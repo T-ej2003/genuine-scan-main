@@ -485,7 +485,7 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, per
   if (expectedZeroMutationChanges.length > 0
     ? JSON.stringify(report.planCapabilities.zeroAwsMutationChanges) !== JSON.stringify(expectedZeroMutationChanges)
     : report.planCapabilities.zeroAwsMutationChanges !== undefined && JSON.stringify(report.planCapabilities.zeroAwsMutationChanges) !== "[]") throw new Error("Permission-preflight zero-AWS-mutation classification is incomplete or stale.");
-  if (plan && capabilities.requiresTaskDefinitionRegistrationContexts) assertTaskDefinitionRegistrationContexts(plan, manifest);
+  if (plan && capabilities.requiresTaskDefinitionRegistrationContexts) assertTaskDefinitionRegistrationContexts(plan, manifest, { terraformConfiguration });
   if (report.phase === "initial") assertCutoverCriticalEvidence(report);
   return true;
 }
@@ -716,16 +716,32 @@ function contextFromTaskDefinitionPlan(change, manifestMapping) {
   return context;
 }
 
-export function assertTaskDefinitionRegistrationContexts(plan, manifest) {
+export function assertTaskDefinitionRegistrationContexts(plan, manifest, { terraformConfiguration } = {}) {
   validateManifest(manifest);
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
-  const registrations = changes.filter((change) => change.type === "aws_ecs_task_definition" && (exactActions(change.change?.actions, ["create"]) || isStageBTaskDefinitionRotationActionsValue(change.change?.actions)));
-  for (const mapping of manifest.taskDefinitionMappings) {
+  const importedBackendUpdates = changes.filter((change) => change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(change.change?.actions, ["update"]));
+  if (importedBackendUpdates.length > 1) throw new Error("Selected plan contains duplicate imported backend normalization changes.");
+  const importedBackendNormalization = importedBackendUpdates.length === 1;
+  if (importedBackendNormalization) assertStageBImportedBackendMetadataNormalization(importedBackendUpdates[0], { terraformConfiguration });
+  const taskDefinitionChanges = changes.filter((change) => change.type === "aws_ecs_task_definition");
+  const registrations = taskDefinitionChanges.filter((change) => exactActions(change.change?.actions, ["create"]) || isStageBTaskDefinitionRotationActionsValue(change.change?.actions));
+  const allowedMetadataChange = (change) => importedBackendNormalization && change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(change.change?.actions, ["update"]);
+  const allowedNoOp = (change) => {
+    if (!exactActions(change.change?.actions, ["no-op"])) return false;
+    if (TASK_DEFINITION_MAPPINGS.some((mapping) => mapping.address === change.address)) return true;
+    const retained = change.address?.match(/^(aws_ecs_task_definition\.(candidate|executor))_retained\["[a-f0-9]+-([^"]+)"\]$/);
+    return Boolean(retained && TASK_DEFINITION_MAPPINGS.some((mapping) => mapping.address === `${retained[1]}["${retained[3]}"]`));
+  };
+  if (taskDefinitionChanges.some((change) => !registrations.includes(change) && !allowedMetadataChange(change) && !allowedNoOp(change))) throw new Error("Selected plan contains an unreviewed task-definition change.");
+  const requiredMappings = importedBackendNormalization
+    ? manifest.taskDefinitionMappings.filter((mapping) => mapping.address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS)
+    : manifest.taskDefinitionMappings;
+  for (const mapping of requiredMappings) {
     const matches = registrations.filter((change) => change.address === mapping.address);
     if (matches.length !== 1) throw new Error(`Selected plan must contain exactly one reviewed task-definition registration for ${mapping.address}.`);
     contextFromTaskDefinitionPlan(matches[0], mapping);
   }
-  if (registrations.length !== manifest.taskDefinitionMappings.length) throw new Error("Selected plan contains an unreviewed task-definition registration.");
+  if (registrations.length !== requiredMappings.length) throw new Error("Selected plan contains an unreviewed task-definition registration or an unclassified backend normalization.");
   return true;
 }
 

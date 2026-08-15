@@ -9,6 +9,7 @@ import {
   canonicalizeJson,
   assertPermissionReportPlanBinding,
   assertPermissionEvaluationBindings,
+  assertTaskDefinitionRegistrationContexts,
   deriveRequiredEvaluations,
   resolveStageBPermissionProfile,
   PERMISSION_REPORT_SIGNING_ALGORITHM,
@@ -210,6 +211,7 @@ function importedBackendPlan() {
 
 test("imported backend normalization derives an explicit zero-AWS permission", () => {
   const imported = importedBackendPlan();
+  assert.doesNotThrow(() => assertTaskDefinitionRegistrationContexts(imported, manifest, { terraformConfiguration }));
   const derived = deriveRequiredEvaluations(imported, manifest, { terraformConfiguration });
   assert.deepEqual(derived.zeroAwsMutationChanges, [{ address: 'aws_ecs_task_definition.candidate["backend"]', classification: "imported-backend-task-definition-metadata-normalization", requiredAwsActions: [] }]);
   assert.equal(derived.zeroAwsMutationChanges[0].requiredAwsActions.length, 0);
@@ -218,6 +220,33 @@ test("imported backend normalization derives an explicit zero-AWS permission", (
   const arbitrary = structuredClone(imported);
   arbitrary.resource_changes.find((item) => item.address === 'aws_ecs_task_definition.candidate["backend"]').change.after.cpu = "999";
   assert.throws(() => deriveRequiredEvaluations(arbitrary, manifest, { terraformConfiguration }), /unrelated field change|No permission manifest entry/);
+});
+
+test("imported backend normalization requires all other reviewed registration contexts", () => {
+  const imported = importedBackendPlan();
+  const backendAddress = 'aws_ecs_task_definition.candidate["backend"]';
+  const workerAddress = 'aws_ecs_task_definition.candidate["worker"]';
+  const missing = structuredClone(imported);
+  missing.resource_changes = missing.resource_changes.filter(({ address }) => address !== workerAddress);
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(missing, manifest, { terraformConfiguration }), /exactly one reviewed task-definition registration/);
+
+  const arbitrary = structuredClone(imported);
+  const backend = arbitrary.resource_changes.find(({ address }) => address === backendAddress);
+  backend.change.after.cpu = "999";
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(arbitrary, manifest, { terraformConfiguration }), /unrelated field change/);
+
+  const replacement = structuredClone(imported);
+  const replacementBackend = replacement.resource_changes.find(({ address }) => address === backendAddress);
+  replacementBackend.change.actions = ["create", "delete"];
+  replacementBackend.change.replace_paths = [["container_definitions"]];
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(replacement, manifest, { terraformConfiguration }), /exactly one reviewed task-definition registration|registration context|root-managed contract/);
+
+  const extra = structuredClone(imported);
+  extra.resource_changes.push({ address: "aws_ecs_task_definition.unbound", type: "aws_ecs_task_definition", change: { actions: ["update"], before: {}, after: {} } });
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(extra, manifest, { terraformConfiguration }), /unreviewed task-definition change/);
+  const extraNoOp = structuredClone(imported);
+  extraNoOp.resource_changes.push({ address: "aws_ecs_task_definition.unbound", type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: {}, after: {} } });
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(extraNoOp, manifest, { terraformConfiguration }), /unreviewed task-definition change/);
 });
 const now = "2026-08-01T12:00:00.000Z";
 const clearCloudTrail = () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] });
