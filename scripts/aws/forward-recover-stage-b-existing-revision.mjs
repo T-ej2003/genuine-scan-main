@@ -116,10 +116,6 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const sourceSha = required(argv, "--source-sha");
   const bindingsPath = path.resolve(required(argv, "--bindings"));
   const imageAuthorizationPath = path.resolve(required(argv, "--image-authorization"));
-  const tfvarsPath = path.resolve(required(argv, "--tfvars"));
-  const bindingReportPath = path.resolve(required(argv, "--binding-report"));
-  const bindingReportSha256 = required(argv, "--binding-report-sha256");
-  const releasePreflightPath = path.resolve(required(argv, "--release-preflight"));
   const profile = required(argv, "--aws-profile");
   const terraformDataDir = required(argv, "--terraform-data-dir");
   const evidencePath = path.resolve(required(argv, "--evidence-out"));
@@ -127,7 +123,15 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const outputs = preflightForwardRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath });
   const bindings = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: bindingsPath, repositoryRoot: root, label: "Stage-B bindings" }).path, "utf8"));
   const imageAuthorization = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: root, label: "Image authorization" }).path, "utf8"));
-  assertForwardRecoveryTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256, releasePreflightPath, sourceSha, bindings, imageAuthorization });
+  const validateImportBindings = () => assertForwardRecoveryTfvarsBinding({
+    tfvarsPath: path.resolve(required(argv, "--tfvars")),
+    bindingReportPath: path.resolve(required(argv, "--binding-report")),
+    bindingReportSha256: required(argv, "--binding-report-sha256"),
+    releasePreflightPath: path.resolve(required(argv, "--release-preflight")),
+    sourceSha,
+    bindings,
+    imageAuthorization,
+  });
   const protectedCheckout = readProtectedCheckout();
   const env = buildForwardRecoveryTerraformEnvironment(terraformDataDir, buildForwardRecoveryAwsEnvironment(profile, baseEnv));
   const run = (command, args) => execFile(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -158,6 +162,7 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
     deriveProvenance: ({ sourceSha: value }) => deriveCanonicalRecoveryProvenance({ sourceSha: value, repositoryRoot: root }),
     proveDescendant,
     deriveImageReuse: ({ imageReleaseSha, toolingSha }) => { const report = deriveStageBImageImpactReport({ imageReleaseSha, toolingSha }); return { ...report, imageBuildInputsChanged: report.newImagesRequired }; },
+    validateImportBindings,
     readState,
     census,
     describe,

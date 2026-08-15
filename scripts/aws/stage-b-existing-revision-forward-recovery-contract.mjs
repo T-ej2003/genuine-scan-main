@@ -242,7 +242,7 @@ function expectedFields({ sourceSha, authorization, bindings, censusEvidence, fi
   return { incidentIdentity, sourceSha, toolingTreeSha256: authorization.derived.toolingTreeSha256, sourceContractSha256: authorization.derived.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, authorizedBackendDigest: authorization.authorizedBackendDigest, imageAuthorizationSha256: authorization.authorization.evidenceSha256, imageAuthorizationSourceSha: authorization.authorization.sourceSha, stateLineage: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage, stateSerial: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial, stateBeforeSha256, existingRevisionArn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn, censusSha256: censusEvidence.censusSha256, fingerprint };
 }
 
-export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse, readState, census, describe, importState, evidence, journal, interruptAt } = {}) {
+export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse, validateImportBindings, readState, census, describe, importState, evidence, journal, interruptAt } = {}) {
   if (typeof readState !== "function" || typeof census !== "function" || typeof describe !== "function" || typeof importState !== "function" || !journal?.read || !journal?.write || !evidence?.read || !evidence?.write) throw new Error("Forward recovery requires read, census, describe, import, journal, and durable evidence adapters.");
   const existing = journal.read();
   const observedState = await readState();
@@ -258,6 +258,8 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   const importRetryState = existing?.phase === "IMPORTING" && (observedState?.resources || []).some(({ type, name, instances }) => type === "aws_ecs_task_definition" && name === "candidate" && Array.isArray(instances) && instances.every(({ index_key: key }) => key !== "backend"))
     ? assertForwardImportRetryState({ journalState: existing, state: observedState })
     : null;
+  const importAuthorizationRequired = !completedResume && (!existing || preparedResume || importRetryState);
+  if (importAuthorizationRequired && typeof validateImportBindings === "function") validateImportBindings();
   const authorization = completedResume || (consumedImportResume && !importRetryState) ? null : assertForwardSourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse });
   const payload = completedResume || consumedImportResume ? null : buildCanonicalBackendRecoveryTaskDefinition(bindings);
   const fingerprint = completedResume?.fingerprint || consumedImportResume?.fingerprint || taskDefinitionFingerprint(payload.taskDefinition, payload.tags);

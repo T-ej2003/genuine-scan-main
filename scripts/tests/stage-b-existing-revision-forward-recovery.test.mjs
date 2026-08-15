@@ -140,6 +140,32 @@ test("completed descendant replay is terminal without current-HEAD image freshne
   assert.equal(JSON.stringify(first.journal.read()), journalBytes);
 });
 
+test("tfvars authorization is required only when an import can be reached", async () => {
+  let gates = 0;
+  const fresh = common({ validateImportBindings: () => { gates += 1; } });
+  await runExistingRevisionForwardRecovery(fresh);
+  assert.equal(gates, 1);
+
+  const completedReplay = common({
+    journal: fresh.journal,
+    evidence: fresh.evidence,
+    readState: async () => importedState(),
+    validateImportBindings: () => { throw new Error("terminal replay must not require tfvars"); },
+  });
+  await runExistingRevisionForwardRecovery(completedReplay);
+  assert.deepEqual(completedReplay.counts, { imports: 0, registrations: 0 });
+
+  const importing = await importingRun();
+  const consumedReplay = common({
+    journal: importing.journal,
+    evidence: importing.evidence,
+    readState: async () => importedState(),
+    validateImportBindings: () => { throw new Error("consumed replay must not require tfvars"); },
+  });
+  await runExistingRevisionForwardRecovery(consumedReplay);
+  assert.deepEqual(consumedReplay.counts, { imports: 0, registrations: 0 });
+});
+
 test("completed replay rejects corrupted or replaced evidence without mutation", async () => {
   const run = common();
   const first = await runExistingRevisionForwardRecovery(run);
@@ -261,7 +287,9 @@ test("forward tfvars preflight binds the canonical release report and authorized
 test("IMPORTING replay permits exactly one bounded retry only from the authenticated pre-import state", async () => {
   let state = emptyState();
   let attempts = 0;
+  let gates = 0;
   const run = common({
+    validateImportBindings: () => { gates += 1; },
     readState: async () => structuredClone(state),
     importState: async () => {
       attempts += 1;
@@ -272,10 +300,12 @@ test("IMPORTING replay permits exactly one bounded retry only from the authentic
   await assert.rejects(() => runExistingRevisionForwardRecovery(run), /before remote state mutation/);
   assert.equal(run.journal.read().phase, "IMPORTING");
   assert.equal(run.journal.read().importCalls, 1);
+  run.validateImportBindings = () => { gates += 1; };
   const result = await runExistingRevisionForwardRecovery(run);
   assert.equal(result.imported, true);
   assert.equal(attempts, 2);
   assert.equal(run.journal.read().importAttemptCount, 2);
+  assert.equal(gates, 2);
 });
 
 test("IMPORTING replay rejects an absent candidate when the authoritative state drift is ambiguous", async () => {
@@ -319,8 +349,8 @@ async function twoShaImportingRun() {
   return run;
 }
 
-async function preparedRun() {
-  const run = common();
+async function preparedRun(overrides = {}) {
+  const run = common(overrides);
   const write = run.journal.write;
   run.journal.write = (value) => { write(value); if (value.phase === "PREPARED") throw new Error("interrupted after PREPARED"); };
   await assert.rejects(() => runExistingRevisionForwardRecovery(run), /interrupted/);
@@ -334,6 +364,16 @@ test("same-source PREPARED resume remains fresh and imports exactly once", async
   const replay = common({ journal: first.journal, evidence: first.evidence });
   const result = await runExistingRevisionForwardRecovery(replay);
   assert.equal(result.imported, true);
+  assert.deepEqual(replay.counts, { imports: 1, registrations: 0 });
+});
+
+test("PREPARED import path requires the canonical tfvars gate", async () => {
+  let gates = 0;
+  const first = await preparedRun({ validateImportBindings: () => { gates += 1; } });
+  assert.equal(gates, 1);
+  const replay = common({ journal: first.journal, evidence: first.evidence, validateImportBindings: () => { gates += 1; } });
+  await runExistingRevisionForwardRecovery(replay);
+  assert.equal(gates, 2);
   assert.deepEqual(replay.counts, { imports: 1, registrations: 0 });
 });
 
