@@ -348,7 +348,7 @@ test("forward tfvars preflight binds the canonical release report and authorized
   for (const filePath of [tfvarsPath, bindingReportPath, releasePreflightPath]) fs.writeFileSync(filePath, "{}\n", { mode: 0o600 });
   const backendDigest = imageAuthorization.backendDigest;
   const bindingsForPreflight = { ...bindings, sourceContractSha256: bindings.sourceContractSha256 };
-  const report = { tfvarsSha256: "a".repeat(64), sourceContractSha256: bindingsForPreflight.sourceContractSha256, images: { backend: { imageReference: bindingsForPreflight.backendImage, digest: backendDigest } } };
+  const report = { tfvarsSha256: "a".repeat(64), imageEvidenceCanonicalSha256: imageAuthorization.imageEvidenceSha256, sourceContractSha256: bindingsForPreflight.sourceContractSha256, images: { backend: { imageReference: bindingsForPreflight.backendImage, digest: backendDigest } } };
   fs.writeFileSync(releasePreflightPath, `${JSON.stringify({ status: "ready-for-plan", tfvarsSha256: report.tfvarsSha256 })}\n`, { mode: 0o600 });
   const calls = [];
   assertForwardRecoveryTfvarsBinding({
@@ -359,6 +359,23 @@ test("forward tfvars preflight binds the canonical release report and authorized
   assert.equal(calls[0].expectedToolingSha, sourceSha);
   assert.equal(calls[0].expectedToolingTreeSha256, bindings.toolingTreeSha256);
   assert.equal(calls[0].expectedImageReleaseSha, imageReleaseSha);
+  assert.equal(calls[0].expectedImageEvidenceSha256, imageAuthorization.imageEvidenceSha256);
+  assert.notEqual(imageAuthorization.imageEvidenceSha256, imageAuthorization.imageEvidence.canonicalArtifactSha256);
+  assert.throws(() => assertForwardRecoveryTfvarsBinding({
+    tfvarsPath, bindingReportPath, bindingReportSha256: "b".repeat(64), releasePreflightPath, sourceSha,
+    bindings: bindingsForPreflight, imageAuthorization: { ...imageAuthorization, imageEvidenceSha256: "f".repeat(64) },
+    validateTfvarsBinding: () => report,
+  }), /source, or authorized backend image/);
+  assert.throws(() => assertForwardRecoveryTfvarsBinding({
+    tfvarsPath, bindingReportPath, bindingReportSha256: "b".repeat(64), releasePreflightPath, sourceSha,
+    bindings: bindingsForPreflight, imageAuthorization: { ...imageAuthorization, imageEvidenceSha256: undefined },
+    validateTfvarsBinding: () => report,
+  }), /canonical image-evidence binding/);
+  assert.throws(() => assertForwardRecoveryTfvarsBinding({
+    tfvarsPath, bindingReportPath, bindingReportSha256: "b".repeat(64), releasePreflightPath, sourceSha,
+    bindings: bindingsForPreflight, imageAuthorization,
+    validateTfvarsBinding: () => ({ ...report, imageEvidenceCanonicalSha256: imageAuthorization.imageEvidence.canonicalArtifactSha256 }),
+  }), /source, or authorized backend image/);
   assert.throws(() => assertForwardRecoveryTfvarsBinding({
     tfvarsPath, bindingReportPath, bindingReportSha256: "b".repeat(64), releasePreflightPath, sourceSha,
     bindings: bindingsForPreflight, imageAuthorization,
