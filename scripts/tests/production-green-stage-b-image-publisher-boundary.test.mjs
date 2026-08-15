@@ -219,6 +219,15 @@ test("backend-only and Stage B publishers use disjoint immutable tag namespaces"
   assert.match(JSON.stringify(reusable), /production-green-stage-b-images/);
 });
 
+test("Stage B signing recovers only through constrained existing-entry verification", () => {
+  const attestationStep = reusable.jobs["build-and-attest"].steps.find((step) => step.name === "Generate SBOMs, sign, and attest provenance");
+  assert.match(attestationStep.run, /cosign-idempotent-sign-and-attest\.sh sign/);
+  assert.match(attestationStep.run, /cosign-idempotent-sign-and-attest\.sh attest/);
+  assert.match(JSON.stringify(attestationStep.env), /COSIGN_CERT_IDENTITY_REGEXP/);
+  assert.match(JSON.stringify(attestationStep.env), /COSIGN_CERT_OIDC_ISSUER/);
+  assert.doesNotMatch(attestationStep.run, /insecure-ignore-tlog|COSIGN_TLOG_UPLOAD=false|--upload=false/);
+});
+
 test("Stage B source identity is checked before ECR or Docker access", () => {
   const publisher = fs.readFileSync("scripts/aws/publish-ecs-images.sh", "utf8");
   const guard = publisher.indexOf('if [[ "$SERVICE_SCOPE" == "production-green-stage-b" ]]');

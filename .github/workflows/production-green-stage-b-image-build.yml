@@ -114,6 +114,8 @@ jobs:
           SOURCE_CONTRACT_SHA256: ${{ steps.package.outputs.source_contract }}
           MIGRATION_SET_DIGEST: ${{ steps.package.outputs.migration_digest }}
           COSIGN_EXPERIMENTAL: "1"
+          COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/production-green-stage-b-image-build.yml@.*$"
+          COSIGN_CERT_OIDC_ISSUER: https://token.actions.githubusercontent.com
         run: |
           set -euo pipefail
           while IFS= read -r record; do
@@ -122,9 +124,9 @@ jobs:
             docker save "$image_ref" -o "$RUNNER_TEMP/$id.tar"
             docker run --rm -v "$RUNNER_TEMP:/workspace:ro" anchore/syft:v1.38.0 "/workspace/$id.tar" -o spdx-json > "$RUNNER_TEMP/$id.spdx.json"
             node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({releaseSha:process.env.IMAGE_TAG,checkoutSha:require("child_process").execFileSync("git",["rev-parse","HEAD"],{encoding:"utf8"}).trim(),workflowDefinitionRef:process.env.WORKFLOW_DEFINITION_REF,workflowDefinitionSha:process.env.WORKFLOW_DEFINITION_SHA,workflowRunId:process.env.GITHUB_RUN_ID,sourceContractSha256:process.env.SOURCE_CONTRACT_SHA256,migrationSetDigest:process.env.MIGRATION_SET_DIGEST,builtAt:new Date().toISOString()}))' "$RUNNER_TEMP/$id.provenance.json"
-            cosign sign --yes "$image_ref"
-            cosign attest --yes --type spdxjson --predicate "$RUNNER_TEMP/$id.spdx.json" "$image_ref"
-            cosign attest --yes --type https://mscqr.com/attestations/stage-b-provenance/v1 --predicate "$RUNNER_TEMP/$id.provenance.json" "$image_ref"
+            ./scripts/aws/cosign-idempotent-sign-and-attest.sh sign "$image_ref"
+            ./scripts/aws/cosign-idempotent-sign-and-attest.sh attest "$image_ref" spdxjson "$RUNNER_TEMP/$id.spdx.json"
+            ./scripts/aws/cosign-idempotent-sign-and-attest.sh attest "$image_ref" https://mscqr.com/attestations/stage-b-provenance/v1 "$RUNNER_TEMP/$id.provenance.json"
           done < "$IMAGES_FILE"
       - name: Verify signed immutable artifacts
         env:
