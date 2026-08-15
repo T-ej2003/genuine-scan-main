@@ -9,6 +9,7 @@ import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from "./production
 import { APPROVED_PREFLIGHT_GENERATOR_ARNS } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_PLAN_PROFILES } from "./stage-b-plan-approval-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
+import { assertStageBImportedBackendMetadataNormalization, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
 import { assertStageBImagePublicationIdentity, publicationIdentitySha256, readStageBImagePublicationIdentity } from "./stage-b-image-publication-identity.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 
@@ -60,7 +61,7 @@ const taskDefinitionsFromPlan = (value, address) => {
   return definitions;
 };
 
-export function assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, planProfile } = {}) {
+export function assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, planProfile, terraformConfiguration } = {}) {
   if (!plan || !imageEvidence) throw new Error("Stage B signed image evidence and Terraform plan are required for image binding.");
   if (!STAGE_B_PLAN_PROFILES.includes(planProfile)) throw new Error(`Stage B image binding plan profile is unsupported: ${planProfile}`);
   const reportImages = new Map();
@@ -91,7 +92,11 @@ export function assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, plan
   for (const change of currentChanges) {
     if (change.type !== "aws_ecs_task_definition") throw new Error(`Stage B current task-definition resource type is invalid: ${change.address}`);
     const actions = change.change?.actions || [];
-    if (!actions.length || !actions.every((action) => action === "create" || action === "no-op")) throw new Error(`Stage B current task-definition actions are invalid: ${change.address}`);
+    if (!actions.length || (!actions.every((action) => action === "create" || action === "no-op")
+      && !(change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(actions) === JSON.stringify(["update"])))) throw new Error(`Stage B current task-definition actions are invalid: ${change.address}`);
+    if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(actions) === JSON.stringify(["update"])) {
+      assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
+    }
     const service = currentTaskImageService(change.address);
     const variable = currentTaskImageVariable(change.address);
     const expected = bindings[variable];

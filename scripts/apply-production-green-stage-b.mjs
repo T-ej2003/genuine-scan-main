@@ -106,7 +106,7 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   if (report.purpose !== "saved-plan-authorization") throw new Error("A saved-plan authorization permission report is required.");
   const permissionProfileBinding = resolveStageBPermissionProfile({ plan, approvedPlanProfile: report.planProfile });
   if (report.permissionProfile !== permissionProfileBinding.permissionProfile) throw new Error("Permission report permission profile is not bound to the approved plan.");
-  assertPermissionEvaluationBindings(report, readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"), { plan, permissionProfile: report.permissionProfile });
+  assertPermissionEvaluationBindings(report, readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"), { plan, permissionProfile: report.permissionProfile, terraformConfiguration: fs.readFileSync(path.join(root, terraformRoot, "main.tf"), "utf8") });
   if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(report.reportGeneratorCallerArn)) throw new Error("Permission-preflight report generator is not approved.");
   if (report.simulatedRoleArn !== RELEASE_ROLE_ARN || report.applyRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission-preflight report role contract is wrong.");
   if (report.applyCallerArn !== null && report.applyCallerArn !== callerArn) throw new Error("Permission-preflight report apply caller is wrong.");
@@ -167,7 +167,8 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport: refreshBindingReport, bindingReportSha256: selectedRefreshBindingSha256, expectedToolingSha: toolingSha, expectedToolingTreeSha256: refreshBindingReport.toolingTreeSha256, expectedTfvarsSha256: refreshBindingReport.tfvarsSha256, expectedImageEvidenceSha256: refreshBindingReport.imageEvidenceCanonicalSha256 || imageEvidenceSha256, expectedStateSha256: refreshBindingReport.stateBackupSha256, allowReviewedResourceDrift: trustedRecovery !== null });
   if (!/^[a-f0-9]{64}$/.test(savedPlanSha256) || sha256(savedPlanBytes) !== savedPlanSha256) throw new Error("Saved Terraform plan SHA256 does not match the approved digest.");
   const parsedAudit = JSON.parse(auditBytes);
-  assertStageBPlanApprovedBinding(approvalReport, { approvalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, referenceAudit: parsedAudit, referenceAuditBytes: auditBytes, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedRefreshReportSha256: refreshReportSha256, expectedRefreshBindingReportSha256: recoveryPlan ? refreshBindingReportSha256 : undefined, expectedRecoveryAttestationSha256: trustedRecovery?.attestationSha256, expectedStageBLineage: bindingReport.stateLineage, expectedStageBSerial: bindingReport.stateSerial, now: new Date(now) });
+  const terraformConfiguration = fs.readFileSync(path.join(root, terraformRoot, "main.tf"), "utf8");
+  assertStageBPlanApprovedBinding(approvalReport, { approvalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, referenceAudit: parsedAudit, referenceAuditBytes: auditBytes, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedRefreshReportSha256: refreshReportSha256, expectedRefreshBindingReportSha256: recoveryPlan ? refreshBindingReportSha256 : undefined, expectedRecoveryAttestationSha256: trustedRecovery?.attestationSha256, expectedStageBLineage: bindingReport.stateLineage, expectedStageBSerial: bindingReport.stateSerial, terraformConfiguration, now: new Date(now) });
   if (!/^[a-f0-9]{64}$/.test(canonicalPlanJsonSha256)) throw new Error("Canonical plan JSON SHA256 is missing or malformed.");
   if (sha256(planBytes) !== planSha256) throw new Error("Plan JSON SHA256 does not match the approved digest.");
   if (sha256(auditBytes) !== auditSha256) throw new Error("Reference audit SHA256 does not match the approved digest.");
@@ -191,7 +192,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   if (deploymentIdentity.canonicalImageEvidenceSha256 !== imageEvidenceSha256) throw new Error("Stage B plan canonical image-evidence digest does not match the authenticated report.");
   if (audit.toolingSha !== deploymentIdentity.toolingSha || audit.imageReleaseSha !== deploymentIdentity.imageReleaseSha || audit.canonicalImageEvidenceSha256 !== deploymentIdentity.canonicalImageEvidenceSha256) throw new Error("Reference audit is bound to a different Stage B deployment identity.");
   assertImageEvidence(imageEvidence, { signatureArtifact: imageEvidenceSignatureArtifact, verifySignature: ({ report, signatureArtifact: artifact, now: signatureNow }) => verifyImageEvidence({ report, signatureArtifact: artifact, now: signatureNow }), toolingSha: boundToolingSha, imageReleaseSha: boundImageReleaseSha, workflowRunId: imageEvidenceWorkflowRunId, artifactSha256: imageEvidenceArtifactSha256, now });
-  const imageBindings = assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, planProfile: approvalReport.planProfile });
+  const imageBindings = assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, planProfile: approvalReport.planProfile, terraformConfiguration });
   const brokerChanges = (plan.resource_changes || []).filter((change) => ["aws_lambda_function.broker", "aws_lambda_alias.reviewed", "aws_iam_policy.broker"].includes(change.address));
   if (brokerChanges.some((change) => (change.change?.actions || []).some((action) => action !== "no-op"))) {
     const broker = audit.broker;
@@ -223,7 +224,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
     planJsonSha256: planSha256,
     imageEvidence,
     trustedCallerArn: callerArn,
-    terraformConfiguration: fs.readFileSync(path.join(root, terraformRoot, "main.tf"), "utf8"),
+    terraformConfiguration,
     strictResourceContract: true,
     recoveryOnly: bindingReport.recoveryOnly === true,
     protectedMainCheckout,

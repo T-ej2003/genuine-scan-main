@@ -8,6 +8,8 @@ const retainedTaskDefinitionAddress = /^aws_ecs_task_definition\.(candidate|exec
 const importedBackendCandidateAddress = 'aws_ecs_task_definition.candidate["backend"]';
 const importedBackendCandidateFamily = STAGE_B_TASK_DEFINITION_FAMILIES[importedBackendCandidateAddress];
 const importedBackendCandidateArn = `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${importedBackendCandidateFamily}:9`;
+export const STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION = "imported-backend-task-definition-metadata-normalization";
+export const STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS = importedBackendCandidateAddress;
 const policyAddress = "aws_iam_policy.broker";
 const attachmentAddress = "aws_iam_role_policy_attachment.broker";
 const legacyInlineAddress = "aws_iam_role_policy.broker";
@@ -252,7 +254,7 @@ export function assertStageBImportedBackendMetadataNormalization(change, { terra
   if (!/^\s*skip_destroy\s*=\s*true\s*$/m.test(resourceBlock)) {
     throw new Error("Imported Stage B backend metadata normalization requires protected skip_destroy=true configuration.");
   }
-  return { address: change.address, type: change.type, actions: [...change.change.actions], classification: "imported-backend-task-definition-metadata-normalization" };
+  return { address: change.address, type: change.type, actions: [...change.change.actions], classification: STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION };
 }
 
 function normalizedPolicyShape(document) {
@@ -592,6 +594,8 @@ export function classifyStageBPlan(plan, options = {}) {
     unclassifiedResources,
     actionCounts,
     taskDefinitionRotations,
-    planProfile: taskDefinitionRotations.length ? "ECS_TASK_DEFINITION_ROTATION" : "BASELINE",
+    planProfile: classifiedResources.some(({ classification }) => classification === STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION)
+      ? "IMPORTED_BACKEND_METADATA_NORMALIZATION"
+      : taskDefinitionRotations.length ? "ECS_TASK_DEFINITION_ROTATION" : "BASELINE",
   };
 }

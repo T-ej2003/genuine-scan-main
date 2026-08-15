@@ -236,6 +236,16 @@ the stated v3/default-policy and recovery-policy hashes were not independently
 read in this session. The plan-only operation itself succeeded under the stated
 release-deployer session.
 
+### Imported backend normalization profile
+
+When the already-imported backend candidate is the exact canonical `:9`, the
+normal plan has one reviewed provider-metadata update instead of the backend
+create: `skip_destroy = null -> true`. The imported-backend normalization
+profile therefore requires exactly 11 creates and 4 updates; it binds the
+backend ARN, image, roles, runtime fields, protected `skip_destroy = true`
+configuration, and zero AWS actions. Any other update, replacement, destroy, or
+unclassified path remains fail-closed.
+
 ## Remaining additions, ordered
 
 1. `aws_cloudwatch_log_group.stage_b["backend"]`

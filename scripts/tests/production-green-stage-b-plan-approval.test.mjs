@@ -37,6 +37,7 @@ const approval = createStageBPlanApprovalReport({ captureReportSha256: hash(capt
 const approvalBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
 const plannerSource = fs.readFileSync("scripts/plan-production-green-stage-b.mjs", "utf8");
 const approvalPathSource = plannerSource.slice(plannerSource.indexOf("export function approveCapturedStageBPlan"), plannerSource.indexOf("\n}\n\nif (process.argv[1]"));
+const terraformConfiguration = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
 
 test.after(() => fs.rmSync(directory, { recursive: true, force: true }));
 
@@ -67,6 +68,45 @@ function finalizeOptions(approvalReportPath, overrides = {}) {
     ...overrides,
   };
 }
+
+function importedBackendPlan() {
+  const value = structuredClone(fixture);
+  const change = value.resource_changes.find((item) => item.address === 'aws_ecs_task_definition.candidate["backend"]');
+  const family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address];
+  const arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:9`;
+  const before = structuredClone(change.change.after);
+  const after = structuredClone(before);
+  for (const state of [before, after]) {
+    state.arn = arn;
+    state.arn_without_revision = arn.replace(/:9$/, "");
+    state.id = family;
+    state.revision = 9;
+    state.network_mode = "awsvpc";
+    state.runtime_platform = [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }];
+    state.volume = [];
+  }
+  before.skip_destroy = null;
+  after.skip_destroy = true;
+  change.change = { actions: ["update"], before, after, replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} };
+  return value;
+}
+
+test("the imported backend profile passes the production approval path with zero AWS mutation", () => {
+  const importedPlan = importedBackendPlan();
+  const importedPlanJsonBytes = Buffer.from(`${JSON.stringify(importedPlan)}\n`);
+  const importedCanonicalPlanJsonBytes = Buffer.from(`${canonicalJson(importedPlan)}\n`);
+  const importedHashes = stageBPlanHashes({ savedPlanBytes, planJsonBytes: importedPlanJsonBytes, canonicalPlanJsonBytes: importedCanonicalPlanJsonBytes });
+  const importedAudit = { ...audit, planJsonSha256: importedHashes.planJsonSha256 };
+  const importedAuditBytes = Buffer.from(`${JSON.stringify(importedAudit)}\n`);
+  const importedClassification = { ...fixtureClassification, create: 11, update: 4 };
+  const importedCapture = createStageBPlanCaptureReport({ toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, hashes: importedHashes, capturedAt: capture.capturedAt, stageBLineage: capture.stageBLineage, stageBSerial: capture.stageBSerial, terraformVersion: capture.terraformVersion, terraformFormatVersion: capture.terraformFormatVersion, classification: importedClassification, planProfile: "IMPORTED_BACKEND_METADATA_NORMALIZATION", brokerEvidence: { brokerOperation: capture.brokerOperation, brokerUpdatePresent: capture.brokerUpdatePresent, brokerActions: capture.brokerActions, brokerResourceAddresses: capture.brokerResourceAddresses, brokerReferenceValidationPending: true } });
+  const importedCaptureBytes = Buffer.from(`${JSON.stringify(importedCapture, null, 2)}\n`);
+  const importedApproval = createStageBPlanApprovalReport({ captureReportSha256: hash(importedCaptureBytes), referenceAuditPath: importedAudit.referenceAuditPath, referenceAuditSha256: hash(importedAuditBytes), referenceAuditCallerArn: importedAudit.callerArn, referenceAuditAt: importedAudit.auditedAt, toolingSha: importedCapture.toolingSha, toolingTreeSha256: importedCapture.toolingTreeSha256, refreshReportSha256: importedCapture.refreshReportSha256, stageBLineage: importedCapture.stageBLineage, stageBSerial: importedCapture.stageBSerial, hashes: importedHashes, logicalCanonicalPlanJsonSha256: importedHashes.logicalCanonicalPlanJsonSha256, approvedAt: capture.capturedAt, classification: importedClassification, planProfile: "IMPORTED_BACKEND_METADATA_NORMALIZATION", brokerOperation: importedCapture.brokerOperation, brokerUpdatePresent: importedCapture.brokerUpdatePresent, brokerActions: importedCapture.brokerActions, brokerResourceAddresses: importedCapture.brokerResourceAddresses });
+  const importedApprovalBytes = Buffer.from(`${JSON.stringify(importedApproval, null, 2)}\n`);
+  assert.doesNotThrow(() => assertStageBNormalPlanCompleteness(importedPlan, { referenceAudit: importedAudit, strict: false, terraformConfiguration }));
+  assert.doesNotThrow(() => assertStageBPlanApprovalReport(importedApproval, { approvalReportBytes: importedApprovalBytes, captureReport: importedCapture, captureReportBytes: importedCaptureBytes, referenceAudit: importedAudit, referenceAuditBytes: importedAuditBytes, hashes: importedHashes, logicalCanonicalPlanJsonSha256: importedHashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: hash(importedAuditBytes), trustedCallerArn: importedAudit.callerArn, stageBLineage: importedCapture.stageBLineage, stageBSerial: importedCapture.stageBSerial, plan: importedPlan, terraformConfiguration }));
+  assert.doesNotThrow(() => assertStageBPlanApprovedBinding(importedApproval, { approvalReportBytes: importedApprovalBytes, approvalReportSha256: hash(importedApprovalBytes), savedPlanBytes, planJsonBytes: importedPlanJsonBytes, canonicalPlanJsonBytes: importedCanonicalPlanJsonBytes, referenceAudit: importedAudit, referenceAuditBytes: importedAuditBytes, expectedToolingSha: importedCapture.toolingSha, expectedToolingTreeSha256: importedCapture.toolingTreeSha256, expectedRefreshReportSha256: importedCapture.refreshReportSha256, expectedStageBLineage: importedCapture.stageBLineage, expectedStageBSerial: importedCapture.stageBSerial, terraformConfiguration, now: new Date(capture.capturedAt) }));
+});
 
 test("approval imports PLAN_APPROVED from the canonical contract and keeps approval-only Terraform-free", () => {
   assert.match(plannerSource, /import \{[^}]*STAGE_B_PLAN_APPROVED[^}]*\} from "\.\/aws\/stage-b-plan-approval-contract\.mjs";/);
@@ -195,7 +235,7 @@ test("approval is deterministic for unchanged captured artifacts", () => {
 });
 
 test("plan profile and broker operation registries match the emitted Stage B universe", () => {
-  assert.deepEqual(STAGE_B_PLAN_PROFILES, ["BASELINE", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY"]);
+  assert.deepEqual(STAGE_B_PLAN_PROFILES, ["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY"]);
   assert.deepEqual(STAGE_B_BROKER_OPERATIONS, ["none", "initial-create", "update", "recovery-alias-only"]);
   assert.throws(() => createStageBPlanCaptureReport({ ...capture, planProfile: "UNREVIEWED" }), /unsupported/);
   assert.throws(() => createStageBPlanApprovalReport({ ...approval, planProfile: "UNREVIEWED" }), /unsupported/);

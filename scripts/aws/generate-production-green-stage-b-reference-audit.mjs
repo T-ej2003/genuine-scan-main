@@ -17,7 +17,7 @@ import {
   STAGE_B_BROKER_TASK_DEFINITION_REFERENCE,
 } from "./stage-b-reference-audit-contract.mjs";
 import { batch, createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
-import { classifyStageBPlan } from "./stage-b-deployment-contract.mjs";
+import { assertStageBImportedBackendMetadataNormalization, classifyStageBPlan, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
@@ -86,7 +86,7 @@ function normalizeEnvironment(config) {
   return requireObject(variables, "broker Lambda environment variables");
 }
 
-function planTaskDefinitions(plan) {
+function planTaskDefinitions(plan, terraformConfiguration) {
   const changes = requireArray(plan?.resource_changes, "Terraform plan resource_changes");
   const seenFamilies = new Set();
   const rolloverByAddress = new Map();
@@ -132,6 +132,11 @@ function planTaskDefinitions(plan) {
       noOpByAddress.set(address, { address, family, priorArn: before.arn, currentArn: after.arn || before.arn, proposedFamily: after.family, change });
       continue;
     }
+    if (address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(actions) === JSON.stringify(["update"])) {
+      assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
+      noOpByAddress.set(address, { address, family, priorArn: before.arn, currentArn: after.arn, proposedFamily: after.family, change, importedMetadata: true });
+      continue;
+    }
     if (isStageBTaskDefinitionRotationActionsValue(actions)) {
       const rollover = assertStageBTaskDefinitionRotation(change, plan, { strict: true });
       rolloverByAddress.set(address, { ...rollover, proposedFamily: after.family });
@@ -157,7 +162,7 @@ function planTaskDefinitions(plan) {
   }
   const retainedArnSet = new Set(retainedArns);
   for (const entry of noOpByAddress.values()) {
-    if (rolloverByAddress.size === 0) {
+    if (rolloverByAddress.size === 0 && !entry.importedMetadata) {
       const validated = assertStageBCurrentTaskDefinitionNoOp(entry.change, plan, retainedArnSet);
       entry.priorArn = validated.arn;
       entry.currentArn = validated.currentArn;
@@ -465,7 +470,7 @@ export function generateReferenceAudit({
     retainedByAddress,
     retainedByFamily,
     newestRetainedByFamily,
-  } = planTaskDefinitions(plan);
+  } = planTaskDefinitions(plan, terraformConfiguration);
   const createOnlyFamilies = new Set([...createOnlyByAddress.values()].map((entry) => entry.family));
   const noOpFamilies = new Set([...noOpByAddress.values()].map((entry) => entry.family));
   const retainedArnSetByFamily = new Map([...retainedByFamily].map(([family, entries]) => [family, new Set(entries.map((entry) => entry.oldArn))]));
