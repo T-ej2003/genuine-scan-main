@@ -46,7 +46,7 @@ export function assertForwardRecoveryTfvarsBinding({ tfvarsPath, bindingReportPa
   const releasePreflightFile = assertStageBPrivateFile({ filePath: releasePreflightPath, repositoryRoot: root, label: "Stage-B release preflight" });
   const releasePreflight = JSON.parse(fs.readFileSync(releasePreflightFile.path, "utf8"));
   if (releasePreflight.status !== "ready-for-plan" || !SHA256.test(releasePreflight.tfvarsSha256 || "")) throw new Error("Stage-B release preflight does not contain a ready canonical tfvars binding.");
-  const imageEvidenceSha256 = imageAuthorization?.imageEvidence?.canonicalArtifactSha256;
+  const imageEvidenceSha256 = imageAuthorization?.imageEvidenceSha256;
   if (!SHA256.test(imageEvidenceSha256 || "")) throw new Error("Forward recovery image authorization is missing its canonical image-evidence binding.");
   const report = validateTfvarsBinding({
     tfvarsPath,
@@ -58,6 +58,7 @@ export function assertForwardRecoveryTfvarsBinding({ tfvarsPath, bindingReportPa
     expectedImageEvidenceSha256: imageEvidenceSha256,
   });
   if (report.tfvarsSha256 !== releasePreflight.tfvarsSha256
+    || report.imageEvidenceCanonicalSha256 !== imageEvidenceSha256
     || report.sourceContractSha256 !== bindings?.sourceContractSha256
     || report.images?.backend?.imageReference !== bindings?.backendImage
     || report.images?.backend?.digest !== authorizedBackendDigest(imageAuthorization)) {
