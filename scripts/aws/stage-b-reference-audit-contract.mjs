@@ -59,11 +59,31 @@ export const STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS = Object.freeze([
 ]);
 const rotationStableFields = STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS;
 const backendTaskDefinitionAddress = 'aws_ecs_task_definition.candidate["backend"]';
+export const STAGE_B_IMPORTED_BACKEND_ROLLOVER_ADDRESSES = Object.freeze(
+  Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).filter((address) => address !== backendTaskDefinitionAddress),
+);
+export const STAGE_B_IMPORTED_BACKEND_ROLLOVER_ACTIONS = Object.freeze(["create", "delete"]);
 const baseTaskDefinitionTags = Object.freeze({ Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform" });
 const backendTaskDefinitionTags = Object.freeze({ ...baseTaskDefinitionTags, [ECS_EXEC_OPERATOR_TASK_TAG_KEY]: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });
 
 const exactActions = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 const isRotationActions = (actions) => STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS.some((expected) => exactActions(actions, expected));
+export function assertStageBImportedBackendRolloverActions(resourceChanges) {
+  if (!Array.isArray(resourceChanges)) throw new Error("Stage B imported-backend normalization requires resource changes.");
+  const changesByAddress = new Map();
+  for (const change of resourceChanges) {
+    if (!STAGE_B_IMPORTED_BACKEND_ROLLOVER_ADDRESSES.includes(change?.address)) continue;
+    if (changesByAddress.has(change.address)) throw new Error(`Stage B imported-backend rollover membership is duplicated: ${change.address}`);
+    changesByAddress.set(change.address, change);
+  }
+  if (changesByAddress.size !== STAGE_B_IMPORTED_BACKEND_ROLLOVER_ADDRESSES.length) throw new Error("Stage B imported-backend rollover membership is incomplete.");
+  for (const address of STAGE_B_IMPORTED_BACKEND_ROLLOVER_ADDRESSES) {
+    if (!exactActions(changesByAddress.get(address)?.change?.actions, STAGE_B_IMPORTED_BACKEND_ROLLOVER_ACTIONS)) {
+      throw new Error(`Stage B imported-backend rollover ${address} must use exact create-before-delete actions.`);
+    }
+  }
+  return true;
+}
 const parsedTaskDefinitionValue = (value) => {
   if (typeof value !== "string") return value;
   try { return JSON.parse(value); } catch { return value; }

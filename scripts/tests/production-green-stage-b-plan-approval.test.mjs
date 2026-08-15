@@ -130,7 +130,7 @@ test("imported-backend profile rejects census and membership drift", () => {
   const rejects = (mutate) => {
     const candidate = importedBackendPlan();
     mutate(candidate);
-    assert.throws(() => assertStageBNormalPlanCompleteness(candidate, { referenceAudit: audit, strict: false, terraformConfiguration }), /mutation census|unsupported|rotation/);
+    assert.throws(() => assertStageBNormalPlanCompleteness(candidate, { referenceAudit: audit, strict: false, terraformConfiguration }), /mutation census|unsupported|rotation|create-before-delete/);
   };
   const replacements = (candidate) => candidate.resource_changes.filter((item) => item.change.actions.join(",") === "create,delete");
   rejects((candidate) => { replacements(candidate)[0].change.actions = ["create"]; });
@@ -138,6 +138,14 @@ test("imported-backend profile rejects census and membership drift", () => {
   rejects((candidate) => { replacements(candidate)[0].change.replace_paths = [["cpu"]]; });
   rejects((candidate) => { const backend = candidate.resource_changes.find((item) => item.address === 'aws_ecs_task_definition.candidate["backend"]'); backend.change.actions = ["create", "delete"]; backend.change.replace_paths = [["container_definitions"]]; });
   rejects((candidate) => { const extra = candidate.resource_changes.find((item) => item.address === "aws_dynamodb_table.replay"); extra.change.actions = ["create"]; });
+});
+
+test("imported-backend approval rejects delete-before-create rollover ordering", () => {
+  for (const index of [0, 5, 10]) {
+    const candidate = importedBackendPlan();
+    candidate.resource_changes.filter((item) => item.change.actions.join(",") === "create,delete")[index].change.actions = ["delete", "create"];
+    assert.throws(() => assertStageBNormalPlanCompleteness(candidate, { referenceAudit: audit, strict: false, terraformConfiguration }), /create-before-delete/);
+  }
 });
 
 test("approval imports PLAN_APPROVED from the canonical contract and keeps approval-only Terraform-free", () => {
