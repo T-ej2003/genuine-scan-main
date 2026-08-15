@@ -144,7 +144,7 @@ test("tfvars authorization is required only when an import can be reached", asyn
   let gates = 0;
   const fresh = common({ validateImportBindings: () => { gates += 1; } });
   await runExistingRevisionForwardRecovery(fresh);
-  assert.equal(gates, 1);
+  assert.equal(gates, 2);
 
   const completedReplay = common({
     journal: fresh.journal,
@@ -284,6 +284,20 @@ test("forward tfvars preflight binds the canonical release report and authorized
   }), /authorized backend/);
 });
 
+test("mutation-boundary tfvars revalidation blocks a changed binding before import", async () => {
+  let validations = 0;
+  const run = common({
+    validateImportBindings: () => {
+      validations += 1;
+      if (validations === 2) throw new Error("tfvars modified after initial validation");
+    },
+  });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(run), /tfvars modified/);
+  assert.equal(validations, 2);
+  assert.deepEqual(run.counts, { imports: 0, registrations: 0 });
+  assert.equal(run.journal.read().phase, "PREPARED");
+});
+
 test("IMPORTING replay permits exactly one bounded retry only from the authenticated pre-import state", async () => {
   let state = emptyState();
   let attempts = 0;
@@ -305,7 +319,7 @@ test("IMPORTING replay permits exactly one bounded retry only from the authentic
   assert.equal(result.imported, true);
   assert.equal(attempts, 2);
   assert.equal(run.journal.read().importAttemptCount, 2);
-  assert.equal(gates, 2);
+  assert.equal(gates, 4);
 });
 
 test("IMPORTING replay rejects an absent candidate when the authoritative state drift is ambiguous", async () => {
@@ -373,7 +387,7 @@ test("PREPARED import path requires the canonical tfvars gate", async () => {
   assert.equal(gates, 1);
   const replay = common({ journal: first.journal, evidence: first.evidence, validateImportBindings: () => { gates += 1; } });
   await runExistingRevisionForwardRecovery(replay);
-  assert.equal(gates, 2);
+  assert.equal(gates, 3);
   assert.deepEqual(replay.counts, { imports: 1, registrations: 0 });
 });
 

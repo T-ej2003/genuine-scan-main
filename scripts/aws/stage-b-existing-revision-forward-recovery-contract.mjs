@@ -305,6 +305,7 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   if (latestCensusEvidence.censusSha256 !== censusEvidence.censusSha256) throw new Error("Forward recovery ECS census changed before the governed import boundary.");
   const latestReadback = assertForwardRevisionReadback({ readback: await describe(STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn), expectedFingerprint: fingerprint, imageReleaseSha: existing?.imageReleaseSha || bindings.imageReleaseSha, backendImage });
   if (latestReadback.fingerprint !== readback.fingerprint) throw new Error("Forward recovery canonical :9 readback changed before the governed import boundary.");
+  if (typeof validateImportBindings === "function") validateImportBindings();
   const prepared = journal.read();
   journal.write({ ...prepared, ...expected, phase: "IMPORTING", importCalls: 1, importMayHaveOccurred: true, importAttemptCount: importRetryState ? 2 : 1, ...(importRetryState ? { importRetryAuthorized: true } : {}) });
   try {

@@ -63,7 +63,13 @@ export function assertForwardRecoveryTfvarsBinding({ tfvarsPath, bindingReportPa
     || report.images?.backend?.digest !== authorizedBackendDigest(imageAuthorization)) {
     throw new Error("Forward recovery tfvars binding does not match the authenticated release preflight, source, or authorized backend image.");
   }
-  return Object.freeze({ report, releasePreflight });
+  return Object.freeze({
+    report,
+    releasePreflight,
+    releasePreflightSha256: releasePreflightFile.sha256,
+    tfvarsSha256: assertStageBPrivateFile({ filePath: tfvarsPath, repositoryRoot: root, label: "Stage-B tfvars" }).sha256,
+    bindingReportSha256: assertStageBPrivateFile({ filePath: bindingReportPath, repositoryRoot: root, label: "Stage-B binding report" }).sha256,
+  });
 }
 
 export function buildForwardRecoveryTerraformImportArgs({ tfvarsPath, address, arn } = {}) {
@@ -123,15 +129,53 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const outputs = preflightForwardRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath });
   const bindings = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: bindingsPath, repositoryRoot: root, label: "Stage-B bindings" }).path, "utf8"));
   const imageAuthorization = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: root, label: "Image authorization" }).path, "utf8"));
-  const validateImportBindings = () => assertForwardRecoveryTfvarsBinding({
-    tfvarsPath: path.resolve(required(argv, "--tfvars")),
-    bindingReportPath: path.resolve(required(argv, "--binding-report")),
-    bindingReportSha256: required(argv, "--binding-report-sha256"),
-    releasePreflightPath: path.resolve(required(argv, "--release-preflight")),
-    sourceSha,
-    bindings,
-    imageAuthorization,
-  });
+  const canonicalTfvarsPath = () => path.resolve(required(argv, "--tfvars"));
+  const bindingReportPath = () => path.resolve(required(argv, "--binding-report"));
+  const bindingReportDigest = () => required(argv, "--binding-report-sha256");
+  const releasePreflightPath = () => path.resolve(required(argv, "--release-preflight"));
+  let validatedImportBinding;
+  let importTfvarsPath;
+  const equivalentImportBinding = (left, right) => left?.tfvarsSha256 === right?.tfvarsSha256
+    && left?.bindingReportSha256 === right?.bindingReportSha256
+    && left?.releasePreflight?.tfvarsSha256 === right?.releasePreflight?.tfvarsSha256
+    && left?.releasePreflightSha256 === right?.releasePreflightSha256
+    && left?.report?.toolingSha === right?.report?.toolingSha
+    && left?.report?.toolingTreeSha256 === right?.report?.toolingTreeSha256
+    && left?.report?.sourceContractSha256 === right?.report?.sourceContractSha256
+    && left?.report?.imageReleaseSha === right?.report?.imageReleaseSha
+    && left?.report?.imageEvidenceCanonicalSha256 === right?.report?.imageEvidenceCanonicalSha256
+    && left?.report?.images?.backend?.imageReference === right?.report?.images?.backend?.imageReference
+    && left?.report?.images?.backend?.digest === right?.report?.images?.backend?.digest;
+  const validateImportBindings = () => {
+    const bindingReport = bindingReportPath();
+    const bindingReportSha256 = bindingReportDigest();
+    const releasePreflight = releasePreflightPath();
+    const original = assertForwardRecoveryTfvarsBinding({
+      tfvarsPath: canonicalTfvarsPath(), bindingReportPath: bindingReport, bindingReportSha256, releasePreflightPath: releasePreflight,
+      sourceSha, bindings, imageAuthorization,
+    });
+    if (!validatedImportBinding) {
+      const originalBytes = fs.readFileSync(canonicalTfvarsPath());
+      const privateDirectory = fs.mkdtempSync(path.join(path.dirname(canonicalTfvarsPath()), ".forward-recovery-import-"));
+      fs.chmodSync(privateDirectory, 0o700);
+      importTfvarsPath = path.join(privateDirectory, path.basename(canonicalTfvarsPath()));
+      writeStageBPrivateFilesAtomic({ repositoryRoot: root, overwrite: false, files: [{ filePath: importTfvarsPath, bytes: originalBytes, label: "Forward recovery validated tfvars" }] });
+      const copied = assertForwardRecoveryTfvarsBinding({
+        tfvarsPath: importTfvarsPath, bindingReportPath: bindingReport, bindingReportSha256, releasePreflightPath: releasePreflight,
+        sourceSha, bindings, imageAuthorization,
+      });
+      if (!equivalentImportBinding(original, copied)) throw new Error("Forward recovery validated tfvars copy does not match the canonical binding.");
+      validatedImportBinding = original;
+      return copied;
+    }
+    if (!equivalentImportBinding(original, validatedImportBinding)) throw new Error("Forward recovery canonical tfvars or binding evidence changed after initial validation.");
+    const copied = assertForwardRecoveryTfvarsBinding({
+      tfvarsPath: importTfvarsPath, bindingReportPath: bindingReport, bindingReportSha256, releasePreflightPath: releasePreflight,
+      sourceSha, bindings, imageAuthorization,
+    });
+    if (!equivalentImportBinding(copied, validatedImportBinding)) throw new Error("Forward recovery validated tfvars copy changed before import.");
+    return copied;
+  };
   const protectedCheckout = readProtectedCheckout();
   const env = buildForwardRecoveryTerraformEnvironment(terraformDataDir, buildForwardRecoveryAwsEnvironment(profile, baseEnv));
   const run = (command, args) => execFile(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -147,7 +191,7 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   }, describe });
   const importState = async ({ address, arn }) => {
     validateBackend();
-    run("terraform", buildForwardRecoveryTerraformImportArgs({ tfvarsPath, address, arn }));
+    run("terraform", buildForwardRecoveryTerraformImportArgs({ tfvarsPath: importTfvarsPath, address, arn }));
   };
   const proveDescendant = ({ ancestorSha, descendantSha }) => {
     if (ancestorSha === descendantSha) return true;
