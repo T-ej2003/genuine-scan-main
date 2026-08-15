@@ -82,8 +82,10 @@ are stale after this correction and must not be reused.
 
 ## Append-only task-definition registration model
 
-Normal Terraform destroys remain forbidden, including every
-`aws_ecs_task_definition` `delete`, `destroy`, or `delete,create` replacement.
+Unreviewed Terraform destroys remain forbidden. The imported-backend profile's
+only permitted `aws_ecs_task_definition` replacements are the exact eleven
+reviewed current-to-new rollovers with `create,delete` actions; any replacement
+outside that membership, including a backend replacement, remains fail-closed.
 `skip_destroy = true` is an AWS provider argument, not Terraform lifecycle
 protection; it does not remove replacement actions from a plan when an existing
 state entry changes. The release role consequently retains no
@@ -241,10 +243,17 @@ release-deployer session.
 When the already-imported backend candidate is the exact canonical `:9`, the
 normal plan has one reviewed provider-metadata update instead of the backend
 create: `skip_destroy = null -> true`. The imported-backend normalization
-profile therefore requires exactly 11 creates and 4 updates; it binds the
-backend ARN, image, roles, runtime fields, protected `skip_destroy = true`
-configuration, and zero AWS actions. Any other update, replacement, destroy, or
-unclassified path remains fail-closed.
+profile therefore requires exactly `1 create`, `11 replacements`, `4 updates`,
+`0 destroys`, and `0 unclassified` paths. The 11 replacements MUST be exactly
+the reviewed ECS task-definition rollover membership and `create,delete`
+lifecycle action topology; this replacement count is not general replacement
+authority. Missing or extra rollovers, arbitrary replacements/creates/updates,
+an unexpected delete or destructive action, or an unknown action remain
+fail-closed. The backend candidate itself remains an UPDATE only:
+`skip_destroy = null -> true`, with ARN `:9`, container definitions and image
+bindings unchanged, `requiredAwsActions=[]`, and
+`registrationRequired=false`; it is not one of the 11 registration-producing
+rollovers. A backend replacement remains fail-closed.
 
 ## Remaining additions, ordered
 

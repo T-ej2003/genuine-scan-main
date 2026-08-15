@@ -664,7 +664,7 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_ALIAS_INITIAL_CREATE).length, 1);
 });
 
-test("imported backend normalization is a complete semantic 11-create/4-update profile", () => {
+test("imported backend normalization is a complete semantic 1-create/11-replacement/4-update profile", () => {
   const value = importedBackendPlan();
   const census = assertStageBPlanSemanticCompleteness(value, { terraformConfiguration: fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8") });
   const backend = census.resources.find((item) => item.address === 'aws_ecs_task_definition.candidate["backend"]');
