@@ -141,6 +141,8 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const outputs = preflightForwardRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath });
   const bindings = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: bindingsPath, repositoryRoot: root, label: "Stage-B bindings" }).path, "utf8"));
   const imageAuthorization = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: root, label: "Image authorization" }).path, "utf8"));
+  const stateBeforePath = option(argv, "--state-before");
+  const stateBefore = stateBeforePath ? JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: path.resolve(stateBeforePath), repositoryRoot: root, label: "Stage-B authenticated pre-import state" }).path, "utf8")) : undefined;
   const canonicalTfvarsPath = () => path.resolve(required(argv, "--tfvars"));
   const bindingReportPath = () => path.resolve(required(argv, "--binding-report"));
   const bindingReportDigest = () => required(argv, "--binding-report-sha256");
@@ -219,6 +221,7 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
     proveDescendant,
     deriveImageReuse: ({ imageReleaseSha, toolingSha }) => { const report = deriveStageBImageImpactReport({ imageReleaseSha, toolingSha }); return { ...report, imageBuildInputsChanged: report.newImagesRequired }; },
     validateImportBindings,
+    stateBefore,
     readState,
     census,
     describe,

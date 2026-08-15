@@ -164,6 +164,34 @@ test("ambiguous supersession crash after import finalizes the existing :9 withou
   assert.equal(replay.journal.read().phase, "COMPLETED");
 });
 
+test("ambiguous supersession replay authenticates the recorded authorization before deriving images", async () => {
+  const first = ambiguousCommon({ proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await runAmbiguousImportSupersession(first);
+  const replaced = { ...imageAuthorization, evidenceSha256: "f".repeat(64), authorizationSha256: "f".repeat(64) };
+  const replay = ambiguousCommon({ journal: first.journal, evidence: first.evidence, imageAuthorization: replaced, readState: async () => importedState(), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await assert.rejects(() => runAmbiguousImportSupersession(replay), /original incident identity/);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
+test("ambiguous supersession rejects drifted output authorization even when it would supply matching values", async () => {
+  const first = ambiguousCommon({ proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await runAmbiguousImportSupersession(first);
+  const malicious = structuredClone(imageAuthorization);
+  malicious.imageEvidence.images[0].digest = "sha256:" + "f".repeat(64);
+  const replay = ambiguousCommon({ journal: first.journal, evidence: first.evidence, imageAuthorization: malicious, readState: async () => importedState(), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await assert.rejects(() => runAmbiguousImportSupersession(replay), /original incident identity/);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
+test("ambiguous supersession rejects a journal authorization hash mismatch", async () => {
+  const first = ambiguousCommon({ proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await runAmbiguousImportSupersession(first);
+  const alteredJournal = { ...first.journal.read(), imageAuthorizationSha256: "a".repeat(64) };
+  const replay = ambiguousCommon({ journal: journalAdapter(alteredJournal), evidence: first.evidence, readState: async () => importedState(), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await assert.rejects(() => runAmbiguousImportSupersession(replay), /identity|journal/);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
 test("ambiguous supersession rejects altered historical journal, current drift, and newer revisions", () => {
   const old = ambiguousOldJournal();
   const oldBytes = Buffer.from(JSON.stringify(old));
@@ -308,6 +336,48 @@ test("post-import comparison reuses the reviewed Terraform checkpoint normalizer
   const allowlistChanged = structuredClone(after);
   allowlistChanged.format_version = 5;
   assert.throws(() => assertForwardStateAfterImport(before, allowlistChanged), /outside/);
+});
+
+test("Terraform 1.15.8 import effects accept only authenticated outputs, checks, and lifecycle metadata", () => {
+  const expectedBoundImages = {
+    backend: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:" + "1".repeat(64),
+    worker: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-worker@sha256:" + "2".repeat(64),
+    executor: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:" + "3".repeat(64),
+    canary: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:" + "4".repeat(64),
+    read_only_canary: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:" + "4".repeat(64),
+  };
+  const makeState = (imported = false) => {
+    const value = emptyState(imported ? 95 : 94);
+    value.check_results = [{ object_kind: "check", config_addr: "check.release_bindings", status: "pass", objects: [{ object_addr: "check.release_bindings", status: "pass" }] }];
+    value.outputs = {
+      bound_images: { value: imported ? expectedBoundImages : Object.fromEntries(Object.entries(expectedBoundImages).map(([key]) => [key, `old-${key}`])) },
+      task_definition_arns: { value: { backend: imported ? arn : `${arn.slice(0, -1)}5`, worker: "worker-arn" } },
+      stable: { value: "unchanged" },
+    };
+    value.resources.push({ mode: "managed", type: "aws_cloudwatch_log_group", name: "stage_b", instances: ["backend", "canary", "read_only_canary", "worker"].map((index_key) => ({ index_key, attributes: { name: `/ecs/${index_key}` }, ...(imported ? { create_before_destroy: true } : {}) })) });
+    if (imported) value.resources[0].instances = [{ index_key: "backend", schema_version: 1, attributes: { id: arn, arn, family: CONTRACT.family } }];
+    return value;
+  };
+  const before = makeState();
+  const after = makeState(true);
+  after.check_results = null;
+  assert.doesNotThrow(() => assertForwardStateAfterImport(before, after, { expectedBoundImages }));
+
+  const wrongImage = structuredClone(after);
+  wrongImage.outputs.bound_images.value.backend = "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:" + "f".repeat(64);
+  assert.throws(() => assertForwardStateAfterImport(before, wrongImage, { expectedBoundImages }), /bound_images/);
+  const failedCheck = structuredClone(after);
+  failedCheck.check_results = [{ status: "fail" }];
+  assert.throws(() => assertForwardStateAfterImport(before, failedCheck, { expectedBoundImages }), /reviewed import effects|check-results/);
+  const unrelatedOutput = structuredClone(after);
+  unrelatedOutput.outputs.stable.value = "changed";
+  assert.throws(() => assertForwardStateAfterImport(before, unrelatedOutput, { expectedBoundImages }), /reviewed import effects/);
+  const unrelatedResource = structuredClone(after);
+  unrelatedResource.resources.find(({ type }) => type === "aws_cloudwatch_log_group").instances[0].attributes.name = "/ecs/changed";
+  assert.throws(() => assertForwardStateAfterImport(before, unrelatedResource, { expectedBoundImages }), /reviewed import effects/);
+  const unrelatedLifecycle = structuredClone(after);
+  unrelatedLifecycle.resources.push({ mode: "managed", type: "aws_s3_bucket", name: "drift", instances: [{ create_before_destroy: true }] });
+  assert.throws(() => assertForwardStateAfterImport(before, unrelatedLifecycle, { expectedBoundImages }), /reviewed import effects/);
 });
 
 test("importing replay finalizes an already successful import without a second import", async () => {
