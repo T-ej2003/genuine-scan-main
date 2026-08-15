@@ -20,7 +20,7 @@ import {
   runAmbiguousImportSupersession,
   runExistingRevisionForwardRecovery,
 } from "../aws/stage-b-existing-revision-forward-recovery-contract.mjs";
-import { assertForwardRecoveryTerraformBackend, assertForwardRecoveryTfvarsBinding, buildForwardRecoveryTerraformEnvironment, buildForwardRecoveryTerraformImportArgs, classifyForwardRecoveryResult, preflightForwardRecoveryOutputs } from "../aws/forward-recover-stage-b-existing-revision.mjs";
+import { assertForwardRecoveryTerraformBackend, assertForwardRecoveryTfvarsBinding, buildForwardRecoveryTerraformEnvironment, buildForwardRecoveryTerraformImportArgs, classifyForwardRecoveryResult, preflightForwardRecoveryOutputs, runForwardRecoveryCli } from "../aws/forward-recover-stage-b-existing-revision.mjs";
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { buildCanonicalBackendRecoveryTaskDefinition, canonicalSha256, stateSnapshotSha256, taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 
@@ -791,4 +791,43 @@ test("forward CLI preflights all artifact paths before any import boundary", () 
   assert.doesNotThrow(() => preflightForwardRecoveryOutputs(paths));
   fs.chmodSync(directory, 0o755);
   assert.throws(() => preflightForwardRecoveryOutputs(paths), /private/);
+});
+
+test("ordinary CLI recovery treats the absent journal path as an output, not a historical input", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-forward-cli-"));
+  fs.chmodSync(directory, 0o700);
+  const terraformDataDir = path.join(directory, "terraform-data");
+  fs.mkdirSync(terraformDataDir, { mode: 0o700 });
+  const bindingsPath = path.join(directory, "bindings.json");
+  const imageAuthorizationPath = path.join(directory, "authorization.json");
+  const evidencePath = path.join(directory, "evidence.json");
+  const journalPath = path.join(directory, "journal.json");
+  fs.writeFileSync(bindingsPath, "{}", { mode: 0o600 });
+  fs.writeFileSync(imageAuthorizationPath, "{}", { mode: 0o600 });
+  await assert.rejects(() => runForwardRecoveryCli([
+    "--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--image-authorization", imageAuthorizationPath,
+    "--aws-profile", "release-deployer", "--terraform-data-dir", terraformDataDir, "--evidence-out", evidencePath,
+    "--forward-recovery-state", journalPath,
+  ], { readProtectedCheckout: () => ({ currentHead: sourceSha, originMainHead: sourceSha, toolingSha: sourceSha, porcelainStatus: "" }) }), (error) => {
+    assert.doesNotMatch(error.message, /Historical forward recovery journal/);
+    return true;
+  });
+  assert.equal(fs.existsSync(journalPath), false);
+});
+
+test("supersession CLI requires the existing historical journal before any contract evaluation", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-forward-supersession-"));
+  fs.chmodSync(directory, 0o700);
+  const oldJournalPath = path.join(directory, "ambiguous.json");
+  const supersessionPath = path.join(directory, "supersession.json");
+  const evidencePath = path.join(directory, "supersession.evidence.json");
+  const bindingsPath = path.join(directory, "bindings.json");
+  const imageAuthorizationPath = path.join(directory, "authorization.json");
+  fs.writeFileSync(bindingsPath, "{}", { mode: 0o600 });
+  fs.writeFileSync(imageAuthorizationPath, "{}", { mode: 0o600 });
+  await assert.rejects(() => runForwardRecoveryCli([
+    "--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--image-authorization", imageAuthorizationPath,
+    "--aws-profile", "release-deployer", "--terraform-data-dir", path.join(directory, "terraform-data"), "--evidence-out", evidencePath,
+    "--forward-recovery-state", oldJournalPath, "--supersede-ambiguous-import", "--supersession-state", supersessionPath,
+  ], { readProtectedCheckout: () => ({ currentHead: sourceSha, originMainHead: sourceSha, toolingSha: sourceSha, porcelainStatus: "" }) }), /Historical forward recovery journal/);
 });

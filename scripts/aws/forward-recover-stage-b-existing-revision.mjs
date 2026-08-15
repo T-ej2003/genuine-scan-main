@@ -128,9 +128,11 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const oldJournalPath = path.resolve(required(argv, "--forward-recovery-state"));
   const supersession = argv.includes("--supersede-ambiguous-import");
   const journalPath = supersession ? path.resolve(required(argv, "--supersession-state")) : oldJournalPath;
-  const oldJournalFile = assertStageBPrivateFile({ filePath: oldJournalPath, repositoryRoot: root, label: "Historical forward recovery journal" });
-  const oldJournal = JSON.parse(fs.readFileSync(oldJournalFile.path, "utf8"));
+  let oldJournalFile;
+  let oldJournal;
   if (supersession) {
+    oldJournalFile = assertStageBPrivateFile({ filePath: oldJournalPath, repositoryRoot: root, label: "Historical forward recovery journal" });
+    oldJournal = JSON.parse(fs.readFileSync(oldJournalFile.path, "utf8"));
     const expectedJournalName = `ambiguous-import-supersession-${oldJournalFile.sha256}.json`;
     const expectedEvidenceName = `ambiguous-import-supersession-${oldJournalFile.sha256}.evidence.json`;
     if (path.dirname(journalPath) !== path.dirname(oldJournalPath) || path.basename(journalPath) !== expectedJournalName || path.basename(evidencePath) !== expectedEvidenceName) throw new Error("Ambiguous import supersession requires deterministic sibling journal and evidence paths bound to the historical journal hash.");
