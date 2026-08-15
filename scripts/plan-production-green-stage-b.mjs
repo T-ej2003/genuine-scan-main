@@ -522,7 +522,11 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
   for (const change of (plan.resource_changes || []).filter((item) => item.type === "aws_ecs_task_definition")) {
     const entry = current.find((item) => item.address === change.address);
     if (!entry) continue;
-    const arn = entry.classification === "no-op" ? entry.priorTaskDefinitionArn : change.change?.after?.arn;
+    const arn = entry.classification === "no-op"
+      ? entry.priorTaskDefinitionArn
+      : entry.classification === "rollover"
+        ? change.change?.before?.arn
+        : change.change?.after?.arn;
     if (arn) {
       const identity = taskDefinitionArnPattern.exec(arn);
       if (!identity || identity[1] !== entry.family) throw new Error(`Stage B append-only current task-definition ARN is malformed: ${entry.address}`);

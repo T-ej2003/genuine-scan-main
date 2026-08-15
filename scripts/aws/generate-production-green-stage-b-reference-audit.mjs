@@ -172,10 +172,6 @@ function planTaskDefinitions(plan, terraformConfiguration) {
   for (const [family, entries] of retainedByFamily) {
     newestRetainedByFamily.set(family, [...entries].sort((left, right) => right.revision - left.revision)[0]);
   }
-  for (const rollover of rolloverByAddress.values()) {
-    const newest = newestRetainedByFamily.get(rollover.family);
-    if (newest && newest.oldArn !== rollover.oldArn) throw new Error(`Terraform plan rollover does not target the newest retained revision: ${rollover.address}`);
-  }
   return { rolloverByAddress, createOnlyByAddress, noOpByAddress, retainedByAddress, retainedByFamily, newestRetainedByFamily, retainedArnSet };
 }
 
@@ -208,6 +204,18 @@ function validateRetainedTaskDefinitionResponse(response, expectedFamily, label)
     throw new Error(`${label} for family ${expectedFamily} has unsupported status ${String(status)}; expected ACTIVE.`);
   }
   return validateTaskDefinitionResponse(response, expectedFamily, label);
+}
+
+function currentManagedTaskDefinitionPredecessors(plan) {
+  const resources = [];
+  const visit = (module) => {
+    resources.push(...(module?.resources || []));
+    for (const child of module?.child_modules || []) visit(child);
+  };
+  visit(plan?.prior_state?.values?.root_module);
+  return new Map(resources
+    .filter((resource) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, resource?.address))
+    .map((resource) => [resource.address, { arn: resource.values?.arn, family: resource.values?.family }]));
 }
 
 function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256, terraformConfiguration) {
@@ -275,8 +283,11 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
     const retainedArns = retainedArnSetByFamily.get(identity.family) || new Set();
     const currentNoOpArns = currentNoOpByFamily.get(identity.family) || new Set();
     const currentArns = currentArnSetByFamily.get(identity.family) || new Set();
+    const currentManagedArns = new Set([...rolloverByAddress.values()]
+      .filter((entry) => entry.family === identity.family)
+      .map((entry) => entry.oldArn));
     if ((retainedArns.size > 0 || currentNoOpArns.size > 0)
-      && !retainedArns.has(identity.arn) && !currentNoOpArns.has(identity.arn) && !currentArns.has(identity.arn)) throw new Error(`Broker task-definition ARN is not an explicitly retained or current no-op revision: ${mode}.`);
+      && !retainedArns.has(identity.arn) && !currentNoOpArns.has(identity.arn) && !currentArns.has(identity.arn) && !currentManagedArns.has(identity.arn)) throw new Error(`Broker task-definition ARN is not an explicitly retained or current no-op revision: ${mode}.`);
     brokerReferences.set(identity.arn, mode);
     brokerReferencesByFamily.set(identity.family, [...(brokerReferencesByFamily.get(identity.family) || []), mode]);
   }
@@ -304,6 +315,12 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
         const atomicByLiveArn = new Map(atomicByAddress);
         atomicByLiveArn.set(rollover.address, { ...rollover, oldArn: identity.arn });
         plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, atomicByLiveArn, planSha256, terraformConfiguration));
+      } catch (error) {
+        throw new Error(`Broker Lambda still references superseded task definition ${arn}: ${error.message}`);
+      }
+    } else if (rollover.oldArn === identity.arn) {
+      try {
+        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, atomicByAddress, planSha256, terraformConfiguration));
       } catch (error) {
         throw new Error(`Broker Lambda still references superseded task definition ${arn}: ${error.message}`);
       }
@@ -470,7 +487,14 @@ export function generateReferenceAudit({
     retainedByAddress,
     retainedByFamily,
     newestRetainedByFamily,
+    retainedArnSet,
   } = planTaskDefinitions(plan, terraformConfiguration);
+  const currentManagedByAddress = currentManagedTaskDefinitionPredecessors(plan);
+  for (const rollover of rolloverByAddress.values()) {
+    const current = currentManagedByAddress.get(rollover.address);
+    if (!current || current.family !== rollover.family || current.arn !== rollover.oldArn) throw new Error(`Terraform plan rollover predecessor is not the exact current managed task definition: ${rollover.address}`);
+    if (retainedArnSet.has(current.arn)) throw new Error(`Terraform plan rollover predecessor is also present in retained history: ${rollover.address}`);
+  }
   const createOnlyFamilies = new Set([...createOnlyByAddress.values()].map((entry) => entry.family));
   const noOpFamilies = new Set([...noOpByAddress.values()].map((entry) => entry.family));
   const retainedArnSetByFamily = new Map([...retainedByFamily].map(([family, entries]) => [family, new Set(entries.map((entry) => entry.oldArn))]));
