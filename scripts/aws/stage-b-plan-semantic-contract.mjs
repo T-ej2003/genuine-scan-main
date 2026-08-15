@@ -15,7 +15,10 @@ import {
   assertStageBBrokerPolicyDocument,
   assertStageBBackendEcsExecPolicyChange,
   assertStageBBrokerPublishProviderMetadataRepresentation,
+  assertStageBImportedBackendMetadataNormalization,
   assertReviewedBrokerTimeoutTransition,
+  STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS,
+  STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION,
   assertStageBTerraformBrokerPolicySource,
   STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
   STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS,
@@ -36,6 +39,7 @@ export const STAGE_B_PLAN_SEMANTIC_CLASSES = Object.freeze([
 export const STAGE_B_PLAN_SEMANTIC_PROFILES = Object.freeze({
   ECS_INITIAL_CREATE: "ECS_INITIAL_CREATE",
   ECS_REVIEWED_ROLLOVER: "ECS_REVIEWED_ROLLOVER",
+  IMPORTED_BACKEND_METADATA_NORMALIZATION: STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION,
   BROKER_POLICY_INITIAL_CREATE: "BROKER_POLICY_INITIAL_CREATE",
   BROKER_FUNCTION_INITIAL_CREATE: "BROKER_FUNCTION_INITIAL_CREATE",
   BROKER_ALIAS_INITIAL_CREATE: "BROKER_ALIAS_INITIAL_CREATE",
@@ -895,6 +899,10 @@ function classifyEcsInitialChangedPath(change, path) {
 
 function classifyEcsChangedPath(change, path) {
   if (isEcsInitialCreate(change)) return classifyEcsInitialChangedPath(change, path);
+  if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactJson(change.change?.actions, ["update"])) {
+    if (path !== "skip_destroy") throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.${path}`);
+    return "REVIEWED_PROVIDER_NORMALIZATION";
+  }
   if (path === "container_definitions") return "REVIEWED_CONCRETE_CHANGE";
   if (path === "tags.MSCQRExecTarget" || path === "tags_all.MSCQRExecTarget") {
     if (change.address !== 'aws_ecs_task_definition.candidate["backend"]'
@@ -1028,12 +1036,16 @@ function assertSensitivePaths(change, kind, paths) {
   return paths;
 }
 
-function classifyResource(change) {
+function classifyResource(change, { terraformConfiguration } = {}) {
   const actions = change?.change?.actions;
   if (ECS_ADDRESSES.has(change?.address) && change.type === "aws_ecs_task_definition" && change.mode === "managed"
     && (change.module === undefined || change.module === null)) {
     if (exactJson(actions, ECS_INITIAL_CREATE_ACTIONS)) return STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_INITIAL_CREATE;
     if (STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS.some((expected) => exactJson(actions, expected))) return STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_REVIEWED_ROLLOVER;
+    if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactJson(actions, ["update"])) {
+      assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
+      return STAGE_B_PLAN_SEMANTIC_PROFILES.IMPORTED_BACKEND_METADATA_NORMALIZATION;
+    }
   }
   const profile = BROKER_PROFILES.get(change?.address);
   const brokerProfile = profile?.profiles.find((candidate) => exactJson(actions, candidate.actions));
@@ -1061,9 +1073,13 @@ function assertBrokerActionProfile(plan) {
   }
 }
 
-function classifyReplacePaths(change) {
+function classifyReplacePaths(change, { terraformConfiguration } = {}) {
   const paths = change.change?.replace_paths || [];
   if (isEcsInitialCreate(change) && paths.length === 0) return [];
+  if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactJson(change.change?.actions, ["update"])) {
+    assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
+    if (paths.length === 0) return [];
+  }
   if (ECS_ADDRESSES.has(change.address) && exactJson(paths, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS)) {
     return paths.map((path) => ({ path: path.join("."), classification: "REVIEWED_REPLACEMENT_TRIGGER" }));
   }
@@ -1107,7 +1123,7 @@ export function censusStageBPlanSemantics(plan, options = {}) {
     if (exactJson(actions, ["no-op"]) || actions.length === 0) continue;
     if (seenAddresses.has(change.address)) throw new Error(`UNCLASSIFIED_RESOURCE_ACTION: ${change.address}`);
     seenAddresses.add(change.address);
-    const classification = classifyResource(change);
+    const classification = classifyResource(change, options);
     assertTypedRepresentationEnvelope(change);
     assertBrokerPublishProviderMetadataRepresentation(change);
     if (change.address === "aws_lambda_function.broker" && exactJson(change.change?.actions, ["update"])) {
@@ -1122,7 +1138,7 @@ export function censusStageBPlanSemantics(plan, options = {}) {
     const afterUnknownPaths = truePaths(change.change?.after_unknown).filter(Boolean).map((path) => ({ path, classification: assertClass(classifyUnknownPath(change, path), "AFTER_UNKNOWN") }));
     const beforeSensitivePaths = assertSensitivePaths(change, "BEFORE", truePaths(change.change?.before_sensitive));
     const afterSensitivePaths = assertSensitivePaths(change, "AFTER", truePaths(change.change?.after_sensitive));
-    const replacePaths = classifyReplacePaths(change);
+    const replacePaths = classifyReplacePaths(change, options);
     const configurationReferences = collectConfigurationReferences(plan, change.address);
     resources.push({
       address: change.address,

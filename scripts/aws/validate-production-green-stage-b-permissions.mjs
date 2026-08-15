@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
-import { STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS } from "./stage-b-deployment-contract.mjs";
+import { assertStageBImportedBackendMetadataNormalization, STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS, STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION } from "./stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
@@ -443,7 +443,7 @@ export function validateSimulationResult(item, result) {
   return { ...result, missingContextValues: actualMissing };
 }
 
-export function assertPermissionEvaluationBindings(report, manifest, { plan, permissionProfile = "NORMAL_STAGE_B_RELEASE", contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY } = {}) {
+export function assertPermissionEvaluationBindings(report, manifest, { plan, permissionProfile = "NORMAL_STAGE_B_RELEASE", contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY, terraformConfiguration } = {}) {
   const capabilities = stageBPermissionProfileCapabilities(permissionProfile);
   const conditionKeyOrigins = sourcePolicyConditionKeyOrigins();
   validateManifest(manifest, { contextRegistry, conditionKeyOrigins });
@@ -478,7 +478,14 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, per
   if (report.planCapabilities?.schemaVersion !== 1
     || JSON.stringify(report.planCapabilities.required) !== JSON.stringify(project(report.requiredEvaluations))
     || JSON.stringify(report.planCapabilities.forbidden) !== JSON.stringify(project(report.forbiddenEvaluations))) throw new Error("Permission-preflight plan capability manifest is incomplete or stale.");
-  if (plan && capabilities.requiresTaskDefinitionRegistrationContexts) assertTaskDefinitionRegistrationContexts(plan, manifest);
+  const expectedZeroMutationChanges = (plan?.resource_changes || []).filter((change) => change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(change.change?.actions || []) === JSON.stringify(["update"])).map((change) => {
+    assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
+    return { address: change.address, classification: STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION, requiredAwsActions: [] };
+  });
+  if (expectedZeroMutationChanges.length > 0
+    ? JSON.stringify(report.planCapabilities.zeroAwsMutationChanges) !== JSON.stringify(expectedZeroMutationChanges)
+    : report.planCapabilities.zeroAwsMutationChanges !== undefined && JSON.stringify(report.planCapabilities.zeroAwsMutationChanges) !== "[]") throw new Error("Permission-preflight zero-AWS-mutation classification is incomplete or stale.");
+  if (plan && capabilities.requiresTaskDefinitionRegistrationContexts) assertTaskDefinitionRegistrationContexts(plan, manifest, { terraformConfiguration });
   if (report.phase === "initial") assertCutoverCriticalEvidence(report);
   return true;
 }
@@ -709,16 +716,32 @@ function contextFromTaskDefinitionPlan(change, manifestMapping) {
   return context;
 }
 
-export function assertTaskDefinitionRegistrationContexts(plan, manifest) {
+export function assertTaskDefinitionRegistrationContexts(plan, manifest, { terraformConfiguration } = {}) {
   validateManifest(manifest);
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
-  const registrations = changes.filter((change) => change.type === "aws_ecs_task_definition" && (exactActions(change.change?.actions, ["create"]) || isStageBTaskDefinitionRotationActionsValue(change.change?.actions)));
-  for (const mapping of manifest.taskDefinitionMappings) {
+  const importedBackendUpdates = changes.filter((change) => change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(change.change?.actions, ["update"]));
+  if (importedBackendUpdates.length > 1) throw new Error("Selected plan contains duplicate imported backend normalization changes.");
+  const importedBackendNormalization = importedBackendUpdates.length === 1;
+  if (importedBackendNormalization) assertStageBImportedBackendMetadataNormalization(importedBackendUpdates[0], { terraformConfiguration });
+  const taskDefinitionChanges = changes.filter((change) => change.type === "aws_ecs_task_definition");
+  const registrations = taskDefinitionChanges.filter((change) => exactActions(change.change?.actions, ["create"]) || isStageBTaskDefinitionRotationActionsValue(change.change?.actions));
+  const allowedMetadataChange = (change) => importedBackendNormalization && change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(change.change?.actions, ["update"]);
+  const allowedNoOp = (change) => {
+    if (!exactActions(change.change?.actions, ["no-op"])) return false;
+    if (TASK_DEFINITION_MAPPINGS.some((mapping) => mapping.address === change.address)) return true;
+    const retained = change.address?.match(/^(aws_ecs_task_definition\.(candidate|executor))_retained\["[a-f0-9]+-([^"]+)"\]$/);
+    return Boolean(retained && TASK_DEFINITION_MAPPINGS.some((mapping) => mapping.address === `${retained[1]}["${retained[3]}"]`));
+  };
+  if (taskDefinitionChanges.some((change) => !registrations.includes(change) && !allowedMetadataChange(change) && !allowedNoOp(change))) throw new Error("Selected plan contains an unreviewed task-definition change.");
+  const requiredMappings = importedBackendNormalization
+    ? manifest.taskDefinitionMappings.filter((mapping) => mapping.address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS)
+    : manifest.taskDefinitionMappings;
+  for (const mapping of requiredMappings) {
     const matches = registrations.filter((change) => change.address === mapping.address);
     if (matches.length !== 1) throw new Error(`Selected plan must contain exactly one reviewed task-definition registration for ${mapping.address}.`);
     contextFromTaskDefinitionPlan(matches[0], mapping);
   }
-  if (registrations.length !== manifest.taskDefinitionMappings.length) throw new Error("Selected plan contains an unreviewed task-definition registration.");
+  if (registrations.length !== requiredMappings.length) throw new Error("Selected plan contains an unreviewed task-definition registration or an unclassified backend normalization.");
   return true;
 }
 
@@ -756,17 +779,24 @@ function principalEvaluation(entry, { forbidden = false } = {}) {
   return result;
 }
 
-export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = "NORMAL_STAGE_B_RELEASE", contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY, conditionKeyOrigins = sourcePolicyConditionKeyOrigins() } = {}) {
+export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = "NORMAL_STAGE_B_RELEASE", contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY, conditionKeyOrigins = sourcePolicyConditionKeyOrigins(), terraformConfiguration } = {}) {
   assertStageBPermissionProfile(permissionProfile);
   validateManifest(manifest, { contextRegistry, conditionKeyOrigins });
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
   const required = manifest.required.filter((entry) => !entry.plan).flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource, { contextRegistry })));
   const coveredChanges = new Set();
+  const zeroAwsMutationChanges = [];
   const matchedPlanEntries = new Set();
   for (const change of changes) {
     const actions = change.change?.actions || [];
     if (["aws_iam_role_policy.broker", "aws_iam_policy.broker", "aws_iam_role_policy_attachment.broker"].includes(change.address)) assertBrokerManagedPolicyChange(change);
     if (exactActions(actions, ["no-op"])) continue;
+    if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(actions, ["update"])) {
+      assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
+      zeroAwsMutationChanges.push({ address: change.address, classification: STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION, requiredAwsActions: [] });
+      coveredChanges.add(change.address);
+      continue;
+    }
     const taskMapping = change.type === "aws_ecs_task_definition" && (exactActions(actions, ["create"]) || isStageBTaskDefinitionRotationActionsValue(actions))
       ? manifest.taskDefinitionMappings.find((mapping) => mapping.address === change.address)
       : undefined;
@@ -797,6 +827,7 @@ export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = 
     required: required.sort((left, right) => left.id.localeCompare(right.id)),
     forbidden: forbidden.sort((left, right) => left.id.localeCompare(right.id)),
     coveredChanges: [...coveredChanges].sort(),
+    zeroAwsMutationChanges,
   };
 }
 
@@ -978,6 +1009,7 @@ export function runPermissionPreflight({
   planApprovalReportSha256,
   referenceAudit,
   referenceAuditBytes,
+  terraformConfiguration,
   expectedAccount = ACCOUNT,
   expectedRegion = REGION,
   generatedAt = new Date().toISOString(),
@@ -999,7 +1031,7 @@ export function runPermissionPreflight({
   if (planBound && (!Buffer.isBuffer(savedPlanBytes) || savedPlanBytes.length === 0)) throw new Error("Saved binary plan bytes are required for permission preflight.");
   if (planBound && (!planApprovalReport || !Buffer.isBuffer(planApprovalReportBytes) || !/^[a-f0-9]{64}$/.test(planApprovalReportSha256 || ""))) throw new Error("PLAN_APPROVED evidence is required before permission preflight.");
   if (planBound && !Buffer.isBuffer(canonicalPlanJsonBytes)) throw new Error("Canonical plan JSON bytes are required for permission preflight.");
-  if (planBound) assertStageBPlanApprovedBinding(planApprovalReport, { approvalReportBytes: planApprovalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, referenceAudit, referenceAuditBytes, now: new Date(now) });
+  if (planBound) assertStageBPlanApprovedBinding(planApprovalReport, { approvalReportBytes: planApprovalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, referenceAudit, referenceAuditBytes, terraformConfiguration, now: new Date(now) });
   const permissionProfileBinding = resolveStageBPermissionProfile({ plan, approvedPlanProfile: planApprovalReport?.planProfile, phase });
   if (!reportGeneratorCallerArn || !APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(reportGeneratorCallerArn)) throw new Error("Permission preflight generator is not an approved audit/admin principal.");
   if (simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission preflight simulated role ARN is not the production release role.");
@@ -1015,7 +1047,7 @@ export function runPermissionPreflight({
   let policyEvidenceError = null;
   try { assertReleasePolicyEvidence(policyEvidence); } catch (error) { policyEvidenceError = error.message; }
   if (discoverContextKeys) assertDiscoveredSimulationContextKeys(discoverContextKeys({ roleArn: simulatedRoleArn }), { conditionKeyOrigins, registry: reviewedContextRegistry });
-  const derived = deriveRequiredEvaluations(plan, manifest, { permissionProfile: permissionProfileBinding.permissionProfile, contextRegistry: reviewedContextRegistry, conditionKeyOrigins });
+  const derived = deriveRequiredEvaluations(plan, manifest, { permissionProfile: permissionProfileBinding.permissionProfile, contextRegistry: reviewedContextRegistry, conditionKeyOrigins, terraformConfiguration });
   const requiredResults = runSimulationCensus({ roleArn: simulatedRoleArn, evaluations: derived.required, simulate });
   const forbiddenResults = runSimulationCensus({ roleArn: simulatedRoleArn, evaluations: derived.forbidden, simulate });
   const operatorRequired = ECS_EXEC_OPERATOR_REQUIRED.map((entry) => principalEvaluation(entry));
@@ -1079,6 +1111,7 @@ export function runPermissionPreflight({
       schemaVersion: 1,
       required: requiredResults.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision })),
       forbidden: forbiddenResults.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision })),
+      zeroAwsMutationChanges: derived.zeroAwsMutationChanges,
     },
     cloudTrail: cloudTrailResult,
     policyEvidence,
@@ -1127,14 +1160,15 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   const savedPlanBytes = fs.readFileSync(path.resolve(options.savedPlanPath));
   const planApprovalReportBytes = fs.readFileSync(path.resolve(options.planApprovalReportPath));
   const planApprovalReport = JSON.parse(planApprovalReportBytes);
-  if (planApprovalReport.planProfile === "BASELINE" && !options.referenceAuditPath) {
+  if (["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION"].includes(planApprovalReport.planProfile) && !options.referenceAuditPath) {
     throw new Error("--reference-audit is required for BASELINE plan-bound permission preflight.");
   }
   const plan = JSON.parse(planBytes);
   const referenceAuditBytes = options.referenceAuditPath ? fs.readFileSync(path.resolve(options.referenceAuditPath)) : undefined;
   const referenceAudit = referenceAuditBytes ? JSON.parse(referenceAuditBytes) : undefined;
   const manifest = JSON.parse(fs.readFileSync(path.resolve(options.manifestPath), "utf8"));
-  const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, canonicalPlanJsonBytes, savedPlanBytes, planApprovalReport, planApprovalReportBytes, referenceAudit, referenceAuditBytes, policyEvidence: collectPolicyEvidence() });
+  const terraformConfiguration = fs.readFileSync(path.join(stageBRoot, "infra/aws/terraform/production-green-stage-b/main.tf"), "utf8");
+  const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, canonicalPlanJsonBytes, savedPlanBytes, planApprovalReport, planApprovalReportBytes, referenceAudit, referenceAuditBytes, terraformConfiguration, policyEvidence: collectPolicyEvidence() });
   assertStageBPermissionEvidenceKind(report, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, "plan-bound");
   process.stdout.write(`${JSON.stringify({ status: report.status, outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
   if (report.status !== "valid") {

@@ -12,7 +12,7 @@ export const STAGE_B_PLAN_APPROVED = "PLAN_APPROVED";
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const STAGE_B_CAPTURE_BROKER_ADDRESSES = ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"];
-export const STAGE_B_PLAN_PROFILES = Object.freeze(["BASELINE", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY"]);
+export const STAGE_B_PLAN_PROFILES = Object.freeze(["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY"]);
 export const STAGE_B_BROKER_OPERATIONS = Object.freeze(["none", "initial-create", "update", "recovery-alias-only"]);
 
 function assertPlanProfile(profile, label = "Stage B plan evidence") {
@@ -98,7 +98,7 @@ function assertRetainedTaskDefinitionEntry(entry, { requireMetadata, seenFamilyR
   return address;
 }
 
-export function assertStageBNormalPlanCompleteness(plan, { referenceAudit, expectedRetainedAddresses, strict = true } = {}) {
+export function assertStageBNormalPlanCompleteness(plan, { referenceAudit, expectedRetainedAddresses, strict = true, terraformConfiguration } = {}) {
   const changes = plan?.resource_changes;
   if (!Array.isArray(changes)) throw new Error("Stage B normal plan resource_changes are missing.");
   const addresses = changes.map((change) => change?.address);
@@ -137,9 +137,14 @@ export function assertStageBNormalPlanCompleteness(plan, { referenceAudit, expec
     if (JSON.stringify(change?.change?.actions) !== JSON.stringify(["no-op"])) throw new Error(`Stage B retained task-definition is not an exact no-op: ${change.address}`);
   }
 
-  const classified = classifyStageBPlan(plan, { strict });
+  const classified = classifyStageBPlan(plan, { strict, terraformConfiguration });
   const noOp = classified.actionCounts["no-op"] || 0;
-  if (classified.actionCounts.create !== 12 || classified.actionCounts.update !== 3 || noOp !== expectedAddresses.size - 15
+  const importedBackendNormalization = classified.classifiedResources.filter(({ classification }) => classification === "imported-backend-task-definition-metadata-normalization");
+  const expectedCreate = importedBackendNormalization.length === 1 ? 11 : 12;
+  const expectedUpdate = importedBackendNormalization.length === 1 ? 4 : 3;
+  const expectedProfile = importedBackendNormalization.length === 1 ? "IMPORTED_BACKEND_METADATA_NORMALIZATION" : "BASELINE";
+  if ((classified.planProfile !== expectedProfile && !(expectedProfile === "BASELINE" && classified.planProfile === "ECS_TASK_DEFINITION_ROTATION"))
+    || classified.actionCounts.create !== expectedCreate || classified.actionCounts.update !== expectedUpdate || noOp !== expectedAddresses.size - 15
     || (classified.actionCounts.destroy || 0) !== 0 || (classified.actionCounts.replacement || 0) !== 0 || classified.unclassifiedResources.length !== 0) {
     throw new Error("Stage B normal plan mutation census is outside the exact structural contract.");
   }
@@ -164,6 +169,12 @@ function assertClassification(report) {
       throw new Error("Stage B recovery-alias-only classification is not exact and non-destructive.");
     }
     assertBrokerEvidence(report);
+    return;
+  }
+  if (profile === "IMPORTED_BACKEND_METADATA_NORMALIZATION") {
+    if (classification.create !== 11 || classification.update !== 4 || classification.destroy !== 0 || classification.replacement !== 0 || classification.unclassified !== 0) {
+      throw new Error("Stage B imported-backend normalization classification is not the exact 11-create/4-update contract.");
+    }
     return;
   }
   if (report?.recoveryAttestationSha256 !== undefined) {
@@ -282,7 +293,7 @@ export function createStageBPlanApprovalReport({ captureReportSha256, referenceA
   };
 }
 
-export function assertStageBPlanApprovalReport(report, { approvalReportBytes, captureReport, captureReportBytes, referenceAudit, referenceAuditBytes, plan, hashes, logicalCanonicalPlanJsonSha256, referenceAuditSha256, trustedCallerArn, stageBLineage, stageBSerial } = {}) {
+export function assertStageBPlanApprovalReport(report, { approvalReportBytes, captureReport, captureReportBytes, referenceAudit, referenceAuditBytes, plan, hashes, logicalCanonicalPlanJsonSha256, referenceAuditSha256, trustedCallerArn, stageBLineage, stageBSerial, terraformConfiguration } = {}) {
   assertCanonicalTerraformSerialNumber(report?.stageBSerial, "Stage B plan approval serial");
   if (report?.schemaVersion !== STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION || report.state !== STAGE_B_PLAN_APPROVED || report.approvedForApply !== true || report.brokerReferenceValidationPending !== false || report.brokerReferenceValidationPassed !== true) throw new Error("Stage B plan approval report is required; PLAN_CAPTURED is not deployable.");
   if (!Buffer.isBuffer(approvalReportBytes) || sha256(approvalReportBytes) !== sha256(Buffer.from(JSON.stringify(report, null, 2) + "\n"))) throw new Error("Stage B plan approval report bytes are not self-consistent.");
@@ -305,12 +316,12 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
   if (captureReport.recoveryAttestationSha256 !== referenceAudit?.recoveryAttestationSha256) throw new Error("Stage B reference audit does not inherit the recovery-attestation binding.");
   if (trustedCallerArn !== undefined && referenceAudit?.callerArn !== trustedCallerArn) throw new Error("Stage B reference audit caller does not match the trusted release caller.");
   if (report.referenceAuditCallerArn !== referenceAudit?.callerArn || report.referenceAuditAt !== referenceAudit?.auditedAt) throw new Error("Stage B plan approval report reference-audit identity is incomplete.");
-  if (report.planProfile === "BASELINE" && plan && referenceAudit) assertStageBNormalPlanCompleteness(plan, { referenceAudit, strict: false });
+  if (["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION"].includes(report.planProfile) && plan && referenceAudit) assertStageBNormalPlanCompleteness(plan, { referenceAudit, strict: false, terraformConfiguration });
   assertClassification(report);
   return true;
 }
 
-export function assertStageBPlanApprovedBinding(report, { approvalReportBytes, approvalReportSha256, savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes, referenceAudit, referenceAuditBytes, expectedToolingSha, expectedToolingTreeSha256, expectedRefreshReportSha256, expectedRefreshBindingReportSha256, expectedRecoveryAttestationSha256, expectedStageBLineage, expectedStageBSerial, now = new Date() } = {}) {
+export function assertStageBPlanApprovedBinding(report, { approvalReportBytes, approvalReportSha256, savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes, referenceAudit, referenceAuditBytes, expectedToolingSha, expectedToolingTreeSha256, expectedRefreshReportSha256, expectedRefreshBindingReportSha256, expectedRecoveryAttestationSha256, expectedStageBLineage, expectedStageBSerial, terraformConfiguration, now = new Date() } = {}) {
   assertCanonicalTerraformSerialNumber(report?.stageBSerial, "Stage B plan approval serial");
   if (report?.schemaVersion !== STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION || report.state !== STAGE_B_PLAN_APPROVED || report.approvedForApply !== true || report.brokerReferenceValidationPending !== false || report.brokerReferenceValidationPassed !== true) throw new Error("PLAN_APPROVED evidence is required; PLAN_CAPTURED is not deployable.");
   if (!Buffer.isBuffer(approvalReportBytes) || sha256(approvalReportBytes) !== approvalReportSha256) throw new Error("Stage B plan approval report SHA256 mismatch.");
@@ -328,8 +339,8 @@ export function assertStageBPlanApprovedBinding(report, { approvalReportBytes, a
   if (report.planProfile === "RECOVERY_ALIAS_ONLY" && expectedRefreshBindingReportSha256 !== undefined && report.refreshBindingReportSha256 !== expectedRefreshBindingReportSha256) throw new Error("Stage B recovery approval observation-binding SHA256 differs from the selected observation binding.");
   assertBrokerEvidence(report, { approved: true });
   assertStageBReferenceAuditFreshness(report.referenceAuditAt, now);
-  const boundReferenceAudit = assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required: report.planProfile === "BASELINE" });
-  if (report.planProfile === "BASELINE") assertStageBNormalPlanCompleteness(JSON.parse(planJsonBytes.toString("utf8")), { referenceAudit: boundReferenceAudit, strict: false });
+  const boundReferenceAudit = assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required: ["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION"].includes(report.planProfile) });
+  if (["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION"].includes(report.planProfile)) assertStageBNormalPlanCompleteness(JSON.parse(planJsonBytes.toString("utf8")), { referenceAudit: boundReferenceAudit, strict: false, terraformConfiguration });
   assertClassification(report);
   return true;
 }

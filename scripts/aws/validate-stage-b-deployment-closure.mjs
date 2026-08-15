@@ -56,6 +56,7 @@ let approvalReport;
 let approvalReportBytes;
 let closureAudit;
 let closureAuditBytes;
+let terraformConfiguration;
 if (mode === "production") {
   const requiredProductionEvidence = [
     "STAGE_B_IMAGE_EVIDENCE_PATH", "STAGE_B_IMAGE_EVIDENCE_SIGNATURE_PATH", "STAGE_B_IMAGE_EVIDENCE_SHA256", "STAGE_B_IMAGE_EVIDENCE_WORKFLOW_RUN_ID", "STAGE_B_IMAGE_EVIDENCE_ARTIFACT_SHA256",
@@ -94,7 +95,8 @@ if (mode === "production") {
   const selectedPlan = JSON.parse(selectedPlanJsonBytes);
   const permissionProfileBinding = resolveStageBPermissionProfile({ plan: selectedPlan, approvedPlanProfile: approvalReport.planProfile });
   if (permissionReport.planProfile !== approvalReport.planProfile || permissionReport.permissionProfile !== permissionProfileBinding.permissionProfile) throw new Error("Production closure permission profile is not bound to PLAN_APPROVED.");
-  assertPermissionEvaluationBindings(permissionReport, permissionManifest, { plan: selectedPlan, permissionProfile: permissionReport.permissionProfile });
+  terraformConfiguration = fs.readFileSync(path.join(root, "infra/aws/terraform/production-green-stage-b/main.tf"), "utf8");
+  assertPermissionEvaluationBindings(permissionReport, permissionManifest, { plan: selectedPlan, permissionProfile: permissionReport.permissionProfile, terraformConfiguration });
   assertReleasePolicyEvidence(permissionReport.policyEvidence);
   verifyPermissionReportSignature({ report: permissionReport, signatureArtifact: permissionSignature, reportBytes: permissionReportBytes, signatureBytes: permissionSignatureBytes, expectedReportFileSha256: process.env.STAGE_B_PERMISSION_REPORT_SHA256, expectedSignatureFileSha256: process.env.STAGE_B_PERMISSION_REPORT_SIGNATURE_SHA256 });
 }
@@ -127,7 +129,7 @@ if (mode === "production" || tfvarsPath || bindingReportPath) {
     refreshBindingReportSha256 = process.env.STAGE_B_REFRESH_BINDING_REPORT_SHA256;
   }
   assertStageBRefreshEvidence({ refreshReportPath: process.env.STAGE_B_REFRESH_REPORT_PATH, refreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, bindingReport: refreshBindingReport, bindingReportSha256: refreshBindingReportSha256, expectedToolingSha: currentHead, expectedToolingTreeSha256: refreshBindingReport.toolingTreeSha256, expectedTfvarsSha256: refreshBindingReport.tfvarsSha256, expectedImageEvidenceSha256: refreshBindingReport.imageEvidenceCanonicalSha256 || process.env.STAGE_B_IMAGE_EVIDENCE_SHA256, expectedStateSha256: refreshBindingReport.stateBackupSha256, allowReviewedResourceDrift: trustedRecovery !== null, ...(backendMetadata ? { expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir } : {}) });
-  if (mode === "production") assertStageBPlanApprovedBinding(approvalReport, { approvalReportBytes, approvalReportSha256: process.env.STAGE_B_PLAN_APPROVAL_REPORT_SHA256, savedPlanBytes: fs.readFileSync(process.env.STAGE_B_PLAN_PATH), planJsonBytes: fs.readFileSync(process.env.STAGE_B_PLAN_JSON_PATH), canonicalPlanJsonBytes: fs.readFileSync(process.env.STAGE_B_CANONICAL_PLAN_JSON_PATH), referenceAudit: closureAudit, referenceAuditBytes: closureAuditBytes, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedRefreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, expectedRefreshBindingReportSha256: recoveryPlan ? process.env.STAGE_B_REFRESH_BINDING_REPORT_SHA256 : undefined, expectedRecoveryAttestationSha256: trustedRecovery?.attestationSha256, expectedStageBLineage: bindingReport.stateLineage, expectedStageBSerial: bindingReport.stateSerial });
+  if (mode === "production") assertStageBPlanApprovedBinding(approvalReport, { approvalReportBytes, approvalReportSha256: process.env.STAGE_B_PLAN_APPROVAL_REPORT_SHA256, savedPlanBytes: fs.readFileSync(process.env.STAGE_B_PLAN_PATH), planJsonBytes: fs.readFileSync(process.env.STAGE_B_PLAN_JSON_PATH), canonicalPlanJsonBytes: fs.readFileSync(process.env.STAGE_B_CANONICAL_PLAN_JSON_PATH), referenceAudit: closureAudit, referenceAuditBytes: closureAuditBytes, expectedToolingSha: currentHead, expectedToolingTreeSha256: process.env.STAGE_B_TOOLING_TREE_SHA256, expectedRefreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, expectedRefreshBindingReportSha256: recoveryPlan ? process.env.STAGE_B_REFRESH_BINDING_REPORT_SHA256 : undefined, expectedRecoveryAttestationSha256: trustedRecovery?.attestationSha256, expectedStageBLineage: bindingReport.stateLineage, expectedStageBSerial: bindingReport.stateSerial, terraformConfiguration });
 }
 const imageImpactReport = mode === "pull-request" ? JSON.parse(fs.readFileSync(process.env.STAGE_B_IMAGE_IMPACT_REPORT_PATH || path.join(root, IMAGE_IMPACT_REPORT_REPO_PATH), "utf8")) : undefined;
 if (mode === "pull-request") assertImageImpactReport({ report: imageImpactReport, imageReleaseSha: imageImpactReport.imageReleaseSha, toolingSha: currentHead, toolingInputTreeSha256: imageImpactReport.toolingInputTreeSha256, changedFiles: imageImpactReport.classifiedChangedFiles });

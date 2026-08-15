@@ -5,6 +5,11 @@ const exactActions = (actual, expected) => JSON.stringify(actual) === JSON.strin
 const exactJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const taskDefinitionAddress = /^(aws_ecs_task_definition\.(candidate|executor))\["([^"]+)"\]$/;
 const retainedTaskDefinitionAddress = /^aws_ecs_task_definition\.(candidate|executor)_retained\["([a-f0-9]{7,40})-([^"]+)"\]$/;
+const importedBackendCandidateAddress = 'aws_ecs_task_definition.candidate["backend"]';
+const importedBackendCandidateFamily = STAGE_B_TASK_DEFINITION_FAMILIES[importedBackendCandidateAddress];
+const importedBackendCandidateArn = `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${importedBackendCandidateFamily}:9`;
+export const STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION = "imported-backend-task-definition-metadata-normalization";
+export const STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS = importedBackendCandidateAddress;
 const policyAddress = "aws_iam_policy.broker";
 const attachmentAddress = "aws_iam_role_policy_attachment.broker";
 const legacyInlineAddress = "aws_iam_role_policy.broker";
@@ -210,6 +215,46 @@ function assertIamArn(value, expected, label, strict) {
     return;
   }
   if (value !== expected) throw new Error(`${label} is outside the exact Stage B contract.`);
+}
+
+export function assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration } = {}) {
+  if (change?.address !== importedBackendCandidateAddress || change?.type !== "aws_ecs_task_definition"
+    || !exactActions(change.change?.actions, ["update"])
+    || (change.change?.replace_paths !== undefined && (!Array.isArray(change.change.replace_paths) || change.change.replace_paths.length !== 0))) {
+    throw new Error("Imported Stage B backend metadata normalization requires the exact reviewed task-definition rotation or in-place backend update.");
+  }
+  const before = change.change?.before;
+  const after = change.change?.after;
+  if (!before || !after || before.skip_destroy !== null || after.skip_destroy !== true
+    || before.arn !== importedBackendCandidateArn || after.arn !== importedBackendCandidateArn
+    || before.family !== importedBackendCandidateFamily || after.family !== importedBackendCandidateFamily
+    || before.id !== importedBackendCandidateFamily || after.id !== importedBackendCandidateFamily
+    || before.revision !== 9 || after.revision !== 9) {
+    throw new Error("Imported Stage B backend metadata normalization is not bound to canonical revision :9 or an exact reviewed task-definition rotation.");
+  }
+  for (const field of ["container_definitions", "cpu", "memory", "network_mode", "requires_compatibilities", "execution_role_arn", "task_role_arn", "runtime_platform", "volume"]) {
+    if (before[field] === undefined || after[field] === undefined) throw new Error(`Imported Stage B backend metadata normalization is missing ${field}.`);
+  }
+  for (const [name, value] of [["before_unknown", change.change.before_unknown], ["after_unknown", change.change.after_unknown]]) {
+    if (value !== undefined && (!value || Array.isArray(value) || typeof value !== "object" || Object.keys(value).length !== 0)) {
+      throw new Error(`Imported Stage B backend metadata normalization has unknown ${name} paths.`);
+    }
+  }
+  const beforeComparable = { ...before };
+  const afterComparable = { ...after };
+  delete beforeComparable.skip_destroy;
+  delete afterComparable.skip_destroy;
+  if (canonicalJson(beforeComparable) !== canonicalJson(afterComparable)) {
+    throw new Error("Imported Stage B backend metadata normalization contains an unrelated field change.");
+  }
+  if (typeof terraformConfiguration !== "string") throw new Error("Imported Stage B backend metadata normalization requires protected Terraform configuration.");
+  const resourceStart = terraformConfiguration.indexOf('resource "aws_ecs_task_definition" "candidate" {');
+  const nextResource = resourceStart < 0 ? -1 : terraformConfiguration.indexOf("\nresource \"", resourceStart + 1);
+  const resourceBlock = resourceStart < 0 ? "" : terraformConfiguration.slice(resourceStart, nextResource < 0 ? undefined : nextResource);
+  if (!/^\s*skip_destroy\s*=\s*true\s*$/m.test(resourceBlock)) {
+    throw new Error("Imported Stage B backend metadata normalization requires protected skip_destroy=true configuration.");
+  }
+  return { address: change.address, type: change.type, actions: [...change.change.actions], classification: STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION };
 }
 
 function normalizedPolicyShape(document) {
@@ -483,6 +528,9 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
   const task = taskDefinitionAddress.exec(address);
   if (task && Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, address)) {
     if (type !== "aws_ecs_task_definition") throw new Error(`Stage B resource rejected at address ${address} ${type}; resource type does not match the exact task-definition contract.`);
+    if (address === importedBackendCandidateAddress && exactActions(actions, ["update"])) {
+      return assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
+    }
     if (validateActions && (!exactActions(actions, ["create"]) && !exactActions(actions, ["no-op"]) && !isStageBTaskDefinitionRotationActionsValue(actions))) throw new Error(`Stage B resource rejected: ${address} ${type} ${JSON.stringify(actions)}; current task definitions permit only create, no-op, or an exact reviewed container-definition rotation.`);
     const rotation = isStageBTaskDefinitionRotationActionsValue(actions) ? assertStageBTaskDefinitionRotation(change, plan, { strict }) : undefined;
     return { address, type, actions, classification: rotation ? "current-task-definition-rotation" : "current-task-definition", ...(rotation ? { rotation } : {}) };
@@ -546,6 +594,8 @@ export function classifyStageBPlan(plan, options = {}) {
     unclassifiedResources,
     actionCounts,
     taskDefinitionRotations,
-    planProfile: taskDefinitionRotations.length ? "ECS_TASK_DEFINITION_ROTATION" : "BASELINE",
+    planProfile: classifiedResources.some(({ classification }) => classification === STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION)
+      ? "IMPORTED_BACKEND_METADATA_NORMALIZATION"
+      : taskDefinitionRotations.length ? "ECS_TASK_DEFINITION_ROTATION" : "BASELINE",
   };
 }

@@ -20,7 +20,7 @@ import {
 import { assertStageBBrokerConfigurationIdentity, canonicalJson, STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-stage-b-image-evidence.mjs";
 import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
-import { assertStageBBrokerFunctionUpdate, classifyStageBPlan, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS } from "./aws/stage-b-deployment-contract.mjs";
+import { assertStageBBrokerFunctionUpdate, assertStageBImportedBackendMetadataNormalization, classifyStageBPlan, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./aws/stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments } from "./aws/stage-b-terraform-workspace.mjs";
@@ -219,6 +219,11 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration, { stri
       currentArnByAddress.set(change.address, validated.arn);
       continue;
     }
+    if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(change.change?.actions || [], ["update"])) {
+      assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
+      currentArnByAddress.set(change.address, change.change.after.arn);
+      continue;
+    }
     if (isStageBTaskDefinitionRotationActionsValue(change.change?.actions || [])) {
       currentRotations.push(assertStageBTaskDefinitionRotation(change, plan, { strict }));
       continue;
@@ -271,7 +276,7 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration, { stri
   }
   assertTaskDefinitionAppendOnlyContract(terraformConfiguration);
   const currentCreates = current.filter((change) => exactActions(change.change?.actions || [], ["create"])).length;
-  const currentNoOps = current.filter((change) => exactActions(change.change?.actions || [], ["no-op"])).length;
+  const currentNoOps = current.filter((change) => exactActions(change.change?.actions || [], ["no-op"]) || (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(change.change?.actions || [], ["update"]))).length;
   const classification = {
     currentCreates,
     currentNoOps,
@@ -280,8 +285,8 @@ function assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration, { stri
   const currentEntries = current.map((change) => ({
       address: change.address,
       family: taskDefinitionFamilies.get(change.address),
-      classification: exactActions(change.change?.actions || [], ["create"]) ? "create-only" : exactActions(change.change?.actions || [], ["no-op"]) ? "no-op" : "rollover",
-      priorTaskDefinitionArn: exactActions(change.change?.actions || [], ["no-op"]) ? currentArnByAddress.get(change.address) : currentRotations.find((entry) => entry.address === change.address)?.oldArn || null,
+      classification: exactActions(change.change?.actions || [], ["create"]) ? "create-only" : exactActions(change.change?.actions || [], ["no-op"]) || (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(change.change?.actions || [], ["update"])) ? "no-op" : "rollover",
+      priorTaskDefinitionArn: (exactActions(change.change?.actions || [], ["no-op"]) || (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(change.change?.actions || [], ["update"]))) ? currentArnByAddress.get(change.address) : currentRotations.find((entry) => entry.address === change.address)?.oldArn || null,
     }));
   const retainedEntries = [...retainedByFamily.values()].flat().map((entry) => ({ address: entry.address, historyKey: entry.historyKey, family: entry.family, oldTaskDefinitionArn: entry.arn, revision: entry.revision, classification: "retained-no-op" }));
   Object.defineProperties(classification, {
@@ -627,7 +632,7 @@ export function assertStageBPlan(plan, options = {}) {
   if (strictResourceContract) assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout, deploymentIdentity });
   const resourceClassification = classifyStageBPlan(plan, { strict: strictResourceContract, terraformConfiguration, allowBrokerPolicyCreate: captureMode });
   const planSemanticCensus = requireSemanticCompleteness ? assertStageBPlanSemanticCompleteness(plan, { terraformConfiguration }) : undefined;
-  const imageBindings = imageEvidence ? assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, planProfile: recoveryOnly ? "RECOVERY_ALIAS_ONLY" : resourceClassification.planProfile }) : undefined;
+  const imageBindings = imageEvidence ? assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, planProfile: recoveryOnly ? "RECOVERY_ALIAS_ONLY" : resourceClassification.planProfile, terraformConfiguration }) : undefined;
   if (recoveryOnly) {
     if (plan.variables?.stage_b_recovery_only?.value !== true) throw new Error("Recovery-only validation requires the explicit recovery-only plan variable.");
     if (!captureMode && requireReferenceAudit) assertRecoveryOnlyReferenceAuditBinding(plan, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now);
@@ -678,7 +683,7 @@ export function assertStageBPlan(plan, options = {}) {
         assertRetainedTaskDefinition(change);
       } else {
         assertTaskDefinitionScope(change);
-        if (!exactActions(actions, ["create"]) && !exactActions(actions, ["no-op"]) && !isStageBTaskDefinitionRotationActionsValue(actions)) throw new Error(`Stage B task-definition plan rejected: ${change.address}`);
+        if (!exactActions(actions, ["create"]) && !exactActions(actions, ["no-op"]) && !(change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(actions, ["update"])) && !isStageBTaskDefinitionRotationActionsValue(actions)) throw new Error(`Stage B task-definition plan rejected: ${change.address}`);
       }
     } else if (actions.includes("delete")) {
       throw new Error(`Stage B plan rejected: ${change.address}`);
@@ -824,9 +829,9 @@ export function readStageBApprovalPlanArtifacts({ savedPlanPath, planJsonPath, c
   };
 }
 
-export function finalizeCapturedStageBPlanApproval({ approval, approvalReportPath, repositoryRoot, captureReport, captureReportBytes, referenceAudit, referenceAuditBytes, plan, hashes, logicalCanonicalPlanJsonSha256, referenceAuditSha256, trustedCallerArn, stageBLineage, stageBSerial, savedPlanPath, planJsonPath, canonicalPlanJsonPath, publish = writeStageBPlanEvidence } = {}) {
+export function finalizeCapturedStageBPlanApproval({ approval, approvalReportPath, repositoryRoot, captureReport, captureReportBytes, referenceAudit, referenceAuditBytes, plan, hashes, logicalCanonicalPlanJsonSha256, referenceAuditSha256, trustedCallerArn, stageBLineage, stageBSerial, savedPlanPath, planJsonPath, canonicalPlanJsonPath, terraformConfiguration, publish = writeStageBPlanEvidence } = {}) {
   const approvalReportBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
-  assertStageBPlanApprovalReport(approval, { approvalReportBytes, captureReport, captureReportBytes, referenceAudit, referenceAuditBytes, plan, hashes, logicalCanonicalPlanJsonSha256, referenceAuditSha256, trustedCallerArn, stageBLineage, stageBSerial });
+  assertStageBPlanApprovalReport(approval, { approvalReportBytes, captureReport, captureReportBytes, referenceAudit, referenceAuditBytes, plan, hashes, logicalCanonicalPlanJsonSha256, referenceAuditSha256, trustedCallerArn, stageBLineage, stageBSerial, terraformConfiguration });
   const result = {
     status: STAGE_B_PLAN_APPROVED,
     state: approval.state,
@@ -876,7 +881,7 @@ export function approveCapturedStageBPlan({ tfvars, cliOptions, protectedMainChe
   const classification = assertStageBPlan(plan, { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: auditSha256, planJsonBytes, planJsonSha256: hashes.planJsonSha256, trustedCallerArn, terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, requireSemanticCompleteness: true, recoveryOnly: inputs.recoveryOnly, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: assertStageBPlanningWorkspace({ env: process.env, argv: [tfvars, ...cliOptions] }).toString() } });
   if (inputs.recoveryOnly) assertRecoveryOnlyPlan(plan, JSON.parse(fs.readFileSync(inputs.recoveryAttestationReportPath, "utf8")));
   const approval = createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath: path.resolve(auditPath), referenceAuditSha256: auditSha256, referenceAuditCallerArn: audit.callerArn, referenceAuditAt: audit.auditedAt, toolingSha: capture.report.toolingSha, toolingTreeSha256: capture.report.toolingTreeSha256, refreshReportSha256: capture.report.refreshReportSha256, refreshBindingReportSha256: capture.report.refreshBindingReportSha256, recoveryAttestationSha256: capture.report.recoveryAttestationSha256, stageBLineage: capture.report.stageBLineage, stageBSerial: capture.report.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: new Date().toISOString(), planProfile: capture.report.planProfile, taskDefinitionRotations: capture.report.taskDefinitionRotations, classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replacement || 0, unclassified: classification.unclassifiedResources.length }, brokerOperation: capture.report.brokerOperation, brokerUpdatePresent: capture.report.brokerUpdatePresent, brokerActions: capture.report.brokerActions, brokerResourceAddresses: capture.report.brokerResourceAddresses });
-  return finalizeCapturedStageBPlanApproval({ approval, approvalReportPath, repositoryRoot: process.cwd(), captureReport: capture.report, captureReportBytes: capture.bytes, referenceAudit: audit, referenceAuditBytes: auditBytes, plan, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: auditSha256, trustedCallerArn, stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial, savedPlanPath, planJsonPath, canonicalPlanJsonPath });
+  return finalizeCapturedStageBPlanApproval({ approval, approvalReportPath, repositoryRoot: process.cwd(), captureReport: capture.report, captureReportBytes: capture.bytes, referenceAudit: audit, referenceAuditBytes: auditBytes, plan, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: auditSha256, trustedCallerArn, stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial, savedPlanPath, planJsonPath, canonicalPlanJsonPath, terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8") });
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

@@ -322,6 +322,25 @@ function plan() {
   return { configuration: configuration(), resource_changes: [...addresses.map((address, index) => taskChange(address, index + 1)), ...brokerChanges()] };
 }
 
+function importedBackendPlan() {
+  const value = plan();
+  const change = value.resource_changes.find((item) => item.address === 'aws_ecs_task_definition.candidate["backend"]');
+  const family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address];
+  const arn = `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${family}:9`;
+  const before = structuredClone(change.change.before);
+  const after = structuredClone(before);
+  for (const state of [before, after]) {
+    state.arn = arn;
+    state.arn_without_revision = arn.replace(/:9$/, "");
+    state.id = family;
+    state.revision = 9;
+  }
+  before.skip_destroy = null;
+  after.skip_destroy = true;
+  change.change = { actions: ["update"], replace_paths: [], before, after, before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} };
+  return value;
+}
+
 test("broker environment conditional references match the source and exact semantic universe", () => {
   const source = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
   assert.match(source, /variables = var\.stage_b_recovery_only \? var\.stage_b_recovery_broker_environment : \{/);
@@ -643,6 +662,17 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_POLICY_INITIAL_CREATE).length, 1);
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_FUNCTION_INITIAL_CREATE).length, 1);
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_ALIAS_INITIAL_CREATE).length, 1);
+});
+
+test("imported backend normalization is a complete semantic 11-create/4-update profile", () => {
+  const value = importedBackendPlan();
+  const census = assertStageBPlanSemanticCompleteness(value, { terraformConfiguration: fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8") });
+  const backend = census.resources.find((item) => item.address === 'aws_ecs_task_definition.candidate["backend"]');
+  assert.equal(backend.classification, STAGE_B_PLAN_SEMANTIC_PROFILES.IMPORTED_BACKEND_METADATA_NORMALIZATION);
+  assert.deepEqual(backend.changedPaths, [{ path: "skip_destroy", classification: "REVIEWED_PROVIDER_NORMALIZATION" }]);
+  const invalid = structuredClone(value);
+  invalid.resource_changes.find((item) => item.address === 'aws_ecs_task_definition.candidate["backend"]').change.after.container_definitions = "changed";
+  assert.throws(() => assertStageBPlanSemanticCompleteness(invalid, { terraformConfiguration: fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8") }), /UNCLASSIFIED_CHANGED_PATH|unrelated field change/);
 });
 
 test("baseline initial-create semantics fail closed on action, identity, path, and reference drift", () => {

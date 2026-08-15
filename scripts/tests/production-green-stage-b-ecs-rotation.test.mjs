@@ -89,6 +89,25 @@ function rotationPlan() {
   };
 }
 
+function importedBackendMetadataChange() {
+  const value = taskChange('aws_ecs_task_definition.candidate["backend"]', 9);
+  const arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["backend"]']}:9`;
+  value.change.actions = ["update"];
+  value.change.replace_paths = [];
+  value.change.before.arn = arn;
+  value.change.after.arn = arn;
+  value.change.before.arn_without_revision = arn.replace(/:9$/, "");
+  value.change.after.arn_without_revision = arn.replace(/:9$/, "");
+  value.change.before.id = value.change.after.id = value.change.before.family;
+  value.change.before.revision = value.change.after.revision = 9;
+  value.change.before.container_definitions = value.change.after.container_definitions;
+  value.change.before.volume = structuredClone(value.change.after.volume);
+  value.change.before.skip_destroy = null;
+  value.change.after.skip_destroy = true;
+  value.change.after_unknown = {};
+  return value;
+}
+
 function rolloverAudit(plan, auditedAt = "2026-08-08T00:00:00.000Z") {
   const oldTaskDefinitions = plan.resource_changes.filter((change) => change.type === "aws_ecs_task_definition").map((change) => ({
     terraformAddress: change.address,
@@ -240,6 +259,37 @@ test("exact twelve ECS task-definition rotations form the explicit normal rotati
   assert.equal(result.taskDefinitionRotations.length, 12);
   assert.deepEqual(result.actionCounts, { replacement: 12 });
   assert.deepEqual(result.unclassifiedResources, []);
+});
+
+test("only the imported backend :9 skip_destroy metadata update is normalized", () => {
+  const canonical = importedBackendMetadataChange();
+  const result = classifyStageBPlan({ resource_changes: [canonical] }, { strict: true, terraformConfiguration });
+  assert.equal(result.classifiedResources[0].classification, "imported-backend-task-definition-metadata-normalization");
+
+  const rejectedMutations = [
+    ["container definition", (change) => { change.change.after.container_definitions = JSON.stringify([{ image: image("9") }]); }],
+    ["image", (change) => { const containers = JSON.parse(change.change.after.container_definitions); containers[0].image = image("9"); change.change.after.container_definitions = JSON.stringify(containers); }],
+    ["role", (change) => { change.change.after.task_role_arn = "arn:aws:iam::368992683803:role/unexpected"; }],
+    ["arbitrary field", (change) => { change.change.after.cpu = "2048"; }],
+    ["candidate ARN", (change) => { change.change.after.arn = change.change.after.arn.replace(/:9$/, ":10"); }],
+    ["replacement", (change) => { change.change.replace_paths = [["container_definitions"]]; }],
+    ["unknown path", (change) => { change.change.after_unknown = { unexpected: true }; }],
+    ["create/delete", (change) => { change.change.actions = ["create", "delete"]; }],
+    ["true to null", (change) => { change.change.before.skip_destroy = true; change.change.after.skip_destroy = null; }],
+    ["false to true", (change) => { change.change.before.skip_destroy = false; }],
+    ["other task definition", (change) => { change.address = 'aws_ecs_task_definition.candidate["worker"]'; }],
+  ];
+  for (const [name, mutate] of rejectedMutations) {
+    const rejected = structuredClone(canonical);
+    mutate(rejected);
+    assert.throws(() => classifyStageBPlan({ resource_changes: [rejected] }, { strict: true, terraformConfiguration }), undefined, name);
+  }
+
+  const noProtectedSkipDestroy = terraformConfiguration.replace(
+    /(resource "aws_ecs_task_definition" "candidate" \{[\s\S]*?skip_destroy\s*=\s*)true/,
+    "$1false",
+  );
+  assert.throws(() => classifyStageBPlan({ resource_changes: [canonical] }, { strict: true, terraformConfiguration: noProtectedSkipDestroy }), /protected skip_destroy/);
 });
 
 test("only the reviewed backend ECS Exec tag convergence is admitted", () => {
