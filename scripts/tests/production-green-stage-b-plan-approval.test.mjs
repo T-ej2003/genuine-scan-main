@@ -7,6 +7,7 @@ import test from "node:test";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { assertStageBNormalPlanCompleteness, assertStageBPlanApprovedBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes, STAGE_B_BROKER_OPERATIONS, STAGE_B_PLAN_PROFILES, STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS } from "../aws/stage-b-plan-approval-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
+import { STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 import { finalizeCapturedStageBPlanApproval, readStageBApprovalPlanArtifacts } from "../plan-production-green-stage-b.mjs";
 import { writeStageBPrivateFileAtomic } from "../aws/stage-b-artifact-contract.mjs";
 import { assertRecoveryOnlyPlan } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
@@ -88,6 +89,23 @@ function importedBackendPlan() {
   before.skip_destroy = null;
   after.skip_destroy = true;
   change.change = { actions: ["update"], before, after, replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} };
+  let revision = 1;
+  for (const current of value.resource_changes.filter((item) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, item.address) && item.address !== change.address)) {
+    const currentAfter = structuredClone(current.change.after);
+    const familyName = currentAfter.family;
+    const key = current.address.match(/\["([^"]+)"\]$/)[1];
+    const oldArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${familyName}:${revision++}`;
+    const common = { ...currentAfter, network_mode: "awsvpc", volume: [], ipc_mode: "", pid_mode: "", skip_destroy: true };
+    const beforeState = { ...structuredClone(common), arn: oldArn, arn_without_revision: oldArn.replace(/:\d+$/, ""), id: oldArn, revision: revision - 1 };
+    const imageBefore = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${key}@sha256:${"b".repeat(64)}`;
+    const imageAfter = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${key}@sha256:${"a".repeat(64)}`;
+    beforeState.container_definitions = JSON.stringify([{ name: key, image: imageBefore, environment: [] }]);
+    common.container_definitions = JSON.stringify([{ name: key, image: imageAfter, environment: [] }]);
+    current.mode = "managed";
+    current.change = { actions: ["create", "delete"], before: beforeState, after: common, replace_paths: [["container_definitions"]], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} };
+  }
+  const backendPolicy = value.resource_changes.find((item) => item.address === STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY.address);
+  backendPolicy.change = { actions: ["create"], before: null, after: { name: STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY.name, role: STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY.role, policy: JSON.stringify(STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY.document) }, before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} };
   return value;
 }
 
@@ -98,7 +116,7 @@ test("the imported backend profile passes the production approval path with zero
   const importedHashes = stageBPlanHashes({ savedPlanBytes, planJsonBytes: importedPlanJsonBytes, canonicalPlanJsonBytes: importedCanonicalPlanJsonBytes });
   const importedAudit = { ...audit, planJsonSha256: importedHashes.planJsonSha256 };
   const importedAuditBytes = Buffer.from(`${JSON.stringify(importedAudit)}\n`);
-  const importedClassification = { ...fixtureClassification, create: 11, update: 4 };
+  const importedClassification = { ...fixtureClassification, create: 1, replacement: 11, update: 4 };
   const importedCapture = createStageBPlanCaptureReport({ toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, hashes: importedHashes, capturedAt: capture.capturedAt, stageBLineage: capture.stageBLineage, stageBSerial: capture.stageBSerial, terraformVersion: capture.terraformVersion, terraformFormatVersion: capture.terraformFormatVersion, classification: importedClassification, planProfile: "IMPORTED_BACKEND_METADATA_NORMALIZATION", brokerEvidence: { brokerOperation: capture.brokerOperation, brokerUpdatePresent: capture.brokerUpdatePresent, brokerActions: capture.brokerActions, brokerResourceAddresses: capture.brokerResourceAddresses, brokerReferenceValidationPending: true } });
   const importedCaptureBytes = Buffer.from(`${JSON.stringify(importedCapture, null, 2)}\n`);
   const importedApproval = createStageBPlanApprovalReport({ captureReportSha256: hash(importedCaptureBytes), referenceAuditPath: importedAudit.referenceAuditPath, referenceAuditSha256: hash(importedAuditBytes), referenceAuditCallerArn: importedAudit.callerArn, referenceAuditAt: importedAudit.auditedAt, toolingSha: importedCapture.toolingSha, toolingTreeSha256: importedCapture.toolingTreeSha256, refreshReportSha256: importedCapture.refreshReportSha256, stageBLineage: importedCapture.stageBLineage, stageBSerial: importedCapture.stageBSerial, hashes: importedHashes, logicalCanonicalPlanJsonSha256: importedHashes.logicalCanonicalPlanJsonSha256, approvedAt: capture.capturedAt, classification: importedClassification, planProfile: "IMPORTED_BACKEND_METADATA_NORMALIZATION", brokerOperation: importedCapture.brokerOperation, brokerUpdatePresent: importedCapture.brokerUpdatePresent, brokerActions: importedCapture.brokerActions, brokerResourceAddresses: importedCapture.brokerResourceAddresses });
@@ -106,6 +124,20 @@ test("the imported backend profile passes the production approval path with zero
   assert.doesNotThrow(() => assertStageBNormalPlanCompleteness(importedPlan, { referenceAudit: importedAudit, strict: false, terraformConfiguration }));
   assert.doesNotThrow(() => assertStageBPlanApprovalReport(importedApproval, { approvalReportBytes: importedApprovalBytes, captureReport: importedCapture, captureReportBytes: importedCaptureBytes, referenceAudit: importedAudit, referenceAuditBytes: importedAuditBytes, hashes: importedHashes, logicalCanonicalPlanJsonSha256: importedHashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: hash(importedAuditBytes), trustedCallerArn: importedAudit.callerArn, stageBLineage: importedCapture.stageBLineage, stageBSerial: importedCapture.stageBSerial, plan: importedPlan, terraformConfiguration }));
   assert.doesNotThrow(() => assertStageBPlanApprovedBinding(importedApproval, { approvalReportBytes: importedApprovalBytes, approvalReportSha256: hash(importedApprovalBytes), savedPlanBytes, planJsonBytes: importedPlanJsonBytes, canonicalPlanJsonBytes: importedCanonicalPlanJsonBytes, referenceAudit: importedAudit, referenceAuditBytes: importedAuditBytes, expectedToolingSha: importedCapture.toolingSha, expectedToolingTreeSha256: importedCapture.toolingTreeSha256, expectedRefreshReportSha256: importedCapture.refreshReportSha256, expectedStageBLineage: importedCapture.stageBLineage, expectedStageBSerial: importedCapture.stageBSerial, terraformConfiguration, now: new Date(capture.capturedAt) }));
+});
+
+test("imported-backend profile rejects census and membership drift", () => {
+  const rejects = (mutate) => {
+    const candidate = importedBackendPlan();
+    mutate(candidate);
+    assert.throws(() => assertStageBNormalPlanCompleteness(candidate, { referenceAudit: audit, strict: false, terraformConfiguration }), /mutation census|unsupported|rotation/);
+  };
+  const replacements = (candidate) => candidate.resource_changes.filter((item) => item.change.actions.join(",") === "create,delete");
+  rejects((candidate) => { replacements(candidate)[0].change.actions = ["create"]; });
+  rejects((candidate) => { replacements(candidate)[0].change.actions = ["no-op"]; });
+  rejects((candidate) => { replacements(candidate)[0].change.replace_paths = [["cpu"]]; });
+  rejects((candidate) => { const backend = candidate.resource_changes.find((item) => item.address === 'aws_ecs_task_definition.candidate["backend"]'); backend.change.actions = ["create", "delete"]; backend.change.replace_paths = [["container_definitions"]]; });
+  rejects((candidate) => { const extra = candidate.resource_changes.find((item) => item.address === "aws_dynamodb_table.replay"); extra.change.actions = ["create"]; });
 });
 
 test("approval imports PLAN_APPROVED from the canonical contract and keeps approval-only Terraform-free", () => {
