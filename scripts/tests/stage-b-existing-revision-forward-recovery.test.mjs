@@ -7,16 +7,20 @@ import test from "node:test";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import {
   STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY as CONTRACT,
+  STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION,
   assertForwardCensus,
+  assertAmbiguousImportSupersessionAuthority,
   assertForwardImportRetryState,
   assertForwardRevisionReadback,
   assertForwardSourceBinding,
   assertForwardStateAfterImport,
   assertForwardStateBeforeImport,
   canonicalForwardRecoveryIncidentIdentity,
+  journalSha256,
+  runAmbiguousImportSupersession,
   runExistingRevisionForwardRecovery,
 } from "../aws/stage-b-existing-revision-forward-recovery-contract.mjs";
-import { assertForwardRecoveryTerraformBackend, assertForwardRecoveryTfvarsBinding, buildForwardRecoveryTerraformEnvironment, buildForwardRecoveryTerraformImportArgs, classifyForwardRecoveryResult, preflightForwardRecoveryOutputs } from "../aws/forward-recover-stage-b-existing-revision.mjs";
+import { assertForwardRecoveryTerraformBackend, assertForwardRecoveryTfvarsBinding, buildForwardRecoveryTerraformEnvironment, buildForwardRecoveryTerraformImportArgs, classifyForwardRecoveryResult, preflightForwardRecoveryOutputs, runForwardRecoveryCli } from "../aws/forward-recover-stage-b-existing-revision.mjs";
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { buildCanonicalBackendRecoveryTaskDefinition, canonicalSha256, stateSnapshotSha256, taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 
@@ -96,6 +100,89 @@ function common(overrides = {}) {
     ...overrides,
   };
 }
+
+function ambiguousOldJournal() {
+  const oldSourceSha = "6".repeat(40);
+  const censusSha256 = canonicalSha256([{ arn, revision: 9, readback }]);
+  const fields = {
+    sourceSha: oldSourceSha, toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256,
+    imageReleaseSha, authorizedBackendDigest: imageAuthorization.backendDigest, imageAuthorizationSha256: imageAuthorization.evidenceSha256,
+    imageAuthorizationSourceSha: imageAuthorization.sourceSha, stateLineage: CONTRACT.lineage, stateSerial: CONTRACT.startSerial,
+    stateBeforeSha256: stateSnapshotSha256(emptyState()), existingRevisionArn: arn, censusSha256, fingerprint,
+  };
+  return {
+    schemaVersion: CONTRACT.schemaVersion, kind: CONTRACT.kind, mode: CONTRACT.mode, phase: "IMPORTING",
+    ...fields, incidentIdentity: canonicalForwardRecoveryIncidentIdentity(fields), registrationCalls: 0, registrationCapability: "NONE",
+    importCalls: 1, importMayHaveOccurred: true,
+  };
+}
+
+function ambiguousCommon(overrides = {}) {
+  const run = common(overrides);
+  run.oldJournal = ambiguousOldJournal();
+  run.oldJournalBytes = Buffer.from(JSON.stringify(run.oldJournal));
+  run.oldJournalSha256 = journalSha256(run.oldJournalBytes);
+  return run;
+}
+
+test("ambiguous import supersession authorizes the exact current state and one zero-registration import", async () => {
+  const run = ambiguousCommon({ proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  const result = await runAmbiguousImportSupersession(run);
+  assert.equal(result.imported, true);
+  assert.deepEqual(run.counts, { imports: 1, registrations: 0 });
+  assert.equal(run.journal.read().mode, STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.mode);
+  assert.equal(run.journal.read().supersedesIncidentIdentity, run.oldJournal.incidentIdentity);
+  assert.equal(run.journal.read().supersessionReason, STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.supersessionReason);
+});
+
+test("legacy ambiguous IMPORTING journal is immutable and cannot complete or retry", async () => {
+  const old = ambiguousOldJournal();
+  const run = common({ journal: journalAdapter(old), readState: async () => importedState() });
+  const before = JSON.stringify(run.journal.read());
+  await assert.rejects(() => runExistingRevisionForwardRecovery(run), /permanently non-resumable|supersession/);
+  assert.equal(JSON.stringify(run.journal.read()), before);
+  assert.deepEqual(run.counts, { imports: 0, registrations: 0 });
+});
+
+test("ambiguous import supersession replay is terminal and cannot import again", async () => {
+  const first = ambiguousCommon({ proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  await runAmbiguousImportSupersession(first);
+  const replay = ambiguousCommon({ journal: first.journal, evidence: first.evidence, readState: async () => importedState(), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  const result = await runAmbiguousImportSupersession(replay);
+  assert.equal(result.imported, false);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+});
+
+test("ambiguous supersession crash after import finalizes the existing :9 without a second import", async () => {
+  const first = ambiguousCommon({ proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha, interruptAt: (phase) => { if (phase === "AFTER_IMPORT") throw new Error("interrupted"); } });
+  await assert.rejects(() => runAmbiguousImportSupersession(first), /interrupted/);
+  assert.equal(first.journal.read().phase, "IMPORTING");
+  const replay = ambiguousCommon({ journal: first.journal, evidence: first.evidence, readState: async () => importedState(), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha });
+  const result = await runAmbiguousImportSupersession(replay);
+  assert.equal(result.imported, false);
+  assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
+  assert.equal(replay.journal.read().phase, "COMPLETED");
+});
+
+test("ambiguous supersession rejects altered historical journal, current drift, and newer revisions", () => {
+  const old = ambiguousOldJournal();
+  const oldBytes = Buffer.from(JSON.stringify(old));
+  const base = { state: emptyState(), census, readback, fingerprint, sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation: imageFixture, deriveProvenance, deriveImageReuse, oldJournalBytes: oldBytes, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha };
+  assert.throws(() => assertAmbiguousImportSupersessionAuthority({ ...base, oldJournal: { ...old, incidentIdentity: "f".repeat(64) }, oldJournalSha256: journalSha256(oldBytes) }), /identity/);
+  assert.throws(() => assertAmbiguousImportSupersessionAuthority({ ...base, oldJournal: old, oldJournalSha256: journalSha256(oldBytes), state: emptyState(95) }), /serial|lineage/);
+  assert.throws(() => assertAmbiguousImportSupersessionAuthority({ ...base, oldJournal: old, oldJournalSha256: journalSha256(oldBytes), census: { complete: true, revisions: [{ arn: `${arn.slice(0, -1)}10`, readback: { ...readback, taskDefinition: { ...readback.taskDefinition, taskDefinitionArn: `${arn.slice(0, -1)}10`, revision: 10 } } }, ...census.revisions] } }), /newest|canonical/);
+});
+
+test("ambiguous supersession rejects changed :9 and never exposes mutation capabilities", async () => {
+  const run = ambiguousCommon({
+    proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "6".repeat(40) && descendantSha === sourceSha,
+    describe: async () => ({ ...readback, taskDefinition: { ...readback.taskDefinition, revision: 10 } }),
+  });
+  await assert.rejects(() => runAmbiguousImportSupersession(run), /fingerprint|canonical/);
+  assert.deepEqual(run.counts, { imports: 0, registrations: 0 });
+  assert.equal(typeof run.register, "function");
+  assert.equal(STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn.endsWith(":9"), true);
+});
 
 test("adopts exact :9 with one import and zero registration capability", async () => {
   const run = common();
@@ -704,4 +791,43 @@ test("forward CLI preflights all artifact paths before any import boundary", () 
   assert.doesNotThrow(() => preflightForwardRecoveryOutputs(paths));
   fs.chmodSync(directory, 0o755);
   assert.throws(() => preflightForwardRecoveryOutputs(paths), /private/);
+});
+
+test("ordinary CLI recovery treats the absent journal path as an output, not a historical input", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-forward-cli-"));
+  fs.chmodSync(directory, 0o700);
+  const terraformDataDir = path.join(directory, "terraform-data");
+  fs.mkdirSync(terraformDataDir, { mode: 0o700 });
+  const bindingsPath = path.join(directory, "bindings.json");
+  const imageAuthorizationPath = path.join(directory, "authorization.json");
+  const evidencePath = path.join(directory, "evidence.json");
+  const journalPath = path.join(directory, "journal.json");
+  fs.writeFileSync(bindingsPath, "{}", { mode: 0o600 });
+  fs.writeFileSync(imageAuthorizationPath, "{}", { mode: 0o600 });
+  await assert.rejects(() => runForwardRecoveryCli([
+    "--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--image-authorization", imageAuthorizationPath,
+    "--aws-profile", "release-deployer", "--terraform-data-dir", terraformDataDir, "--evidence-out", evidencePath,
+    "--forward-recovery-state", journalPath,
+  ], { readProtectedCheckout: () => ({ currentHead: sourceSha, originMainHead: sourceSha, toolingSha: sourceSha, porcelainStatus: "" }) }), (error) => {
+    assert.doesNotMatch(error.message, /Historical forward recovery journal/);
+    return true;
+  });
+  assert.equal(fs.existsSync(journalPath), false);
+});
+
+test("supersession CLI requires the existing historical journal before any contract evaluation", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-forward-supersession-"));
+  fs.chmodSync(directory, 0o700);
+  const oldJournalPath = path.join(directory, "ambiguous.json");
+  const supersessionPath = path.join(directory, "supersession.json");
+  const evidencePath = path.join(directory, "supersession.evidence.json");
+  const bindingsPath = path.join(directory, "bindings.json");
+  const imageAuthorizationPath = path.join(directory, "authorization.json");
+  fs.writeFileSync(bindingsPath, "{}", { mode: 0o600 });
+  fs.writeFileSync(imageAuthorizationPath, "{}", { mode: 0o600 });
+  await assert.rejects(() => runForwardRecoveryCli([
+    "--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--image-authorization", imageAuthorizationPath,
+    "--aws-profile", "release-deployer", "--terraform-data-dir", path.join(directory, "terraform-data"), "--evidence-out", evidencePath,
+    "--forward-recovery-state", oldJournalPath, "--supersede-ambiguous-import", "--supersession-state", supersessionPath,
+  ], { readProtectedCheckout: () => ({ currentHead: sourceSha, originMainHead: sourceSha, toolingSha: sourceSha, porcelainStatus: "" }) }), /Historical forward recovery journal/);
 });

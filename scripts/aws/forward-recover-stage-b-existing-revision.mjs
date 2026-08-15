@@ -10,7 +10,7 @@ import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.m
 import { deriveStageBImageImpactReport } from "./validate-stage-b-image-reuse.mjs";
 import { deriveCanonicalRecoveryProvenance, collectCanonicalBackendRecoveryCensus, preflightCanonicalRecoveryOutputs } from "./recover-stage-b-backend-task-definition.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
-import { runExistingRevisionForwardRecovery, STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY } from "./stage-b-existing-revision-forward-recovery-contract.mjs";
+import { runAmbiguousImportSupersession, runExistingRevisionForwardRecovery, STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION, STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY } from "./stage-b-existing-revision-forward-recovery-contract.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
 import { findTerraformCliArgEnvKeys } from "../plan-staging-terraform.mjs";
@@ -125,7 +125,18 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const profile = required(argv, "--aws-profile");
   const terraformDataDir = required(argv, "--terraform-data-dir");
   const evidencePath = path.resolve(required(argv, "--evidence-out"));
-  const journalPath = path.resolve(required(argv, "--forward-recovery-state"));
+  const oldJournalPath = path.resolve(required(argv, "--forward-recovery-state"));
+  const supersession = argv.includes("--supersede-ambiguous-import");
+  const journalPath = supersession ? path.resolve(required(argv, "--supersession-state")) : oldJournalPath;
+  let oldJournalFile;
+  let oldJournal;
+  if (supersession) {
+    oldJournalFile = assertStageBPrivateFile({ filePath: oldJournalPath, repositoryRoot: root, label: "Historical forward recovery journal" });
+    oldJournal = JSON.parse(fs.readFileSync(oldJournalFile.path, "utf8"));
+    const expectedJournalName = `ambiguous-import-supersession-${oldJournalFile.sha256}.json`;
+    const expectedEvidenceName = `ambiguous-import-supersession-${oldJournalFile.sha256}.evidence.json`;
+    if (path.dirname(journalPath) !== path.dirname(oldJournalPath) || path.basename(journalPath) !== expectedJournalName || path.basename(evidencePath) !== expectedEvidenceName) throw new Error("Ambiguous import supersession requires deterministic sibling journal and evidence paths bound to the historical journal hash.");
+  }
   const outputs = preflightForwardRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath });
   const bindings = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: bindingsPath, repositoryRoot: root, label: "Stage-B bindings" }).path, "utf8"));
   const imageAuthorization = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: root, label: "Image authorization" }).path, "utf8"));
@@ -197,7 +208,7 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
     if (ancestorSha === descendantSha) return true;
     try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
   };
-  const result = await runExistingRevisionForwardRecovery({
+  const recoveryInput = {
     bindings,
     sourceSha,
     protectedCheckout,
@@ -213,8 +224,11 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
     importState,
     evidence: evidenceAdapter(outputs.evidence),
     journal: journalAdapter(outputs.journal, root),
-  });
-  process.stdout.write(`${JSON.stringify({ ...classifyForwardRecoveryResult(result), mode: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode })}\n`);
+  };
+  const result = supersession
+    ? await runAmbiguousImportSupersession({ ...recoveryInput, oldJournal, oldJournalSha256: oldJournalFile.sha256, oldJournalBytes: fs.readFileSync(oldJournalFile.path) })
+    : await runExistingRevisionForwardRecovery(recoveryInput);
+  process.stdout.write(`${JSON.stringify({ ...classifyForwardRecoveryResult(result), mode: supersession ? STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.mode : STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.mode })}\n`);
   return result;
 }
 
