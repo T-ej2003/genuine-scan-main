@@ -11,10 +11,13 @@ import { deriveStageBImageImpactReport } from "./validate-stage-b-image-reuse.mj
 import { deriveCanonicalRecoveryProvenance, collectCanonicalBackendRecoveryCensus, preflightCanonicalRecoveryOutputs } from "./recover-stage-b-backend-task-definition.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { runExistingRevisionForwardRecovery, STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY } from "./stage-b-existing-revision-forward-recovery-contract.mjs";
+import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
+import { authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
 import { findTerraformCliArgEnvKeys } from "../plan-staging-terraform.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
+const SHA256 = /^[a-f0-9]{64}$/;
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 
@@ -36,6 +39,37 @@ export function buildForwardRecoveryTerraformEnvironment(terraformDataDir, baseE
 
 export function preflightForwardRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath } = {}) {
   return preflightCanonicalRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath, allowInProgressEvidence: true });
+}
+
+export function assertForwardRecoveryTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256, releasePreflightPath, sourceSha, bindings, imageAuthorization, validateTfvarsBinding = assertStageBTfvarsBinding } = {}) {
+  if (!SHA256.test(bindingReportSha256 || "")) throw new Error("Forward recovery requires the exact Stage-B tfvars binding-report SHA256.");
+  const releasePreflightFile = assertStageBPrivateFile({ filePath: releasePreflightPath, repositoryRoot: root, label: "Stage-B release preflight" });
+  const releasePreflight = JSON.parse(fs.readFileSync(releasePreflightFile.path, "utf8"));
+  if (releasePreflight.status !== "ready-for-plan" || !SHA256.test(releasePreflight.tfvarsSha256 || "")) throw new Error("Stage-B release preflight does not contain a ready canonical tfvars binding.");
+  const imageEvidenceSha256 = imageAuthorization?.imageEvidence?.canonicalArtifactSha256;
+  if (!SHA256.test(imageEvidenceSha256 || "")) throw new Error("Forward recovery image authorization is missing its canonical image-evidence binding.");
+  const report = validateTfvarsBinding({
+    tfvarsPath,
+    bindingReportPath,
+    bindingReportSha256,
+    expectedToolingSha: sourceSha,
+    expectedToolingTreeSha256: bindings?.toolingTreeSha256,
+    expectedImageReleaseSha: bindings?.imageReleaseSha,
+    expectedImageEvidenceSha256: imageEvidenceSha256,
+  });
+  if (report.tfvarsSha256 !== releasePreflight.tfvarsSha256
+    || report.sourceContractSha256 !== bindings?.sourceContractSha256
+    || report.images?.backend?.imageReference !== bindings?.backendImage
+    || report.images?.backend?.digest !== authorizedBackendDigest(imageAuthorization)) {
+    throw new Error("Forward recovery tfvars binding does not match the authenticated release preflight, source, or authorized backend image.");
+  }
+  return Object.freeze({ report, releasePreflight });
+}
+
+export function buildForwardRecoveryTerraformImportArgs({ tfvarsPath, address, arn } = {}) {
+  if (!path.isAbsolute(tfvarsPath || "") || path.extname(tfvarsPath) !== ".tfvars") throw new Error("Forward recovery import requires the absolute canonical production tfvars path.");
+  if (address !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.address || arn !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn) throw new Error("Forward recovery attempted an unreviewed Terraform import.");
+  return [`-chdir=${terraformRoot}`, "import", "-lock-timeout=60s", `-var-file=${tfvarsPath}`, address, arn];
 }
 
 export function classifyForwardRecoveryResult(result = {}) {
@@ -82,6 +116,10 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const sourceSha = required(argv, "--source-sha");
   const bindingsPath = path.resolve(required(argv, "--bindings"));
   const imageAuthorizationPath = path.resolve(required(argv, "--image-authorization"));
+  const tfvarsPath = path.resolve(required(argv, "--tfvars"));
+  const bindingReportPath = path.resolve(required(argv, "--binding-report"));
+  const bindingReportSha256 = required(argv, "--binding-report-sha256");
+  const releasePreflightPath = path.resolve(required(argv, "--release-preflight"));
   const profile = required(argv, "--aws-profile");
   const terraformDataDir = required(argv, "--terraform-data-dir");
   const evidencePath = path.resolve(required(argv, "--evidence-out"));
@@ -89,6 +127,7 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const outputs = preflightForwardRecoveryOutputs({ evidencePath, journalPath, bindingsPath, imageAuthorizationPath });
   const bindings = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: bindingsPath, repositoryRoot: root, label: "Stage-B bindings" }).path, "utf8"));
   const imageAuthorization = JSON.parse(fs.readFileSync(assertStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: root, label: "Image authorization" }).path, "utf8"));
+  assertForwardRecoveryTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256, releasePreflightPath, sourceSha, bindings, imageAuthorization });
   const protectedCheckout = readProtectedCheckout();
   const env = buildForwardRecoveryTerraformEnvironment(terraformDataDir, buildForwardRecoveryAwsEnvironment(profile, baseEnv));
   const run = (command, args) => execFile(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -103,9 +142,8 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
     return aws(args);
   }, describe });
   const importState = async ({ address, arn }) => {
-    if (address !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.address || arn !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn) throw new Error("Forward recovery attempted an unreviewed Terraform import.");
     validateBackend();
-    run("terraform", [`-chdir=${terraformRoot}`, "import", "-lock-timeout=60s", address, arn]);
+    run("terraform", buildForwardRecoveryTerraformImportArgs({ tfvarsPath, address, arn }));
   };
   const proveDescendant = ({ ancestorSha, descendantSha }) => {
     if (ancestorSha === descendantSha) return true;

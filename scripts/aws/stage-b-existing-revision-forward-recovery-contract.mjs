@@ -54,6 +54,15 @@ export function assertForwardStateBeforeImport(state) {
   return { lineage: state.lineage, serial: state.serial, stateSha256: stateSnapshotSha256(state) };
 }
 
+export function assertForwardImportRetryState({ journalState, state } = {}) {
+  if (!journalState || journalState.phase !== "IMPORTING" || journalState.importCalls !== 1 || journalState.importMayHaveOccurred !== true) throw new Error("Forward import retry requires an authenticated importing incident.");
+  const attemptCount = journalState.importAttemptCount ?? 1;
+  if (attemptCount !== 1 || journalState.importAttemptOutcome !== "FAILED_BEFORE_STATE_MUTATION" || journalState.importFailureStateSha256 !== journalState.stateBeforeSha256) throw new Error("Forward import retry outcome is ambiguous; durable proof that the prior invocation failed before state mutation is required.");
+  const before = assertForwardStateBeforeImport(state);
+  if (before.stateSha256 !== journalState.stateBeforeSha256) throw new Error("Forward import outcome is ambiguous; authoritative state is not the authenticated pre-import state.");
+  return Object.freeze({ stateSha256: before.stateSha256, retryAuthorized: true });
+}
+
 export function assertForwardImportedState({ beforeStateSha256, after } = {}) {
   if (after?.lineage !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage || after?.serial !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial + 1) throw new Error("Forward recovery import changed Terraform lineage or serial unexpectedly.");
   if (backendInstances(after).length !== 1) throw new Error("Forward recovery import must add exactly one backend candidate instance.");
@@ -198,6 +207,8 @@ export function validateExistingRevisionForwardJournal(journal, expected) {
   if (["RECONCILED", "COMPLETED"].includes(journal.phase) && !SHA256.test(journal.stateAfterImportSha256 || "")) throw new Error("Forward recovery journal is missing its authenticated post-import state hash.");
   if (journal.phase === "IMPORTING" && journal.importMayHaveOccurred !== true) throw new Error("Forward recovery importing phase must fail closed as potentially ambiguous.");
   if (journal.phase === "IMPORTING" && journal.importCalls !== 1) throw new Error("Forward recovery importing phase must have exactly one reserved import call.");
+  if (["IMPORTING", "RECONCILED", "COMPLETED"].includes(journal.phase) && journal.importAttemptCount !== undefined && ![1, 2].includes(journal.importAttemptCount)) throw new Error("Forward recovery import attempt count is malformed.");
+  if (journal.phase === "IMPORTING" && journal.importAttemptCount === 2 && journal.importRetryAuthorized !== true) throw new Error("Forward recovery retry authorization is incomplete.");
   if (["RECONCILED", "COMPLETED"].includes(journal.phase) && (!SHA256.test(journal.evidenceSha256 || "") || journal.registrationCalls !== 0 || journal.importCalls !== 1 || !SHA256.test(journal.stateAfterImportSha256 || ""))) throw new Error("Forward recovery completed evidence bindings are incomplete.");
   return journal;
 }
@@ -244,7 +255,10 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   const consumedImportResume = existing?.phase === "IMPORTING"
     ? assertForwardConsumedImportResume({ sourceSha, bindings, protectedCheckout, journalState: existing, imageAuthorization, deriveProvenance, deriveImageReuse, proveDescendant })
     : null;
-  const authorization = completedResume || consumedImportResume ? null : assertForwardSourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse });
+  const importRetryState = existing?.phase === "IMPORTING" && (observedState?.resources || []).some(({ type, name, instances }) => type === "aws_ecs_task_definition" && name === "candidate" && Array.isArray(instances) && instances.every(({ index_key: key }) => key !== "backend"))
+    ? assertForwardImportRetryState({ journalState: existing, state: observedState })
+    : null;
+  const authorization = completedResume || (consumedImportResume && !importRetryState) ? null : assertForwardSourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse });
   const payload = completedResume || consumedImportResume ? null : buildCanonicalBackendRecoveryTaskDefinition(bindings);
   const fingerprint = completedResume?.fingerprint || consumedImportResume?.fingerprint || taskDefinitionFingerprint(payload.taskDefinition, payload.tags);
   const censusEvidence = assertForwardCensus({ census: await census() });
@@ -267,11 +281,13 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
       return { incidentIdentity, imported: false, phase: existing.phase, registrationCalls: 0, importCalls: 0, state: observedState, readback, census: censusEvidence };
     }
     if (existing.phase === "IMPORTING") {
-      const afterBinding = assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, after: observedState });
-      if (existing.stateAfterImportSha256 !== undefined && existing.stateAfterImportSha256 !== afterBinding.stateSha256) throw new Error("Forward recovery importing checkpoint hash does not match the authenticated imported state.");
-      const recoveredEvidence = persistForwardRecoveryEvidence(buildForwardRecoveryEvidence(expected, afterBinding.stateSha256), evidence);
-      journal.write({ ...existing, ...recoveredEvidence, schemaVersion: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.schemaVersion, stateAfterImportSha256: afterBinding.stateSha256, phase: "COMPLETED" });
-      return { incidentIdentity, imported: false, phase: "COMPLETED", recoveredFromPhase: "IMPORTING", registrationCalls: 0, importCalls: 0, state: observedState, readback, census: censusEvidence, evidence: recoveredEvidence };
+      if (!importRetryState) {
+        const afterBinding = assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, after: observedState });
+        if (existing.stateAfterImportSha256 !== undefined && existing.stateAfterImportSha256 !== afterBinding.stateSha256) throw new Error("Forward recovery importing checkpoint hash does not match the authenticated imported state.");
+        const recoveredEvidence = persistForwardRecoveryEvidence(buildForwardRecoveryEvidence(expected, afterBinding.stateSha256), evidence);
+        journal.write({ ...existing, ...recoveredEvidence, schemaVersion: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.schemaVersion, stateAfterImportSha256: afterBinding.stateSha256, phase: "COMPLETED" });
+        return { incidentIdentity, imported: false, phase: "COMPLETED", recoveredFromPhase: "IMPORTING", registrationCalls: 0, importCalls: 0, state: observedState, readback, census: censusEvidence, evidence: recoveredEvidence };
+      }
     }
   }
   const beforeState = observedState;
@@ -288,8 +304,20 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   const latestReadback = assertForwardRevisionReadback({ readback: await describe(STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn), expectedFingerprint: fingerprint, imageReleaseSha: existing?.imageReleaseSha || bindings.imageReleaseSha, backendImage });
   if (latestReadback.fingerprint !== readback.fingerprint) throw new Error("Forward recovery canonical :9 readback changed before the governed import boundary.");
   const prepared = journal.read();
-  journal.write({ ...prepared, ...expected, phase: "IMPORTING", importCalls: 1, importMayHaveOccurred: true });
-  await importState({ address: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.address, arn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn });
+  journal.write({ ...prepared, ...expected, phase: "IMPORTING", importCalls: 1, importMayHaveOccurred: true, importAttemptCount: importRetryState ? 2 : 1, ...(importRetryState ? { importRetryAuthorized: true } : {}) });
+  try {
+    await importState({ address: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.address, arn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn });
+  } catch (error) {
+    if (!importRetryState) {
+      const failedState = await readState();
+      const failedBefore = assertForwardStateBeforeImport(failedState);
+      const currentJournal = journal.read();
+      if (currentJournal?.phase === "IMPORTING" && currentJournal.importAttemptCount === 1 && failedBefore.stateSha256 === currentJournal.stateBeforeSha256) {
+        journal.write({ ...currentJournal, importAttemptOutcome: "FAILED_BEFORE_STATE_MUTATION", importFailureStateSha256: failedBefore.stateSha256 });
+      }
+    }
+    throw error;
+  }
   interruptAt?.("AFTER_IMPORT");
   const after = await readState();
   const afterBinding = assertForwardStateAfterImport(beforeState, after);

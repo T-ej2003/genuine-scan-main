@@ -8,6 +8,7 @@ import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-auth
 import {
   STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY as CONTRACT,
   assertForwardCensus,
+  assertForwardImportRetryState,
   assertForwardRevisionReadback,
   assertForwardSourceBinding,
   assertForwardStateAfterImport,
@@ -15,7 +16,7 @@ import {
   canonicalForwardRecoveryIncidentIdentity,
   runExistingRevisionForwardRecovery,
 } from "../aws/stage-b-existing-revision-forward-recovery-contract.mjs";
-import { assertForwardRecoveryTerraformBackend, buildForwardRecoveryTerraformEnvironment, classifyForwardRecoveryResult, preflightForwardRecoveryOutputs } from "../aws/forward-recover-stage-b-existing-revision.mjs";
+import { assertForwardRecoveryTerraformBackend, assertForwardRecoveryTfvarsBinding, buildForwardRecoveryTerraformEnvironment, buildForwardRecoveryTerraformImportArgs, classifyForwardRecoveryResult, preflightForwardRecoveryOutputs } from "../aws/forward-recover-stage-b-existing-revision.mjs";
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { buildCanonicalBackendRecoveryTaskDefinition, canonicalSha256, stateSnapshotSha256, taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 
@@ -218,6 +219,86 @@ test("importing replay finalizes an already successful import without a second i
   assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
 });
 
+test("forward import command binds the canonical tfvars and lock timeout", () => {
+  assert.deepEqual(buildForwardRecoveryTerraformImportArgs({ tfvarsPath: "/private/tmp/stage-b/production.tfvars", address: CONTRACT.address, arn }), [
+    `-chdir=${path.resolve("infra/aws/terraform/production-green-stage-b")}`, "import", "-lock-timeout=60s", "-var-file=/private/tmp/stage-b/production.tfvars", CONTRACT.address, arn,
+  ]);
+  assert.throws(() => buildForwardRecoveryTerraformImportArgs({ tfvarsPath: "production.tfvars", address: CONTRACT.address, arn }), /absolute/);
+  assert.throws(() => buildForwardRecoveryTerraformImportArgs({ tfvarsPath: "/private/tmp/stage-b/production.tfvars", address: CONTRACT.address, arn: `${arn.slice(0, -1)}8` }), /unreviewed/);
+});
+
+test("forward tfvars preflight binds the canonical release report and authorized backend", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-forward-tfvars-"));
+  const tfvarsPath = path.join(directory, "production.tfvars");
+  const bindingReportPath = path.join(directory, "binding.json");
+  const releasePreflightPath = path.join(directory, "release-preflight.json");
+  for (const filePath of [tfvarsPath, bindingReportPath, releasePreflightPath]) fs.writeFileSync(filePath, "{}\n", { mode: 0o600 });
+  const backendDigest = imageAuthorization.backendDigest;
+  const bindingsForPreflight = { ...bindings, sourceContractSha256: bindings.sourceContractSha256 };
+  const report = { tfvarsSha256: "a".repeat(64), sourceContractSha256: bindingsForPreflight.sourceContractSha256, images: { backend: { imageReference: bindingsForPreflight.backendImage, digest: backendDigest } } };
+  fs.writeFileSync(releasePreflightPath, `${JSON.stringify({ status: "ready-for-plan", tfvarsSha256: report.tfvarsSha256 })}\n`, { mode: 0o600 });
+  const calls = [];
+  assertForwardRecoveryTfvarsBinding({
+    tfvarsPath, bindingReportPath, bindingReportSha256: "b".repeat(64), releasePreflightPath, sourceSha,
+    bindings: bindingsForPreflight, imageAuthorization,
+    validateTfvarsBinding: (value) => { calls.push(value); return report; },
+  });
+  assert.equal(calls[0].expectedToolingSha, sourceSha);
+  assert.equal(calls[0].expectedToolingTreeSha256, bindings.toolingTreeSha256);
+  assert.equal(calls[0].expectedImageReleaseSha, imageReleaseSha);
+  assert.throws(() => assertForwardRecoveryTfvarsBinding({
+    tfvarsPath, bindingReportPath, bindingReportSha256: "b".repeat(64), releasePreflightPath, sourceSha,
+    bindings: bindingsForPreflight, imageAuthorization,
+    validateTfvarsBinding: () => ({ ...report, tfvarsSha256: "c".repeat(64) }),
+  }), /preflight/);
+  assert.throws(() => assertForwardRecoveryTfvarsBinding({
+    tfvarsPath, bindingReportPath, bindingReportSha256: "b".repeat(64), releasePreflightPath, sourceSha,
+    bindings: bindingsForPreflight, imageAuthorization,
+    validateTfvarsBinding: () => ({ ...report, images: { backend: { imageReference: bindingsForPreflight.backendImage, digest: "sha256:" + "f".repeat(64) } } }),
+  }), /authorized backend/);
+});
+
+test("IMPORTING replay permits exactly one bounded retry only from the authenticated pre-import state", async () => {
+  let state = emptyState();
+  let attempts = 0;
+  const run = common({
+    readState: async () => structuredClone(state),
+    importState: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("Terraform failed before remote state mutation");
+      state = importedState();
+    },
+  });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(run), /before remote state mutation/);
+  assert.equal(run.journal.read().phase, "IMPORTING");
+  assert.equal(run.journal.read().importCalls, 1);
+  const result = await runExistingRevisionForwardRecovery(run);
+  assert.equal(result.imported, true);
+  assert.equal(attempts, 2);
+  assert.equal(run.journal.read().importAttemptCount, 2);
+});
+
+test("IMPORTING replay rejects an absent candidate when the authoritative state drift is ambiguous", async () => {
+  let state = emptyState();
+  let attempts = 0;
+  const run = common({
+    readState: async () => structuredClone(state),
+    importState: async () => { attempts += 1; throw new Error("Terraform failed before remote state mutation"); },
+  });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(run), /before remote state mutation/);
+  state.resources.push({ mode: "managed", type: "aws_s3_bucket", name: "drift", instances: [] });
+  await assert.rejects(() => runExistingRevisionForwardRecovery(run), /ambiguous/);
+  assert.equal(attempts, 1);
+  assert.equal(run.journal.read().importCalls, 1);
+});
+
+test("IMPORTING retry guard authenticates the exact pre-import checkpoint", async () => {
+  const journal = { phase: "IMPORTING", importCalls: 1, importMayHaveOccurred: true, importAttemptOutcome: "FAILED_BEFORE_STATE_MUTATION", importFailureStateSha256: stateSnapshotSha256(emptyState()), stateBeforeSha256: stateSnapshotSha256(emptyState()) };
+  assert.deepEqual(assertForwardImportRetryState({ journalState: journal, state: emptyState() }), { stateSha256: journal.stateBeforeSha256, retryAuthorized: true });
+  assert.throws(() => assertForwardImportRetryState({ journalState: journal, state: emptyState(95) }), /lineage|serial/);
+  assert.throws(() => assertForwardImportRetryState({ journalState: journal, state: { ...emptyState(), resources: [...emptyState().resources, { mode: "managed", type: "aws_s3_bucket", name: "drift", instances: [] }] } }), /ambiguous/);
+});
+
 async function importingRun() {
   const run = common({ interruptAt: (phase) => { if (phase === "AFTER_IMPORT") throw new Error("interrupted after import"); } });
   await assert.rejects(() => runExistingRevisionForwardRecovery(run), /interrupted/);
@@ -398,7 +479,7 @@ test("consumed descendant replay still rejects image-affecting executor drift", 
 test("consumed importing replay fails closed when state does not prove the import", async () => {
   const first = await importingRun();
   const replay = common({ journal: first.journal, evidence: first.evidence, readState: async () => emptyState() });
-  await assert.rejects(() => runExistingRevisionForwardRecovery(replay), /lineage|serial|candidate/);
+  await assert.rejects(() => runExistingRevisionForwardRecovery(replay), /ambiguous|lineage|serial|candidate/);
   assert.deepEqual(replay.counts, { imports: 0, registrations: 0 });
 });
 
