@@ -1,6 +1,7 @@
 import {
   canonicalizeEcsTaskDefinitionVolumes,
   STAGE_B_TASK_DEFINITION_FAMILIES,
+  assertStageBImportedBackendRolloverActions,
   STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS,
   STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS,
   exactReviewedTaskDefinitionTags,
@@ -1156,6 +1157,10 @@ export function censusStageBPlanSemantics(plan, options = {}) {
       configurationReferences,
       classification,
     });
+  }
+  if (resources.some(({ classification }) => classification === STAGE_B_PLAN_SEMANTIC_PROFILES.IMPORTED_BACKEND_METADATA_NORMALIZATION)
+    && resources.some(({ classification }) => classification === STAGE_B_PLAN_SEMANTIC_PROFILES.ECS_REVIEWED_ROLLOVER)) {
+    assertStageBImportedBackendRolloverActions(plan.resource_changes);
   }
   assertComputedAliasBinding(plan);
   const counts = {

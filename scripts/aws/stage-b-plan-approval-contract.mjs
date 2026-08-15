@@ -14,6 +14,10 @@ const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex"
 const STAGE_B_CAPTURE_BROKER_ADDRESSES = ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"];
 export const STAGE_B_PLAN_PROFILES = Object.freeze(["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY"]);
 export const STAGE_B_BROKER_OPERATIONS = Object.freeze(["none", "initial-create", "update", "recovery-alias-only"]);
+export const STAGE_B_PLAN_PROFILE_CENSUS = Object.freeze({
+  BASELINE: Object.freeze({ create: 12, replacement: 0, update: 3, destroy: 0, unclassified: 0 }),
+  IMPORTED_BACKEND_METADATA_NORMALIZATION: Object.freeze({ create: 1, replacement: 11, update: 4, destroy: 0, unclassified: 0 }),
+});
 
 function assertPlanProfile(profile, label = "Stage B plan evidence") {
   if (!STAGE_B_PLAN_PROFILES.includes(profile)) throw new Error(`${label} profile is unsupported: ${profile}`);
@@ -35,6 +39,13 @@ function assertBrokerEvidence(report, { approved = false } = {}) {
     || JSON.stringify(report.brokerActions) !== JSON.stringify(expected.actions)
     || JSON.stringify(report.brokerResourceAddresses) !== JSON.stringify(expected.addresses)) throw new Error("Stage B broker evidence is malformed.");
   return true;
+}
+
+function assertPlanProfileCensus(classification, profile, label) {
+  const expected = STAGE_B_PLAN_PROFILE_CENSUS[profile];
+  if (!expected || Object.entries(expected).some(([key, value]) => (classification?.[key] ?? 0) !== value)) {
+    throw new Error(`${label} is not the exact ${profile} census.`);
+  }
 }
 
 export function stageBPlanHashes({ savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes }) {
@@ -140,12 +151,13 @@ export function assertStageBNormalPlanCompleteness(plan, { referenceAudit, expec
   const classified = classifyStageBPlan(plan, { strict, terraformConfiguration });
   const noOp = classified.actionCounts["no-op"] || 0;
   const importedBackendNormalization = classified.classifiedResources.filter(({ classification }) => classification === "imported-backend-task-definition-metadata-normalization");
-  const expectedCreate = importedBackendNormalization.length === 1 ? 11 : 12;
-  const expectedUpdate = importedBackendNormalization.length === 1 ? 4 : 3;
   const expectedProfile = importedBackendNormalization.length === 1 ? "IMPORTED_BACKEND_METADATA_NORMALIZATION" : "BASELINE";
+  const expectedCensus = STAGE_B_PLAN_PROFILE_CENSUS[expectedProfile];
+  const expectedChanged = expectedCensus.create + expectedCensus.replacement + expectedCensus.update + expectedCensus.destroy;
   if ((classified.planProfile !== expectedProfile && !(expectedProfile === "BASELINE" && classified.planProfile === "ECS_TASK_DEFINITION_ROTATION"))
-    || classified.actionCounts.create !== expectedCreate || classified.actionCounts.update !== expectedUpdate || noOp !== expectedAddresses.size - 15
-    || (classified.actionCounts.destroy || 0) !== 0 || (classified.actionCounts.replacement || 0) !== 0 || classified.unclassifiedResources.length !== 0) {
+    || classified.actionCounts.create !== expectedCensus.create || (classified.actionCounts.replacement || 0) !== expectedCensus.replacement
+    || classified.actionCounts.update !== expectedCensus.update || (classified.actionCounts.destroy || 0) !== expectedCensus.destroy
+    || noOp !== expectedAddresses.size - expectedChanged || classified.unclassifiedResources.length !== expectedCensus.unclassified) {
     throw new Error("Stage B normal plan mutation census is outside the exact structural contract.");
   }
   return { expectedAddresses: [...expectedAddresses].sort(), retainedAddresses: [...retainedAddresses].sort(), classification: classified };
@@ -172,9 +184,7 @@ function assertClassification(report) {
     return;
   }
   if (profile === "IMPORTED_BACKEND_METADATA_NORMALIZATION") {
-    if (classification.create !== 11 || classification.update !== 4 || classification.destroy !== 0 || classification.replacement !== 0 || classification.unclassified !== 0) {
-      throw new Error("Stage B imported-backend normalization classification is not the exact 11-create/4-update contract.");
-    }
+    assertPlanProfileCensus(classification, profile, "Stage B imported-backend normalization classification");
     return;
   }
   if (report?.recoveryAttestationSha256 !== undefined) {
@@ -182,10 +192,8 @@ function assertClassification(report) {
     return;
   }
   if (profile === "ECS_TASK_DEFINITION_ROTATION") return;
-  if (profile !== "BASELINE" || classification.create !== 12 || classification.update !== 3
-    || classification.destroy !== 0 || classification.replacement !== 0 || classification.unclassified !== 0) {
-    throw new Error("Stage B plan evidence classification is not the reviewed normal 12-create/3-update/0-destroy/0-replacement contract.");
-  }
+  if (profile !== "BASELINE") throw new Error("Stage B plan evidence classification profile is unsupported.");
+  assertPlanProfileCensus(classification, profile, "Stage B baseline plan evidence classification");
 }
 
 function assertPlanHashes(report, hashes) {

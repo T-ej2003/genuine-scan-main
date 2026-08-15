@@ -664,7 +664,7 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
   assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.BROKER_ALIAS_INITIAL_CREATE).length, 1);
 });
 
-test("imported backend normalization is a complete semantic 11-create/4-update profile", () => {
+test("imported backend normalization is a complete semantic 1-create/11-replacement/4-update profile", () => {
   const value = importedBackendPlan();
   const census = assertStageBPlanSemanticCompleteness(value, { terraformConfiguration: fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8") });
   const backend = census.resources.find((item) => item.address === 'aws_ecs_task_definition.candidate["backend"]');
@@ -673,6 +673,14 @@ test("imported backend normalization is a complete semantic 11-create/4-update p
   const invalid = structuredClone(value);
   invalid.resource_changes.find((item) => item.address === 'aws_ecs_task_definition.candidate["backend"]').change.after.container_definitions = "changed";
   assert.throws(() => assertStageBPlanSemanticCompleteness(invalid, { terraformConfiguration: fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8") }), /UNCLASSIFIED_CHANGED_PATH|unrelated field change/);
+});
+
+test("imported backend normalization requires create-before-delete ordering for every rollover", () => {
+  for (const index of [0, 5, 10]) {
+    const invalid = importedBackendPlan();
+    invalid.resource_changes.filter((item) => item.change.actions.join(",") === "create,delete")[index].change.actions = ["delete", "create"];
+    assert.throws(() => assertStageBPlanSemanticCompleteness(invalid, { terraformConfiguration: fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8") }), /create-before-delete/);
+  }
 });
 
 test("baseline initial-create semantics fail closed on action, identity, path, and reference drift", () => {

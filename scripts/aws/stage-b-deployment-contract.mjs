@@ -1,5 +1,5 @@
 import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
+import { assertStageBImportedBackendRolloverActions, assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 
 const exactActions = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 const exactJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
@@ -589,13 +589,15 @@ export function classifyStageBPlan(plan, options = {}) {
     return counts;
   }, {});
   const taskDefinitionRotations = classifiedResources.filter((item) => item.rotation).map((item) => item.rotation);
+  const planProfile = classifiedResources.some(({ classification }) => classification === STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION)
+    ? "IMPORTED_BACKEND_METADATA_NORMALIZATION"
+    : taskDefinitionRotations.length ? "ECS_TASK_DEFINITION_ROTATION" : "BASELINE";
+  if (planProfile === "IMPORTED_BACKEND_METADATA_NORMALIZATION" && taskDefinitionRotations.length > 0) assertStageBImportedBackendRolloverActions(plan?.resource_changes);
   return {
     classifiedResources,
     unclassifiedResources,
     actionCounts,
     taskDefinitionRotations,
-    planProfile: classifiedResources.some(({ classification }) => classification === STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION)
-      ? "IMPORTED_BACKEND_METADATA_NORMALIZATION"
-      : taskDefinitionRotations.length ? "ECS_TASK_DEFINITION_ROTATION" : "BASELINE",
+    planProfile,
   };
 }
