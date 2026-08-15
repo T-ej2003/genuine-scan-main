@@ -8,6 +8,7 @@ import {
   buildCanonicalBackendRecoveryTaskDefinition,
   canonicalJson,
   canonicalSha256,
+  normalizeTerraformRecoveryCheckpointState,
   stateSnapshotSha256,
   taskDefinitionFingerprint,
 } from "./stage-b-task-definition-recovery-contract.mjs";
@@ -38,6 +39,9 @@ export const STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION = Object.freeze({
 const SHA = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const IMAGE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/;
+const IMAGE_REFERENCE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/(?:mscqr-backend|mscqr-worker)@sha256:[a-f0-9]{64}$/;
+const IMPORT_BOUND_IMAGE_KEYS = Object.freeze(["backend", "worker", "executor", "canary", "read_only_canary"]);
+const IMPORT_LOG_GROUP_KEYS = Object.freeze(["backend", "canary", "read_only_canary", "worker"]);
 
 export function journalSha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
@@ -65,6 +69,95 @@ function backendInstances(state) {
   return resources[0].instances.filter(({ index_key: key }) => key === "backend");
 }
 
+function expectedBoundImagesFromBindingReport(report) {
+  const images = report?.images;
+  const values = {
+    backend: images?.backend?.imageReference,
+    worker: images?.worker?.imageReference,
+    executor: images?.executor?.imageReference,
+    canary: images?.canary?.imageReference,
+    read_only_canary: (images?.readOnlyCanary || images?.read_only_canary)?.imageReference,
+  };
+  if (IMPORT_BOUND_IMAGE_KEYS.some((key) => !IMAGE_REFERENCE.test(values[key] || ""))) return null;
+  return Object.freeze(values);
+}
+
+function expectedBoundImagesFromAuthorization(authorization) {
+  const evidence = authorization?.imageEvidence;
+  const records = evidence?.images;
+  if (!Array.isArray(records)) return null;
+  const repositories = new Map((evidence.repositories || []).map((repository) => [repository.repositoryName, repository.repositoryUri]));
+  const references = new Map(records.map((record) => {
+    const digest = record.digest || record.image_digest;
+    const reference = record.image_ref || record.imageReference || (repositories.get(record.repository) && `${repositories.get(record.repository)}@${digest}`);
+    return [record.service, reference];
+  }));
+  const values = {
+    backend: references.get("backend"),
+    worker: references.get("worker"),
+    executor: references.get("rls-executor"),
+    canary: references.get("rls-canary"),
+    read_only_canary: references.get("rls-canary"),
+  };
+  if (IMPORT_BOUND_IMAGE_KEYS.some((key) => !IMAGE_REFERENCE.test(values[key] || ""))) return null;
+  return Object.freeze(values);
+}
+
+function expectedBoundImages({ bindingReport, authorization } = {}) {
+  return expectedBoundImagesFromBindingReport(bindingReport) || expectedBoundImagesFromAuthorization(authorization);
+}
+
+function normalizeImportCheckResults(before, after) {
+  if (after.check_results === null) {
+    if (!Array.isArray(before.check_results) || before.check_results.some((result) => result?.status !== "pass")) throw new Error("Terraform import check-results null is only compatible with authenticated all-pass pre-import checks.");
+    before.check_results = [];
+    after.check_results = [];
+  }
+  return { before, after };
+}
+
+function normalizeImportLifecycleMetadata(before, after) {
+  const resource = (state) => (state.resources || []).find((candidate) => candidate.type === "aws_cloudwatch_log_group" && candidate.name === "stage_b");
+  const beforeResource = resource(before);
+  const afterResource = resource(after);
+  for (const key of IMPORT_LOG_GROUP_KEYS) {
+    const beforeInstance = beforeResource?.instances?.find((instance) => instance.index_key === key);
+    const afterInstance = afterResource?.instances?.find((instance) => instance.index_key === key);
+    const beforeHas = Object.hasOwn(beforeInstance || {}, "create_before_destroy");
+    const afterHas = Object.hasOwn(afterInstance || {}, "create_before_destroy");
+    if (!beforeHas && afterHas && afterInstance.create_before_destroy === true) delete afterInstance.create_before_destroy;
+    else if (beforeHas !== afterHas || beforeInstance?.create_before_destroy !== afterInstance?.create_before_destroy) throw new Error("Terraform import changed an unreviewed lifecycle metadata path.");
+  }
+  return { before, after };
+}
+
+function normalizeImportComparisonState(before, after, expectedImages) {
+  const comparableBefore = stateWithoutBackend(before);
+  const comparableAfter = stateWithoutBackend(after);
+  const beforeOutputs = comparableBefore.outputs;
+  const afterOutputs = comparableAfter.outputs;
+  const hasDerivedOutputs = beforeOutputs !== undefined || afterOutputs !== undefined;
+  if (hasDerivedOutputs) {
+    if (!expectedImages || !beforeOutputs?.bound_images?.value || !afterOutputs?.bound_images?.value || !beforeOutputs?.task_definition_arns?.value || !afterOutputs?.task_definition_arns?.value) throw new Error("Forward import output comparison requires authenticated pre-import and canonical output bindings.");
+    for (const key of IMPORT_BOUND_IMAGE_KEYS) {
+      if (afterOutputs.bound_images.value[key] !== expectedImages[key]) throw new Error(`Forward import bound_images.${key} does not match authenticated canonical tfvars.`);
+      afterOutputs.bound_images.value[key] = beforeOutputs.bound_images.value[key];
+    }
+    if (afterOutputs.task_definition_arns.value.backend !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn) throw new Error("Forward import backend task-definition output does not match canonical :9.");
+    afterOutputs.task_definition_arns.value.backend = beforeOutputs.task_definition_arns.value.backend;
+  }
+  normalizeImportCheckResults(comparableBefore, comparableAfter);
+  normalizeImportLifecycleMetadata(comparableBefore, comparableAfter);
+  comparableAfter.serial = comparableBefore.serial;
+  return { comparableBefore: normalizeTerraformRecoveryCheckpointState(comparableBefore), comparableAfter: normalizeTerraformRecoveryCheckpointState(comparableAfter) };
+}
+
+function importedStateSnapshotSha256(after) {
+  const normalized = structuredClone(after);
+  if (normalized.check_results === null) normalized.check_results = [];
+  return stateSnapshotSha256(normalized);
+}
+
 export function assertForwardStateBeforeImport(state) {
   if (state?.lineage !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage || state?.serial !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial) throw new Error("Forward recovery requires the exact current Terraform lineage and serial.");
   if (backendInstances(state).length !== 0) throw new Error("Forward recovery requires the backend candidate to be absent before import.");
@@ -87,26 +180,28 @@ export function assertLegacyAmbiguousImportJournalIsImmutable(journalState) {
   return journalState;
 }
 
-export function assertForwardImportedState({ beforeStateSha256, after } = {}) {
+export function assertForwardImportedState({ beforeStateSha256, before, after, expectedBoundImages } = {}) {
   if (after?.lineage !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage || after?.serial !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial + 1) throw new Error("Forward recovery import changed Terraform lineage or serial unexpectedly.");
   if (backendInstances(after).length !== 1) throw new Error("Forward recovery import must add exactly one backend candidate instance.");
   const imported = backendInstances(after)[0];
   const importedArn = imported?.attributes?.arn || imported?.attributes?.id;
   if (importedArn !== STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn) throw new Error("Forward recovery import did not bind the exact canonical :9 ARN.");
-  const comparableAfter = stateWithoutBackend(after);
-  comparableAfter.serial = STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial;
-  if (stateSnapshotSha256(comparableAfter) !== beforeStateSha256) throw new Error("Forward recovery import changed Terraform state outside the exact backend candidate address.");
-  return { lineage: after.lineage, serial: after.serial, stateSha256: stateSnapshotSha256(after), backendArn: importedArn };
+  if (before) {
+    if (stateSnapshotSha256(before) !== beforeStateSha256) throw new Error("Forward recovery pre-import state does not match the authenticated checkpoint.");
+    const { comparableBefore, comparableAfter } = normalizeImportComparisonState(before, after, expectedBoundImages);
+    if (canonicalJson(comparableBefore) !== canonicalJson(comparableAfter)) throw new Error("Forward recovery import changed Terraform state outside the exact reviewed import effects.");
+  } else {
+    if (after.outputs || after.check_results === null) throw new Error("Forward recovery import output/checkpoint compatibility requires the authenticated pre-import state snapshot.");
+    const comparableAfter = stateWithoutBackend(after);
+    comparableAfter.serial = STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial;
+    if (stateSnapshotSha256(comparableAfter) !== beforeStateSha256) throw new Error("Forward recovery import changed Terraform state outside the exact backend candidate address.");
+  }
+  return { lineage: after.lineage, serial: after.serial, stateSha256: importedStateSnapshotSha256(after), backendArn: importedArn };
 }
 
-export function assertForwardStateAfterImport(before, after) {
+export function assertForwardStateAfterImport(before, after, { expectedBoundImages } = {}) {
   const beforeBinding = assertForwardStateBeforeImport(before);
-  const result = assertForwardImportedState({ beforeStateSha256: beforeBinding.stateSha256, after });
-  const comparableBefore = stateWithoutBackend(before);
-  const comparableAfter = stateWithoutBackend(after);
-  comparableAfter.serial = comparableBefore.serial;
-  if (stateSnapshotSha256(comparableBefore) !== stateSnapshotSha256(comparableAfter)) throw new Error("Forward recovery import changed Terraform state outside the exact backend candidate address.");
-  return result;
+  return assertForwardImportedState({ beforeStateSha256: beforeBinding.stateSha256, before, after, expectedBoundImages });
 }
 
 export function assertForwardCensus({ census } = {}) {
@@ -362,10 +457,19 @@ export function assertAmbiguousImportSupersessionAuthority({ oldJournal, oldJour
   return Object.freeze({ ...fields, incidentIdentity: canonicalAmbiguousImportSupersessionIdentity(fields), authorization, censusEvidence, fingerprint, stateBeforeSha256: stateBefore.stateSha256 });
 }
 
-export async function runAmbiguousImportSupersession({ oldJournal, oldJournalSha256, oldJournalBytes, bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse, validateImportBindings, readState, census, describe, importState, evidence, journal, interruptAt } = {}) {
+export async function runAmbiguousImportSupersession({ oldJournal, oldJournalSha256, oldJournalBytes, bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse, validateImportBindings, stateBefore, readState, census, describe, importState, evidence, journal, interruptAt } = {}) {
   if (!oldJournal || typeof readState !== "function" || typeof census !== "function" || typeof describe !== "function" || typeof importState !== "function" || !journal?.read || !journal?.write || !evidence?.read || !evidence?.write) throw new Error("Ambiguous import supersession requires the immutable historical journal and durable adapters.");
   const existing = journal.read();
   const state = await readState();
+  const authenticatedBefore = stateBefore ? assertForwardStateBeforeImport(stateBefore) : null;
+  if (authenticatedBefore && existing?.stateBeforeSha256 !== undefined && authenticatedBefore.stateSha256 !== existing.stateBeforeSha256) throw new Error("Ambiguous import supersession supplied pre-import state does not match the authenticated incident checkpoint.");
+  let validatedBindingReport;
+  const validateMutationBindings = () => {
+    const result = typeof validateImportBindings === "function" ? validateImportBindings() : null;
+    if (result?.report) validatedBindingReport = result.report;
+    return result;
+  };
+  const expectedImages = () => expectedBoundImages({ bindingReport: validatedBindingReport, authorization: imageAuthorization });
   if (existing?.phase === "IMPORTING") {
     const expected = supersessionFields(existing);
     validateAmbiguousImportSupersessionJournal(existing, expected);
@@ -373,7 +477,7 @@ export async function runAmbiguousImportSupersession({ oldJournal, oldJournalSha
     const censusEvidence = assertForwardCensus({ census: await census() });
     const readback = await describe(STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn);
     assertForwardRevisionReadback({ readback, expectedFingerprint: existing.fingerprint, imageReleaseSha: existing.imageReleaseSha, backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${existing.authorizedBackendDigest}` });
-    const afterBinding = assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, after: state });
+    const afterBinding = assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, before: stateBefore, after: state, expectedBoundImages: expectedImages() });
     if (censusEvidence.censusSha256 !== existing.censusSha256) throw new Error("Ambiguous import supersession consumed replay census drifted.");
     const completedEvidence = persistForwardRecoveryEvidence(buildAmbiguousImportSupersessionEvidence(expected, afterBinding.stateSha256), evidence);
     journal.write({ ...existing, ...completedEvidence, phase: "COMPLETED", stateAfterImportSha256: afterBinding.stateSha256 });
@@ -386,7 +490,7 @@ export async function runAmbiguousImportSupersession({ oldJournal, oldJournalSha
     const readback = await describe(STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn);
     assertForwardRevisionReadback({ readback, expectedFingerprint: existing.fingerprint, imageReleaseSha: existing.imageReleaseSha, backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${existing.authorizedBackendDigest}` });
     validateAmbiguousImportSupersessionEvidence(evidence.read(), existing, expected);
-    assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, after: state });
+    assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, before: stateBefore, after: state, expectedBoundImages: expectedImages() });
     if (censusEvidence.censusSha256 !== existing.censusSha256) throw new Error("Ambiguous import supersession completed replay census drifted.");
     return { incidentIdentity: existing.incidentIdentity, imported: false, phase: "COMPLETED", registrationCalls: 0, importCalls: 0, state, readback, census: censusEvidence };
   }
@@ -397,7 +501,7 @@ export async function runAmbiguousImportSupersession({ oldJournal, oldJournalSha
     validateAmbiguousImportSupersessionJournal(existing, expected);
     if (existing.phase === "IMPORTING") throw new Error("Ambiguous import supersession import outcome is still ambiguous; no second import is authorized.");
   } else {
-    if (typeof validateImportBindings === "function") validateImportBindings();
+    validateMutationBindings();
     journal.write({ schemaVersion: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.schemaVersion, kind: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.kind, mode: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.mode, phase: "PREPARED", ...expected, registrationCalls: 0, registrationCapability: "NONE", importCalls: 0 });
   }
   const latestState = await readState();
@@ -406,12 +510,12 @@ export async function runAmbiguousImportSupersession({ oldJournal, oldJournalSha
   if (latestCensus.censusSha256 !== authority.censusEvidence.censusSha256) throw new Error("Ambiguous import supersession ECS census changed before the governed import boundary.");
   const latestReadback = assertForwardRevisionReadback({ readback: await describe(STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn), expectedFingerprint: authority.fingerprint, imageReleaseSha: bindings.imageReleaseSha, backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${authority.authorization.authorizedBackendDigest}` });
   if (latestReadback.fingerprint !== authority.fingerprint) throw new Error("Ambiguous import supersession canonical :9 changed before the governed import boundary.");
-  if (typeof validateImportBindings === "function") validateImportBindings();
+  validateMutationBindings();
   journal.write({ ...journal.read(), ...expected, phase: "IMPORTING", importCalls: 1, importMayHaveOccurred: true });
   await importState({ address: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.address, arn: STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION.existingRevisionArn });
   interruptAt?.("AFTER_IMPORT");
   const after = await readState();
-  const afterBinding = assertForwardStateAfterImport(state, after);
+  const afterBinding = assertForwardStateAfterImport(state, after, { expectedBoundImages: expectedImages() });
   interruptAt?.("AFTER_POST_IMPORT_VERIFICATION");
   const completedEvidence = persistForwardRecoveryEvidence(buildAmbiguousImportSupersessionEvidence(expected, afterBinding.stateSha256), evidence);
   interruptAt?.("AFTER_EVIDENCE_PERSISTED");
@@ -433,11 +537,20 @@ function expectedFields({ sourceSha, authorization, bindings, censusEvidence, fi
   return { incidentIdentity, sourceSha, toolingTreeSha256: authorization.derived.toolingTreeSha256, sourceContractSha256: authorization.derived.sourceContractSha256, imageReleaseSha: bindings.imageReleaseSha, authorizedBackendDigest: authorization.authorizedBackendDigest, imageAuthorizationSha256: authorization.authorization.evidenceSha256, imageAuthorizationSourceSha: authorization.authorization.sourceSha, stateLineage: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.lineage, stateSerial: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.startSerial, stateBeforeSha256, existingRevisionArn: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn, censusSha256: censusEvidence.censusSha256, fingerprint };
 }
 
-export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse, validateImportBindings, readState, census, describe, importState, evidence, journal, interruptAt } = {}) {
+export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse, validateImportBindings, stateBefore, readState, census, describe, importState, evidence, journal, interruptAt } = {}) {
   if (typeof readState !== "function" || typeof census !== "function" || typeof describe !== "function" || typeof importState !== "function" || !journal?.read || !journal?.write || !evidence?.read || !evidence?.write) throw new Error("Forward recovery requires read, census, describe, import, journal, and durable evidence adapters.");
   const existing = journal.read();
   assertLegacyAmbiguousImportJournalIsImmutable(existing);
   const observedState = await readState();
+  const authenticatedBefore = stateBefore ? assertForwardStateBeforeImport(stateBefore) : null;
+  if (authenticatedBefore && existing?.stateBeforeSha256 !== undefined && authenticatedBefore.stateSha256 !== existing.stateBeforeSha256) throw new Error("Forward recovery supplied pre-import state does not match the authenticated incident checkpoint.");
+  let validatedBindingReport;
+  const validateMutationBindings = () => {
+    const result = typeof validateImportBindings === "function" ? validateImportBindings() : null;
+    if (result?.report) validatedBindingReport = result.report;
+    return result;
+  };
+  const expectedImages = () => expectedBoundImages({ bindingReport: validatedBindingReport, authorization: imageAuthorization });
   const completedResume = existing && ["COMPLETED", "RECONCILED"].includes(existing.phase)
     ? assertForwardCompletedResume({ sourceSha, protectedCheckout, journalState: existing, proveDescendant })
     : null;
@@ -451,7 +564,7 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
     ? assertForwardImportRetryState({ journalState: existing, state: observedState })
     : null;
   const importAuthorizationRequired = !completedResume && (!existing || preparedResume || importRetryState);
-  if (importAuthorizationRequired && typeof validateImportBindings === "function") validateImportBindings();
+  if (importAuthorizationRequired) validateMutationBindings();
   const authorization = completedResume || (consumedImportResume && !importRetryState) ? null : assertForwardSourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance, proveDescendant, deriveImageReuse });
   const payload = completedResume || consumedImportResume ? null : buildCanonicalBackendRecoveryTaskDefinition(bindings);
   const fingerprint = completedResume?.fingerprint || consumedImportResume?.fingerprint || taskDefinitionFingerprint(payload.taskDefinition, payload.tags);
@@ -471,12 +584,13 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
     if (!preparedDescendantRestart) validateExistingRevisionForwardJournal(existing, expected);
     if (["COMPLETED", "RECONCILED"].includes(existing.phase)) {
       validateForwardRecoveryEvidence(evidence.read(), existing, expected);
-      if (stateSnapshotSha256(observedState) !== existing.stateAfterImportSha256 || observedState.lineage !== existing.stateLineage || observedState.serial !== existing.stateSerial + 1 || (backendInstance(observedState)?.attributes?.arn || backendInstance(observedState)?.attributes?.id) !== existing.existingRevisionArn) throw new Error("Forward recovery replay observed state drift after reconciliation.");
+      const completedState = assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, before: stateBefore, after: observedState, expectedBoundImages: expectedImages() });
+      if (completedState.stateSha256 !== existing.stateAfterImportSha256 || observedState.lineage !== existing.stateLineage || observedState.serial !== existing.stateSerial + 1 || (backendInstance(observedState)?.attributes?.arn || backendInstance(observedState)?.attributes?.id) !== existing.existingRevisionArn) throw new Error("Forward recovery replay observed state drift after reconciliation.");
       return { incidentIdentity, imported: false, phase: existing.phase, registrationCalls: 0, importCalls: 0, state: observedState, readback, census: censusEvidence };
     }
     if (existing.phase === "IMPORTING") {
       if (!importRetryState) {
-        const afterBinding = assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, after: observedState });
+        const afterBinding = assertForwardImportedState({ beforeStateSha256: existing.stateBeforeSha256, before: stateBefore, after: observedState, expectedBoundImages: expectedImages() });
         if (existing.stateAfterImportSha256 !== undefined && existing.stateAfterImportSha256 !== afterBinding.stateSha256) throw new Error("Forward recovery importing checkpoint hash does not match the authenticated imported state.");
         const recoveredEvidence = persistForwardRecoveryEvidence(buildForwardRecoveryEvidence(expected, afterBinding.stateSha256), evidence);
         journal.write({ ...existing, ...recoveredEvidence, schemaVersion: STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.schemaVersion, stateAfterImportSha256: afterBinding.stateSha256, phase: "COMPLETED" });
@@ -497,7 +611,7 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   if (latestCensusEvidence.censusSha256 !== censusEvidence.censusSha256) throw new Error("Forward recovery ECS census changed before the governed import boundary.");
   const latestReadback = assertForwardRevisionReadback({ readback: await describe(STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.existingRevisionArn), expectedFingerprint: fingerprint, imageReleaseSha: existing?.imageReleaseSha || bindings.imageReleaseSha, backendImage });
   if (latestReadback.fingerprint !== readback.fingerprint) throw new Error("Forward recovery canonical :9 readback changed before the governed import boundary.");
-  if (typeof validateImportBindings === "function") validateImportBindings();
+  validateMutationBindings();
   const prepared = journal.read();
   journal.write({ ...prepared, ...expected, phase: "IMPORTING", importCalls: 1, importMayHaveOccurred: true, importAttemptCount: importRetryState ? 2 : 1, ...(importRetryState ? { importRetryAuthorized: true } : {}) });
   try {
@@ -515,7 +629,7 @@ export async function runExistingRevisionForwardRecovery({ bindings, sourceSha, 
   }
   interruptAt?.("AFTER_IMPORT");
   const after = await readState();
-  const afterBinding = assertForwardStateAfterImport(beforeState, after);
+  const afterBinding = assertForwardStateAfterImport(beforeState, after, { expectedBoundImages: expectedImages() });
   interruptAt?.("AFTER_POST_IMPORT_VERIFICATION");
   const completedEvidence = persistForwardRecoveryEvidence(buildForwardRecoveryEvidence(expected, afterBinding.stateSha256), evidence);
   interruptAt?.("AFTER_EVIDENCE_PERSISTED");

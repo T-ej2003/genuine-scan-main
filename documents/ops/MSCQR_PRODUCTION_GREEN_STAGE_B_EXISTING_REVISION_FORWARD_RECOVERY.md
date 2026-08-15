@@ -25,11 +25,17 @@ or Terraform apply capability. Its only mutation seam is one canonical Terraform
 exact `:9` ARN. Before import it binds the current state, census, image authorization, source
 provenance, semantic fingerprint, and incident identity. After import it verifies lineage, the
 expected serial transition, exact `:9` ownership at the governed address, and that no unrelated
-state changed. Both comparison states use the shared reviewed Terraform checkpoint normalizer,
-limited to the approved Terraform-generated version and `check_results` metadata. The CLI validates
+state changed. Import finalization additionally permits only the reproduced Terraform 1.15.8
+effects: the exact `task_definition_arns.backend` value, the five authenticated `bound_images`
+values, all-pass pre-import `check_results` becoming post-import `null`, and `true`
+`create_before_destroy` metadata appearing only on the four `aws_cloudwatch_log_group.stage_b`
+instances. The shared reviewed Terraform checkpoint normalizer remains the only generic normalizer;
+all other state/output/provider/resource differences fail closed. The CLI validates
 the reviewed S3 backend metadata and `default` workspace before
 the first remote state pull and again immediately before import; it also re-reads the remote state
-at that boundary. The journal remains `IMPORTING` until post-import state is verified and
+at that boundary. An `IMPORTING` or terminal replay must also receive the authenticated pre-import
+state snapshot via `--state-before`, bound to the journal's `stateBeforeSha256`, before any
+derived-output compatibility is accepted. The journal remains `IMPORTING` until post-import state is verified and
 deterministic evidence is durably written and read back. A completed forward journal is replay-safe
 and performs no second import: its evidence is parsed, canonicalized, hash-checked against the
 journal, and then treated as immutable. If the executor checkout advances after an import has
