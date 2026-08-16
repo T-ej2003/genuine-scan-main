@@ -6,7 +6,7 @@ import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { assertImageEvidence, imageEvidenceSha256 } from "./production-green-stage-b-image-evidence.mjs";
 import {
   deriveStageBImageImpactReport,
-  assertProductionImageReuseResult,
+  assertStageBImageReuseResult,
 } from "./validate-stage-b-image-reuse.mjs";
 import {
   assertStageBArtifactPath,
@@ -58,7 +58,7 @@ export function assertCanonicalImageReuseEvidence(imageEvidence, reuseEvidence, 
   if (reuseEvidence.imageReleaseSha !== imageEvidence.imageReleaseSha || reuseEvidence.toolingSha !== sourceSha) throw new Error("Image-reuse evidence is not bound to the image release and protected-main SHA.");
   const derived = deriveStageBImageImpactReport({ imageReleaseSha: imageEvidence.imageReleaseSha, toolingSha: sourceSha });
   if (canonicalSha256(reuseEvidence) !== canonicalSha256(derived)) throw new Error("Image-reuse evidence does not match the independently derived git impact report.");
-  assertProductionImageReuseResult({ ...derived, imageBuildInputsChanged: derived.newImagesRequired });
+  assertStageBImageReuseResult({ ...derived, imageBuildInputsChanged: derived.newImagesRequired });
   return derived;
 }
 

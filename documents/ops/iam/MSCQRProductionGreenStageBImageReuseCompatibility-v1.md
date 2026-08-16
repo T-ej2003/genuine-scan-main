@@ -23,6 +23,15 @@ The report contains `comparisonBaseSha` for the image release, the complete clas
 diff, and a SHA256 of the tooling input tree with the JSON and Markdown evidence excluded.
 Those exclusions break the evidence self-reference and make regeneration deterministic. Runtime validation
 recomputes the exact diff and tree digest and requires an exact report match. The
+trusted-workflow proof also fingerprints the complete effective publication inputs: workflow
+inputs, inherited publication environment, release checkout, dependency installation, Node
+setup/cache, AWS publication role, publisher command, working directory, shell, and strategy.
+The proof covers the publisher's image-affecting environment contract, including platform,
+ECR targets, Dockerfiles, build contexts, source/build labels, and verified RLS bindings;
+unknown publication-looking inherited inputs fail closed while unrelated environment values
+remain outside the image publication fingerprint.
+Runtime validation
+recomputes that fingerprint and requires the release and protected-tooling values to match. The
 production wrapper separately authenticates the exact pair by requiring
 `HEAD == tooling_sha == origin/main`; CI review mode validates a proposed tree without
 claiming it is protected main. Any future image-build input change invalidates the report

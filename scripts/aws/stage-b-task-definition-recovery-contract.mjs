@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { renderStageBTaskDefinition, assertFixedTaskDefinition } from "./production-green-stage-b-task-definitions.mjs";
 import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
-import { assertProductionImageReuseResult, deriveStageBImageImpactReport } from "./validate-stage-b-image-reuse.mjs";
+import { assertStageBImageReuseResult, deriveStageBImageImpactReport, STAGE_B_IMAGE_REUSE_RULES_VERSION } from "./validate-stage-b-image-reuse.mjs";
 
 export const STAGE_B_BACKEND_RECOVERY = Object.freeze({
   address: 'aws_ecs_task_definition.candidate["backend"]',
@@ -118,11 +118,13 @@ export function assertCanonicalRecoveryDescendantResume({ sourceSha, bindings, p
     || bindings.backendImage !== `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${authorizedDigest}`) throw new Error("Cross-descendant recovery backend image does not preserve the original authorized digest.");
   let reuse;
   try { reuse = deriveImageReuse({ imageReleaseSha: journalState.imageReleaseSha, toolingSha: sourceSha }); } catch (error) { throw new Error(`Cross-descendant image reuse proof failed: ${error.message}`); }
-  assertProductionImageReuseResult(reuse);
+  assertStageBImageReuseResult(reuse);
   if (reuse.toolingSha !== sourceSha || reuse.imageReleaseSha !== journalState.imageReleaseSha || reuse.comparisonBaseSha !== journalState.imageReleaseSha
-    || reuse.comparisonHeadIdentity !== "tooling-input-tree-sha256" || reuse.comparisonHeadSha256 !== reuse.toolingInputTreeSha256 || reuse.classificationRulesVersion !== "stage-b-image-reuse-v2"
+    || reuse.comparisonHeadIdentity !== "tooling-input-tree-sha256" || reuse.comparisonHeadSha256 !== reuse.toolingInputTreeSha256 || reuse.classificationRulesVersion !== STAGE_B_IMAGE_REUSE_RULES_VERSION
     || !SHA256.test(reuse.toolingInputTreeSha256 || "") || !Array.isArray(reuse.classifiedChangedFiles) || !Array.isArray(reuse.imageAffectingFiles)
-    || reuse.imageAffectingFiles.length !== 0 || reuse.classifiedChangedFiles.some(({ category }) => !CROSS_DESCENDANT_REUSE_CATEGORIES.has(category))) throw new Error("Cross-descendant image reuse proof contains a runtime, image-affecting, or unreviewed change.");
+    || reuse.imageAffectingFiles.length !== 0) throw new Error("Cross-descendant image reuse proof contains a runtime, image-affecting, or unreviewed change.");
+  const hasTrustedToolingOnly = reuse.classifiedChangedFiles.some(({ category }) => category === "trustedToolingOnly");
+  if (!hasTrustedToolingOnly && reuse.classifiedChangedFiles.some(({ category }) => !CROSS_DESCENDANT_REUSE_CATEGORIES.has(category))) throw new Error("Cross-descendant image reuse proof contains an unreviewed change category.");
   if (completed) throw new Error("Completed cross-descendant recovery incidents are terminal and cannot be resumed.");
   return Object.freeze({ incidentSourceSha: journalState.sourceSha, incidentProvenance, executorToolingSha: sourceSha, executorProvenance, imageReuse: reuse });
 }

@@ -3,14 +3,14 @@
   "identityModel": "tooling-input-tree-sha256",
   "imageReleaseSha": "29bf92a14d5e832575009bd76b16886feff62cbd",
   "comparisonBaseSha": "29bf92a14d5e832575009bd76b16886feff62cbd",
-  "toolingSha": "a736715f84e2a47292035156a724aa76628f9ea1",
+  "toolingSha": "b2b1017c2328b6f1a053934af84d97a05bfcd3a8",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
   "comparisonHeadSha256": "a2bcf00ea3bbfa636e41843ffb1f17c744fc077c055c772c30aecb2322395802",
   "toolingInputTreeSha256": "a2bcf00ea3bbfa636e41843ffb1f17c744fc077c055c772c30aecb2322395802",
   "imageReuseCompatible": true,
   "imageBuildInputsChanged": false,
   "classificationRulesVersion": "stage-b-image-reuse-v3",
-  "generatedAt": "2026-08-16T02:30:58+01:00",
+  "generatedAt": "2026-08-16T02:31:11+01:00",
   "generatorVersion": "validate-stage-b-image-reuse@3",
   "classifiedChangedFiles": [
     {
@@ -288,5 +288,16 @@
     ".github/workflows/production-green-stage-b-image-build.yml"
   ],
   "imageAffectingFiles": [],
-  "reason": "The reviewed tooling input tree contains no image-affecting changes relative to the image release; the Stage B build workflow is accepted only through the authenticated release-source/trusted-tooling separation contract."
+  "reason": "The reviewed tooling input tree contains no image-affecting changes relative to the image release.",
+  "publicationInputFingerprint": "836f3d2507790909eee093e33b3a7c8c6af33f643e37a7bcc02a64b4e18c4610",
+  "trustedWorkflowProof": {
+    "schemaVersion": 1,
+    "assertion": "STAGE_B_TRUSTED_WORKFLOW_PUBLICATION_INPUTS_V1",
+    "workflowPath": ".github/workflows/production-green-stage-b-image-build.yml",
+    "releaseFingerprint": "836f3d2507790909eee093e33b3a7c8c6af33f643e37a7bcc02a64b4e18c4610",
+    "toolingFingerprint": "836f3d2507790909eee093e33b3a7c8c6af33f643e37a7bcc02a64b4e18c4610",
+    "releaseCheckout": "release-source",
+    "publisherSource": "release-source",
+    "trustedSigningSource": "$GITHUB_WORKSPACE"
+  }
 }
