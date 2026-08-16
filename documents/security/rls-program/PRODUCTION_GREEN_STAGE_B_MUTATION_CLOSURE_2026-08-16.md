@@ -30,9 +30,11 @@ canonical backend, default workspace, canonical tfvars, and the hashes of the
 saved plan, plan JSON, approval, permission evidence, and mutation manifest.
 Ambient `TF_CLI_ARGS` and every `TF_CLI_ARGS_*` key are rejected. Apply consumes
 only the approved saved plan; no target, replace, refresh-only, or re-plan path
-is accepted. An immutable private `APPLYING` marker is written before Terraform
-starts. Its existence makes a second apply for the same artifact set fail
-closed.
+is accepted. The canonical executable-binding SHA256 is also the apply-attempt
+identity. Immediately before Terraform starts, the wrapper exclusively creates
+`$HOME/.mscqr/production-green-stage-b/apply-attempts/<artifact-set-sha256>.json`.
+The CLI cannot select or replace that path. Existing or concurrently reserved
+identity files make a second apply for the same artifact set fail closed.
 
 ## Barrier 2 expected operations
 

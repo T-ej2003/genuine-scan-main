@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -31,7 +32,7 @@ import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage
 import { assertStageBTerraformWorkspace } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBDeploymentCapabilityGraph } from "./aws/generate-production-green-stage-b-capability-graph.mjs";
 import { assertStageBRecoveryProvenance, assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
-import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./aws/stage-b-artifact-contract.mjs";
+import { assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileExclusive } from "./aws/stage-b-artifact-contract.mjs";
 import { assertStageBPlanApprovedBinding } from "./aws/stage-b-plan-approval-contract.mjs";
 import { assertRecoveryOnlyPlan, assertVerifiedStageBRecovery } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
 import { captureStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs";
@@ -58,9 +59,10 @@ function requireOption(argv, option) {
 }
 
 export function parseCli(argv) {
+  if (argv.includes("--apply-attempt")) throw new Error("Stage B apply attempt identity is derived from the approved artifact set; --apply-attempt is forbidden.");
   const closureMode = requireOption(argv, "--closure-mode");
   if (closureMode !== "production") throw new Error("Stage B apply requires --closure-mode production.");
-  const parsed = {
+  return {
     closureMode,
     planPath: requireOption(argv, "--plan"),
     planJsonPath: requireOption(argv, "--plan-json"),
@@ -99,8 +101,19 @@ export function parseCli(argv) {
     toolingTreeSha256: requireOption(argv, "--tooling-tree-sha256"),
     verifyOnly: argv.includes("--verify-only"),
   };
-  parsed.applyAttemptPath = parsed.verifyOnly ? readOption(argv, "--apply-attempt") : requireOption(argv, "--apply-attempt");
-  return parsed;
+}
+
+export const stageBApplyArtifactSetIdentity = (bindings) => sha256(Buffer.from(canonicalizeJson(bindings)));
+
+export function stageBApplyAttemptPath({ artifactSetIdentity, homeDirectory = os.homedir() } = {}) {
+  if (!/^[a-f0-9]{64}$/.test(artifactSetIdentity || "")) throw new Error("Stage B apply artifact-set identity is malformed.");
+  const directories = [".mscqr", "production-green-stage-b", "apply-attempts"];
+  let directory = path.resolve(homeDirectory);
+  for (const segment of directories) {
+    directory = path.join(directory, segment);
+    ensureStageBPrivateDirectory({ directory, repositoryRoot: root, create: true, label: "Stage B canonical apply-attempt directory" });
+  }
+  return path.join(directory, `${artifactSetIdentity}.json`);
 }
 
 export function assertStageBApplyTerraformEnvironment(env = {}) {
@@ -311,11 +324,13 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   if (finalBindings.planSha256 !== artifacts.planSha256 || finalBindings.savedPlanSha256 !== artifacts.savedPlanSha256 || finalBindings.approvalSha256 !== artifacts.planApprovalReportSha256 || finalBindings.permissionEvidenceSha256 !== artifacts.permissionReportSha256) throw new Error("Stage B executable artifacts changed after approval.");
   const tfvarsBinding = JSON.parse(fs.readFileSync(artifacts.tfvarsBindingReportPath, "utf8"));
   if (finalBindings.tfvarsSha256 !== tfvarsBinding.tfvarsSha256) throw new Error("Stage B tfvars changed after approval.");
-  const executableAuditSha256 = sha256(Buffer.from(canonicalizeJson(finalBindings)));
-  writeStageBPrivateFileAtomic({ filePath: artifacts.applyAttemptPath, repositoryRoot: root, label: "Stage B apply attempt", bytes: Buffer.from(`${JSON.stringify({ schemaVersion: 1, kind: "MSCQRProductionGreenStageBApplyAttempt", phase: "APPLYING", applyCalls: 1, applyMayHaveOccurred: true, executableAuditSha256, ...finalBindings }, null, 2)}\n`) });
+  const executableAuditSha256 = stageBApplyArtifactSetIdentity(finalBindings);
+  const applyAttemptPath = stageBApplyAttemptPath({ artifactSetIdentity: executableAuditSha256, homeDirectory: effectiveDeps.homeDirectory?.() || os.homedir() });
+  const reserveApplyAttempt = effectiveDeps.reserveApplyAttempt || ((filePath, bytes) => writeStageBPrivateFileExclusive({ filePath, bytes, repositoryRoot: root, label: "Stage B apply attempt" }));
+  reserveApplyAttempt(applyAttemptPath, Buffer.from(`${JSON.stringify({ schemaVersion: 1, kind: "MSCQRProductionGreenStageBApplyAttempt", phase: "APPLYING", applyCalls: 1, applyMayHaveOccurred: true, artifactSetIdentity: executableAuditSha256, createdAt: effectiveDeps.now?.() || new Date().toISOString(), ...finalBindings }, null, 2)}\n`));
   const result = effectiveDeps.apply(artifacts.planPath);
   if (result?.status !== undefined && result.status !== 0) throw new Error("Terraform apply failed; stop without retry.");
-  return { status: "applied-saved-plan", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, mutationManifestSha256: verified.mutationManifestSha256, executableAuditSha256, applyCalls: 1, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
+  return { status: "applied-saved-plan", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, mutationManifestSha256: verified.mutationManifestSha256, executableAuditSha256, applyAttemptPath, applyCalls: 1, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

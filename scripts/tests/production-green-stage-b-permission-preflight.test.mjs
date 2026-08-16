@@ -4,7 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, runApply, showSavedPlan } from "../apply-production-green-stage-b.mjs";
+import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, runApply, showSavedPlan, stageBApplyArtifactSetIdentity } from "../apply-production-green-stage-b.mjs";
+import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import {
   canonicalizeJson,
   assertPermissionReportPlanBinding,
@@ -1660,7 +1661,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     terraformConfiguration: fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8"),
   });
   writePermissionPair(permissionPath, permissionSignaturePath, report);
-  return { directory, applyAttemptPath: path.join(directory, "apply-attempt.json"), planPath, planJsonPath, canonicalPlanJsonPath, planApprovalReportPath, planApprovalReportSha256: crypto.createHash("sha256").update(approvalBytes).digest("hex"), auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex"), permissionReportSignatureSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionSignaturePath)).digest("hex"), imageEvidencePath, imageEvidenceSha256: canonicalImageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256: crypto.createHash("sha256").update(fs.readFileSync(refreshReportPath)).digest("hex"), toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), toolingTreeSha256: "e".repeat(64) };
+  return { directory, planPath, planJsonPath, canonicalPlanJsonPath, planApprovalReportPath, planApprovalReportSha256: crypto.createHash("sha256").update(approvalBytes).digest("hex"), auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex"), permissionReportSignatureSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionSignaturePath)).digest("hex"), imageEvidencePath, imageEvidenceSha256: canonicalImageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256: crypto.createHash("sha256").update(fs.readFileSync(refreshReportPath)).digest("hex"), toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), toolingTreeSha256: "e".repeat(64) };
 }
 
 const planBoundPermissionInput = (fixture) => {
@@ -1739,7 +1740,6 @@ const wrapperArgs = (fixture, verifyOnly = false) => [
   "--tooling-sha", "b".repeat(40), "--image-release-sha", "a".repeat(40), "--tfvars", fixture.tfvarsPath, "--tfvars-binding-report", fixture.tfvarsBindingReportPath, "--tfvars-binding-report-sha256", fixture.tfvarsBindingReportSha256, "--tooling-tree-sha256", fixture.toolingTreeSha256,
   "--refresh-report", fixture.refreshReportPath, "--refresh-report-sha256", fixture.refreshReportSha256,
   "--plan-sha256", fixture.planHash, "--audit-sha256", fixture.auditHash, "--saved-plan-sha256", fixture.savedHash, "--canonical-plan-json-sha256", fixture.canonicalHash,
-  ...(verifyOnly ? [] : ["--apply-attempt", fixture.applyAttemptPath]),
 ];
 const rebindApprovalAudit = (fixture, auditBytes) => {
   const approval = JSON.parse(fs.readFileSync(fixture.planApprovalReportPath));
@@ -1797,6 +1797,7 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
       verifyPermissionSignature: () => true,
       verifyImageEvidence: fixture.verifyImageEvidence,
       getBackendMetadata: () => structuredClone(initializedBackendMetadata),
+      homeDirectory: () => fixture.directory,
       apply: (planPath) => {
         applyCalls.push(planPath);
         return { status: 0 };
@@ -1843,8 +1844,71 @@ test("apply attempt marker makes a second apply unreachable", () => {
   const first = validRealApplyInput(fixture);
   assert.equal(runApply(first).applyCalls, 1);
   const second = validRealApplyInput(fixture);
-  assert.throws(() => runApply(second), /Refusing to overwrite existing|must be a new/);
+  assert.throws(() => runApply(second), /EEXIST|exist/i);
   assert.deepEqual(second.applyCalls, []);
+});
+
+test("caller-selected alternate apply-attempt paths cannot change the canonical reservation", () => {
+  const fixture = createValidStageBApplyFixture();
+  assert.equal(runApply(validRealApplyInput(fixture)).applyCalls, 1);
+  for (const alternate of [path.join(fixture.directory, "alternate.json"), path.join(fixture.directory, "missing", "alternate.json"), "../escape.json", "/private/tmp/alternate.json"]) {
+    const replay = validRealApplyInput(fixture);
+    replay.argv.push("--apply-attempt", alternate);
+    assert.throws(() => runApply(replay), /--apply-attempt is forbidden/);
+    assert.deepEqual(replay.applyCalls, []);
+  }
+});
+
+test("interrupted and successful applies leave the canonical artifact set permanently consumed", () => {
+  for (const outcome of ["interrupted", "successful"]) {
+    const fixture = createValidStageBApplyFixture();
+    const first = validRealApplyInput(fixture);
+    if (outcome === "interrupted") first.deps.apply = () => { throw new Error("simulated interruption"); };
+    if (outcome === "interrupted") assert.throws(() => runApply(first), /simulated interruption/);
+    else assert.equal(runApply(first).applyCalls, 1);
+    const replay = validRealApplyInput(fixture);
+    assert.throws(() => runApply(replay), /EEXIST|exist/i);
+    assert.deepEqual(replay.applyCalls, []);
+  }
+});
+
+test("artifact-set identity changes only with approved executable bindings", () => {
+  const baseline = { protectedMainSha: "a".repeat(40), planSha256: "b".repeat(64), savedPlanSha256: "c".repeat(64), tfvarsSha256: "d".repeat(64), approvalSha256: "e".repeat(64), permissionEvidenceSha256: "f".repeat(64), mutationManifestSha256: "1".repeat(64), workspace: "default", backendSha256: "2".repeat(64) };
+  const identity = stageBApplyArtifactSetIdentity(baseline);
+  assert.equal(stageBApplyArtifactSetIdentity(structuredClone(baseline)), identity);
+  for (const [field, value] of [["planSha256", "3".repeat(64)], ["mutationManifestSha256", "4".repeat(64)], ["protectedMainSha", "5".repeat(40)]]) {
+    assert.notEqual(stageBApplyArtifactSetIdentity({ ...baseline, [field]: value }), identity);
+  }
+});
+
+test("exclusive apply-attempt reservation admits exactly one contender", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-apply-exclusive-"));
+  const filePath = path.join(directory, "attempt.json");
+  const reserve = () => writeStageBPrivateFileExclusive({ filePath, bytes: Buffer.from("{}\n"), repositoryRoot: process.cwd() });
+  const results = await Promise.allSettled([Promise.resolve().then(reserve), Promise.resolve().then(reserve)]);
+  assert.equal(results.filter(({ status }) => status === "fulfilled").length, 1);
+  assert.equal(results.filter(({ status }) => status === "rejected").length, 1);
+});
+
+test("canonical attempt path rejects symlink substitution and verify-only reserves nothing", () => {
+  const fixture = createValidStageBApplyFixture();
+  assert.equal(runApply(validApplyInput(fixture)).status, "ready-to-apply");
+  assert.equal(fs.existsSync(path.join(fixture.directory, ".mscqr")), false);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-attempt-outside-"));
+  fs.symlinkSync(outside, path.join(fixture.directory, ".mscqr"));
+  const input = validRealApplyInput(fixture);
+  assert.throws(() => runApply(input), /non-symlink directory/);
+  assert.deepEqual(input.applyCalls, []);
+});
+
+test("reservation failure occurs before Terraform spawn", () => {
+  const fixture = createValidStageBApplyFixture();
+  const input = validRealApplyInput(fixture);
+  const events = [];
+  input.deps.reserveApplyAttempt = () => { events.push("reserve"); throw new Error("reservation failed"); };
+  input.deps.apply = () => { events.push("apply"); return { status: 0 }; };
+  assert.throws(() => runApply(input), /reservation failed/);
+  assert.deepEqual(events, ["reserve"]);
 });
 
 test("apply rejects ambient Terraform CLI argument injection before artifacts or mutation", () => {
