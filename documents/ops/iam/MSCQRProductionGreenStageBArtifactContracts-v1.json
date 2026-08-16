@@ -601,6 +601,25 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "apply-attempt",
+      "kind": "file",
+      "producer": "scripts/apply-production-green-stage-b.mjs:runApply",
+      "consumers": [
+        "scripts/apply-production-green-stage-b.mjs",
+        "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_MUTATION_CLOSURE_2026-08-16.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "apply-attempt",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "image-evidence",
       "kind": "file",
       "producer": "scripts/aws/production-green-stage-b-image-evidence.mjs:runCli",

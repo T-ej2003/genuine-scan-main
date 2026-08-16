@@ -10,6 +10,7 @@ import {
   assertPermissionReportPlanBinding,
   assertPermissionEvaluationBindings,
   assertTaskDefinitionRegistrationContexts,
+  createStageBMutationManifest,
   deriveRequiredEvaluations,
   resolveStageBPermissionProfile,
   PERMISSION_REPORT_SIGNING_ALGORITHM,
@@ -247,6 +248,38 @@ test("imported backend normalization requires all other reviewed registration co
   const extraNoOp = structuredClone(imported);
   extraNoOp.resource_changes.push({ address: "aws_ecs_task_definition.unbound", type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: {}, after: {} } });
   assert.throws(() => assertTaskDefinitionRegistrationContexts(extraNoOp, manifest, { terraformConfiguration }), /unreviewed task-definition change/);
+});
+
+test("imported backend mutation manifest exactly binds the real 1/11/4 profile", () => {
+  const imported = importedBackendPlan();
+  for (const change of imported.resource_changes.filter(({ type, address }) => type === "aws_ecs_task_definition" && Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, address) && address !== 'aws_ecs_task_definition.candidate["backend"]')) {
+    const family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address];
+    const after = { ...structuredClone(change.change.after), family, network_mode: "awsvpc", runtime_platform: [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }], volume: [], ipc_mode: null, pid_mode: null, container_definitions: JSON.stringify([{ name: "worker", image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"a".repeat(64)}`, privileged: false }]) };
+    change.mode = "managed";
+    change.change = {
+      ...change.change,
+      actions: ["create", "delete"],
+      before: { ...after, arn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:5`, id: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:5`, container_definitions: after.container_definitions.replace(`sha256:${"a".repeat(64)}`, `sha256:${"b".repeat(64)}`) },
+      after,
+      replace_paths: [["container_definitions"]],
+    };
+  }
+  imported.resource_changes.push({ address: "aws_iam_role_policy.backend_ecs_exec", mode: "managed", type: "aws_iam_role_policy", change: { actions: ["create"], before: null, after: { role: "mscqr-production-rls-green-backend-task", name: "mscqr-production-rls-green-backend-ecs-exec" } } });
+  const mutationManifest = createStageBMutationManifest(imported, manifest, {
+    planProfile: "IMPORTED_BACKEND_METADATA_NORMALIZATION",
+    planSha256: "1".repeat(64), savedPlanSha256: "2".repeat(64), canonicalPlanJsonSha256: "3".repeat(64), planApprovalReportSha256: "4".repeat(64), toolingSha: "5".repeat(40), terraformConfiguration,
+  });
+  const actionCounts = mutationManifest.resources.reduce((counts, { actions }) => ({ ...counts, [JSON.stringify(actions)]: (counts[JSON.stringify(actions)] || 0) + 1 }), {});
+  assert.equal(actionCounts[JSON.stringify(["create"])], 1);
+  assert.equal(actionCounts[JSON.stringify(["create", "delete"])], 11);
+  assert.equal(actionCounts[JSON.stringify(["update"])], 4);
+  const backend = mutationManifest.resources.find(({ address }) => address === 'aws_ecs_task_definition.candidate["backend"]');
+  assert.equal(backend.expected_aws_mutation, false);
+  assert.deepEqual(backend.required_permissions, []);
+  assert.equal(mutationManifest.resources.filter(({ classification }) => classification === "stage-b-task-definition-registration").length, 11);
+  assert.ok(/^[a-f0-9]{64}$/.test(mutationManifest.mutationManifestSha256));
+  imported.resource_changes.find(({ type, address }) => type === "aws_ecs_task_definition" && address !== 'aws_ecs_task_definition.candidate["backend"]' && Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, address)).change.actions = ["delete", "create"];
+  assert.throws(() => createStageBMutationManifest(imported, manifest, { planProfile: "IMPORTED_BACKEND_METADATA_NORMALIZATION", terraformConfiguration }), /exact create-before-delete actions/);
 });
 const now = "2026-08-01T12:00:00.000Z";
 const clearCloudTrail = () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] });
@@ -1409,6 +1442,8 @@ test("CLI and programmatic preflight paths produce the same deterministic report
   const cliReport = JSON.parse(fs.readFileSync(outputPath, "utf8"));
   delete cliReport.planApprovalReportSha256;
   delete direct.planApprovalReportSha256;
+  cliReport.planCapabilities.mutationManifest = { ...cliReport.planCapabilities.mutationManifest, planApprovalReportSha256: undefined, mutationManifestSha256: undefined };
+  direct.planCapabilities.mutationManifest = { ...direct.planCapabilities.mutationManifest, planApprovalReportSha256: undefined, mutationManifestSha256: undefined };
   assert.deepEqual(cliReport, direct);
 });
 
@@ -1615,8 +1650,17 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   approvalBytes = Buffer.from(`${JSON.stringify({ ...approval, refreshReportSha256: actualRefreshReportSha256 }, null, 2)}\n`);
   writePrivate(planApprovalReportPath, approvalBytes);
   report.planApprovalReportSha256 = crypto.createHash("sha256").update(approvalBytes).digest("hex");
+  report.planCapabilities.mutationManifest = createStageBMutationManifest(JSON.parse(fs.readFileSync(planJsonPath, "utf8")), manifest, {
+    planProfile: report.planProfile,
+    planSha256: report.planSha256,
+    savedPlanSha256: report.savedPlanSha256,
+    canonicalPlanJsonSha256: report.canonicalPlanJsonSha256,
+    planApprovalReportSha256: report.planApprovalReportSha256,
+    toolingSha: report.toolingSha,
+    terraformConfiguration: fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8"),
+  });
   writePermissionPair(permissionPath, permissionSignaturePath, report);
-  return { directory, planPath, planJsonPath, canonicalPlanJsonPath, planApprovalReportPath, planApprovalReportSha256: crypto.createHash("sha256").update(approvalBytes).digest("hex"), auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex"), permissionReportSignatureSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionSignaturePath)).digest("hex"), imageEvidencePath, imageEvidenceSha256: canonicalImageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256: crypto.createHash("sha256").update(fs.readFileSync(refreshReportPath)).digest("hex"), toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), toolingTreeSha256: "e".repeat(64) };
+  return { directory, applyAttemptPath: path.join(directory, "apply-attempt.json"), planPath, planJsonPath, canonicalPlanJsonPath, planApprovalReportPath, planApprovalReportSha256: crypto.createHash("sha256").update(approvalBytes).digest("hex"), auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex"), permissionReportSignatureSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionSignaturePath)).digest("hex"), imageEvidencePath, imageEvidenceSha256: canonicalImageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256: crypto.createHash("sha256").update(fs.readFileSync(refreshReportPath)).digest("hex"), toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), toolingTreeSha256: "e".repeat(64) };
 }
 
 const planBoundPermissionInput = (fixture) => {
@@ -1695,6 +1739,7 @@ const wrapperArgs = (fixture, verifyOnly = false) => [
   "--tooling-sha", "b".repeat(40), "--image-release-sha", "a".repeat(40), "--tfvars", fixture.tfvarsPath, "--tfvars-binding-report", fixture.tfvarsBindingReportPath, "--tfvars-binding-report-sha256", fixture.tfvarsBindingReportSha256, "--tooling-tree-sha256", fixture.toolingTreeSha256,
   "--refresh-report", fixture.refreshReportPath, "--refresh-report-sha256", fixture.refreshReportSha256,
   "--plan-sha256", fixture.planHash, "--audit-sha256", fixture.auditHash, "--saved-plan-sha256", fixture.savedHash, "--canonical-plan-json-sha256", fixture.canonicalHash,
+  ...(verifyOnly ? [] : ["--apply-attempt", fixture.applyAttemptPath]),
 ];
 const rebindApprovalAudit = (fixture, auditBytes) => {
   const approval = JSON.parse(fs.readFileSync(fixture.planApprovalReportPath));
@@ -1719,7 +1764,7 @@ const createValidStageBApplyFixture = (options = {}) => ({
 
 const validApplyInput = (fixture) => ({
   argv: wrapperArgs(fixture, true),
-  env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+  env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
   deps: {
     getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test",
     getProtectedMainCheckout: () => fixture.protectedMainCheckout,
@@ -1738,7 +1783,7 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
   let checkoutReadCount = 0;
   return {
     argv: wrapperArgs(fixture),
-    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
     deps: {
       getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test",
       getProtectedMainCheckout: () => {
@@ -1791,6 +1836,35 @@ test("valid non-verify-only apply path calls the injected apply stub exactly onc
   assert.equal(runApply(input).status, "applied-saved-plan");
   assert.equal(input.checkoutReadCount, 2);
   assert.deepEqual(input.applyCalls, [fixture.planPath]);
+});
+
+test("apply attempt marker makes a second apply unreachable", () => {
+  const fixture = createValidStageBApplyFixture();
+  const first = validRealApplyInput(fixture);
+  assert.equal(runApply(first).applyCalls, 1);
+  const second = validRealApplyInput(fixture);
+  assert.throws(() => runApply(second), /Refusing to overwrite existing|must be a new/);
+  assert.deepEqual(second.applyCalls, []);
+});
+
+test("apply rejects ambient Terraform CLI argument injection before artifacts or mutation", () => {
+  const fixture = createValidStageBApplyFixture();
+  const input = validRealApplyInput(fixture);
+  input.env.TF_CLI_ARGS_apply = "-target=aws_ecs_task_definition.candidate[backend]";
+  assert.throws(() => runApply(input), /refuses TF_CLI_ARGS/);
+  assert.deepEqual(input.applyCalls, []);
+});
+
+test("apply rejects a signed permission report with a different mutation manifest", () => {
+  const fixture = createValidStageBApplyFixture();
+  const report = JSON.parse(fs.readFileSync(fixture.permissionReportPath, "utf8"));
+  report.planCapabilities.mutationManifest.resources[0].actions = ["delete", "create"];
+  writePermissionPair(fixture.permissionReportPath, fixture.permissionReportSignaturePath, report);
+  fixture.permissionReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportPath)).digest("hex");
+  fixture.permissionReportSignatureSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportSignaturePath)).digest("hex");
+  const input = validRealApplyInput(fixture);
+  assert.throws(() => runApply(input), /mutation manifest is incomplete or stale/);
+  assert.deepEqual(input.applyCalls, []);
 });
 
 test("wrapper rejects permission context drift before the injected apply seam", () => {
@@ -1919,7 +1993,7 @@ test("exact binary plan and derived JSON reach the ready-to-apply boundary witho
   const fixture = wrapperFixture();
   const result = runApply({
     argv: wrapperArgs(fixture, true),
-    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
     deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, getBackendMetadata: () => structuredClone(initializedBackendMetadata), apply: () => { throw new Error("apply must not be reached"); } },
   });
   assert.equal(result.status, "ready-to-apply");
@@ -1938,7 +2012,7 @@ test("verify-only and apply reject failed refresh checks before any plan or appl
     let applied = false;
     assert.throws(() => runApply({
       argv: wrapperArgs(fixture, verifyOnly),
-      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
       deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => { throw new Error("plan seam must not be reached"); }, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { applied = true; } },
     }), /check or binding structure/);
     assert.equal(applied, false);
@@ -2021,7 +2095,7 @@ test("verification-only and real apply paths reject an invalid report signature 
   for (const verifyOnly of [true, false]) {
     assert.throws(() => runApply({
       argv: wrapperArgs(fixture, verifyOnly),
-      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
       deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => false, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { throw new Error("apply must not be reached"); } },
     }), /signature verification failed/);
   }
@@ -2057,7 +2131,7 @@ test("wrapper rejects a plan digest mismatch before invoking apply", () => {
     let applied = false;
     assert.throws(() => runApply({
       argv: wrapperArgs(fixture, verifyOnly),
-      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
       deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { applied = true; } },
     }), /plan evidence planJsonSha256 does not match/);
     assert.equal(applied, false);
@@ -2068,7 +2142,7 @@ test("apply wrapper rejects a non-STS caller during verification-only mode", () 
   const fixture = wrapperFixture();
   assert.throws(() => runApply({
     argv: wrapperArgs(fixture, true),
-    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
     deps: { getCaller: () => roleArn, currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, apply: () => { throw new Error("apply must not be reached"); } },
   }), /STS assumed-role/);
 });

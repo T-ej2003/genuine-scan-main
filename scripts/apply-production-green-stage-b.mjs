@@ -19,6 +19,7 @@ import {
   assertStageBPermissionEvidenceKind,
   PLAN_BOUND_PERMISSION_EVIDENCE_KIND,
   assertReleasePolicyEvidence,
+  createStageBMutationManifest,
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./aws/stage-b-evidence-freshness.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
@@ -30,10 +31,11 @@ import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage
 import { assertStageBTerraformWorkspace } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBDeploymentCapabilityGraph } from "./aws/generate-production-green-stage-b-capability-graph.mjs";
 import { assertStageBRecoveryProvenance, assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
-import { assertStageBPrivateFile } from "./aws/stage-b-artifact-contract.mjs";
+import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./aws/stage-b-artifact-contract.mjs";
 import { assertStageBPlanApprovedBinding } from "./aws/stage-b-plan-approval-contract.mjs";
 import { assertRecoveryOnlyPlan, assertVerifiedStageBRecovery } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
 import { captureStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs";
+import { findTerraformCliArgEnvKeys } from "./plan-staging-terraform.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -58,7 +60,7 @@ function requireOption(argv, option) {
 export function parseCli(argv) {
   const closureMode = requireOption(argv, "--closure-mode");
   if (closureMode !== "production") throw new Error("Stage B apply requires --closure-mode production.");
-  return {
+  const parsed = {
     closureMode,
     planPath: requireOption(argv, "--plan"),
     planJsonPath: requireOption(argv, "--plan-json"),
@@ -97,6 +99,16 @@ export function parseCli(argv) {
     toolingTreeSha256: requireOption(argv, "--tooling-tree-sha256"),
     verifyOnly: argv.includes("--verify-only"),
   };
+  parsed.applyAttemptPath = parsed.verifyOnly ? readOption(argv, "--apply-attempt") : requireOption(argv, "--apply-attempt");
+  return parsed;
+}
+
+export function assertStageBApplyTerraformEnvironment(env = {}) {
+  const keys = findTerraformCliArgEnvKeys(env);
+  if (keys.length > 0) throw new Error(`Stage B apply refuses TF_CLI_ARGS* environment variables: ${keys.join(", ")}.`);
+  assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE });
+  if (!env.TF_DATA_DIR) throw new Error("Stage B apply requires the reviewed TF_DATA_DIR.");
+  return true;
 }
 
 export function assertPermissionReport(report, { signatureArtifact, verifySignature = verifyPermissionReportSignature, plan, planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, toolingSha, imageReleaseSha, canonicalImageEvidenceSha256, now = new Date().toISOString() } = {}) {
@@ -216,6 +228,10 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   const derivedCanonicalPlanJsonSha256 = sha256(Buffer.from(derivedCanonical));
   if (derivedCanonical !== approvedCanonical || derivedCanonicalPlanJsonSha256 !== canonicalPlanJsonSha256) throw new Error("Saved binary Terraform plan does not match the approved plan JSON.");
   assertPermissionReport(permissionReport, { signatureArtifact, verifySignature: ({ report, signatureArtifact: artifact }) => verifyPermissionSignature({ report, signatureArtifact: artifact, reportBytes: permissionReportBytes, signatureBytes: permissionReportSignatureBytes, expectedReportFileSha256: permissionReportSha256, expectedSignatureFileSha256: permissionReportSignatureSha256, now }), plan, planSha256, savedPlanSha256, canonicalPlanJsonSha256, manifestSha256, callerArn, toolingSha: boundToolingSha, imageReleaseSha: boundImageReleaseSha, canonicalImageEvidenceSha256: deploymentIdentity.canonicalImageEvidenceSha256, now });
+  const expectedMutationManifest = createStageBMutationManifest(plan, manifest, { planProfile: permissionReport.planProfile, planSha256, savedPlanSha256, canonicalPlanJsonSha256, planApprovalReportSha256, toolingSha: boundToolingSha, terraformConfiguration });
+  if (canonicalizeJson(permissionReport.planCapabilities.mutationManifest) !== canonicalizeJson(expectedMutationManifest)) {
+    throw new Error(`Permission-preflight mutation manifest is incomplete or stale (signed=${permissionReport.planCapabilities.mutationManifest?.mutationManifestSha256 || "missing"}, expected=${expectedMutationManifest.mutationManifestSha256}).`);
+  }
   const resourceClassification = validatePlan(plan, {
     referenceAudit: audit,
     referenceAuditBytes: auditBytes,
@@ -233,7 +249,8 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   const approvedRotationAddresses = new Set(resourceClassification?.taskDefinitions?.currentRotations?.map((rotation) => rotation.address) || []);
   const deleteChanges = (plan.resource_changes || []).filter((change) => (change.change?.actions || []).includes("delete"));
   if (deleteChanges.length !== approvedRotationAddresses.size || deleteChanges.some((change) => !approvedRotationAddresses.has(change.address))) throw new Error("Stage B apply plan contains a delete action outside the exact task-definition rotation contract.");
-  return { plan, audit, permissionReport, imageEvidence, deploymentIdentity, imageBindings, resourceClassification, trustedRecovery, savedPlanSha256, canonicalPlanJsonSha256, derivedPlanJsonSha256: sha256(derivedPlanBytes) };
+  const mutationManifest = permissionReport.planCapabilities.mutationManifest;
+  return { plan, audit, permissionReport, imageEvidence, deploymentIdentity, imageBindings, resourceClassification, trustedRecovery, mutationManifest, mutationManifestSha256: mutationManifest.mutationManifestSha256, savedPlanSha256, canonicalPlanJsonSha256, derivedPlanJsonSha256: sha256(derivedPlanBytes) };
 }
 
 function currentCaller() {
@@ -254,7 +271,7 @@ function readInitializedBackendMetadata(env = process.env) {
 
 export function runApply({ argv = process.argv.slice(2), env = process.env, deps = { getCaller: currentCaller, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) } } = {}) {
   if (env.MSCQR_STAGE_B_APPLY_ENABLED !== "true" || env.MSCQR_STAGE_B_APPLY_CONFIRM !== requiredConfirmation) throw new Error("Stage B apply gate is not enabled.");
-  assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE });
+  assertStageBApplyTerraformEnvironment(env);
   const artifacts = parseCli(argv); const callerArn = deps.getCaller();
   const defaultDeps = { getCaller: currentCaller, showPlan: (planPath) => showSavedPlan(planPath, { env }), validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) };
   const effectiveDeps = { ...defaultDeps, ...deps };
@@ -268,18 +285,37 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
       ? buildStageBProtectedMainCheckoutEvidence({ toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "production" })
       : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
   const verified = assertApplyArtifacts({ ...artifacts, callerArn, protectedMainCheckout, currentHead: protectedMainCheckout.currentHead, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature, verifyImageEvidence: effectiveDeps.verifyImageEvidence });
-  assertStageBTerraformInitializedBackendMetadata(effectiveDeps.getBackendMetadata(env));
-  if (artifacts.verifyOnly) return { status: "ready-to-apply", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
+  const backendMetadata = effectiveDeps.getBackendMetadata(env);
+  assertStageBTerraformInitializedBackendMetadata(backendMetadata);
+  if (artifacts.verifyOnly) return { status: "ready-to-apply", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, mutationManifestSha256: verified.mutationManifestSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
   const applyCheckout = effectiveDeps.getProtectedMainCheckout
     ? effectiveDeps.getProtectedMainCheckout()
     : effectiveDeps.currentHead
       ? buildStageBProtectedMainCheckoutEvidence({ toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "production" })
       : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
   assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout: { ...applyCheckout, mode: "production" }, deploymentIdentity: verified.deploymentIdentity });
+  assertStageBApplyTerraformEnvironment(env);
+  assertStageBTerraformInitializedBackendMetadata(effectiveDeps.getBackendMetadata(env));
   assertStageBTfvarsBinding({ tfvarsPath: artifacts.tfvarsPath, bindingReportPath: artifacts.tfvarsBindingReportPath, bindingReportSha256: artifacts.tfvarsBindingReportSha256, expectedToolingSha: artifacts.toolingSha, expectedToolingTreeSha256: artifacts.toolingTreeSha256, expectedImageReleaseSha: artifacts.imageReleaseSha, expectedImageEvidenceSha256: artifacts.imageEvidenceSha256 });
+  const finalBindings = {
+    planSha256: sha256(fs.readFileSync(artifacts.planJsonPath)),
+    savedPlanSha256: sha256(fs.readFileSync(artifacts.planPath)),
+    approvalSha256: sha256(fs.readFileSync(artifacts.planApprovalReportPath)),
+    permissionEvidenceSha256: sha256(fs.readFileSync(artifacts.permissionReportPath)),
+    tfvarsSha256: sha256(fs.readFileSync(artifacts.tfvarsPath)),
+    mutationManifestSha256: verified.mutationManifestSha256,
+    protectedMainSha: verified.deploymentIdentity.toolingSha,
+    workspace: env.TF_WORKSPACE,
+    backendSha256: sha256(Buffer.from(canonicalizeJson(backendMetadata))),
+  };
+  if (finalBindings.planSha256 !== artifacts.planSha256 || finalBindings.savedPlanSha256 !== artifacts.savedPlanSha256 || finalBindings.approvalSha256 !== artifacts.planApprovalReportSha256 || finalBindings.permissionEvidenceSha256 !== artifacts.permissionReportSha256) throw new Error("Stage B executable artifacts changed after approval.");
+  const tfvarsBinding = JSON.parse(fs.readFileSync(artifacts.tfvarsBindingReportPath, "utf8"));
+  if (finalBindings.tfvarsSha256 !== tfvarsBinding.tfvarsSha256) throw new Error("Stage B tfvars changed after approval.");
+  const executableAuditSha256 = sha256(Buffer.from(canonicalizeJson(finalBindings)));
+  writeStageBPrivateFileAtomic({ filePath: artifacts.applyAttemptPath, repositoryRoot: root, label: "Stage B apply attempt", bytes: Buffer.from(`${JSON.stringify({ schemaVersion: 1, kind: "MSCQRProductionGreenStageBApplyAttempt", phase: "APPLYING", applyCalls: 1, applyMayHaveOccurred: true, executableAuditSha256, ...finalBindings }, null, 2)}\n`) });
   const result = effectiveDeps.apply(artifacts.planPath);
   if (result?.status !== undefined && result.status !== 0) throw new Error("Terraform apply failed; stop without retry.");
-  return { status: "applied-saved-plan", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
+  return { status: "applied-saved-plan", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, mutationManifestSha256: verified.mutationManifestSha256, executableAuditSha256, applyCalls: 1, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
