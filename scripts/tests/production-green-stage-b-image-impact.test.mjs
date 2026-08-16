@@ -53,6 +53,20 @@ test("the two-SHA workflow boundary rejects a release-build command change", () 
   assert.throws(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: readWorkflow }), /publication inputs/);
 });
 
+test("a stale compatibility report cannot authorize the exact two-SHA release", () => {
+  const releaseSha = "29bf92a14d5e832575009bd76b16886feff62cbd";
+  const protectedSha = "a37fe2559f15094494122825a7d7365ca1218120";
+  const files = [{ file: STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH, category: "trustedToolingOnly", imageAffecting: false }];
+  assert.throws(() => imageReuseCompatibility({
+    imageReleaseSha: releaseSha,
+    toolingSha: protectedSha,
+    currentHead: protectedSha,
+    changedFiles: files,
+    toolingInputTreeSha256,
+    reviewedReport: { ...compatibilityReport(files), imageReleaseSha: "c45f2d788ce29c2067bfb4e8afff46f8b1c238ea", comparisonBaseSha: "c45f2d788ce29c2067bfb4e8afff46f8b1c238ea" },
+  }), /different image release SHA/);
+});
+
 test("non-image-affecting pull-request impact is merge-ready for reviewed reuse", () => {
   const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ["scripts/plan-production-green-stage-b.mjs"] });
   assert.equal(report.status, "merge-ready-reuse-compatible");
