@@ -25,7 +25,7 @@ import {
   STAGE_B_EXECUTOR_FOR_EACH_REFERENCES,
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "../aws/stage-b-reference-audit-contract.mjs";
-import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
+import { assertStageBLambdaEnvironmentSize, STAGE_B, stageBLambdaEnvironmentUtf8Bytes } from "../aws/production-green-stage-b-contract.mjs";
 
 const addresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
 const BROKER_INITIAL_ADDRESSES = new Set(["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"]);
@@ -35,7 +35,6 @@ const envNames = [
   "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
   "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
-  "INVENTORY_DATABASE_URL_ARN", "INVENTORY_RLS_ROLE",
 ];
 const SCOPED_REFERENCE_CENSUS_FIELDS = [
   ["aws_ecs_task_definition.candidate", "for_each_expression"],
@@ -143,13 +142,7 @@ function configuration() {
       { address: "aws_iam_policy.broker", type: "aws_iam_policy", expressions: { name: { constant_value: "mscqr-production-rls-approval-broker-runtime" }, path: { constant_value: "/" }, policy: ref(["local.broker_runtime_policy"]), tags: ref(["local.tags"]) } },
       { address: "aws_lambda_function.broker", type: "aws_lambda_function", expressions: {
         environment: [{ variables: ref([
-          "aws_dynamodb_table.replay", "aws_dynamodb_table.replay.name", "local.active_broker_task_definition_arns",
-          "local.broker_approval_expected", "local.broker_images", "local.broker_template_hashes",
-          "var.approval_secret_arn", "var.ecs_cluster_arn", "var.private_subnet_ids", "var.receipt_bucket_arn",
-          "var.stage_a_executor_security_group_id", "var.stage_b_recovery_broker_environment", "var.stage_b_recovery_only",
-          "aws_iam_role.execution", "aws_iam_role.execution[\"backend\"]", "aws_iam_role.execution[\"backend\"].arn",
-          "aws_iam_role.task", "aws_iam_role.task[\"backend\"]", "aws_iam_role.task[\"backend\"].arn",
-          "local.logs.backend", "var.account_id", "var.aws_region", "var.backend_image",
+          "local.broker_environment",
         ]) }],
         filename: ref(["var.broker_package_path"]), function_name: { constant_value: "mscqr-production-rls-approval-broker" }, handler: { constant_value: "index.handler" }, role: ref(["var.stage_a_broker_role_arn"]), publish: { constant_value: true }, runtime: { constant_value: "nodejs24.x" }, source_code_hash: ref(["var.broker_package_path"]), tags: ref(["local.tags"]), timeout: { constant_value: 180 },
       } },
@@ -311,10 +304,10 @@ function assertScopedReferenceCensus(census) {
 
 function brokerChanges() {
   const policy = { address: "aws_iam_policy.broker", mode: "managed", type: "aws_iam_policy", change: { actions: ["update"], before: { policy: "old" }, after: {}, after_unknown: { policy: true }, before_sensitive: {}, after_sensitive: {} } };
-  const before = { architectures: ["x86_64"], environment: [{ variables: Object.fromEntries(envNames.map((name) => [name, `old-${name}`])) }], filename: "old.zip", source_code_hash: "old-source-code-hash", code_sha256: "old-code-sha", source_code_size: 100, last_modified: "old", qualified_arn: "old", qualified_invoke_arn: "old", version: 2, timeout: 30 };
-  const after = { architectures: ["x86_64"], environment: [{}], filename: "new.zip", source_code_hash: "new-source-code-hash", timeout: 180 };
+  const before = { architectures: ["x86_64"], environment: [{ variables: Object.fromEntries(envNames.map((name) => [name, `old-${name}`])) }], filename: "old.zip", function_name: "mscqr-production-rls-approval-broker", source_code_hash: "old-source-code-hash", code_sha256: "old-code-sha", source_code_size: 100, last_modified: "old", qualified_arn: "old", qualified_invoke_arn: "old", version: 2, timeout: 30 };
+  const after = { architectures: ["x86_64"], environment: [{}], filename: "new.zip", function_name: "mscqr-production-rls-approval-broker", source_code_hash: "new-source-code-hash", timeout: 180 };
   const lambda = { address: "aws_lambda_function.broker", mode: "managed", type: "aws_lambda_function", change: { actions: ["update"], before, after, after_unknown: { architectures: [false], code_sha256: true, environment: [{ variables: true }], last_modified: true, qualified_arn: true, qualified_invoke_arn: true, source_code_size: true, version: true }, before_sensitive: { architectures: [false] }, after_sensitive: { architectures: [false] } } };
-  const alias = { address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "2", routing_config: [] }, after: { routing_config: [] }, after_unknown: { function_version: true, routing_config: [] }, before_sensitive: { routing_config: [] }, after_sensitive: { routing_config: [] } } };
+  const alias = { address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", change: { actions: ["update"], before: { name: "reviewed", function_name: "mscqr-production-rls-approval-broker", function_version: "2", routing_config: [] }, after: { name: "reviewed", function_name: "mscqr-production-rls-approval-broker", routing_config: [] }, after_unknown: { function_version: true, routing_config: [] }, before_sensitive: { routing_config: [] }, after_sensitive: { routing_config: [] } } };
   return [policy, lambda, alias];
 }
 
@@ -341,9 +334,27 @@ function importedBackendPlan() {
   return value;
 }
 
+function partialApplyRecoveryPlan() {
+  const value = importedBackendPlan();
+  for (const change of value.resource_changes) {
+    if (change.type === "aws_ecs_task_definition") {
+      if (change.address === 'aws_ecs_task_definition.candidate["backend"]') {
+        change.change = { ...change.change, actions: ["no-op"], after: change.change.before };
+      } else {
+        const family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address];
+        change.deposed = "a".repeat(8);
+        change.change = { actions: ["delete"], replace_paths: [], before: { ...change.change.before, family, arn: `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${family}:5`, skip_destroy: true }, after: null };
+      }
+    } else if (change.address === "aws_iam_policy.broker") {
+      change.change = { ...change.change, actions: ["no-op"], after: {}, after_unknown: { policy: true } };
+    }
+  }
+  return value;
+}
+
 test("broker environment conditional references match the source and exact semantic universe", () => {
   const source = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
-  assert.match(source, /variables = var\.stage_b_recovery_only \? var\.stage_b_recovery_broker_environment : \{/);
+  assert.match(source, /broker_environment = var\.stage_b_recovery_only \? var\.stage_b_recovery_broker_environment : \{/);
   for (const reference of [
     "aws_dynamodb_table.replay.name", "var.receipt_bucket_arn", "var.ecs_cluster_arn", "var.approval_secret_arn",
     "var.stage_a_executor_security_group_id", "var.private_subnet_ids", "local.active_broker_task_definition_arns",
@@ -530,18 +541,30 @@ function resolvedBrokerEnvironment() {
     BROKER_REPLAY_TABLE: "mscqr-production-rls-stage-b-replay",
     BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskDefinitions),
     BROKER_TASK_TEMPLATE_HASHES_JSON: JSON.stringify({ backend: "e".repeat(64), worker: "f".repeat(64), executor: "1".repeat(64), canary: "2".repeat(64) }),
-    INVENTORY_ASSIGN_PUBLIC_IP: "DISABLED",
-    INVENTORY_EXECUTION_ROLE_ARN: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
-    INVENTORY_IMAGE_DIGEST: image("1"),
-    INVENTORY_LOG_GROUP_NAME: STAGE_B.inventoryLogGroupName,
-    INVENTORY_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds),
-    INVENTORY_SECURITY_GROUPS_JSON: JSON.stringify([STAGE_B.executorSecurityGroupId]),
-    INVENTORY_TASK_DEFINITION_FAMILY_ARN: `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B.inventoryTaskDefinitionFamily}:1`,
-    INVENTORY_TASK_ROLE_ARN: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
-    INVENTORY_DATABASE_URL_ARN: STAGE_B.inventoryDatabaseSecretArn,
-    INVENTORY_RLS_ROLE: STAGE_B.inventoryRlsRole,
   };
 }
+
+test("broker environment stays below the safety bound using exact UTF-8 payload accounting", () => {
+  const environment = resolvedBrokerEnvironment();
+  const legacyEnvironment = {
+    ...environment,
+    INVENTORY_TASK_DEFINITION_FAMILY_ARN: `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B.inventoryTaskDefinitionFamily}:1`,
+    INVENTORY_IMAGE_DIGEST: image("1"),
+    INVENTORY_TASK_ROLE_ARN: `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-task`,
+    INVENTORY_EXECUTION_ROLE_ARN: `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-execution`,
+    INVENTORY_DATABASE_URL_ARN: STAGE_B.inventoryDatabaseSecretArn,
+    INVENTORY_RLS_ROLE: STAGE_B.inventoryRlsRole,
+    INVENTORY_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds),
+    INVENTORY_SECURITY_GROUPS_JSON: JSON.stringify([STAGE_B.executorSecurityGroupId]),
+    INVENTORY_ASSIGN_PUBLIC_IP: "DISABLED",
+    INVENTORY_LOG_GROUP_NAME: STAGE_B.inventoryLogGroupName,
+  };
+  assert.ok(stageBLambdaEnvironmentUtf8Bytes(legacyEnvironment) > 4096);
+  assert.ok(stageBLambdaEnvironmentUtf8Bytes(environment) <= 3500);
+  assert.ok(stageBLambdaEnvironmentUtf8Bytes(environment) <= 3500);
+  assert.equal(assertStageBLambdaEnvironmentSize(environment), stageBLambdaEnvironmentUtf8Bytes(environment));
+  assert.throws(() => assertStageBLambdaEnvironmentSize({ ...environment, OVERSIZED: "x".repeat(4096) }), /UTF-8 bytes/);
+});
 
 function dependencyResolvedRetryPlan() {
   const value = baselinePlan();
@@ -680,6 +703,25 @@ test("imported backend normalization requires create-before-delete ordering for 
     const invalid = importedBackendPlan();
     invalid.resource_changes.filter((item) => item.change.actions.join(",") === "create,delete")[index].change.actions = ["delete", "create"];
     assert.throws(() => assertStageBPlanSemanticCompleteness(invalid, { terraformConfiguration: fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8") }), /create-before-delete/);
+  }
+});
+
+test("partial-apply recovery accepts only eleven deposed ECS cleanups plus broker function and alias updates", () => {
+  const value = partialApplyRecoveryPlan();
+  const configurationText = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  const classified = classifyStageBPlan(value, { partialApplyRecovery: true, terraformConfiguration: configurationText });
+  assert.equal(classified.planProfile, "PARTIAL_APPLY_RECOVERY");
+  assert.deepEqual(classified.actionCounts, { "no-op": 2, destroy: 11, update: 2 });
+  const census = assertStageBPlanSemanticCompleteness(value, { partialApplyRecovery: true, terraformConfiguration: configurationText });
+  assert.equal(census.resources.filter((item) => item.classification === STAGE_B_PLAN_SEMANTIC_PROFILES.PARTIAL_APPLY_RECOVERY).length, 11);
+  for (const mutation of [
+    (target) => { target.resource_changes.find((item) => item.address === 'aws_ecs_task_definition.candidate["canary"]').deposed = "bad!"; },
+    (target) => { target.resource_changes.find((item) => item.address === 'aws_ecs_task_definition.candidate["canary"]').change.before.skip_destroy = false; },
+    (target) => { target.resource_changes.push({ address: "aws_lambda_function.other", type: "aws_lambda_function", mode: "managed", change: { actions: ["update"], before: {}, after: {} } }); },
+  ]) {
+    const invalid = partialApplyRecoveryPlan();
+    mutation(invalid);
+    assert.throws(() => classifyStageBPlan(invalid, { partialApplyRecovery: true, terraformConfiguration: configurationText }), /partial-apply recovery|unsupported|outside/);
   }
 });
 
@@ -920,12 +962,21 @@ test("typed Terraform envelope admits exact nulls, false markers, and resolved d
 
 test("supported profile matrix is explicit and includes baseline broker creation", () => {
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES.map(({ profile }) => profile), [
-    "BASELINE_INITIAL_CREATE", "ROLLOVER_RECOVERY", "RECOVERY_ALIAS_ONLY", "NO_CHANGE_OR_APPEND_ONLY_RETRY",
+    "BASELINE_INITIAL_CREATE", "ROLLOVER_RECOVERY", "RECOVERY_ALIAS_ONLY", "NO_CHANGE_OR_APPEND_ONLY_RETRY", "PARTIAL_APPLY_RECOVERY",
   ]);
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerPolicyActions, [["create"]]);
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerFunctionActions, [["create"]]);
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerAliasActions, [["create"]]);
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[3].brokerPolicyActions, [["create"], ["no-op"]]);
+  assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[4], {
+    profile: "PARTIAL_APPLY_RECOVERY",
+    ecsActions: [["delete"]],
+    brokerPolicyActions: [["no-op"]],
+    brokerFunctionActions: [["update"]],
+    brokerAliasActions: [["update"]],
+    recoveryRequired: true,
+    fixture: "production-green-stage-b-plan-semantic.test.mjs",
+  });
 });
 
 test("recovery-only semantic profile contains only the exact concrete alias target", () => {

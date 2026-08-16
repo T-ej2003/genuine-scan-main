@@ -349,7 +349,7 @@ test("permission manifest declares the exact normal and recovery mutation matrix
   const profilesFor = (id) => manifest.required.find((entry) => entry.id === id)?.profiles;
   assert.deepEqual(profilesFor("update-broker-managed-policy"), ["NORMAL_STAGE_B_RELEASE"]);
   assert.deepEqual(profilesFor("prune-broker-managed-policy-versions"), ["NORMAL_STAGE_B_RELEASE"]);
-  assert.deepEqual(profilesFor("update-reviewed-broker-alias"), ["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY"]);
+  assert.deepEqual(profilesFor("update-reviewed-broker-alias"), ["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"]);
   for (const entry of manifest.required.filter((candidate) => !candidate.plan)) assert.equal(entry.profiles, undefined);
 });
 

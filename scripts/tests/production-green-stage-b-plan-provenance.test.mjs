@@ -72,3 +72,29 @@ test("recovery planning validates refresh against observation binding before rea
 test("recovery planning fails closed when the observation binding is omitted", () => {
   assert.throws(() => readPlanningInputs("/private/tmp/recovery.tfvars", ["--binding-report", "/private/tmp/recovery.json", "--binding-report-sha256", digest("a"), "--tooling-tree-sha256", digest("b"), "--image-release-sha", "c".repeat(40), "--refresh-report", "/private/tmp/refresh.json", "--refresh-report-sha256", digest("d"), "--recovery-only", "--closure-mode", "production"], { currentHead: "e".repeat(40) }, { validateTfvarsBinding: () => ({ recoveryOnly: true }) }), /original observation binding/);
 });
+
+test("partial-apply recovery accepts only explicitly bound resource drift", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-partial-provenance-"));
+  fs.chmodSync(directory, 0o700);
+  const write = (name, value) => { const file = path.join(directory, name); fs.writeFileSync(file, `${JSON.stringify(value)}\n`, { mode: 0o600 }); return file; };
+  const sourceSha = "a".repeat(40);
+  const binding = { recoveryOnly: false, toolingTreeSha256: digest("b"), tfvarsSha256: digest("c"), imageEvidenceCanonicalSha256: digest("d"), stateBackupSha256: digest("e") };
+  const bindingPath = write("observation.json", binding);
+  const refreshPath = write("refresh.json", { status: "RESOURCE_DRIFT" });
+  const refreshSha256 = hash(fs.readFileSync(refreshPath));
+  const args = [
+    "--binding-report", path.join(directory, "tfvars-binding.json"), "--binding-report-sha256", digest("f"),
+    "--refresh-binding-report", bindingPath, "--refresh-binding-report-sha256", hash(fs.readFileSync(bindingPath)),
+    "--tooling-tree-sha256", binding.toolingTreeSha256, "--image-release-sha", "g".repeat(40),
+    "--refresh-report", refreshPath, "--refresh-report-sha256", refreshSha256, "--partial-apply-recovery", "--closure-mode", "production",
+  ];
+  let validated;
+  const inputs = readPlanningInputs("/private/tmp/recovery.tfvars", args, { currentHead: sourceSha }, {
+    validateTfvarsBinding: () => binding,
+    assertRefresh: (value) => { validated = value; return true; },
+    backendMetadata: { backendMetadataSha256: digest("h"), terraformDataDir: directory },
+  });
+  assert.equal(inputs.partialApplyRecovery, true);
+  assert.deepEqual(validated.bindingReport, binding);
+  assert.equal(validated.allowReviewedResourceDrift, true);
+});

@@ -1,5 +1,17 @@
 locals {
   ecs_cluster_name = element(split("/", var.ecs_cluster_arn), 1)
+  broker_environment = var.stage_b_recovery_only ? var.stage_b_recovery_broker_environment : {
+    BROKER_REPLAY_TABLE               = aws_dynamodb_table.replay.name
+    BROKER_RECEIPT_BUCKET             = trimprefix(var.receipt_bucket_arn, "arn:aws:s3:::")
+    BROKER_CLUSTER_ARN                = var.ecs_cluster_arn
+    BROKER_APPROVAL_SECRET_ARN        = var.approval_secret_arn
+    BROKER_EXECUTOR_SECURITY_GROUP_ID = var.stage_a_executor_security_group_id
+    BROKER_PRIVATE_SUBNETS_JSON       = jsonencode(var.private_subnet_ids)
+    BROKER_TASK_DEFINITIONS_JSON      = jsonencode(local.active_broker_task_definition_arns)
+    BROKER_TASK_TEMPLATE_HASHES_JSON  = jsonencode(local.broker_template_hashes)
+    BROKER_APPROVAL_EXPECTED_JSON     = jsonencode(local.broker_approval_expected)
+    BROKER_IMAGES_JSON                = jsonencode(local.broker_images)
+  }
   tags = {
     Environment = "production"
     ManagedBy   = "Terraform"
@@ -564,27 +576,13 @@ resource "aws_lambda_function" "broker" {
   publish          = true
 
   environment {
-    variables = var.stage_b_recovery_only ? var.stage_b_recovery_broker_environment : {
-      BROKER_REPLAY_TABLE                  = aws_dynamodb_table.replay.name
-      BROKER_RECEIPT_BUCKET                = trimprefix(var.receipt_bucket_arn, "arn:aws:s3:::")
-      BROKER_CLUSTER_ARN                   = var.ecs_cluster_arn
-      BROKER_APPROVAL_SECRET_ARN           = var.approval_secret_arn
-      BROKER_EXECUTOR_SECURITY_GROUP_ID    = var.stage_a_executor_security_group_id
-      BROKER_PRIVATE_SUBNETS_JSON          = jsonencode(var.private_subnet_ids)
-      BROKER_TASK_DEFINITIONS_JSON         = jsonencode(local.active_broker_task_definition_arns)
-      BROKER_TASK_TEMPLATE_HASHES_JSON     = jsonencode(local.broker_template_hashes)
-      BROKER_APPROVAL_EXPECTED_JSON        = jsonencode(local.broker_approval_expected)
-      BROKER_IMAGES_JSON                   = jsonencode(local.broker_images)
-      INVENTORY_TASK_DEFINITION_FAMILY_ARN = "arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-production-rls-green-predeployment-inventory:1"
-      INVENTORY_IMAGE_DIGEST               = var.backend_image
-      INVENTORY_TASK_ROLE_ARN              = aws_iam_role.task["backend"].arn
-      INVENTORY_EXECUTION_ROLE_ARN         = aws_iam_role.execution["backend"].arn
-      INVENTORY_DATABASE_URL_ARN           = "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh"
-      INVENTORY_RLS_ROLE                   = "mscqr_prod_rls_read"
-      INVENTORY_PRIVATE_SUBNETS_JSON       = jsonencode(var.private_subnet_ids)
-      INVENTORY_SECURITY_GROUPS_JSON       = jsonencode([var.stage_a_executor_security_group_id])
-      INVENTORY_ASSIGN_PUBLIC_IP           = "DISABLED"
-      INVENTORY_LOG_GROUP_NAME             = local.logs.backend
+    variables = local.broker_environment
+  }
+
+  lifecycle {
+    precondition {
+      condition     = length(jsonencode(local.broker_environment)) <= 3500
+      error_message = "Stage B broker Lambda environment JSON must remain at or below the 3500-byte safety bound (AWS hard limit: 4096 bytes)."
     }
   }
   tags = local.tags
