@@ -18,6 +18,7 @@ import {
 import { buildStageBImagePublicationIdentity, publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
+import { STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "../aws/stage-b-deployment-contract.mjs";
 
 const imageReleaseSha = "7245a6036492f875654c414473737e33c1422f3c";
 const toolingSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
@@ -85,6 +86,33 @@ const imagePlan = (overrides = {}) => {
     change: { actions: ["create"], after: { family, container_definitions: JSON.stringify([{ image: planReferenceForAddress(address) }]) } },
   }));
   return { ...overrides, variables, resource_changes: overrides.resource_changes || resource_changes };
+};
+
+const importedBackendPlan = () => {
+  const plan = imagePlan();
+  const backend = plan.resource_changes.find(({ address }) => address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS);
+  const family = STAGE_B_TASK_DEFINITION_FAMILIES[STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS];
+  const taskDefinition = {
+    arn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:9`,
+    id: family,
+    family,
+    revision: 9,
+    skip_destroy: null,
+    container_definitions: backend.change.after.container_definitions,
+    cpu: "512",
+    memory: "1024",
+    network_mode: "awsvpc",
+    requires_compatibilities: ["FARGATE"],
+    execution_role_arn: "arn:aws:iam::368992683803:role/execution",
+    task_role_arn: "arn:aws:iam::368992683803:role/task",
+    runtime_platform: {},
+    volume: [],
+  };
+  backend.change = { actions: ["update"], replace_paths: [], before: taskDefinition, after: { ...taskDefinition, skip_destroy: true } };
+  for (const change of plan.resource_changes) {
+    if (change.address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS) change.change.actions = ["create", "delete"];
+  }
+  return plan;
 };
 
 function reportFixture(overrides = {}) {
@@ -285,6 +313,14 @@ test("exact production-shaped plan variables and all twelve task definitions bin
     applicationCanary: { repository: "mscqr-backend", digest: `sha256:${"4".repeat(64)}`, imageReference: planReferences.canary },
     readOnlyCanary: { repository: "mscqr-backend", digest: `sha256:${"4".repeat(64)}`, imageReference: planReferences.canary },
   });
+});
+
+test("imported-backend image binding accepts the exact reviewed rollover topology", () => {
+  const plan = importedBackendPlan();
+  const terraformConfiguration = fs.readFileSync(new URL("../../infra/aws/terraform/production-green-stage-b/main.tf", import.meta.url), "utf8");
+  assert.doesNotThrow(() => assertStageBPlanImageEvidenceBinding({ plan, imageEvidence: reportFixture(), planProfile: "IMPORTED_BACKEND_METADATA_NORMALIZATION", terraformConfiguration }));
+  plan.resource_changes.find(({ address }) => address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS).change.actions = ["delete", "create"];
+  assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan, imageEvidence: reportFixture(), planProfile: "IMPORTED_BACKEND_METADATA_NORMALIZATION", terraformConfiguration }), /exact create-before-delete actions/);
 });
 
 test("every plan variable must equal its signed repository and digest", () => {
