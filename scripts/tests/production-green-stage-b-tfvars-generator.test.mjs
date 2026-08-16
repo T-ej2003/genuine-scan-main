@@ -8,7 +8,7 @@ import test from "node:test";
 import { signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
 import { publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
 import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
-import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, deriveContractDigests, deriveRecoveryOnlyBindings, deriveRetainedDefinitions, generateStageBTfvars, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
+import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, deriveContractDigests, deriveRecoveryOnlyBindings, deriveRetainedDefinitions, generateStageBTfvars, isTerraformDeposedInstance, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
@@ -197,6 +197,42 @@ test("partial-apply state accepts current candidate and executor addresses", () 
   assert.equal(result.serial, 78);
   assert.equal(result.counts.candidate, 3);
   assert.equal(result.counts.executor, 8);
+});
+
+test("serial-96 state separates reviewed deposed instances from current uniqueness", () => {
+  const state = stateFixture({ serial: 96, resources: [...stateFixture().resources, ...currentTaskDefinitionState()] });
+  const current = state.resources.filter(({ name }) => ["candidate", "executor"].includes(name));
+  let deposedCount = 0;
+  for (const resource of current) {
+    for (const instance of resource.instances.slice(0, resource.name === "candidate" ? 3 : 8)) {
+      resource.instances.push({ ...structuredClone(instance), deposed: `${(deposedCount + 1).toString(16)}`.repeat(8) });
+      deposedCount += 1;
+    }
+  }
+  assert.equal(deposedCount, 11);
+  assert.equal(isTerraformDeposedInstance(current[0].instances.at(-1)), true);
+  const result = deriveRetainedDefinitions(state);
+  assert.equal(result.serial, 96);
+  assert.equal(result.counts.candidate, 3);
+  assert.equal(result.counts.executor, 8);
+});
+
+test("deposed identity syntax is exactly eight lowercase hexadecimal characters", () => {
+  for (const value of ["aaaaaaaa", "0123abcd"]) assert.equal(isTerraformDeposedInstance({ deposed: value }), true, value);
+  for (const value of ["a", "abcdefg", "abcdefghi", "123456789", "ABCDEF12", "", 12345678, null]) {
+    assert.throws(() => isTerraformDeposedInstance({ deposed: value }), /deposed identity is malformed/, value === null ? "null" : String(value));
+  }
+  assert.equal(isTerraformDeposedInstance({}), false);
+});
+
+test("malformed or duplicate deposed task-definition identities fail closed", () => {
+  const malformed = stateFixture({ serial: 96, resources: [...stateFixture().resources, ...currentTaskDefinitionState()] });
+  malformed.resources.find(({ name }) => name === "candidate").instances.push({ ...structuredClone(malformed.resources.find(({ name }) => name === "candidate").instances[0]), deposed: "not-hex" });
+  assert.throws(() => deriveRetainedDefinitions(malformed), /deposed identity is malformed/);
+  const duplicate = stateFixture({ serial: 96, resources: [...stateFixture().resources, ...currentTaskDefinitionState()] });
+  const candidate = duplicate.resources.find(({ name }) => name === "candidate");
+  candidate.instances.push({ ...structuredClone(candidate.instances[0]), deposed: "a".repeat(8) }, { ...structuredClone(candidate.instances[0]), deposed: "a".repeat(8) });
+  assert.throws(() => deriveRetainedDefinitions(duplicate), /duplicate deposed Stage B task-definition instance/);
 });
 
 test("recovery-only bindings are derived from exact broker state identity", () => {

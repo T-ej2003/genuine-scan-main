@@ -173,8 +173,16 @@ function isRootManagedTaskDefinition(resource) {
   return resource.mode === "managed" && (!Object.hasOwn(resource, "module") || resource.module === null);
 }
 
+export function isTerraformDeposedInstance(instance, label = "Terraform state task-definition instance") {
+  if (!instance || typeof instance !== "object" || Array.isArray(instance)) throw new Error(`${label} is malformed.`);
+  if (!Object.hasOwn(instance, "deposed")) return false;
+  if (typeof instance.deposed !== "string" || !/^[a-f0-9]{8}$/.test(instance.deposed)) throw new Error(`${label} deposed identity is malformed.`);
+  return true;
+}
+
 export function validateCurrentTaskDefinitionState(resources) {
   const seen = new Set();
+  const seenDeposed = new Set();
   for (const resource of resources.filter(({ type }) => type === "aws_ecs_task_definition")) {
     if (!isRootManagedTaskDefinition(resource)) throw new Error(`Terraform state task-definition resource is not a root managed resource: ${resource.name}.`);
     if (!currentTaskDefinitionCollections.has(resource.name)) {
@@ -183,15 +191,22 @@ export function validateCurrentTaskDefinitionState(resources) {
     }
     if (!Array.isArray(resource.instances) || resource.instances.length === 0) throw new Error(`Terraform state current task-definition collection is empty or malformed: ${resource.name}.`);
     for (const instance of resource.instances) {
+      const deposed = isTerraformDeposedInstance(instance, `Terraform state task-definition instance ${resource.name}`);
       if (typeof instance.index_key !== "string") throw new Error(`Terraform state current task-definition index is malformed: ${resource.name}.`);
       const address = `aws_ecs_task_definition.${resource.name}["${instance.index_key}"]`;
       const expectedFamily = STAGE_B_TASK_DEFINITION_FAMILIES[address];
       if (!expectedFamily) throw new Error(`Terraform state contains an unexpected current Stage B task-definition address: ${address}.`);
-      if (seen.has(address)) throw new Error(`Terraform state contains a duplicate current Stage B task-definition address: ${address}.`);
-      const { definition, arn } = retainedDefinition(instance.attributes, `Current task definition ${address}`);
+      if (deposed) {
+        const deposedIdentity = `${address}:${instance.deposed}`;
+        if (seenDeposed.has(deposedIdentity)) throw new Error(`Terraform state contains a duplicate deposed Stage B task-definition instance: ${address}.`);
+        seenDeposed.add(deposedIdentity);
+      } else {
+        if (seen.has(address)) throw new Error(`Terraform state contains a duplicate current Stage B task-definition address: ${address}.`);
+        seen.add(address);
+      }
+      const { definition, arn } = retainedDefinition(instance.attributes, `${deposed ? "Deposed" : "Current"} task definition ${address}`);
       const arnFamily = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([^:]+):/.exec(arn)?.[1];
       if (definition.family !== expectedFamily || arnFamily !== expectedFamily) throw new Error(`Terraform state current task-definition family does not match ${address}.`);
-      seen.add(address);
     }
   }
 }
