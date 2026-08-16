@@ -161,6 +161,32 @@ function validDeps(plan = noChangePlan()) {
   return { validateTfvarsBinding: () => ({ ...bindingReport(), stateBackupSha256: stateHash }), validateBackendMetadata: () => true, getProtectedMainCheckout: () => checkout, showWorkspace: ({ env }) => { assert.equal(env.TF_DATA_DIR, env.TF_DATA_DIR); return "default\n"; }, showPlanJson: () => ({ status: 0, stdout: JSON.stringify(plan), stderr: "" }), runTerraform: (terraformArgs) => { writeTemporaryPlan(terraformArgs); return { status: 0, stdout: "No changes.\n", stderr: "" }; } };
 }
 
+function generatedRefreshEvidence() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-count-binding-"));
+  const result = runRefreshOnly({ argv: args(directory), env: { TF_WORKSPACE: "default" }, deps: validDeps() });
+  const report = JSON.parse(fs.readFileSync(result.outputPath, "utf8"));
+  const validBinding = { ...bindingReport(), stateBackupSha256: stateHash };
+  assert.doesNotThrow(() => assertStageBRefreshEvidence({ refreshReportPath: result.outputPath, bindingReport: validBinding }));
+  return { report, reportPath: result.outputPath, validBinding };
+}
+
+test("refresh evidence binds the emitted resource precondition count to recomputation", () => {
+  const mutations = [
+    ["omitted", (report) => { delete report.resourcePreconditionCheckCount; }],
+    ["null", (report) => { report.resourcePreconditionCheckCount = null; }],
+    ["wrong count", (report) => { report.resourcePreconditionCheckCount = 2; }],
+    ["zero with an authorized resource precondition", (report) => { report.resourcePreconditionCheckCount = 0; }],
+    ["count inconsistent with checks", (report) => { report.checks = report.checks.filter(({ address }) => address !== "aws_lambda_function.broker"); }],
+    ["forged count with otherwise valid evidence", (report) => { report.resourcePreconditionCheckCount = 9; }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const { report, reportPath, validBinding } = generatedRefreshEvidence();
+    mutate(report);
+    fs.writeFileSync(reportPath, `${JSON.stringify(report)}\n`, { mode: 0o600 });
+    assert.throws(() => assertStageBRefreshEvidence({ refreshReportPath: reportPath, bindingReport: validBinding }), /check or binding structure/, label);
+  }
+});
+
 test("refresh-only rejects HCL at a JSON filename before Terraform", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); let calls = 0; assert.throws(() => runRefreshOnly({ argv: args(directory, "production.json"), env: { TF_WORKSPACE: "default" }, deps: { runTerraform: () => { calls += 1; return { status: 0 }; } } }), /\.tfvars filename/); assert.equal(calls, 0); });
 test("refresh-only rejects deployable plan output arguments", () => assert.throws(() => parseCli(["--closure-mode", "production", "-out=/private/tmp/plan.tfplan"]), /does not accept/));
 test("refresh-only rejects backend metadata redirected outside the validated data directory", () => { const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-refresh-contract-")); const argv = args(directory); argv[argv.indexOf("--backend-metadata") + 1] = path.join(directory, "other", "terraform.tfstate"); assert.throws(() => runRefreshOnly({ argv, env: { TF_WORKSPACE: "default" }, deps: validDeps() }), /must be <terraform-data-dir>/); });
