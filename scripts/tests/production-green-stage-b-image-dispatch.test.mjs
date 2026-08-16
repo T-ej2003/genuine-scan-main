@@ -79,9 +79,19 @@ test("dispatcher rejects a nonexistent release commit before dispatch", () => {
 
 test("workflow source and release source stay separate even if main advances after dispatch", () => {
   assert.equal(dispatcher.jobs["verify-release"].steps[0].env.EXPECTED_WORKFLOW_REF, "refs/heads/main");
-  assert.equal(dispatcher.jobs["verify-release"].steps[1].with.ref, "${{ inputs.release_sha }}");
+  const dispatcherTooling = dispatcher.jobs["verify-release"].steps.find((step) => step.name === "Checkout trusted workflow tooling");
+  const dispatcherRelease = dispatcher.jobs["verify-release"].steps.find((step) => step.uses === "actions/checkout@v6" && step.with?.path === "release-source");
+  assert.equal(dispatcherTooling.with.ref, "${{ github.sha }}");
+  assert.equal(dispatcherRelease.with.ref, "${{ inputs.release_sha }}");
+  assert.equal(dispatcherRelease.with.path, "release-source");
+  assert.match(dispatcher.jobs["verify-release"].steps.find((step) => step.name === "Bind the trusted workflow tooling revision").run, /rev-parse FETCH_HEAD/);
+  assert.doesNotMatch(`${JSON.stringify(dispatcher)}${JSON.stringify(reusable)}`, /inputs\.tooling|inputs\.workflow/);
   assert.equal(reusable.jobs["build-and-attest"].steps[0].env.EXPECTED_WORKFLOW_REF, "refs/heads/main");
-  assert.equal(reusable.jobs["build-and-attest"].steps[1].with.ref, "${{ inputs.release_sha }}");
+  const reusableTooling = reusable.jobs["build-and-attest"].steps.find((step) => step.name === "Checkout trusted workflow tooling");
+  const reusableRelease = reusable.jobs["build-and-attest"].steps.find((step) => step.uses === "actions/checkout@v6" && step.with?.path === "release-source");
+  assert.equal(reusableTooling.with.ref, "${{ github.sha }}");
+  assert.equal(reusableRelease.with.ref, "${{ inputs.release_sha }}");
+  assert.equal(reusableRelease.with.path, "release-source");
   assert.match(JSON.stringify(reusable), /checkoutSha/);
   assert.match(JSON.stringify(reusable), /workflowDefinitionRef/);
   assert.match(JSON.stringify(reusable), /workflowDefinitionSha/);
@@ -90,4 +100,18 @@ test("workflow source and release source stay separate even if main advances aft
   dispatchProductionGreenStageBImages({ releaseSha: sha, run: mockGh(calls) });
   assert.equal(calls.at(-1).at(-1), `release_sha=${sha}`);
   assert.equal(calls.at(-1)[6], "main");
+});
+
+test("an older merged release may predate tooling while the trusted helper remains available", () => {
+  const dispatcherTooling = dispatcher.jobs["verify-release"].steps.find((step) => step.name === "Checkout trusted workflow tooling");
+  const dispatcherRelease = dispatcher.jobs["verify-release"].steps.find((step) => step.uses === "actions/checkout@v6" && step.with?.path === "release-source");
+  const toolingCheckout = reusable.jobs["build-and-attest"].steps.find((step) => step.name === "Checkout trusted workflow tooling");
+  const releaseCheckout = reusable.jobs["build-and-attest"].steps.find((step) => step.uses === "actions/checkout@v6" && step.with?.path === "release-source");
+  const signRun = reusable.jobs["build-and-attest"].steps.find((step) => step.name === "Generate SBOMs, sign, and attest provenance").run;
+  assert.equal(toolingCheckout.with.ref, "${{ github.sha }}");
+  assert.equal(releaseCheckout.with.ref, "${{ inputs.release_sha }}");
+  assert.equal(dispatcherTooling.with.ref, "${{ github.sha }}");
+  assert.equal(dispatcherRelease.with.ref, "${{ inputs.release_sha }}");
+  assert.match(signRun, /\$GITHUB_WORKSPACE\/scripts\/aws\/cosign-idempotent-sign-and-attest\.sh/);
+  assert.doesNotMatch(signRun, /release-source\/scripts\/aws\/cosign-idempotent-sign-and-attest\.sh/);
 });

@@ -139,7 +139,7 @@ test("Stage B workflow and Docker targets keep the executor fixed and front-end 
   const publisher = fs.readFileSync("scripts/aws/publish-ecs-images.sh", "utf8");
   assert.match(dockerfile, /FROM node:24-bookworm-slim AS production-rls-executor/); assert.match(dockerfile, /ENTRYPOINT \["node", "scripts\/production-full-rls-green-executor\.mjs"\]/);
   assert.match(dockerfile, /scripts\/aws\/production-green-stage-b-contract\.mjs \.\/scripts\/production-green-stage-b-contract\.mjs/);
-  assert.match(workflow, /rls:full-verify/); assert.match(workflow, /trivy-action/); assert.match(workflow, /cosign attest/);
+  assert.match(workflow, /rls:full-verify/); assert.match(workflow, /trivy-action/); assert.match(workflow, /cosign-idempotent-sign-and-attest\.sh"? attest/);
   assert.match(publisher, /IMAGE_TAG.*git rev-parse HEAD/); assert.match(publisher, /SOURCE_RELEASE_SHA/); assert.match(publisher, /npm run rls:full-verify/);
   assert.match(publisher, /verify_stage_b_reuse/); assert.match(publisher, /stage-b-image-bindings\.mjs/);
   assert.match(dispatcher, /stage-b-release-gate\.mjs/); assert.match(workflow, /stage-b-release-gate\.mjs/);

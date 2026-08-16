@@ -23,12 +23,28 @@ jobs:
         env:
           EXPECTED_WORKFLOW_REF: refs/heads/main
         run: test "$GITHUB_REF" = "$EXPECTED_WORKFLOW_REF"
+      - name: Checkout trusted workflow tooling
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Bind the trusted workflow tooling revision
+        env:
+          EXPECTED_TOOLING_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$EXPECTED_TOOLING_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_TOOLING_SHA"
+          test "$(git rev-parse --is-shallow-repository)" = false
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.release_sha }}
+          path: release-source
           fetch-depth: 0
       - name: Require the approved release to be merged into protected main
-        run: node scripts/aws/stage-b-release-gate.mjs "${{ inputs.release_sha }}"
+        working-directory: release-source
+        run: node "$GITHUB_WORKSPACE/scripts/aws/stage-b-release-gate.mjs" "${{ inputs.release_sha }}"
 
   build-and-attest:
     needs: verify-release
