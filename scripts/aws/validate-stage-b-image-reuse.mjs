@@ -9,11 +9,12 @@ import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvid
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const STAGE_B_IMAGE_REUSE_SCHEMA_VERSION = 2;
-export const STAGE_B_IMAGE_REUSE_RULES_VERSION = "stage-b-image-reuse-v2";
+export const STAGE_B_IMAGE_REUSE_RULES_VERSION = "stage-b-image-reuse-v3";
 export const COMPATIBILITY_REPORT_REPO_PATH = "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json";
 export const STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION = 1;
 export const IMAGE_IMPACT_REPORT_REPO_PATH = "documents/ops/iam/MSCQRProductionGreenStageBImageImpact-v1.json";
 export const STAGE_B_CLOSURE_MODES = ["pull-request", "production"];
+export const STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH = ".github/workflows/production-green-stage-b-image-build.yml";
 const TOOLING_TREE_EVIDENCE_PATHS = new Set([COMPATIBILITY_REPORT_REPO_PATH, "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.md", IMAGE_IMPACT_REPORT_REPO_PATH]);
 const SHA = /^[a-f0-9]{40}$/;
 
@@ -43,6 +44,43 @@ const canonicalJson = (value) => {
 };
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 
+function workflowStep(source, name, nextName) {
+  const start = source.indexOf(`      - name: ${name}`);
+  const end = source.indexOf(`      - name: ${nextName}`, start);
+  assert(start >= 0 && end > start, `Trusted Stage B workflow is missing the ${name} step.`);
+  return source.slice(start, end);
+}
+
+function withoutReleaseWorkingDirectory(source) {
+  return source.replace(/\n        working-directory: release-source/g, "");
+}
+
+export function assertStageBTrustedWorkflowSeparation({ imageReleaseSha, toolingSha, readFile } = {}) {
+  assert(SHA.test(imageReleaseSha || ""), "Image release SHA must be a full commit SHA.");
+  assert(SHA.test(toolingSha || ""), "Trusted tooling SHA must be a full commit SHA.");
+  const read = readFile || ((sha) => git(["show", `${sha}:${STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH}`]));
+  const releaseWorkflow = read(imageReleaseSha);
+  const toolingWorkflow = read(toolingSha);
+  assert.notEqual(releaseWorkflow, toolingWorkflow, "Trusted workflow separation requires a changed workflow boundary.");
+
+  const releasePublishStep = workflowStep(releaseWorkflow, "Publish immutable backend, worker, executor, and canary images", "Bind image digest outputs");
+  const toolingPublishStep = workflowStep(toolingWorkflow, "Publish immutable backend, worker, executor, and canary images", "Bind image digest outputs");
+  assert.equal(withoutReleaseWorkingDirectory(toolingPublishStep), releasePublishStep, "Trusted workflow changes altered the release image publication inputs.");
+  assert.match(toolingWorkflow, /IMAGE_TAG: \$\{\{ inputs\.release_sha \}\}/, "Trusted workflow must bind the image tag to release_sha.");
+  assert.match(toolingWorkflow, /ref: \$\{\{ inputs\.release_sha \}\}\s+path: release-source\s+fetch-depth: 0/, "Trusted workflow must isolate the release checkout.");
+  assert.match(toolingWorkflow, /working-directory: release-source\s+run: \.\/scripts\/aws\/publish-ecs-images\.sh production-green-stage-b/, "Trusted workflow must build from the release checkout.");
+  assert.match(toolingWorkflow, /run: npm ci && npm --prefix backend ci\s+working-directory: release-source/, "Trusted workflow must install release-source dependencies.");
+  assert.match(toolingWorkflow, /\$GITHUB_WORKSPACE\/scripts\/aws\/cosign-idempotent-sign-and-attest\.sh/, "Trusted signing tooling must come from the protected tooling checkout.");
+  assert.match(toolingWorkflow, /\$GITHUB_WORKSPACE\/scripts\/aws\/verify-release-artifacts\.sh/, "Trusted verification tooling must come from the protected tooling checkout.");
+  return Object.freeze({ file: STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH, category: "trustedToolingOnly", imageAffecting: false });
+}
+
+function classifyChangedFiles({ imageReleaseSha, toolingSha, changedFiles }) {
+  const hasTrustedWorkflow = changedFiles.some((entry) => (typeof entry === "string" ? entry : entry?.file) === STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH);
+  const trustedWorkflow = hasTrustedWorkflow ? assertStageBTrustedWorkflowSeparation({ imageReleaseSha, toolingSha }) : undefined;
+  return normalizeClassifiedFiles(changedFiles, { trustedWorkflow });
+}
+
 export function classifyStageBImageReusePath(file) {
   if (CONTROL_PLANE.test(file)) return { file, category: "controlPlaneOnly", imageAffecting: false };
   if (IMAGE_INPUTS.some((pattern) => pattern.test(file))) {
@@ -59,8 +97,9 @@ export function classifyStageBImageReusePath(file) {
   return { file, category: "unknown", imageAffecting: true };
 }
 
-function normalizeClassifiedFiles(files) {
+function normalizeClassifiedFiles(files, { trustedWorkflow } = {}) {
   return files.map((entry) => typeof entry === "string" ? classifyStageBImageReusePath(entry) : entry)
+    .map((entry) => trustedWorkflow && entry.file === trustedWorkflow.file ? trustedWorkflow : entry)
     .map(({ file, category, imageAffecting }) => ({ file, category, imageAffecting: Boolean(imageAffecting) }))
     .sort((left, right) => left.file.localeCompare(right.file));
 }
@@ -79,6 +118,7 @@ function assertReviewedReport({ reviewedReport, imageReleaseSha, toolingInputTre
   assert.equal(reviewedReport.comparisonHeadSha256, toolingInputTreeSha256, "Compatibility report comparison head does not match the tooling input tree.");
   assert.equal(reviewedReport.classificationRulesVersion, STAGE_B_IMAGE_REUSE_RULES_VERSION, "Compatibility report classification rules are stale.");
   assert.deepEqual(reviewedReport.classifiedChangedFiles, normalizeClassifiedFiles(changedFiles), "Compatibility report changed-file classification is stale or incomplete.");
+  assert.deepEqual(reviewedReport.trustedToolingOnlyPaths, changedFiles.filter(({ category }) => category === "trustedToolingOnly").map(({ file }) => file), "Compatibility report trusted-tooling boundary is stale or incomplete.");
   assert.equal(reviewedReport.imageReuseCompatible, !reviewedReport.classifiedChangedFiles.some(({ imageAffecting }) => imageAffecting), "Compatibility report compatibility result is inconsistent.");
 }
 
@@ -86,7 +126,7 @@ export function imageReuseCompatibility({ imageReleaseSha, toolingSha, changedFi
   assert(SHA.test(imageReleaseSha || ""), "Image release SHA must be a full commit SHA.");
   assert(SHA.test(toolingSha || ""), "Tooling SHA must be a full commit SHA.");
   if (currentHead !== undefined) assert.equal(currentHead, toolingSha, "Tooling SHA must equal the checked-out tooling HEAD.");
-  const classifiedChangedFiles = normalizeClassifiedFiles(changedFiles);
+  const classifiedChangedFiles = classifyChangedFiles({ imageReleaseSha, toolingSha, changedFiles });
   const unclassifiedFiles = classifiedChangedFiles.filter(({ category }) => category === "unknown").map(({ file }) => file);
   assert.equal(unclassifiedFiles.length, 0, `Stage B image-impact report contains unclassified files: ${unclassifiedFiles.join(", ")}`);
   const imageAffectingFiles = classifiedChangedFiles.filter(({ imageAffecting }) => imageAffecting).map(({ file }) => file);
@@ -94,7 +134,6 @@ export function imageReuseCompatibility({ imageReleaseSha, toolingSha, changedFi
   return {
     schemaVersion: STAGE_B_IMAGE_REUSE_SCHEMA_VERSION,
     imageReleaseSha,
-    toolingSha,
     toolingInputTreeSha256,
     comparisonBaseSha: imageReleaseSha,
     comparisonHeadSha256: toolingInputTreeSha256,
@@ -102,6 +141,7 @@ export function imageReuseCompatibility({ imageReleaseSha, toolingSha, changedFi
     imageReuseCompatible: imageAffectingFiles.length === 0,
     imageBuildInputsChanged: imageAffectingFiles.length > 0,
     classifiedChangedFiles,
+    trustedToolingOnlyPaths: classifiedChangedFiles.filter(({ category }) => category === "trustedToolingOnly").map(({ file }) => file),
     imageAffectingFiles,
     reportMatchesRecomputedDiff: true,
   };
@@ -110,7 +150,7 @@ export function imageReuseCompatibility({ imageReleaseSha, toolingSha, changedFi
 export function imageImpactReportFor({ imageReleaseSha, toolingSha, changedFiles, toolingInputTreeSha256 }) {
   assert(SHA.test(imageReleaseSha || ""), "Image release SHA must be a full commit SHA.");
   assert(SHA.test(toolingSha || ""), "Tooling SHA must be a full commit SHA.");
-  const classifiedChangedFiles = normalizeClassifiedFiles(changedFiles);
+  const classifiedChangedFiles = classifyChangedFiles({ imageReleaseSha, toolingSha, changedFiles });
   const unclassifiedFiles = classifiedChangedFiles.filter(({ category }) => category === "unknown").map(({ file }) => file);
   assert.equal(unclassifiedFiles.length, 0, `Stage B image-impact report contains unclassified files: ${unclassifiedFiles.join(", ")}`);
   const imageAffectingFiles = classifiedChangedFiles.filter(({ imageAffecting }) => imageAffecting).map(({ file }) => file);
@@ -122,6 +162,7 @@ export function imageImpactReportFor({ imageReleaseSha, toolingSha, changedFiles
     comparisonBaseSha: imageReleaseSha,
     toolingSha,
     toolingInputTreeSha256,
+    trustedToolingOnlyPaths: classifiedChangedFiles.filter(({ category }) => category === "trustedToolingOnly").map(({ file }) => file),
     comparisonHeadIdentity: "tooling-input-tree-sha256",
     comparisonHeadSha256: toolingInputTreeSha256,
     classificationRulesVersion: STAGE_B_IMAGE_REUSE_RULES_VERSION,
@@ -204,12 +245,13 @@ function git(args) {
 }
 
 function reportFor({ imageReleaseSha, toolingSha, changedFiles, toolingInputTreeSha256 }) {
-  const classifiedChangedFiles = normalizeClassifiedFiles(changedFiles);
+  const classifiedChangedFiles = classifyChangedFiles({ imageReleaseSha, toolingSha, changedFiles });
   return {
     schemaVersion: STAGE_B_IMAGE_REUSE_SCHEMA_VERSION,
     identityModel: "tooling-input-tree-sha256",
     imageReleaseSha,
     comparisonBaseSha: imageReleaseSha,
+    toolingSha,
     comparisonHeadIdentity: "tooling-input-tree-sha256",
     comparisonHeadSha256: toolingInputTreeSha256,
     toolingInputTreeSha256,
@@ -217,8 +259,9 @@ function reportFor({ imageReleaseSha, toolingSha, changedFiles, toolingInputTree
     imageBuildInputsChanged: classifiedChangedFiles.some(({ imageAffecting }) => imageAffecting),
     classificationRulesVersion: STAGE_B_IMAGE_REUSE_RULES_VERSION,
     generatedAt: git(["show", "-s", "--format=%cI", toolingSha]),
-    generatorVersion: "validate-stage-b-image-reuse@2",
+    generatorVersion: "validate-stage-b-image-reuse@3",
     classifiedChangedFiles,
+    trustedToolingOnlyPaths: classifiedChangedFiles.filter(({ category }) => category === "trustedToolingOnly").map(({ file }) => file),
     imageAffectingFiles: classifiedChangedFiles.filter(({ imageAffecting }) => imageAffecting).map(({ file }) => file),
     reason: "The reviewed tooling input tree contains no image-affecting changes relative to the image release.",
   };

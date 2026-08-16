@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   assertImageImpactReport,
   assertProductionImageReuseResult,
+  assertStageBTrustedWorkflowSeparation,
   computeStageBToolingInputTreeSha256,
   imageImpactReportFor,
   imageReuseCompatibility,
@@ -11,6 +13,7 @@ import {
   parseStageBImageReuseCliArgs,
   parseStageBClosureMode,
   STAGE_B_IMAGE_REUSE_RULES_VERSION,
+  STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH,
 } from "../aws/validate-stage-b-image-reuse.mjs";
 
 const imageReleaseSha = "a".repeat(40);
@@ -25,7 +28,29 @@ const compatibilityReport = (classifiedChangedFiles) => ({
   comparisonHeadSha256: toolingInputTreeSha256,
   classificationRulesVersion: STAGE_B_IMAGE_REUSE_RULES_VERSION,
   classifiedChangedFiles,
+  trustedToolingOnlyPaths: [],
   imageReuseCompatible: true,
+});
+
+test("the reviewed two-SHA workflow boundary keeps the exact 29bf release image-compatible", () => {
+  const releaseSha = "29bf92a14d5e832575009bd76b16886feff62cbd";
+  const protectedSha = "a37fe2559f15094494122825a7d7365ca1218120";
+  const boundary = assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha });
+  assert.deepEqual(boundary, { file: STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH, category: "trustedToolingOnly", imageAffecting: false });
+  const report = imageImpactReportFor({ imageReleaseSha: releaseSha, toolingSha: protectedSha, toolingInputTreeSha256: "d".repeat(64), changedFiles: [STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH] });
+  assert.deepEqual(report.imageAffectingFiles, []);
+  assert.deepEqual(report.trustedToolingOnlyPaths, [STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH]);
+  assert.equal(report.imageReuseCompatible, true);
+});
+
+test("the two-SHA workflow boundary rejects a release-build command change", () => {
+  const releaseSha = "29bf92a14d5e832575009bd76b16886feff62cbd";
+  const protectedSha = "a37fe2559f15094494122825a7d7365ca1218120";
+  const readWorkflow = (sha) => {
+    const source = execFileSync("git", ["show", `${sha}:${STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH}`], { encoding: "utf8" });
+    return sha === protectedSha ? source.replace("./scripts/aws/publish-ecs-images.sh production-green-stage-b", "./scripts/aws/publish-ecs-images.sh backend") : source;
+  };
+  assert.throws(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: readWorkflow }), /publication inputs/);
 });
 
 test("non-image-affecting pull-request impact is merge-ready for reviewed reuse", () => {
