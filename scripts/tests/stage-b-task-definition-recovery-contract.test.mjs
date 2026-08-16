@@ -51,6 +51,11 @@ const bindings = {
 };
 const protectedCheckout = { mode: "production", toolingSha: sourceSha, currentHead: sourceSha, originMainHead: sourceSha, isAncestor: true, porcelainStatus: "", derivedProvenance: { toolingTreeSha256: "a".repeat(64), sourceContractSha256: "b".repeat(64) }, repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false } };
 const deriveProvenance = ({ protectedCheckout: checkout }) => checkout.derivedProvenance;
+const freshSourceSha = "94da9651eb9427603be87abe89f89111412755c9";
+const freshImageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha: freshSourceSha, imageReleaseSha: freshSourceSha, impactImageReleaseSha: "29bf92a14d5e832575009bd76b16886feff62cbd" });
+const freshImageAuthorization = freshImageAuthorizationFixture.authorization;
+const freshBindings = { ...bindings, sourceSha: freshSourceSha, toolingSha: freshSourceSha, imageReleaseSha: freshImageAuthorization.imageReleaseSha, backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${freshImageAuthorization.backendDigest}`, imageAuthorization: freshImageAuthorization };
+const freshProtectedCheckout = { ...protectedCheckout, toolingSha: freshSourceSha, currentHead: freshSourceSha, originMainHead: freshSourceSha };
 
 const originalIncidentSha = "3d5eeefc34d69820e00bef072da3c4396689491f";
 const executorSha = "eec7724ea16cd5051cd709fbd729fa7bc1c3786b";
@@ -298,6 +303,18 @@ test("recovery separates tooling provenance from image/task-definition provenanc
   assert.notEqual(bindings.toolingSha, bindings.imageReleaseSha);
   assert.throws(() => assertCanonicalRecoverySourceBinding({ sourceSha, bindings: { ...bindings, imageReleaseSha: sourceSha }, protectedCheckout }), /image-release identity/);
   assert.throws(() => assertCanonicalRecoverySourceBinding({ sourceSha, bindings: { ...bindings, backendImage: `${image.slice(0, -64)}${"e".repeat(64)}` }, protectedCheckout }), /backend image/);
+});
+
+test("partial recovery accepts the canonical fresh-publication authorization path", () => {
+  assert.equal(freshImageAuthorization.authorizationPath, "FRESH_IMAGE_PUBLICATION");
+  assert.doesNotThrow(() => assertCanonicalRecoverySourceBinding({
+    sourceSha: freshSourceSha,
+    bindings: freshBindings,
+    protectedCheckout: freshProtectedCheckout,
+    imageAuthorization: freshImageAuthorization,
+    imageAuthorizationValidation: { now: freshImageAuthorizationFixture.now, verifyImageEvidence: freshImageAuthorizationFixture.verifyImageEvidence },
+    deriveProvenance: () => ({ toolingTreeSha256: freshBindings.toolingTreeSha256, sourceContractSha256: freshBindings.sourceContractSha256 }),
+  }));
 });
 
 test("protected eec7724 resumes the original 3d5eeef incident without rebinding or registering", async () => {

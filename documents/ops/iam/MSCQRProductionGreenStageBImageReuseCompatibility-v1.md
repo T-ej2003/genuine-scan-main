@@ -62,6 +62,25 @@ metadata cannot satisfy the evidence boundary. Different tooling and image-relea
 SHAs therefore require explicit canonical reuse authorization; same-SHA publications
 retain the direct binding path.
 
+## Authorization paths
+
+Image authorization has two mutually exclusive, fail-closed paths. The reuse path
+requires `imageReuseCompatible=true` and the complete reviewed two-SHA/source and
+supply-chain bindings above. When the impact report says `newImagesRequired=true`,
+reuse remains false: authorization instead requires a successful canonical signed-image
+workflow whose exact protected-main SHA, immutable release SHA, workflow run, complete
+artifact set, immutable digests, ECR readback, Cosign identity/issuer, transparency-log
+inclusion, SPDX predicate, and provenance predicate all match the verified evidence.
+For this path, `imageReleaseSha` and the build/provenance checkout SHA must equal the
+protected-main source SHA that triggered `newImagesRequired`; a prior release image
+cannot pass merely because its trusted workflow tooling used that source SHA.
+The publication identity must be for the current protected workflow run; stale evidence
+from an earlier run or SHA cannot satisfy fresh-image authorization.
+
+`newImagesRequired` is only the rebuild requirement, never proof that rebuilding happened.
+The fresh-publication path is the only path that satisfies that requirement, and it does
+not relax digest, identity, transparency-log, attestation, or downstream recovery gates.
+
 Descendant recovery validates every changed-file category independently. `trustedToolingOnly`
 is an additional authenticated category for the dedicated workflow proof; it does not bypass
 the existing allowlist for other non-image categories.
