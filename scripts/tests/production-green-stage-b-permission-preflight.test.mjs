@@ -1884,6 +1884,7 @@ test("S3 reservation uses conditional create as the first authoritative gate and
   assert.equal(calls[0].includes("--if-none-match"), true);
   assert.equal(calls[0][1], "put-object");
   assert.equal(calls[0][calls[0].indexOf("--if-none-match") + 1], "*");
+  assert.equal(calls[0][calls[0].indexOf("--server-side-encryption") + 1], "AES256");
   assert.equal(calls[0][calls[0].indexOf("--key") + 1], stageBApplyAttemptS3Key(identity));
   assert.equal(calls[1][1], "get-object");
 });

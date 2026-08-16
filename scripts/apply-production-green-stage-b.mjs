@@ -151,7 +151,7 @@ export function reserveStageBSharedApplyAttempt({ artifactSetIdentity, bytes, pr
   const readbackPath = path.join(temporaryDirectory, "readback.json");
   try {
     fs.writeFileSync(requestPath, bytes, { mode: 0o600, flag: "wx" });
-    const create = run(["s3api", "put-object", "--bucket", STAGE_B_TERRAFORM_BACKEND.bucketName, "--key", key, "--body", requestPath, "--if-none-match", "*", "--region", STAGE_B_TERRAFORM_BACKEND.region, "--no-cli-pager"]);
+    const create = run(["s3api", "put-object", "--bucket", STAGE_B_TERRAFORM_BACKEND.bucketName, "--key", key, "--body", requestPath, "--if-none-match", "*", "--server-side-encryption", "AES256", "--region", STAGE_B_TERRAFORM_BACKEND.region, "--no-cli-pager"]);
     if (create?.status !== 0) {
       const output = awsResultText(create);
       if (/(?:412|PreconditionFailed)/i.test(output)) throw new Error("Stage B shared apply reservation already exists; Terraform apply is unreachable.");
