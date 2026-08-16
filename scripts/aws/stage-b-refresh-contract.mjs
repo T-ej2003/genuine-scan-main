@@ -19,6 +19,7 @@ export const STAGE_B_REFRESH_STATUSES = Object.freeze([
   "MALFORMED_RESULT",
 ]);
 export const STAGE_B_REFRESH_ALLOWED_STATUSES = Object.freeze(["NO_CHANGES", "REVIEWED_OUTPUT_RECONCILIATION"]);
+export const STAGE_B_REFRESH_CAPTURE_STATUSES = Object.freeze([...STAGE_B_REFRESH_ALLOWED_STATUSES, "RESOURCE_DRIFT"]);
 export const STAGE_B_TERRAFORM_PLAN_FORMAT_VERSION = "1.2";
 export const STAGE_B_TERRAFORM_MIN_VERSION = "1.6.0";
 export const STAGE_B_TERRAFORM_MAX_VERSION_EXCLUSIVE = "2.0.0";
@@ -148,6 +149,76 @@ export function checkAddressesFromSource(source) {
   return addresses.sort();
 }
 
+function skipTerraformBlock(source, openBrace) {
+  let cursor = openBrace + 1;
+  let depth = 1;
+  while (cursor < source.length) {
+    const next = skipTerraformTrivia(source, cursor);
+    if (next !== cursor) { cursor = next; continue; }
+    if (source[cursor] === '"') { cursor = skipTerraformString(source, cursor); continue; }
+    if (source.startsWith("<<", cursor)) { cursor = skipTerraformHeredoc(source, cursor); continue; }
+    if (source[cursor] === "{") { depth += 1; cursor += 1; continue; }
+    if (source[cursor] === "}") {
+      depth -= 1;
+      if (depth === 0) return cursor + 1;
+      cursor += 1;
+      continue;
+    }
+    cursor += 1;
+  }
+  throw new Error("Stage B Terraform block is unbalanced.");
+}
+
+function namedTerraformBlocksFromSource(source, keyword, labelCount) {
+  if (typeof source !== "string") throw new Error("Stage B Terraform source must be text.");
+  const blocks = [];
+  let cursor = 0;
+  let depth = 0;
+  while (cursor < source.length) {
+    const next = skipTerraformTrivia(source, cursor);
+    if (next !== cursor) { cursor = next; continue; }
+    if (source[cursor] === '"') { cursor = skipTerraformString(source, cursor); continue; }
+    if (source.startsWith("<<", cursor)) { cursor = skipTerraformHeredoc(source, cursor); continue; }
+    if (source[cursor] === "{") { depth += 1; cursor += 1; continue; }
+    if (source[cursor] === "}") {
+      if (depth === 0) throw new Error("Stage B Terraform source contains an unmatched closing brace.");
+      depth -= 1;
+      cursor += 1;
+      continue;
+    }
+    const isKeyword = depth === 0 && source.startsWith(keyword, cursor) && !identifier.test(source[cursor - 1] || "") && !identifier.test(source[cursor + keyword.length] || "");
+    if (!isKeyword) { cursor += 1; continue; }
+    let probe = skipTerraformTrivia(source, cursor + keyword.length);
+    const labels = [];
+    for (let index = 0; index < labelCount; index += 1) {
+      if (source[probe] !== '"') throw new Error(`Stage B Terraform ${keyword} block label is malformed.`);
+      const end = skipTerraformString(source, probe);
+      const label = source.slice(probe + 1, end - 1);
+      if (!/^[A-Za-z0-9_-]+$/.test(label)) throw new Error(`Stage B Terraform ${keyword} block label is malformed.`);
+      labels.push(label);
+      probe = skipTerraformTrivia(source, end);
+    }
+    if (source[probe] !== "{") throw new Error(`Stage B Terraform ${keyword} block is missing its body.`);
+    const end = skipTerraformBlock(source, probe);
+    blocks.push({ labels, body: source.slice(probe + 1, end - 1) });
+    cursor = end;
+  }
+  if (depth !== 0) throw new Error("Stage B Terraform source contains an unbalanced brace.");
+  return blocks;
+}
+
+export function resourcePreconditionAddressesFromSource(source) {
+  const addresses = [];
+  for (const resource of namedTerraformBlocksFromSource(source, "resource", 2)) {
+    const [type, name] = resource.labels;
+    const lifecycle = namedTerraformBlocksFromSource(resource.body, "lifecycle", 0);
+    if (lifecycle.some(({ body }) => namedTerraformBlocksFromSource(body, "precondition", 0).length > 0)) addresses.push(`${type}.${name}`);
+  }
+  const duplicates = addresses.filter((address, index) => addresses.indexOf(address) !== index);
+  if (duplicates.length) throw new Error(`Duplicate Stage B Terraform resource precondition: ${duplicates[0]}`);
+  return [...new Set(addresses)].sort();
+}
+
 export function collectStageBTerraformCheckAddresses(terraformRoot = TERRAFORM_ROOT_PATH) {
   const root = path.resolve(terraformRoot);
   if (root !== TERRAFORM_ROOT_PATH) throw new Error("Stage B check discovery must use the canonical protected Terraform root.");
@@ -175,7 +246,17 @@ const sourceVariableValidationNames = variableValidationNamesFromSource(variable
 if (JSON.stringify(sourceVariableValidationNames) !== JSON.stringify([...REVIEWED_VARIABLE_VALIDATION_NAMES].sort())) throw new Error("Stage B Terraform variable-validation inventory requires review.");
 export const STAGE_B_EXPECTED_CHECK_ADDRESSES = Object.freeze(collectStageBTerraformCheckAddresses());
 export const STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES = Object.freeze(REVIEWED_VARIABLE_VALIDATION_NAMES.map((name) => `var.${name}`).sort());
-export const STAGE_B_EXPECTED_CHECK_INVENTORY = Object.freeze([...STAGE_B_EXPECTED_CHECK_ADDRESSES, ...STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES].sort());
+export const STAGE_B_EXPECTED_RESOURCE_PRECONDITION_ADDRESSES = Object.freeze((() => {
+  const addresses = [];
+  const files = fs.readdirSync(TERRAFORM_ROOT_PATH, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of files) {
+    if (!entry.name.endsWith(".tf")) continue;
+    if (entry.isSymbolicLink() || !entry.isFile()) throw new Error(`Stage B Terraform source file is not a regular file: ${entry.name}`);
+    addresses.push(...resourcePreconditionAddressesFromSource(fs.readFileSync(path.join(TERRAFORM_ROOT_PATH, entry.name), "utf8")));
+  }
+  return [...new Set(addresses)].sort();
+})());
+export const STAGE_B_EXPECTED_CHECK_INVENTORY = Object.freeze([...STAGE_B_EXPECTED_CHECK_ADDRESSES, ...STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES, ...STAGE_B_EXPECTED_RESOURCE_PRECONDITION_ADDRESSES].sort());
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const hasUnknown = (value) => value === true || (value && typeof value === "object" && Object.values(value).some(hasUnknown));
@@ -250,6 +331,37 @@ export function checkAddress(value) {
   return display || string;
 }
 
+function renderedResourceAddress(value) {
+  return typeof value === "string" && value.length > 0 && value.trim() === value && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value) ? value : undefined;
+}
+
+function resourceCheckAddress(value) {
+  if (typeof value === "string") return renderedResourceAddress(value);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const toDisplay = value.to_display;
+  const toString = value.to_string;
+  if (toDisplay !== undefined && typeof toDisplay !== "string") return undefined;
+  if (toString !== undefined && typeof toString !== "string") return undefined;
+  const display = renderedResourceAddress(toDisplay);
+  const string = renderedResourceAddress(toString);
+  if ((toDisplay !== undefined && !display) || (toString !== undefined && !string) || (display && string && display !== string)) return undefined;
+  const structured = value.kind !== undefined || value.mode !== undefined || value.type !== undefined || value.name !== undefined;
+  if (structured) {
+    if (value.kind !== "resource" || value.mode !== "managed" || typeof value.type !== "string" || typeof value.name !== "string" || !/^[A-Za-z0-9_-]+$/.test(value.type) || !/^[A-Za-z0-9_-]+$/.test(value.name)) return undefined;
+    const address = `${value.type}.${value.name}`;
+    return (!display || display === address) && (!string || string === address) ? address : undefined;
+  }
+  return display || string;
+}
+
+function refreshCheckAddress(value) {
+  const standard = checkAddress(value);
+  if (standard) return { address: standard, category: standard.startsWith("check.") ? "infrastructure" : "variable" };
+  const resource = resourceCheckAddress(value);
+  if (resource) return { address: resource, category: "resource" };
+  return { address: undefined, category: undefined };
+}
+
 function checkMessage(value) {
   if (typeof value === "string") return value;
   if (value && typeof value.message === "string") return value.message;
@@ -257,10 +369,11 @@ function checkMessage(value) {
   return "Terraform check did not provide a usable message.";
 }
 
-export function inspectStageBRefreshChecks({ checks, checksSource } = {}) {
+export function inspectStageBRefreshChecks({ checks, checksSource, resourcePreconditionAddresses = STAGE_B_EXPECTED_RESOURCE_PRECONDITION_ADDRESSES } = {}) {
   const expectedInfrastructureCheckAddresses = checksSource ? checkAddressesFromSource(checksSource) : STAGE_B_EXPECTED_CHECK_ADDRESSES;
   const expectedVariableCheckAddresses = checksSource ? STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES : STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES;
-  const expectedAddresses = [...expectedInfrastructureCheckAddresses, ...expectedVariableCheckAddresses].sort();
+  const expectedResourcePreconditionAddresses = [...new Set(checksSource ? resourcePreconditionAddressesFromSource(checksSource) : resourcePreconditionAddresses)].sort();
+  const expectedAddresses = [...expectedInfrastructureCheckAddresses, ...expectedVariableCheckAddresses, ...expectedResourcePreconditionAddresses].sort();
   const failedChecks = [];
   const normalized = [];
   const seen = new Set();
@@ -278,13 +391,14 @@ export function inspectStageBRefreshChecks({ checks, checksSource } = {}) {
   let infrastructureCheckCount = 0;
   let variableCheckCount = 0;
   const emptyInstanceInventoryHash = sha256(Buffer.from(canonicalJson([])));
-  if (!Array.isArray(checks)) return { checkCount: 0, infrastructureCheckCount: 0, variableCheckCount: 0, passedCheckCount: 0, failedCheckCount: 0, malformedCheckCount: 1, missingCheckCount: expectedAddresses.length, unknownCheckCount: 0, duplicateCheckCount: 0, emittedInstanceCount: 0, passedInstanceCount: 0, failedInstanceCount: 0, malformedInstanceCount: 0, duplicateInstanceCount: 0, checkInventoryHash: emptyInstanceInventoryHash, instanceInventoryHash: emptyInstanceInventoryHash, failedChecks: [{ address: "<checks>", status: "malformed", message: "Terraform refresh JSON is missing the plan.checks array." }], checks: [], expectedInfrastructureCheckAddresses, expectedVariableCheckAddresses, expectedAddresses, valid: false };
+  if (!Array.isArray(checks)) return { checkCount: 0, infrastructureCheckCount: 0, variableCheckCount: 0, resourcePreconditionCheckCount: 0, passedCheckCount: 0, failedCheckCount: 0, malformedCheckCount: 1, missingCheckCount: expectedAddresses.length, unknownCheckCount: 0, duplicateCheckCount: 0, emittedInstanceCount: 0, passedInstanceCount: 0, failedInstanceCount: 0, malformedInstanceCount: 0, duplicateInstanceCount: 0, checkInventoryHash: emptyInstanceInventoryHash, instanceInventoryHash: emptyInstanceInventoryHash, failedChecks: [{ address: "<checks>", status: "malformed", message: "Terraform refresh JSON is missing the plan.checks array." }], checks: [], expectedInfrastructureCheckAddresses, expectedVariableCheckAddresses, expectedResourcePreconditionAddresses, expectedAddresses, valid: false };
   for (const check of checks) {
-    const address = checkAddress(check?.address);
+    const parsedAddress = refreshCheckAddress(check?.address);
+    const address = parsedAddress.address;
     const issues = [];
     let malformed = false;
     let failed = false;
-    const category = address?.startsWith("check.") ? "infrastructure" : address?.startsWith("var.") ? "variable" : undefined;
+    const category = parsedAddress.category;
     if (!address) { malformed = true; unknownCheckCount += 1; issues.push({ address: "<unknown>", status: "malformed", message: "Terraform check address is missing or malformed." }); }
     else if (!expectedAddresses.includes(address)) { malformed = true; unknownCheckCount += 1; issues.push({ address, status: "malformed", message: "Terraform check address is not defined by the protected Stage B source." }); }
     else if (seen.has(address)) { malformed = true; duplicateCheckCount += 1; issues.push({ address, status: "malformed", message: "Terraform check address is duplicated." }); }
@@ -305,7 +419,7 @@ export function inspectStageBRefreshChecks({ checks, checksSource } = {}) {
     const seenInstanceAddresses = new Set();
     for (const instance of instances) {
       emittedInstanceCount += 1;
-      const instanceAddress = checkAddress(instance?.address, { instance: true });
+      const instanceAddress = refreshCheckAddress(instance?.address).address;
       const problems = instance?.problems;
       normalizedInstances.push({ address: instanceAddress, status: instance?.status });
       const malformedInstance = !instance || typeof instance !== "object" || Array.isArray(instance) || !instanceAddress || instanceAddress !== address || (problems !== undefined && !Array.isArray(problems));
@@ -346,7 +460,8 @@ export function inspectStageBRefreshChecks({ checks, checksSource } = {}) {
   normalized.sort((left, right) => String(left.address).localeCompare(String(right.address)));
   const checkInventoryHash = sha256(Buffer.from(canonicalJson(normalized.map(({ address }) => address).sort())));
   const instanceInventoryHash = sha256(Buffer.from(canonicalJson(normalized.map(({ address, instances }) => ({ address, instances })).sort((left, right) => String(left.address).localeCompare(String(right.address))))));
-  return { checkCount: checks.length, infrastructureCheckCount, variableCheckCount, passedCheckCount, failedCheckCount, malformedCheckCount, missingCheckCount, unknownCheckCount, duplicateCheckCount, emittedInstanceCount, passedInstanceCount, failedInstanceCount, malformedInstanceCount, duplicateInstanceCount, checkInventoryHash, instanceInventoryHash, failedChecks, checks: normalized, expectedInfrastructureCheckAddresses, expectedVariableCheckAddresses, expectedAddresses, valid: checks.length === expectedAddresses.length && infrastructureCheckCount === expectedInfrastructureCheckAddresses.length && variableCheckCount === expectedVariableCheckAddresses.length && failedCheckCount === 0 && malformedCheckCount === 0 && missingCheckCount === 0 && unknownCheckCount === 0 && duplicateCheckCount === 0 && emittedInstanceCount === passedInstanceCount && failedInstanceCount === 0 && malformedInstanceCount === 0 && duplicateInstanceCount === 0 && failedChecks.length === 0 };
+  const resourcePreconditionCheckCount = normalized.filter(({ address }) => expectedResourcePreconditionAddresses.includes(address)).length;
+  return { checkCount: checks.length, infrastructureCheckCount, variableCheckCount, resourcePreconditionCheckCount, passedCheckCount, failedCheckCount, malformedCheckCount, missingCheckCount, unknownCheckCount, duplicateCheckCount, emittedInstanceCount, passedInstanceCount, failedInstanceCount, malformedInstanceCount, duplicateInstanceCount, checkInventoryHash, instanceInventoryHash, failedChecks, checks: normalized, expectedInfrastructureCheckAddresses, expectedVariableCheckAddresses, expectedResourcePreconditionAddresses, expectedAddresses, valid: checks.length === expectedAddresses.length && infrastructureCheckCount === expectedInfrastructureCheckAddresses.length && variableCheckCount === expectedVariableCheckAddresses.length && resourcePreconditionCheckCount === expectedResourcePreconditionAddresses.length && failedCheckCount === 0 && malformedCheckCount === 0 && missingCheckCount === 0 && unknownCheckCount === 0 && duplicateCheckCount === 0 && emittedInstanceCount === passedInstanceCount && failedInstanceCount === 0 && malformedInstanceCount === 0 && duplicateInstanceCount === 0 && failedChecks.length === 0 };
 }
 
 function expectedImages(bindingReport) {
