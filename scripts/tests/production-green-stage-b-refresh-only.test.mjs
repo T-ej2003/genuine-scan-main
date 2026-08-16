@@ -529,6 +529,26 @@ test("canonical current task-definition state reconciles to the exact Terraform 
   assert.equal(result.taskDefinitionOutputClassification, "STATE_OUTPUT_ALREADY_CONVERGED");
   assert.deepEqual(result.taskDefinitionArns, current.outputs.task_definition_arns.value);
 });
+test("serial-96 deposed task-definition residue is excluded from current output mapping", () => {
+  const current = currentTaskDefinitionStateFixture();
+  let deposedCount = 0;
+  for (const resource of current.resources) {
+    for (const instance of resource.instances.slice(0, resource.name === "candidate" ? 3 : 8)) {
+      resource.instances.push({ ...structuredClone(instance), deposed: `${(deposedCount + 1).toString(16)}`.repeat(8) });
+      deposedCount += 1;
+    }
+  }
+  assert.equal(deposedCount, 11);
+  const result = classifyStageBRefreshResult({ plan: noChangePlan(), bindingReport: bindingReport(), state: current, outputsSource });
+  assert.equal(result.status, "NO_CHANGES");
+  assert.deepEqual(result.taskDefinitionArns, current.outputs.task_definition_arns.value);
+});
+test("malformed deposed task-definition residue fails refresh classification", () => {
+  const current = currentTaskDefinitionStateFixture();
+  current.resources[0].instances.push({ ...structuredClone(current.resources[0].instances[0]), deposed: "not-hex" });
+  const result = classifyStageBRefreshResult({ plan: noChangePlan(), bindingReport: bindingReport(), state: current, outputsSource });
+  assert.equal(result.status, "MALFORMED_RESULT");
+});
 test("valid current resources authorize a planned output correction when state output is absent", () => {
   const current = currentTaskDefinitionStateFixture();
   delete current.outputs;

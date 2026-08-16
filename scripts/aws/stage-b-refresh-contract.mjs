@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 import { STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
-import { validateCurrentTaskDefinitionState } from "./generate-production-green-stage-b-tfvars.mjs";
+import { isTerraformDeposedInstance, validateCurrentTaskDefinitionState } from "./generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 
 export const STAGE_B_REFRESH_SCHEMA_VERSION = 1;
@@ -400,7 +400,7 @@ function expectedTaskDefinitionArns(state, outputsSource) {
     return {};
   }
   const expectedAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).sort();
-  const entries = current.flatMap((resource) => (resource.instances || []).map((instance) => ({
+  const entries = current.flatMap((resource) => (resource.instances || []).filter((instance) => !isTerraformDeposedInstance(instance, `Terraform state task-definition instance ${resource.name}`)).map((instance) => ({
     address: `aws_ecs_task_definition.${resource.name}["${instance.index_key}"]`,
     arn: instance.attributes?.arn,
   })));
