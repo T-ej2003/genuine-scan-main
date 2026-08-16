@@ -8,7 +8,7 @@ import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
-import { assertStageBRefreshStateBinding, classifyStageBRefreshResult, STAGE_B_REFRESH_ALLOWED_STATUSES } from "./aws/stage-b-refresh-contract.mjs";
+import { assertStageBRefreshStateBinding, classifyStageBRefreshResult, STAGE_B_REFRESH_CAPTURE_STATUSES } from "./aws/stage-b-refresh-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./aws/stage-b-artifact-contract.mjs";
 import { normalizeStageBRefreshPlan } from "./aws/stage-b-refresh-contract.mjs";
 import { runStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs";
@@ -447,6 +447,7 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
     checkCount: classification.checkCount || 0,
     infrastructureCheckCount: classification.infrastructureCheckCount || 0,
     variableCheckCount: classification.variableCheckCount || 0,
+    resourcePreconditionCheckCount: classification.resourcePreconditionCheckCount || 0,
     passedCheckCount: classification.passedCheckCount || 0,
     failedCheckCount: classification.failedCheckCount || 0,
     malformedCheckCount: classification.malformedCheckCount || 0,
@@ -467,7 +468,7 @@ export function runRefreshOnly({ argv = process.argv.slice(2), env = process.env
     outputChanges: classification.outputChanges,
     };
     writeOutput(artifacts.outputPath, refreshReport);
-    if (!STAGE_B_REFRESH_ALLOWED_STATUSES.includes(classification.status)) throw new Error(`Stage B refresh-only ${classification.status}: ${classification.reason}`);
+    if (!STAGE_B_REFRESH_CAPTURE_STATUSES.includes(classification.status)) throw new Error(`Stage B refresh-only ${classification.status}: ${classification.reason}`);
     return { ...refreshReport, outputPath: artifacts.outputPath, terraformArgs: argsForTerraform };
   } finally {
     fs.rmSync(refreshDirectory, { recursive: true, force: true });

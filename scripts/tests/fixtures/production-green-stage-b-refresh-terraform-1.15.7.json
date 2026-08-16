@@ -12,6 +12,7 @@
   "diagnostics": [],
   "output_changes": {},
   "checks": [
+    {"address":{"kind":"resource","mode":"managed","type":"aws_lambda_function","name":"broker","to_display":"aws_lambda_function.broker"},"status":"pass","instances":[{"address":{"to_display":"aws_lambda_function.broker"},"status":"pass"}]},
     {"address":{"kind":"check","name":"immutable_images","to_display":"check.immutable_images"},"status":"pass","instances":[{"address":{"to_display":"check.immutable_images"},"status":"pass"}]},
     {"address":{"kind":"check","name":"overlap_execution_role_secret_contract","to_display":"check.overlap_execution_role_secret_contract"},"status":"pass","instances":[{"address":{"to_display":"check.overlap_execution_role_secret_contract"},"status":"pass"}]},
     {"address":{"kind":"check","name":"production_only","to_display":"check.production_only"},"status":"pass","instances":[{"address":{"to_display":"check.production_only"},"status":"pass"}]},
