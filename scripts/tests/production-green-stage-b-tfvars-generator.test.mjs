@@ -217,6 +217,14 @@ test("serial-96 state separates reviewed deposed instances from current uniquene
   assert.equal(result.counts.executor, 8);
 });
 
+test("deposed identity syntax is exactly eight lowercase hexadecimal characters", () => {
+  for (const value of ["aaaaaaaa", "0123abcd"]) assert.equal(isTerraformDeposedInstance({ deposed: value }), true, value);
+  for (const value of ["a", "abcdefg", "abcdefghi", "123456789", "ABCDEF12", "", 12345678, null]) {
+    assert.throws(() => isTerraformDeposedInstance({ deposed: value }), /deposed identity is malformed/, value === null ? "null" : String(value));
+  }
+  assert.equal(isTerraformDeposedInstance({}), false);
+});
+
 test("malformed or duplicate deposed task-definition identities fail closed", () => {
   const malformed = stateFixture({ serial: 96, resources: [...stateFixture().resources, ...currentTaskDefinitionState()] });
   malformed.resources.find(({ name }) => name === "candidate").instances.push({ ...structuredClone(malformed.resources.find(({ name }) => name === "candidate").instances[0]), deposed: "not-hex" });
