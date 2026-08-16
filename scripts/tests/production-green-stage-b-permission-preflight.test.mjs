@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertApplyArtifacts, assertPermissionReport, inspectStageBSharedApplyReservation, parseCli as parseApplyCli, reserveStageBSharedApplyAttempt, runApply, showSavedPlan, stageBApplyArtifactSetIdentity, stageBApplyAttemptPath, stageBEffectiveOperatorHome } from "../apply-production-green-stage-b.mjs";
+import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, reserveStageBSharedApplyAttempt, runApply, showSavedPlan, stageBApplyArtifactSetIdentity, stageBApplyAttemptPath, stageBEffectiveOperatorHome } from "../apply-production-green-stage-b.mjs";
 import { stageBApplyAttemptS3Key } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import {
@@ -1775,7 +1775,6 @@ const validApplyInput = (fixture) => ({
     verifyPermissionSignature: () => true,
     verifyImageEvidence: fixture.verifyImageEvidence,
     getBackendMetadata: () => structuredClone(initializedBackendMetadata),
-    inspectSharedApplyReservation: ({ artifactSetIdentity }) => ({ status: fixture.sharedReservations.has(artifactSetIdentity) ? "present" : "absent", key: stageBApplyAttemptS3Key(artifactSetIdentity) }),
     apply: () => { throw new Error("apply must not be reached"); },
   },
 });
@@ -1801,7 +1800,6 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
       verifyImageEvidence: fixture.verifyImageEvidence,
       getBackendMetadata: () => structuredClone(initializedBackendMetadata),
       getEffectiveOperatorHome: () => fixture.directory,
-      inspectSharedApplyReservation: ({ artifactSetIdentity }) => ({ status: fixture.sharedReservations.has(artifactSetIdentity) ? "present" : "absent", key: stageBApplyAttemptS3Key(artifactSetIdentity) }),
       reserveSharedApplyAttempt: ({ artifactSetIdentity, bytes }) => {
         if (fixture.sharedReservations.has(artifactSetIdentity)) throw new Error("shared reservation already exists");
         fixture.sharedReservations.set(artifactSetIdentity, Buffer.from(bytes));
@@ -1868,12 +1866,12 @@ test("shared reservation blocks the same artifact set across hosts, users, and l
   ]) {
     const replay = validRealApplyInput(fixture);
     Object.assign(replay.env, environment);
-    assert.throws(() => runApply(replay), /shared apply reservation is already consumed/);
+    assert.throws(() => runApply(replay), /shared reservation already exists/);
     assert.deepEqual(replay.applyCalls, []);
   }
 });
 
-test("S3 reservation uses conditional create and verifies the exact durable bytes", () => {
+test("S3 reservation uses conditional create as the first authoritative gate and verifies its bytes", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-shared-reservation-"));
   const identity = "a".repeat(64); const bytes = Buffer.from("{\"attempt\":1}\n"); const calls = [];
   const result = reserveStageBSharedApplyAttempt({ artifactSetIdentity: identity, bytes, privateDirectory: directory, run: (args) => {
@@ -1884,6 +1882,7 @@ test("S3 reservation uses conditional create and verifies the exact durable byte
   } });
   assert.deepEqual(result, { status: "reserved", key: stageBApplyAttemptS3Key(identity) });
   assert.equal(calls[0].includes("--if-none-match"), true);
+  assert.equal(calls[0][1], "put-object");
   assert.equal(calls[0][calls[0].indexOf("--if-none-match") + 1], "*");
   assert.equal(calls[0][calls[0].indexOf("--key") + 1], stageBApplyAttemptS3Key(identity));
   assert.equal(calls[1][1], "get-object");
@@ -1895,6 +1894,7 @@ test("shared reservation 412, 409, outage, and readback mismatch fail closed", (
   for (const [stderr, pattern] of [
     ["PreconditionFailed (412)", /already exists/],
     ["ConditionalRequestConflict (409)", /concurrent conflict/],
+    ["AccessDenied (403)", /could not be created/],
     ["ServiceUnavailable", /could not be created/],
   ]) assert.throws(() => reserveStageBSharedApplyAttempt({ ...input, run: () => ({ status: 1, stdout: "", stderr }) }), pattern);
   assert.throws(() => reserveStageBSharedApplyAttempt({ ...input, run: (args) => {
@@ -1902,13 +1902,6 @@ test("shared reservation 412, 409, outage, and readback mismatch fail closed", (
     fs.writeFileSync(args.at(-1), "different\n");
     return { status: 0, stdout: "{}", stderr: "" };
   } }), /readback verification failed/);
-});
-
-test("shared readiness inspection distinguishes absent, present, and unavailable without reserving", () => {
-  const artifactSetIdentity = "c".repeat(64); const privateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-shared-inspection-"));
-  assert.equal(inspectStageBSharedApplyReservation({ artifactSetIdentity, privateDirectory, run: (args) => { fs.writeFileSync(args.at(-1), "{}\n"); return { status: 0, stdout: "{}", stderr: "" }; } }).status, "present");
-  assert.equal(inspectStageBSharedApplyReservation({ artifactSetIdentity, privateDirectory, run: () => ({ status: 255, stdout: "", stderr: "An error occurred (404) when calling GetObject" }) }).status, "absent");
-  assert.throws(() => inspectStageBSharedApplyReservation({ artifactSetIdentity, privateDirectory, run: () => ({ status: 255, stdout: "", stderr: "AccessDenied" }) }), /could not be inspected/);
 });
 
 test("effective operator account fixes the attempt root across caller environment changes", () => {
@@ -1968,8 +1961,8 @@ test("mutation identity changes only with stable executable bindings", () => {
   const baseline = { protectedMainSha: "a".repeat(40), planSha256: "b".repeat(64), savedPlanSha256: "c".repeat(64), tfvarsSha256: "d".repeat(64), approvalSha256: "e".repeat(64), permissionEvidenceSha256: "f".repeat(64), mutationManifestSha256: "1".repeat(64), workspace: "default", backendIdentitySha256: "2".repeat(64) };
   const identity = stageBApplyArtifactSetIdentity(baseline);
   assert.equal(stageBApplyArtifactSetIdentity(structuredClone(baseline)), identity);
-  for (const field of ["planSha256", "approvalSha256", "permissionEvidenceSha256", "mutationManifestSha256"]) assert.equal(stageBApplyArtifactSetIdentity({ ...baseline, [field]: "3".repeat(64) }), identity);
-  for (const [field, value] of [["savedPlanSha256", "3".repeat(64)], ["tfvarsSha256", "4".repeat(64)], ["protectedMainSha", "6".repeat(40)], ["backendIdentitySha256", "7".repeat(64)]]) {
+  for (const field of ["planSha256", "tfvarsSha256", "approvalSha256", "permissionEvidenceSha256", "mutationManifestSha256"]) assert.equal(stageBApplyArtifactSetIdentity({ ...baseline, [field]: "3".repeat(64) }), identity);
+  for (const [field, value] of [["savedPlanSha256", "3".repeat(64)], ["protectedMainSha", "6".repeat(40)], ["backendIdentitySha256", "7".repeat(64)]]) {
     assert.notEqual(stageBApplyArtifactSetIdentity({ ...baseline, [field]: value }), identity);
   }
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-attempt-identity-"));
@@ -1978,6 +1971,16 @@ test("mutation identity changes only with stable executable bindings", () => {
   const changedPath = stageBApplyAttemptPath({ artifactSetIdentity: changed, effectiveOperatorHome: fixture });
   assert.equal(path.dirname(firstPath), path.dirname(changedPath));
   assert.notEqual(path.basename(firstPath), path.basename(changedPath));
+});
+
+test("RECOVERY_ALIAS_ONLY tfvars reserialization cannot mint another mutation right", () => {
+  const stable = { planProfile: "RECOVERY_ALIAS_ONLY", savedPlanSha256: "a".repeat(64), tfvarsSha256: crypto.createHash("sha256").update("alias_version = 3\n").digest("hex"), protectedMainSha: "b".repeat(40), workspace: "default", backendIdentitySha256: "c".repeat(64) };
+  const reserialized = { ...stable, tfvarsSha256: crypto.createHash("sha256").update("# same saved plan\nalias_version=3\n").digest("hex") };
+  const identity = stageBApplyArtifactSetIdentity(stable);
+  assert.equal(stageBApplyArtifactSetIdentity(reserialized), identity);
+  assert.equal(stageBApplyAttemptS3Key(stageBApplyArtifactSetIdentity(reserialized)), stageBApplyAttemptS3Key(identity));
+  const privateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-recovery-tfvars-reserialization-"));
+  assert.throws(() => reserveStageBSharedApplyAttempt({ artifactSetIdentity: stageBApplyArtifactSetIdentity(reserialized), bytes: Buffer.from("{}\n"), privateDirectory, run: () => ({ status: 1, stdout: "", stderr: "PreconditionFailed (412)" }) }), /already exists/);
 });
 
 test("renewed permission evidence cannot create a second mutation right", () => {
@@ -1991,7 +1994,7 @@ test("renewed permission evidence cannot create a second mutation right", () => 
   fixture.permissionReportSignatureSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportSignaturePath)).digest("hex");
   fs.rmSync(path.join(fixture.directory, ".mscqr"), { recursive: true, force: true });
   const replay = validRealApplyInput(fixture);
-  assert.throws(() => runApply(replay), /shared apply reservation is already consumed/);
+  assert.throws(() => runApply(replay), /shared reservation already exists/);
   assert.equal([...fixture.sharedReservations.keys()][0], firstIdentity);
   assert.deepEqual(replay.applyCalls, []);
 });
@@ -2017,7 +2020,7 @@ test("equivalent initialized-backend representations share one global reservatio
   fs.rmSync(path.join(fixture.directory, ".mscqr"), { recursive: true, force: true });
   const replay = validRealApplyInput(fixture);
   replay.deps.getBackendMetadata = () => structuredClone(equivalent);
-  assert.throws(() => runApply(replay), /shared apply reservation is already consumed/);
+  assert.throws(() => runApply(replay), /shared reservation already exists/);
   assert.deepEqual(replay.applyCalls, []);
 });
 
@@ -2044,7 +2047,8 @@ test("canonical attempt path rejects symlink substitution and verify-only reserv
   const fixture = createValidStageBApplyFixture();
   const readiness = runApply(validApplyInput(fixture));
   assert.equal(readiness.status, "ready-to-apply");
-  assert.equal(readiness.reservationStatus, "absent");
+  assert.equal(readiness.reservationStatus, "not-authoritatively-readable");
+  assert.equal(readiness.atomicReservationGate, "enforced-at-mutation-boundary");
   assert.equal(fixture.sharedReservations.size, 0);
   assert.equal(fs.existsSync(path.join(fixture.directory, ".mscqr")), false);
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-attempt-outside-"));
@@ -2229,7 +2233,7 @@ test("exact binary plan and derived JSON reach the ready-to-apply boundary witho
   const result = runApply({
     argv: wrapperArgs(fixture, true),
     env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
-    deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, getBackendMetadata: () => structuredClone(initializedBackendMetadata), inspectSharedApplyReservation: ({ artifactSetIdentity }) => ({ status: "absent", key: stageBApplyAttemptS3Key(artifactSetIdentity) }), apply: () => { throw new Error("apply must not be reached"); } },
+    deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, getBackendMetadata: () => structuredClone(initializedBackendMetadata), apply: () => { throw new Error("apply must not be reached"); } },
   });
   assert.equal(result.status, "ready-to-apply");
 });

@@ -33,7 +33,9 @@ only the approved saved plan; no target, replace, refresh-only, or re-plan path
 is accepted. Fresh approval and permission evidence remain mandatory and are
 revalidated, but their renewable artifact hashes do not mint another mutation
 right. The apply-attempt identity is the canonical hash of the stable saved-plan,
-tfvars, protected-source, normalized backend identity, and workspace bindings.
+protected-source, normalized backend identity, and workspace bindings. Canonical
+tfvars remain mandatory authenticated evidence but are not consumed by
+`terraform apply <saved-plan>`, so reserialization cannot mint another key.
 The normalized backend identity contains only the validated S3 type, bucket,
 state key, region, encryption, and lockfile coordinates; Terraform's metadata
 hash and default-valued optional serialization do not mint another key. The mutation manifest
@@ -55,9 +57,25 @@ The effective OS account marker at
 `<effective-operator-home>/.mscqr/production-green-stage-b/apply-attempts/<artifact-set-sha256>.json`
 remains local defense-in-depth only. Losing it cannot restore mutation
 authority because the shared S3 reservation is authoritative across hosts,
-users, runners, and local filesystem loss. The readiness audit only checks
-that the shared reservation is absent; only the final mutation boundary may
-create it.
+users, runners, and local filesystem loss. Without `s3:ListBucket`, a
+missing-object `GetObject` is not an authoritative absence test. Readiness
+therefore reports the reservation as not authoritatively readable and does not
+consume it. Only conditional `PutObject` at the final mutation boundary decides
+whether the mutation right is available.
+
+The global mutation identity field audit is:
+
+| Field | Classification | Reservation-key effect |
+|---|---|---|
+| saved binary plan SHA-256 | executable mutation | included |
+| protected source SHA | immutable execution binding | included |
+| normalized backend identity | external state target | included |
+| canonical workspace | external state target | included |
+| tfvars and binding report | freshly validated evidence; not an apply input | excluded |
+| approval, permission, manifest, signatures, timestamps | renewable authorization evidence | excluded |
+
+Excluded evidence is still validated against the saved plan immediately before
+conditional reservation; exclusion changes no freshness or authorization gate.
 
 ## Barrier 2 expected operations
 

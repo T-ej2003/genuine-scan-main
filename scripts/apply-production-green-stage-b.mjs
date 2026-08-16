@@ -103,7 +103,7 @@ export function parseCli(argv) {
   };
 }
 
-const STAGE_B_MUTATION_IDENTITY_SHA256_FIELDS = ["savedPlanSha256", "tfvarsSha256", "backendIdentitySha256"];
+const STAGE_B_MUTATION_IDENTITY_SHA256_FIELDS = ["savedPlanSha256", "backendIdentitySha256"];
 
 export function stageBApplyArtifactSetIdentity(bindings = {}) {
   for (const field of STAGE_B_MUTATION_IDENTITY_SHA256_FIELDS) if (!/^[a-f0-9]{64}$/.test(bindings[field] || "")) throw new Error(`Stage B mutation identity ${field} is malformed.`);
@@ -111,7 +111,6 @@ export function stageBApplyArtifactSetIdentity(bindings = {}) {
   if (bindings.workspace !== "default") throw new Error("Stage B mutation identity workspace must be default.");
   return sha256(Buffer.from(canonicalizeJson({
     savedPlanSha256: bindings.savedPlanSha256,
-    tfvarsSha256: bindings.tfvarsSha256,
     protectedMainSha: bindings.protectedMainSha,
     workspace: bindings.workspace,
     backendIdentitySha256: bindings.backendIdentitySha256,
@@ -142,20 +141,6 @@ export function stageBApplyAttemptPath({ artifactSetIdentity, effectiveOperatorH
 }
 
 const awsResultText = (result) => `${result?.stdout || ""}\n${result?.stderr || ""}`;
-
-export function inspectStageBSharedApplyReservation({ artifactSetIdentity, privateDirectory, run = (args) => spawnSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
-  const key = stageBApplyAttemptS3Key(artifactSetIdentity);
-  const temporaryDirectory = fs.mkdtempSync(path.join(privateDirectory, ".shared-inspection-"));
-  const readbackPath = path.join(temporaryDirectory, "reservation.json");
-  try {
-    const result = run(["s3api", "get-object", "--bucket", STAGE_B_TERRAFORM_BACKEND.bucketName, "--key", key, "--region", STAGE_B_TERRAFORM_BACKEND.region, "--no-cli-pager", readbackPath]);
-    if (result?.status === 0 && fs.existsSync(readbackPath)) return { status: "present", key };
-    if (/(?:404|Not Found|NoSuchKey)/i.test(awsResultText(result))) return { status: "absent", key };
-    throw new Error("Stage B shared apply reservation could not be inspected; Terraform apply is unreachable.");
-  } finally {
-    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
-  }
-}
 
 export function reserveStageBSharedApplyAttempt({ artifactSetIdentity, bytes, privateDirectory, run = (args) => spawnSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
   const key = stageBApplyAttemptS3Key(artifactSetIdentity);
@@ -384,10 +369,8 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   assertStageBTerraformInitializedBackendMetadata(backendMetadata);
   const initialBindings = stageBApplyBindings({ artifacts, verified, backendMetadata, env });
   const initialArtifactSetIdentity = stageBApplyArtifactSetIdentity(initialBindings);
-  const inspectSharedApplyReservation = effectiveDeps.inspectSharedApplyReservation || inspectStageBSharedApplyReservation;
-  const sharedReservation = inspectSharedApplyReservation({ artifactSetIdentity: initialArtifactSetIdentity, privateDirectory: env.TF_DATA_DIR });
-  if (sharedReservation?.status !== "absent" || sharedReservation.key !== stageBApplyAttemptS3Key(initialArtifactSetIdentity)) throw new Error("Stage B shared apply reservation is already consumed or could not be authenticated; Terraform apply is unreachable.");
-  if (artifacts.verifyOnly) return { status: "ready-to-apply", reservationStatus: "absent", sharedReservationKey: sharedReservation.key, callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, mutationManifestSha256: verified.mutationManifestSha256, executableAuditSha256: initialArtifactSetIdentity, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
+  const sharedReservationKey = stageBApplyAttemptS3Key(initialArtifactSetIdentity);
+  if (artifacts.verifyOnly) return { status: "ready-to-apply", reservationStatus: "not-authoritatively-readable", atomicReservationGate: "enforced-at-mutation-boundary", sharedReservationKey, callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, savedPlanSha256: artifacts.savedPlanSha256, canonicalPlanJsonSha256: artifacts.canonicalPlanJsonSha256, mutationManifestSha256: verified.mutationManifestSha256, executableAuditSha256: initialArtifactSetIdentity, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
   const applyCheckout = effectiveDeps.getProtectedMainCheckout
     ? effectiveDeps.getProtectedMainCheckout()
     : effectiveDeps.currentHead
