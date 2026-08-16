@@ -10,7 +10,7 @@ import { produceOnboardingEvidence } from "../security/produce-production-onboar
 import { validateOnboardingContract } from "../security/production-onboarding-contract.mjs";
 import { assertImageEvidence, imageEvidenceSha256 } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B, canonicalSha256 } from "./production-green-stage-b-contract.mjs";
-import { assertCanonicalImageReuseEvidence, imageAuthorizationSha256 } from "./production-image-authorization.mjs";
+import { assertCanonicalImageImpactEvidence, imageAuthorizationSha256, IMAGE_AUTHORIZATION_PATHS } from "./production-image-authorization.mjs";
 import { assertCheckerChainStructuralEvidence } from "./production-checker-chain-contract.mjs";
 
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -178,10 +178,16 @@ export function assertImageAuthorizationEnvelope(value, { now, verifyImageEviden
   const sourceSha = value?.sourceSha;
   if (!SHA40.test(sourceSha || "") || value?.schemaVersion !== 2 || value.valid !== true || !SHA256.test(value.evidenceSha256 || "")
     || !value.imageEvidence || !value.imageEvidenceSignature || !value.imageReuseEvidence
+    || !Object.values(IMAGE_AUTHORIZATION_PATHS).includes(value.authorizationPath)
     || !SHA256.test(value.imageEvidenceSha256 || "") || !SHA256.test(value.imageReuseEvidenceSha256 || "")
     || !SHA256.test(value.authorizationSha256 || "")) throw new Error("Canonical image authorization is incomplete or invalid.");
   for (const field of ["signatureVerified", "attestationVerified", "provenanceVerified"]) if (value[field] !== true) throw new Error(`Image ${field} is not verified.`);
-  if (value.imageReuseCompatible !== true || value.imageBuildInputsChanged !== false || !SHA40.test(value.imageReleaseSha || "") || !/^\d+$/.test(String(value.workflowRunId || ""))) throw new Error("Image authorization is not bound to canonical compatibility and publication evidence.");
+  if (!Object.values(IMAGE_AUTHORIZATION_PATHS).includes(value.authorizationPath)
+    || !SHA40.test(value.imageReleaseSha || "") || !/^\d+$/.test(String(value.workflowRunId || ""))) throw new Error("Image authorization path or publication identity is invalid.");
+  const freshPublication = value.authorizationPath === IMAGE_AUTHORIZATION_PATHS.FRESH_PUBLICATION;
+  if (freshPublication
+    ? (value.imageReuseCompatible !== false || value.imageBuildInputsChanged !== true)
+    : (value.imageReuseCompatible !== true || value.imageBuildInputsChanged !== false)) throw new Error("Image authorization path does not match the independently derived image-impact result.");
   if (!Array.isArray(value.images) || value.images.length !== 4 || new Set(value.images.map(({ service }) => service)).size !== 4) throw new Error("Image authorization must contain exactly four image records.");
   for (const image of value.images) if (!new Set(["backend", "worker", "rls-executor", "rls-canary"]).has(image.service) || !/^sha256:[a-f0-9]{64}$/.test(image.digest || "")) throw new Error(`Image authorization record is invalid: ${image.service || "unknown"}.`);
   const backend = value.images.find(({ service }) => service === "backend")?.digest;
@@ -198,11 +204,13 @@ export function assertImageAuthorizationEnvelope(value, { now, verifyImageEviden
     now,
     ...(verifyImageEvidence ? { verifySignature: verifyImageEvidence } : {}),
   });
-  assertCanonicalImageReuseEvidence(value.imageEvidence, value.imageReuseEvidence, sourceSha);
+  const { derived: impactEvidence, authorizationPath } = assertCanonicalImageImpactEvidence(value.imageEvidence, value.imageReuseEvidence, sourceSha);
   if (value.imageEvidence.imageReleaseSha !== value.imageReleaseSha || String(value.imageEvidence.workflowRunId) !== String(value.workflowRunId)
     || value.imageEvidence.images.some(({ service, digest }) => value.images.find((candidate) => candidate.service === service)?.digest !== digest)
     || value.imageReuseEvidence.imageReuseCompatible !== value.imageReuseCompatible
-    || value.imageReuseEvidence.newImagesRequired !== value.imageBuildInputsChanged) {
+    || value.imageReuseEvidence.newImagesRequired !== value.imageBuildInputsChanged
+    || authorizationPath !== value.authorizationPath
+    || impactEvidence.newImagesRequired !== value.imageBuildInputsChanged) {
     throw new Error("Image authorization envelope diverges from its validated inputs.");
   }
 }

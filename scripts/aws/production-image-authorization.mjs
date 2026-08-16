@@ -23,6 +23,10 @@ const WORKFLOW_RUN = /^\d+$/;
 const SERVICES = new Set(["backend", "worker", "rls-executor", "rls-canary"]);
 
 export const IMAGE_AUTHORIZATION_SCHEMA_VERSION = 2;
+export const IMAGE_AUTHORIZATION_PATHS = Object.freeze({
+  REUSE: "IMAGE_REUSE",
+  FRESH_PUBLICATION: "FRESH_IMAGE_PUBLICATION",
+});
 
 const authorizationPayload = (value) => {
   const { evidenceSha256, filePath, authorizationSha256, ...payload } = value || {};
@@ -53,13 +57,46 @@ function assertImageRecords(images) {
   }
 }
 
+function assertExactImageImpactEvidence(imageEvidence, impactEvidence, sourceSha) {
+  if (!impactEvidence || typeof impactEvidence !== "object" || Array.isArray(impactEvidence)) throw new Error("Canonical image-impact evidence is required.");
+  requireSha(sourceSha, "Protected-main source SHA");
+  requireSha(impactEvidence.imageReleaseSha, "Image-impact release SHA");
+  if (impactEvidence.toolingSha !== sourceSha) throw new Error("Image-impact evidence is not bound to the protected-main SHA.");
+  const derived = deriveStageBImageImpactReport({ imageReleaseSha: impactEvidence.imageReleaseSha, toolingSha: sourceSha });
+  if (canonicalSha256(impactEvidence) !== canonicalSha256(derived)) throw new Error("Image-impact evidence does not match the independently derived git impact report.");
+  return derived;
+}
+
+function assertFreshPublicationEvidence(imageEvidence, sourceSha) {
+  const identity = imageEvidence?.publicationIdentity;
+  if (imageEvidence?.imageReleaseSha !== sourceSha
+    || identity?.workflowDefinitionSha !== sourceSha
+    || identity?.imageReleaseSha !== imageEvidence.imageReleaseSha
+    || String(identity?.workflowRunId) !== String(imageEvidence.workflowRunId)
+    || identity?.event !== "workflow_dispatch"
+    || identity?.headBranch !== "main"
+    || identity?.conclusion !== "success"
+    || identity?.artifactExpired !== false) {
+    throw new Error("Fresh image authorization requires a successful publication from the exact protected-main workflow revision.");
+  }
+}
+
 export function assertCanonicalImageReuseEvidence(imageEvidence, reuseEvidence, sourceSha) {
-  if (!reuseEvidence || typeof reuseEvidence !== "object" || Array.isArray(reuseEvidence)) throw new Error("Canonical image-reuse evidence is required.");
-  if (reuseEvidence.imageReleaseSha !== imageEvidence.imageReleaseSha || reuseEvidence.toolingSha !== sourceSha) throw new Error("Image-reuse evidence is not bound to the image release and protected-main SHA.");
-  const derived = deriveStageBImageImpactReport({ imageReleaseSha: imageEvidence.imageReleaseSha, toolingSha: sourceSha });
-  if (canonicalSha256(reuseEvidence) !== canonicalSha256(derived)) throw new Error("Image-reuse evidence does not match the independently derived git impact report.");
+  const derived = assertExactImageImpactEvidence(imageEvidence, reuseEvidence, sourceSha);
+  if (derived.imageReleaseSha !== imageEvidence.imageReleaseSha) throw new Error("Image-reuse evidence is not bound to the reused image release.");
   assertStageBImageReuseResult({ ...derived, imageBuildInputsChanged: derived.newImagesRequired });
   return derived;
+}
+
+export function assertCanonicalImageImpactEvidence(imageEvidence, impactEvidence, sourceSha) {
+  const derived = assertExactImageImpactEvidence(imageEvidence, impactEvidence, sourceSha);
+  if (derived.newImagesRequired) {
+    assertFreshPublicationEvidence(imageEvidence, sourceSha);
+    return Object.freeze({ derived, authorizationPath: IMAGE_AUTHORIZATION_PATHS.FRESH_PUBLICATION });
+  }
+  if (derived.imageReleaseSha !== imageEvidence.imageReleaseSha) throw new Error("Image-reuse evidence is not bound to the image publication.");
+  assertStageBImageReuseResult({ ...derived, imageBuildInputsChanged: false });
+  return Object.freeze({ derived, authorizationPath: IMAGE_AUTHORIZATION_PATHS.REUSE });
 }
 
 export function createImageAuthorization({
@@ -89,7 +126,7 @@ export function createImageAuthorization({
     ...(verifyImageEvidence ? { verifySignature: verifyImageEvidence } : {}),
   });
   assertImageRecords(imageEvidence.images);
-  assertCanonicalImageReuseEvidence(imageEvidence, imageReuseEvidence, sourceSha);
+  const { derived: impactEvidence, authorizationPath } = assertCanonicalImageImpactEvidence(imageEvidence, imageReuseEvidence, sourceSha);
 
   const images = imageEvidence.images.map(({ service, digest }) => ({ service, digest }));
   const authorization = {
@@ -102,8 +139,9 @@ export function createImageAuthorization({
     evidenceSha256: null,
     imageEvidenceSha256: imageEvidenceSha256(imageEvidence),
     imageReuseEvidenceSha256: canonicalSha256(imageReuseEvidence),
-    imageReuseCompatible: true,
-    imageBuildInputsChanged: false,
+    authorizationPath,
+    imageReuseCompatible: impactEvidence.imageReuseCompatible,
+    imageBuildInputsChanged: impactEvidence.newImagesRequired,
     signatureVerified: true,
     attestationVerified: true,
     provenanceVerified: true,
@@ -170,7 +208,7 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
     verifyImageEvidence: deps.verifyImageEvidence,
   });
   const result = writeImageAuthorization({ outputPath, authorization });
-  process.stdout.write(`${JSON.stringify({ outputPath: result.path, evidenceSha256: authorization.evidenceSha256, sourceSha, imageReleaseSha: authorization.imageReleaseSha, workflowRunId: authorization.workflowRunId, imageReuseCompatible: authorization.imageReuseCompatible }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ outputPath: result.path, evidenceSha256: authorization.evidenceSha256, sourceSha, imageReleaseSha: authorization.imageReleaseSha, workflowRunId: authorization.workflowRunId, authorizationPath: authorization.authorizationPath, imageReuseCompatible: authorization.imageReuseCompatible }, null, 2)}\n`);
   return result;
 }
 

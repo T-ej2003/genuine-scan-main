@@ -14,7 +14,7 @@ const digests = {
   "rls-canary": "sha256:f26b3c87ef6b7d1545936e50a41a049e5d02b3f11ef81bd41946ca1c967b05ab",
 };
 
-export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = defaultImageReleaseSha } = {}) {
+export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = defaultImageReleaseSha, impactImageReleaseSha = imageReleaseSha } = {}) {
   const observedAt = new Date().toISOString();
   const records = [
     ["backend", "mscqr-backend", imageReleaseSha],
@@ -57,7 +57,7 @@ export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = d
   });
   const imageEvidenceSignature = signImageEvidence(imageEvidence, { now: observedAt, sign: () => "AQ==" });
   const verifyImageEvidence = ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true });
-  const imageReuseEvidence = deriveStageBImageImpactReport({ imageReleaseSha, toolingSha: sourceSha });
+  const imageReuseEvidence = deriveStageBImageImpactReport({ imageReleaseSha: impactImageReleaseSha, toolingSha: sourceSha });
   const authorization = createImageAuthorization({ sourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: sourceSha, freshRemoteMainSha: sourceSha }, imageEvidence, imageEvidenceSignature, imageReuseEvidence, now: observedAt, verifyImageEvidence });
   return { authorization, now: observedAt, verifyImageEvidence, imageReleaseSha, workflowRunId, digests };
 }
