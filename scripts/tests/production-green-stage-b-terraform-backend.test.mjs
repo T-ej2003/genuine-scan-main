@@ -13,6 +13,7 @@ import {
   STAGE_B_TERRAFORM_BACKEND_CONFIG,
   STAGE_B_TERRAFORM_BACKEND_MANIFEST,
   STAGE_B_TERRAFORM_BACKEND_POLICY,
+  stageBTerraformBackendIdentity,
   ensureStageBTerraformBackendMetadataPrivate,
 } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { generateStageBTerraformBackendConfig } from "../aws/generate-production-green-stage-b-backend-config.mjs";
@@ -27,9 +28,12 @@ const asArray = (value) => Array.isArray(value) ? value : [value];
 function matches(statement, action, resource, context) {
   const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
   const resources = Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource];
-  if (!actions.includes(action) || !resources.includes(resource)) return false;
+  if (!actions.includes(action) || !resources.some((candidate) => candidate === resource || candidate.endsWith("*") && resource.startsWith(candidate.slice(0, -1)))) return false;
   const expected = statement.Condition?.StringEquals?.["s3:prefix"];
-  return expected === undefined || context.prefix === expected;
+  if (expected !== undefined && context.prefix !== expected) return false;
+  const nullCondition = statement.Condition?.Null?.["s3:if-none-match"];
+  if (nullCondition !== undefined && String(context["s3:if-none-match"] === undefined) !== nullCondition) return false;
+  return true;
 }
 
 function decision(policies, action, resource, context = {}) {
@@ -38,7 +42,9 @@ function decision(policies, action, resource, context = {}) {
   return statements.some((statement) => statement.Effect === "Allow" && matches(statement, action, resource, context)) ? "allowed" : "implicitDeny";
 }
 
-const { bucketArn, stateArn, lockArn, legacyWorkspaceArn, legacyWorkspaceLockArn } = STAGE_B_TERRAFORM_BACKEND;
+const { bucketArn, stateArn, lockArn, applyAttemptPrefixArn, legacyWorkspaceArn, legacyWorkspaceLockArn } = STAGE_B_TERRAFORM_BACKEND;
+const applyAttemptArn = applyAttemptPrefixArn.replaceAll("*", `${"a".repeat(64)}.json`);
+assert.equal(applyAttemptArn.includes("*"), false);
 
 test("the canonical backend policy and manifest are exact and complete", () => {
   assert.equal(assertStageBTerraformBackendPolicy(policy), true);
@@ -59,6 +65,22 @@ test("the direct production-state config uses the default CLI workspace", () => 
 
 test("Terraform v1.15.7 initialized metadata accepts only the canonical normalized S3 shape", () => {
   assert.equal(assertStageBTerraformInitializedBackendMetadata(initializedMetadata.backend), true);
+});
+
+test("accepted initialized-backend representations share one security identity", () => {
+  const expected = stageBTerraformBackendIdentity(initializedMetadata.backend);
+  const required = new Set(["bucket", "key", "region", "encrypt", "use_lockfile"]);
+  const optional = Object.keys(initializedMetadata.backend.config).filter((key) => !required.has(key));
+  for (const key of optional) {
+    for (const representation of [undefined, null, ""]) {
+      const metadata = structuredClone(initializedMetadata.backend);
+      if (representation === undefined) delete metadata.config[key];
+      else metadata.config[key] = representation;
+      metadata.hash += 1;
+      metadata.config = Object.fromEntries(Object.entries(metadata.config).reverse());
+      assert.deepEqual(stageBTerraformBackendIdentity(metadata), expected, `${key}:${String(representation)}`);
+    }
+  }
 });
 
 test("initialized backend metadata rejects noncanonical type, keys, endpoints, credentials, and transport options", () => {
@@ -152,6 +174,14 @@ test("Terraform's exact direct backend operation set is allowed", () => {
     ["s3:PutObject", lockArn, {}],
     ["s3:DeleteObject", lockArn, {}],
   ]) assert.equal(decision([policy], action, resource, context), "allowed", `${action} ${resource}`);
+});
+
+test("shared apply reservations are readable and conditionally creatable but never overwritable or deletable", () => {
+  assert.equal(decision([policy], "s3:GetObject", applyAttemptArn), "allowed");
+  assert.equal(decision([policy], "s3:PutObject", applyAttemptArn, { "s3:if-none-match": "*" }), "allowed");
+  assert.equal(decision([policy], "s3:PutObject", applyAttemptArn), "explicitDeny");
+  assert.equal(decision([policy], "s3:DeleteObject", applyAttemptArn), "explicitDeny");
+  assert.equal(decision([policy], "s3:DeleteObjectVersion", applyAttemptArn), "explicitDeny");
 });
 
 test("workspace listing and HeadBucket-style access are not required", () => {

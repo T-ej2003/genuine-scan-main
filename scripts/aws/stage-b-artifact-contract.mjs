@@ -185,6 +185,20 @@ export function writeStageBPrivateFileAtomic({ filePath, bytes, repositoryRoot, 
   return writeStageBPrivateFilesAtomic({ files: [{ filePath, bytes, label }], repositoryRoot, overwrite, fsOps })[0];
 }
 
+export function writeStageBPrivateFileExclusive({ filePath, bytes, repositoryRoot, fsOps = fs, label = "Stage B private file" } = {}) {
+  const resolved = assertStageBArtifactPath({ artifactPath: filePath, repositoryRoot, label, allowExisting: true });
+  ensureStageBPrivateDirectory({ directory: path.dirname(resolved), repositoryRoot, create: true, fsOps });
+  let descriptor;
+  try {
+    descriptor = fsOps.openSync(resolved, "wx", STAGE_B_PRIVATE_FILE_MODE);
+    fsOps.writeFileSync(descriptor, bytes);
+    fsOps.fsyncSync(descriptor);
+  } finally {
+    if (descriptor !== undefined) fsOps.closeSync(descriptor);
+  }
+  return ensureStageBPrivateFile({ filePath: resolved, repositoryRoot, fsOps, label });
+}
+
 export const STAGE_B_ARTIFACT_CONTRACTS = Object.freeze([
   { id: "release-artifact-directory", kind: "directory", producer: "scripts/aws/run-production-green-stage-b-preflight.mjs:runReleaseReadPreflight", consumers: ["scripts/aws/run-production-green-stage-b-preflight.mjs", "scripts/refresh-production-green-stage-b.mjs", "scripts/plan-production-green-stage-b.mjs", "scripts/aws/validate-stage-b-deployment-closure.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: null, symlink: "reject", outsideRepository: true, atomic: false, overwrite: false, hashBound: false },
   { id: "administrator-capability-report", kind: "file", producer: "scripts/aws/run-production-green-stage-b-preflight.mjs:runAdministratorPreflight", consumers: ["scripts/aws/run-production-green-stage-b-preflight.mjs", "scripts/aws/production-green-stage-b-identity-capabilities.mjs", "scripts/aws/validate-stage-b-deployment-closure.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
@@ -216,6 +230,7 @@ export const STAGE_B_ARTIFACT_CONTRACTS = Object.freeze([
   { id: "ecs-observations", kind: "file", producer: "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs:runCli", consumers: ["scripts/aws/generate-production-green-stage-b-reference-audit.mjs", "scripts/aws/validate-stage-b-deployment-closure.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
   { id: "permission-report", kind: "file", producer: "scripts/aws/validate-production-green-stage-b-permissions.mjs:runCli", consumers: ["scripts/aws/validate-stage-b-deployment-closure.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
   { id: "permission-signature", kind: "file", producer: "scripts/aws/validate-production-green-stage-b-permissions.mjs:runCli", consumers: ["scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
+  { id: "apply-attempt", kind: "file", producer: "scripts/apply-production-green-stage-b.mjs:runApply", consumers: ["scripts/apply-production-green-stage-b.mjs", "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_MUTATION_CLOSURE_2026-08-16.md"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
   { id: "image-evidence", kind: "file", producer: "scripts/aws/production-green-stage-b-image-evidence.mjs:runCli", consumers: ["scripts/aws/generate-production-green-stage-b-tfvars.mjs", "scripts/plan-production-green-stage-b.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
   { id: "image-evidence-signature", kind: "file", producer: "scripts/aws/production-green-stage-b-image-evidence.mjs:runCli", consumers: ["scripts/aws/generate-production-green-stage-b-tfvars.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
 ]);

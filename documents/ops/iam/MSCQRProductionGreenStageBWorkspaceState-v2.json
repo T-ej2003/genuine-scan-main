@@ -33,6 +33,43 @@
       "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
     },
     {
+      "Sid": "ReadStageBApplyAttempts",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"
+    },
+    {
+      "Sid": "CreateStageBApplyAttemptsOnly",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*",
+      "Condition": {
+        "Null": {
+          "s3:if-none-match": "false"
+        }
+      }
+    },
+    {
+      "Sid": "DenyNonConditionalStageBApplyAttempts",
+      "Effect": "Deny",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*",
+      "Condition": {
+        "Null": {
+          "s3:if-none-match": "true"
+        }
+      }
+    },
+    {
+      "Sid": "DenyStageBApplyAttemptDeletion",
+      "Effect": "Deny",
+      "Action": [
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion"
+      ],
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"
+    },
+    {
       "Sid": "DenyStageBLegacyWorkspaceLockAccess",
       "Effect": "Deny",
       "Action": [

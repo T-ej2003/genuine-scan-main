@@ -12,7 +12,7 @@ import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backen
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidenceTimestamp, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
 import { assertStageBPlanApprovedBinding, STAGE_B_PLAN_PROFILES } from "./stage-b-plan-approval-contract.mjs";
-import { assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
+import { assertStageBImportedBackendRolloverActions, assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 import { assertEcsExecOperatorEvidence, assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorSourceContract, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
@@ -361,6 +361,7 @@ export const REVIEWED_SIMULATION_CONTEXT_REGISTRY = Object.freeze([
   { key: "ecs:task-definition", type: "stringList", values: Object.freeze(["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47"]) },
   { key: "ecs:task-memory", type: "numeric", values: Object.freeze(["512", "1024", "2048"]) },
   { key: "iam:PassedToService", type: "string", values: Object.freeze(["ecs-tasks.amazonaws.com"]) },
+  { key: "s3:if-none-match", type: "string", values: Object.freeze(["present"]) },
   { key: "secretsmanager:Name", type: "string", values: Object.freeze(["mscqr/production/rls-green/artifact-signing/private-key-current", "mscqr/production/rls-green/artifact-signing/public-key-current", "mscqr/production/rls-green/artifact-signing/active-key-version", "mscqr/production/rls-green/artifact-signing/public-keys-json", "mscqr/prod/rotation/jwt-previous", "mscqr/prod/rotation/jwt-pending", "mscqr/prod/rotation/qr-private-pending", "mscqr/prod/rotation/qr-public-previous", "mscqr/prod/rotation/qr-public-pending", "mscqr/prod/rotation/qr-current-version", "mscqr/prod/rotation/qr-previous-version"]) },
 ]);
 
@@ -666,6 +667,84 @@ function planMatches(selector, change) {
   if (selector.roleName && change.change?.after?.role !== selector.roleName) return false;
   if (selector.policyName && change.change?.after?.name !== selector.policyName) return false;
   return true;
+}
+
+const plannedIdentity = (value) => value?.arn ?? value?.id ?? value?.name ?? value?.function_name ?? value?.role ?? value?.family ?? null;
+
+export function createStageBMutationManifest(plan, manifest, { planProfile, planSha256, savedPlanSha256, canonicalPlanJsonSha256, planApprovalReportSha256, toolingSha, terraformConfiguration } = {}) {
+  validateManifest(manifest);
+  if (planProfile === "IMPORTED_BACKEND_METADATA_NORMALIZATION") assertStageBImportedBackendRolloverActions(plan?.resource_changes);
+  const resources = (plan?.resource_changes || []).filter(({ change }) => !exactActions(change?.actions, ["no-op"])).map((change) => {
+    const actions = change.change?.actions || [];
+    let classification;
+    let requiredPermissions;
+    let taskDefinitionPostcondition;
+    if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(actions, ["update"])) {
+      assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
+      classification = STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION;
+      requiredPermissions = [];
+    } else if (change.type === "aws_ecs_task_definition") {
+      const mapping = manifest.taskDefinitionMappings.find((candidate) => candidate.address === change.address);
+      if (!mapping || !(exactActions(actions, ["create"]) || isStageBTaskDefinitionRotationActionsValue(actions))) throw new Error(`Mutation manifest rejects unreviewed task-definition change ${change.address}.`);
+      contextFromTaskDefinitionPlan(change, mapping);
+      classification = "stage-b-task-definition-registration";
+      requiredPermissions = ["ecs:RegisterTaskDefinition", "ecs:TagResource", "iam:PassRole"];
+      const containers = typeof change.change.after.container_definitions === "string" ? JSON.parse(change.change.after.container_definitions) : change.change.after.container_definitions;
+      taskDefinitionPostcondition = {
+        family: change.change.after.family,
+        images: containers.map(({ name, image }) => ({ name, image })).sort((left, right) => left.name.localeCompare(right.name)),
+        execution_role_arn: change.change.after.execution_role_arn,
+        task_role_arn: change.change.after.task_role_arn,
+        cpu: String(change.change.after.cpu),
+        memory: String(change.change.after.memory),
+        network_mode: change.change.after.network_mode,
+        runtime_platform: change.change.after.runtime_platform,
+        environment_secrets_sha256: sha256(Buffer.from(canonicalizeJson(containers.map(({ name, environment = [], secrets = [] }) => ({ name, environment, secrets }))))),
+        logging_sha256: sha256(Buffer.from(canonicalizeJson(containers.map(({ name, logConfiguration = null }) => ({ name, logConfiguration }))))),
+      };
+    } else {
+      const matches = manifest.required.filter((entry) => entry.plan && appliesToPermissionProfile(entry, "NORMAL_STAGE_B_RELEASE") && planMatches(entry.plan, change));
+      if (matches.length === 0) throw new Error(`Mutation manifest has no reviewed permission mapping for ${change.address}.`);
+      classification = matches.map(({ id }) => id).sort().join("+");
+      requiredPermissions = [...new Set(matches.map(({ action }) => action))].sort();
+    }
+    const before = change.change?.before || null;
+    const after = change.change?.after || null;
+    return {
+      address: change.address,
+      type: change.type,
+      actions: [...actions],
+      classification,
+      before_identity: plannedIdentity(before),
+      after_identity: plannedIdentity(after),
+      replacement_order: isStageBTaskDefinitionRotationActionsValue(actions) ? [...actions] : null,
+      expected_aws_api_family: [...new Set(requiredPermissions.map((action) => action.split(":", 1)[0]))].sort(),
+      expected_aws_mutation: requiredPermissions.length > 0,
+      required_permissions: requiredPermissions,
+      expected_remote_postcondition: { identity: plannedIdentity(after), after_sha256: sha256(Buffer.from(canonicalizeJson(after))), ...(taskDefinitionPostcondition ? { task_definition: taskDefinitionPostcondition } : {}) },
+    };
+  }).sort((left, right) => left.address.localeCompare(right.address));
+  const outputs = Object.entries(plan?.output_changes || {}).filter(([, change]) => !exactActions(change?.actions, ["no-op"])).map(([output, change]) => ({
+    output,
+    actions: [...(change.actions || [])],
+    before: change.before ?? null,
+    after: change.after ?? null,
+    after_unknown: change.after_unknown ?? false,
+    classification: "derived-output-change",
+  })).sort((left, right) => left.output.localeCompare(right.output));
+  const body = JSON.parse(JSON.stringify({
+    schemaVersion: 1,
+    kind: "MSCQRProductionGreenStageBMutationManifest",
+    planProfile,
+    toolingSha,
+    planSha256,
+    savedPlanSha256,
+    canonicalPlanJsonSha256,
+    planApprovalReportSha256,
+    resources,
+    outputs,
+  }));
+  return Object.freeze({ ...body, mutationManifestSha256: sha256(Buffer.from(canonicalizeJson(body))) });
 }
 
 function assertBrokerPolicyDocument(change) {
@@ -1065,6 +1144,15 @@ export function runPermissionPreflight({
   const deniedRequired = requiredResults.filter((item) => item.decision !== "allowed");
   const allowedForbidden = forbiddenResults.filter((item) => item.decision === "allowed" || item.validation !== "accepted");
   const unresolved = cloudTrailResult.unresolvedDenials || [];
+  const mutationManifest = planBound ? createStageBMutationManifest(plan, manifest, {
+    planProfile: permissionProfileBinding.planProfile,
+    planSha256: planBound ? sha256(planBytes) : undefined,
+    savedPlanSha256: planBound ? sha256(savedPlanBytes) : undefined,
+    canonicalPlanJsonSha256: planBound ? sha256(Buffer.from(canonicalizeJson(plan))) : undefined,
+    planApprovalReportSha256: planBound ? planApprovalReportSha256 : undefined,
+    toolingSha: deploymentIdentity.toolingSha,
+    terraformConfiguration,
+  }) : undefined;
   const report = {
     schemaVersion: PERMISSION_PREFLIGHT_SCHEMA_VERSION,
     evidenceKind: planBound ? PLAN_BOUND_PERMISSION_EVIDENCE_KIND : INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND,
@@ -1112,6 +1200,7 @@ export function runPermissionPreflight({
       required: requiredResults.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision })),
       forbidden: forbiddenResults.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision })),
       zeroAwsMutationChanges: derived.zeroAwsMutationChanges,
+      ...(planBound ? { mutationManifest } : {}),
     },
     cloudTrail: cloudTrailResult,
     policyEvidence,

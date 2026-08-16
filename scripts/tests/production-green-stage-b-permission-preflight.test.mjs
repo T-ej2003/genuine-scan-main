@@ -4,12 +4,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, runApply, showSavedPlan } from "../apply-production-green-stage-b.mjs";
+import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, reserveStageBSharedApplyAttempt, runApply, showSavedPlan, stageBApplyArtifactSetIdentity, stageBApplyAttemptPath, stageBEffectiveOperatorHome } from "../apply-production-green-stage-b.mjs";
+import { stageBApplyAttemptS3Key } from "../aws/stage-b-terraform-backend-contract.mjs";
+import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import {
   canonicalizeJson,
   assertPermissionReportPlanBinding,
   assertPermissionEvaluationBindings,
   assertTaskDefinitionRegistrationContexts,
+  createStageBMutationManifest,
   deriveRequiredEvaluations,
   resolveStageBPermissionProfile,
   PERMISSION_REPORT_SIGNING_ALGORITHM,
@@ -248,6 +251,38 @@ test("imported backend normalization requires all other reviewed registration co
   extraNoOp.resource_changes.push({ address: "aws_ecs_task_definition.unbound", type: "aws_ecs_task_definition", change: { actions: ["no-op"], before: {}, after: {} } });
   assert.throws(() => assertTaskDefinitionRegistrationContexts(extraNoOp, manifest, { terraformConfiguration }), /unreviewed task-definition change/);
 });
+
+test("imported backend mutation manifest exactly binds the real 1/11/4 profile", () => {
+  const imported = importedBackendPlan();
+  for (const change of imported.resource_changes.filter(({ type, address }) => type === "aws_ecs_task_definition" && Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, address) && address !== 'aws_ecs_task_definition.candidate["backend"]')) {
+    const family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address];
+    const after = { ...structuredClone(change.change.after), family, network_mode: "awsvpc", runtime_platform: [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }], volume: [], ipc_mode: null, pid_mode: null, container_definitions: JSON.stringify([{ name: "worker", image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"a".repeat(64)}`, privileged: false }]) };
+    change.mode = "managed";
+    change.change = {
+      ...change.change,
+      actions: ["create", "delete"],
+      before: { ...after, arn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:5`, id: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:5`, container_definitions: after.container_definitions.replace(`sha256:${"a".repeat(64)}`, `sha256:${"b".repeat(64)}`) },
+      after,
+      replace_paths: [["container_definitions"]],
+    };
+  }
+  imported.resource_changes.push({ address: "aws_iam_role_policy.backend_ecs_exec", mode: "managed", type: "aws_iam_role_policy", change: { actions: ["create"], before: null, after: { role: "mscqr-production-rls-green-backend-task", name: "mscqr-production-rls-green-backend-ecs-exec" } } });
+  const mutationManifest = createStageBMutationManifest(imported, manifest, {
+    planProfile: "IMPORTED_BACKEND_METADATA_NORMALIZATION",
+    planSha256: "1".repeat(64), savedPlanSha256: "2".repeat(64), canonicalPlanJsonSha256: "3".repeat(64), planApprovalReportSha256: "4".repeat(64), toolingSha: "5".repeat(40), terraformConfiguration,
+  });
+  const actionCounts = mutationManifest.resources.reduce((counts, { actions }) => ({ ...counts, [JSON.stringify(actions)]: (counts[JSON.stringify(actions)] || 0) + 1 }), {});
+  assert.equal(actionCounts[JSON.stringify(["create"])], 1);
+  assert.equal(actionCounts[JSON.stringify(["create", "delete"])], 11);
+  assert.equal(actionCounts[JSON.stringify(["update"])], 4);
+  const backend = mutationManifest.resources.find(({ address }) => address === 'aws_ecs_task_definition.candidate["backend"]');
+  assert.equal(backend.expected_aws_mutation, false);
+  assert.deepEqual(backend.required_permissions, []);
+  assert.equal(mutationManifest.resources.filter(({ classification }) => classification === "stage-b-task-definition-registration").length, 11);
+  assert.ok(/^[a-f0-9]{64}$/.test(mutationManifest.mutationManifestSha256));
+  imported.resource_changes.find(({ type, address }) => type === "aws_ecs_task_definition" && address !== 'aws_ecs_task_definition.candidate["backend"]' && Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, address)).change.actions = ["delete", "create"];
+  assert.throws(() => createStageBMutationManifest(imported, manifest, { planProfile: "IMPORTED_BACKEND_METADATA_NORMALIZATION", terraformConfiguration }), /exact create-before-delete actions/);
+});
 const now = "2026-08-01T12:00:00.000Z";
 const clearCloudTrail = () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] });
 const writePrivate = (filePath, bytes) => fs.writeFileSync(filePath, bytes, { mode: 0o600 });
@@ -305,8 +340,8 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.length, 12);
   assert.equal(new Set(manifest.taskDefinitionMappings.map((entry) => entry.address)).size, 12);
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
-  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 18);
-  assert.equal(assertReviewedSimulationContextRegistry().length, 18);
+  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 19);
+  assert.equal(assertReviewedSimulationContextRegistry().length, 19);
   assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0 && !values.includes("*")));
 });
 
@@ -784,8 +819,8 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 154);
-  assert.equal(report.forbiddenEvaluations.length, 34);
+  assert.equal(report.requiredEvaluations.length, 156);
+  assert.equal(report.forbiddenEvaluations.length, 37);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
     if (evaluation.resource.startsWith("arn:aws:") && !evaluation.resource.startsWith("arn:aws:s3:::")) assert.ok(evaluation.resource === "*" || evaluation.resource.includes(":368992683803:"), evaluation.resource);
@@ -1409,6 +1444,8 @@ test("CLI and programmatic preflight paths produce the same deterministic report
   const cliReport = JSON.parse(fs.readFileSync(outputPath, "utf8"));
   delete cliReport.planApprovalReportSha256;
   delete direct.planApprovalReportSha256;
+  cliReport.planCapabilities.mutationManifest = { ...cliReport.planCapabilities.mutationManifest, planApprovalReportSha256: undefined, mutationManifestSha256: undefined };
+  direct.planCapabilities.mutationManifest = { ...direct.planCapabilities.mutationManifest, planApprovalReportSha256: undefined, mutationManifestSha256: undefined };
   assert.deepEqual(cliReport, direct);
 });
 
@@ -1615,6 +1652,15 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   approvalBytes = Buffer.from(`${JSON.stringify({ ...approval, refreshReportSha256: actualRefreshReportSha256 }, null, 2)}\n`);
   writePrivate(planApprovalReportPath, approvalBytes);
   report.planApprovalReportSha256 = crypto.createHash("sha256").update(approvalBytes).digest("hex");
+  report.planCapabilities.mutationManifest = createStageBMutationManifest(JSON.parse(fs.readFileSync(planJsonPath, "utf8")), manifest, {
+    planProfile: report.planProfile,
+    planSha256: report.planSha256,
+    savedPlanSha256: report.savedPlanSha256,
+    canonicalPlanJsonSha256: report.canonicalPlanJsonSha256,
+    planApprovalReportSha256: report.planApprovalReportSha256,
+    toolingSha: report.toolingSha,
+    terraformConfiguration: fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8"),
+  });
   writePermissionPair(permissionPath, permissionSignaturePath, report);
   return { directory, planPath, planJsonPath, canonicalPlanJsonPath, planApprovalReportPath, planApprovalReportSha256: crypto.createHash("sha256").update(approvalBytes).digest("hex"), auditPath, permissionReportPath: permissionPath, permissionReportSignaturePath: permissionSignaturePath, permissionReportSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionPath)).digest("hex"), permissionReportSignatureSha256: crypto.createHash("sha256").update(fs.readFileSync(permissionSignaturePath)).digest("hex"), imageEvidencePath, imageEvidenceSha256: canonicalImageEvidenceSha256, imageEvidenceSignaturePath, imageEvidenceWorkflowRunId: imageEvidence.workflowRunId, imageEvidenceArtifactSha256: imageEvidence.canonicalArtifactSha256, planHash, auditHash: crypto.createHash("sha256").update(auditBytes).digest("hex"), savedHash, canonicalHash, shownBytes: Buffer.from(JSON.stringify(effectiveShownPlan)), verifyImageEvidence: () => true, tfvarsPath, tfvarsBindingReportPath, tfvarsBindingReportSha256, refreshReportPath, refreshReportSha256: crypto.createHash("sha256").update(fs.readFileSync(refreshReportPath)).digest("hex"), toolingSha: "b".repeat(40), imageReleaseSha: "a".repeat(40), toolingTreeSha256: "e".repeat(64) };
 }
@@ -1706,6 +1752,7 @@ const rebindApprovalAudit = (fixture, auditBytes) => {
 
 const createValidStageBApplyFixture = (options = {}) => ({
   ...wrapperFixture(options),
+  sharedReservations: new Map(),
   protectedMainCheckout: buildStageBProtectedMainCheckoutEvidence({
     toolingSha: "b".repeat(40),
     currentHead: "b".repeat(40),
@@ -1719,7 +1766,7 @@ const createValidStageBApplyFixture = (options = {}) => ({
 
 const validApplyInput = (fixture) => ({
   argv: wrapperArgs(fixture, true),
-  env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+  env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
   deps: {
     getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test",
     getProtectedMainCheckout: () => fixture.protectedMainCheckout,
@@ -1738,7 +1785,7 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
   let checkoutReadCount = 0;
   return {
     argv: wrapperArgs(fixture),
-    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
     deps: {
       getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test",
       getProtectedMainCheckout: () => {
@@ -1752,6 +1799,12 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
       verifyPermissionSignature: () => true,
       verifyImageEvidence: fixture.verifyImageEvidence,
       getBackendMetadata: () => structuredClone(initializedBackendMetadata),
+      getEffectiveOperatorHome: () => fixture.directory,
+      reserveSharedApplyAttempt: ({ artifactSetIdentity, bytes }) => {
+        if (fixture.sharedReservations.has(artifactSetIdentity)) throw new Error("shared reservation already exists");
+        fixture.sharedReservations.set(artifactSetIdentity, Buffer.from(bytes));
+        return { status: "reserved", key: stageBApplyAttemptS3Key(artifactSetIdentity) };
+      },
       apply: (planPath) => {
         applyCalls.push(planPath);
         return { status: 0 };
@@ -1791,6 +1844,266 @@ test("valid non-verify-only apply path calls the injected apply stub exactly onc
   assert.equal(runApply(input).status, "applied-saved-plan");
   assert.equal(input.checkoutReadCount, 2);
   assert.deepEqual(input.applyCalls, [fixture.planPath]);
+});
+
+test("apply attempt marker makes a second apply unreachable", () => {
+  const fixture = createValidStageBApplyFixture();
+  const first = validRealApplyInput(fixture);
+  assert.equal(runApply(first).applyCalls, 1);
+  const second = validRealApplyInput(fixture);
+  assert.throws(() => runApply(second), /consumed|exist/i);
+  assert.deepEqual(second.applyCalls, []);
+});
+
+test("shared reservation blocks the same artifact set across hosts, users, and local marker loss", () => {
+  const fixture = createValidStageBApplyFixture();
+  const first = validRealApplyInput(fixture);
+  const result = runApply(first);
+  fs.unlinkSync(result.applyAttemptPath);
+  for (const environment of [
+    { HOME: "/host-b/user-b", HOSTNAME: "host-b" },
+    { HOME: "/runner/work", HOSTNAME: "github-runner", GITHUB_WORKSPACE: "/runner/work/repository" },
+  ]) {
+    const replay = validRealApplyInput(fixture);
+    Object.assign(replay.env, environment);
+    assert.throws(() => runApply(replay), /shared reservation already exists/);
+    assert.deepEqual(replay.applyCalls, []);
+  }
+});
+
+test("S3 reservation uses conditional create as the first authoritative gate and verifies its bytes", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-shared-reservation-"));
+  const identity = "a".repeat(64); const bytes = Buffer.from("{\"attempt\":1}\n"); const calls = [];
+  const result = reserveStageBSharedApplyAttempt({ artifactSetIdentity: identity, bytes, privateDirectory: directory, run: (args) => {
+    calls.push(args);
+    if (args[1] === "put-object") return { status: 0, stdout: "{}", stderr: "" };
+    fs.writeFileSync(args.at(-1), bytes);
+    return { status: 0, stdout: "{}", stderr: "" };
+  } });
+  assert.deepEqual(result, { status: "reserved", key: stageBApplyAttemptS3Key(identity) });
+  assert.equal(calls[0].includes("--if-none-match"), true);
+  assert.equal(calls[0][1], "put-object");
+  assert.equal(calls[0][calls[0].indexOf("--if-none-match") + 1], "*");
+  assert.equal(calls[0][calls[0].indexOf("--key") + 1], stageBApplyAttemptS3Key(identity));
+  assert.equal(calls[1][1], "get-object");
+});
+
+test("shared reservation 412, 409, outage, and readback mismatch fail closed", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-shared-reservation-fail-"));
+  const input = { artifactSetIdentity: "b".repeat(64), bytes: Buffer.from("{}\n"), privateDirectory: directory };
+  for (const [stderr, pattern] of [
+    ["PreconditionFailed (412)", /already exists/],
+    ["ConditionalRequestConflict (409)", /concurrent conflict/],
+    ["AccessDenied (403)", /could not be created/],
+    ["ServiceUnavailable", /could not be created/],
+  ]) assert.throws(() => reserveStageBSharedApplyAttempt({ ...input, run: () => ({ status: 1, stdout: "", stderr }) }), pattern);
+  assert.throws(() => reserveStageBSharedApplyAttempt({ ...input, run: (args) => {
+    if (args[1] === "put-object") return { status: 0, stdout: "{}", stderr: "" };
+    fs.writeFileSync(args.at(-1), "different\n");
+    return { status: 0, stdout: "{}", stderr: "" };
+  } }), /readback verification failed/);
+});
+
+test("effective operator account fixes the attempt root across caller environment changes", () => {
+  const original = { HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP, PWD: process.env.PWD };
+  const originalCwd = process.cwd();
+  const alternateCwd = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-attempt-cwd-"));
+  try {
+    Object.assign(process.env, { HOME: "/private/tmp/home-a", TMPDIR: "/private/tmp/tmp-a", TMP: "/private/tmp/tmp-a", TEMP: "/private/tmp/tmp-a", PWD: "/private/tmp/cwd-a" });
+    const first = stageBEffectiveOperatorHome();
+    process.chdir(alternateCwd);
+    Object.assign(process.env, { HOME: "/private/tmp/home-b", TMPDIR: "/private/tmp/tmp-b", TMP: "/private/tmp/tmp-b", TEMP: "/private/tmp/tmp-b", PWD: "/private/tmp/cwd-b" });
+    assert.equal(stageBEffectiveOperatorHome(), first);
+    assert.equal(path.isAbsolute(first), true);
+  } finally {
+    process.chdir(originalCwd);
+    for (const [key, value] of Object.entries(original)) value === undefined ? delete process.env[key] : process.env[key] = value;
+  }
+});
+
+test("HOME, temporary-directory, and working-directory changes cannot relocate an artifact set", () => {
+  const fixture = createValidStageBApplyFixture();
+  const first = validRealApplyInput(fixture);
+  Object.assign(first.env, { HOME: "/private/tmp/home-a", TMPDIR: "/private/tmp/tmp-a", PWD: "/private/tmp/cwd-a" });
+  const marker = runApply(first).applyAttemptPath;
+  const replay = validRealApplyInput(fixture);
+  Object.assign(replay.env, { HOME: "/private/tmp/home-b", TMPDIR: "/private/tmp/tmp-b", PWD: "/private/tmp/cwd-b" });
+  assert.throws(() => runApply(replay), /consumed|exist/i);
+  assert.deepEqual(replay.applyCalls, []);
+  assert.equal(marker.startsWith(path.join(fixture.directory, ".mscqr", "production-green-stage-b", "apply-attempts")), true);
+});
+
+test("caller-selected alternate apply-attempt paths cannot change the canonical reservation", () => {
+  const fixture = createValidStageBApplyFixture();
+  assert.equal(runApply(validRealApplyInput(fixture)).applyCalls, 1);
+  for (const alternate of [path.join(fixture.directory, "alternate.json"), path.join(fixture.directory, "missing", "alternate.json"), "../escape.json", "/private/tmp/alternate.json"]) {
+    const replay = validRealApplyInput(fixture);
+    replay.argv.push("--apply-attempt", alternate);
+    assert.throws(() => runApply(replay), /--apply-attempt is forbidden/);
+    assert.deepEqual(replay.applyCalls, []);
+  }
+});
+
+test("interrupted and successful applies leave the canonical artifact set permanently consumed", () => {
+  for (const outcome of ["interrupted", "successful"]) {
+    const fixture = createValidStageBApplyFixture();
+    const first = validRealApplyInput(fixture);
+    if (outcome === "interrupted") first.deps.apply = () => { throw new Error("simulated interruption"); };
+    if (outcome === "interrupted") assert.throws(() => runApply(first), /simulated interruption/);
+    else assert.equal(runApply(first).applyCalls, 1);
+    const replay = validRealApplyInput(fixture);
+    assert.throws(() => runApply(replay), /consumed|exist/i);
+    assert.deepEqual(replay.applyCalls, []);
+  }
+});
+
+test("mutation identity changes only with stable executable bindings", () => {
+  const baseline = { protectedMainSha: "a".repeat(40), planSha256: "b".repeat(64), savedPlanSha256: "c".repeat(64), tfvarsSha256: "d".repeat(64), approvalSha256: "e".repeat(64), permissionEvidenceSha256: "f".repeat(64), mutationManifestSha256: "1".repeat(64), workspace: "default", backendIdentitySha256: "2".repeat(64) };
+  const identity = stageBApplyArtifactSetIdentity(baseline);
+  assert.equal(stageBApplyArtifactSetIdentity(structuredClone(baseline)), identity);
+  for (const field of ["planSha256", "tfvarsSha256", "approvalSha256", "permissionEvidenceSha256", "mutationManifestSha256"]) assert.equal(stageBApplyArtifactSetIdentity({ ...baseline, [field]: "3".repeat(64) }), identity);
+  for (const [field, value] of [["savedPlanSha256", "3".repeat(64)], ["protectedMainSha", "6".repeat(40)], ["backendIdentitySha256", "7".repeat(64)]]) {
+    assert.notEqual(stageBApplyArtifactSetIdentity({ ...baseline, [field]: value }), identity);
+  }
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-attempt-identity-"));
+  const changed = stageBApplyArtifactSetIdentity({ ...baseline, savedPlanSha256: "3".repeat(64) });
+  const firstPath = stageBApplyAttemptPath({ artifactSetIdentity: identity, effectiveOperatorHome: fixture });
+  const changedPath = stageBApplyAttemptPath({ artifactSetIdentity: changed, effectiveOperatorHome: fixture });
+  assert.equal(path.dirname(firstPath), path.dirname(changedPath));
+  assert.notEqual(path.basename(firstPath), path.basename(changedPath));
+});
+
+test("RECOVERY_ALIAS_ONLY tfvars reserialization cannot mint another mutation right", () => {
+  const stable = { planProfile: "RECOVERY_ALIAS_ONLY", savedPlanSha256: "a".repeat(64), tfvarsSha256: crypto.createHash("sha256").update("alias_version = 3\n").digest("hex"), protectedMainSha: "b".repeat(40), workspace: "default", backendIdentitySha256: "c".repeat(64) };
+  const reserialized = { ...stable, tfvarsSha256: crypto.createHash("sha256").update("# same saved plan\nalias_version=3\n").digest("hex") };
+  const identity = stageBApplyArtifactSetIdentity(stable);
+  assert.equal(stageBApplyArtifactSetIdentity(reserialized), identity);
+  assert.equal(stageBApplyAttemptS3Key(stageBApplyArtifactSetIdentity(reserialized)), stageBApplyAttemptS3Key(identity));
+  const privateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-recovery-tfvars-reserialization-"));
+  assert.throws(() => reserveStageBSharedApplyAttempt({ artifactSetIdentity: stageBApplyArtifactSetIdentity(reserialized), bytes: Buffer.from("{}\n"), privateDirectory, run: () => ({ status: 1, stdout: "", stderr: "PreconditionFailed (412)" }) }), /already exists/);
+});
+
+test("renewed permission evidence cannot create a second mutation right", () => {
+  const fixture = createValidStageBApplyFixture();
+  const first = runApply(validRealApplyInput(fixture));
+  const firstIdentity = first.executableAuditSha256;
+  const report = JSON.parse(fs.readFileSync(fixture.permissionReportPath, "utf8"));
+  report.generatedAt = new Date(Date.now() + 1_000).toISOString();
+  writePermissionPair(fixture.permissionReportPath, fixture.permissionReportSignaturePath, report);
+  fixture.permissionReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportPath)).digest("hex");
+  fixture.permissionReportSignatureSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportSignaturePath)).digest("hex");
+  fs.rmSync(path.join(fixture.directory, ".mscqr"), { recursive: true, force: true });
+  const replay = validRealApplyInput(fixture);
+  assert.throws(() => runApply(replay), /shared reservation already exists/);
+  assert.equal([...fixture.sharedReservations.keys()][0], firstIdentity);
+  assert.deepEqual(replay.applyCalls, []);
+});
+
+test("equivalent initialized-backend representations share one global reservation", () => {
+  const fixture = createValidStageBApplyFixture();
+  const equivalent = structuredClone(initializedBackendMetadata);
+  equivalent.hash += 1;
+  for (const [index, key] of Object.keys(equivalent.config).entries()) {
+    if (["bucket", "key", "region", "encrypt", "use_lockfile"].includes(key)) continue;
+    if (index % 2 === 0) delete equivalent.config[key];
+    else equivalent.config[key] = "";
+  }
+  equivalent.config = Object.fromEntries(Object.entries(equivalent.config).reverse());
+  const representationA = validApplyInput(fixture);
+  const representationB = validApplyInput(fixture);
+  representationB.deps.getBackendMetadata = () => structuredClone(equivalent);
+  const identityA = runApply(representationA).executableAuditSha256;
+  const identityB = runApply(representationB).executableAuditSha256;
+  assert.equal(identityB, identityA);
+  assert.equal(stageBApplyAttemptS3Key(identityB), stageBApplyAttemptS3Key(identityA));
+  assert.equal(runApply(validRealApplyInput(fixture)).applyCalls, 1);
+  fs.rmSync(path.join(fixture.directory, ".mscqr"), { recursive: true, force: true });
+  const replay = validRealApplyInput(fixture);
+  replay.deps.getBackendMetadata = () => structuredClone(equivalent);
+  assert.throws(() => runApply(replay), /shared reservation already exists/);
+  assert.deepEqual(replay.applyCalls, []);
+});
+
+test("effective operator lookup failure blocks Terraform spawn", () => {
+  assert.throws(() => stageBEffectiveOperatorHome({ userInfo: () => { throw new Error("lookup unavailable"); } }), /could not resolve/);
+  assert.throws(() => stageBEffectiveOperatorHome({ userInfo: () => ({ uid: -1, homedir: "relative" }) }), /missing or not absolute/);
+  const fixture = createValidStageBApplyFixture();
+  const input = validRealApplyInput(fixture);
+  input.deps.getEffectiveOperatorHome = () => { throw new Error("operator lookup failed"); };
+  assert.throws(() => runApply(input), /operator lookup failed/);
+  assert.deepEqual(input.applyCalls, []);
+});
+
+test("exclusive apply-attempt reservation admits exactly one contender", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-apply-exclusive-"));
+  const filePath = path.join(directory, "attempt.json");
+  const reserve = () => writeStageBPrivateFileExclusive({ filePath, bytes: Buffer.from("{}\n"), repositoryRoot: process.cwd() });
+  const results = await Promise.allSettled([Promise.resolve().then(reserve), Promise.resolve().then(reserve)]);
+  assert.equal(results.filter(({ status }) => status === "fulfilled").length, 1);
+  assert.equal(results.filter(({ status }) => status === "rejected").length, 1);
+});
+
+test("canonical attempt path rejects symlink substitution and verify-only reserves nothing", () => {
+  const fixture = createValidStageBApplyFixture();
+  const readiness = runApply(validApplyInput(fixture));
+  assert.equal(readiness.status, "ready-to-apply");
+  assert.equal(readiness.reservationStatus, "not-authoritatively-readable");
+  assert.equal(readiness.atomicReservationGate, "enforced-at-mutation-boundary");
+  assert.equal(fixture.sharedReservations.size, 0);
+  assert.equal(fs.existsSync(path.join(fixture.directory, ".mscqr")), false);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-attempt-outside-"));
+  fs.symlinkSync(outside, path.join(fixture.directory, ".mscqr"));
+  const input = validRealApplyInput(fixture);
+  assert.throws(() => runApply(input), /non-symlink directory/);
+  assert.deepEqual(input.applyCalls, []);
+});
+
+test("reservation failure occurs before Terraform spawn", () => {
+  const fixture = createValidStageBApplyFixture();
+  const input = validRealApplyInput(fixture);
+  const events = [];
+  input.deps.reserveSharedApplyAttempt = () => { events.push("shared-reserve"); throw new Error("reservation failed"); };
+  input.deps.apply = () => { events.push("apply"); return { status: 0 }; };
+  assert.throws(() => runApply(input), /reservation failed/);
+  assert.deepEqual(events, ["shared-reserve"]);
+});
+
+test("pre-existing local evidence blocks before consuming a shared reservation", () => {
+  const fixture = createValidStageBApplyFixture(); runApply(validRealApplyInput(fixture)); fixture.sharedReservations.clear();
+  const input = validRealApplyInput(fixture); let sharedCalls = 0;
+  input.deps.reserveSharedApplyAttempt = () => { sharedCalls += 1; throw new Error("shared reservation must not be reached"); };
+  assert.throws(() => runApply(input), /local apply-attempt evidence already exists/);
+  assert.equal(sharedCalls, 0);
+  assert.deepEqual(input.applyCalls, []);
+});
+
+test("shared reservation and readback precede local reservation and Terraform spawn", () => {
+  const fixture = createValidStageBApplyFixture(); const input = validRealApplyInput(fixture); const events = [];
+  input.deps.reserveSharedApplyAttempt = ({ artifactSetIdentity }) => { events.push("shared-reserved-and-verified"); return { status: "reserved", key: stageBApplyAttemptS3Key(artifactSetIdentity) }; };
+  input.deps.reserveApplyAttempt = () => { events.push("local-evidence"); };
+  input.deps.apply = () => { events.push("terraform"); return { status: 0 }; };
+  runApply(input);
+  assert.deepEqual(events, ["shared-reserved-and-verified", "local-evidence", "terraform"]);
+});
+
+test("apply rejects ambient Terraform CLI argument injection before artifacts or mutation", () => {
+  const fixture = createValidStageBApplyFixture();
+  const input = validRealApplyInput(fixture);
+  input.env.TF_CLI_ARGS_apply = "-target=aws_ecs_task_definition.candidate[backend]";
+  assert.throws(() => runApply(input), /refuses TF_CLI_ARGS/);
+  assert.deepEqual(input.applyCalls, []);
+});
+
+test("apply rejects a signed permission report with a different mutation manifest", () => {
+  const fixture = createValidStageBApplyFixture();
+  const report = JSON.parse(fs.readFileSync(fixture.permissionReportPath, "utf8"));
+  report.planCapabilities.mutationManifest.resources[0].actions = ["delete", "create"];
+  writePermissionPair(fixture.permissionReportPath, fixture.permissionReportSignaturePath, report);
+  fixture.permissionReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportPath)).digest("hex");
+  fixture.permissionReportSignatureSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportSignaturePath)).digest("hex");
+  const input = validRealApplyInput(fixture);
+  assert.throws(() => runApply(input), /mutation manifest is incomplete or stale/);
+  assert.deepEqual(input.applyCalls, []);
 });
 
 test("wrapper rejects permission context drift before the injected apply seam", () => {
@@ -1919,7 +2232,7 @@ test("exact binary plan and derived JSON reach the ready-to-apply boundary witho
   const fixture = wrapperFixture();
   const result = runApply({
     argv: wrapperArgs(fixture, true),
-    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
     deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, getBackendMetadata: () => structuredClone(initializedBackendMetadata), apply: () => { throw new Error("apply must not be reached"); } },
   });
   assert.equal(result.status, "ready-to-apply");
@@ -1938,7 +2251,7 @@ test("verify-only and apply reject failed refresh checks before any plan or appl
     let applied = false;
     assert.throws(() => runApply({
       argv: wrapperArgs(fixture, verifyOnly),
-      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
       deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => { throw new Error("plan seam must not be reached"); }, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { applied = true; } },
     }), /check or binding structure/);
     assert.equal(applied, false);
@@ -2021,7 +2334,7 @@ test("verification-only and real apply paths reject an invalid report signature 
   for (const verifyOnly of [true, false]) {
     assert.throws(() => runApply({
       argv: wrapperArgs(fixture, verifyOnly),
-      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
       deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => false, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { throw new Error("apply must not be reached"); } },
     }), /signature verification failed/);
   }
@@ -2057,7 +2370,7 @@ test("wrapper rejects a plan digest mismatch before invoking apply", () => {
     let applied = false;
     assert.throws(() => runApply({
       argv: wrapperArgs(fixture, verifyOnly),
-      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+      env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
       deps: { getCaller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, verifyImageEvidence: fixture.verifyImageEvidence, apply: () => { applied = true; } },
     }), /plan evidence planJsonSha256 does not match/);
     assert.equal(applied, false);
@@ -2068,7 +2381,7 @@ test("apply wrapper rejects a non-STS caller during verification-only mode", () 
   const fixture = wrapperFixture();
   assert.throws(() => runApply({
     argv: wrapperArgs(fixture, true),
-    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default" },
+    env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
     deps: { getCaller: () => roleArn, currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, apply: () => { throw new Error("apply must not be reached"); } },
   }), /STS assumed-role/);
 });
