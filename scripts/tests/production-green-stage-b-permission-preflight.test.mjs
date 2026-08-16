@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, runApply, showSavedPlan, stageBApplyArtifactSetIdentity } from "../apply-production-green-stage-b.mjs";
+import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, runApply, showSavedPlan, stageBApplyArtifactSetIdentity, stageBApplyAttemptPath, stageBEffectiveOperatorHome } from "../apply-production-green-stage-b.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import {
   canonicalizeJson,
@@ -1797,7 +1797,7 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
       verifyPermissionSignature: () => true,
       verifyImageEvidence: fixture.verifyImageEvidence,
       getBackendMetadata: () => structuredClone(initializedBackendMetadata),
-      homeDirectory: () => fixture.directory,
+      getEffectiveOperatorHome: () => fixture.directory,
       apply: (planPath) => {
         applyCalls.push(planPath);
         return { status: 0 };
@@ -1848,6 +1848,35 @@ test("apply attempt marker makes a second apply unreachable", () => {
   assert.deepEqual(second.applyCalls, []);
 });
 
+test("effective operator account fixes the attempt root across caller environment changes", () => {
+  const original = { HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP, PWD: process.env.PWD };
+  const originalCwd = process.cwd();
+  const alternateCwd = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-attempt-cwd-"));
+  try {
+    Object.assign(process.env, { HOME: "/private/tmp/home-a", TMPDIR: "/private/tmp/tmp-a", TMP: "/private/tmp/tmp-a", TEMP: "/private/tmp/tmp-a", PWD: "/private/tmp/cwd-a" });
+    const first = stageBEffectiveOperatorHome();
+    process.chdir(alternateCwd);
+    Object.assign(process.env, { HOME: "/private/tmp/home-b", TMPDIR: "/private/tmp/tmp-b", TMP: "/private/tmp/tmp-b", TEMP: "/private/tmp/tmp-b", PWD: "/private/tmp/cwd-b" });
+    assert.equal(stageBEffectiveOperatorHome(), first);
+    assert.equal(path.isAbsolute(first), true);
+  } finally {
+    process.chdir(originalCwd);
+    for (const [key, value] of Object.entries(original)) value === undefined ? delete process.env[key] : process.env[key] = value;
+  }
+});
+
+test("HOME, temporary-directory, and working-directory changes cannot relocate an artifact set", () => {
+  const fixture = createValidStageBApplyFixture();
+  const first = validRealApplyInput(fixture);
+  Object.assign(first.env, { HOME: "/private/tmp/home-a", TMPDIR: "/private/tmp/tmp-a", PWD: "/private/tmp/cwd-a" });
+  const marker = runApply(first).applyAttemptPath;
+  const replay = validRealApplyInput(fixture);
+  Object.assign(replay.env, { HOME: "/private/tmp/home-b", TMPDIR: "/private/tmp/tmp-b", PWD: "/private/tmp/cwd-b" });
+  assert.throws(() => runApply(replay), /EEXIST|exist/i);
+  assert.deepEqual(replay.applyCalls, []);
+  assert.equal(marker.startsWith(path.join(fixture.directory, ".mscqr", "production-green-stage-b", "apply-attempts")), true);
+});
+
 test("caller-selected alternate apply-attempt paths cannot change the canonical reservation", () => {
   const fixture = createValidStageBApplyFixture();
   assert.equal(runApply(validRealApplyInput(fixture)).applyCalls, 1);
@@ -1879,6 +1908,22 @@ test("artifact-set identity changes only with approved executable bindings", () 
   for (const [field, value] of [["planSha256", "3".repeat(64)], ["mutationManifestSha256", "4".repeat(64)], ["protectedMainSha", "5".repeat(40)]]) {
     assert.notEqual(stageBApplyArtifactSetIdentity({ ...baseline, [field]: value }), identity);
   }
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-attempt-identity-"));
+  const changed = stageBApplyArtifactSetIdentity({ ...baseline, planSha256: "3".repeat(64) });
+  const firstPath = stageBApplyAttemptPath({ artifactSetIdentity: identity, effectiveOperatorHome: fixture });
+  const changedPath = stageBApplyAttemptPath({ artifactSetIdentity: changed, effectiveOperatorHome: fixture });
+  assert.equal(path.dirname(firstPath), path.dirname(changedPath));
+  assert.notEqual(path.basename(firstPath), path.basename(changedPath));
+});
+
+test("effective operator lookup failure blocks Terraform spawn", () => {
+  assert.throws(() => stageBEffectiveOperatorHome({ userInfo: () => { throw new Error("lookup unavailable"); } }), /could not resolve/);
+  assert.throws(() => stageBEffectiveOperatorHome({ userInfo: () => ({ uid: -1, homedir: "relative" }) }), /missing or not absolute/);
+  const fixture = createValidStageBApplyFixture();
+  const input = validRealApplyInput(fixture);
+  input.deps.getEffectiveOperatorHome = () => { throw new Error("operator lookup failed"); };
+  assert.throws(() => runApply(input), /operator lookup failed/);
+  assert.deepEqual(input.applyCalls, []);
 });
 
 test("exclusive apply-attempt reservation admits exactly one contender", async () => {

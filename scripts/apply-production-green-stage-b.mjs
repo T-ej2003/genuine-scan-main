@@ -105,10 +105,22 @@ export function parseCli(argv) {
 
 export const stageBApplyArtifactSetIdentity = (bindings) => sha256(Buffer.from(canonicalizeJson(bindings)));
 
-export function stageBApplyAttemptPath({ artifactSetIdentity, homeDirectory = os.homedir() } = {}) {
+export function stageBEffectiveOperatorHome({ userInfo = () => os.userInfo(), fsOps = fs } = {}) {
+  let operator;
+  try { operator = userInfo(); } catch { throw new Error("Stage B apply could not resolve the effective OS operator."); }
+  if (!operator || !path.isAbsolute(operator.homedir || "")) throw new Error("Stage B apply effective OS operator home is missing or not absolute.");
+  if (typeof process.getuid === "function" && operator.uid !== process.getuid()) throw new Error("Stage B apply effective OS operator identity is inconsistent.");
+  const stat = fsOps.lstatSync(operator.homedir, { throwIfNoEntry: false });
+  if (!stat?.isDirectory() || stat.isSymbolicLink()) throw new Error("Stage B apply effective OS operator home must be an existing non-symlink directory.");
+  if (typeof process.getuid === "function" && stat.uid !== process.getuid()) throw new Error("Stage B apply effective OS operator home must be owned by the effective operator.");
+  return operator.homedir;
+}
+
+export function stageBApplyAttemptPath({ artifactSetIdentity, effectiveOperatorHome } = {}) {
   if (!/^[a-f0-9]{64}$/.test(artifactSetIdentity || "")) throw new Error("Stage B apply artifact-set identity is malformed.");
+  if (!path.isAbsolute(effectiveOperatorHome || "")) throw new Error("Stage B apply effective operator home must be absolute.");
   const directories = [".mscqr", "production-green-stage-b", "apply-attempts"];
-  let directory = path.resolve(homeDirectory);
+  let directory = effectiveOperatorHome;
   for (const segment of directories) {
     directory = path.join(directory, segment);
     ensureStageBPrivateDirectory({ directory, repositoryRoot: root, create: true, label: "Stage B canonical apply-attempt directory" });
@@ -325,7 +337,8 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const tfvarsBinding = JSON.parse(fs.readFileSync(artifacts.tfvarsBindingReportPath, "utf8"));
   if (finalBindings.tfvarsSha256 !== tfvarsBinding.tfvarsSha256) throw new Error("Stage B tfvars changed after approval.");
   const executableAuditSha256 = stageBApplyArtifactSetIdentity(finalBindings);
-  const applyAttemptPath = stageBApplyAttemptPath({ artifactSetIdentity: executableAuditSha256, homeDirectory: effectiveDeps.homeDirectory?.() || os.homedir() });
+  const effectiveOperatorHome = effectiveDeps.getEffectiveOperatorHome?.() || stageBEffectiveOperatorHome();
+  const applyAttemptPath = stageBApplyAttemptPath({ artifactSetIdentity: executableAuditSha256, effectiveOperatorHome });
   const reserveApplyAttempt = effectiveDeps.reserveApplyAttempt || ((filePath, bytes) => writeStageBPrivateFileExclusive({ filePath, bytes, repositoryRoot: root, label: "Stage B apply attempt" }));
   reserveApplyAttempt(applyAttemptPath, Buffer.from(`${JSON.stringify({ schemaVersion: 1, kind: "MSCQRProductionGreenStageBApplyAttempt", phase: "APPLYING", applyCalls: 1, applyMayHaveOccurred: true, artifactSetIdentity: executableAuditSha256, createdAt: effectiveDeps.now?.() || new Date().toISOString(), ...finalBindings }, null, 2)}\n`));
   const result = effectiveDeps.apply(artifacts.planPath);
