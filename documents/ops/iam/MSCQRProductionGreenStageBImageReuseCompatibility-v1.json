@@ -3,14 +3,14 @@
   "identityModel": "tooling-input-tree-sha256",
   "imageReleaseSha": "29bf92a14d5e832575009bd76b16886feff62cbd",
   "comparisonBaseSha": "29bf92a14d5e832575009bd76b16886feff62cbd",
-  "toolingSha": "5b2cf28777da67c979c138e78970420c29c21bab",
+  "toolingSha": "0aa7831b317e32956a930b16d3e072eebc0bee07",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
-  "comparisonHeadSha256": "5d10b0e1791195b9db8c5318b21db723c5633e4d4644527d676213f5a1a48710",
-  "toolingInputTreeSha256": "5d10b0e1791195b9db8c5318b21db723c5633e4d4644527d676213f5a1a48710",
+  "comparisonHeadSha256": "2e8ba5ccf341c92ff4ac84d92fcd20ec4eaa6d95be0b63b874579cbac230f260",
+  "toolingInputTreeSha256": "2e8ba5ccf341c92ff4ac84d92fcd20ec4eaa6d95be0b63b874579cbac230f260",
   "imageReuseCompatible": true,
   "imageBuildInputsChanged": false,
   "classificationRulesVersion": "stage-b-image-reuse-v3",
-  "generatedAt": "2026-08-16T03:19:58+01:00",
+  "generatedAt": "2026-08-16T11:56:17+01:00",
   "generatorVersion": "validate-stage-b-image-reuse@3",
   "classifiedChangedFiles": [
     {
@@ -24,6 +24,11 @@
       "imageAffecting": false
     },
     {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBArtifactContracts-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
       "file": "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json",
       "category": "documentationOnly",
       "imageAffecting": false
@@ -34,12 +39,27 @@
       "imageAffecting": false
     },
     {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
       "file": "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json",
       "category": "documentationOnly",
       "imageAffecting": false
     },
     {
       "file": "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
       "category": "documentationOnly",
       "imageAffecting": false
     },
@@ -55,6 +75,11 @@
     },
     {
       "file": "documents/ops/PRODUCTION_STAGE_B_IMAGE_SIGNING_IDEMPOTENCY.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_MUTATION_CLOSURE_2026-08-16.md",
       "category": "documentationOnly",
       "imageAffecting": false
     },
@@ -129,6 +154,11 @@
       "imageAffecting": false
     },
     {
+      "file": "scripts/aws/stage-b-artifact-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
       "file": "scripts/aws/stage-b-deployment-contract.mjs",
       "category": "toolingOnly",
       "imageAffecting": false
@@ -165,6 +195,11 @@
     },
     {
       "file": "scripts/aws/stage-b-task-definition-recovery-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-terraform-backend-contract.mjs",
       "category": "toolingOnly",
       "imageAffecting": false
     },
@@ -264,12 +299,22 @@
       "imageAffecting": false
     },
     {
+      "file": "scripts/tests/production-green-stage-b-terraform-backend.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
       "file": "scripts/tests/production-green-stage-b-tfvars-generator.test.mjs",
       "category": "testOnly",
       "imageAffecting": false
     },
     {
       "file": "scripts/tests/production-image-authorization.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/stage-b-administrator-phase-split.test.mjs",
       "category": "testOnly",
       "imageAffecting": false
     },
