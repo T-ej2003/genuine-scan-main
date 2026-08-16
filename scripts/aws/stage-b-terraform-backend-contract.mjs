@@ -110,6 +110,18 @@ export function assertStageBTerraformInitializedBackendMetadata(metadata) {
   return true;
 }
 
+export function stageBTerraformBackendIdentity(metadata) {
+  assertStageBTerraformInitializedBackendMetadata(metadata);
+  return Object.freeze({
+    type: metadata.type,
+    bucket: metadata.config.bucket,
+    key: metadata.config.key,
+    region: metadata.config.region,
+    encrypt: metadata.config.encrypt,
+    useLockfile: metadata.config.use_lockfile,
+  });
+}
+
 export const STAGE_B_TERRAFORM_BACKEND_POLICY = Object.freeze({
   Version: "2012-10-17",
   Statement: Object.freeze([

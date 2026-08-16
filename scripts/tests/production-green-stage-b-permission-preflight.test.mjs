@@ -1965,11 +1965,11 @@ test("interrupted and successful applies leave the canonical artifact set perman
 });
 
 test("mutation identity changes only with stable executable bindings", () => {
-  const baseline = { protectedMainSha: "a".repeat(40), planSha256: "b".repeat(64), savedPlanSha256: "c".repeat(64), tfvarsSha256: "d".repeat(64), approvalSha256: "e".repeat(64), permissionEvidenceSha256: "f".repeat(64), mutationManifestSha256: "1".repeat(64), workspace: "default", backendSha256: "2".repeat(64) };
+  const baseline = { protectedMainSha: "a".repeat(40), planSha256: "b".repeat(64), savedPlanSha256: "c".repeat(64), tfvarsSha256: "d".repeat(64), approvalSha256: "e".repeat(64), permissionEvidenceSha256: "f".repeat(64), mutationManifestSha256: "1".repeat(64), workspace: "default", backendIdentitySha256: "2".repeat(64) };
   const identity = stageBApplyArtifactSetIdentity(baseline);
   assert.equal(stageBApplyArtifactSetIdentity(structuredClone(baseline)), identity);
   for (const field of ["planSha256", "approvalSha256", "permissionEvidenceSha256", "mutationManifestSha256"]) assert.equal(stageBApplyArtifactSetIdentity({ ...baseline, [field]: "3".repeat(64) }), identity);
-  for (const [field, value] of [["savedPlanSha256", "3".repeat(64)], ["tfvarsSha256", "4".repeat(64)], ["protectedMainSha", "6".repeat(40)], ["backendSha256", "7".repeat(64)]]) {
+  for (const [field, value] of [["savedPlanSha256", "3".repeat(64)], ["tfvarsSha256", "4".repeat(64)], ["protectedMainSha", "6".repeat(40)], ["backendIdentitySha256", "7".repeat(64)]]) {
     assert.notEqual(stageBApplyArtifactSetIdentity({ ...baseline, [field]: value }), identity);
   }
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-attempt-identity-"));
@@ -1993,6 +1993,31 @@ test("renewed permission evidence cannot create a second mutation right", () => 
   const replay = validRealApplyInput(fixture);
   assert.throws(() => runApply(replay), /shared apply reservation is already consumed/);
   assert.equal([...fixture.sharedReservations.keys()][0], firstIdentity);
+  assert.deepEqual(replay.applyCalls, []);
+});
+
+test("equivalent initialized-backend representations share one global reservation", () => {
+  const fixture = createValidStageBApplyFixture();
+  const equivalent = structuredClone(initializedBackendMetadata);
+  equivalent.hash += 1;
+  for (const [index, key] of Object.keys(equivalent.config).entries()) {
+    if (["bucket", "key", "region", "encrypt", "use_lockfile"].includes(key)) continue;
+    if (index % 2 === 0) delete equivalent.config[key];
+    else equivalent.config[key] = "";
+  }
+  equivalent.config = Object.fromEntries(Object.entries(equivalent.config).reverse());
+  const representationA = validApplyInput(fixture);
+  const representationB = validApplyInput(fixture);
+  representationB.deps.getBackendMetadata = () => structuredClone(equivalent);
+  const identityA = runApply(representationA).executableAuditSha256;
+  const identityB = runApply(representationB).executableAuditSha256;
+  assert.equal(identityB, identityA);
+  assert.equal(stageBApplyAttemptS3Key(identityB), stageBApplyAttemptS3Key(identityA));
+  assert.equal(runApply(validRealApplyInput(fixture)).applyCalls, 1);
+  fs.rmSync(path.join(fixture.directory, ".mscqr"), { recursive: true, force: true });
+  const replay = validRealApplyInput(fixture);
+  replay.deps.getBackendMetadata = () => structuredClone(equivalent);
+  assert.throws(() => runApply(replay), /shared apply reservation is already consumed/);
   assert.deepEqual(replay.applyCalls, []);
 });
 

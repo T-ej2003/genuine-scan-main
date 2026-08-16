@@ -24,7 +24,7 @@ import {
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./aws/stage-b-evidence-freshness.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
-import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendPolicy, stageBApplyAttemptS3Key, STAGE_B_TERRAFORM_BACKEND } from "./aws/stage-b-terraform-backend-contract.mjs";
+import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendPolicy, stageBApplyAttemptS3Key, stageBTerraformBackendIdentity, STAGE_B_TERRAFORM_BACKEND } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenceSha256 as canonicalImageEvidenceSha256, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
@@ -103,7 +103,7 @@ export function parseCli(argv) {
   };
 }
 
-const STAGE_B_MUTATION_IDENTITY_SHA256_FIELDS = ["savedPlanSha256", "tfvarsSha256", "backendSha256"];
+const STAGE_B_MUTATION_IDENTITY_SHA256_FIELDS = ["savedPlanSha256", "tfvarsSha256", "backendIdentitySha256"];
 
 export function stageBApplyArtifactSetIdentity(bindings = {}) {
   for (const field of STAGE_B_MUTATION_IDENTITY_SHA256_FIELDS) if (!/^[a-f0-9]{64}$/.test(bindings[field] || "")) throw new Error(`Stage B mutation identity ${field} is malformed.`);
@@ -114,7 +114,7 @@ export function stageBApplyArtifactSetIdentity(bindings = {}) {
     tfvarsSha256: bindings.tfvarsSha256,
     protectedMainSha: bindings.protectedMainSha,
     workspace: bindings.workspace,
-    backendSha256: bindings.backendSha256,
+    backendIdentitySha256: bindings.backendIdentitySha256,
   })));
 }
 
@@ -357,7 +357,7 @@ function stageBApplyBindings({ artifacts, verified, backendMetadata, env }) {
     mutationManifestSha256: verified.mutationManifestSha256,
     protectedMainSha: verified.deploymentIdentity.toolingSha,
     workspace: env.TF_WORKSPACE,
-    backendSha256: sha256(Buffer.from(canonicalizeJson(backendMetadata))),
+    backendIdentitySha256: sha256(Buffer.from(canonicalizeJson(stageBTerraformBackendIdentity(backendMetadata)))),
   };
   if (bindings.planSha256 !== artifacts.planSha256 || bindings.savedPlanSha256 !== artifacts.savedPlanSha256 || bindings.approvalSha256 !== artifacts.planApprovalReportSha256 || bindings.permissionEvidenceSha256 !== artifacts.permissionReportSha256) throw new Error("Stage B executable artifacts changed after approval.");
   if (bindings.tfvarsSha256 !== JSON.parse(fs.readFileSync(artifacts.tfvarsBindingReportPath, "utf8")).tfvarsSha256) throw new Error("Stage B tfvars changed after approval.");

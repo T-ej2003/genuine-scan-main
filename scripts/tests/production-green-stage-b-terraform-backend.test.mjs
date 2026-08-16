@@ -13,6 +13,7 @@ import {
   STAGE_B_TERRAFORM_BACKEND_CONFIG,
   STAGE_B_TERRAFORM_BACKEND_MANIFEST,
   STAGE_B_TERRAFORM_BACKEND_POLICY,
+  stageBTerraformBackendIdentity,
   ensureStageBTerraformBackendMetadataPrivate,
 } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { generateStageBTerraformBackendConfig } from "../aws/generate-production-green-stage-b-backend-config.mjs";
@@ -64,6 +65,22 @@ test("the direct production-state config uses the default CLI workspace", () => 
 
 test("Terraform v1.15.7 initialized metadata accepts only the canonical normalized S3 shape", () => {
   assert.equal(assertStageBTerraformInitializedBackendMetadata(initializedMetadata.backend), true);
+});
+
+test("accepted initialized-backend representations share one security identity", () => {
+  const expected = stageBTerraformBackendIdentity(initializedMetadata.backend);
+  const required = new Set(["bucket", "key", "region", "encrypt", "use_lockfile"]);
+  const optional = Object.keys(initializedMetadata.backend.config).filter((key) => !required.has(key));
+  for (const key of optional) {
+    for (const representation of [undefined, null, ""]) {
+      const metadata = structuredClone(initializedMetadata.backend);
+      if (representation === undefined) delete metadata.config[key];
+      else metadata.config[key] = representation;
+      metadata.hash += 1;
+      metadata.config = Object.fromEntries(Object.entries(metadata.config).reverse());
+      assert.deepEqual(stageBTerraformBackendIdentity(metadata), expected, `${key}:${String(representation)}`);
+    }
+  }
 });
 
 test("initialized backend metadata rejects noncanonical type, keys, endpoints, credentials, and transport options", () => {

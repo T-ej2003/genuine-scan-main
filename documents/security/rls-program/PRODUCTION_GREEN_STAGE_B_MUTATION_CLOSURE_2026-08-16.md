@@ -33,7 +33,10 @@ only the approved saved plan; no target, replace, refresh-only, or re-plan path
 is accepted. Fresh approval and permission evidence remain mandatory and are
 revalidated, but their renewable artifact hashes do not mint another mutation
 right. The apply-attempt identity is the canonical hash of the stable saved-plan,
-tfvars, protected-source, backend, and workspace bindings. The mutation manifest
+tfvars, protected-source, normalized backend identity, and workspace bindings.
+The normalized backend identity contains only the validated S3 type, bucket,
+state key, region, encryption, and lockfile coordinates; Terraform's metadata
+hash and default-valued optional serialization do not mint another key. The mutation manifest
 and all authorization artifacts are still authenticated against that saved plan
 immediately before reservation, but their renewable artifact bytes cannot select
 a new reservation key.
