@@ -32,12 +32,23 @@ Ambient `TF_CLI_ARGS` and every `TF_CLI_ARGS_*` key are rejected. Apply consumes
 only the approved saved plan; no target, replace, refresh-only, or re-plan path
 is accepted. The canonical executable-binding SHA256 is also the apply-attempt
 identity. Immediately before Terraform starts, the wrapper resolves the
-effective OS account home through the operating-system account database, then
-exclusively creates
-`<effective-operator-home>/.mscqr/production-green-stage-b/apply-attempts/<artifact-set-sha256>.json`.
-Caller environment and CLI arguments cannot select or replace that path.
-Existing or concurrently reserved identity files make a second apply for the
-same artifact set fail closed.
+canonical S3 reservation key
+`env:/production/mscqr/production/rls-green/stage-b/apply-attempts/<artifact-set-sha256>.json`
+in the existing production Terraform backend bucket. It uses one conditional
+`PutObject` with `If-None-Match: *`, then reads back and verifies the exact
+identity-bound bytes before Terraform can start. `412`, `409`, unavailable
+storage, or mismatched readback all fail closed without retry. The release
+deployer can read and conditionally create this exact prefix, but explicit
+denies prevent unconditional overwrite, `DeleteObject`, and
+`DeleteObjectVersion`.
+
+The effective OS account marker at
+`<effective-operator-home>/.mscqr/production-green-stage-b/apply-attempts/<artifact-set-sha256>.json`
+remains local defense-in-depth only. Losing it cannot restore mutation
+authority because the shared S3 reservation is authoritative across hosts,
+users, runners, and local filesystem loss. The readiness audit only checks
+that the shared reservation is absent; only the final mutation boundary may
+create it.
 
 ## Barrier 2 expected operations
 

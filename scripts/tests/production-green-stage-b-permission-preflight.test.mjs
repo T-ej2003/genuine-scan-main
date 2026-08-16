@@ -4,7 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, runApply, showSavedPlan, stageBApplyArtifactSetIdentity, stageBApplyAttemptPath, stageBEffectiveOperatorHome } from "../apply-production-green-stage-b.mjs";
+import { assertApplyArtifacts, assertPermissionReport, inspectStageBSharedApplyReservation, parseCli as parseApplyCli, reserveStageBSharedApplyAttempt, runApply, showSavedPlan, stageBApplyArtifactSetIdentity, stageBApplyAttemptPath, stageBEffectiveOperatorHome } from "../apply-production-green-stage-b.mjs";
+import { stageBApplyAttemptS3Key } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import {
   canonicalizeJson,
@@ -339,8 +340,8 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.length, 12);
   assert.equal(new Set(manifest.taskDefinitionMappings.map((entry) => entry.address)).size, 12);
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
-  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 18);
-  assert.equal(assertReviewedSimulationContextRegistry().length, 18);
+  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 19);
+  assert.equal(assertReviewedSimulationContextRegistry().length, 19);
   assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0 && !values.includes("*")));
 });
 
@@ -818,8 +819,8 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 154);
-  assert.equal(report.forbiddenEvaluations.length, 34);
+  assert.equal(report.requiredEvaluations.length, 156);
+  assert.equal(report.forbiddenEvaluations.length, 37);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
     if (evaluation.resource.startsWith("arn:aws:") && !evaluation.resource.startsWith("arn:aws:s3:::")) assert.ok(evaluation.resource === "*" || evaluation.resource.includes(":368992683803:"), evaluation.resource);
@@ -1751,6 +1752,7 @@ const rebindApprovalAudit = (fixture, auditBytes) => {
 
 const createValidStageBApplyFixture = (options = {}) => ({
   ...wrapperFixture(options),
+  sharedReservations: new Map(),
   protectedMainCheckout: buildStageBProtectedMainCheckoutEvidence({
     toolingSha: "b".repeat(40),
     currentHead: "b".repeat(40),
@@ -1773,6 +1775,7 @@ const validApplyInput = (fixture) => ({
     verifyPermissionSignature: () => true,
     verifyImageEvidence: fixture.verifyImageEvidence,
     getBackendMetadata: () => structuredClone(initializedBackendMetadata),
+    inspectSharedApplyReservation: ({ artifactSetIdentity }) => ({ status: fixture.sharedReservations.has(artifactSetIdentity) ? "present" : "absent", key: stageBApplyAttemptS3Key(artifactSetIdentity) }),
     apply: () => { throw new Error("apply must not be reached"); },
   },
 });
@@ -1798,6 +1801,12 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
       verifyImageEvidence: fixture.verifyImageEvidence,
       getBackendMetadata: () => structuredClone(initializedBackendMetadata),
       getEffectiveOperatorHome: () => fixture.directory,
+      inspectSharedApplyReservation: ({ artifactSetIdentity }) => ({ status: fixture.sharedReservations.has(artifactSetIdentity) ? "present" : "absent", key: stageBApplyAttemptS3Key(artifactSetIdentity) }),
+      reserveSharedApplyAttempt: ({ artifactSetIdentity, bytes }) => {
+        if (fixture.sharedReservations.has(artifactSetIdentity)) throw new Error("shared reservation already exists");
+        fixture.sharedReservations.set(artifactSetIdentity, Buffer.from(bytes));
+        return { status: "reserved", key: stageBApplyAttemptS3Key(artifactSetIdentity) };
+      },
       apply: (planPath) => {
         applyCalls.push(planPath);
         return { status: 0 };
@@ -1844,8 +1853,62 @@ test("apply attempt marker makes a second apply unreachable", () => {
   const first = validRealApplyInput(fixture);
   assert.equal(runApply(first).applyCalls, 1);
   const second = validRealApplyInput(fixture);
-  assert.throws(() => runApply(second), /EEXIST|exist/i);
+  assert.throws(() => runApply(second), /consumed|exist/i);
   assert.deepEqual(second.applyCalls, []);
+});
+
+test("shared reservation blocks the same artifact set across hosts, users, and local marker loss", () => {
+  const fixture = createValidStageBApplyFixture();
+  const first = validRealApplyInput(fixture);
+  const result = runApply(first);
+  fs.unlinkSync(result.applyAttemptPath);
+  for (const environment of [
+    { HOME: "/host-b/user-b", HOSTNAME: "host-b" },
+    { HOME: "/runner/work", HOSTNAME: "github-runner", GITHUB_WORKSPACE: "/runner/work/repository" },
+  ]) {
+    const replay = validRealApplyInput(fixture);
+    Object.assign(replay.env, environment);
+    assert.throws(() => runApply(replay), /shared apply reservation is already consumed/);
+    assert.deepEqual(replay.applyCalls, []);
+  }
+});
+
+test("S3 reservation uses conditional create and verifies the exact durable bytes", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-shared-reservation-"));
+  const identity = "a".repeat(64); const bytes = Buffer.from("{\"attempt\":1}\n"); const calls = [];
+  const result = reserveStageBSharedApplyAttempt({ artifactSetIdentity: identity, bytes, privateDirectory: directory, run: (args) => {
+    calls.push(args);
+    if (args[1] === "put-object") return { status: 0, stdout: "{}", stderr: "" };
+    fs.writeFileSync(args.at(-1), bytes);
+    return { status: 0, stdout: "{}", stderr: "" };
+  } });
+  assert.deepEqual(result, { status: "reserved", key: stageBApplyAttemptS3Key(identity) });
+  assert.equal(calls[0].includes("--if-none-match"), true);
+  assert.equal(calls[0][calls[0].indexOf("--if-none-match") + 1], "*");
+  assert.equal(calls[0][calls[0].indexOf("--key") + 1], stageBApplyAttemptS3Key(identity));
+  assert.equal(calls[1][1], "get-object");
+});
+
+test("shared reservation 412, 409, outage, and readback mismatch fail closed", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-shared-reservation-fail-"));
+  const input = { artifactSetIdentity: "b".repeat(64), bytes: Buffer.from("{}\n"), privateDirectory: directory };
+  for (const [stderr, pattern] of [
+    ["PreconditionFailed (412)", /already exists/],
+    ["ConditionalRequestConflict (409)", /concurrent conflict/],
+    ["ServiceUnavailable", /could not be created/],
+  ]) assert.throws(() => reserveStageBSharedApplyAttempt({ ...input, run: () => ({ status: 1, stdout: "", stderr }) }), pattern);
+  assert.throws(() => reserveStageBSharedApplyAttempt({ ...input, run: (args) => {
+    if (args[1] === "put-object") return { status: 0, stdout: "{}", stderr: "" };
+    fs.writeFileSync(args.at(-1), "different\n");
+    return { status: 0, stdout: "{}", stderr: "" };
+  } }), /readback verification failed/);
+});
+
+test("shared readiness inspection distinguishes absent, present, and unavailable without reserving", () => {
+  const artifactSetIdentity = "c".repeat(64); const privateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-shared-inspection-"));
+  assert.equal(inspectStageBSharedApplyReservation({ artifactSetIdentity, privateDirectory, run: (args) => { fs.writeFileSync(args.at(-1), "{}\n"); return { status: 0, stdout: "{}", stderr: "" }; } }).status, "present");
+  assert.equal(inspectStageBSharedApplyReservation({ artifactSetIdentity, privateDirectory, run: () => ({ status: 255, stdout: "", stderr: "An error occurred (404) when calling GetObject" }) }).status, "absent");
+  assert.throws(() => inspectStageBSharedApplyReservation({ artifactSetIdentity, privateDirectory, run: () => ({ status: 255, stdout: "", stderr: "AccessDenied" }) }), /could not be inspected/);
 });
 
 test("effective operator account fixes the attempt root across caller environment changes", () => {
@@ -1872,7 +1935,7 @@ test("HOME, temporary-directory, and working-directory changes cannot relocate a
   const marker = runApply(first).applyAttemptPath;
   const replay = validRealApplyInput(fixture);
   Object.assign(replay.env, { HOME: "/private/tmp/home-b", TMPDIR: "/private/tmp/tmp-b", PWD: "/private/tmp/cwd-b" });
-  assert.throws(() => runApply(replay), /EEXIST|exist/i);
+  assert.throws(() => runApply(replay), /consumed|exist/i);
   assert.deepEqual(replay.applyCalls, []);
   assert.equal(marker.startsWith(path.join(fixture.directory, ".mscqr", "production-green-stage-b", "apply-attempts")), true);
 });
@@ -1896,7 +1959,7 @@ test("interrupted and successful applies leave the canonical artifact set perman
     if (outcome === "interrupted") assert.throws(() => runApply(first), /simulated interruption/);
     else assert.equal(runApply(first).applyCalls, 1);
     const replay = validRealApplyInput(fixture);
-    assert.throws(() => runApply(replay), /EEXIST|exist/i);
+    assert.throws(() => runApply(replay), /consumed|exist/i);
     assert.deepEqual(replay.applyCalls, []);
   }
 });
@@ -1937,7 +2000,10 @@ test("exclusive apply-attempt reservation admits exactly one contender", async (
 
 test("canonical attempt path rejects symlink substitution and verify-only reserves nothing", () => {
   const fixture = createValidStageBApplyFixture();
-  assert.equal(runApply(validApplyInput(fixture)).status, "ready-to-apply");
+  const readiness = runApply(validApplyInput(fixture));
+  assert.equal(readiness.status, "ready-to-apply");
+  assert.equal(readiness.reservationStatus, "absent");
+  assert.equal(fixture.sharedReservations.size, 0);
   assert.equal(fs.existsSync(path.join(fixture.directory, ".mscqr")), false);
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-attempt-outside-"));
   fs.symlinkSync(outside, path.join(fixture.directory, ".mscqr"));
@@ -1950,10 +2016,28 @@ test("reservation failure occurs before Terraform spawn", () => {
   const fixture = createValidStageBApplyFixture();
   const input = validRealApplyInput(fixture);
   const events = [];
-  input.deps.reserveApplyAttempt = () => { events.push("reserve"); throw new Error("reservation failed"); };
+  input.deps.reserveSharedApplyAttempt = () => { events.push("shared-reserve"); throw new Error("reservation failed"); };
   input.deps.apply = () => { events.push("apply"); return { status: 0 }; };
   assert.throws(() => runApply(input), /reservation failed/);
-  assert.deepEqual(events, ["reserve"]);
+  assert.deepEqual(events, ["shared-reserve"]);
+});
+
+test("pre-existing local evidence blocks before consuming a shared reservation", () => {
+  const fixture = createValidStageBApplyFixture(); runApply(validRealApplyInput(fixture)); fixture.sharedReservations.clear();
+  const input = validRealApplyInput(fixture); let sharedCalls = 0;
+  input.deps.reserveSharedApplyAttempt = () => { sharedCalls += 1; throw new Error("shared reservation must not be reached"); };
+  assert.throws(() => runApply(input), /local apply-attempt evidence already exists/);
+  assert.equal(sharedCalls, 0);
+  assert.deepEqual(input.applyCalls, []);
+});
+
+test("shared reservation and readback precede local reservation and Terraform spawn", () => {
+  const fixture = createValidStageBApplyFixture(); const input = validRealApplyInput(fixture); const events = [];
+  input.deps.reserveSharedApplyAttempt = ({ artifactSetIdentity }) => { events.push("shared-reserved-and-verified"); return { status: "reserved", key: stageBApplyAttemptS3Key(artifactSetIdentity) }; };
+  input.deps.reserveApplyAttempt = () => { events.push("local-evidence"); };
+  input.deps.apply = () => { events.push("terraform"); return { status: 0 }; };
+  runApply(input);
+  assert.deepEqual(events, ["shared-reserved-and-verified", "local-evidence", "terraform"]);
 });
 
 test("apply rejects ambient Terraform CLI argument injection before artifacts or mutation", () => {

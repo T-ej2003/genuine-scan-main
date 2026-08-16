@@ -15,6 +15,8 @@
     "backendConfig": {"bucket":"mscqr-production-terraform-state-368992683803-eu-west-2","key":"env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate","region":"eu-west-2","encrypt":true,"use_lockfile":true},
     "stateArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate",
     "lockArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock",
+    "applyAttemptPrefixArn": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*",
+    "applyAttemptKeyTemplate": "env:/production/mscqr/production/rls-green/stage-b/apply-attempts/<artifact-set-identity>.json",
     "legacyWorkspaceKeyAccess": "read-write-delete-denied",
     "headBucketRequired": false,
     "requiredActions": [
@@ -23,7 +25,9 @@
       "s3:PutObject(state)",
       "s3:GetObject(lock)",
       "s3:PutObject(lock)",
-      "s3:DeleteObject(lock)"
+      "s3:DeleteObject(lock)",
+      "s3:GetObject(apply-attempt)",
+      "s3:PutObject(apply-attempt,If-None-Match:*)"
     ]
   },
   "required": [
@@ -74,6 +78,22 @@
       "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate.tflock"],
       "context": [],
       "evidence": "Terraform S3 lockfile release"
+    },
+    {
+      "id": "apply-stage-b-reservation-read",
+      "phase": "apply",
+      "action": "s3:GetObject",
+      "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"],
+      "context": [],
+      "evidence": "readback authenticates the exact globally consumed apply-attempt reservation"
+    },
+    {
+      "id": "apply-stage-b-reservation-create",
+      "phase": "apply",
+      "action": "s3:PutObject",
+      "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"],
+      "context": [{"key": "s3:if-none-match", "type": "string", "values": ["present"]}],
+      "evidence": "conditional If-None-Match:* creates the exact artifact-set reservation once"
     },
     {
       "id": "collect-stage-a-prerequisite-state",
@@ -557,6 +577,9 @@
     }
   },
   "forbidden": [
+    {"id": "apply-stage-b-reservation-unconditional-overwrite", "phase": "apply", "action": "s3:PutObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"], "context": [], "expectedDecision": "explicitDeny", "expectedMissingContextValues": [], "reason": "A consumed artifact-set reservation cannot be overwritten without conditional create semantics"},
+    {"id": "apply-stage-b-reservation-delete", "phase": "apply", "action": "s3:DeleteObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"], "context": [], "expectedDecision": "explicitDeny", "expectedMissingContextValues": [], "reason": "A consumed artifact-set reservation is immutable"},
+    {"id": "apply-stage-b-reservation-version-delete", "phase": "apply", "action": "s3:DeleteObjectVersion", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"], "context": [], "expectedDecision": "explicitDeny", "expectedMissingContextValues": [], "reason": "Versioned reservation history cannot be deleted to restore mutation authority"},
     {"id": "release-deployer-ecs-exec", "action": "ecs:ExecuteCommand", "resources": ["arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"], "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "ECS Exec is owned by the dedicated verifier operator, never by the release-deployer"},
     {"id": "stage-a-ingress-unrelated-security-group", "action": "ec2:AuthorizeSecurityGroupIngress", "resources": ["arn:aws:ec2:eu-west-2:368992683803:security-group/sg-00000000000000"], "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Stage A ingress permission is limited to the reviewed endpoint security group"},
     {"id": "stage-a-ingress-wrong-region", "action": "ec2:AuthorizeSecurityGroupIngress", "resources": ["arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412"], "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["us-east-1"]}], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Stage A ingress permission is region-bound to eu-west-2"},

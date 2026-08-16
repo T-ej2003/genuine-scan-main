@@ -7,6 +7,7 @@ const bucketArn = `arn:aws:s3:::${bucketName}`;
 const legacyWorkspaceKey = "mscqr/production/rls-green/stage-b/terraform.tfstate";
 const stateKey = `env:/production/${legacyWorkspaceKey}`;
 const lockKey = `${stateKey}.tflock`;
+const applyAttemptPrefix = "env:/production/mscqr/production/rls-green/stage-b/apply-attempts";
 const legacyWorkspaceLockKey = `${legacyWorkspaceKey}.tflock`;
 
 export const STAGE_B_TERRAFORM_BACKEND = Object.freeze({
@@ -18,6 +19,8 @@ export const STAGE_B_TERRAFORM_BACKEND = Object.freeze({
   stateArn: `${bucketArn}/${stateKey}`,
   lockKey,
   lockArn: `${bucketArn}/${lockKey}`,
+  applyAttemptPrefix,
+  applyAttemptPrefixArn: `${bucketArn}/${applyAttemptPrefix}/*`,
   legacyWorkspaceKey,
   legacyWorkspaceArn: `${bucketArn}/${legacyWorkspaceKey}`,
   legacyWorkspaceLockKey,
@@ -135,6 +138,32 @@ export const STAGE_B_TERRAFORM_BACKEND_POLICY = Object.freeze({
       Resource: `${bucketArn}/${stateKey}`,
     }),
     Object.freeze({
+      Sid: "ReadStageBApplyAttempts",
+      Effect: "Allow",
+      Action: "s3:GetObject",
+      Resource: `${bucketArn}/${applyAttemptPrefix}/*`,
+    }),
+    Object.freeze({
+      Sid: "CreateStageBApplyAttemptsOnly",
+      Effect: "Allow",
+      Action: "s3:PutObject",
+      Resource: `${bucketArn}/${applyAttemptPrefix}/*`,
+      Condition: Object.freeze({ Null: Object.freeze({ "s3:if-none-match": "false" }) }),
+    }),
+    Object.freeze({
+      Sid: "DenyNonConditionalStageBApplyAttempts",
+      Effect: "Deny",
+      Action: "s3:PutObject",
+      Resource: `${bucketArn}/${applyAttemptPrefix}/*`,
+      Condition: Object.freeze({ Null: Object.freeze({ "s3:if-none-match": "true" }) }),
+    }),
+    Object.freeze({
+      Sid: "DenyStageBApplyAttemptDeletion",
+      Effect: "Deny",
+      Action: Object.freeze(["s3:DeleteObject", "s3:DeleteObjectVersion"]),
+      Resource: `${bucketArn}/${applyAttemptPrefix}/*`,
+    }),
+    Object.freeze({
       Sid: "DenyStageBLegacyWorkspaceLockAccess",
       Effect: "Deny",
       Action: Object.freeze(["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]),
@@ -156,6 +185,8 @@ export const STAGE_B_TERRAFORM_BACKEND_MANIFEST = Object.freeze({
   backendConfig: STAGE_B_TERRAFORM_BACKEND_CONFIG,
   stateArn: `${bucketArn}/${stateKey}`,
   lockArn: `${bucketArn}/${lockKey}`,
+  applyAttemptPrefixArn: `${bucketArn}/${applyAttemptPrefix}/*`,
+  applyAttemptKeyTemplate: `${applyAttemptPrefix}/<artifact-set-identity>.json`,
   legacyWorkspaceKeyAccess: "read-write-delete-denied",
   headBucketRequired: false,
   requiredActions: Object.freeze([
@@ -165,8 +196,15 @@ export const STAGE_B_TERRAFORM_BACKEND_MANIFEST = Object.freeze({
     "s3:GetObject(lock)",
     "s3:PutObject(lock)",
     "s3:DeleteObject(lock)",
+    "s3:GetObject(apply-attempt)",
+    "s3:PutObject(apply-attempt,If-None-Match:*)",
   ]),
 });
+
+export function stageBApplyAttemptS3Key(artifactSetIdentity) {
+  if (!/^[a-f0-9]{64}$/.test(artifactSetIdentity || "")) throw new Error("Stage B apply artifact-set identity is malformed.");
+  return `${applyAttemptPrefix}/${artifactSetIdentity}.json`;
+}
 
 export function assertStageBTerraformBackendPolicy(policy) {
   if (JSON.stringify(policy) !== JSON.stringify(STAGE_B_TERRAFORM_BACKEND_POLICY)) {
