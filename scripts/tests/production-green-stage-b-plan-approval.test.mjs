@@ -8,7 +8,7 @@ import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { assertStageBNormalPlanCompleteness, assertStageBPlanApprovedBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes, STAGE_B_BROKER_OPERATIONS, STAGE_B_PLAN_PROFILES, STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS } from "../aws/stage-b-plan-approval-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY } from "../aws/stage-b-deployment-contract.mjs";
-import { finalizeCapturedStageBPlanApproval, readStageBApprovalPlanArtifacts } from "../plan-production-green-stage-b.mjs";
+import { approveCapturedStageBPlan, finalizeCapturedStageBPlanApproval, readStageBApprovalPlanArtifacts } from "../plan-production-green-stage-b.mjs";
 import { writeStageBPrivateFileAtomic } from "../aws/stage-b-artifact-contract.mjs";
 import { assertRecoveryOnlyPlan } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
 import { assertPermissionReportPlanBinding } from "../aws/validate-production-green-stage-b-permissions.mjs";
@@ -109,6 +109,19 @@ function importedBackendPlan() {
   return value;
 }
 
+function partialApplyRecoveryPlan() {
+  const value = importedBackendPlan();
+  for (const change of value.resource_changes) {
+    if (change.address === 'aws_ecs_task_definition.candidate["backend"]' || change.address === "aws_iam_policy.broker" || change.address === STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY.address) {
+      change.change = { ...change.change, actions: ["no-op"] };
+    } else if (Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, change.address)) {
+      change.deposed = "a".repeat(8);
+      change.change = { ...change.change, actions: ["delete"], after: null, after_unknown: {}, after_sensitive: {} };
+    }
+  }
+  return value;
+}
+
 test("the imported backend profile passes the production approval path with zero AWS mutation", () => {
   const importedPlan = importedBackendPlan();
   const importedPlanJsonBytes = Buffer.from(`${JSON.stringify(importedPlan)}\n`);
@@ -124,6 +137,57 @@ test("the imported backend profile passes the production approval path with zero
   assert.doesNotThrow(() => assertStageBNormalPlanCompleteness(importedPlan, { referenceAudit: importedAudit, strict: false, terraformConfiguration }));
   assert.doesNotThrow(() => assertStageBPlanApprovalReport(importedApproval, { approvalReportBytes: importedApprovalBytes, captureReport: importedCapture, captureReportBytes: importedCaptureBytes, referenceAudit: importedAudit, referenceAuditBytes: importedAuditBytes, hashes: importedHashes, logicalCanonicalPlanJsonSha256: importedHashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: hash(importedAuditBytes), trustedCallerArn: importedAudit.callerArn, stageBLineage: importedCapture.stageBLineage, stageBSerial: importedCapture.stageBSerial, plan: importedPlan, terraformConfiguration }));
   assert.doesNotThrow(() => assertStageBPlanApprovedBinding(importedApproval, { approvalReportBytes: importedApprovalBytes, approvalReportSha256: hash(importedApprovalBytes), savedPlanBytes, planJsonBytes: importedPlanJsonBytes, canonicalPlanJsonBytes: importedCanonicalPlanJsonBytes, referenceAudit: importedAudit, referenceAuditBytes: importedAuditBytes, expectedToolingSha: importedCapture.toolingSha, expectedToolingTreeSha256: importedCapture.toolingTreeSha256, expectedRefreshReportSha256: importedCapture.refreshReportSha256, expectedStageBLineage: importedCapture.stageBLineage, expectedStageBSerial: importedCapture.stageBSerial, terraformConfiguration, now: new Date(capture.capturedAt) }));
+});
+
+test("partial-apply recovery binds the exact eleven cleanup entries and two Lambda updates through approval", () => {
+  const partialPlan = partialApplyRecoveryPlan();
+  const partialPlanJsonBytes = Buffer.from(`${JSON.stringify(partialPlan)}\n`);
+  const partialCanonicalPlanJsonBytes = Buffer.from(`${canonicalJson(partialPlan)}\n`);
+  const partialHashes = stageBPlanHashes({ savedPlanBytes, planJsonBytes: partialPlanJsonBytes, canonicalPlanJsonBytes: partialCanonicalPlanJsonBytes });
+  const partialAudit = { ...audit, planJsonSha256: partialHashes.planJsonSha256 };
+  const partialAuditBytes = Buffer.from(`${JSON.stringify(partialAudit)}\n`);
+  const partialClassification = { noOp: fixtureClassification.noOp + 2, create: 0, replacement: 0, update: 2, destroy: 11, unclassified: 0 };
+  const partialCapture = createStageBPlanCaptureReport({ toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, hashes: partialHashes, capturedAt: capture.capturedAt, stageBLineage: capture.stageBLineage, stageBSerial: 96, terraformVersion: capture.terraformVersion, terraformFormatVersion: capture.terraformFormatVersion, classification: partialClassification, planProfile: "PARTIAL_APPLY_RECOVERY", brokerEvidence: { brokerOperation: "partial-apply-recovery", brokerUpdatePresent: true, brokerActions: ["update"], brokerResourceAddresses: ["aws_lambda_alias.reviewed", "aws_lambda_function.broker"], brokerReferenceValidationPending: true } });
+  const partialCaptureBytes = Buffer.from(`${JSON.stringify(partialCapture, null, 2)}\n`);
+  const partialApproval = createStageBPlanApprovalReport({ captureReportSha256: hash(partialCaptureBytes), referenceAuditPath: partialAudit.referenceAuditPath, referenceAuditSha256: hash(partialAuditBytes), referenceAuditCallerArn: partialAudit.callerArn, referenceAuditAt: partialAudit.auditedAt, toolingSha: partialCapture.toolingSha, toolingTreeSha256: partialCapture.toolingTreeSha256, refreshReportSha256: partialCapture.refreshReportSha256, stageBLineage: partialCapture.stageBLineage, stageBSerial: partialCapture.stageBSerial, hashes: partialHashes, logicalCanonicalPlanJsonSha256: partialHashes.logicalCanonicalPlanJsonSha256, approvedAt: capture.capturedAt, classification: partialClassification, planProfile: "PARTIAL_APPLY_RECOVERY", brokerOperation: partialCapture.brokerOperation, brokerUpdatePresent: partialCapture.brokerUpdatePresent, brokerActions: partialCapture.brokerActions, brokerResourceAddresses: partialCapture.brokerResourceAddresses });
+  const partialApprovalBytes = Buffer.from(`${JSON.stringify(partialApproval, null, 2)}\n`);
+  const common = { approvalReportBytes: partialApprovalBytes, approvalReportSha256: hash(partialApprovalBytes), referenceAudit: partialAudit, referenceAuditBytes: partialAuditBytes, now: new Date(capture.capturedAt) };
+  assert.doesNotThrow(() => assertStageBPlanApprovalReport(partialApproval, { ...common, captureReport: partialCapture, captureReportBytes: partialCaptureBytes, plan: partialPlan, hashes: partialHashes, logicalCanonicalPlanJsonSha256: partialHashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: hash(partialAuditBytes), trustedCallerArn: partialAudit.callerArn, stageBLineage: partialCapture.stageBLineage, stageBSerial: partialCapture.stageBSerial, terraformConfiguration }));
+  assert.doesNotThrow(() => assertStageBPlanApprovedBinding(partialApproval, { ...common, savedPlanBytes, planJsonBytes: partialPlanJsonBytes, canonicalPlanJsonBytes: partialCanonicalPlanJsonBytes, expectedToolingSha: partialCapture.toolingSha, expectedToolingTreeSha256: partialCapture.toolingTreeSha256, expectedRefreshReportSha256: partialCapture.refreshReportSha256, expectedStageBLineage: partialCapture.stageBLineage, expectedStageBSerial: partialCapture.stageBSerial, terraformConfiguration }));
+  const mixedRecoveryApproval = { ...partialApproval, recoveryAttestationSha256: "a".repeat(64), recoveryPlan: true };
+  const mixedRecoveryApprovalBytes = Buffer.from(`${JSON.stringify(mixedRecoveryApproval, null, 2)}\n`);
+  assert.throws(() => assertStageBPlanApprovedBinding(mixedRecoveryApproval, { ...common, approvalReportBytes: mixedRecoveryApprovalBytes, approvalReportSha256: hash(mixedRecoveryApprovalBytes), savedPlanBytes, planJsonBytes: partialPlanJsonBytes, canonicalPlanJsonBytes: partialCanonicalPlanJsonBytes, expectedToolingSha: partialCapture.toolingSha, expectedToolingTreeSha256: partialCapture.toolingTreeSha256, expectedRefreshReportSha256: partialCapture.refreshReportSha256, expectedStageBLineage: partialCapture.stageBLineage, expectedStageBSerial: partialCapture.stageBSerial, terraformConfiguration }), /cannot carry RECOVERY_ALIAS_ONLY/);
+});
+
+test("approval-only propagates partial-apply recovery into the real approval validator seam", () => {
+  const plan = partialApplyRecoveryPlan();
+  const planJsonBytes = Buffer.from(`${JSON.stringify(plan)}\n`);
+  const canonicalPlanJsonBytes = Buffer.from(`${canonicalJson(plan)}\n`);
+  const approvalHashes = stageBPlanHashes({ savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes });
+  const auditValue = { ...audit, planJsonSha256: approvalHashes.planJsonSha256 };
+  const auditValueBytes = Buffer.from(`${JSON.stringify(auditValue)}\n`);
+  const captureValue = createStageBPlanCaptureReport({ toolingSha: capture.toolingSha, toolingTreeSha256: capture.toolingTreeSha256, refreshReportSha256: capture.refreshReportSha256, hashes: approvalHashes, capturedAt: capture.capturedAt, stageBLineage: capture.stageBLineage, stageBSerial: 96, terraformVersion: capture.terraformVersion, terraformFormatVersion: capture.terraformFormatVersion, classification: { noOp: fixtureClassification.noOp + 2, create: 0, replacement: 0, update: 2, destroy: 11, unclassified: 0 }, planProfile: "PARTIAL_APPLY_RECOVERY", brokerEvidence: { brokerOperation: "partial-apply-recovery", brokerUpdatePresent: true, brokerActions: ["update"], brokerResourceAddresses: ["aws_lambda_alias.reviewed", "aws_lambda_function.broker"], brokerReferenceValidationPending: true } });
+  const captureValueBytes = Buffer.from(`${JSON.stringify(captureValue, null, 2)}\n`);
+  const temp = outputDirectory("approval-only-partial");
+  const savedPath = path.join(temp, "saved.tfplan"); const planPath = path.join(temp, "plan.json"); const canonicalPath = path.join(temp, "canonical.json"); const auditPath = path.join(temp, "audit.json"); const capturePath = path.join(temp, "capture.json"); const approvalPath = path.join(temp, "approval.json");
+  for (const [filePath, bytes] of [[savedPath, savedPlanBytes], [planPath, planJsonBytes], [canonicalPath, canonicalPlanJsonBytes], [auditPath, auditValueBytes], [capturePath, captureValueBytes]]) fs.writeFileSync(filePath, bytes, { mode: 0o600 });
+  let receivedOptions;
+  const previousWorkspace = process.env.TF_WORKSPACE;
+  process.env.TF_WORKSPACE = "default";
+  const result = approveCapturedStageBPlan({
+    tfvars: path.join(temp, "partial.tfvars"),
+    cliOptions: ["--saved-plan", savedPath, "--plan-json", planPath, "--canonical-plan-json", canonicalPath, "--capture-report", capturePath, "--capture-report-sha256", hash(captureValueBytes), "--reference-audit", auditPath, "--reference-audit-sha256", hash(auditValueBytes), "--approval-report", approvalPath],
+    protectedMainCheckout: { currentHead: capture.toolingSha },
+    deps: {
+      readPlanningInputs: () => ({ bindingReport: { stateLineage: captureValue.stageBLineage, stateSerial: captureValue.stageBSerial }, partialApplyRecovery: true, recoveryOnly: false }),
+      getCallerArn: () => auditValue.callerArn,
+      validatePlan: (_selectedPlan, options) => { receivedOptions = options; return { actionCounts: { "no-op": fixtureClassification.noOp + 2, update: 2, destroy: 11, create: 0, replacement: 0 }, unclassifiedResources: [] }; },
+    },
+  });
+  if (previousWorkspace === undefined) delete process.env.TF_WORKSPACE; else process.env.TF_WORKSPACE = previousWorkspace;
+  assert.equal(receivedOptions.partialApplyRecovery, true);
+  assert.equal(result.status, "PLAN_APPROVED");
+  assert.equal(JSON.parse(fs.readFileSync(approvalPath)).planProfile, "PARTIAL_APPLY_RECOVERY");
 });
 
 test("imported-backend profile rejects census and membership drift", () => {
@@ -275,8 +339,8 @@ test("approval is deterministic for unchanged captured artifacts", () => {
 });
 
 test("plan profile and broker operation registries match the emitted Stage B universe", () => {
-  assert.deepEqual(STAGE_B_PLAN_PROFILES, ["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY"]);
-  assert.deepEqual(STAGE_B_BROKER_OPERATIONS, ["none", "initial-create", "update", "recovery-alias-only"]);
+  assert.deepEqual(STAGE_B_PLAN_PROFILES, ["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"]);
+  assert.deepEqual(STAGE_B_BROKER_OPERATIONS, ["none", "initial-create", "update", "recovery-alias-only", "partial-apply-recovery"]);
   assert.throws(() => createStageBPlanCaptureReport({ ...capture, planProfile: "UNREVIEWED" }), /unsupported/);
   assert.throws(() => createStageBPlanApprovalReport({ ...approval, planProfile: "UNREVIEWED" }), /unsupported/);
 });

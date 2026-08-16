@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { classifyStageBPlan, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
+import { assertStageBPartialApplyRecoveryPlan, classifyStageBPlan, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
 import { assertStageBReferenceAuditFreshness, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
@@ -12,11 +12,16 @@ export const STAGE_B_PLAN_APPROVED = "PLAN_APPROVED";
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const STAGE_B_CAPTURE_BROKER_ADDRESSES = ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"];
-export const STAGE_B_PLAN_PROFILES = Object.freeze(["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY"]);
-export const STAGE_B_BROKER_OPERATIONS = Object.freeze(["none", "initial-create", "update", "recovery-alias-only"]);
+export const STAGE_B_PLAN_PROFILES = Object.freeze(["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"]);
+
+function assertPartialApplyRecoveryEvidence(report) {
+  if (report?.planProfile === "PARTIAL_APPLY_RECOVERY" && (report.recoveryAttestationSha256 !== undefined || report.recoveryPlan === true)) throw new Error("PARTIAL_APPLY_RECOVERY cannot carry RECOVERY_ALIAS_ONLY attestation evidence.");
+}
+export const STAGE_B_BROKER_OPERATIONS = Object.freeze(["none", "initial-create", "update", "recovery-alias-only", "partial-apply-recovery"]);
 export const STAGE_B_PLAN_PROFILE_CENSUS = Object.freeze({
   BASELINE: Object.freeze({ create: 12, replacement: 0, update: 3, destroy: 0, unclassified: 0 }),
   IMPORTED_BACKEND_METADATA_NORMALIZATION: Object.freeze({ create: 1, replacement: 11, update: 4, destroy: 0, unclassified: 0 }),
+  PARTIAL_APPLY_RECOVERY: Object.freeze({ create: 0, replacement: 0, update: 2, destroy: 11, unclassified: 0 }),
 });
 
 function assertPlanProfile(profile, label = "Stage B plan evidence") {
@@ -29,6 +34,7 @@ function expectedBrokerEvidence(operation) {
   if (operation === "initial-create") return { updatePresent: false, actions: ["create"], addresses: STAGE_B_CAPTURE_BROKER_ADDRESSES, pending: false };
   if (operation === "update") return { updatePresent: true, actions: ["update"], addresses: STAGE_B_CAPTURE_BROKER_ADDRESSES, pending: true };
   if (operation === "recovery-alias-only") return { updatePresent: false, actions: ["no-op"], addresses: ["aws_lambda_alias.reviewed"], pending: false };
+  if (operation === "partial-apply-recovery") return { updatePresent: true, actions: ["update"], addresses: ["aws_lambda_alias.reviewed", "aws_lambda_function.broker"], pending: true };
   throw new Error(`Stage B broker operation is unsupported: ${operation}`);
 }
 
@@ -187,6 +193,10 @@ function assertClassification(report) {
     assertPlanProfileCensus(classification, profile, "Stage B imported-backend normalization classification");
     return;
   }
+  if (profile === "PARTIAL_APPLY_RECOVERY") {
+    assertPlanProfileCensus(classification, profile, "Stage B partial-apply recovery classification");
+    return;
+  }
   if (report?.recoveryAttestationSha256 !== undefined) {
     if (!/^[a-f0-9]{64}$/.test(report.recoveryAttestationSha256) || report.recoveryPlan !== true || classification.destroy !== 0 || classification.unclassified !== 0) throw new Error("Stage B recovery plan evidence classification is not exact and non-destructive.");
     return;
@@ -219,6 +229,8 @@ function assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes
 
 export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, refreshReportSha256, refreshBindingReportSha256, recoveryAttestationSha256, hashes, capturedAt, stageBLineage, stageBSerial, terraformVersion, terraformFormatVersion, planExitCode = 0, showExitCode = 0, classification, planProfile = "BASELINE", taskDefinitionRotations = [], brokerEvidence = {} }) {
   assertCanonicalTerraformSerialNumber(stageBSerial, "Stage B serial");
+  const profile = assertPlanProfile(planProfile);
+  assertPartialApplyRecoveryEvidence({ planProfile: profile, recoveryAttestationSha256, recoveryPlan: recoveryAttestationSha256 !== undefined });
   return {
     schemaVersion: STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION,
     state: STAGE_B_PLAN_CAPTURED,
@@ -227,7 +239,7 @@ export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, r
     refreshReportSha256,
     ...(refreshBindingReportSha256 ? { refreshBindingReportSha256 } : {}),
     ...(recoveryAttestationSha256 ? { recoveryAttestationSha256, recoveryPlan: true } : {}),
-    planProfile: assertPlanProfile(planProfile),
+    planProfile: profile,
     ...(planProfile === "ECS_TASK_DEFINITION_ROTATION" ? { taskDefinitionRotations } : {}),
     ...hashes,
     classification,
@@ -254,6 +266,7 @@ export function assertStageBPlanCaptureReport(report, { captureReportBytes, hash
     throw new Error("Stage B plan capture report is missing the PLAN_CAPTURED contract.");
   }
   assertPlanProfile(report.planProfile, "Stage B plan capture");
+  assertPartialApplyRecoveryEvidence(report);
   if (report.planProfile === "RECOVERY_ALIAS_ONLY" && !/^[a-f0-9]{64}$/.test(report.refreshBindingReportSha256 || "")) throw new Error("Stage B recovery plan capture observation-binding SHA256 is missing or malformed.");
   assertBrokerEvidence(report);
   if (!Buffer.isBuffer(captureReportBytes) || sha256(captureReportBytes) !== sha256(Buffer.from(JSON.stringify(report, null, 2) + "\n"))) throw new Error("Stage B plan capture report bytes are not self-consistent.");
@@ -270,6 +283,8 @@ export function assertStageBPlanCaptureReport(report, { captureReportBytes, hash
 
 export function createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath, referenceAuditSha256, referenceAuditCallerArn, referenceAuditAt, toolingSha, toolingTreeSha256, refreshReportSha256, refreshBindingReportSha256, recoveryAttestationSha256, stageBLineage, stageBSerial, hashes, logicalCanonicalPlanJsonSha256, approvedAt, classification, planProfile = "BASELINE", taskDefinitionRotations = [], brokerOperation = "none", brokerUpdatePresent = false, brokerActions = [], brokerResourceAddresses = [] }) {
   assertCanonicalTerraformSerialNumber(stageBSerial, "Stage B serial");
+  const profile = assertPlanProfile(planProfile);
+  assertPartialApplyRecoveryEvidence({ planProfile: profile, recoveryAttestationSha256, recoveryPlan: recoveryAttestationSha256 !== undefined });
   return {
     schemaVersion: STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION,
     state: STAGE_B_PLAN_APPROVED,
@@ -279,7 +294,7 @@ export function createStageBPlanApprovalReport({ captureReportSha256, referenceA
     refreshReportSha256,
     ...(refreshBindingReportSha256 ? { refreshBindingReportSha256 } : {}),
     ...(recoveryAttestationSha256 ? { recoveryAttestationSha256, recoveryPlan: true } : {}),
-    planProfile: assertPlanProfile(planProfile),
+    planProfile: profile,
     ...(planProfile === "ECS_TASK_DEFINITION_ROTATION" ? { taskDefinitionRotations } : {}),
     stageBLineage,
     stageBSerial,
@@ -310,6 +325,7 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
   if (report.brokerOperation !== captureReport.brokerOperation || report.brokerUpdatePresent !== captureReport.brokerUpdatePresent || JSON.stringify(report.brokerActions) !== JSON.stringify(captureReport.brokerActions) || JSON.stringify(report.brokerResourceAddresses) !== JSON.stringify(captureReport.brokerResourceAddresses)) throw new Error("Stage B plan approval broker evidence is not bound to the captured plan.");
   assertBrokerEvidence(report, { approved: true });
   assertPlanProfile(report.planProfile, "Stage B plan approval");
+  assertPartialApplyRecoveryEvidence(report);
   if (report.planProfile === "RECOVERY_ALIAS_ONLY" && report.refreshBindingReportSha256 !== captureReport.refreshBindingReportSha256) throw new Error("Stage B recovery approval observation-binding SHA256 is not inherited from the captured plan.");
   if (report.planProfile !== captureReport.planProfile || JSON.stringify(report.taskDefinitionRotations || []) !== JSON.stringify(captureReport.taskDefinitionRotations || [])) throw new Error("Stage B plan approval profile is not bound to the captured plan.");
   if (report.captureReportSha256 !== sha256(captureReportBytes)) throw new Error("Stage B plan approval report is bound to a different capture report.");
@@ -325,6 +341,7 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
   if (trustedCallerArn !== undefined && referenceAudit?.callerArn !== trustedCallerArn) throw new Error("Stage B reference audit caller does not match the trusted release caller.");
   if (report.referenceAuditCallerArn !== referenceAudit?.callerArn || report.referenceAuditAt !== referenceAudit?.auditedAt) throw new Error("Stage B plan approval report reference-audit identity is incomplete.");
   if (["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION"].includes(report.planProfile) && plan && referenceAudit) assertStageBNormalPlanCompleteness(plan, { referenceAudit, strict: false, terraformConfiguration });
+  if (report.planProfile === "PARTIAL_APPLY_RECOVERY" && plan) assertStageBPartialApplyRecoveryPlan(plan);
   assertClassification(report);
   return true;
 }
@@ -344,11 +361,18 @@ export function assertStageBPlanApprovedBinding(report, { approvalReportBytes, a
   }
   if (expectedRecoveryAttestationSha256 !== undefined && report.recoveryAttestationSha256 !== expectedRecoveryAttestationSha256) throw new Error("Stage B approval recovery-attestation binding differs from the current recovery evidence.");
   assertPlanProfile(report.planProfile, "Stage B plan approval");
+  assertPartialApplyRecoveryEvidence(report);
   if (report.planProfile === "RECOVERY_ALIAS_ONLY" && expectedRefreshBindingReportSha256 !== undefined && report.refreshBindingReportSha256 !== expectedRefreshBindingReportSha256) throw new Error("Stage B recovery approval observation-binding SHA256 differs from the selected observation binding.");
   assertBrokerEvidence(report, { approved: true });
   assertStageBReferenceAuditFreshness(report.referenceAuditAt, now);
-  const boundReferenceAudit = assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required: ["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION"].includes(report.planProfile) });
+  const boundReferenceAudit = assertBoundReferenceAudit(report, {
+    referenceAudit,
+    referenceAuditBytes,
+    hashes,
+    required: ["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "PARTIAL_APPLY_RECOVERY"].includes(report.planProfile),
+  });
   if (["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION"].includes(report.planProfile)) assertStageBNormalPlanCompleteness(JSON.parse(planJsonBytes.toString("utf8")), { referenceAudit: boundReferenceAudit, strict: false, terraformConfiguration });
+  if (report.planProfile === "PARTIAL_APPLY_RECOVERY") assertStageBPartialApplyRecoveryPlan(JSON.parse(planJsonBytes.toString("utf8")));
   assertClassification(report);
   return true;
 }

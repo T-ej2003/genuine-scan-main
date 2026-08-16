@@ -20,7 +20,7 @@ import {
 import { assertStageBBrokerConfigurationIdentity, canonicalJson, STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-stage-b-image-evidence.mjs";
 import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
-import { assertStageBBrokerFunctionUpdate, assertStageBImportedBackendMetadataNormalization, classifyStageBPlan, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./aws/stage-b-deployment-contract.mjs";
+import { assertStageBBrokerFunctionUpdate, assertStageBImportedBackendMetadataNormalization, assertStageBPartialApplyRecoveryPlan, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./aws/stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments } from "./aws/stage-b-terraform-workspace.mjs";
@@ -634,12 +634,13 @@ function assertRecoveryOnlyReferenceAuditBinding(plan, audit, auditBytes, auditS
 }
 
 export function assertStageBPlan(plan, options = {}) {
-  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration, imageEvidence, strictResourceContract = false, protectedMainCheckout, terraformWorkspace, requireReferenceAudit = true, captureMode = false, requireSemanticCompleteness = false, recoveryOnly = false } = options;
+  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration, imageEvidence, strictResourceContract = false, protectedMainCheckout, terraformWorkspace, requireReferenceAudit = true, captureMode = false, requireSemanticCompleteness = false, recoveryOnly = false, partialApplyRecovery = false } = options;
   if (terraformWorkspace) assertStageBTerraformWorkspace(terraformWorkspace);
   const deploymentIdentity = strictResourceContract || imageEvidence ? assertStageBDeploymentIdentity({ plan, imageEvidence }) : undefined;
   if (strictResourceContract) assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout, deploymentIdentity });
-  const resourceClassification = classifyStageBPlan(plan, { strict: strictResourceContract, terraformConfiguration, allowBrokerPolicyCreate: captureMode });
-  const planSemanticCensus = requireSemanticCompleteness ? assertStageBPlanSemanticCompleteness(plan, { terraformConfiguration }) : undefined;
+  const resourceClassification = classifyStageBPlan(plan, { strict: strictResourceContract, terraformConfiguration, allowBrokerPolicyCreate: captureMode, partialApplyRecovery });
+  const planSemanticCensus = requireSemanticCompleteness ? assertStageBPlanSemanticCompleteness(plan, { terraformConfiguration, partialApplyRecovery }) : undefined;
+  if (partialApplyRecovery) assertStageBPartialApplyRecoveryPlan(plan);
   const imageBindings = imageEvidence ? assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, planProfile: recoveryOnly ? "RECOVERY_ALIAS_ONLY" : resourceClassification.planProfile, terraformConfiguration }) : undefined;
   if (recoveryOnly) {
     if (plan.variables?.stage_b_recovery_only?.value !== true) throw new Error("Recovery-only validation requires the explicit recovery-only plan variable.");
@@ -649,12 +650,14 @@ export function assertStageBPlan(plan, options = {}) {
   const brokerMutationAddresses = new Set(["aws_lambda_function.broker", "aws_lambda_alias.reviewed", "aws_iam_policy.broker"]);
   const brokerMutation = (plan.resource_changes || []).find((change) => brokerMutationAddresses.has(change.address)
     && !exactActions(change.change?.actions || [], ["no-op"]));
-  if (brokerMutation && !recoveryOnly) assertStageBBrokerTaskDefinitionMapping(plan, terraformConfiguration);
-  const brokerActionShape = captureMode && !recoveryOnly ? classifyStageBBrokerActionShape(plan) : undefined;
+  if (brokerMutation && !recoveryOnly && !partialApplyRecovery) assertStageBBrokerTaskDefinitionMapping(plan, terraformConfiguration);
+  const brokerActionShape = captureMode && !recoveryOnly && !partialApplyRecovery ? classifyStageBBrokerActionShape(plan) : undefined;
   let brokerCapture;
   if (captureMode) {
     if (recoveryOnly) {
       brokerCapture = { brokerOperation: "recovery-alias-only", brokerUpdatePresent: false, brokerActions: ["no-op"], brokerResourceAddresses: ["aws_lambda_alias.reviewed"], brokerReferenceValidationPending: false };
+    } else if (partialApplyRecovery) {
+      brokerCapture = { brokerOperation: "partial-apply-recovery", brokerUpdatePresent: true, brokerActions: ["update"], brokerResourceAddresses: ["aws_lambda_alias.reviewed", "aws_lambda_function.broker"], brokerReferenceValidationPending: true };
     } else if (brokerActionShape === "initial-create") {
       assertInitialBrokerCreatePlan(plan, terraformConfiguration);
       brokerCapture = { brokerOperation: "initial-create", brokerUpdatePresent: false, brokerActions: ["create"], brokerResourceAddresses: [...brokerCaptureAddresses], brokerReferenceValidationPending: false };
@@ -672,11 +675,12 @@ export function assertStageBPlan(plan, options = {}) {
     if (captureMode) {
       if (exactActions(brokerActions, ["no-op"]) && brokerCapture?.brokerUpdatePresent) throw new Error("Stage B PLAN_CAPTURED broker update identity is inconsistent.");
     } else if (exactActions(brokerActions, ["create"])) assertInitialBrokerCreatePlan(plan, terraformConfiguration);
-    else if (!recoveryOnly && exactActions(brokerActions, ["update"]) && requireReferenceAudit) assertBrokerAuditBinding(plan, brokerChange, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
+    else if (partialApplyRecovery && exactActions(brokerActions, ["update"])) assertStageBPartialApplyRecoveryPlan(plan);
+    else if (!recoveryOnly && !partialApplyRecovery && exactActions(brokerActions, ["update"]) && requireReferenceAudit) assertBrokerAuditBinding(plan, brokerChange, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
     else if (!exactActions(brokerActions, ["no-op"])) throw new Error(`Stage B broker actions are unsupported: ${JSON.stringify(brokerActions)}`);
   }
   const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition");
-  const taskDefinitionClassification = taskDefinitionChanges.length && !recoveryOnly
+  const taskDefinitionClassification = taskDefinitionChanges.length && !recoveryOnly && !partialApplyRecovery
     ? assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration, { strict: strictResourceContract })
     : null;
   const brokerActions = brokerChange?.change?.actions || [];
@@ -691,9 +695,9 @@ export function assertStageBPlan(plan, options = {}) {
         assertRetainedTaskDefinition(change);
       } else {
         assertTaskDefinitionScope(change);
-        if (!exactActions(actions, ["create"]) && !exactActions(actions, ["no-op"]) && !(change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(actions, ["update"])) && !isStageBTaskDefinitionRotationActionsValue(actions)) throw new Error(`Stage B task-definition plan rejected: ${change.address}`);
+        if (!exactActions(actions, ["create"]) && !exactActions(actions, ["no-op"]) && !(partialApplyRecovery && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) && !(change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(actions, ["update"])) && !isStageBTaskDefinitionRotationActionsValue(actions)) throw new Error(`Stage B task-definition plan rejected: ${change.address}`);
       }
-    } else if (actions.includes("delete")) {
+    } else if (actions.includes("delete") && !(partialApplyRecovery && isStageBPartialApplyDeposedTaskDefinitionCleanup(change))) {
       throw new Error(`Stage B plan rejected: ${change.address}`);
     }
     const after = JSON.stringify(change.change.after || {});
@@ -704,7 +708,8 @@ export function assertStageBPlan(plan, options = {}) {
 
 export function assertStageBPlanCapture(plan, options = {}) {
   const result = assertStageBPlan(plan, { ...options, requireReferenceAudit: false, captureMode: true });
-  if ((result.actionCounts?.destroy || 0) !== 0 || result.unclassifiedResources?.length !== 0 || (result.actionCounts?.replacement || 0) !== (result.taskDefinitionRotations?.length || 0)) throw new Error("Stage B plan capture contains an unauthorized destructive or unclassified action.");
+  if (!options.partialApplyRecovery && ((result.actionCounts?.destroy || 0) !== 0 || result.unclassifiedResources?.length !== 0 || (result.actionCounts?.replacement || 0) !== (result.taskDefinitionRotations?.length || 0))) throw new Error("Stage B plan capture contains an unauthorized destructive or unclassified action.");
+  if (options.partialApplyRecovery && (result.actionCounts?.destroy !== 11 || result.actionCounts?.update !== 2 || result.unclassifiedResources?.length !== 0)) throw new Error("Stage B partial-apply recovery plan capture census is not exact.");
   return result;
 }
 
@@ -737,14 +742,17 @@ export function readPlanningInputs(tfvars, cliOptions, protectedMainCheckout, de
   const recoveryClassificationPath = readOption(cliOptions, "--recovery-classification");
   const recoveryClassificationSha256 = readOption(cliOptions, "--recovery-classification-sha256");
   const recoveryOnly = cliOptions.includes("--recovery-only");
+  const partialApplyRecovery = cliOptions.includes("--partial-apply-recovery");
   const closureMode = readOption(cliOptions, "--closure-mode");
+  if (recoveryOnly && partialApplyRecovery) throw new Error("Stage B recovery-only and partial-apply recovery modes are mutually exclusive.");
   if (!bindingReportPath || !bindingReportSha256 || !toolingTreeSha256 || !expectedImageReleaseSha || !refreshReportPath || !refreshReportSha256 || closureMode !== "production") throw new Error("Stage B planning requires canonical tfvars, refresh provenance, and production closure mode.");
-  if (recoveryOnly && (!refreshBindingReportPath || !refreshBindingReportSha256)) throw new Error("RECOVERY_ALIAS_ONLY planning requires the original observation binding report and SHA256.");
+  if ((recoveryOnly || partialApplyRecovery) && (!refreshBindingReportPath || !refreshBindingReportSha256)) throw new Error("Stage B recovery planning requires the original observation binding report and SHA256.");
   const validateTfvarsBinding = deps.validateTfvarsBinding || assertStageBTfvarsBinding;
   const validateRecovery = deps.assertRecovery || assertVerifiedStageBRecovery;
   const validateRefresh = deps.assertRefresh || assertStageBRefreshEvidence;
   const bindingReport = validateTfvarsBinding({ tfvarsPath: tfvars, bindingReportPath, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha });
   if (bindingReport.recoveryOnly !== recoveryOnly) throw new Error("Stage B recovery-only mode must exactly match the canonical tfvars binding report.");
+  if (Boolean(bindingReport.partialApplyRecovery) !== partialApplyRecovery || (partialApplyRecovery && bindingReport.recoveryMode !== "PARTIAL_APPLY_RECOVERY")) throw new Error("Stage B partial-apply recovery mode must exactly match the canonical tfvars binding report.");
   const backendMetadata = deps.backendMetadata || assertStageBPlanningBackendMetadata();
   if (Boolean(recoveryClassificationPath) !== Boolean(recoveryClassificationSha256)) throw new Error("Recovery classification path and SHA256 are required together.");
   const refreshReport = JSON.parse(fs.readFileSync(refreshReportPath, "utf8"));
@@ -753,22 +761,28 @@ export function readPlanningInputs(tfvars, cliOptions, protectedMainCheckout, de
   const recoveryAttestationSignatureSha256 = readOption(cliOptions, "--recovery-attestation-signature-sha256");
   if (Boolean(recoveryAttestationSha256) !== Boolean(recoveryAttestationReportPath) || Boolean(recoveryAttestationSha256) !== Boolean(recoveryAttestationSignaturePath) || Boolean(recoveryAttestationSha256) !== Boolean(recoveryAttestationSignatureSha256)) throw new Error("Recovery attestation report, signature, and SHA256 values are required together.");
   if (refreshReport.status === "RESOURCE_DRIFT") {
-    if (!recoveryOnly) throw new Error("Reviewed partial-apply residue requires the explicit recovery-only plan mode.");
-    if (!recoveryClassificationPath || !recoveryAttestationSha256) throw new Error("RESOURCE_DRIFT requires a separately verified recovery classification and attestation.");
-    const classificationBytes = fs.readFileSync(recoveryClassificationPath);
-    if (crypto.createHash("sha256").update(classificationBytes).digest("hex") !== recoveryClassificationSha256) throw new Error("Recovery classification SHA256 mismatch.");
-    const recoveryBytes = fs.readFileSync(recoveryAttestationReportPath); const signatureBytes = fs.readFileSync(recoveryAttestationSignaturePath); const classification = JSON.parse(classificationBytes); const recovery = JSON.parse(recoveryBytes); const signature = JSON.parse(signatureBytes);
-    validateRecovery({ refreshReport, refreshReportBytes: fs.readFileSync(refreshReportPath), refreshReportSha256, classification, classificationBytes, classificationSha256: recoveryClassificationSha256, attestation: recovery, attestationBytes: recoveryBytes, attestationSha256: recoveryAttestationSha256, signature, signatureBytes, signatureSha256: recoveryAttestationSignatureSha256, expectedSourceSha: protectedMainCheckout.currentHead, expectedLineage: bindingReport.stateLineage, expectedSerial: bindingReport.stateSerial });
-    if (bindingReport.recoveryAttestationSha256 !== recoveryAttestationSha256 || bindingReport.recoveryClassificationSha256 !== recoveryClassificationSha256 || bindingReport.recoveryRefreshReportSha256 !== refreshReportSha256 || bindingReport.recoveryDesiredVersion !== recovery.currentObservedEvidence.configuredDesiredVersion || bindingReport.recoveryLiveVersion !== recovery.currentObservedEvidence.liveVersion) throw new Error("Recovery-only tfvars is not bound to the verified attestation and refresh evidence.");
+    if (!recoveryOnly && !partialApplyRecovery) throw new Error("Reviewed partial-apply residue requires an explicit recovery plan mode.");
+    if (partialApplyRecovery && (recoveryClassificationPath || recoveryAttestationSha256)) throw new Error("PARTIAL_APPLY_RECOVERY does not accept RECOVERY_ALIAS_ONLY attestation inputs.");
+    if (recoveryOnly && (!recoveryClassificationPath || !recoveryAttestationSha256)) throw new Error("RECOVERY_ALIAS_ONLY RESOURCE_DRIFT requires a separately verified recovery classification and attestation.");
     assertStageBPrivateFile({ filePath: refreshBindingReportPath, repositoryRoot: process.cwd(), label: "Stage B observation binding report" });
     const refreshBindingBytes = fs.readFileSync(refreshBindingReportPath);
     if (sha256(refreshBindingBytes) !== refreshBindingReportSha256) throw new Error("Stage B observation binding report SHA256 does not match the approved digest.");
     const refreshBindingReport = JSON.parse(refreshBindingBytes);
-    assertStageBRecoveryProvenance({ refreshReport, refreshReportSha256, observationBindingReport: refreshBindingReport, observationBindingReportSha256: refreshBindingReportSha256, recoveryBindingReport: bindingReport, recoveryClassificationSha256: recoveryClassificationSha256, recoveryAttestationSha256 });
+    if (recoveryOnly) {
+      const classificationBytes = fs.readFileSync(recoveryClassificationPath);
+      if (crypto.createHash("sha256").update(classificationBytes).digest("hex") !== recoveryClassificationSha256) throw new Error("Recovery classification SHA256 mismatch.");
+      const recoveryBytes = fs.readFileSync(recoveryAttestationReportPath); const signatureBytes = fs.readFileSync(recoveryAttestationSignaturePath); const classification = JSON.parse(classificationBytes); const recovery = JSON.parse(recoveryBytes); const signature = JSON.parse(signatureBytes);
+      validateRecovery({ refreshReport, refreshReportBytes: fs.readFileSync(refreshReportPath), refreshReportSha256, classification, classificationBytes, classificationSha256: recoveryClassificationSha256, attestation: recovery, attestationBytes: recoveryBytes, attestationSha256: recoveryAttestationSha256, signature, signatureBytes, signatureSha256: recoveryAttestationSignatureSha256, expectedSourceSha: protectedMainCheckout.currentHead, expectedLineage: bindingReport.stateLineage, expectedSerial: bindingReport.stateSerial });
+      if (bindingReport.recoveryAttestationSha256 !== recoveryAttestationSha256 || bindingReport.recoveryClassificationSha256 !== recoveryClassificationSha256 || bindingReport.recoveryRefreshReportSha256 !== refreshReportSha256 || bindingReport.recoveryDesiredVersion !== recovery.currentObservedEvidence.configuredDesiredVersion || bindingReport.recoveryLiveVersion !== recovery.currentObservedEvidence.liveVersion) throw new Error("Recovery-only tfvars is not bound to the verified attestation and refresh evidence.");
+      assertStageBRecoveryProvenance({ refreshReport, refreshReportSha256, observationBindingReport: refreshBindingReport, observationBindingReportSha256: refreshBindingReportSha256, recoveryBindingReport: bindingReport, recoveryClassificationSha256: recoveryClassificationSha256, recoveryAttestationSha256 });
+    } else if (partialApplyRecovery) {
+      if (bindingReport.recoveryRefreshReportSha256 !== refreshReportSha256 || bindingReport.recoveryObservationBindingSha256 !== refreshBindingReportSha256 || bindingReport.recoveryStateLineage !== bindingReport.stateLineage || bindingReport.recoveryStateSerial !== bindingReport.stateSerial) throw new Error("PARTIAL_APPLY_RECOVERY tfvars is not bound to the exact refresh and observation artifacts.");
+      assertStageBRecoveryProvenance({ refreshReport, refreshReportSha256, observationBindingReport: refreshBindingReport, observationBindingReportSha256: refreshBindingReportSha256, recoveryBindingReport: bindingReport, recoveryMode: "PARTIAL_APPLY_RECOVERY" });
+    }
     validateRefresh({ refreshReportPath, refreshReportSha256, bindingReport: refreshBindingReport, bindingReportSha256: refreshBindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: refreshBindingReport.toolingTreeSha256, expectedTfvarsSha256: refreshBindingReport.tfvarsSha256, expectedImageEvidenceSha256: refreshBindingReport.imageEvidenceCanonicalSha256, expectedStateSha256: refreshBindingReport.stateBackupSha256, expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir, allowReviewedResourceDrift: true });
-  } else if (recoveryAttestationSha256 || recoveryClassificationPath || recoveryOnly) throw new Error("Recovery-only planning requires the exact reviewed RESOURCE_DRIFT refresh evidence.");
+  } else if (recoveryAttestationSha256 || recoveryClassificationPath || recoveryOnly || partialApplyRecovery) throw new Error("Recovery planning requires the exact reviewed RESOURCE_DRIFT refresh evidence.");
   if (refreshReport.status !== "RESOURCE_DRIFT") validateRefresh({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: bindingReport.imageEvidenceCanonicalSha256, expectedStateSha256: bindingReport.stateBackupSha256, expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir });
-  return { bindingReport, backendMetadata, bindingReportPath, bindingReportSha256, refreshBindingReportPath, refreshBindingReportSha256, toolingTreeSha256, refreshReportPath, refreshReportSha256, recoveryOnly, recoveryAttestationSha256, recoveryAttestationReportPath, recoveryAttestationSignaturePath, recoveryAttestationSignatureSha256, recoveryClassificationPath, recoveryClassificationSha256, expectedImageReleaseSha };
+  return { bindingReport, backendMetadata, bindingReportPath, bindingReportSha256, refreshBindingReportPath, refreshBindingReportSha256, toolingTreeSha256, refreshReportPath, refreshReportSha256, recoveryOnly, partialApplyRecovery, recoveryAttestationSha256, recoveryAttestationReportPath, recoveryAttestationSignaturePath, recoveryAttestationSignatureSha256, recoveryClassificationPath, recoveryClassificationSha256, expectedImageReleaseSha };
 }
 
 export function captureStageBPlan({ tfvars, cliOptions, protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true }), plan = () => execFileSync("terraform", [`-chdir=${root}`, "plan", `-var-file=${tfvars}`, `-out=${readOption(cliOptions, "--saved-plan")}`], { stdio: "inherit" }), show = (savedPlanPath) => captureStageBTerraformJson({ args: [`-chdir=${root}`, "show", "-json", savedPlanPath], cwd: process.cwd() }), readInputs = readPlanningInputs, showWorkspace } = {}) {
@@ -789,12 +803,12 @@ export function captureStageBPlan({ tfvars, cliOptions, protectedMainCheckout = 
   const parsedPlan = JSON.parse(planJsonText);
   const planJsonBytes = Buffer.from(`${planJsonText.trim()}\n`);
   const canonicalPlanJsonBytes = Buffer.from(`${canonicalJson(parsedPlan)}\n`);
-  const classification = assertStageBPlanCapture(parsedPlan, { terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, requireSemanticCompleteness: true, recoveryOnly: inputs.recoveryOnly, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: workspace } });
+  const classification = assertStageBPlanCapture(parsedPlan, { terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, requireSemanticCompleteness: true, recoveryOnly: inputs.recoveryOnly, partialApplyRecovery: inputs.partialApplyRecovery, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: workspace } });
   writeStageBPrivateFileAtomic({ filePath: outputPaths[1], bytes: planJsonBytes, repositoryRoot: process.cwd(), label: "Stage B plan JSON" });
   writeStageBPrivateFileAtomic({ filePath: outputPaths[2], bytes: canonicalPlanJsonBytes, repositoryRoot: process.cwd(), label: "Stage B canonical plan JSON" });
   if (inputs.recoveryAttestationSha256) { const recoveryReport = JSON.parse(fs.readFileSync(inputs.recoveryAttestationReportPath, "utf8")); if (inputs.recoveryOnly) assertRecoveryOnlyPlan(parsedPlan, recoveryReport); else assertRecoveryPlanDelta(parsedPlan, recoveryReport); }
   const hashes = stageBPlanHashes({ savedPlanBytes: fs.readFileSync(outputPaths[0]), planJsonBytes, canonicalPlanJsonBytes });
-  const report = createStageBPlanCaptureReport({ toolingSha: protectedMainCheckout.currentHead, toolingTreeSha256: inputs.toolingTreeSha256, refreshReportSha256: inputs.refreshReportSha256, refreshBindingReportSha256: inputs.refreshBindingReportSha256, recoveryAttestationSha256: inputs.recoveryAttestationSha256, hashes, capturedAt: new Date().toISOString(), stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial, terraformVersion: parsedPlan.terraform_version, terraformFormatVersion: parsedPlan.format_version, planProfile: inputs.recoveryOnly ? "RECOVERY_ALIAS_ONLY" : classification.planProfile, taskDefinitionRotations: classification.taskDefinitionRotations, classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replacement || 0, unclassified: classification.unclassifiedResources.length }, brokerEvidence: classification.brokerCapture });
+  const report = createStageBPlanCaptureReport({ toolingSha: protectedMainCheckout.currentHead, toolingTreeSha256: inputs.toolingTreeSha256, refreshReportSha256: inputs.refreshReportSha256, refreshBindingReportSha256: inputs.refreshBindingReportSha256, recoveryAttestationSha256: inputs.recoveryAttestationSha256, hashes, capturedAt: new Date().toISOString(), stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial, terraformVersion: parsedPlan.terraform_version, terraformFormatVersion: parsedPlan.format_version, planProfile: inputs.recoveryOnly ? "RECOVERY_ALIAS_ONLY" : inputs.partialApplyRecovery ? "PARTIAL_APPLY_RECOVERY" : classification.planProfile, taskDefinitionRotations: classification.taskDefinitionRotations, classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replacement || 0, unclassified: classification.unclassifiedResources.length }, brokerEvidence: classification.brokerCapture });
   const reportResult = writeStageBPlanEvidence({ filePath: captureReportPath, report, repositoryRoot: process.cwd(), label: "Stage B plan capture report" });
   return { status: STAGE_B_PLAN_CAPTURED, ...reportResult, plan: outputPaths[0], planJson: outputPaths[1], canonicalPlanJson: outputPaths[2], planJsonSha256: hashes.planJsonSha256, canonicalPlanJsonSha256: hashes.canonicalPlanFileSha256, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256 };
 }
@@ -865,7 +879,7 @@ export function finalizeCapturedStageBPlanApproval({ approval, approvalReportPat
   return result;
 }
 
-export function approveCapturedStageBPlan({ tfvars, cliOptions, protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true }) } = {}) {
+export function approveCapturedStageBPlan({ tfvars, cliOptions, protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true }), deps = {} } = {}) {
   const savedPlanPath = readOption(cliOptions, "--saved-plan");
   const planJsonPath = readOption(cliOptions, "--plan-json");
   const canonicalPlanJsonPath = readOption(cliOptions, "--canonical-plan-json");
@@ -877,16 +891,16 @@ export function approveCapturedStageBPlan({ tfvars, cliOptions, protectedMainChe
   if (!savedPlanPath || !planJsonPath || !canonicalPlanJsonPath || !captureReportPath || !captureReportSha256 || !auditPath || !auditSha256 || !approvalReportPath) throw new Error("Stage B plan approval requires captured plan artifacts, capture report, reference audit, and approval report.");
   for (const [filePath, label] of [[savedPlanPath, "Stage B saved plan"], [planJsonPath, "Stage B plan JSON"], [canonicalPlanJsonPath, "Stage B canonical plan JSON"], [auditPath, "Stage B reference audit"]]) ensureStageBPrivateFile({ filePath, repositoryRoot: process.cwd(), label });
   assertStageBArtifactPath({ artifactPath: approvalReportPath, repositoryRoot: process.cwd(), label: "Stage B plan approval report", allowExisting: false });
-  const inputs = readPlanningInputs(tfvars, cliOptions, protectedMainCheckout);
+  const inputs = (deps.readPlanningInputs || readPlanningInputs)(tfvars, cliOptions, protectedMainCheckout);
   const { savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes } = readStageBApprovalPlanArtifacts({ savedPlanPath, planJsonPath, canonicalPlanJsonPath });
   const hashes = stageBPlanHashes({ savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes });
   const capture = readStageBPlanEvidence(captureReportPath, process.cwd(), "Stage B plan capture report");
   if (capture.sha256 !== captureReportSha256) throw new Error("Stage B plan capture report SHA256 mismatch.");
   const auditBytes = fs.readFileSync(auditPath); const audit = JSON.parse(auditBytes);
-  const trustedCallerArn = JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn;
+  const trustedCallerArn = deps.getCallerArn ? deps.getCallerArn() : JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn;
   if (sha256(planJsonBytes) !== (readOption(cliOptions, "--plan-json-sha256") || hashes.planJsonSha256)) throw new Error("Stage B plan JSON SHA256 does not match the selected plan JSON.");
   const plan = JSON.parse(planJsonBytes.toString("utf8"));
-  const classification = assertStageBPlan(plan, { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: auditSha256, planJsonBytes, planJsonSha256: hashes.planJsonSha256, trustedCallerArn, terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, requireSemanticCompleteness: true, recoveryOnly: inputs.recoveryOnly, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: assertStageBPlanningWorkspace({ env: process.env, argv: [tfvars, ...cliOptions] }).toString() } });
+  const classification = (deps.validatePlan || assertStageBPlan)(plan, { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: auditSha256, planJsonBytes, planJsonSha256: hashes.planJsonSha256, trustedCallerArn, terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, requireSemanticCompleteness: true, recoveryOnly: inputs.recoveryOnly, partialApplyRecovery: inputs.partialApplyRecovery, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: assertStageBPlanningWorkspace({ env: process.env, argv: [tfvars, ...cliOptions] }).toString() } });
   if (inputs.recoveryOnly) assertRecoveryOnlyPlan(plan, JSON.parse(fs.readFileSync(inputs.recoveryAttestationReportPath, "utf8")));
   const approval = createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath: path.resolve(auditPath), referenceAuditSha256: auditSha256, referenceAuditCallerArn: audit.callerArn, referenceAuditAt: audit.auditedAt, toolingSha: capture.report.toolingSha, toolingTreeSha256: capture.report.toolingTreeSha256, refreshReportSha256: capture.report.refreshReportSha256, refreshBindingReportSha256: capture.report.refreshBindingReportSha256, recoveryAttestationSha256: capture.report.recoveryAttestationSha256, stageBLineage: capture.report.stageBLineage, stageBSerial: capture.report.stageBSerial, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: new Date().toISOString(), planProfile: capture.report.planProfile, taskDefinitionRotations: capture.report.taskDefinitionRotations, classification: { noOp: classification.actionCounts["no-op"] || 0, create: classification.actionCounts.create || 0, update: classification.actionCounts.update || 0, destroy: classification.actionCounts.destroy || 0, replacement: classification.actionCounts.replacement || 0, unclassified: classification.unclassifiedResources.length }, brokerOperation: capture.report.brokerOperation, brokerUpdatePresent: capture.report.brokerUpdatePresent, brokerActions: capture.report.brokerActions, brokerResourceAddresses: capture.report.brokerResourceAddresses });
   return finalizeCapturedStageBPlanApproval({ approval, approvalReportPath, repositoryRoot: process.cwd(), captureReport: capture.report, captureReportBytes: capture.bytes, referenceAudit: audit, referenceAuditBytes: auditBytes, plan, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: auditSha256, trustedCallerArn, stageBLineage: inputs.bindingReport.stateLineage, stageBSerial: inputs.bindingReport.stateSerial, savedPlanPath, planJsonPath, canonicalPlanJsonPath, terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8") });

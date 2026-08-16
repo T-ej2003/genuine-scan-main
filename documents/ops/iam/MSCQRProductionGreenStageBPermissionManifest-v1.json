@@ -376,7 +376,7 @@
       "phase": "apply",
       "action": "lambda:UpdateFunctionConfiguration",
       "plan": {"type": "aws_lambda_function", "actions": ["update"], "address": "aws_lambda_function.broker"},
-      "profiles": ["NORMAL_STAGE_B_RELEASE"],
+      "profiles": ["NORMAL_STAGE_B_RELEASE", "PARTIAL_APPLY_RECOVERY"],
       "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
       "context": [
         {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
@@ -391,7 +391,7 @@
       "phase": "apply",
       "action": "lambda:UpdateFunctionCode",
       "plan": {"type": "aws_lambda_function", "actions": ["update"], "address": "aws_lambda_function.broker"},
-      "profiles": ["NORMAL_STAGE_B_RELEASE"],
+      "profiles": ["NORMAL_STAGE_B_RELEASE", "PARTIAL_APPLY_RECOVERY"],
       "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
       "context": [
         {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
@@ -406,7 +406,7 @@
       "phase": "apply",
       "action": "lambda:PublishVersion",
       "plan": {"type": "aws_lambda_function", "actions": ["update"], "address": "aws_lambda_function.broker"},
-      "profiles": ["NORMAL_STAGE_B_RELEASE"],
+      "profiles": ["NORMAL_STAGE_B_RELEASE", "PARTIAL_APPLY_RECOVERY"],
       "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
       "context": [
         {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
@@ -421,7 +421,7 @@
       "phase": "apply",
       "action": "lambda:UpdateAlias",
       "plan": {"type": "aws_lambda_alias", "actions": ["update"], "address": "aws_lambda_alias.reviewed"},
-      "profiles": ["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY"],
+      "profiles": ["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"],
       "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
       "context": [
         {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},

@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
-import { assertStageBImportedBackendMetadataNormalization, STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS, STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION } from "./stage-b-deployment-contract.mjs";
+import { assertStageBImportedBackendMetadataNormalization, isStageBPartialApplyDeposedTaskDefinitionCleanup, STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS, STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION } from "./stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
@@ -47,10 +47,11 @@ const STAGE_A_LIVE_EVIDENCE_EVALUATIONS = Object.freeze([
 ]);
 export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${ACCOUNT}:root`]);
 export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
-export const STAGE_B_PERMISSION_PROFILES = Object.freeze(["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY"]);
+export const STAGE_B_PERMISSION_PROFILES = Object.freeze(["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"]);
 export const STAGE_B_PERMISSION_PROFILE_CAPABILITIES = Object.freeze({
   NORMAL_STAGE_B_RELEASE: Object.freeze({ requiresTaskDefinitionRegistrationContexts: true }),
   RECOVERY_ALIAS_ONLY: Object.freeze({ requiresTaskDefinitionRegistrationContexts: false }),
+  PARTIAL_APPLY_RECOVERY: Object.freeze({ requiresTaskDefinitionRegistrationContexts: false }),
 });
 
 export function assertStageBPermissionEvidenceKind(report, expectedKind, expectedPhase) {
@@ -131,11 +132,12 @@ export function resolveStageBPermissionProfile({ plan, approvedPlanProfile, phas
   if (!STAGE_B_PLAN_PROFILES.includes(planProfile)) throw new Error(`Stage B approved plan profile is unsupported: ${planProfile}`);
   if (phase === "plan-bound" && !approvedPlanProfile) throw new Error("PLAN_BOUND_PERMISSION requires the approved plan profile.");
   const recoveryOnly = planProfile === "RECOVERY_ALIAS_ONLY";
+  const partialRecovery = planProfile === "PARTIAL_APPLY_RECOVERY";
   const recoveryVariable = plan?.variables?.stage_b_recovery_only?.value;
-  if (recoveryOnly !== (recoveryVariable === true)) throw new Error("Stage B approved plan profile does not match the recovery-only Terraform input.");
+  if (recoveryOnly !== (recoveryVariable === true) || (partialRecovery && recoveryVariable === true)) throw new Error("Stage B approved plan profile does not match the recovery Terraform input.");
   return {
     planProfile,
-    permissionProfile: assertStageBPermissionProfile(recoveryOnly ? "RECOVERY_ALIAS_ONLY" : "NORMAL_STAGE_B_RELEASE"),
+    permissionProfile: assertStageBPermissionProfile(recoveryOnly ? "RECOVERY_ALIAS_ONLY" : partialRecovery ? "PARTIAL_APPLY_RECOVERY" : "NORMAL_STAGE_B_RELEASE"),
   };
 }
 
@@ -457,7 +459,7 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, per
   const taskDefinitionEvaluationIds = new Set(manifest.taskDefinitionMappings.flatMap((mapping) => [mapping.id, `${mapping.id}-register`, `${mapping.id}-tag`, `${mapping.id}-pass-execution`, `${mapping.id}-pass-task`]));
   for (const [items, forbidden] of [[report.requiredEvaluations, false], [report.forbiddenEvaluations, true]]) {
     if (!Array.isArray(items)) throw new Error("Permission-preflight evaluation results are missing.");
-    if (!capabilities.requiresTaskDefinitionRegistrationContexts && items.some((item) => taskDefinitionEvaluationIds.has(item.manifestId))) throw new Error("RECOVERY_ALIAS_ONLY permission evidence cannot contain ECS task-definition evaluations.");
+    if (!capabilities.requiresTaskDefinitionRegistrationContexts && items.some((item) => taskDefinitionEvaluationIds.has(item.manifestId))) throw new Error(`${permissionProfile} permission evidence cannot contain ECS task-definition evaluations.`);
     for (const item of items) {
       const binding = entries.get(item.manifestId);
       if (!binding || binding.forbidden !== forbidden) throw new Error(`Permission-preflight evaluation ${item.id} is not bound to the current manifest section.`);
@@ -479,9 +481,13 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, per
   if (report.planCapabilities?.schemaVersion !== 1
     || JSON.stringify(report.planCapabilities.required) !== JSON.stringify(project(report.requiredEvaluations))
     || JSON.stringify(report.planCapabilities.forbidden) !== JSON.stringify(project(report.forbiddenEvaluations))) throw new Error("Permission-preflight plan capability manifest is incomplete or stale.");
-  const expectedZeroMutationChanges = (plan?.resource_changes || []).filter((change) => change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(change.change?.actions || []) === JSON.stringify(["update"])).map((change) => {
-    assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
-    return { address: change.address, classification: STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION, requiredAwsActions: [] };
+  const expectedZeroMutationChanges = (plan?.resource_changes || []).flatMap((change) => {
+    if (permissionProfile === "PARTIAL_APPLY_RECOVERY" && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) return [{ address: change.address, classification: "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP", requiredAwsActions: [] }];
+    if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(change.change?.actions || []) === JSON.stringify(["update"])) {
+      assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
+      return [{ address: change.address, classification: STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION, requiredAwsActions: [] }];
+    }
+    return [];
   });
   if (expectedZeroMutationChanges.length > 0
     ? JSON.stringify(report.planCapabilities.zeroAwsMutationChanges) !== JSON.stringify(expectedZeroMutationChanges)
@@ -679,7 +685,10 @@ export function createStageBMutationManifest(plan, manifest, { planProfile, plan
     let classification;
     let requiredPermissions;
     let taskDefinitionPostcondition;
-    if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(actions, ["update"])) {
+    if (planProfile === "PARTIAL_APPLY_RECOVERY" && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) {
+      classification = "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP";
+      requiredPermissions = [];
+    } else if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(actions, ["update"])) {
       assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
       classification = STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION;
       requiredPermissions = [];
@@ -870,6 +879,11 @@ export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = 
     const actions = change.change?.actions || [];
     if (["aws_iam_role_policy.broker", "aws_iam_policy.broker", "aws_iam_role_policy_attachment.broker"].includes(change.address)) assertBrokerManagedPolicyChange(change);
     if (exactActions(actions, ["no-op"])) continue;
+    if (permissionProfile === "PARTIAL_APPLY_RECOVERY" && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) {
+      zeroAwsMutationChanges.push({ address: change.address, classification: "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP", requiredAwsActions: [] });
+      coveredChanges.add(change.address);
+      continue;
+    }
     if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(actions, ["update"])) {
       assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
       zeroAwsMutationChanges.push({ address: change.address, classification: STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION, requiredAwsActions: [] });

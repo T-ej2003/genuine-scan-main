@@ -821,3 +821,25 @@ the shared backend/apply mechanics plus the exact reviewed alias update mapping;
 does not require broker-policy, broker-function, or ECS mutation permissions because
 those actions are forbidden by the approved recovery plan. A missing or mismatched
 profile binding remains a fail-closed error.
+
+## Broker Lambda environment safety after partial apply
+
+The broker Lambda environment is capped before Terraform can apply it: the
+UTF-8 JSON payload must remain at or below the reviewed 3500-byte safety bound,
+inside AWS's 4096-byte aggregate limit. The broker keeps only the ten required
+operational bindings in Lambda environment variables. Pre-deployment inventory
+settings are derived at runtime from those authenticated broker bindings and the
+fixed Stage B contract, so the same inventory task, image, roles, secret, RLS
+role, network, and log-group values remain validated without duplicating them in
+the environment.
+
+The failed apply's observed legacy payload was 4405 UTF-8 bytes. The repaired
+ten-binding payload is 3443 bytes in the canonical production plan; the contract
+also rejects any future payload above 3500 bytes during planning.
+
+After a partial apply, the consumed apply attempt is never retried. The current
+remote state and the successful ECS/IAM mutations are reconciled first; a fresh
+recovery plan uses the explicit `PARTIAL_APPLY_RECOVERY` profile and must contain
+only the remaining reviewed Lambda mutations plus state-only cleanup of the
+eleven deposed task-definition objects, with no duplicate ECS registration and no
+service cutover before post-apply convergence.

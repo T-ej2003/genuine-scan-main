@@ -436,12 +436,12 @@ test("Stage A owns shared logs and reviewed executor networking while Stage B on
 test("broker Terraform runtime variables exactly cover runtimeConfig and publish a numbered reviewed alias", () => {
   const main = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
   const broker = fs.readFileSync("infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs", "utf8");
-  const runtimeConfig = broker.match(/const runtimeConfig = \(\) => \(\{[\s\S]*?\n}\);/)?.[0] || "";
+  const runtimeConfig = broker.match(/export function createBrokerRuntimeConfig[\s\S]*?\n}\n/)?.[0] || "";
   const required = [
-    ...runtimeConfig.matchAll(/process\.env\.(BROKER_[A-Z0-9_]+)/g),
-    ...runtimeConfig.matchAll(/parse\("(BROKER_[A-Z0-9_]+)"/g),
+    ...runtimeConfig.matchAll(/env\.(BROKER_[A-Z0-9_]+)/g),
+    ...runtimeConfig.matchAll(/parse\(env, "(BROKER_[A-Z0-9_]+)"/g),
   ].map((match) => match[1]).sort();
-  const environment = main.match(/environment \{[\s\S]*?\n  \}/)?.[0] || "";
+  const environment = main.match(/broker_environment\s*=\s*var\.stage_b_recovery_only\s*\?[^:]+:\s*\{([\s\S]*?)\n  \}/)?.[1] || "";
   const supplied = [...environment.matchAll(/^\s+(BROKER_[A-Z0-9_]+)\s*=/gm)].map((match) => match[1]).sort();
   assert.deepEqual(supplied, required);
   assert.match(main, /publish\s*=\s*true/);
@@ -477,7 +477,7 @@ test("broker and executor IAM match their exact AWS SDK writes and launch bounda
   const brokerPolicy = main.match(/resource "aws_iam_policy" "broker" \{[\s\S]*?\n}/)?.[0] || "";
   const brokerFunction = main.match(/resource "aws_lambda_function" "broker" \{[\s\S]*?\n}/)?.[0] || "";
   assert.doesNotMatch(brokerPolicy, /precondition\s*\{/);
-  assert.doesNotMatch(brokerFunction, /precondition\s*\{/);
+  assert.match(brokerFunction, /precondition\s*\{[\s\S]*3500-byte safety bound/);
   assert.match(main, /iam:PassedToService/);
   assert.match(main, /Sid\s*=\s*"ReadWriteOnlyProductionArtifactObjects"[\s\S]*s3:GetObject[\s\S]*s3:PutObject[\s\S]*Resource\s*=\s*"\$\{var\.receipt_bucket_arn\}\/\*"/);
   assert.doesNotMatch(main, /Action\s*=\s*\[[^\]]*iam:(?:Create|Update|Delete|Attach|Put)/);
@@ -504,7 +504,7 @@ test("broker current mappings are safe at a zero-current append-only checkpoint 
 test("zero-current checkpoint does not fail broker no-op refresh validation", () => {
   const main = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
   const planValidator = fs.readFileSync("scripts/plan-production-green-stage-b.mjs", "utf8");
-  assert.doesNotMatch(main, /resource "aws_(?:iam_policy|lambda_function)" "(?:broker)"[\s\S]*?precondition/);
+  assert.match(main, /resource "aws_lambda_function" "broker"[\s\S]*?precondition[\s\S]*?3500-byte safety bound/);
   assert.match(planValidator, /!exactActions\(change\.change\?\.actions \|\| \[\], \["no-op"\]\)/);
   assert.match(planValidator, /assertStageBBrokerTaskDefinitionMapping\(plan, terraformConfiguration\)/);
 });

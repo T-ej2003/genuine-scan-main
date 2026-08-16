@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { createProductionPreDeploymentInventoryAdapter, PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS, PREDEPLOYMENT_BROKER_CALLER_TIMEOUT_HEADROOM_SECONDS } from "../aws/production-predeployment-inventory-adapter.mjs";
-import { assertPreDeploymentInventoryResult, createPreDeploymentInventoryHandler, createPreDeploymentOperationIdentity, preDeploymentOperationKey, validatePreDeploymentInventoryConfiguration, PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS, PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
+import { assertPreDeploymentInventoryResult, createBrokerRuntimeConfig, createPreDeploymentInventoryHandler, createPreDeploymentOperationIdentity, preDeploymentOperationKey, validatePreDeploymentInventoryConfiguration, PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS, PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
 import { buildPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAG } from "../aws/production-predeployment-inventory-task.mjs";
 import { assertBoundedRotationInventory, ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
@@ -63,6 +63,28 @@ const brokerApproval = {
   taskDefinitionTemplateHashes: Object.fromEntries(STAGE_B_TASK_TEMPLATE_KEYS.map((key) => [key, "f".repeat(64)])),
 };
 const brokerDefinition = () => ({ ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn: brokerTaskDefinitionArn, status: "ACTIVE" });
+
+test("broker runtime derives inventory configuration without duplicating it in Lambda environment", () => {
+  const runtime = createBrokerRuntimeConfig({
+    BROKER_REPLAY_TABLE: "replay",
+    BROKER_RECEIPT_BUCKET: "receipts",
+    BROKER_CLUSTER_ARN: STAGE_B.clusterArn,
+    BROKER_APPROVAL_SECRET_ARN: STAGE_B.approvalSecretArn,
+    BROKER_EXECUTOR_SECURITY_GROUP_ID: STAGE_B.executorSecurityGroupId,
+    BROKER_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds),
+    BROKER_TASK_DEFINITIONS_JSON: JSON.stringify({}),
+    BROKER_TASK_TEMPLATE_HASHES_JSON: JSON.stringify({}),
+    BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify({}),
+    BROKER_IMAGES_JSON: JSON.stringify({ backendImageDigest: image }),
+  });
+  assert.equal(runtime.inventoryImageDigest, image);
+  assert.deepEqual(runtime.inventoryPrivateSubnetIds, STAGE_B.privateSubnetIds);
+  assert.deepEqual(runtime.inventorySecurityGroupIds, [STAGE_B.executorSecurityGroupId]);
+  assert.equal(runtime.inventoryDatabaseUrlArn, STAGE_B.inventoryDatabaseSecretArn);
+  assert.equal(runtime.inventoryRlsRole, STAGE_B.inventoryRlsRole);
+  assert.equal(runtime.inventoryLogGroupName, STAGE_B.inventoryLogGroupName);
+});
+
 function makeBrokerHandler({ definition = brokerDefinition(), tags = brokerTags, readApproval = async () => brokerApproval, describeTaskDefinition = async () => ({ taskDefinition: definition, tags }), describeTasks = async () => ({ tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: "STOPPED", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: "rotation-1" }], containers: [{ name: "inventory", exitCode: 0 }] }] }), runTask = async () => ({ failures: [], tasks: [{ taskArn: brokerTaskArn }] }), verifySignature = async () => true, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, stopTask, now = () => new Date("2026-07-29T12:00:00.000Z"), monotonicNow = () => 0, sleep = async () => {} } = {}) {
   const calls = [];
   const cleanup = stopTask || (async (request) => { calls.push(["stopTask", request]); });

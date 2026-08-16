@@ -461,6 +461,32 @@ const brokerFunctionAllowedChangedFields = new Set([
 ]);
 
 export const STAGE_B_REVIEWED_BROKER_TIMEOUT_SECONDS = Object.freeze({ before: 30, after: 180 });
+export const STAGE_B_PARTIAL_APPLY_RECOVERY = "PARTIAL_APPLY_RECOVERY";
+
+export function isStageBPartialApplyDeposedTaskDefinitionCleanup(change) {
+  const family = STAGE_B_TASK_DEFINITION_FAMILIES[change?.address];
+  return Boolean(family && change?.type === "aws_ecs_task_definition" && change?.mode === "managed"
+    && (change.module === undefined || change.module === null) && typeof change.deposed === "string"
+    && /^[a-f0-9]+$/.test(change.deposed) && exactActions(change.change?.actions, ["delete"])
+    && change.change?.after === null && change.change?.before?.skip_destroy === true
+    && change.change?.before?.family === family && new RegExp(`^arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${family}:[1-9][0-9]*$`).test(change.change?.before?.arn || ""));
+}
+
+export function assertStageBPartialApplyRecoveryPlan(plan) {
+  const changes = (plan?.resource_changes || []).filter((change) => !exactActions(change.change?.actions, ["no-op"]));
+  const cleanups = changes.filter(isStageBPartialApplyDeposedTaskDefinitionCleanup);
+  const expectedEcs = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).filter((address) => address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS);
+  const addresses = new Set(cleanups.map((change) => change.address));
+  const brokerChanges = new Map(changes.filter((change) => ["aws_lambda_function.broker", "aws_lambda_alias.reviewed"].includes(change.address)).map((change) => [change.address, change]));
+  if (cleanups.length !== expectedEcs.length || addresses.size !== expectedEcs.length || expectedEcs.some((address) => !addresses.has(address))
+    || changes.length !== expectedEcs.length + 2
+    || !exactActions(brokerChanges.get("aws_lambda_function.broker")?.change?.actions, ["update"])
+    || !exactActions(brokerChanges.get("aws_lambda_alias.reviewed")?.change?.actions, ["update"])
+    || changes.some((change) => !isStageBPartialApplyDeposedTaskDefinitionCleanup(change) && !["aws_lambda_function.broker", "aws_lambda_alias.reviewed"].includes(change.address))) {
+    throw new Error("Stage B partial-apply recovery must contain exactly eleven deposed task-definition cleanups and the broker function/alias updates.");
+  }
+  return { profile: STAGE_B_PARTIAL_APPLY_RECOVERY, cleanupAddresses: [...addresses].sort(), brokerAddresses: ["aws_lambda_function.broker", "aws_lambda_alias.reviewed"] };
+}
 
 export function assertReviewedBrokerTimeoutTransition(change) {
   if (change?.address !== "aws_lambda_function.broker" || change?.type !== "aws_lambda_function"
@@ -519,7 +545,7 @@ export function assertStageBBrokerFunctionUpdate(change) {
   return true;
 }
 
-export function assertStageBPlanResourceChange(change, { strict = true, terraformConfiguration, validateActions = true, allowBrokerPolicyCreate = false, plan } = {}) {
+export function assertStageBPlanResourceChange(change, { strict = true, terraformConfiguration, validateActions = true, allowBrokerPolicyCreate = false, partialApplyRecovery = false, plan } = {}) {
   const address = change?.address || "<missing address>";
   const type = change?.type || "<missing type>";
   const actions = change?.change?.actions || [];
@@ -528,6 +554,7 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
   const task = taskDefinitionAddress.exec(address);
   if (task && Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, address)) {
     if (type !== "aws_ecs_task_definition") throw new Error(`Stage B resource rejected at address ${address} ${type}; resource type does not match the exact task-definition contract.`);
+    if (partialApplyRecovery && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) return { address, type, actions, classification: "partial-apply-deposed-task-definition-cleanup" };
     if (address === importedBackendCandidateAddress && exactActions(actions, ["update"])) {
       return assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
     }
@@ -571,6 +598,7 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
 }
 
 export function classifyStageBPlan(plan, options = {}) {
+  if (options.partialApplyRecovery) assertStageBPartialApplyRecoveryPlan(plan);
   const classifiedResources = [];
   const errors = [];
   for (const change of plan?.resource_changes || []) {
@@ -584,12 +612,13 @@ export function classifyStageBPlan(plan, options = {}) {
   const unclassifiedResources = classifiedResources.filter((item) => !item.classification).map((item) => item.address);
   if (unclassifiedResources.length) throw new Error(`Stage B plan contains unclassified resources: ${unclassifiedResources.join(", ")}`);
   const actionCounts = classifiedResources.reduce((counts, item) => {
-    const action = isStageBTaskDefinitionRotationActionsValue(item.actions) ? "replacement" : item.actions.join(",");
+    const action = isStageBTaskDefinitionRotationActionsValue(item.actions) ? "replacement" : item.classification === "partial-apply-deposed-task-definition-cleanup" ? "destroy" : item.actions.join(",");
     counts[action] = (counts[action] || 0) + 1;
     return counts;
   }, {});
   const taskDefinitionRotations = classifiedResources.filter((item) => item.rotation).map((item) => item.rotation);
-  const planProfile = classifiedResources.some(({ classification }) => classification === STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION)
+  const planProfile = options.partialApplyRecovery ? STAGE_B_PARTIAL_APPLY_RECOVERY
+    : classifiedResources.some(({ classification }) => classification === STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION)
     ? "IMPORTED_BACKEND_METADATA_NORMALIZATION"
     : taskDefinitionRotations.length ? "ECS_TASK_DEFINITION_ROTATION" : "BASELINE";
   if (planProfile === "IMPORTED_BACKEND_METADATA_NORMALIZATION" && taskDefinitionRotations.length > 0) assertStageBImportedBackendRolloverActions(plan?.resource_changes);

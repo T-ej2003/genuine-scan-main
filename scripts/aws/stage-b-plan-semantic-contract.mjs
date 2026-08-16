@@ -17,6 +17,8 @@ import {
   assertStageBBackendEcsExecPolicyChange,
   assertStageBBrokerPublishProviderMetadataRepresentation,
   assertStageBImportedBackendMetadataNormalization,
+  assertStageBPartialApplyRecoveryPlan,
+  isStageBPartialApplyDeposedTaskDefinitionCleanup,
   assertReviewedBrokerTimeoutTransition,
   STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS,
   STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION,
@@ -24,7 +26,7 @@ import {
   STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
   STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS,
 } from "./stage-b-deployment-contract.mjs";
-import { STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { assertStageBLambdaEnvironmentSize, STAGE_B } from "./production-green-stage-b-contract.mjs";
 
 export const STAGE_B_PLAN_SEMANTIC_CLASSES = Object.freeze([
   "STABLE_REQUIRED",
@@ -47,6 +49,7 @@ export const STAGE_B_PLAN_SEMANTIC_PROFILES = Object.freeze({
   BROKER_POLICY_UPDATE: "BROKER_POLICY_UPDATE",
   BROKER_FUNCTION_PUBLISH_UPDATE: "BROKER_FUNCTION_PUBLISH_UPDATE",
   REVIEWED_RECOVERY_ALIAS_UPDATE: "REVIEWED_RECOVERY_ALIAS_UPDATE",
+  PARTIAL_APPLY_RECOVERY: "PARTIAL_APPLY_RECOVERY",
   BACKEND_ECS_EXEC_POLICY_CREATE: "BACKEND_ECS_EXEC_POLICY_CREATE",
 });
 
@@ -55,6 +58,7 @@ export const STAGE_B_SUPPORTED_PLAN_PROFILES = Object.freeze([
   Object.freeze({ profile: "ROLLOVER_RECOVERY", ecsActions: [["create", "delete"], ["delete", "create"]], brokerPolicyActions: [["update"]], brokerFunctionActions: [["update"]], brokerAliasActions: [["update"]], recoveryRequired: true, fixture: "production-green-stage-b-plan-semantic.test.mjs" }),
   Object.freeze({ profile: "RECOVERY_ALIAS_ONLY", ecsActions: [], brokerPolicyActions: [["no-op"]], brokerFunctionActions: [["no-op"]], brokerAliasActions: [["update"]], recoveryRequired: true, fixture: "stage-b-partial-apply-recovery-contract.test.mjs" }),
   Object.freeze({ profile: "NO_CHANGE_OR_APPEND_ONLY_RETRY", ecsActions: [["create"], ["no-op"]], brokerPolicyActions: [["create"], ["no-op"]], brokerFunctionActions: [["create"], ["no-op"]], brokerAliasActions: [["create"], ["no-op"]], recoveryRequired: false, fixture: "production-green-stage-b-plan-semantic.test.mjs" }),
+  Object.freeze({ profile: "PARTIAL_APPLY_RECOVERY", ecsActions: [["delete"]], brokerPolicyActions: [["no-op"]], brokerFunctionActions: [["update"]], brokerAliasActions: [["update"]], recoveryRequired: true, fixture: "production-green-stage-b-plan-semantic.test.mjs" }),
 ]);
 
 const ECS_ADDRESSES = new Set(Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES));
@@ -263,13 +267,7 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
   },
   "aws_lambda_function.broker": {
     "environment[0].variables": [
-      "aws_dynamodb_table.replay", "aws_dynamodb_table.replay.name", "local.active_broker_task_definition_arns",
-      "local.broker_approval_expected", "local.broker_images", "local.broker_template_hashes",
-      "var.approval_secret_arn", "var.ecs_cluster_arn", "var.private_subnet_ids", "var.receipt_bucket_arn",
-      "var.stage_a_executor_security_group_id", "var.stage_b_recovery_broker_environment", "var.stage_b_recovery_only",
-      "aws_iam_role.execution", "aws_iam_role.execution[\"backend\"]", "aws_iam_role.execution[\"backend\"].arn",
-      "aws_iam_role.task", "aws_iam_role.task[\"backend\"]", "aws_iam_role.task[\"backend\"].arn",
-      "local.logs.backend", "var.account_id", "var.aws_region", "var.backend_image",
+      "local.broker_environment",
     ],
     filename: ["var.broker_package_path"],
     role: ["var.stage_a_broker_role_arn"],
@@ -766,9 +764,6 @@ export const STAGE_B_BROKER_ENVIRONMENT_VARIABLES = Object.freeze([
   "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
   "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
-  "INVENTORY_ASSIGN_PUBLIC_IP", "INVENTORY_EXECUTION_ROLE_ARN", "INVENTORY_IMAGE_DIGEST",
-  "INVENTORY_LOG_GROUP_NAME", "INVENTORY_PRIVATE_SUBNETS_JSON", "INVENTORY_SECURITY_GROUPS_JSON",
-  "INVENTORY_TASK_DEFINITION_FAMILY_ARN", "INVENTORY_TASK_ROLE_ARN", "INVENTORY_DATABASE_URL_ARN", "INVENTORY_RLS_ROLE",
 ]);
 const brokerTaskDefinitionModes = Object.freeze(Object.fromEntries([
   ["full-rls-application-canary", STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']],
@@ -791,18 +786,6 @@ function assertConcreteBrokerEnvironment(variables) {
     || variables.BROKER_CLUSTER_ARN !== STAGE_B.clusterArn
     || variables.BROKER_APPROVAL_SECRET_ARN !== STAGE_B.approvalSecretArn
     || variables.BROKER_EXECUTOR_SECURITY_GROUP_ID !== STAGE_B.executorSecurityGroupId) {
-    throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables");
-  }
-  if (variables.INVENTORY_ASSIGN_PUBLIC_IP !== "DISABLED"
-    || variables.INVENTORY_LOG_GROUP_NAME !== STAGE_B.inventoryLogGroupName
-    || variables.INVENTORY_TASK_DEFINITION_FAMILY_ARN !== `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B.inventoryTaskDefinitionFamily}:1`
-    || !/^\d{12}\.dkr\.ecr\.[^@]+@sha256:[a-f0-9]{64}$/.test(variables.INVENTORY_IMAGE_DIGEST)
-    || variables.INVENTORY_TASK_ROLE_ARN !== `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-task`
-    || variables.INVENTORY_EXECUTION_ROLE_ARN !== `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-execution`
-    || variables.INVENTORY_DATABASE_URL_ARN !== STAGE_B.inventoryDatabaseSecretArn
-    || variables.INVENTORY_RLS_ROLE !== STAGE_B.inventoryRlsRole
-    || JSON.stringify(parseEnvironmentJson(variables.INVENTORY_PRIVATE_SUBNETS_JSON, "INVENTORY_PRIVATE_SUBNETS_JSON")) !== JSON.stringify(STAGE_B.privateSubnetIds)
-    || JSON.stringify(parseEnvironmentJson(variables.INVENTORY_SECURITY_GROUPS_JSON, "INVENTORY_SECURITY_GROUPS_JSON")) !== JSON.stringify([STAGE_B.executorSecurityGroupId])) {
     throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables");
   }
   const taskDefinitions = parseEnvironmentJson(variables.BROKER_TASK_DEFINITIONS_JSON, "BROKER_TASK_DEFINITIONS_JSON");
@@ -828,6 +811,7 @@ function assertConcreteBrokerEnvironment(variables) {
   }
   const subnets = parseEnvironmentJson(variables.BROKER_PRIVATE_SUBNETS_JSON, "BROKER_PRIVATE_SUBNETS_JSON");
   if (JSON.stringify(subnets) !== JSON.stringify(STAGE_B.privateSubnetIds)) throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables.BROKER_PRIVATE_SUBNETS_JSON");
+  assertStageBLambdaEnvironmentSize(variables);
 }
 
 function assertInitialProviderComputedShape(change) {
@@ -1037,7 +1021,8 @@ function assertSensitivePaths(change, kind, paths) {
   return paths;
 }
 
-function classifyResource(change, { terraformConfiguration } = {}) {
+function classifyResource(change, { terraformConfiguration, partialApplyRecovery = false } = {}) {
+  if (partialApplyRecovery && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) return STAGE_B_PLAN_SEMANTIC_PROFILES.PARTIAL_APPLY_RECOVERY;
   const actions = change?.change?.actions;
   if (ECS_ADDRESSES.has(change?.address) && change.type === "aws_ecs_task_definition" && change.mode === "managed"
     && (change.module === undefined || change.module === null)) {
@@ -1061,7 +1046,11 @@ function classifyResource(change, { terraformConfiguration } = {}) {
   throw new Error(`UNCLASSIFIED_RESOURCE_ACTION: ${change?.address}`);
 }
 
-function assertBrokerActionProfile(plan) {
+function assertBrokerActionProfile(plan, { partialApplyRecovery = false } = {}) {
+  if (partialApplyRecovery) {
+    assertStageBPartialApplyRecoveryPlan(plan);
+    return;
+  }
   const active = plan.resource_changes.filter((change) => BROKER_ADDRESSES.has(change?.address)
     && !exactJson(change.change?.actions, ["no-op"]));
   if (active.length === 0) return;
@@ -1074,8 +1063,9 @@ function assertBrokerActionProfile(plan) {
   }
 }
 
-function classifyReplacePaths(change, { terraformConfiguration } = {}) {
+function classifyReplacePaths(change, { terraformConfiguration, partialApplyRecovery = false } = {}) {
   const paths = change.change?.replace_paths || [];
+  if (partialApplyRecovery && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) return [];
   if (isEcsInitialCreate(change) && paths.length === 0) return [];
   if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactJson(change.change?.actions, ["update"])) {
     assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
@@ -1116,7 +1106,7 @@ export function censusStageBPlanSemantics(plan, options = {}) {
   assertStageBProviderSemanticSnapshot();
   const staticConfiguration = assertStageBStaticConfigurationCoverage(plan, options);
   const { attributes: staticConfigurationAttributes, ...staticConfigurationCounts } = staticConfiguration;
-  assertBrokerActionProfile(plan);
+  assertBrokerActionProfile(plan, options);
   const resources = [];
   const seenAddresses = new Set();
   for (const change of plan.resource_changes) {
@@ -1132,10 +1122,12 @@ export function censusStageBPlanSemantics(plan, options = {}) {
         .filter((key) => !exactJson(change.change?.before?.[key], change.change?.after?.[key]));
       if (changedFields.includes("timeout")) assertReviewedBrokerTimeoutTransition(change);
     }
-    if (ECS_ADDRESSES.has(change.address)) assertEcsSemanticDomain(change);
+    if (ECS_ADDRESSES.has(change.address) && !(options.partialApplyRecovery && isStageBPartialApplyDeposedTaskDefinitionCleanup(change))) assertEcsSemanticDomain(change);
     assertInitialBrokerEnvironment(change);
     if (isBrokerInitialCreate(change) || isEcsInitialCreate(change)) assertInitialProviderComputedShape(change);
-    const changedPaths = diffPaths(change.change?.before, change.change?.after).filter(Boolean).map((path) => ({ path, classification: assertClass(classifyChangedPath(change, path), "CHANGED_PATH") }));
+    const changedPaths = options.partialApplyRecovery && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)
+      ? []
+      : diffPaths(change.change?.before, change.change?.after).filter(Boolean).map((path) => ({ path, classification: assertClass(classifyChangedPath(change, path), "CHANGED_PATH") }));
     const afterUnknownPaths = truePaths(change.change?.after_unknown).filter(Boolean).map((path) => ({ path, classification: assertClass(classifyUnknownPath(change, path), "AFTER_UNKNOWN") }));
     const beforeSensitivePaths = assertSensitivePaths(change, "BEFORE", truePaths(change.change?.before_sensitive));
     const afterSensitivePaths = assertSensitivePaths(change, "AFTER", truePaths(change.change?.after_sensitive));

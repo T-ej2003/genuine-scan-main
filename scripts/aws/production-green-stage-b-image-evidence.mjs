@@ -9,7 +9,7 @@ import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from "./production
 import { APPROVED_PREFLIGHT_GENERATOR_ARNS } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_PLAN_PROFILES } from "./stage-b-plan-approval-contract.mjs";
 import { STAGE_B_IMPORTED_BACKEND_ROLLOVER_ACTIONS, assertStageBImportedBackendRolloverActions, STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
-import { assertStageBImportedBackendMetadataNormalization, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
+import { assertStageBImportedBackendMetadataNormalization, isStageBPartialApplyDeposedTaskDefinitionCleanup, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
 import { assertStageBImagePublicationIdentity, publicationIdentitySha256, readStageBImagePublicationIdentity } from "./stage-b-image-publication-identity.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 
@@ -92,6 +92,7 @@ export function assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, plan
   }
   for (const change of currentChanges) {
     if (change.type !== "aws_ecs_task_definition") throw new Error(`Stage B current task-definition resource type is invalid: ${change.address}`);
+    if (planProfile === "PARTIAL_APPLY_RECOVERY" && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) continue;
     const actions = change.change?.actions || [];
     const importedRollover = planProfile === "IMPORTED_BACKEND_METADATA_NORMALIZATION"
       && change.address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS

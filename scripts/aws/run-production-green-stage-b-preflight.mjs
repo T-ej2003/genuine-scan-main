@@ -57,12 +57,14 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   const stageAState = path.join(preflightDirectory, "stage-a-state.json"); const stageBState = path.join(preflightDirectory, "stage-b-state.json");
   const handoff = value(argv, "--stage-a-handoff"); const tfvars = value(argv, "--tfvars"); const bindingReport = value(argv, "--binding-report");
   const toolingSha = value(argv, "--tooling-sha"); const toolingTreeSha256 = value(argv, "--tooling-tree-sha256");
+  const partialApplyRecovery = argv.includes("--partial-apply-recovery");
   generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff });
   const generated = generateStageBTfvars({
     imageEvidence: value(argv, "--image-evidence"), imageEvidenceSignature: value(argv, "--image-evidence-signature"), stateBackup: stageBState,
     stageAInput: handoff, stageAStateBackup: stageAState, brokerPackagePath: value(argv, "--broker-package"), toolingSha, toolingTreeSha256,
     imageReleaseSha: value(argv, "--image-release-sha"), workflowRunId: value(argv, "--workflow-run-id"), canonicalArtifactSha256: value(argv, "--canonical-artifact-sha256"),
-    environment: "production", outputPath: tfvars, bindingReportPath: bindingReport,
+    environment: "production", outputPath: tfvars, bindingReportPath: bindingReport, partialApplyRecovery,
+    ...(partialApplyRecovery ? { recovery: { refreshReportPath: value(argv, "--refresh-report"), observationBindingPath: value(argv, "--refresh-binding-report") } } : {}),
   });
   generateStageBTerraformBackendConfig({ outputPath: backendConfig });
   ensureStageBPrivateDirectory({ directory: terraformDataDir, repositoryRoot: root, create: true, normalize: true });

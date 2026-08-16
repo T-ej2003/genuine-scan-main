@@ -19,6 +19,8 @@ const inventoryTaskDefinitionTags = Object.freeze({ Component: "full-rls-green-s
 const inventoryTaskDefinitionFamily = "mscqr-production-rls-green-predeployment-inventory";
 const inventoryDatabaseUrlArn = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh";
 const inventoryRlsRole = "mscqr_prod_rls_read";
+const inventoryTaskRoleArn = `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-task`;
+const inventoryExecutionRoleArn = `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-execution`;
 const exact = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const canonicalize = (value) => Array.isArray(value) ? value.map(canonicalize) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, child]) => [key, canonicalize(child)])) : value;
 const exactJson = (left, right) => JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
@@ -134,8 +136,8 @@ export function validatePreDeploymentInventoryConfiguration(config) {
       || !Array.isArray(config.inventoryPrivateSubnetIds) || [...config.inventoryPrivateSubnetIds].sort().join(",") !== [...STAGE_B.privateSubnetIds].sort().join(",")
       || !Array.isArray(config.inventorySecurityGroupIds) || config.inventorySecurityGroupIds.length !== 1 || config.inventorySecurityGroupIds[0] !== STAGE_B.executorSecurityGroupId
       || config.inventoryAssignPublicIp !== "DISABLED" || !inventoryTaskArnPattern.test(config.inventoryTaskDefinitionFamilyArn || "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:1")
-      || config.inventoryTaskRoleArn !== "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"
-      || config.inventoryExecutionRoleArn !== "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution"
+      || config.inventoryTaskRoleArn !== inventoryTaskRoleArn
+      || config.inventoryExecutionRoleArn !== inventoryExecutionRoleArn
       || config.inventoryDatabaseUrlArn !== inventoryDatabaseUrlArn
       || config.inventoryRlsRole !== inventoryRlsRole
       || config.inventoryLogGroupName !== STAGE_B.inventoryLogGroupName) throw new Error("Pre-deployment inventory broker configuration is outside the reviewed contract.");
@@ -308,33 +310,36 @@ export function createPreDeploymentInventoryHandler({ config, readApproval, veri
   };
 }
 
-const parse = (name, fallback) => JSON.parse(process.env[name] || fallback);
-const runtimeConfig = () => ({
-  clusterArn: process.env.BROKER_CLUSTER_ARN,
-  approvalSecretArn: process.env.BROKER_APPROVAL_SECRET_ARN,
-  executorSecurityGroupId: process.env.BROKER_EXECUTOR_SECURITY_GROUP_ID,
-  privateSubnetIds: parse("BROKER_PRIVATE_SUBNETS_JSON", "[]"),
-  taskDefinitionArns: parse("BROKER_TASK_DEFINITIONS_JSON", "{}"),
-  templateHashes: parse("BROKER_TASK_TEMPLATE_HASHES_JSON", "{}"),
-  approvalExpected: parse("BROKER_APPROVAL_EXPECTED_JSON", "{}"),
-  images: parse("BROKER_IMAGES_JSON", "{}"),
-  replayTable: process.env.BROKER_REPLAY_TABLE,
-  receiptBucket: process.env.BROKER_RECEIPT_BUCKET,
-  inventoryTaskDefinitionArn: process.env.INVENTORY_TASK_DEFINITION_ARN,
-  inventoryTaskDefinitionFamilyArn: process.env.INVENTORY_TASK_DEFINITION_FAMILY_ARN,
-  inventoryImageDigest: process.env.INVENTORY_IMAGE_DIGEST,
-  inventoryTaskRoleArn: process.env.INVENTORY_TASK_ROLE_ARN,
-  inventoryExecutionRoleArn: process.env.INVENTORY_EXECUTION_ROLE_ARN,
-  inventoryDatabaseUrlArn: process.env.INVENTORY_DATABASE_URL_ARN,
-  inventoryRlsRole: process.env.INVENTORY_RLS_ROLE,
-  inventoryPrivateSubnetIds: parse("INVENTORY_PRIVATE_SUBNETS_JSON", "[]"),
-  inventorySecurityGroupIds: parse("INVENTORY_SECURITY_GROUPS_JSON", "[]"),
-  inventoryAssignPublicIp: process.env.INVENTORY_ASSIGN_PUBLIC_IP || "DISABLED",
-  inventoryLogGroupName: process.env.INVENTORY_LOG_GROUP_NAME,
-});
+const parse = (env, name, fallback) => JSON.parse(env[name] || fallback);
+export function createBrokerRuntimeConfig(env = process.env) {
+  const privateSubnetIds = parse(env, "BROKER_PRIVATE_SUBNETS_JSON", "[]");
+  const images = parse(env, "BROKER_IMAGES_JSON", "{}");
+  return {
+    clusterArn: env.BROKER_CLUSTER_ARN,
+    approvalSecretArn: env.BROKER_APPROVAL_SECRET_ARN,
+    executorSecurityGroupId: env.BROKER_EXECUTOR_SECURITY_GROUP_ID,
+    privateSubnetIds,
+    taskDefinitionArns: parse(env, "BROKER_TASK_DEFINITIONS_JSON", "{}"),
+    templateHashes: parse(env, "BROKER_TASK_TEMPLATE_HASHES_JSON", "{}"),
+    approvalExpected: parse(env, "BROKER_APPROVAL_EXPECTED_JSON", "{}"),
+    images,
+    replayTable: env.BROKER_REPLAY_TABLE,
+    receiptBucket: env.BROKER_RECEIPT_BUCKET,
+    inventoryTaskDefinitionFamilyArn: `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${inventoryTaskDefinitionFamily}:1`,
+    inventoryImageDigest: images.backendImageDigest,
+    inventoryTaskRoleArn,
+    inventoryExecutionRoleArn,
+    inventoryDatabaseUrlArn,
+    inventoryRlsRole,
+    inventoryPrivateSubnetIds: privateSubnetIds,
+    inventorySecurityGroupIds: [STAGE_B.executorSecurityGroupId],
+    inventoryAssignPublicIp: "DISABLED",
+    inventoryLogGroupName: STAGE_B.inventoryLogGroupName,
+  };
+}
 
 export async function handler(event, context) {
-  const config = runtimeConfig();
+  const config = createBrokerRuntimeConfig();
   if (!/^[A-Za-z0-9._-]{3,255}$/.test(config.replayTable || "") || config.receiptBucket !== STAGE_B.receiptBucket) throw new Error("Stage B broker storage is outside the reviewed contract.");
   const [{ ECSClient, RunTaskCommand, DescribeTaskDefinitionCommand, DescribeTasksCommand, StopTaskCommand }, { SecretsManagerClient, GetSecretValueCommand }, { KMSClient, VerifyCommand }, { DynamoDBClient, PutItemCommand, DeleteItemCommand, UpdateItemCommand }, { S3Client, PutObjectCommand }, { CloudWatchLogsClient, DescribeLogStreamsCommand, GetLogEventsCommand }] = await Promise.all([
     import("@aws-sdk/client-ecs"), import("@aws-sdk/client-secrets-manager"), import("@aws-sdk/client-kms"), import("@aws-sdk/client-dynamodb"), import("@aws-sdk/client-s3"), import("@aws-sdk/client-cloudwatch-logs"),

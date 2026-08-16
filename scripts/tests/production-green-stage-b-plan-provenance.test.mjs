@@ -40,7 +40,7 @@ test("recovery planning validates refresh against observation binding before rea
   fs.writeFileSync(refreshPath, `${JSON.stringify(refresh)}\n`, { mode: 0o600 });
   const refreshReportSha256 = hash(fs.readFileSync(refreshPath));
   const recovery = {
-    ...shared, recoveryOnly: true, tfvarsSha256: digest("8"),
+    ...shared, recoveryOnly: true, recoveryMode: "RECOVERY_ALIAS_ONLY", tfvarsSha256: digest("8"),
     recoveryRefreshReportSha256: refreshReportSha256, recoveryClassificationSha256: classificationSha256,
     recoveryAttestationSha256: attestationSha256, recoveryLiveVersion: "2", recoveryDesiredVersion: "3",
   };
@@ -71,4 +71,33 @@ test("recovery planning validates refresh against observation binding before rea
 
 test("recovery planning fails closed when the observation binding is omitted", () => {
   assert.throws(() => readPlanningInputs("/private/tmp/recovery.tfvars", ["--binding-report", "/private/tmp/recovery.json", "--binding-report-sha256", digest("a"), "--tooling-tree-sha256", digest("b"), "--image-release-sha", "c".repeat(40), "--refresh-report", "/private/tmp/refresh.json", "--refresh-report-sha256", digest("d"), "--recovery-only", "--closure-mode", "production"], { currentHead: "e".repeat(40) }, { validateTfvarsBinding: () => ({ recoveryOnly: true }) }), /original observation binding/);
+});
+
+test("partial-apply recovery accepts only explicitly bound resource drift", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-partial-provenance-"));
+  fs.chmodSync(directory, 0o700);
+  const write = (name, value) => { const file = path.join(directory, name); fs.writeFileSync(file, `${JSON.stringify(value)}\n`, { mode: 0o600 }); return file; };
+  const sourceSha = "a".repeat(40);
+  const shared = { toolingSha: sourceSha, toolingTreeSha256: digest("b"), imageReleaseSha: "g".repeat(40), imageEvidenceCanonicalSha256: digest("d"), stageAInputSha256: digest("1"), stageAStateBackupSha256: digest("2"), stageAStateObject: "stage-a.tfstate", stageAStateLineage: "stage-a-lineage", stageAStateSerial: 35, stateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stateSerial: 96, stateBackupSha256: digest("e"), sourceContractSha256: digest("3"), migrationSetDigest: digest("4"), packageChecksumSha256: digest("5"), images: { backend: "same" } };
+  const observation = { ...shared, recoveryOnly: false, tfvarsSha256: digest("c") };
+  const binding = { ...shared, recoveryOnly: false, partialApplyRecovery: true, recoveryMode: "PARTIAL_APPLY_RECOVERY", tfvarsSha256: digest("6"), recoveryRefreshReportSha256: "0".repeat(64), recoveryObservationBindingSha256: "0".repeat(64), recoveryStateLineage: shared.stateLineage, recoveryStateSerial: shared.stateSerial };
+  const bindingPath = write("observation.json", observation);
+  const refreshPath = write("refresh.json", { status: "RESOURCE_DRIFT", bindingReportSha256: hash(fs.readFileSync(bindingPath)), tfvarsSha256: observation.tfvarsSha256 });
+  const actualRefreshSha256 = hash(fs.readFileSync(refreshPath));
+  binding.recoveryRefreshReportSha256 = actualRefreshSha256; binding.recoveryObservationBindingSha256 = hash(fs.readFileSync(bindingPath));
+  const args = [
+    "--binding-report", path.join(directory, "tfvars-binding.json"), "--binding-report-sha256", digest("f"),
+    "--refresh-binding-report", bindingPath, "--refresh-binding-report-sha256", hash(fs.readFileSync(bindingPath)),
+    "--tooling-tree-sha256", binding.toolingTreeSha256, "--image-release-sha", "g".repeat(40),
+    "--refresh-report", refreshPath, "--refresh-report-sha256", actualRefreshSha256, "--partial-apply-recovery", "--closure-mode", "production",
+  ];
+  let validated;
+  const inputs = readPlanningInputs("/private/tmp/recovery.tfvars", args, { currentHead: sourceSha }, {
+    validateTfvarsBinding: () => binding,
+    assertRefresh: (value) => { validated = value; return true; },
+    backendMetadata: { backendMetadataSha256: digest("h"), terraformDataDir: directory },
+  });
+  assert.equal(inputs.partialApplyRecovery, true);
+  assert.deepEqual(validated.bindingReport, observation);
+  assert.equal(validated.allowReviewedResourceDrift, true);
 });

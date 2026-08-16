@@ -124,6 +124,15 @@ export const canonicalJson = (value) => {
   return JSON.stringify(value);
 };
 export const canonicalSha256 = (value) => sha256(canonicalJson(value));
+export const STAGE_B_LAMBDA_ENVIRONMENT_HARD_LIMIT_BYTES = 4096;
+export const STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES = 3500;
+export const stageBLambdaEnvironmentUtf8Bytes = (variables) => Buffer.byteLength(JSON.stringify(variables), "utf8");
+export function assertStageBLambdaEnvironmentSize(variables, maxBytes = STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES) {
+  if (!variables || typeof variables !== "object" || Array.isArray(variables) || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error("Stage B Lambda environment payload is malformed.");
+  const bytes = stageBLambdaEnvironmentUtf8Bytes(variables);
+  if (bytes > STAGE_B_LAMBDA_ENVIRONMENT_HARD_LIMIT_BYTES || bytes > maxBytes) throw new Error(`Stage B broker Lambda environment payload is ${bytes} UTF-8 bytes; maximum allowed safety bound is ${maxBytes} bytes (AWS hard limit: ${STAGE_B_LAMBDA_ENVIRONMENT_HARD_LIMIT_BYTES}).`);
+  return bytes;
+}
 export const assertImmutableImage = (value, field = "image") => {
   if (!imagePattern.test(String(value || ""))) throw new Error(`${field} must be an immutable reviewed ECR digest.`);
   return value;
