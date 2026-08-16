@@ -6,7 +6,7 @@ The reviewed comparison is anchored by the two-SHA image boundary:
 image release: 29bf92a14d5e832575009bd76b16886feff62cbd
 tooling:       a37fe2559f15094494122825a7d7365ca1218120
 report identity: tooling-input-tree-sha256
-tooling tree:  86863a32c00a4d593c07c39a0d18de6194823050b515093940f815314b94143e
+tooling tree:  a2bcf00ea3bbfa636e41843ffb1f17c744fc077c055c772c30aecb2322395802
 ```
 
 The canonical report classifies the protected workflow change as

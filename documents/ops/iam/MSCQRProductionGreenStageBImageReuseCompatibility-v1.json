@@ -1,17 +1,38 @@
 {
   "schemaVersion": 2,
   "identityModel": "tooling-input-tree-sha256",
-  "imageReleaseSha": "c45f2d788ce29c2067bfb4e8afff46f8b1c238ea",
-  "comparisonBaseSha": "c45f2d788ce29c2067bfb4e8afff46f8b1c238ea",
+  "imageReleaseSha": "29bf92a14d5e832575009bd76b16886feff62cbd",
+  "comparisonBaseSha": "29bf92a14d5e832575009bd76b16886feff62cbd",
+  "toolingSha": "8341ded173a6f4deaba35a70013e143dd39f1f94",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
-  "comparisonHeadSha256": "8a121a50c6cfabef4dec5538d3e49fdcc12027d6af1a61f6acdf5320bcee85bf",
-  "toolingInputTreeSha256": "8a121a50c6cfabef4dec5538d3e49fdcc12027d6af1a61f6acdf5320bcee85bf",
+  "comparisonHeadSha256": "a2bcf00ea3bbfa636e41843ffb1f17c744fc077c055c772c30aecb2322395802",
+  "toolingInputTreeSha256": "a2bcf00ea3bbfa636e41843ffb1f17c744fc077c055c772c30aecb2322395802",
   "imageReuseCompatible": true,
   "imageBuildInputsChanged": false,
-  "classificationRulesVersion": "stage-b-image-reuse-v2",
-  "generatedAt": "2026-08-11T23:05:47+01:00",
-  "generatorVersion": "validate-stage-b-image-reuse@2",
+  "classificationRulesVersion": "stage-b-image-reuse-v3",
+  "generatedAt": "2026-08-16T02:30:42+01:00",
+  "generatorVersion": "validate-stage-b-image-reuse@3",
   "classifiedChangedFiles": [
+    {
+      "file": ".github/workflows/production-green-stage-b-image-build.yml",
+      "category": "trustedToolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": ".github/workflows/production-green-stage-b-images.yml",
+      "category": "ciOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
     {
       "file": "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json",
       "category": "documentationOnly",
@@ -23,12 +44,127 @@
       "imageAffecting": false
     },
     {
-      "file": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "file": "documents/ops/MSCQR_PRODUCTION_GREEN_STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.md",
       "category": "documentationOnly",
       "imageAffecting": false
     },
     {
-      "file": "package.json",
+      "file": "documents/ops/MSCQR_PRODUCTION_GREEN_STAGE_B_TASK_DEFINITION_RECOVERY.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/PRODUCTION_STAGE_B_IMAGE_SIGNING_IDEMPOTENCY.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_PLAN_RECONCILIATION_2026-07-29.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_TWO_SHA_IDENTITY.md",
+      "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/apply-production-green-stage-b.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/cosign-idempotent-sign-and-attest.sh",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/dispatch-production-green-stage-b-images.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/generate-production-green-stage-b-capability-graph.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/production-cutover-control-plane.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/production-green-stage-b-image-evidence.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/production-image-authorization.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-deployment-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-existing-revision-forward-recovery-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-image-publication-identity.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-plan-approval-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-plan-semantic-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-reference-audit-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-refresh-contract.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/stage-b-task-definition-recovery-contract.mjs",
       "category": "toolingOnly",
       "imageAffecting": false
     },
@@ -38,8 +174,58 @@
       "imageAffecting": false
     },
     {
+      "file": "scripts/aws/validate-stage-b-deployment-closure.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
       "file": "scripts/aws/validate-stage-b-image-reuse.mjs",
       "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/plan-production-green-stage-b.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/fixtures/canonical-image-authorization.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-control-plane.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-cosign-idempotency.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-deployment-identity.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-ecs-rotation.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-identity-capabilities.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-image-dispatch.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-image-evidence.test.mjs",
+      "category": "testOnly",
       "imageAffecting": false
     },
     {
@@ -48,7 +234,7 @@
       "imageAffecting": false
     },
     {
-      "file": "scripts/tests/production-green-stage-b-image-reuse-cli.test.mjs",
+      "file": "scripts/tests/production-green-stage-b-image-publisher-boundary.test.mjs",
       "category": "testOnly",
       "imageAffecting": false
     },
@@ -56,8 +242,51 @@
       "file": "scripts/tests/production-green-stage-b-permission-preflight.test.mjs",
       "category": "testOnly",
       "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-plan-approval.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-plan-semantic.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-reference-audit-generator.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-refresh-only.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-tfvars-generator.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-image-authorization.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/stage-b-existing-revision-forward-recovery.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/stage-b-task-definition-recovery-contract.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
     }
   ],
+  "trustedToolingOnlyPaths": [
+    ".github/workflows/production-green-stage-b-image-build.yml"
+  ],
   "imageAffectingFiles": [],
-  "reason": "The reviewed tooling input tree contains no image-affecting changes relative to the image release."
+  "reason": "The reviewed tooling input tree contains no image-affecting changes relative to the image release; the Stage B build workflow is accepted only through the authenticated release-source/trusted-tooling separation contract."
 }
