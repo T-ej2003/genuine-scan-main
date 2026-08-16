@@ -124,7 +124,7 @@ export function assertCanonicalRecoveryDescendantResume({ sourceSha, bindings, p
     || !SHA256.test(reuse.toolingInputTreeSha256 || "") || !Array.isArray(reuse.classifiedChangedFiles) || !Array.isArray(reuse.imageAffectingFiles)
     || reuse.imageAffectingFiles.length !== 0) throw new Error("Cross-descendant image reuse proof contains a runtime, image-affecting, or unreviewed change.");
   const hasTrustedToolingOnly = reuse.classifiedChangedFiles.some(({ category }) => category === "trustedToolingOnly");
-  if (!hasTrustedToolingOnly && reuse.classifiedChangedFiles.some(({ category }) => !CROSS_DESCENDANT_REUSE_CATEGORIES.has(category))) throw new Error("Cross-descendant image reuse proof contains an unreviewed change category.");
+  if (reuse.classifiedChangedFiles.some(({ category }) => category !== "trustedToolingOnly" && !CROSS_DESCENDANT_REUSE_CATEGORIES.has(category))) throw new Error("Cross-descendant image reuse proof contains an unreviewed change category.");
   if (completed) throw new Error("Completed cross-descendant recovery incidents are terminal and cannot be resumed.");
   return Object.freeze({ incidentSourceSha: journalState.sourceSha, incidentProvenance, executorToolingSha: sourceSha, executorProvenance, imageReuse: reuse });
 }

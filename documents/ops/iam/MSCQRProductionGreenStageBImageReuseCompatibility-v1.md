@@ -30,6 +30,9 @@ The proof covers the publisher's image-affecting environment contract, including
 ECR targets, Dockerfiles, build contexts, source/build labels, and verified RLS bindings;
 unknown publication-looking inherited inputs fail closed while unrelated environment values
 remain outside the image publication fingerprint.
+The fingerprint also covers every `build-and-attest` step through immutable-image
+publication; only the two explicitly named trusted-tooling checkout steps are excluded.
+An unreviewed pre-publication step or source mutation therefore fails closed.
 Runtime validation
 recomputes that fingerprint and requires the release and protected-tooling values to match. The
 production wrapper separately authenticates the exact pair by requiring
@@ -58,3 +61,7 @@ canonical artifact-byte hash. A filename, numeric run ID, or caller-supplied wor
 metadata cannot satisfy the evidence boundary. Different tooling and image-release
 SHAs therefore require explicit canonical reuse authorization; same-SHA publications
 retain the direct binding path.
+
+Descendant recovery validates every changed-file category independently. `trustedToolingOnly`
+is an additional authenticated category for the dedicated workflow proof; it does not bypass
+the existing allowlist for other non-image categories.

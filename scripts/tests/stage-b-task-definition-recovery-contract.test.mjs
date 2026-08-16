@@ -353,6 +353,9 @@ test("cross-descendant resume rejects identity, ancestry, checkout, authorizatio
     ["stale reuse rules", { deriveImageReuse: () => ({ ...crossReuse({ imageReleaseSha: crossBindings.imageReleaseSha, toolingSha: executorSha }), classificationRulesVersion: "stage-b-image-reuse-v2" }) }],
   ];
   for (const [label, overrides] of cases) assert.throws(() => assertCanonicalRecoveryDescendantResume({ ...base, ...overrides }), label);
+  for (const category of ["terraformOnly", "controlPlaneOnly"]) {
+    assert.throws(() => assertCanonicalRecoveryDescendantResume({ ...base, deriveImageReuse: () => ({ ...crossReuse({ imageReleaseSha: crossBindings.imageReleaseSha, toolingSha: executorSha }), classifiedChangedFiles: [{ file: STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH, category: "trustedToolingOnly", imageAffecting: false }, { file: `unrelated/${category}`, category, imageAffecting: false }] }) }), `unreviewed ${category} alongside trusted tooling`);
+  }
 });
 
 test("cross-descendant resume rejects canonical revision, census, budget, and Terraform drift before import", async () => {

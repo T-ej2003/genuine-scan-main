@@ -25,6 +25,7 @@ const PUBLICATION_ENV_KEYS = new Set([
   "WORKER_BUILD_CONTEXT", "BUILDER_NAME", "SOURCE_CONTRACT_SHA256", "MIGRATION_SET_DIGEST", "BUILD_TIMESTAMP",
 ]);
 const PUBLICATION_ENV_SUSPECT = /(?:IMAGE|ECR|DOCKER|BUILD|PLATFORM|SOURCE|RELEASE|PUBLISH|CONTEXT|TARGET)/i;
+const TRUSTED_TOOLING_STEP_NAMES = new Set(["Checkout trusted workflow tooling", "Bind the trusted workflow tooling revision"]);
 
 const IMAGE_INPUTS = [
   /^\.github\/workflows\/production-green-stage-b-image-build\.yml$/,
@@ -66,7 +67,9 @@ function withoutReleaseWorkingDirectory(source) {
 function workflowStepBlocks(source) {
   const blocks = [];
   let block = [];
-  for (const line of source.split("\n")) {
+  const stepsStart = source.lastIndexOf("\n    steps:\n");
+  assert(stepsStart >= 0, "Trusted Stage B build job steps are missing.");
+  for (const line of source.slice(stepsStart).split("\n")) {
     if (/^      - /.test(line)) {
       if (block.length) blocks.push(block.join("\n"));
       block = [line];
@@ -80,6 +83,13 @@ function workflowStepBy(source, predicate, label) {
   const step = workflowStepBlocks(source).find(predicate);
   assert(step, `Trusted Stage B workflow is missing the ${label} step.`);
   return step;
+}
+
+function workflowPublicationSteps(source) {
+  const steps = workflowStepBlocks(source);
+  const publishIndex = steps.findIndex((step) => step.startsWith("      - name: Publish immutable backend, worker, executor, and canary images"));
+  assert(publishIndex >= 0, "Trusted Stage B workflow is missing the image publication step.");
+  return steps.slice(0, publishIndex + 1).filter((step) => !TRUSTED_TOOLING_STEP_NAMES.has(step.match(/^      - name: (.+)$/m)?.[1]));
 }
 
 function indentedBlock(source, marker, indent) {
@@ -107,7 +117,7 @@ function parseEnvBlock(block, label) {
 }
 
 function normalizeWorkflowText(value) {
-  return value.replaceAll("release-source/", "").replaceAll("\n          path: release-source", "").replaceAll("\n        working-directory: release-source", "").replaceAll("$GITHUB_WORKSPACE/scripts/aws/", "./scripts/aws/").replaceAll('node "./scripts/aws/', "node scripts/aws/").replaceAll('stage-b-release-gate.mjs" ', "stage-b-release-gate.mjs ");
+  return value.replaceAll("release-source/", "").replaceAll("\n      TRUSTED_TOOLING_SHA: ${{ github.sha }}", "").replaceAll("\n          path: release-source", "").replaceAll("\n        working-directory: release-source", "").replaceAll("$GITHUB_WORKSPACE/scripts/aws/", "./scripts/aws/").replaceAll('node "./scripts/aws/', "node scripts/aws/").replaceAll('stage-b-release-gate.mjs" ', "stage-b-release-gate.mjs ");
 }
 
 function effectivePublicationEnv(source, publishStep) {
@@ -132,6 +142,7 @@ export function stageBPublicationInputs(source) {
     workflowDefaults: indentedBlock(source, "  defaults:", 2),
     jobDefaults: indentedBlock(source, "    defaults:", 4),
     jobStrategy: indentedBlock(source, "    strategy:", 4),
+    publicationSteps: workflowPublicationSteps(source).map(normalizeWorkflowText),
     effectiveEnv: effectivePublicationEnv(source, publishStep),
     publicationStep: normalizeWorkflowText(publishStep),
     releaseCheckout: normalizeWorkflowText(releaseCheckout),
