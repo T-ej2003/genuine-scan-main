@@ -506,12 +506,15 @@ export function assertStageBRefreshEvidence({ refreshReportPath, refreshReportSh
   return report;
 }
 
-export function assertStageBRecoveryProvenance({ refreshReport, refreshReportSha256, observationBindingReport, observationBindingReportSha256, recoveryBindingReport, recoveryClassificationSha256, recoveryAttestationSha256 } = {}) {
+export function assertStageBRecoveryProvenance({ refreshReport, refreshReportSha256, observationBindingReport, observationBindingReportSha256, recoveryBindingReport, recoveryClassificationSha256, recoveryAttestationSha256, recoveryMode = "RECOVERY_ALIAS_ONLY" } = {}) {
   requireObject(refreshReport, "Stage B refresh report");
   requireObject(observationBindingReport, "Stage B observation binding report");
   requireObject(recoveryBindingReport, "Stage B recovery binding report");
   if (observationBindingReport.recoveryOnly !== false) throw new Error("Stage B refresh evidence requires the original non-recovery observation binding.");
-  if (recoveryBindingReport.recoveryOnly !== true) throw new Error("Stage B recovery planning requires the recovery binding report.");
+  if (!["RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"].includes(recoveryMode)) throw new Error(`Stage B recovery mode is unsupported: ${recoveryMode}`);
+  if (recoveryMode === "PARTIAL_APPLY_RECOVERY" && (recoveryClassificationSha256 !== undefined || recoveryAttestationSha256 !== undefined)) throw new Error("PARTIAL_APPLY_RECOVERY cannot use RECOVERY_ALIAS_ONLY evidence.");
+  const expectedRecoveryOnly = recoveryMode === "RECOVERY_ALIAS_ONLY";
+  if (recoveryBindingReport.recoveryOnly !== expectedRecoveryOnly) throw new Error(`Stage B ${recoveryMode} planning requires the matching recovery binding report.`);
   if (!/^[a-f0-9]{64}$/.test(observationBindingReportSha256 || "") || refreshReport.bindingReportSha256 !== observationBindingReportSha256) throw new Error("Stage B refresh evidence is not bound to the selected observation binding report.");
   if (refreshReport.tfvarsSha256 !== observationBindingReport.tfvarsSha256) throw new Error("Stage B refresh evidence is not bound to the selected observation tfvars.");
   if (observationBindingReport.tfvarsSha256 === recoveryBindingReport.tfvarsSha256) throw new Error("Stage B recovery planning requires distinct observation and recovery tfvars bindings.");

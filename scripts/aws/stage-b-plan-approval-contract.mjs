@@ -13,6 +13,10 @@ export const STAGE_B_PLAN_APPROVED = "PLAN_APPROVED";
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const STAGE_B_CAPTURE_BROKER_ADDRESSES = ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"];
 export const STAGE_B_PLAN_PROFILES = Object.freeze(["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"]);
+
+function assertPartialApplyRecoveryEvidence(report) {
+  if (report?.planProfile === "PARTIAL_APPLY_RECOVERY" && (report.recoveryAttestationSha256 !== undefined || report.recoveryPlan === true)) throw new Error("PARTIAL_APPLY_RECOVERY cannot carry RECOVERY_ALIAS_ONLY attestation evidence.");
+}
 export const STAGE_B_BROKER_OPERATIONS = Object.freeze(["none", "initial-create", "update", "recovery-alias-only", "partial-apply-recovery"]);
 export const STAGE_B_PLAN_PROFILE_CENSUS = Object.freeze({
   BASELINE: Object.freeze({ create: 12, replacement: 0, update: 3, destroy: 0, unclassified: 0 }),
@@ -225,6 +229,8 @@ function assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes
 
 export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, refreshReportSha256, refreshBindingReportSha256, recoveryAttestationSha256, hashes, capturedAt, stageBLineage, stageBSerial, terraformVersion, terraformFormatVersion, planExitCode = 0, showExitCode = 0, classification, planProfile = "BASELINE", taskDefinitionRotations = [], brokerEvidence = {} }) {
   assertCanonicalTerraformSerialNumber(stageBSerial, "Stage B serial");
+  const profile = assertPlanProfile(planProfile);
+  assertPartialApplyRecoveryEvidence({ planProfile: profile, recoveryAttestationSha256, recoveryPlan: recoveryAttestationSha256 !== undefined });
   return {
     schemaVersion: STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION,
     state: STAGE_B_PLAN_CAPTURED,
@@ -233,7 +239,7 @@ export function createStageBPlanCaptureReport({ toolingSha, toolingTreeSha256, r
     refreshReportSha256,
     ...(refreshBindingReportSha256 ? { refreshBindingReportSha256 } : {}),
     ...(recoveryAttestationSha256 ? { recoveryAttestationSha256, recoveryPlan: true } : {}),
-    planProfile: assertPlanProfile(planProfile),
+    planProfile: profile,
     ...(planProfile === "ECS_TASK_DEFINITION_ROTATION" ? { taskDefinitionRotations } : {}),
     ...hashes,
     classification,
@@ -260,6 +266,7 @@ export function assertStageBPlanCaptureReport(report, { captureReportBytes, hash
     throw new Error("Stage B plan capture report is missing the PLAN_CAPTURED contract.");
   }
   assertPlanProfile(report.planProfile, "Stage B plan capture");
+  assertPartialApplyRecoveryEvidence(report);
   if (report.planProfile === "RECOVERY_ALIAS_ONLY" && !/^[a-f0-9]{64}$/.test(report.refreshBindingReportSha256 || "")) throw new Error("Stage B recovery plan capture observation-binding SHA256 is missing or malformed.");
   assertBrokerEvidence(report);
   if (!Buffer.isBuffer(captureReportBytes) || sha256(captureReportBytes) !== sha256(Buffer.from(JSON.stringify(report, null, 2) + "\n"))) throw new Error("Stage B plan capture report bytes are not self-consistent.");
@@ -276,6 +283,8 @@ export function assertStageBPlanCaptureReport(report, { captureReportBytes, hash
 
 export function createStageBPlanApprovalReport({ captureReportSha256, referenceAuditPath, referenceAuditSha256, referenceAuditCallerArn, referenceAuditAt, toolingSha, toolingTreeSha256, refreshReportSha256, refreshBindingReportSha256, recoveryAttestationSha256, stageBLineage, stageBSerial, hashes, logicalCanonicalPlanJsonSha256, approvedAt, classification, planProfile = "BASELINE", taskDefinitionRotations = [], brokerOperation = "none", brokerUpdatePresent = false, brokerActions = [], brokerResourceAddresses = [] }) {
   assertCanonicalTerraformSerialNumber(stageBSerial, "Stage B serial");
+  const profile = assertPlanProfile(planProfile);
+  assertPartialApplyRecoveryEvidence({ planProfile: profile, recoveryAttestationSha256, recoveryPlan: recoveryAttestationSha256 !== undefined });
   return {
     schemaVersion: STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION,
     state: STAGE_B_PLAN_APPROVED,
@@ -285,7 +294,7 @@ export function createStageBPlanApprovalReport({ captureReportSha256, referenceA
     refreshReportSha256,
     ...(refreshBindingReportSha256 ? { refreshBindingReportSha256 } : {}),
     ...(recoveryAttestationSha256 ? { recoveryAttestationSha256, recoveryPlan: true } : {}),
-    planProfile: assertPlanProfile(planProfile),
+    planProfile: profile,
     ...(planProfile === "ECS_TASK_DEFINITION_ROTATION" ? { taskDefinitionRotations } : {}),
     stageBLineage,
     stageBSerial,
@@ -316,6 +325,7 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
   if (report.brokerOperation !== captureReport.brokerOperation || report.brokerUpdatePresent !== captureReport.brokerUpdatePresent || JSON.stringify(report.brokerActions) !== JSON.stringify(captureReport.brokerActions) || JSON.stringify(report.brokerResourceAddresses) !== JSON.stringify(captureReport.brokerResourceAddresses)) throw new Error("Stage B plan approval broker evidence is not bound to the captured plan.");
   assertBrokerEvidence(report, { approved: true });
   assertPlanProfile(report.planProfile, "Stage B plan approval");
+  assertPartialApplyRecoveryEvidence(report);
   if (report.planProfile === "RECOVERY_ALIAS_ONLY" && report.refreshBindingReportSha256 !== captureReport.refreshBindingReportSha256) throw new Error("Stage B recovery approval observation-binding SHA256 is not inherited from the captured plan.");
   if (report.planProfile !== captureReport.planProfile || JSON.stringify(report.taskDefinitionRotations || []) !== JSON.stringify(captureReport.taskDefinitionRotations || [])) throw new Error("Stage B plan approval profile is not bound to the captured plan.");
   if (report.captureReportSha256 !== sha256(captureReportBytes)) throw new Error("Stage B plan approval report is bound to a different capture report.");
@@ -351,6 +361,7 @@ export function assertStageBPlanApprovedBinding(report, { approvalReportBytes, a
   }
   if (expectedRecoveryAttestationSha256 !== undefined && report.recoveryAttestationSha256 !== expectedRecoveryAttestationSha256) throw new Error("Stage B approval recovery-attestation binding differs from the current recovery evidence.");
   assertPlanProfile(report.planProfile, "Stage B plan approval");
+  assertPartialApplyRecoveryEvidence(report);
   if (report.planProfile === "RECOVERY_ALIAS_ONLY" && expectedRefreshBindingReportSha256 !== undefined && report.refreshBindingReportSha256 !== expectedRefreshBindingReportSha256) throw new Error("Stage B recovery approval observation-binding SHA256 differs from the selected observation binding.");
   assertBrokerEvidence(report, { approved: true });
   assertStageBReferenceAuditFreshness(report.referenceAuditAt, now);

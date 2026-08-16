@@ -481,9 +481,13 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, per
   if (report.planCapabilities?.schemaVersion !== 1
     || JSON.stringify(report.planCapabilities.required) !== JSON.stringify(project(report.requiredEvaluations))
     || JSON.stringify(report.planCapabilities.forbidden) !== JSON.stringify(project(report.forbiddenEvaluations))) throw new Error("Permission-preflight plan capability manifest is incomplete or stale.");
-  const expectedZeroMutationChanges = (plan?.resource_changes || []).filter((change) => change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(change.change?.actions || []) === JSON.stringify(["update"])).map((change) => {
-    assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
-    return { address: change.address, classification: STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION, requiredAwsActions: [] };
+  const expectedZeroMutationChanges = (plan?.resource_changes || []).flatMap((change) => {
+    if (permissionProfile === "PARTIAL_APPLY_RECOVERY" && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) return [{ address: change.address, classification: "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP", requiredAwsActions: [] }];
+    if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(change.change?.actions || []) === JSON.stringify(["update"])) {
+      assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
+      return [{ address: change.address, classification: STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION, requiredAwsActions: [] }];
+    }
+    return [];
   });
   if (expectedZeroMutationChanges.length > 0
     ? JSON.stringify(report.planCapabilities.zeroAwsMutationChanges) !== JSON.stringify(expectedZeroMutationChanges)
