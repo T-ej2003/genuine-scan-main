@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { assertImageAuthorizationEnvelope, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
 import { imageAuthorizationSha256 } from "./production-image-authorization.mjs";
-import { assertProductionImageReuseResult } from "./validate-stage-b-image-reuse.mjs";
+import { assertStageBImageReuseResult } from "./validate-stage-b-image-reuse.mjs";
 import {
   STAGE_B_BACKEND_RECOVERY,
   assertCanonicalBackendRecoveryCensus,
@@ -240,10 +240,10 @@ export function assertForwardSourceBinding({ sourceSha, bindings, protectedCheck
   if (!derived || derived.toolingTreeSha256 !== bindings.toolingTreeSha256 || derived.sourceContractSha256 !== bindings.sourceContractSha256) throw new Error("Forward recovery current source provenance is not derived from protected main.");
   if (authorization.sourceSha !== sourceSha && (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: authorization.sourceSha, descendantSha: sourceSha }) !== true)) throw new Error("Forward recovery image authorization source is not an authenticated protected-main ancestor.");
   const authorizationSourceReuse = deriveImageReuse?.({ imageReleaseSha: authorization.sourceSha, toolingSha: sourceSha });
-  assertProductionImageReuseResult(authorizationSourceReuse);
+  assertStageBImageReuseResult(authorizationSourceReuse);
   if (authorizationSourceReuse.toolingSha !== sourceSha || authorizationSourceReuse.imageReleaseSha !== authorization.sourceSha || authorizationSourceReuse.imageAffectingFiles.length !== 0) throw new Error("Forward recovery authorization-source reuse is not explicitly compatible with current protected main.");
   const reuse = deriveImageReuse?.({ imageReleaseSha: bindings.imageReleaseSha, toolingSha: sourceSha });
-  assertProductionImageReuseResult(reuse);
+  assertStageBImageReuseResult(reuse);
   if (reuse.toolingSha !== sourceSha || reuse.imageReleaseSha !== bindings.imageReleaseSha || reuse.imageAffectingFiles.length !== 0) throw new Error("Forward recovery image reuse is not explicitly compatible with current protected main.");
   return Object.freeze({ authorization, authorizedBackendDigest: digest, derived, authorizationSourceReuse, reuse });
 }
@@ -271,7 +271,7 @@ export function assertForwardConsumedImportResume({ sourceSha, bindings, protect
   if (!incidentProvenance || incidentProvenance.toolingTreeSha256 !== journalState.toolingTreeSha256 || incidentProvenance.sourceContractSha256 !== journalState.sourceContractSha256
     || !executorProvenance || !SHA256.test(executorProvenance.toolingTreeSha256 || "") || executorProvenance.sourceContractSha256 !== journalState.sourceContractSha256) throw new Error("Forward consumed-import replay provenance is not bound to the original incident and protected executor.");
   const reuse = deriveImageReuse?.({ imageReleaseSha: journalState.imageReleaseSha, toolingSha: sourceSha });
-  assertProductionImageReuseResult(reuse);
+  assertStageBImageReuseResult(reuse);
   if (reuse.toolingSha !== sourceSha || reuse.imageReleaseSha !== journalState.imageReleaseSha || reuse.imageAffectingFiles.length !== 0 || reuse.imageBuildInputsChanged === true) throw new Error("Forward consumed-import replay image reuse is not explicitly compatible with the protected executor.");
   return Object.freeze({ incidentSourceSha: journalState.sourceSha, authorizationSourceSha: authorization.sourceSha, authorizedBackendDigest: journalState.authorizedBackendDigest, fingerprint: journalState.fingerprint, incidentProvenance, executorProvenance, authorizationSourceReuse, reuse });
 }
@@ -284,7 +284,7 @@ function assertConsumedImportAuthorization({ journalState, authorization, derive
   if (authorization.sourceSha !== journalState.sourceSha
     && (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: authorization.sourceSha, descendantSha: journalState.sourceSha }) !== true)) throw new Error("Forward consumed-import replay authorization source is not the authenticated original incident ancestor.");
   const authorizationSourceReuse = deriveImageReuse?.({ imageReleaseSha: authorization.sourceSha, toolingSha: journalState.sourceSha });
-  assertProductionImageReuseResult(authorizationSourceReuse);
+  assertStageBImageReuseResult(authorizationSourceReuse);
   if (authorizationSourceReuse.toolingSha !== journalState.sourceSha || authorizationSourceReuse.imageReleaseSha !== authorization.sourceSha || authorizationSourceReuse.imageAffectingFiles.length !== 0 || authorizationSourceReuse.imageBuildInputsChanged === true) throw new Error("Forward consumed-import replay original authorization-source reuse is not explicitly compatible with the incident source.");
   return Object.freeze({ authorization, authorizationSourceReuse });
 }

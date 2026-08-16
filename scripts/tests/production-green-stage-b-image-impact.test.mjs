@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   assertImageImpactReport,
   assertProductionImageReuseResult,
+  assertStageBTrustedToolingReuseResult,
+  assertStageBTrustedWorkflowSeparation,
   computeStageBToolingInputTreeSha256,
   imageImpactReportFor,
   imageReuseCompatibility,
@@ -11,6 +14,7 @@ import {
   parseStageBImageReuseCliArgs,
   parseStageBClosureMode,
   STAGE_B_IMAGE_REUSE_RULES_VERSION,
+  STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH,
 } from "../aws/validate-stage-b-image-reuse.mjs";
 
 const imageReleaseSha = "a".repeat(40);
@@ -25,7 +29,86 @@ const compatibilityReport = (classifiedChangedFiles) => ({
   comparisonHeadSha256: toolingInputTreeSha256,
   classificationRulesVersion: STAGE_B_IMAGE_REUSE_RULES_VERSION,
   classifiedChangedFiles,
+  trustedToolingOnlyPaths: [],
   imageReuseCompatible: true,
+});
+
+test("the reviewed two-SHA workflow boundary keeps the exact 29bf release image-compatible", () => {
+  const releaseSha = "29bf92a14d5e832575009bd76b16886feff62cbd";
+  const protectedSha = "a37fe2559f15094494122825a7d7365ca1218120";
+  const boundary = assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha });
+  assert.deepEqual(Object.fromEntries(Object.entries(boundary).filter(([key]) => ["file", "category", "imageAffecting"].includes(key))), { file: STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH, category: "trustedToolingOnly", imageAffecting: false });
+  assert.match(boundary.publicationInputFingerprint, /^[a-f0-9]{64}$/);
+  const report = imageImpactReportFor({ imageReleaseSha: releaseSha, toolingSha: protectedSha, toolingInputTreeSha256: "d".repeat(64), changedFiles: [STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH] });
+  assert.deepEqual(report.imageAffectingFiles, []);
+  assert.deepEqual(report.trustedToolingOnlyPaths, [STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH]);
+  assert.equal(report.imageReuseCompatible, true);
+});
+
+test("trusted workflow publication inputs are complete and inherited image inputs fail closed", () => {
+  const releaseSha = "29bf92a14d5e832575009bd76b16886feff62cbd";
+  const protectedSha = "a37fe2559f15094494122825a7d7365ca1218120";
+  const read = (mutate) => (sha) => {
+    const source = execFileSync("git", ["show", `${sha}:${STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH}`], { encoding: "utf8" });
+    return sha === protectedSha ? mutate(source) : source;
+  };
+  for (const [label, replacement] of [
+    ["platform", ["PLATFORMS: linux/amd64", "PLATFORMS: linux/arm64"]],
+    ["backend repository", ["BACKEND_ECR_REPO: mscqr-backend", "BACKEND_ECR_REPO: other-backend"]],
+    ["worker repository", ["WORKER_ECR_REPO: mscqr-worker", "WORKER_ECR_REPO: other-worker"]],
+  ]) assert.throws(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: read((source) => source.replace(...replacement)) }), label);
+  assert.throws(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: read((source) => source.replace("AWS_ACCOUNT_ID: \"368992683803\"", "AWS_ACCOUNT_ID: \"368992683803\"\n      BACKEND_DOCKERFILE: backend/Otherfile")) }), /publication inputs/);
+  assert.throws(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: read((source) => source.replace("AWS_ACCOUNT_ID: \"368992683803\"", "AWS_ACCOUNT_ID: \"368992683803\"\n      BACKEND_BUILD_CONTEXT: changed")) }), /publication inputs/);
+  assert.throws(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: read((source) => source.replace("MIGRATION_SET_DIGEST: ${{ steps.package.outputs.migration_digest }}", "MIGRATION_SET_DIGEST: changed")) }), /publication inputs/);
+  assert.throws(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: read((source) => source.replace("npm ci && npm --prefix backend ci", "npm ci --ignore-scripts && npm --prefix backend ci")) }), /publication inputs|missing/);
+  assert.throws(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: read((source) => source.replace("PLATFORMS: linux/amd64", "PLATFORMS: linux/amd64\n      UNKNOWN_BUILD_FLAG: enabled")) }), /unknown publication-affecting/);
+  assert.throws(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: read((source) => source.replace("      - name: Publish immutable backend, worker, executor, and canary images", "      - name: Unreviewed release-source mutation\n        working-directory: release-source\n        run: printf changed > backend/changed\n      - name: Publish immutable backend, worker, executor, and canary images")) }), /publication inputs/);
+  assert.doesNotThrow(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: read((source) => source.replace("AWS_REGION: eu-west-2", "AWS_REGION: eu-west-2\n      UNRELATED_ENV: ignored")) }));
+  assert.doesNotThrow(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: read((source) => source.replace("sign \"$image_ref\"", "sign \"$image_ref\" # signing-only")) }));
+  assert.doesNotThrow(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: read((source) => source.replace("attest \"$image_ref\" spdxjson", "attest \"$image_ref\" spdxjson # attestation-only")) }));
+});
+
+test("trustedToolingOnly reuse requires the authenticated v3 publication proof", () => {
+  const releaseSha = "29bf92a14d5e832575009bd76b16886feff62cbd";
+  const toolingSha = "a37fe2559f15094494122825a7d7365ca1218120";
+  const result = imageImpactReportFor({ imageReleaseSha: releaseSha, toolingSha, toolingInputTreeSha256: "d".repeat(64), changedFiles: [STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH] });
+  assert.doesNotThrow(() => assertStageBTrustedToolingReuseResult(result));
+  assert.throws(() => assertStageBTrustedToolingReuseResult({ ...result, trustedWorkflowProof: undefined }), /publication proof/);
+  assert.throws(() => assertStageBTrustedToolingReuseResult({ ...result, publicationInputFingerprint: "e".repeat(64) }), /fingerprint/);
+  assert.throws(() => assertStageBTrustedToolingReuseResult({ ...result, classifiedChangedFiles: [{ file: STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH, category: "trustedToolingOnly", imageAffecting: false }, { file: "unknown/build-input", category: "unknown", imageAffecting: false }] }), /unknown/);
+});
+
+test("image-reuse consumers accept only the current rules version", () => {
+  const files = [{ file: "scripts/plan-production-green-stage-b.mjs", category: "toolingOnly", imageAffecting: false }];
+  const report = compatibilityReport(files);
+  assert.equal(imageReuseCompatibility({ imageReleaseSha: imageReleaseSha, toolingSha, currentHead: toolingSha, changedFiles: files, toolingInputTreeSha256, reviewedReport: report }).classificationRulesVersion, STAGE_B_IMAGE_REUSE_RULES_VERSION);
+  for (const classificationRulesVersion of ["stage-b-image-reuse-v2", "stage-b-image-reuse-v4", undefined]) {
+    assert.throws(() => imageReuseCompatibility({ imageReleaseSha, toolingSha, currentHead: toolingSha, changedFiles: files, toolingInputTreeSha256, reviewedReport: { ...report, classificationRulesVersion } }), /rules are stale/);
+  }
+});
+
+test("the two-SHA workflow boundary rejects a release-build command change", () => {
+  const releaseSha = "29bf92a14d5e832575009bd76b16886feff62cbd";
+  const protectedSha = "a37fe2559f15094494122825a7d7365ca1218120";
+  const readWorkflow = (sha) => {
+    const source = execFileSync("git", ["show", `${sha}:${STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH}`], { encoding: "utf8" });
+    return sha === protectedSha ? source.replace("./scripts/aws/publish-ecs-images.sh production-green-stage-b", "./scripts/aws/publish-ecs-images.sh backend") : source;
+  };
+  assert.throws(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: readWorkflow }), /publication inputs/);
+});
+
+test("a stale compatibility report cannot authorize the exact two-SHA release", () => {
+  const releaseSha = "29bf92a14d5e832575009bd76b16886feff62cbd";
+  const protectedSha = "a37fe2559f15094494122825a7d7365ca1218120";
+  const files = [{ file: STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH, category: "trustedToolingOnly", imageAffecting: false }];
+  assert.throws(() => imageReuseCompatibility({
+    imageReleaseSha: releaseSha,
+    toolingSha: protectedSha,
+    currentHead: protectedSha,
+    changedFiles: files,
+    toolingInputTreeSha256,
+    reviewedReport: { ...compatibilityReport(files), imageReleaseSha: "c45f2d788ce29c2067bfb4e8afff46f8b1c238ea", comparisonBaseSha: "c45f2d788ce29c2067bfb4e8afff46f8b1c238ea" },
+  }), /different image release SHA/);
 });
 
 test("non-image-affecting pull-request impact is merge-ready for reviewed reuse", () => {

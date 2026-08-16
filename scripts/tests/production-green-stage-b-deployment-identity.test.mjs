@@ -165,7 +165,7 @@ test("image reuse compatibility binds the reviewed tooling input tree and exact 
   assert.equal(classifyStageBImageReusePath("documents/security/rls-program/notes.md").imageAffecting, false);
   const changedFiles = ["scripts/plan-production-green-stage-b.mjs"];
   const classifiedChangedFiles = [{ file: changedFiles[0], category: "toolingOnly", imageAffecting: false }];
-  const report = { schemaVersion: 2, imageReleaseSha, comparisonBaseSha: imageReleaseSha, comparisonHeadIdentity: "tooling-input-tree-sha256", toolingInputTreeSha256: "d".repeat(64), comparisonHeadSha256: "d".repeat(64), classificationRulesVersion: STAGE_B_IMAGE_REUSE_RULES_VERSION, classifiedChangedFiles, imageReuseCompatible: true };
+  const report = { schemaVersion: 2, imageReleaseSha, comparisonBaseSha: imageReleaseSha, comparisonHeadIdentity: "tooling-input-tree-sha256", toolingInputTreeSha256: "d".repeat(64), comparisonHeadSha256: "d".repeat(64), classificationRulesVersion: STAGE_B_IMAGE_REUSE_RULES_VERSION, classifiedChangedFiles, trustedToolingOnlyPaths: [], imageReuseCompatible: true };
   assert.equal(imageReuseCompatibility({ imageReleaseSha, toolingSha, changedFiles, currentHead: toolingSha, toolingInputTreeSha256: "d".repeat(64), reviewedReport: report }).imageReuseCompatible, true);
   assert.throws(() => imageReuseCompatibility({ imageReleaseSha, toolingSha, changedFiles, currentHead: toolingSha, toolingInputTreeSha256: "d".repeat(64), reviewedReport: { ...report, imageReleaseSha: toolingSha } }), /different image release/);
   assert.throws(() => imageReuseCompatibility({ imageReleaseSha, toolingSha, changedFiles, currentHead: toolingSha, toolingInputTreeSha256: "e".repeat(64), reviewedReport: report }), /different tooling input tree/);

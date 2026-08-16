@@ -1,28 +1,45 @@
 # Stage B image-reuse compatibility
 
-The reviewed comparison is anchored by:
+The reviewed comparison is anchored by the two-SHA image boundary:
 
 ```text
-image release: c45f2d788ce29c2067bfb4e8afff46f8b1c238ea
-tooling:       4e8dcdabf1e7b4ff19b87e7606585b8b627b6f1d
+image release: 29bf92a14d5e832575009bd76b16886feff62cbd
+tooling:       a37fe2559f15094494122825a7d7365ca1218120
 report identity: tooling-input-tree-sha256
-tooling tree:  8a121a50c6cfabef4dec5538d3e49fdcc12027d6af1a61f6acdf5320bcee85bf
+tooling tree:  a2bcf00ea3bbfa636e41843ffb1f17c744fc077c055c772c30aecb2322395802
 ```
 
-The canonical report classifies the comparison files as the compatibility report itself,
-the permission manifest, the permission validator, and the image-reuse/preflight tests. All are
-non-image-affecting, so `imageAffectingFiles` is empty and the existing immutable images
-may be reused by the explicit two-SHA contract. `imageBuildInputsChanged` is false.
-No image rebuild is required for this compatibility transition.
+The canonical report classifies the protected workflow change as
+`trustedToolingOnly` only after proving that the exact release publication step is
+unchanged, the Dockerfile/build context/package installation remain under
+`release-source`, and signing/verification helpers execute from the protected tooling
+checkout. The immutable release source remains `29bf…`; the trusted tooling source is
+separate. All other changed paths must still classify as non-image-affecting, and any
+application, Dockerfile, dependency, build-argument, or unknown change remains
+image-affecting or fail-closed. `imageAffectingFiles` is empty and
+`imageBuildInputsChanged` is false only for this authenticated boundary.
 
 The report contains `comparisonBaseSha` for the image release, the complete classified
 diff, and a SHA256 of the tooling input tree with the JSON and Markdown evidence excluded.
 Those exclusions break the evidence self-reference and make regeneration deterministic. Runtime validation
 recomputes the exact diff and tree digest and requires an exact report match. The
+trusted-workflow proof also fingerprints the complete effective publication inputs: workflow
+inputs, inherited publication environment, release checkout, dependency installation, Node
+setup/cache, AWS publication role, publisher command, working directory, shell, and strategy.
+The proof covers the publisher's image-affecting environment contract, including platform,
+ECR targets, Dockerfiles, build contexts, source/build labels, and verified RLS bindings;
+unknown publication-looking inherited inputs fail closed while unrelated environment values
+remain outside the image publication fingerprint.
+The fingerprint also covers every `build-and-attest` step through immutable-image
+publication; only the two explicitly named trusted-tooling checkout steps are excluded.
+An unreviewed pre-publication step or source mutation therefore fails closed.
+Runtime validation
+recomputes that fingerprint and requires the release and protected-tooling values to match. The
 production wrapper separately authenticates the exact pair by requiring
 `HEAD == tooling_sha == origin/main`; CI review mode validates a proposed tree without
 claiming it is protected main. Any future image-build input change invalidates the report
-and requires a new exact-SHA image publication.
+and requires a new exact-SHA image publication. A stale report for another release SHA
+cannot authorize this release.
 
 ## Publication identity and tag namespaces
 
@@ -44,3 +61,7 @@ canonical artifact-byte hash. A filename, numeric run ID, or caller-supplied wor
 metadata cannot satisfy the evidence boundary. Different tooling and image-release
 SHAs therefore require explicit canonical reuse authorization; same-SHA publications
 retain the direct binding path.
+
+Descendant recovery validates every changed-file category independently. `trustedToolingOnly`
+is an additional authenticated category for the dedicated workflow proof; it does not bypass
+the existing allowlist for other non-image categories.

@@ -25,6 +25,7 @@ import {
   stateSnapshotSha256,
   taskDefinitionFingerprint,
 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
+import { STAGE_B_IMAGE_REUSE_RULES_VERSION, STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH } from "../aws/validate-stage-b-image-reuse.mjs";
 
 const sourceSha = "45c5a38c7e3594793fafe1f051f1f381937ba0d4";
 const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: "25394d30c189583384c9bba62604bf968dc9e0b2" });
@@ -63,7 +64,7 @@ const crossProtectedCheckout = { ...protectedCheckout, toolingSha: executorSha, 
 const crossProvenance = ({ sourceSha: value }) => value === originalIncidentSha
   ? { toolingTreeSha256: originalIncidentTree, sourceContractSha256: bindings.sourceContractSha256 }
   : { toolingTreeSha256: executorTree, sourceContractSha256: bindings.sourceContractSha256 };
-const crossReuse = ({ imageReleaseSha: release, toolingSha: tooling }) => ({ schemaVersion: 1, imageReleaseSha: release, toolingSha: tooling, toolingInputTreeSha256: executorTree, comparisonBaseSha: release, comparisonHeadIdentity: "tooling-input-tree-sha256", comparisonHeadSha256: executorTree, classificationRulesVersion: "stage-b-image-reuse-v2", imageReuseCompatible: true, imageBuildInputsChanged: false, imageAffectingFiles: [], classifiedChangedFiles: [{ file: "scripts/aws/stage-b-task-definition-recovery-contract.mjs", category: "toolingOnly", imageAffecting: false }] });
+const crossReuse = ({ imageReleaseSha: release, toolingSha: tooling }) => ({ schemaVersion: 2, imageReleaseSha: release, toolingSha: tooling, toolingInputTreeSha256: executorTree, comparisonBaseSha: release, comparisonHeadIdentity: "tooling-input-tree-sha256", comparisonHeadSha256: executorTree, classificationRulesVersion: STAGE_B_IMAGE_REUSE_RULES_VERSION, imageReuseCompatible: true, imageBuildInputsChanged: false, imageAffectingFiles: [], trustedToolingOnlyPaths: [STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH], publicationInputFingerprint: "f".repeat(64), trustedWorkflowProof: { schemaVersion: 1, assertion: "STAGE_B_TRUSTED_WORKFLOW_PUBLICATION_INPUTS_V1", workflowPath: STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH, releaseFingerprint: "f".repeat(64), toolingFingerprint: "f".repeat(64), releaseCheckout: "release-source", publisherSource: "release-source", trustedSigningSource: "$GITHUB_WORKSPACE" }, classifiedChangedFiles: [{ file: STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH, category: "trustedToolingOnly", imageAffecting: false }] });
 const journalIdentity = { imageReleaseSha, imageAuthorizationSha256: imageAuthorization.evidenceSha256 };
 const journalAdapter = (initial) => { let value = initial ? structuredClone(initial) : null; return { read: () => value && structuredClone(value), write: (next) => { value = structuredClone(next); } }; };
 const state = (arn = STAGE_B_BACKEND_RECOVERY.predecessorArn, serial = STAGE_B_BACKEND_RECOVERY.serial) => ({
@@ -348,8 +349,13 @@ test("cross-descendant resume rejects identity, ancestry, checkout, authorizatio
     ["changed image authorization", { journalState: { ...crossResumeJournal(), imageAuthorizationSha256: "f".repeat(64) } }],
     ["changed incident identity", { journalState: { ...crossResumeJournal(), incidentIdentity: "f".repeat(64) } }],
     ["unknown checkpoint domain", { journalState: { ...crossResumeJournal(), checkpointHashDomain: "unreviewed" } }],
+    ["forged trusted-tooling proof", { deriveImageReuse: () => ({ ...crossReuse({ imageReleaseSha: crossBindings.imageReleaseSha, toolingSha: executorSha }), trustedWorkflowProof: undefined }) }],
+    ["stale reuse rules", { deriveImageReuse: () => ({ ...crossReuse({ imageReleaseSha: crossBindings.imageReleaseSha, toolingSha: executorSha }), classificationRulesVersion: "stage-b-image-reuse-v2" }) }],
   ];
   for (const [label, overrides] of cases) assert.throws(() => assertCanonicalRecoveryDescendantResume({ ...base, ...overrides }), label);
+  for (const category of ["terraformOnly", "controlPlaneOnly"]) {
+    assert.throws(() => assertCanonicalRecoveryDescendantResume({ ...base, deriveImageReuse: () => ({ ...crossReuse({ imageReleaseSha: crossBindings.imageReleaseSha, toolingSha: executorSha }), classifiedChangedFiles: [{ file: STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH, category: "trustedToolingOnly", imageAffecting: false }, { file: `unrelated/${category}`, category, imageAffecting: false }] }) }), `unreviewed ${category} alongside trusted tooling`);
+  }
 });
 
 test("cross-descendant resume rejects canonical revision, census, budget, and Terraform drift before import", async () => {
