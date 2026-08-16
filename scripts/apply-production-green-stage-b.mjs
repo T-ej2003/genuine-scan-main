@@ -103,7 +103,20 @@ export function parseCli(argv) {
   };
 }
 
-export const stageBApplyArtifactSetIdentity = (bindings) => sha256(Buffer.from(canonicalizeJson(bindings)));
+const STAGE_B_MUTATION_IDENTITY_SHA256_FIELDS = ["savedPlanSha256", "tfvarsSha256", "backendSha256"];
+
+export function stageBApplyArtifactSetIdentity(bindings = {}) {
+  for (const field of STAGE_B_MUTATION_IDENTITY_SHA256_FIELDS) if (!/^[a-f0-9]{64}$/.test(bindings[field] || "")) throw new Error(`Stage B mutation identity ${field} is malformed.`);
+  if (!/^[a-f0-9]{40}$/.test(bindings.protectedMainSha || "")) throw new Error("Stage B mutation identity protectedMainSha is malformed.");
+  if (bindings.workspace !== "default") throw new Error("Stage B mutation identity workspace must be default.");
+  return sha256(Buffer.from(canonicalizeJson({
+    savedPlanSha256: bindings.savedPlanSha256,
+    tfvarsSha256: bindings.tfvarsSha256,
+    protectedMainSha: bindings.protectedMainSha,
+    workspace: bindings.workspace,
+    backendSha256: bindings.backendSha256,
+  })));
+}
 
 export function stageBEffectiveOperatorHome({ userInfo = () => os.userInfo(), fsOps = fs } = {}) {
   let operator;

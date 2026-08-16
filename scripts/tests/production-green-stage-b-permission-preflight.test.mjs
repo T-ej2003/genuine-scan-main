@@ -1964,19 +1964,36 @@ test("interrupted and successful applies leave the canonical artifact set perman
   }
 });
 
-test("artifact-set identity changes only with approved executable bindings", () => {
+test("mutation identity changes only with stable executable bindings", () => {
   const baseline = { protectedMainSha: "a".repeat(40), planSha256: "b".repeat(64), savedPlanSha256: "c".repeat(64), tfvarsSha256: "d".repeat(64), approvalSha256: "e".repeat(64), permissionEvidenceSha256: "f".repeat(64), mutationManifestSha256: "1".repeat(64), workspace: "default", backendSha256: "2".repeat(64) };
   const identity = stageBApplyArtifactSetIdentity(baseline);
   assert.equal(stageBApplyArtifactSetIdentity(structuredClone(baseline)), identity);
-  for (const [field, value] of [["planSha256", "3".repeat(64)], ["mutationManifestSha256", "4".repeat(64)], ["protectedMainSha", "5".repeat(40)]]) {
+  for (const field of ["planSha256", "approvalSha256", "permissionEvidenceSha256", "mutationManifestSha256"]) assert.equal(stageBApplyArtifactSetIdentity({ ...baseline, [field]: "3".repeat(64) }), identity);
+  for (const [field, value] of [["savedPlanSha256", "3".repeat(64)], ["tfvarsSha256", "4".repeat(64)], ["protectedMainSha", "6".repeat(40)], ["backendSha256", "7".repeat(64)]]) {
     assert.notEqual(stageBApplyArtifactSetIdentity({ ...baseline, [field]: value }), identity);
   }
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-attempt-identity-"));
-  const changed = stageBApplyArtifactSetIdentity({ ...baseline, planSha256: "3".repeat(64) });
+  const changed = stageBApplyArtifactSetIdentity({ ...baseline, savedPlanSha256: "3".repeat(64) });
   const firstPath = stageBApplyAttemptPath({ artifactSetIdentity: identity, effectiveOperatorHome: fixture });
   const changedPath = stageBApplyAttemptPath({ artifactSetIdentity: changed, effectiveOperatorHome: fixture });
   assert.equal(path.dirname(firstPath), path.dirname(changedPath));
   assert.notEqual(path.basename(firstPath), path.basename(changedPath));
+});
+
+test("renewed permission evidence cannot create a second mutation right", () => {
+  const fixture = createValidStageBApplyFixture();
+  const first = runApply(validRealApplyInput(fixture));
+  const firstIdentity = first.executableAuditSha256;
+  const report = JSON.parse(fs.readFileSync(fixture.permissionReportPath, "utf8"));
+  report.generatedAt = new Date(Date.now() + 1_000).toISOString();
+  writePermissionPair(fixture.permissionReportPath, fixture.permissionReportSignaturePath, report);
+  fixture.permissionReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportPath)).digest("hex");
+  fixture.permissionReportSignatureSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportSignaturePath)).digest("hex");
+  fs.rmSync(path.join(fixture.directory, ".mscqr"), { recursive: true, force: true });
+  const replay = validRealApplyInput(fixture);
+  assert.throws(() => runApply(replay), /shared apply reservation is already consumed/);
+  assert.equal([...fixture.sharedReservations.keys()][0], firstIdentity);
+  assert.deepEqual(replay.applyCalls, []);
 });
 
 test("effective operator lookup failure blocks Terraform spawn", () => {

@@ -42,7 +42,8 @@ function decision(policies, action, resource, context = {}) {
 }
 
 const { bucketArn, stateArn, lockArn, applyAttemptPrefixArn, legacyWorkspaceArn, legacyWorkspaceLockArn } = STAGE_B_TERRAFORM_BACKEND;
-const applyAttemptArn = applyAttemptPrefixArn.replace("*", `${"a".repeat(64)}.json`);
+const applyAttemptArn = applyAttemptPrefixArn.replaceAll("*", `${"a".repeat(64)}.json`);
+assert.equal(applyAttemptArn.includes("*"), false);
 
 test("the canonical backend policy and manifest are exact and complete", () => {
   assert.equal(assertStageBTerraformBackendPolicy(policy), true);

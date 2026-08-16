@@ -30,8 +30,14 @@ canonical backend, default workspace, canonical tfvars, and the hashes of the
 saved plan, plan JSON, approval, permission evidence, and mutation manifest.
 Ambient `TF_CLI_ARGS` and every `TF_CLI_ARGS_*` key are rejected. Apply consumes
 only the approved saved plan; no target, replace, refresh-only, or re-plan path
-is accepted. The canonical executable-binding SHA256 is also the apply-attempt
-identity. Immediately before Terraform starts, the wrapper resolves the
+is accepted. Fresh approval and permission evidence remain mandatory and are
+revalidated, but their renewable artifact hashes do not mint another mutation
+right. The apply-attempt identity is the canonical hash of the stable saved-plan,
+tfvars, protected-source, backend, and workspace bindings. The mutation manifest
+and all authorization artifacts are still authenticated against that saved plan
+immediately before reservation, but their renewable artifact bytes cannot select
+a new reservation key.
+Immediately before Terraform starts, the wrapper resolves the
 canonical S3 reservation key
 `env:/production/mscqr/production/rls-green/stage-b/apply-attempts/<artifact-set-sha256>.json`
 in the existing production Terraform backend bucket. It uses one conditional
