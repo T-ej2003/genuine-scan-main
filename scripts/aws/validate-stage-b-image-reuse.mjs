@@ -5,7 +5,6 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import yaml from "js-yaml";
 import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -64,60 +63,82 @@ function withoutReleaseWorkingDirectory(source) {
   return source.replace(/\n        working-directory: release-source/g, "");
 }
 
-function workflowStepObject(workflow, predicate, label) {
-  const steps = workflow?.jobs?.["build-and-attest"]?.steps;
-  assert(Array.isArray(steps), "Trusted Stage B workflow steps are missing.");
-  const step = steps.find(predicate);
+function workflowStepBlocks(source) {
+  const blocks = [];
+  let block = [];
+  for (const line of source.split("\n")) {
+    if (/^      - /.test(line)) {
+      if (block.length) blocks.push(block.join("\n"));
+      block = [line];
+    } else if (block.length) block.push(line);
+  }
+  if (block.length) blocks.push(block.join("\n"));
+  return blocks;
+}
+
+function workflowStepBy(source, predicate, label) {
+  const step = workflowStepBlocks(source).find(predicate);
   assert(step, `Trusted Stage B workflow is missing the ${label} step.`);
   return step;
 }
 
-function normalizedRunStep(step) {
-  return {
-    uses: step.uses,
-    with: step.with,
-    run: step.run,
-    shell: step.shell,
-    workingDirectory: step["working-directory"] === "release-source" ? "<release-source>" : step["working-directory"] || "<release-source>",
-  };
+function indentedBlock(source, marker, indent) {
+  const lines = source.split("\n");
+  const index = lines.indexOf(marker);
+  if (index < 0) return "";
+  const block = [];
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    const line = lines[cursor];
+    if (line && new RegExp(`^ {0,${indent}}\\S`).test(line)) break;
+    block.push(line);
+  }
+  return block.join("\n").trimEnd();
 }
 
-function normalizeReleasePath(value) {
-  return typeof value === "string" ? value.replaceAll("release-source/", "").replaceAll("$GITHUB_WORKSPACE/scripts/aws/", "./scripts/aws/").replaceAll('node "./scripts/aws/', "node scripts/aws/").replaceAll('stage-b-release-gate.mjs" ', "stage-b-release-gate.mjs ") : value;
+function parseEnvBlock(block, label) {
+  if (!block) return {};
+  const values = {};
+  for (const line of block.split("\n").filter(Boolean)) {
+    const match = line.match(/^\s{6,10}([A-Z][A-Z0-9_]*)\s*:\s*(.*)$/);
+    assert(match, `Trusted Stage B ${label} environment structure is unsupported.`);
+    values[match[1]] = match[2];
+  }
+  return Object.fromEntries(Object.entries(values).sort(([left], [right]) => left.localeCompare(right)));
 }
 
-function effectivePublicationEnv(workflow, publishStep) {
-  const job = workflow.jobs["build-and-attest"];
-  const values = { ...(workflow.env || {}), ...(job.env || {}), ...(publishStep.env || {}) };
+function normalizeWorkflowText(value) {
+  return value.replaceAll("release-source/", "").replaceAll("\n          path: release-source", "").replaceAll("\n        working-directory: release-source", "").replaceAll("$GITHUB_WORKSPACE/scripts/aws/", "./scripts/aws/").replaceAll('node "./scripts/aws/', "node scripts/aws/").replaceAll('stage-b-release-gate.mjs" ', "stage-b-release-gate.mjs ");
+}
+
+function effectivePublicationEnv(source, publishStep) {
+  const values = { ...parseEnvBlock(indentedBlock(source, "  env:", 2), "workflow"), ...parseEnvBlock(indentedBlock(source, "    env:", 4), "job"), ...parseEnvBlock(indentedBlock(publishStep, "        env:", 8), "publication step") };
   const unknown = Object.keys(values).filter((key) => !PUBLICATION_ENV_KEYS.has(key) && PUBLICATION_ENV_SUSPECT.test(key)).sort();
   assert.equal(unknown.length, 0, `Trusted workflow has unknown publication-affecting environment inputs: ${unknown.join(", ")}`);
   return Object.fromEntries(Object.entries(values).filter(([key]) => PUBLICATION_ENV_KEYS.has(key)).sort(([left], [right]) => left.localeCompare(right)));
 }
 
 export function stageBPublicationInputs(source) {
-  const workflow = yaml.load(source);
-  const job = workflow?.jobs?.["build-and-attest"];
-  assert(job, "Trusted Stage B build job is missing.");
-  const publishStep = workflowStepObject(workflow, (step) => step.name === "Publish immutable backend, worker, executor, and canary images", "image publication");
-  const releaseCheckout = workflowStepObject(workflow, (step) => step.uses === "actions/checkout@v6" && (step.with?.path === "release-source" || step.with?.ref === "${{ inputs.release_sha }}"), "release checkout");
-  const installStep = workflowStepObject(workflow, (step) => typeof step.run === "string" && step.run.includes("npm ci && npm --prefix backend ci"), "release dependency installation");
-  const setupNode = workflowStepObject(workflow, (step) => step.uses === "actions/setup-node@v6", "Node setup");
-  const credentials = workflowStepObject(workflow, (step) => step.uses === "aws-actions/configure-aws-credentials@v6", "AWS credentials");
-  const releaseGate = workflowStepObject(workflow, (step) => step.name === "Require the approved release to be merged into protected main", "release gate");
-  const releaseInput = workflow?.on?.workflow_call?.inputs?.release_sha;
-  assert(releaseInput && releaseInput.required === true && releaseInput.type === "string", "Trusted workflow release_sha input contract is invalid.");
+  const publishStep = workflowStepBy(source, (step) => step.startsWith("      - name: Publish immutable backend, worker, executor, and canary images"), "image publication");
+  const releaseCheckout = workflowStepBy(source, (step) => step.startsWith("      - uses: actions/checkout@v6") && (/ref: \$\{\{ inputs\.release_sha \}\}/.test(step) || /path: release-source/.test(step)), "release checkout");
+  const installStep = workflowStepBy(source, (step) => /npm ci && npm --prefix backend ci/.test(step), "release dependency installation");
+  const setupNode = workflowStepBy(source, (step) => step.startsWith("      - uses: actions/setup-node@v6"), "Node setup");
+  const credentials = workflowStepBy(source, (step) => step.startsWith("      - uses: aws-actions/configure-aws-credentials@v6"), "AWS credentials");
+  const releaseGate = workflowStepBy(source, (step) => step.startsWith("      - name: Require the approved release to be merged into protected main"), "release gate");
+  const inputBlock = indentedBlock(source, "      release_sha:", 6);
+  assert(/required:\s*true/.test(inputBlock) && /type:\s*string/.test(inputBlock), "Trusted workflow release_sha input contract is invalid.");
+  const setupNodeInputs = indentedBlock(setupNode, "        with:", 8).replaceAll("release-source/", "");
   return {
-    workflowInput: { releaseSha: releaseInput },
-    workflowDefaults: workflow.defaults,
-    jobDefaults: job.defaults,
-    jobStrategy: job.strategy,
-    effectiveEnv: effectivePublicationEnv(workflow, publishStep),
-    publicationStep: { ...normalizedRunStep(publishStep), env: publishStep.env || {} },
-    releaseCheckout: { uses: releaseCheckout.uses, with: { ...(releaseCheckout.with || {}), path: "<release-source>" } },
-    installStep: normalizedRunStep(installStep),
-    setupNode: { uses: setupNode.uses, with: Object.fromEntries(Object.entries(setupNode.with || {}).map(([key, value]) => [key, normalizeReleasePath(value)])) },
-    credentials: { uses: credentials.uses, with: credentials.with },
-    releaseGate: { ...normalizedRunStep(releaseGate), run: normalizeReleasePath(normalizedRunStep(releaseGate).run) },
+    workflowInput: inputBlock,
+    workflowDefaults: indentedBlock(source, "  defaults:", 2),
+    jobDefaults: indentedBlock(source, "    defaults:", 4),
+    jobStrategy: indentedBlock(source, "    strategy:", 4),
+    effectiveEnv: effectivePublicationEnv(source, publishStep),
+    publicationStep: normalizeWorkflowText(publishStep),
+    releaseCheckout: normalizeWorkflowText(releaseCheckout),
+    installStep: normalizeWorkflowText(installStep),
+    setupNode: setupNode.replace(indentedBlock(setupNode, "        with:", 8), setupNodeInputs),
+    credentials,
+    releaseGate: normalizeWorkflowText(releaseGate),
   };
 }
 
