@@ -109,6 +109,7 @@ if (mode === "production" || tfvarsPath || bindingReportPath) {
   const recoveryInputs = ["STAGE_B_RECOVERY_ATTESTATION_PATH", "STAGE_B_RECOVERY_ATTESTATION_SHA256", "STAGE_B_RECOVERY_SIGNATURE_PATH", "STAGE_B_RECOVERY_SIGNATURE_SHA256", "STAGE_B_RECOVERY_CLASSIFICATION_PATH", "STAGE_B_RECOVERY_CLASSIFICATION_SHA256"];
   const hasRecoveryInputs = recoveryInputs.some((name) => Boolean(process.env[name]));
   if (partialApplyRecovery && (approvalReport.recoveryAttestationSha256 !== undefined || hasRecoveryInputs)) throw new Error("PARTIAL_APPLY_RECOVERY cannot use RECOVERY_ALIAS_ONLY evidence.");
+  if (Boolean(bindingReport.partialApplyRecovery) !== partialApplyRecovery || (partialApplyRecovery && bindingReport.recoveryMode !== "PARTIAL_APPLY_RECOVERY")) throw new Error("Stage B partial-apply recovery tfvars and approved plan profile disagree.");
   let trustedRecovery = null;
   if (mode === "production") {
     if (approvalReport.recoveryAttestationSha256 && !recoveryInputs.every((name) => Boolean(process.env[name]))) throw new Error("Recovery closure requires all recovery artifacts and hashes.");

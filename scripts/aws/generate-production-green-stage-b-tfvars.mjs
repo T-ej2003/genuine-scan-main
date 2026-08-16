@@ -296,6 +296,18 @@ function assertRecoveryOnlyEvidence({ recovery, state, toolingSha } = {}) {
   return { ...verified, report: attestation, classification, hashes };
 }
 
+function assertPartialApplyRecoveryEvidence({ recovery, state, toolingSha, toolingTreeSha256 } = {}) {
+  if (!recovery || typeof recovery !== "object") throw new Error("Partial-apply recovery mode requires the authenticated observation and refresh artifacts.");
+  for (const [field, label] of [["refreshReportPath", "Partial recovery refresh report"], ["observationBindingPath", "Partial recovery observation binding report"]]) assertAbsoluteFile(recovery[field], label);
+  const refreshBytes = fs.readFileSync(recovery.refreshReportPath); const observationBytes = fs.readFileSync(recovery.observationBindingPath);
+  const refreshReport = JSON.parse(refreshBytes); const observationBinding = JSON.parse(observationBytes);
+  const refreshReportSha256 = sha256(refreshBytes); const observationBindingSha256 = sha256(observationBytes); const stateSha256 = sha256(fs.readFileSync(recovery.stateBackupPath || ""));
+  if (recovery.refreshReportSha256 !== undefined && recovery.refreshReportSha256 !== refreshReportSha256) throw new Error("Partial recovery refresh report SHA256 is caller-selected or stale.");
+  if (recovery.observationBindingSha256 !== undefined && recovery.observationBindingSha256 !== observationBindingSha256) throw new Error("Partial recovery observation binding SHA256 is caller-selected or stale.");
+  if (observationBinding.recoveryOnly !== false || refreshReport.schemaVersion !== 1 || refreshReport.status !== "RESOURCE_DRIFT" || refreshReport.deployablePlan !== false || refreshReport.bindingReportSha256 !== observationBindingSha256 || refreshReport.tfvarsSha256 !== observationBinding.tfvarsSha256 || refreshReport.stageBStateLineage !== state.lineage || refreshReport.stageBStateSerial !== state.serial || refreshReport.stageBStateSha256 !== stateSha256 || refreshReport.toolingSha !== toolingSha || refreshReport.toolingTreeSha256 !== toolingTreeSha256) throw new Error("Partial recovery observation or refresh evidence is not bound to the authenticated serial/state residue.");
+  return { refreshReportSha256, observationBindingSha256, stateSha256, stateLineage: state.lineage, stateSerial: state.serial };
+}
+
 function deriveRecoveryExecutionSecretArns(retained, taskDefinitionArns) {
   const result = {};
   for (const kind of ["backend", "worker", "canary", "read_only_canary"]) {
@@ -451,6 +463,10 @@ export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindi
   if (report.tfvarsSha256 !== sha256(tfvarsBytes)) throw new Error("Stage B tfvars was modified after canonical generation.");
   if (report.recoveryOnly !== undefined && typeof report.recoveryOnly !== "boolean") throw new Error("Stage B tfvars binding recovery-only flag is malformed.");
   if (report.recoveryOnly === undefined) report.recoveryOnly = false;
+  if (report.partialApplyRecovery !== undefined && typeof report.partialApplyRecovery !== "boolean") throw new Error("Stage B tfvars binding partial-recovery flag is malformed.");
+  if (report.partialApplyRecovery === undefined) report.partialApplyRecovery = false;
+  const expectedRecoveryMode = report.recoveryOnly ? "RECOVERY_ALIAS_ONLY" : report.partialApplyRecovery ? "PARTIAL_APPLY_RECOVERY" : "NONE";
+  if (report.recoveryMode !== undefined && report.recoveryMode !== expectedRecoveryMode) throw new Error("Stage B tfvars binding recovery mode is inconsistent.");
   assertBrokerPackageBinding(tfvarsBytes, report);
   assertStageAPrerequisiteBinding(report);
   for (const [key, expected] of [["toolingSha", expectedToolingSha], ["toolingTreeSha256", expectedToolingTreeSha256], ["imageReleaseSha", expectedImageReleaseSha], ["imageEvidenceCanonicalSha256", expectedImageEvidenceSha256]]) if (expected !== undefined && report[key] !== expected) throw new Error(`Stage B tfvars binding report ${key} does not match the current deployment identity.`);
@@ -465,6 +481,10 @@ export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindi
     if (!digestPattern.test(report.recoveryAttestationSha256 || "") || !digestPattern.test(report.recoveryClassificationSha256 || "") || !digestPattern.test(report.recoveryRefreshReportSha256 || "") || report.recoveryStateLineage !== report.stateLineage || report.recoveryStateSerial !== report.stateSerial || report.recoveryDesiredVersion === null || !/^[1-9][0-9]*$/.test(String(report.recoveryDesiredVersion))) throw new Error("Recovery-only tfvars binding report is incomplete or state-unbound.");
     if (!tfvarsBytes.toString("utf8").includes("stage_b_recovery_only = true") || !tfvarsBytes.toString("utf8").includes(`stage_b_recovery_alias_target_version = ${quote(report.recoveryDesiredVersion)}`)) throw new Error("Recovery-only tfvars does not carry the exact attested target binding.");
   }
+  if (report.partialApplyRecovery === true) {
+    if (report.recoveryOnly === true || report.recoveryMode !== "PARTIAL_APPLY_RECOVERY" || !digestPattern.test(report.recoveryRefreshReportSha256 || "") || !digestPattern.test(report.recoveryObservationBindingSha256 || "") || report.recoveryStateLineage !== report.stateLineage || report.recoveryStateSerial !== report.stateSerial) throw new Error("Partial-apply recovery tfvars binding report is incomplete or state-unbound.");
+    if (tfvarsBytes.toString("utf8").includes("stage_b_recovery_only = true")) throw new Error("Partial-apply recovery tfvars cannot use RECOVERY_ALIAS_ONLY inputs.");
+  }
   return report;
 }
 
@@ -476,8 +496,10 @@ function validateTfvarsValues(values) {
   for (const field of ["backend_image", "worker_image", "executor_image", "canary_image", "read_only_canary_image"]) if (!imageUriPattern.test(values[field] || "")) throw new Error(`${field} is not an immutable Stage B image reference.`);
 }
 
-export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, outputPath, bindingReportPath, allowOverwrite = false, recoveryOnly = false, recovery } = {}) {
+export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, outputPath, bindingReportPath, allowOverwrite = false, recoveryOnly = false, partialApplyRecovery = false, recovery } = {}) {
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !digestPattern.test(toolingTreeSha256 || "") || !/^[a-f0-9]{40}$/.test(imageReleaseSha || "")) throw new Error("Tooling, tooling-tree, or image-release identity is malformed.");
+  if (recoveryOnly && partialApplyRecovery) throw new Error("Stage B recovery-only and partial-apply recovery modes are mutually exclusive.");
+  if (recovery && !recoveryOnly && !partialApplyRecovery) throw new Error("Recovery artifacts require an explicit Stage B recovery mode.");
   if (environment !== STAGE_B_EXPECTED_ENVIRONMENT) throw new Error("Stage B tfvars require the production environment.");
   assertAbsoluteFile(imageEvidence, "Image evidence"); assertAbsoluteFile(imageEvidenceSignature, "Image-evidence signature"); assertAbsoluteFile(stateBackup, "State backup"); assertAbsoluteFile(stageAInput, "Stage-A prerequisite input"); assertAbsoluteFile(stageAStateBackup, "Stage-A state backup"); assertAbsoluteFile(brokerPackagePath, "Broker package");
   const brokerPackageStat = fs.lstatSync(brokerPackagePath);
@@ -490,6 +512,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   const images = extractImages(report, imageReleaseSha);
   const state = readJson(stateBackup); const retained = deriveRetainedDefinitions(state);
   const recoveryEvidence = recoveryOnly ? assertRecoveryOnlyEvidence({ recovery, state, toolingSha }) : null;
+  const partialRecoveryEvidence = partialApplyRecovery ? assertPartialApplyRecoveryEvidence({ recovery: { ...recovery, stateBackupPath: stateBackup }, state, toolingSha, toolingTreeSha256 }) : null;
   const recoveryBindings = recoveryOnly ? deriveRecoveryOnlyBindings(state) : null;
   if (recoveryOnly && path.resolve(brokerPackagePath) !== recoveryBindings.packagePath) throw new Error("Recovery-only broker package path must match the current Lambda state filename exactly.");
   if (recoveryOnly && base64Sha256(fs.readFileSync(brokerPackagePath)) !== recoveryBindings.sourceCodeHashBase64) throw new Error("Recovery-only broker package bytes do not match the current Lambda source_code_hash.");
@@ -523,6 +546,8 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
     tfvarsExtension: STAGE_B_TFVARS_EXTENSION,
     generator: STAGE_B_TFVARS_GENERATOR,
     recoveryOnly,
+    partialApplyRecovery,
+    recoveryMode: recoveryOnly ? "RECOVERY_ALIAS_ONLY" : partialApplyRecovery ? "PARTIAL_APPLY_RECOVERY" : "NONE",
     toolingSha, toolingTreeSha256, imageReleaseSha, imageEvidenceCanonicalSha256: evidenceSha256,
     imageEvidenceSource: path.basename(imageEvidence), imageEvidenceSignatureSha256: sha256(fs.readFileSync(imageEvidenceSignature)), stageAInputPath: path.resolve(stageAInput), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stageAStateBackupPath: path.resolve(stageAStateBackup), stageAStateBackupSha256: stageAStateSha256, stageAStateObject: stageAPrerequisiteInput.stageAStateObject, stageAStateLineage: stageAState.lineage, stageAStateSerial: stageAState.serial, stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),
     brokerPackagePath: path.resolve(brokerPackagePath), brokerPackageManifestPath: brokerManifest.path, brokerPackageManifestSha256: brokerManifest.sha256, brokerPackageManifestFormat: brokerManifest.manifest.format, brokerPackageRawSha256: sha256(brokerBytes), brokerPackageBase64Sha256: base64Sha256(brokerBytes), sourceContractSha256: contract.sourceContractSha256, migrationSetDigest: contract.migrationSetDigest, packageChecksumSha256: contract.packageChecksumSha256,
@@ -540,6 +565,12 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
       recoveryBrokerPackageStatePath: recoveryBindings.packagePath,
       recoveryBrokerStateSourceCodeHashBase64: recoveryBindings.sourceCodeHashBase64,
     } : {}),
+    ...(partialApplyRecovery ? {
+      recoveryRefreshReportSha256: partialRecoveryEvidence.refreshReportSha256,
+      recoveryObservationBindingSha256: partialRecoveryEvidence.observationBindingSha256,
+      recoveryStateLineage: partialRecoveryEvidence.stateLineage,
+      recoveryStateSerial: partialRecoveryEvidence.stateSerial,
+    } : {}),
     tfvarsSha256,
   };
   if (Object.values(bindingReport.images).some((image) => image.digestLength !== 71 || image.matchesEvidence !== true)) throw new Error("Stage B image binding report contains an unequal or malformed digest.");
@@ -551,15 +582,21 @@ function requiredOption(argv, option) { const index = argv.indexOf(option); cons
 
 export function parseCli(argv = process.argv.slice(2)) {
   const recoveryOnly = argv.includes("--recovery-only");
+  const partialApplyRecovery = argv.includes("--partial-apply-recovery");
+  if (recoveryOnly && partialApplyRecovery) throw new Error("Stage B recovery-only and partial-apply recovery modes are mutually exclusive.");
   const result = {
     imageEvidence: requiredOption(argv, "--image-evidence"), imageEvidenceSignature: requiredOption(argv, "--image-evidence-signature"), stateBackup: requiredOption(argv, "--state-backup"), stageAInput: requiredOption(argv, "--stage-a-input"), stageAStateBackup: requiredOption(argv, "--stage-a-state-backup"), brokerPackagePath: requiredOption(argv, "--broker-package"),
-    toolingSha: requiredOption(argv, "--tooling-sha"), toolingTreeSha256: requiredOption(argv, "--tooling-tree-sha256"), imageReleaseSha: requiredOption(argv, "--image-release-sha"), workflowRunId: requiredOption(argv, "--workflow-run-id"), canonicalArtifactSha256: requiredOption(argv, "--canonical-artifact-sha256"), environment: requiredOption(argv, "--environment"), outputPath: requiredOption(argv, "--output"), bindingReportPath: requiredOption(argv, "--binding-report"), allowOverwrite: argv.includes("--allow-overwrite"), recoveryOnly,
+    toolingSha: requiredOption(argv, "--tooling-sha"), toolingTreeSha256: requiredOption(argv, "--tooling-tree-sha256"), imageReleaseSha: requiredOption(argv, "--image-release-sha"), workflowRunId: requiredOption(argv, "--workflow-run-id"), canonicalArtifactSha256: requiredOption(argv, "--canonical-artifact-sha256"), environment: requiredOption(argv, "--environment"), outputPath: requiredOption(argv, "--output"), bindingReportPath: requiredOption(argv, "--binding-report"), allowOverwrite: argv.includes("--allow-overwrite"), recoveryOnly, partialApplyRecovery,
   };
   if (recoveryOnly) result.recovery = {
     refreshReportPath: requiredOption(argv, "--refresh-report"), refreshReportSha256: requiredOption(argv, "--refresh-report-sha256"),
     attestationPath: requiredOption(argv, "--recovery-attestation"), attestationSha256: requiredOption(argv, "--recovery-attestation-sha256"),
     signaturePath: requiredOption(argv, "--recovery-signature"), signatureSha256: requiredOption(argv, "--recovery-signature-sha256"),
     classificationPath: requiredOption(argv, "--recovery-classification"), classificationSha256: requiredOption(argv, "--recovery-classification-sha256"),
+  };
+  if (partialApplyRecovery) result.recovery = {
+    refreshReportPath: requiredOption(argv, "--refresh-report"),
+    observationBindingPath: requiredOption(argv, "--refresh-binding-report"),
   };
   return result;
 }

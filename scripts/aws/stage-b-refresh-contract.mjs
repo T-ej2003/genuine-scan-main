@@ -514,11 +514,12 @@ export function assertStageBRecoveryProvenance({ refreshReport, refreshReportSha
   if (!["RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"].includes(recoveryMode)) throw new Error(`Stage B recovery mode is unsupported: ${recoveryMode}`);
   if (recoveryMode === "PARTIAL_APPLY_RECOVERY" && (recoveryClassificationSha256 !== undefined || recoveryAttestationSha256 !== undefined)) throw new Error("PARTIAL_APPLY_RECOVERY cannot use RECOVERY_ALIAS_ONLY evidence.");
   const expectedRecoveryOnly = recoveryMode === "RECOVERY_ALIAS_ONLY";
-  if (recoveryBindingReport.recoveryOnly !== expectedRecoveryOnly) throw new Error(`Stage B ${recoveryMode} planning requires the matching recovery binding report.`);
+  if (recoveryBindingReport.recoveryOnly !== expectedRecoveryOnly || recoveryBindingReport.recoveryMode !== recoveryMode) throw new Error(`Stage B ${recoveryMode} planning requires the matching recovery binding report.`);
   if (!/^[a-f0-9]{64}$/.test(observationBindingReportSha256 || "") || refreshReport.bindingReportSha256 !== observationBindingReportSha256) throw new Error("Stage B refresh evidence is not bound to the selected observation binding report.");
   if (refreshReport.tfvarsSha256 !== observationBindingReport.tfvarsSha256) throw new Error("Stage B refresh evidence is not bound to the selected observation tfvars.");
   if (observationBindingReport.tfvarsSha256 === recoveryBindingReport.tfvarsSha256) throw new Error("Stage B recovery planning requires distinct observation and recovery tfvars bindings.");
   if (recoveryBindingReport.recoveryRefreshReportSha256 !== refreshReportSha256) throw new Error("Stage B recovery binding is bound to a different refresh report.");
+  if (recoveryMode === "PARTIAL_APPLY_RECOVERY" && (recoveryBindingReport.recoveryObservationBindingSha256 !== observationBindingReportSha256 || recoveryBindingReport.recoveryStateLineage !== recoveryBindingReport.stateLineage || recoveryBindingReport.recoveryStateSerial !== recoveryBindingReport.stateSerial)) throw new Error("Stage B partial recovery binding is not bound to the exact observation/state identity.");
   if (recoveryClassificationSha256 !== undefined && recoveryBindingReport.recoveryClassificationSha256 !== recoveryClassificationSha256) throw new Error("Stage B recovery binding is bound to a different recovery classification.");
   if (recoveryAttestationSha256 !== undefined && recoveryBindingReport.recoveryAttestationSha256 !== recoveryAttestationSha256) throw new Error("Stage B recovery binding is bound to a different recovery attestation.");
   for (const field of STAGE_B_SHARED_BINDING_FIELDS) {

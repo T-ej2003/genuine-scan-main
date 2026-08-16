@@ -94,6 +94,39 @@ test("production-shaped inputs generate deterministic private tfvars and binding
   assert.equal(first.bindingReport.tfvarsExtension, ".tfvars");
 });
 
+test("partial-apply recovery is generated from the exact observation and refresh artifacts", () => {
+  const args = input();
+  const normal = generateStageBTfvars(args);
+  const observationPackagePath = path.join(path.dirname(args.outputPath), "observation-broker.zip");
+  fs.copyFileSync(args.brokerPackagePath, observationPackagePath); fs.chmodSync(observationPackagePath, 0o600); fs.copyFileSync(`${args.brokerPackagePath}.manifest.json`, `${observationPackagePath}.manifest.json`); fs.chmodSync(`${observationPackagePath}.manifest.json`, 0o600);
+  const observationPath = path.join(path.dirname(args.outputPath), "observation.binding.json");
+  const observation = generateStageBTfvars({ ...args, brokerPackagePath: observationPackagePath, outputPath: path.join(path.dirname(args.outputPath), "observation.tfvars"), bindingReportPath: observationPath });
+  const refreshPath = path.join(path.dirname(args.outputPath), "partial.refresh.json");
+  const refresh = { schemaVersion: 1, status: "RESOURCE_DRIFT", deployablePlan: false, bindingReportSha256: crypto.createHash("sha256").update(fs.readFileSync(observationPath)).digest("hex"), tfvarsSha256: observation.bindingReport.tfvarsSha256, stageBStateLineage: observation.bindingReport.stateLineage, stageBStateSerial: observation.bindingReport.stateSerial, stageBStateSha256: observation.bindingReport.stateBackupSha256, toolingSha: args.toolingSha, toolingTreeSha256: args.toolingTreeSha256 };
+  fs.writeFileSync(refreshPath, `${JSON.stringify(refresh)}\n`, { mode: 0o600 });
+  let attempt = 0;
+  const partial = (overrides = {}) => { const suffix = attempt++; return generateStageBTfvars({ ...args, outputPath: path.join(path.dirname(args.outputPath), `partial-${suffix}.tfvars`), bindingReportPath: path.join(path.dirname(args.outputPath), `partial-${suffix}.json`), partialApplyRecovery: true, recovery: { refreshReportPath: refreshPath, observationBindingPath: observationPath, ...overrides } }); };
+  const result = partial();
+  assert.equal(result.bindingReport.recoveryMode, "PARTIAL_APPLY_RECOVERY");
+  assert.equal(result.bindingReport.partialApplyRecovery, true);
+  assert.equal(result.bindingReport.recoveryRefreshReportSha256, crypto.createHash("sha256").update(fs.readFileSync(refreshPath)).digest("hex"));
+  assert.equal(result.bindingReport.recoveryObservationBindingSha256, refresh.bindingReportSha256);
+  assert.throws(() => generateStageBTfvars({ ...args, recovery: { refreshReportPath: refreshPath, observationBindingPath: observationPath } }), /explicit Stage B recovery mode/);
+  assert.throws(() => partial({ refreshReportSha256: "0".repeat(64) }), /caller-selected or stale/);
+  const alteredRefreshPath = path.join(path.dirname(args.outputPath), "altered.refresh.json");
+  fs.writeFileSync(alteredRefreshPath, `${JSON.stringify({ ...refresh, status: "NO_CHANGES" })}\n`, { mode: 0o600 });
+  assert.throws(() => partial({ refreshReportPath: alteredRefreshPath }), /not bound to the authenticated serial\/state residue/);
+  fs.writeFileSync(alteredRefreshPath, `${JSON.stringify({ ...refresh, stageBStateSerial: 95 })}\n`, { mode: 0o600 });
+  assert.throws(() => partial({ refreshReportPath: alteredRefreshPath }), /not bound to the authenticated serial\/state residue/);
+  fs.writeFileSync(alteredRefreshPath, `${JSON.stringify({ ...refresh, stageBStateLineage: "0".repeat(36) })}\n`, { mode: 0o600 });
+  assert.throws(() => partial({ refreshReportPath: alteredRefreshPath }), /not bound to the authenticated serial\/state residue/);
+  fs.writeFileSync(alteredRefreshPath, `${JSON.stringify({ ...refresh, toolingSha: "0".repeat(40) })}\n`, { mode: 0o600 });
+  assert.throws(() => partial({ refreshReportPath: alteredRefreshPath }), /not bound to the authenticated serial\/state residue/);
+  assert.throws(() => partial({ observationBindingPath: path.join(path.dirname(args.outputPath), "missing.binding.json") }), /regular non-symlink file/);
+  assert.throws(() => generateStageBTfvars({ ...args, partialApplyRecovery: true, recoveryOnly: true, recovery: { refreshReportPath: refreshPath, observationBindingPath: observationPath } }), /mutually exclusive/);
+  assert.equal(normal.bindingReport.recoveryMode, "NONE");
+});
+
 test("canonical tfvars rejects JSON and ambiguous filenames before output", () => {
   for (const name of ["production.json", "production.tfvars.json", "production"]) {
     const args = input({ outputPath: path.join(tempRoot, name) });

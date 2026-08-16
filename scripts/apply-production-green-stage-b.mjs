@@ -255,6 +255,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   try { assertStageBReleaseCallerArn(callerArn); } catch { throw new Error("Current caller is not the production release-deployer STS assumed-role."); }
   const plan = JSON.parse(planBytes); const audit = JSON.parse(auditBytes);
   if (bindingReport.recoveryOnly !== (approvalReport.planProfile === "RECOVERY_ALIAS_ONLY")) throw new Error("Stage B recovery-only tfvars and approved plan profile disagree.");
+  if (Boolean(bindingReport.partialApplyRecovery) !== partialApplyRecovery || (partialApplyRecovery && bindingReport.recoveryMode !== "PARTIAL_APPLY_RECOVERY")) throw new Error("Stage B partial-apply recovery tfvars and approved plan profile disagree.");
   if (bindingReport.recoveryOnly) {
     if (!trustedRecovery) throw new Error("Recovery-only apply requires verified recovery evidence.");
     assertRecoveryOnlyPlan(plan, trustedRecovery.attestation);
