@@ -1,5 +1,5 @@
 locals {
-  tags                      = merge({ Environment = "production", ManagedBy = "Terraform", Component = "full-rls-green-stage-a" }, var.tags)
+  tags                      = merge({ Environment = "production", ManagedBy = "Terraform", Component = "full-rls-green-stage-a", Stack = "production-green-stage-a" }, var.tags)
   checker_assumer_role_name = "mscqr-production-independent-checker"
   executor_interface_endpoint_services = toset([
     "ecr.api",

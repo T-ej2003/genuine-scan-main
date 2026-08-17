@@ -17,6 +17,11 @@ test("Stage A accepts only the reviewed production receipt bucket", () => {
   assert.match(variables, /mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/);
 });
 
+test("Stage A canonically owns its existing Stack tag", () => {
+  assert.match(source, /tags\s*=\s*merge\(\{[\s\S]*Stack\s*=\s*"production-green-stage-a"/);
+  assert.match(source.match(/resource "aws_kms_key" "root_drop" \{([\s\S]*?)\n\}/)?.[1] || "", /tags\s*=\s*local\.tags/);
+});
+
 test("Stage A keeps checker and protected deployer distinct", () => {
   assert.match(variables, /checker_is_independent_of_release_deployer/);
   assert.match(variables, /!contains\(var\.checker_principal_arns, var\.release_role_arn\)/);
