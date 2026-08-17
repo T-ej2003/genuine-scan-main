@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
 import { assertStageBReferenceAuditFreshness, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
+import { assertStageBMutationInstanceMultisetEqual, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 
@@ -13,6 +13,63 @@ export const STAGE_B_PLAN_APPROVED = "PLAN_APPROVED";
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const STAGE_B_CAPTURE_BROKER_ADDRESSES = ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"];
 export const STAGE_B_PLAN_PROFILES = Object.freeze(["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"]);
+
+const freshImageCurrentClassification = "CURRENT_RUNTIME_TASK_DEFINITION";
+const freshImageDeposedClassification = "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP";
+const mutationInstanceKey = (entry, label) => {
+  if (!entry || typeof entry !== "object" || typeof entry.terraformAddress !== "string" || typeof entry.mutationInstanceIdentity !== "string" || typeof entry.classification !== "string") throw new Error(`Stage B fresh-image reference audit ${label} mutation instance is malformed.`);
+  return JSON.stringify([entry.terraformAddress, entry.mutationInstanceIdentity, entry.classification]);
+};
+
+function assertEmptyRuntimeReferences(entry, label) {
+  const references = entry?.runtimeReferences;
+  if (!references || typeof references !== "object" || Array.isArray(references) || JSON.stringify(Object.keys(references).sort()) !== JSON.stringify(["brokerModes", "pendingTasks", "runningTasks", "services"])) throw new Error(`Stage B fresh-image reference audit ${label} runtime-reference evidence is malformed.`);
+  for (const key of ["services", "runningTasks", "pendingTasks", "brokerModes"]) if (!Array.isArray(references[key]) || references[key].length !== 0) throw new Error(`Stage B fresh-image reference audit ${label} contains a live runtime reference.`);
+}
+
+function assertNoDeposedRuntimeReferences(referenceAudit, deposedArns) {
+  for (const [label, items, arnKey] of [["service", referenceAudit.services, "taskDefinition"], ["RUNNING task", referenceAudit.runningTasks, "taskDefinitionArn"], ["PENDING task", referenceAudit.pendingTasks, "taskDefinitionArn"], ["transitional task", referenceAudit.transitionalTasks, "taskDefinitionArn"]]) {
+    if (!Array.isArray(items)) throw new Error(`Stage B fresh-image reference audit ${label} evidence is missing.`);
+    for (const item of items) {
+      if (!item || typeof item[arnKey] !== "string") throw new Error(`Stage B fresh-image reference audit ${label} observation is malformed.`);
+      if (deposedArns.has(item[arnKey])) throw new Error(`Stage B fresh-image reference audit ${label} references a deposed task definition.`);
+    }
+  }
+  const mappings = referenceAudit.broker?.liveTaskDefinitionMappings;
+  if (!Array.isArray(mappings)) throw new Error("Stage B fresh-image reference audit broker mapping evidence is missing.");
+  for (const mapping of mappings) {
+    if (!mapping || typeof mapping.taskDefinitionArn !== "string") throw new Error("Stage B fresh-image reference audit broker mapping is malformed.");
+    if (deposedArns.has(mapping.taskDefinitionArn)) throw new Error("Stage B fresh-image reference audit broker mapping references a deposed task definition.");
+  }
+}
+
+export function assertStageBFreshImageReferenceAuditBinding(plan, referenceAudit, { terraformConfiguration } = {}) {
+  if (!referenceAudit || typeof referenceAudit !== "object" || Array.isArray(referenceAudit)) throw new Error("Stage B fresh-image reference audit is missing.");
+  const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change?.type === "aws_ecs_task_definition");
+  const currentChanges = taskDefinitionChanges.filter((change) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, change.address) && !Object.hasOwn(change, "deposed"));
+  const deposedChanges = taskDefinitionChanges.filter((change) => Object.hasOwn(change, "deposed"));
+  if (currentChanges.length !== 12 || deposedChanges.length !== 11) throw new Error("Stage B fresh-image reference audit plan partition is not the exact 12-current/11-deposed topology.");
+  for (const change of deposedChanges) if (!isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) throw new Error(`Stage B fresh-image reference audit contains an unexpected deposed task-definition instance: ${change.address}.`);
+  const expectedCurrent = currentChanges.map((change) => ({ terraformAddress: change.address, mutationInstanceIdentity: stageBMutationInstanceIdentity(change), classification: freshImageCurrentClassification }));
+  const expectedDeposed = deposedChanges.map((change) => ({ terraformAddress: change.address, deposed: change.deposed, mutationInstanceIdentity: stageBMutationInstanceIdentity(change), family: STAGE_B_TASK_DEFINITION_FAMILIES[change.address], beforeTaskDefinitionArn: change.change.before.arn, actions: ["delete"], classification: freshImageDeposedClassification, remoteDeletion: false }));
+  const expectedAll = [...expectedCurrent, ...expectedDeposed];
+  const actualAll = referenceAudit.taskDefinitionMutationInstances;
+  const actualDeposed = referenceAudit.deposedTaskDefinitionCleanups;
+  if (!Array.isArray(actualAll) || !Array.isArray(actualDeposed)) throw new Error("Stage B fresh-image reference audit mutation-instance evidence is missing.");
+  assertStageBMutationInstanceMultisetEqual(expectedAll.map((entry) => mutationInstanceKey(entry, "expected")), actualAll.map((entry) => mutationInstanceKey(entry, "audit")), "Stage B fresh-image reference audit mutation instances");
+  assertStageBMutationInstanceMultisetEqual(expectedCurrent.map((entry) => mutationInstanceKey(entry, "expected")), actualAll.filter((entry) => entry?.classification === freshImageCurrentClassification).map((entry) => mutationInstanceKey(entry, "audit")), "Stage B fresh-image reference audit current runtime instances");
+  assertStageBMutationInstanceMultisetEqual(expectedDeposed.map((entry) => mutationInstanceKey(entry, "expected")), actualDeposed.map((entry) => mutationInstanceKey(entry, "audit")), "Stage B fresh-image reference audit deposed cleanups");
+  if (actualAll.length !== expectedAll.length || actualDeposed.length !== expectedDeposed.length || referenceAudit.currentTaskDefinitionReferenceCount !== expectedCurrent.length) throw new Error("Stage B fresh-image reference audit mutation-instance counts do not match the plan.");
+  const deposedArns = new Set();
+  for (const expected of expectedDeposed) {
+    const actual = actualDeposed.find((entry) => entry?.mutationInstanceIdentity === expected.mutationInstanceIdentity);
+    if (!actual || actual.terraformAddress !== expected.terraformAddress || actual.deposed !== expected.deposed || actual.family !== expected.family || actual.beforeTaskDefinitionArn !== expected.beforeTaskDefinitionArn || JSON.stringify(actual.actions) !== JSON.stringify(expected.actions) || actual.classification !== expected.classification || actual.remoteDeletion !== false) throw new Error(`Stage B fresh-image reference audit deposed cleanup does not match the plan: ${expected.terraformAddress}:${expected.deposed}`);
+    assertEmptyRuntimeReferences(actual, `${expected.terraformAddress}:${expected.deposed}`);
+    deposedArns.add(expected.beforeTaskDefinitionArn);
+  }
+  assertNoDeposedRuntimeReferences(referenceAudit, deposedArns);
+  return { currentCount: expectedCurrent.length, deposedCount: expectedDeposed.length, mutationInstanceCount: expectedAll.length };
+}
 
 function assertPartialApplyRecoveryEvidence(report) {
   if (["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(report?.planProfile) && (report.recoveryAttestationSha256 !== undefined || report.recoveryPlan === true)) throw new Error(`${report.planProfile} cannot carry RECOVERY_ALIAS_ONLY attestation evidence.`);
@@ -337,14 +394,17 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
     if (report[name] !== value) throw new Error(`Stage B plan approval report ${name} is not bound to the captured release.`);
   }
   if (report.logicalCanonicalPlanJsonSha256 !== logicalCanonicalPlanJsonSha256) throw new Error("Stage B logical canonical plan hash is not bound to the approved plan.");
-  assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required: true });
+  const boundReferenceAudit = assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required: true });
   if (referenceAuditSha256 !== undefined && report.referenceAuditSha256 !== referenceAuditSha256) throw new Error("Stage B plan approval report reference-audit binding is invalid.");
   if (captureReport.recoveryAttestationSha256 !== referenceAudit?.recoveryAttestationSha256) throw new Error("Stage B reference audit does not inherit the recovery-attestation binding.");
   if (trustedCallerArn !== undefined && referenceAudit?.callerArn !== trustedCallerArn) throw new Error("Stage B reference audit caller does not match the trusted release caller.");
   if (report.referenceAuditCallerArn !== referenceAudit?.callerArn || report.referenceAuditAt !== referenceAudit?.auditedAt) throw new Error("Stage B plan approval report reference-audit identity is incomplete.");
   if (["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION"].includes(report.planProfile) && plan && referenceAudit) assertStageBNormalPlanCompleteness(plan, { referenceAudit, strict: false, terraformConfiguration });
   if (report.planProfile === "PARTIAL_APPLY_RECOVERY" && plan) assertStageBPartialApplyRecoveryPlan(plan);
-  if (report.planProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" && plan) assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraformConfiguration });
+  if (report.planProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" && plan) {
+    assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraformConfiguration });
+    assertStageBFreshImageReferenceAuditBinding(plan, boundReferenceAudit, { terraformConfiguration });
+  }
   assertClassification(report);
   return true;
 }
@@ -376,7 +436,11 @@ export function assertStageBPlanApprovedBinding(report, { approvalReportBytes, a
   });
   if (["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION"].includes(report.planProfile)) assertStageBNormalPlanCompleteness(JSON.parse(planJsonBytes.toString("utf8")), { referenceAudit: boundReferenceAudit, strict: false, terraformConfiguration });
   if (report.planProfile === "PARTIAL_APPLY_RECOVERY") assertStageBPartialApplyRecoveryPlan(JSON.parse(planJsonBytes.toString("utf8")));
-  if (report.planProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY") assertStageBFreshImagePartialApplyRecoveryPlan(JSON.parse(planJsonBytes.toString("utf8")), { terraformConfiguration });
+  if (report.planProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY") {
+    const boundPlan = JSON.parse(planJsonBytes.toString("utf8"));
+    assertStageBFreshImagePartialApplyRecoveryPlan(boundPlan, { terraformConfiguration });
+    assertStageBFreshImageReferenceAuditBinding(boundPlan, boundReferenceAudit, { terraformConfiguration });
+  }
   assertClassification(report);
   return true;
 }

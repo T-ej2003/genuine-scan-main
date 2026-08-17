@@ -26,6 +26,7 @@ import {
   STAGE_B_ACTIVE_BROKER_TASK_DEFINITION_LOCAL_EXPRESSION,
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "../aws/stage-b-reference-audit-contract.mjs";
+import { assertStageBFreshImageReferenceAuditBinding } from "../aws/stage-b-plan-approval-contract.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const planSha256 = "a".repeat(64);
@@ -398,6 +399,13 @@ function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", package
 
 function makeFreshImagePartialApplyReferenceFixture() {
   const fixture = makeAtomicBrokerFixture({ appendOnly: false });
+  fixture.plan.resource_changes.filter((change) => change.type === "aws_ecs_task_definition" && !Object.hasOwn(change, "deposed")).forEach((change) => { change.change.actions = ["create", "delete"]; });
+  const brokerFunction = fixture.plan.resource_changes.find((change) => change.address === "aws_lambda_function.broker");
+  brokerFunction.change.after_unknown = { code_sha256: true, source_code_size: true, last_modified: true, qualified_arn: true, qualified_invoke_arn: true, version: true, environment: [{ variables: true }] };
+  fixture.plan.resource_changes.push(
+    { address: "aws_iam_policy.broker", mode: "managed", type: "aws_iam_policy", change: { actions: ["update"], before: { policy: "old" }, after: {}, after_unknown: { policy: true }, before_sensitive: {}, after_sensitive: {} } },
+    { address: "aws_lambda_alias.reviewed", mode: "managed", type: "aws_lambda_alias", change: { actions: ["update"], before: { name: "reviewed", function_name: STAGE_B.brokerFunctionArn.split(":function:")[1], function_version: "2", routing_config: [] }, after: { name: "reviewed", function_name: STAGE_B.brokerFunctionArn.split(":function:")[1], routing_config: [] }, after_unknown: { function_version: true, routing_config: [] }, before_sensitive: { routing_config: [] }, after_sensitive: { routing_config: [] } } },
+  );
   Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES)
     .filter(([address]) => address !== backendAddress)
     .forEach(([address, family], index) => fixture.plan.resource_changes.push({
@@ -536,6 +544,51 @@ test("fresh-image recovery partitions current runtime instances from reviewed de
   assert.equal(new Set(audit.taskDefinitionMutationInstances.map((entry) => entry.mutationInstanceIdentity)).size, 23);
   assert.equal(audit.deposedTaskDefinitionCleanups.every((entry) => entry.classification === "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP" && entry.remoteDeletion === false), true);
   assert.equal(audit.deposedTaskDefinitionCleanups.every((entry) => Object.values(entry.runtimeReferences).every((references) => references.length === 0)), true);
+});
+
+test("fresh-image approval re-derives the exact reference-audit mutation partition", () => {
+  const fixture = makeFreshImagePartialApplyReferenceFixture();
+  const audit = generate(fixture);
+  assert.deepEqual(assertStageBFreshImageReferenceAuditBinding(fixture.plan, audit, { terraformConfiguration: fixture.options.terraformConfiguration }), { currentCount: 12, deposedCount: 11, mutationInstanceCount: 23 });
+  const rejects = [
+    ["missing deposed cleanup", (candidate) => candidate.deposedTaskDefinitionCleanups.pop()],
+    ["fake deposed cleanup", (candidate) => candidate.deposedTaskDefinitionCleanups.push({ ...candidate.deposedTaskDefinitionCleanups[0], deposed: "deadbeef", mutationInstanceIdentity: candidate.deposedTaskDefinitionCleanups[0].mutationInstanceIdentity.replace(/deposed:[a-f0-9]{8}/, "deposed:deadbeef") })],
+    ["altered deposed identity", (candidate) => { candidate.deposedTaskDefinitionCleanups[0].deposed = "deadbeef"; }],
+    ["duplicate deposed cleanup", (candidate) => candidate.deposedTaskDefinitionCleanups.push(structuredClone(candidate.deposedTaskDefinitionCleanups[0]))],
+    ["missing mutation instance", (candidate) => candidate.taskDefinitionMutationInstances.pop()],
+    ["fake mutation instance", (candidate) => candidate.taskDefinitionMutationInstances.push({ ...candidate.taskDefinitionMutationInstances[0], terraformAddress: "aws_ecs_task_definition.candidate[\"fake\"]" })],
+    ["current converted to deposed", (candidate) => { candidate.taskDefinitionMutationInstances[0].classification = "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP"; }],
+    ["deposed converted to current", (candidate) => { candidate.taskDefinitionMutationInstances.find((entry) => entry.classification === "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP").classification = "CURRENT_RUNTIME_TASK_DEFINITION"; }],
+    ["mutation action changed", (candidate) => { candidate.deposedTaskDefinitionCleanups[0].actions = ["create"]; }],
+    ["mutation classification changed", (candidate) => { candidate.deposedTaskDefinitionCleanups[0].classification = "CURRENT_RUNTIME_TASK_DEFINITION"; }],
+    ["false no-live-reference claim", (candidate) => { candidate.services.push({ taskDefinition: candidate.deposedTaskDefinitionCleanups[0].beforeTaskDefinitionArn }); }],
+    ["prohibited deposed live reference", (candidate) => { candidate.broker.liveTaskDefinitionMappings[0].taskDefinitionArn = candidate.deposedTaskDefinitionCleanups[0].beforeTaskDefinitionArn; }],
+    ["correct counts wrong identities", (candidate) => { candidate.taskDefinitionMutationInstances[0].mutationInstanceIdentity = "wrong"; }],
+    ["correct identities wrong classifications", (candidate) => { candidate.taskDefinitionMutationInstances.find((entry) => entry.classification === "CURRENT_RUNTIME_TASK_DEFINITION").classification = "wrong"; }],
+    ["address-only equivalent identity", (candidate) => { candidate.deposedTaskDefinitionCleanups[0].terraformAddress = backendAddress; }],
+  ];
+  for (const [label, mutate] of rejects) {
+    const candidate = structuredClone(audit);
+    mutate(candidate);
+    assert.throws(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, candidate, { terraformConfiguration: fixture.options.terraformConfiguration }), undefined, label);
+  }
+});
+
+test("fresh-image reference audit reaches the real plan approval validator", () => {
+  const fixture = makeFreshImagePartialApplyReferenceFixture();
+  const audit = generate(fixture);
+  const auditBytes = Buffer.from(JSON.stringify(audit));
+  assert.doesNotThrow(() => assertStageBPlan(fixture.plan, {
+    freshImagePartialApplyRecovery: true,
+    referenceAudit: audit,
+    referenceAuditBytes: auditBytes,
+    referenceAuditSha256: sha256(auditBytes),
+    planJsonBytes: fixture.planBytes,
+    planJsonSha256: fixture.planJsonSha256,
+    terraformConfiguration: fixture.options.terraformConfiguration,
+    trustedCallerArn: callerArn,
+    now,
+  }));
 });
 
 for (const [label, mutatePlan, expected] of [

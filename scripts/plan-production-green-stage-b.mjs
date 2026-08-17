@@ -26,7 +26,7 @@ import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformIniti
 import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBRecoveryProvenance, assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./aws/stage-b-artifact-contract.mjs";
-import { STAGE_B_PLAN_APPROVED, STAGE_B_PLAN_CAPTURED, assertStageBPlanApprovalReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, readStageBPlanEvidence, stageBPlanHashes, writeStageBPlanEvidence } from "./aws/stage-b-plan-approval-contract.mjs";
+import { STAGE_B_PLAN_APPROVED, STAGE_B_PLAN_CAPTURED, assertStageBFreshImageReferenceAuditBinding, assertStageBPlanApprovalReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, readStageBPlanEvidence, stageBPlanHashes, writeStageBPlanEvidence } from "./aws/stage-b-plan-approval-contract.mjs";
 import { assertRecoveryOnlyPlan, assertRecoveryPlanDelta, assertVerifiedStageBRecovery, parseCanonicalTerraformSerialCliText, STAGE_B_PARTIAL_APPLY_RECOVERY_ADDRESS } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
 import { captureStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs";
 import { assertStageBPlanSemanticCompleteness } from "./aws/stage-b-plan-semantic-contract.mjs";
@@ -646,6 +646,7 @@ export function assertStageBPlan(plan, options = {}) {
   const planSemanticCensus = requireSemanticCompleteness ? assertStageBPlanSemanticCompleteness(plan, { terraformConfiguration, recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery }) : undefined;
   if (freshImagePartialApplyRecovery) assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraformConfiguration });
   else if (partialApplyRecovery) assertStageBPartialApplyRecoveryPlan(plan);
+  if (freshImagePartialApplyRecovery && !captureMode && requireReferenceAudit) assertStageBFreshImageReferenceAuditBinding(plan, referenceAudit, { terraformConfiguration });
   const imageBindings = imageEvidence ? assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, planProfile: recoveryOnly ? "RECOVERY_ALIAS_ONLY" : resourceClassification.planProfile, terraformConfiguration }) : undefined;
   if (recoveryOnly) {
     if (plan.variables?.stage_b_recovery_only?.value !== true) throw new Error("Recovery-only validation requires the explicit recovery-only plan variable.");
