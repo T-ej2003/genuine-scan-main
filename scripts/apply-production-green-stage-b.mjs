@@ -179,7 +179,7 @@ export function assertPermissionReport(report, { signatureArtifact, verifySignat
   assertStageBPermissionEvidenceKind(report, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, "plan-bound");
   if (report?.schemaVersion !== 1 || report.status !== "valid") throw new Error("A valid permission-preflight report is required.");
   if (report.purpose !== "saved-plan-authorization") throw new Error("A saved-plan authorization permission report is required.");
-  const permissionProfileBinding = resolveStageBPermissionProfile({ plan, approvedPlanProfile: report.planProfile });
+  const permissionProfileBinding = resolveStageBPermissionProfile({ plan, approvedPlanProfile: report.planProfile, terraformConfiguration: fs.readFileSync(path.join(root, terraformRoot, "main.tf"), "utf8") });
   if (report.permissionProfile !== permissionProfileBinding.permissionProfile) throw new Error("Permission report permission profile is not bound to the approved plan.");
   assertPermissionEvaluationBindings(report, readJson("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json"), { plan, permissionProfile: report.permissionProfile, terraformConfiguration: fs.readFileSync(path.join(root, terraformRoot, "main.tf"), "utf8") });
   if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(report.reportGeneratorCallerArn)) throw new Error("Permission-preflight report generator is not approved.");
@@ -217,11 +217,12 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   const planBytes = fs.readFileSync(planJsonPath); const canonicalPlanJsonBytes = fs.readFileSync(canonicalPlanJsonPath); const approvalReportBytes = fs.readFileSync(planApprovalReportPath); const approvalReport = JSON.parse(approvalReportBytes); const auditBytes = fs.readFileSync(auditPath); const savedPlanBytes = fs.readFileSync(planPath); const permissionReportBytes = fs.readFileSync(permissionReportPath); const permissionReport = JSON.parse(permissionReportBytes); const permissionReportSignatureBytes = fs.readFileSync(permissionReportSignaturePath); const signatureArtifact = JSON.parse(permissionReportSignatureBytes); const imageEvidenceBytes = fs.readFileSync(imageEvidencePath); const imageEvidence = JSON.parse(imageEvidenceBytes); const imageEvidenceSignatureArtifact = JSON.parse(fs.readFileSync(imageEvidenceSignaturePath, "utf8"));
   const recoveryPlan = approvalReport.planProfile === "RECOVERY_ALIAS_ONLY";
   const partialApplyRecovery = approvalReport.planProfile === "PARTIAL_APPLY_RECOVERY";
+  const freshImagePartialApplyRecovery = approvalReport.planProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY";
   if (permissionReport.planProfile !== approvalReport.planProfile) throw new Error("Permission report plan profile is not bound to PLAN_APPROVED.");
-  if ((recoveryPlan || partialApplyRecovery) && (!refreshBindingReportPath || !refreshBindingReportSha256)) throw new Error("Recovery apply requires the original observation binding report and SHA256.");
+  if ((recoveryPlan || partialApplyRecovery || freshImagePartialApplyRecovery) && (!refreshBindingReportPath || !refreshBindingReportSha256)) throw new Error("Recovery apply requires the original observation binding report and SHA256.");
   const recoveryInputs = [recoveryAttestationPath, recoveryAttestationSha256, recoverySignaturePath, recoverySignatureSha256, recoveryClassificationPath, recoveryClassificationSha256];
   const hasRecoveryInputs = recoveryInputs.some((value) => value !== undefined);
-  if (partialApplyRecovery && (approvalReport.recoveryAttestationSha256 !== undefined || hasRecoveryInputs)) throw new Error("PARTIAL_APPLY_RECOVERY cannot use RECOVERY_ALIAS_ONLY evidence.");
+  if ((partialApplyRecovery || freshImagePartialApplyRecovery) && (approvalReport.recoveryAttestationSha256 !== undefined || hasRecoveryInputs)) throw new Error("Partial-apply recovery profiles cannot use RECOVERY_ALIAS_ONLY evidence.");
   let trustedRecovery = null;
   if (approvalReport.recoveryAttestationSha256) {
     if (!recoveryInputs.every((value) => value !== undefined)) throw new Error("Recovery apply requires all recovery artifacts and hashes.");
@@ -232,20 +233,20 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   } else if (hasRecoveryInputs) throw new Error("Recovery artifacts are not valid without a recovery PLAN_APPROVED report.");
   let refreshBindingReport = bindingReport;
   let selectedRefreshBindingSha256 = tfvarsBindingReportSha256;
-  if (recoveryPlan || partialApplyRecovery) {
+  if (recoveryPlan || partialApplyRecovery || freshImagePartialApplyRecovery) {
     assertStageBPrivateFile({ filePath: refreshBindingReportPath, repositoryRoot: root, label: "Stage B observation binding report" });
     const observationBytes = fs.readFileSync(refreshBindingReportPath);
     if (sha256(observationBytes) !== refreshBindingReportSha256) throw new Error("Stage B observation binding report SHA256 does not match the approved digest.");
     refreshBindingReport = JSON.parse(observationBytes);
     const refreshReport = JSON.parse(fs.readFileSync(refreshReportPath));
-    assertStageBRecoveryProvenance({ refreshReport, refreshReportSha256, observationBindingReport: refreshBindingReport, observationBindingReportSha256: refreshBindingReportSha256, recoveryBindingReport: bindingReport, recoveryBindingReportSha256: tfvarsBindingReportSha256, recoveryClassificationSha256, recoveryAttestationSha256, recoveryMode: partialApplyRecovery ? "PARTIAL_APPLY_RECOVERY" : "RECOVERY_ALIAS_ONLY" });
+    assertStageBRecoveryProvenance({ refreshReport, refreshReportSha256, observationBindingReport: refreshBindingReport, observationBindingReportSha256: refreshBindingReportSha256, recoveryBindingReport: bindingReport, recoveryBindingReportSha256: tfvarsBindingReportSha256, recoveryClassificationSha256, recoveryAttestationSha256, recoveryMode: recoveryPlan ? "RECOVERY_ALIAS_ONLY" : freshImagePartialApplyRecovery ? "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" : "PARTIAL_APPLY_RECOVERY" });
     selectedRefreshBindingSha256 = refreshBindingReportSha256;
   }
-  assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport: refreshBindingReport, bindingReportSha256: selectedRefreshBindingSha256, expectedToolingSha: toolingSha, expectedToolingTreeSha256: refreshBindingReport.toolingTreeSha256, expectedTfvarsSha256: refreshBindingReport.tfvarsSha256, expectedImageEvidenceSha256: refreshBindingReport.imageEvidenceCanonicalSha256 || imageEvidenceSha256, expectedStateSha256: refreshBindingReport.stateBackupSha256, allowReviewedResourceDrift: recoveryPlan || partialApplyRecovery || trustedRecovery !== null });
+  assertStageBRefreshEvidence({ refreshReportPath, refreshReportSha256, bindingReport: refreshBindingReport, bindingReportSha256: selectedRefreshBindingSha256, expectedToolingSha: toolingSha, expectedToolingTreeSha256: refreshBindingReport.toolingTreeSha256, expectedTfvarsSha256: refreshBindingReport.tfvarsSha256, expectedImageEvidenceSha256: refreshBindingReport.imageEvidenceCanonicalSha256 || imageEvidenceSha256, expectedStateSha256: refreshBindingReport.stateBackupSha256, allowReviewedResourceDrift: recoveryPlan || partialApplyRecovery || freshImagePartialApplyRecovery || trustedRecovery !== null });
   if (!/^[a-f0-9]{64}$/.test(savedPlanSha256) || sha256(savedPlanBytes) !== savedPlanSha256) throw new Error("Saved Terraform plan SHA256 does not match the approved digest.");
   const parsedAudit = JSON.parse(auditBytes);
   const terraformConfiguration = fs.readFileSync(path.join(root, terraformRoot, "main.tf"), "utf8");
-  assertStageBPlanApprovedBinding(approvalReport, { approvalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, referenceAudit: parsedAudit, referenceAuditBytes: auditBytes, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedRefreshReportSha256: refreshReportSha256, expectedRefreshBindingReportSha256: recoveryPlan || partialApplyRecovery ? refreshBindingReportSha256 : undefined, expectedRecoveryAttestationSha256: trustedRecovery?.attestationSha256, expectedStageBLineage: bindingReport.stateLineage, expectedStageBSerial: bindingReport.stateSerial, terraformConfiguration, now: new Date(now) });
+  assertStageBPlanApprovedBinding(approvalReport, { approvalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, referenceAudit: parsedAudit, referenceAuditBytes: auditBytes, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedRefreshReportSha256: refreshReportSha256, expectedRefreshBindingReportSha256: recoveryPlan || partialApplyRecovery || freshImagePartialApplyRecovery ? refreshBindingReportSha256 : undefined, expectedRecoveryAttestationSha256: trustedRecovery?.attestationSha256, expectedStageBLineage: bindingReport.stateLineage, expectedStageBSerial: bindingReport.stateSerial, terraformConfiguration, now: new Date(now) });
   if (!/^[a-f0-9]{64}$/.test(canonicalPlanJsonSha256)) throw new Error("Canonical plan JSON SHA256 is missing or malformed.");
   if (sha256(planBytes) !== planSha256) throw new Error("Plan JSON SHA256 does not match the approved digest.");
   if (sha256(auditBytes) !== auditSha256) throw new Error("Reference audit SHA256 does not match the approved digest.");
@@ -255,7 +256,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   try { assertStageBReleaseCallerArn(callerArn); } catch { throw new Error("Current caller is not the production release-deployer STS assumed-role."); }
   const plan = JSON.parse(planBytes); const audit = JSON.parse(auditBytes);
   if (bindingReport.recoveryOnly !== (approvalReport.planProfile === "RECOVERY_ALIAS_ONLY")) throw new Error("Stage B recovery-only tfvars and approved plan profile disagree.");
-  if (Boolean(bindingReport.partialApplyRecovery) !== partialApplyRecovery || (partialApplyRecovery && bindingReport.recoveryMode !== "PARTIAL_APPLY_RECOVERY")) throw new Error("Stage B partial-apply recovery tfvars and approved plan profile disagree.");
+  if (Boolean(bindingReport.partialApplyRecovery) !== (partialApplyRecovery || freshImagePartialApplyRecovery) || Boolean(bindingReport.freshImagePartialApplyRecovery) !== freshImagePartialApplyRecovery || ((partialApplyRecovery || freshImagePartialApplyRecovery) && bindingReport.recoveryMode !== (freshImagePartialApplyRecovery ? "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" : "PARTIAL_APPLY_RECOVERY"))) throw new Error("Stage B recovery tfvars and approved plan profile disagree.");
   if (bindingReport.recoveryOnly) {
     if (!trustedRecovery) throw new Error("Recovery-only apply requires verified recovery evidence.");
     assertRecoveryOnlyPlan(plan, trustedRecovery.attestation);
@@ -310,11 +311,12 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
     strictResourceContract: true,
     recoveryOnly: recoveryPlan,
     partialApplyRecovery,
+    freshImagePartialApplyRecovery,
     protectedMainCheckout,
     now: new Date(now),
   });
-  const approvedRotationAddresses = new Set(partialApplyRecovery
-    ? resourceClassification?.classifiedResources?.filter(({ classification }) => classification === "partial-apply-deposed-task-definition-cleanup").map(({ address }) => address) || []
+  const approvedRotationAddresses = new Set(partialApplyRecovery || freshImagePartialApplyRecovery
+    ? resourceClassification?.classifiedResources?.filter(({ classification }) => ["partial-apply-deposed-task-definition-cleanup", "current-task-definition-rotation"].includes(classification)).map(({ address }) => address) || []
     : resourceClassification?.taskDefinitions?.currentRotations?.map((rotation) => rotation.address) || []);
   const deleteChanges = (plan.resource_changes || []).filter((change) => (change.change?.actions || []).includes("delete"));
   if (deleteChanges.length !== approvedRotationAddresses.size || deleteChanges.some((change) => !approvedRotationAddresses.has(change.address))) throw new Error("Stage B apply plan contains a delete action outside the exact task-definition rotation contract.");

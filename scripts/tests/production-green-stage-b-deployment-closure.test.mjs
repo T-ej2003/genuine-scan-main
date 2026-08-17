@@ -97,8 +97,8 @@ test("recovery consumers use the canonical signed verifier, never the unsigned c
     assert.match(source, /assertVerifiedStageBRecovery/);
     assert.doesNotMatch(source, /attestationVerified/);
   }
-  assert.match(apply, /allowReviewedResourceDrift: recoveryPlan \|\| partialApplyRecovery \|\| trustedRecovery !== null/);
-  assert.match(closure, /allowReviewedResourceDrift: recoveryPlan \|\| partialApplyRecovery \|\| trustedRecovery !== null/);
+  assert.match(apply, /allowReviewedResourceDrift: recoveryPlan \|\| partialApplyRecovery \|\| freshImagePartialApplyRecovery \|\| trustedRecovery !== null/);
+  assert.match(closure, /allowReviewedResourceDrift: recoveryPlan \|\| partialApplyRecovery \|\| freshImagePartialApplyRecovery \|\| trustedRecovery !== null/);
   assert.ok(planner.indexOf("assertVerifiedStageBRecovery") < planner.indexOf("allowReviewedResourceDrift: true"));
 });
 

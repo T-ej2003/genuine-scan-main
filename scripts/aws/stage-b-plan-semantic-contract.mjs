@@ -18,6 +18,8 @@ import {
   assertStageBBrokerPublishProviderMetadataRepresentation,
   assertStageBImportedBackendMetadataNormalization,
   assertStageBPartialApplyRecoveryPlan,
+  assertStageBFreshImagePartialApplyRecoveryPlan,
+  STAGE_B_FRESH_IMAGE_PARTIAL_APPLY_RECOVERY,
   isStageBPartialApplyDeposedTaskDefinitionCleanup,
   assertReviewedBrokerTimeoutTransition,
   STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS,
@@ -50,6 +52,7 @@ export const STAGE_B_PLAN_SEMANTIC_PROFILES = Object.freeze({
   BROKER_FUNCTION_PUBLISH_UPDATE: "BROKER_FUNCTION_PUBLISH_UPDATE",
   REVIEWED_RECOVERY_ALIAS_UPDATE: "REVIEWED_RECOVERY_ALIAS_UPDATE",
   PARTIAL_APPLY_RECOVERY: "PARTIAL_APPLY_RECOVERY",
+  FRESH_IMAGE_PARTIAL_APPLY_RECOVERY: STAGE_B_FRESH_IMAGE_PARTIAL_APPLY_RECOVERY,
   BACKEND_ECS_EXEC_POLICY_CREATE: "BACKEND_ECS_EXEC_POLICY_CREATE",
 });
 
@@ -59,6 +62,7 @@ export const STAGE_B_SUPPORTED_PLAN_PROFILES = Object.freeze([
   Object.freeze({ profile: "RECOVERY_ALIAS_ONLY", ecsActions: [], brokerPolicyActions: [["no-op"]], brokerFunctionActions: [["no-op"]], brokerAliasActions: [["update"]], recoveryRequired: true, fixture: "stage-b-partial-apply-recovery-contract.test.mjs" }),
   Object.freeze({ profile: "NO_CHANGE_OR_APPEND_ONLY_RETRY", ecsActions: [["create"], ["no-op"]], brokerPolicyActions: [["create"], ["no-op"]], brokerFunctionActions: [["create"], ["no-op"]], brokerAliasActions: [["create"], ["no-op"]], recoveryRequired: false, fixture: "production-green-stage-b-plan-semantic.test.mjs" }),
   Object.freeze({ profile: "PARTIAL_APPLY_RECOVERY", ecsActions: [["delete"]], brokerPolicyActions: [["no-op"]], brokerFunctionActions: [["update"]], brokerAliasActions: [["update"]], recoveryRequired: true, fixture: "production-green-stage-b-plan-semantic.test.mjs" }),
+  Object.freeze({ profile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", ecsActions: [["create", "delete"]], brokerPolicyActions: [["update"]], brokerFunctionActions: [["update"]], brokerAliasActions: [["update"]], recoveryRequired: true, fixture: "production-green-stage-b-fresh-image-partial-recovery.test.mjs" }),
 ]);
 
 const ECS_ADDRESSES = new Set(Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES));
@@ -1021,8 +1025,8 @@ function assertSensitivePaths(change, kind, paths) {
   return paths;
 }
 
-function classifyResource(change, { terraformConfiguration, partialApplyRecovery = false } = {}) {
-  if (partialApplyRecovery && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) return STAGE_B_PLAN_SEMANTIC_PROFILES.PARTIAL_APPLY_RECOVERY;
+function classifyResource(change, { terraformConfiguration, partialApplyRecovery = false, freshImagePartialApplyRecovery = false } = {}) {
+  if ((partialApplyRecovery || freshImagePartialApplyRecovery) && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) return freshImagePartialApplyRecovery ? STAGE_B_PLAN_SEMANTIC_PROFILES.FRESH_IMAGE_PARTIAL_APPLY_RECOVERY : STAGE_B_PLAN_SEMANTIC_PROFILES.PARTIAL_APPLY_RECOVERY;
   const actions = change?.change?.actions;
   if (ECS_ADDRESSES.has(change?.address) && change.type === "aws_ecs_task_definition" && change.mode === "managed"
     && (change.module === undefined || change.module === null)) {
@@ -1046,7 +1050,11 @@ function classifyResource(change, { terraformConfiguration, partialApplyRecovery
   throw new Error(`UNCLASSIFIED_RESOURCE_ACTION: ${change?.address}`);
 }
 
-function assertBrokerActionProfile(plan, { partialApplyRecovery = false } = {}) {
+function assertBrokerActionProfile(plan, { partialApplyRecovery = false, freshImagePartialApplyRecovery = false, terraformConfiguration } = {}) {
+  if (freshImagePartialApplyRecovery) {
+    assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraformConfiguration });
+    return;
+  }
   if (partialApplyRecovery) {
     assertStageBPartialApplyRecoveryPlan(plan);
     return;
@@ -1063,9 +1071,9 @@ function assertBrokerActionProfile(plan, { partialApplyRecovery = false } = {}) 
   }
 }
 
-function classifyReplacePaths(change, { terraformConfiguration, partialApplyRecovery = false } = {}) {
+function classifyReplacePaths(change, { terraformConfiguration, partialApplyRecovery = false, freshImagePartialApplyRecovery = false } = {}) {
   const paths = change.change?.replace_paths || [];
-  if (partialApplyRecovery && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) return [];
+  if ((partialApplyRecovery || freshImagePartialApplyRecovery) && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) return [];
   if (isEcsInitialCreate(change) && paths.length === 0) return [];
   if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactJson(change.change?.actions, ["update"])) {
     assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
@@ -1112,8 +1120,11 @@ export function censusStageBPlanSemantics(plan, options = {}) {
   for (const change of plan.resource_changes) {
     const actions = change?.change?.actions || [];
     if (exactJson(actions, ["no-op"]) || actions.length === 0) continue;
-    if (seenAddresses.has(change.address)) throw new Error(`UNCLASSIFIED_RESOURCE_ACTION: ${change.address}`);
-    seenAddresses.add(change.address);
+    const deposedCleanup = isStageBPartialApplyDeposedTaskDefinitionCleanup(change);
+    if (!deposedCleanup || !(options.partialApplyRecovery || options.freshImagePartialApplyRecovery)) {
+      if (seenAddresses.has(change.address)) throw new Error(`UNCLASSIFIED_RESOURCE_ACTION: ${change.address}`);
+      seenAddresses.add(change.address);
+    }
     const classification = classifyResource(change, options);
     assertTypedRepresentationEnvelope(change);
     assertBrokerPublishProviderMetadataRepresentation(change);
@@ -1122,10 +1133,10 @@ export function censusStageBPlanSemantics(plan, options = {}) {
         .filter((key) => !exactJson(change.change?.before?.[key], change.change?.after?.[key]));
       if (changedFields.includes("timeout")) assertReviewedBrokerTimeoutTransition(change);
     }
-    if (ECS_ADDRESSES.has(change.address) && !(options.partialApplyRecovery && isStageBPartialApplyDeposedTaskDefinitionCleanup(change))) assertEcsSemanticDomain(change);
+    if (ECS_ADDRESSES.has(change.address) && !((options.partialApplyRecovery || options.freshImagePartialApplyRecovery) && isStageBPartialApplyDeposedTaskDefinitionCleanup(change))) assertEcsSemanticDomain(change);
     assertInitialBrokerEnvironment(change);
     if (isBrokerInitialCreate(change) || isEcsInitialCreate(change)) assertInitialProviderComputedShape(change);
-    const changedPaths = options.partialApplyRecovery && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)
+    const changedPaths = (options.partialApplyRecovery || options.freshImagePartialApplyRecovery) && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)
       ? []
       : diffPaths(change.change?.before, change.change?.after).filter(Boolean).map((path) => ({ path, classification: assertClass(classifyChangedPath(change, path), "CHANGED_PATH") }));
     const afterUnknownPaths = truePaths(change.change?.after_unknown).filter(Boolean).map((path) => ({ path, classification: assertClass(classifyUnknownPath(change, path), "AFTER_UNKNOWN") }));

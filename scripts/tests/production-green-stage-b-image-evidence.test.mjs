@@ -362,6 +362,13 @@ test("recovery alias-only image binding requires zero current task definitions w
   assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan: recoveryPlan, imageEvidence: reportFixture() }), /unsupported/);
 });
 
+test("fresh-image recovery binds current rotations while ignoring reviewed deposed cleanup entries", () => {
+  const plan = imagePlan();
+  plan.resource_changes = plan.resource_changes.map((change) => ({ ...change, change: { ...change.change, actions: ["create", "delete"] } }));
+  for (const change of plan.resource_changes.slice(1)) plan.resource_changes.push({ ...change, deposed: "a".repeat(8), change: { ...change.change, actions: ["delete"], after: null } });
+  assert.doesNotThrow(() => assertStageBPlanImageEvidenceBinding({ plan, imageEvidence: reportFixture(), planProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" }));
+});
+
 test("normal image binding rejects zero or incomplete current task-definition sets", () => {
   for (const plan of [
     imagePlan({ resource_changes: [] }),

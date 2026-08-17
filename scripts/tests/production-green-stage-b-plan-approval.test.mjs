@@ -339,8 +339,8 @@ test("approval is deterministic for unchanged captured artifacts", () => {
 });
 
 test("plan profile and broker operation registries match the emitted Stage B universe", () => {
-  assert.deepEqual(STAGE_B_PLAN_PROFILES, ["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"]);
-  assert.deepEqual(STAGE_B_BROKER_OPERATIONS, ["none", "initial-create", "update", "recovery-alias-only", "partial-apply-recovery"]);
+  assert.deepEqual(STAGE_B_PLAN_PROFILES, ["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"]);
+  assert.deepEqual(STAGE_B_BROKER_OPERATIONS, ["none", "initial-create", "update", "recovery-alias-only", "partial-apply-recovery", "fresh-image-partial-apply-recovery"]);
   assert.throws(() => createStageBPlanCaptureReport({ ...capture, planProfile: "UNREVIEWED" }), /unsupported/);
   assert.throws(() => createStageBPlanApprovalReport({ ...approval, planProfile: "UNREVIEWED" }), /unsupported/);
 });

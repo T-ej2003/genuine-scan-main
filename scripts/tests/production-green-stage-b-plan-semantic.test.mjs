@@ -19,7 +19,7 @@ import {
   STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT,
 } from "../aws/stage-b-provider-semantic-snapshot.mjs";
 import { assertRecoveryPlanDelta } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
-import { assertStageBBrokerFunctionUpdate, classifyStageBPlan, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS } from "../aws/stage-b-deployment-contract.mjs";
+import { assertStageBBrokerFunctionUpdate, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS } from "../aws/stage-b-deployment-contract.mjs";
 import {
   STAGE_B_CANDIDATE_FOR_EACH_REFERENCES,
   STAGE_B_EXECUTOR_FOR_EACH_REFERENCES,
@@ -348,6 +348,19 @@ function partialApplyRecoveryPlan() {
     } else if (change.address === "aws_iam_policy.broker") {
       change.change = { ...change.change, actions: ["no-op"], after: {}, after_unknown: { policy: true } };
     }
+  }
+  return value;
+}
+
+function freshImagePartialApplyRecoveryPlan() {
+  const value = plan();
+  value.variables = Object.fromEntries(["backend_image", "worker_image", "executor_image", "canary_image", "read_only_canary_image"].map((name) => [name, { value: image("a") }]));
+  for (const change of value.resource_changes.filter((item) => item.type === "aws_ecs_task_definition" && item.address !== 'aws_ecs_task_definition.candidate["backend"]')) {
+    const family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address];
+    value.resource_changes.push({
+      address: change.address, deposed: "a".repeat(8), mode: "managed", type: "aws_ecs_task_definition",
+      change: { actions: ["delete"], replace_paths: [], before: { ...change.change.before, family, arn: `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${family}:5`, skip_destroy: true }, after: null },
+    });
   }
   return value;
 }
@@ -725,6 +738,33 @@ test("partial-apply recovery accepts only eleven deposed ECS cleanups plus broke
   }
 });
 
+test("fresh-image partial-apply recovery admits only the reviewed 12 rotations, 11 cleanups, and broker policy/function/alias updates", () => {
+  const value = freshImagePartialApplyRecoveryPlan();
+  const configurationText = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  assert.deepEqual(assertStageBFreshImagePartialApplyRecoveryPlan(value, { terraformConfiguration: configurationText }), {
+    profile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY",
+    currentAddresses: addresses,
+    cleanupAddresses: addresses.filter((address) => address !== 'aws_ecs_task_definition.candidate["backend"]'),
+    brokerAddresses: ["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"],
+  });
+  const classified = classifyStageBPlan(value, { freshImagePartialApplyRecovery: true, terraformConfiguration: configurationText });
+  assert.equal(classified.planProfile, "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY");
+  assert.equal(classified.actionCounts.replacement, 12);
+  assert.equal(classified.actionCounts.destroy, 11);
+  assert.equal(classified.actionCounts.update, 3);
+  const ordinary = structuredClone(value);
+  assert.throws(() => classifyStageBPlan(ordinary, { partialApplyRecovery: true, terraformConfiguration: configurationText }), /partial-apply recovery/);
+  const extra = structuredClone(value);
+  extra.resource_changes.push({ address: "aws_ecs_task_definition.candidate[\"backend\"]", deposed: "b".repeat(8), mode: "managed", type: "aws_ecs_task_definition", change: { actions: ["delete"], before: { family: STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["backend"]'], arn: `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["backend"]']}:5`, skip_destroy: true }, after: null } });
+  assert.throws(() => assertStageBFreshImagePartialApplyRecoveryPlan(extra, { terraformConfiguration: configurationText }), /exact eleven/);
+  for (const deposed of ["a", "abcdefghi", "ABCDEF12"]) {
+    const malformed = structuredClone(value);
+    const cleanup = malformed.resource_changes.find((item) => item.deposed);
+    cleanup.deposed = deposed;
+    assert.throws(() => assertStageBFreshImagePartialApplyRecoveryPlan(malformed, { terraformConfiguration: configurationText }), /exact eleven|deposed/);
+  }
+});
+
 test("baseline initial-create semantics fail closed on action, identity, path, and reference drift", () => {
   const mutateBaseline = (mutator, expected = /UNCLASSIFIED/) => {
     const value = baselinePlan();
@@ -962,7 +1002,7 @@ test("typed Terraform envelope admits exact nulls, false markers, and resolved d
 
 test("supported profile matrix is explicit and includes baseline broker creation", () => {
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES.map(({ profile }) => profile), [
-    "BASELINE_INITIAL_CREATE", "ROLLOVER_RECOVERY", "RECOVERY_ALIAS_ONLY", "NO_CHANGE_OR_APPEND_ONLY_RETRY", "PARTIAL_APPLY_RECOVERY",
+    "BASELINE_INITIAL_CREATE", "ROLLOVER_RECOVERY", "RECOVERY_ALIAS_ONLY", "NO_CHANGE_OR_APPEND_ONLY_RETRY", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY",
   ]);
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerPolicyActions, [["create"]]);
   assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[0].brokerFunctionActions, [["create"]]);
@@ -976,6 +1016,9 @@ test("supported profile matrix is explicit and includes baseline broker creation
     brokerAliasActions: [["update"]],
     recoveryRequired: true,
     fixture: "production-green-stage-b-plan-semantic.test.mjs",
+  });
+  assert.deepEqual(STAGE_B_SUPPORTED_PLAN_PROFILES[5], {
+    profile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", ecsActions: [["create", "delete"]], brokerPolicyActions: [["update"]], brokerFunctionActions: [["update"]], brokerAliasActions: [["update"]], recoveryRequired: true, fixture: "production-green-stage-b-fresh-image-partial-recovery.test.mjs",
   });
 });
 

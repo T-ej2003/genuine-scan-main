@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
-import { assertStageBImportedBackendMetadataNormalization, isStageBPartialApplyDeposedTaskDefinitionCleanup, STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS, STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION } from "./stage-b-deployment-contract.mjs";
+import { assertStageBImportedBackendMetadataNormalization, assertStageBFreshImagePartialApplyRecoveryPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS, STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION } from "./stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
@@ -47,11 +47,12 @@ const STAGE_A_LIVE_EVIDENCE_EVALUATIONS = Object.freeze([
 ]);
 export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${ACCOUNT}:root`]);
 export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
-export const STAGE_B_PERMISSION_PROFILES = Object.freeze(["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"]);
+export const STAGE_B_PERMISSION_PROFILES = Object.freeze(["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"]);
 export const STAGE_B_PERMISSION_PROFILE_CAPABILITIES = Object.freeze({
   NORMAL_STAGE_B_RELEASE: Object.freeze({ requiresTaskDefinitionRegistrationContexts: true }),
   RECOVERY_ALIAS_ONLY: Object.freeze({ requiresTaskDefinitionRegistrationContexts: false }),
   PARTIAL_APPLY_RECOVERY: Object.freeze({ requiresTaskDefinitionRegistrationContexts: false }),
+  FRESH_IMAGE_PARTIAL_APPLY_RECOVERY: Object.freeze({ requiresTaskDefinitionRegistrationContexts: true }),
 });
 
 export function assertStageBPermissionEvidenceKind(report, expectedKind, expectedPhase) {
@@ -127,17 +128,19 @@ export function stageBPermissionProfileCapabilities(profile) {
   return STAGE_B_PERMISSION_PROFILE_CAPABILITIES[profile];
 }
 
-export function resolveStageBPermissionProfile({ plan, approvedPlanProfile, phase = "plan-bound" } = {}) {
+export function resolveStageBPermissionProfile({ plan, approvedPlanProfile, phase = "plan-bound", terraformConfiguration } = {}) {
   const planProfile = approvedPlanProfile || "BASELINE";
   if (!STAGE_B_PLAN_PROFILES.includes(planProfile)) throw new Error(`Stage B approved plan profile is unsupported: ${planProfile}`);
   if (phase === "plan-bound" && !approvedPlanProfile) throw new Error("PLAN_BOUND_PERMISSION requires the approved plan profile.");
   const recoveryOnly = planProfile === "RECOVERY_ALIAS_ONLY";
   const partialRecovery = planProfile === "PARTIAL_APPLY_RECOVERY";
+  const freshImagePartialRecovery = planProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY";
   const recoveryVariable = plan?.variables?.stage_b_recovery_only?.value;
-  if (recoveryOnly !== (recoveryVariable === true) || (partialRecovery && recoveryVariable === true)) throw new Error("Stage B approved plan profile does not match the recovery Terraform input.");
+  if (recoveryOnly !== (recoveryVariable === true) || ((partialRecovery || freshImagePartialRecovery) && recoveryVariable === true)) throw new Error("Stage B approved plan profile does not match the recovery Terraform input.");
+  if (freshImagePartialRecovery) assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraformConfiguration });
   return {
     planProfile,
-    permissionProfile: assertStageBPermissionProfile(recoveryOnly ? "RECOVERY_ALIAS_ONLY" : partialRecovery ? "PARTIAL_APPLY_RECOVERY" : "NORMAL_STAGE_B_RELEASE"),
+    permissionProfile: assertStageBPermissionProfile(recoveryOnly ? "RECOVERY_ALIAS_ONLY" : freshImagePartialRecovery ? "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" : partialRecovery ? "PARTIAL_APPLY_RECOVERY" : "NORMAL_STAGE_B_RELEASE"),
   };
 }
 
@@ -482,7 +485,7 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, per
     || JSON.stringify(report.planCapabilities.required) !== JSON.stringify(project(report.requiredEvaluations))
     || JSON.stringify(report.planCapabilities.forbidden) !== JSON.stringify(project(report.forbiddenEvaluations))) throw new Error("Permission-preflight plan capability manifest is incomplete or stale.");
   const expectedZeroMutationChanges = (plan?.resource_changes || []).flatMap((change) => {
-    if (permissionProfile === "PARTIAL_APPLY_RECOVERY" && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) return [{ address: change.address, classification: "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP", requiredAwsActions: [] }];
+    if (["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(permissionProfile) && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) return [{ address: change.address, classification: "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP", requiredAwsActions: [] }];
     if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(change.change?.actions || []) === JSON.stringify(["update"])) {
       assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });
       return [{ address: change.address, classification: STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION, requiredAwsActions: [] }];
@@ -685,7 +688,7 @@ export function createStageBMutationManifest(plan, manifest, { planProfile, plan
     let classification;
     let requiredPermissions;
     let taskDefinitionPostcondition;
-    if (planProfile === "PARTIAL_APPLY_RECOVERY" && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) {
+    if (["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(planProfile) && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) {
       classification = "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP";
       requiredPermissions = [];
     } else if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(actions, ["update"])) {
@@ -879,7 +882,7 @@ export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = 
     const actions = change.change?.actions || [];
     if (["aws_iam_role_policy.broker", "aws_iam_policy.broker", "aws_iam_role_policy_attachment.broker"].includes(change.address)) assertBrokerManagedPolicyChange(change);
     if (exactActions(actions, ["no-op"])) continue;
-    if (permissionProfile === "PARTIAL_APPLY_RECOVERY" && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) {
+    if (["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(permissionProfile) && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) {
       zeroAwsMutationChanges.push({ address: change.address, classification: "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP", requiredAwsActions: [] });
       coveredChanges.add(change.address);
       continue;
@@ -1125,7 +1128,7 @@ export function runPermissionPreflight({
   if (planBound && (!planApprovalReport || !Buffer.isBuffer(planApprovalReportBytes) || !/^[a-f0-9]{64}$/.test(planApprovalReportSha256 || ""))) throw new Error("PLAN_APPROVED evidence is required before permission preflight.");
   if (planBound && !Buffer.isBuffer(canonicalPlanJsonBytes)) throw new Error("Canonical plan JSON bytes are required for permission preflight.");
   if (planBound) assertStageBPlanApprovedBinding(planApprovalReport, { approvalReportBytes: planApprovalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, referenceAudit, referenceAuditBytes, terraformConfiguration, now: new Date(now) });
-  const permissionProfileBinding = resolveStageBPermissionProfile({ plan, approvedPlanProfile: planApprovalReport?.planProfile, phase });
+  const permissionProfileBinding = resolveStageBPermissionProfile({ plan, approvedPlanProfile: planApprovalReport?.planProfile, phase, terraformConfiguration });
   if (!reportGeneratorCallerArn || !APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(reportGeneratorCallerArn)) throw new Error("Permission preflight generator is not an approved audit/admin principal.");
   if (simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Permission preflight simulated role ARN is not the production release role.");
   const conditionKeyOrigins = sourcePolicyConditionKeyOrigins();
