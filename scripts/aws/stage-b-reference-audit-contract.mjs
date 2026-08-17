@@ -115,11 +115,16 @@ export function normalizeStageBFreshImageRuntimeModel({ plan, audit } = {}) {
     observedMappingsByMode.set(mapping.mode, { mode: mapping.mode, taskDefinitionArn: mapping.taskDefinitionArn, family });
   }
   if (!sameStringSet([...observedMappingsByMode.keys()], STAGE_B_MODES)) throw new Error("Stage B broker live mappings do not cover the canonical mode set.");
-  const currentByBeforeArn = new Map(currentPlanReplacements.map((change) => [change.beforeArn, change]));
-  const currentRolloverModes = [...observedMappingsByMode.values()]
-    .filter((mapping) => currentByBeforeArn.has(mapping.taskDefinitionArn))
-    .map((mapping) => ({ ...mapping, ...currentByBeforeArn.get(mapping.taskDefinitionArn) }));
-  if (new Set(currentRolloverModes.map((item) => item.address)).size !== currentRolloverModes.length || new Set(currentRolloverModes.map((item) => item.mode)).size !== currentRolloverModes.length) throw new Error("Stage B broker live mappings collapse current rollover identities.");
+  const currentByFamily = new Map();
+  for (const change of currentPlanReplacements) currentByFamily.set(change.family, [...(currentByFamily.get(change.family) || []), change]);
+  const currentRolloverModes = STAGE_B_MODES.map((mode) => {
+    const family = canonicalBrokerFamily(mode);
+    const candidates = currentByFamily.get(family) || [];
+    if (candidates.length !== 1) throw new Error(`Stage B canonical broker mode does not bind to exactly one current plan replacement: ${mode}`);
+    const mapping = observedMappingsByMode.get(mode);
+    if (mapping.taskDefinitionArn !== candidates[0].beforeArn) throw new Error(`Stage B canonical broker mapping does not match its authenticated plan predecessor: ${mode}`);
+    return { ...mapping, ...candidates[0] };
+  });
   const deposedCleanups = (plan.resource_changes || []).filter((change) => change?.type === "aws_ecs_task_definition" && Object.hasOwn(change, "deposed"));
   return {
     currentPlanReplacements,

@@ -399,6 +399,18 @@ function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", package
 
 function makeFreshImagePartialApplyReferenceFixture() {
   const fixture = makeAtomicBrokerFixture({ appendOnly: false });
+  fixture.plan.relevant_attributes = [
+    { resource: executorCollectionAddress, attribute: [] },
+    { resource: "aws_ecs_task_definition.candidate", attribute: [] },
+  ];
+  const originalGetFunctionConfiguration = fixture.reader.getFunctionConfiguration;
+  fixture.reader.getFunctionConfiguration = () => {
+    const configuration = originalGetFunctionConfiguration();
+    const taskDefinitions = JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+    for (const mode of STAGE_B_MODES) taskDefinitions[mode] = oldArnFor(familyForMode(mode));
+    configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+    return configuration;
+  };
   fixture.plan.resource_changes.filter((change) => change.type === "aws_ecs_task_definition" && !Object.hasOwn(change, "deposed")).forEach((change) => { change.change.actions = ["create", "delete"]; });
   const brokerFunction = fixture.plan.resource_changes.find((change) => change.address === "aws_lambda_function.broker");
   brokerFunction.change.after_unknown = { code_sha256: true, source_code_size: true, last_modified: true, qualified_arn: true, qualified_invoke_arn: true, version: true, environment: [{ variables: true }] };
@@ -580,6 +592,8 @@ test("fresh-image approval binds every current replacement to complete rollover 
   assert.ok(audit.plannedAtomicBrokerRollovers.length > 0);
   const rolloverEntry = audit.oldTaskDefinitions.find((entry) => entry.brokerReferenceModes.length > 0);
   const rolloverMode = rolloverEntry.brokerReferenceModes[0];
+  const rolloverMapping = audit.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode);
+  const sameFamilyDifferentRevision = (arn, revision) => arn.replace(/:[1-9][0-9]*$/, `:${revision}`);
   const rejects = [
     ["missing current rollover", (candidate) => candidate.oldTaskDefinitions.pop()],
     ["duplicate current rollover", (candidate) => candidate.oldTaskDefinitions.push(structuredClone(candidate.oldTaskDefinitions[0]))],
@@ -622,11 +636,19 @@ test("fresh-image approval binds every current replacement to complete rollover 
     ["missing planned atomic rollover", (candidate) => { candidate.plannedAtomicBrokerRollovers.pop(); }],
     ["altered planned atomic rollover", (candidate) => { candidate.plannedAtomicBrokerRollovers[0].oldTaskDefinitionArn = oldArnFor("wrong-family"); }],
     ["broker mapping wrong predecessor", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).taskDefinitionArn = oldArnFor("wrong-family"); }],
+    ["broker mapping different same-family revision", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).taskDefinitionArn = sameFamilyDifferentRevision(rolloverMapping.taskDefinitionArn, 2); }],
+    ["broker mapping newer same-family revision", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).taskDefinitionArn = sameFamilyDifferentRevision(rolloverMapping.taskDefinitionArn, 999999); }],
+    ["broker mapping absent plan predecessor", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).taskDefinitionArn = sameFamilyDifferentRevision(rolloverMapping.taskDefinitionArn, 777777); }],
     ["broker mapping missing", (candidate) => { candidate.broker.liveTaskDefinitionMappings = candidate.broker.liveTaskDefinitionMappings.filter((mapping) => mapping.mode !== rolloverMode); }],
     ["broker mapping duplicate", (candidate) => { const mapping = candidate.broker.liveTaskDefinitionMappings.find((item) => item.mode === rolloverMode); candidate.broker.liveTaskDefinitionMappings.push(structuredClone(mapping)); }],
     ["broker mapping wrong mode", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).mode = "wrong-mode"; }],
     ["extra mapping for another current predecessor", (candidate) => { candidate.broker.liveTaskDefinitionMappings.push({ mode: "unexpected-mode", taskDefinitionArn: audit.oldTaskDefinitions.find((entry) => entry.brokerReferenceModes.length === 0).oldTaskDefinitionArn }); }],
     ["swapped broker mode mappings", (candidate) => { const first = candidate.broker.liveTaskDefinitionMappings[0]; const second = candidate.broker.liveTaskDefinitionMappings[1]; [first.taskDefinitionArn, second.taskDefinitionArn] = [second.taskDefinitionArn, first.taskDefinitionArn]; }],
+    ["wrong revision plus omitted mode and proof", (candidate) => {
+      candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).taskDefinitionArn = sameFamilyDifferentRevision(rolloverMapping.taskDefinitionArn, 777778);
+      candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).brokerReferenceModes = [];
+      candidate.plannedAtomicBrokerRollovers = candidate.plannedAtomicBrokerRollovers.filter((proof) => proof.mode !== rolloverMode);
+    }],
     ["swapped rollover evidence", (candidate) => {
       const first = candidate.oldTaskDefinitions[0];
       const second = candidate.oldTaskDefinitions[1];
