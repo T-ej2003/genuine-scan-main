@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { readPlanningInputs, runStageBTerraformPlanCommand } from "../plan-production-green-stage-b.mjs";
+import { assertStageBRecoveryProvenance } from "../aws/stage-b-refresh-contract.mjs";
 
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const digest = (character) => character.repeat(64);
@@ -80,11 +81,14 @@ test("partial-apply recovery accepts only explicitly bound resource drift", () =
   const sourceSha = "a".repeat(40);
   const shared = { toolingSha: sourceSha, toolingTreeSha256: digest("b"), imageReleaseSha: "g".repeat(40), imageEvidenceCanonicalSha256: digest("d"), stageAInputSha256: digest("1"), stageAStateBackupSha256: digest("2"), stageAStateObject: "stage-a.tfstate", stageAStateLineage: "stage-a-lineage", stageAStateSerial: 35, stateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stateSerial: 96, stateBackupSha256: digest("e"), sourceContractSha256: digest("3"), migrationSetDigest: digest("4"), packageChecksumSha256: digest("5"), images: { backend: "same" } };
   const observation = { ...shared, recoveryOnly: false, tfvarsSha256: digest("c") };
-  const binding = { ...shared, recoveryOnly: false, partialApplyRecovery: true, recoveryMode: "PARTIAL_APPLY_RECOVERY", tfvarsSha256: digest("6"), recoveryRefreshReportSha256: "0".repeat(64), recoveryObservationBindingSha256: "0".repeat(64), recoveryStateLineage: shared.stateLineage, recoveryStateSerial: shared.stateSerial };
+  const binding = { ...shared, recoveryOnly: false, partialApplyRecovery: true, recoveryMode: "PARTIAL_APPLY_RECOVERY", tfvarsSha256: observation.tfvarsSha256, recoveryRefreshReportSha256: "0".repeat(64), recoveryObservationBindingSha256: "0".repeat(64), recoveryStateLineage: shared.stateLineage, recoveryStateSerial: shared.stateSerial };
   const bindingPath = write("observation.json", observation);
   const refreshPath = write("refresh.json", { status: "RESOURCE_DRIFT", bindingReportSha256: hash(fs.readFileSync(bindingPath)), tfvarsSha256: observation.tfvarsSha256 });
   const actualRefreshSha256 = hash(fs.readFileSync(refreshPath));
   binding.recoveryRefreshReportSha256 = actualRefreshSha256; binding.recoveryObservationBindingSha256 = hash(fs.readFileSync(bindingPath));
+  assert.doesNotThrow(() => assertStageBRecoveryProvenance({ refreshReport: JSON.parse(fs.readFileSync(refreshPath)), refreshReportSha256: actualRefreshSha256, observationBindingReport: observation, observationBindingReportSha256: binding.recoveryObservationBindingSha256, recoveryBindingReport: binding, recoveryBindingReportSha256: digest("f"), recoveryMode: "PARTIAL_APPLY_RECOVERY" }));
+  assert.throws(() => assertStageBRecoveryProvenance({ refreshReport: { ...JSON.parse(fs.readFileSync(refreshPath)), tfvarsSha256: digest("6") }, refreshReportSha256: actualRefreshSha256, observationBindingReport: observation, observationBindingReportSha256: binding.recoveryObservationBindingSha256, recoveryBindingReport: binding, recoveryBindingReportSha256: digest("f"), recoveryMode: "PARTIAL_APPLY_RECOVERY" }), /selected observation tfvars/);
+  assert.throws(() => assertStageBRecoveryProvenance({ refreshReport: JSON.parse(fs.readFileSync(refreshPath)), refreshReportSha256: actualRefreshSha256, observationBindingReport: observation, observationBindingReportSha256: binding.recoveryObservationBindingSha256, recoveryBindingReport: binding, recoveryBindingReportSha256: binding.recoveryObservationBindingSha256, recoveryMode: "PARTIAL_APPLY_RECOVERY" }), /distinct recovery binding/);
   const args = [
     "--binding-report", path.join(directory, "tfvars-binding.json"), "--binding-report-sha256", digest("f"),
     "--refresh-binding-report", bindingPath, "--refresh-binding-report-sha256", hash(fs.readFileSync(bindingPath)),
