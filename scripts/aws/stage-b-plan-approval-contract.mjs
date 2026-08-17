@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { assertStageBCurrentRolloverReferenceBinding, assertStageBReferenceAuditFreshness, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
+import { assertStageBCurrentRolloverReferenceBinding, assertStageBReferenceAuditFreshness, normalizeStageBFreshImageRuntimeModel, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBMutationInstanceMultisetEqual, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
@@ -63,15 +63,15 @@ export function assertStageBFreshImageReferenceAuditBinding(plan, referenceAudit
   if (actualAll.length !== expectedAll.length || actualDeposed.length !== expectedDeposed.length || referenceAudit.currentTaskDefinitionReferenceCount !== expectedCurrent.length) throw new Error("Stage B fresh-image reference audit mutation-instance counts do not match the plan.");
   const currentAuditedEntries = referenceAudit.oldTaskDefinitions;
   if (!Array.isArray(currentAuditedEntries) || currentAuditedEntries.length !== expectedCurrent.length) throw new Error("Stage B fresh-image reference audit current rollover evidence is incomplete.");
+  const runtimeModel = normalizeStageBFreshImageRuntimeModel({ plan, audit: referenceAudit });
   const expectedCurrentAddresses = new Set(currentChanges.map((change) => change.address));
   const actualCurrentAddresses = actualAll.filter((entry) => entry?.classification === freshImageCurrentClassification).map((entry) => entry?.terraformAddress);
   if (new Set(actualCurrentAddresses).size !== actualCurrentAddresses.length || actualCurrentAddresses.some((address) => !expectedCurrentAddresses.has(address))) throw new Error("Stage B fresh-image reference audit current rollover entries are duplicated or unexpected.");
   const expectedAtomicRolloverKeys = [];
   for (const change of currentChanges) {
-    const entry = currentAuditedEntries.find((item) => item?.terraformAddress === change.address);
-    assertStageBCurrentRolloverReferenceBinding({ plan, change, audit: referenceAudit, planJsonSha256, terraformConfiguration });
-    for (const mode of entry.brokerReferenceModes) expectedAtomicRolloverKeys.push(`${change.address}|${mode}`);
+    assertStageBCurrentRolloverReferenceBinding({ plan, change, audit: referenceAudit, planJsonSha256, terraformConfiguration, runtimeModel });
   }
+  for (const rollover of runtimeModel.broker.currentRolloverModes) expectedAtomicRolloverKeys.push(`${rollover.address}|${rollover.mode}`);
   const actualAtomicRolloverKeys = Array.isArray(referenceAudit.plannedAtomicBrokerRollovers)
     ? referenceAudit.plannedAtomicBrokerRollovers.map((entry) => `${entry?.taskDefinitionTerraformAddress}|${entry?.mode}`)
     : [];

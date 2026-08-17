@@ -594,6 +594,11 @@ test("fresh-image approval binds every current replacement to complete rollover 
     ["entry service reference contradicts top level", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).serviceReferences = ["unexpected-service"]; }],
     ["entry running reference contradicts top level", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).runningTaskReferences = ["unexpected-running-task"]; }],
     ["entry pending reference contradicts top level", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).pendingTaskReferences = ["unexpected-pending-task"]; }],
+    ["ACTIVATING predecessor reference", (candidate) => { candidate.transitionalTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "activating-task", lastStatus: "ACTIVATING" }); }],
+    ["DEACTIVATING predecessor reference", (candidate) => { candidate.transitionalTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "deactivating-task", lastStatus: "DEACTIVATING" }); }],
+    ["STOPPING predecessor reference", (candidate) => { candidate.transitionalTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "stopping-task", lastStatus: "STOPPING" }); }],
+    ["canonical broker mode removed from entry", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).brokerReferenceModes = []; }],
+    ["canonical broker mode removed from proof", (candidate) => { candidate.plannedAtomicBrokerRollovers = candidate.plannedAtomicBrokerRollovers.filter((proof) => proof.mode !== rolloverMode); }],
     ["missing planned atomic rollover", (candidate) => { candidate.plannedAtomicBrokerRollovers.pop(); }],
     ["altered planned atomic rollover", (candidate) => { candidate.plannedAtomicBrokerRollovers[0].oldTaskDefinitionArn = oldArnFor("wrong-family"); }],
     ["broker mapping wrong predecessor", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).taskDefinitionArn = oldArnFor("wrong-family"); }],
@@ -601,6 +606,7 @@ test("fresh-image approval binds every current replacement to complete rollover 
     ["broker mapping duplicate", (candidate) => { const mapping = candidate.broker.liveTaskDefinitionMappings.find((item) => item.mode === rolloverMode); candidate.broker.liveTaskDefinitionMappings.push(structuredClone(mapping)); }],
     ["broker mapping wrong mode", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).mode = "wrong-mode"; }],
     ["extra mapping for another current predecessor", (candidate) => { candidate.broker.liveTaskDefinitionMappings.push({ mode: "unexpected-mode", taskDefinitionArn: audit.oldTaskDefinitions.find((entry) => entry.brokerReferenceModes.length === 0).oldTaskDefinitionArn }); }],
+    ["swapped broker mode mappings", (candidate) => { const first = candidate.broker.liveTaskDefinitionMappings[0]; const second = candidate.broker.liveTaskDefinitionMappings[1]; [first.taskDefinitionArn, second.taskDefinitionArn] = [second.taskDefinitionArn, first.taskDefinitionArn]; }],
     ["swapped rollover evidence", (candidate) => {
       const first = candidate.oldTaskDefinitions[0];
       const second = candidate.oldTaskDefinitions[1];
