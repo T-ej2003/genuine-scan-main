@@ -498,7 +498,7 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, per
   if (expectedZeroMutationChanges.length > 0
     ? JSON.stringify(report.planCapabilities.zeroAwsMutationChanges) !== JSON.stringify(expectedZeroMutationChanges)
     : report.planCapabilities.zeroAwsMutationChanges !== undefined && JSON.stringify(report.planCapabilities.zeroAwsMutationChanges) !== "[]") throw new Error("Permission-preflight zero-AWS-mutation classification is incomplete or stale.");
-  if (plan && capabilities.requiresTaskDefinitionRegistrationContexts) assertTaskDefinitionRegistrationContexts(plan, manifest, { terraformConfiguration });
+  if (plan && capabilities.requiresTaskDefinitionRegistrationContexts) assertTaskDefinitionRegistrationContexts(plan, manifest, { permissionProfile, terraformConfiguration });
   if (plan) {
     const expectedMutationInstances = deriveRequiredEvaluations(plan, manifest, { permissionProfile, contextRegistry, conditionKeyOrigins, terraformConfiguration }).coveredChanges;
     if (JSON.stringify(report.planCapabilities.mutationInstances) !== JSON.stringify(expectedMutationInstances)) throw new Error("Permission-preflight mutation-instance coverage is incomplete or stale.");
@@ -815,8 +815,9 @@ function contextFromTaskDefinitionPlan(change, manifestMapping) {
   return context;
 }
 
-export function assertTaskDefinitionRegistrationContexts(plan, manifest, { terraformConfiguration } = {}) {
+export function assertTaskDefinitionRegistrationContexts(plan, manifest, { permissionProfile = "NORMAL_STAGE_B_RELEASE", terraformConfiguration } = {}) {
   validateManifest(manifest);
+  const allowsReviewedDeposedCleanup = permissionProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY";
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
   const importedBackendUpdates = changes.filter((change) => change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(change.change?.actions, ["update"]));
   if (importedBackendUpdates.length > 1) throw new Error("Selected plan contains duplicate imported backend normalization changes.");
@@ -824,6 +825,15 @@ export function assertTaskDefinitionRegistrationContexts(plan, manifest, { terra
   if (importedBackendNormalization) assertStageBImportedBackendMetadataNormalization(importedBackendUpdates[0], { terraformConfiguration });
   const taskDefinitionChanges = changes.filter((change) => change.type === "aws_ecs_task_definition");
   const registrations = taskDefinitionChanges.filter((change) => exactActions(change.change?.actions, ["create"]) || isStageBTaskDefinitionRotationActionsValue(change.change?.actions));
+  const reviewedDeposedCleanups = taskDefinitionChanges.filter((change) => allowsReviewedDeposedCleanup && isStageBPartialApplyDeposedTaskDefinitionCleanup(change));
+  if (allowsReviewedDeposedCleanup) {
+    const expectedCleanupAddresses = new Set(TASK_DEFINITION_MAPPINGS.filter(({ address }) => address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS).map(({ address }) => address));
+    const actualCleanupAddresses = new Set(reviewedDeposedCleanups.map(({ address }) => address));
+    if (reviewedDeposedCleanups.length !== expectedCleanupAddresses.size || actualCleanupAddresses.size !== expectedCleanupAddresses.size
+      || [...expectedCleanupAddresses].some((address) => !actualCleanupAddresses.has(address))) {
+      throw new Error("Fresh-image recovery must contain exactly one reviewed deposed cleanup for each non-backend task-definition address.");
+    }
+  }
   const allowedMetadataChange = (change) => importedBackendNormalization && change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(change.change?.actions, ["update"]);
   const allowedNoOp = (change) => {
     if (!exactActions(change.change?.actions, ["no-op"])) return false;
@@ -831,7 +841,7 @@ export function assertTaskDefinitionRegistrationContexts(plan, manifest, { terra
     const retained = change.address?.match(/^(aws_ecs_task_definition\.(candidate|executor))_retained\["[a-f0-9]+-([^"]+)"\]$/);
     return Boolean(retained && TASK_DEFINITION_MAPPINGS.some((mapping) => mapping.address === `${retained[1]}["${retained[3]}"]`));
   };
-  if (taskDefinitionChanges.some((change) => !registrations.includes(change) && !allowedMetadataChange(change) && !allowedNoOp(change))) throw new Error("Selected plan contains an unreviewed task-definition change.");
+  if (taskDefinitionChanges.some((change) => !registrations.includes(change) && !reviewedDeposedCleanups.includes(change) && !allowedMetadataChange(change) && !allowedNoOp(change))) throw new Error("Selected plan contains an unreviewed task-definition change.");
   const requiredMappings = importedBackendNormalization
     ? manifest.taskDefinitionMappings.filter((mapping) => mapping.address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS)
     : manifest.taskDefinitionMappings;
