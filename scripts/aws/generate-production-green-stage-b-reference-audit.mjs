@@ -17,7 +17,7 @@ import {
   STAGE_B_BROKER_TASK_DEFINITION_REFERENCE,
 } from "./stage-b-reference-audit-contract.mjs";
 import { batch, createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
-import { assertStageBImportedBackendMetadataNormalization, classifyStageBPlan, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
+import { assertStageBImportedBackendMetadataNormalization, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
@@ -86,14 +86,46 @@ function normalizeEnvironment(config) {
   return requireObject(variables, "broker Lambda environment variables");
 }
 
+function partitionTaskDefinitionMutationInstances(plan) {
+  const changes = requireArray(plan?.resource_changes, "Terraform plan resource_changes")
+    .filter((item) => item?.type === "aws_ecs_task_definition");
+  const current = [];
+  const deposed = [];
+  const currentAddresses = new Set();
+  const deposedAddresses = new Set();
+  const deposedIdentities = new Set();
+  for (const change of changes) {
+    if (Object.hasOwn(change, "deposed")) {
+      if (!isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) {
+        throw new Error(`Terraform plan contains an unexpected or malformed deposed task-definition cleanup: ${change.address}`);
+      }
+      const identity = stageBMutationInstanceIdentity(change);
+      if (deposedIdentities.has(identity) || deposedAddresses.has(change.address)) {
+        throw new Error(`Terraform plan contains a duplicate deposed task-definition cleanup: ${change.address}`);
+      }
+      deposedIdentities.add(identity);
+      deposedAddresses.add(change.address);
+      deposed.push(change);
+      continue;
+    }
+    if (currentAddresses.has(change.address)) {
+      throw new Error(`Terraform plan contains a duplicate current task-definition instance: ${change.address}`);
+    }
+    currentAddresses.add(change.address);
+    current.push(change);
+  }
+  return { current, deposed };
+}
+
 function planTaskDefinitions(plan, terraformConfiguration) {
-  const changes = requireArray(plan?.resource_changes, "Terraform plan resource_changes");
+  const { current: currentTaskDefinitionChanges, deposed: deposedTaskDefinitionChanges } = partitionTaskDefinitionMutationInstances(plan);
+  const currentPlan = { ...plan, resource_changes: currentTaskDefinitionChanges };
   const seenFamilies = new Set();
   const rolloverByAddress = new Map();
   const createOnlyByAddress = new Map();
   const noOpByAddress = new Map();
   const retainedByAddress = new Map();
-  for (const change of changes.filter((item) => item?.type === "aws_ecs_task_definition")) {
+  for (const change of currentTaskDefinitionChanges) {
     const address = change.address;
     const before = change.change?.before || {};
     const after = change.change?.after || {};
@@ -138,7 +170,7 @@ function planTaskDefinitions(plan, terraformConfiguration) {
       continue;
     }
     if (isStageBTaskDefinitionRotationActionsValue(actions)) {
-      const rollover = assertStageBTaskDefinitionRotation(change, plan, { strict: true });
+      const rollover = assertStageBTaskDefinitionRotation(change, currentPlan, { strict: true });
       rolloverByAddress.set(address, { ...rollover, proposedFamily: after.family });
       continue;
     }
@@ -163,7 +195,7 @@ function planTaskDefinitions(plan, terraformConfiguration) {
   const retainedArnSet = new Set(retainedArns);
   for (const entry of noOpByAddress.values()) {
     if (rolloverByAddress.size === 0 && !entry.importedMetadata) {
-      const validated = assertStageBCurrentTaskDefinitionNoOp(entry.change, plan, retainedArnSet);
+      const validated = assertStageBCurrentTaskDefinitionNoOp(entry.change, currentPlan, retainedArnSet);
       entry.priorArn = validated.arn;
       entry.currentArn = validated.currentArn;
     }
@@ -172,7 +204,18 @@ function planTaskDefinitions(plan, terraformConfiguration) {
   for (const [family, entries] of retainedByFamily) {
     newestRetainedByFamily.set(family, [...entries].sort((left, right) => right.revision - left.revision)[0]);
   }
-  return { rolloverByAddress, createOnlyByAddress, noOpByAddress, retainedByAddress, retainedByFamily, newestRetainedByFamily, retainedArnSet };
+  return {
+    rolloverByAddress,
+    createOnlyByAddress,
+    noOpByAddress,
+    retainedByAddress,
+    retainedByFamily,
+    newestRetainedByFamily,
+    retainedArnSet,
+    currentTaskDefinitionChanges,
+    currentRuntimeTaskDefinitionChanges: currentTaskDefinitionChanges.filter((change) => currentAddressForRetained(change.address) === undefined),
+    deposedTaskDefinitionChanges,
+  };
 }
 
 function ensurePlanHash(planBytes, expectedPlanSha256) {
@@ -488,6 +531,8 @@ export function generateReferenceAudit({
     retainedByFamily,
     newestRetainedByFamily,
     retainedArnSet,
+    currentRuntimeTaskDefinitionChanges,
+    deposedTaskDefinitionChanges,
   } = planTaskDefinitions(plan, terraformConfiguration);
   const currentManagedByAddress = currentManagedTaskDefinitionPredecessors(plan);
   for (const rollover of rolloverByAddress.values()) {
@@ -549,6 +594,26 @@ export function generateReferenceAudit({
   const serviceReferences = referenceNames(stageBServices, oldArns, "taskDefinition", "serviceName");
   const runningReferences = referenceNames(stageBRunningTasks, oldArns, "taskDefinitionArn", "taskArn");
   const pendingReferences = referenceNames(stageBPendingTasks, oldArns, "taskDefinitionArn", "taskArn");
+  const deposedTaskDefinitionCleanups = deposedTaskDefinitionChanges.map((change) => {
+    const beforeArn = change.change?.before?.arn;
+    const identity = familyFromArn(beforeArn, `${change.address} deposed task definition`);
+    return {
+      terraformAddress: change.address,
+      deposed: change.deposed,
+      mutationInstanceIdentity: stageBMutationInstanceIdentity(change),
+      family: identity.family,
+      beforeTaskDefinitionArn: identity.arn,
+      actions: [...change.change.actions],
+      classification: "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP",
+      remoteDeletion: false,
+      runtimeReferences: { services: [], runningTasks: [], pendingTasks: [], brokerModes: [] },
+    };
+  });
+  const deposedArns = new Set(deposedTaskDefinitionCleanups.map((entry) => entry.beforeTaskDefinitionArn));
+  for (const [items, arnKey, nameKey] of [[stageBServices, "taskDefinition", "serviceName"], [stageBRunningTasks, "taskDefinitionArn", "taskArn"], [stageBPendingTasks, "taskDefinitionArn", "taskArn"]]) {
+    for (const item of items) if (deposedArns.has(item[arnKey])) throw new Error(`Deposed task definition remains referenced by ${nameKey}: ${item[arnKey]}`);
+  }
+  for (const arn of deposedArns) if (brokerReferencesByArn.has(arn)) throw new Error(`Deposed task definition remains referenced by the broker: ${arn}`);
   assertStageBLiveReferences(stageBServices, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinition", "serviceName");
   assertStageBLiveReferences(stageBRunningTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
   assertStageBLiveReferences(stageBPendingTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
@@ -633,6 +698,13 @@ export function generateReferenceAudit({
       : "not-referenced-by-broker-v1",
   }));
   const retainedAuditByAddress = new Map(retainedAuditEntries.map((entry) => [entry.terraformAddress, entry]));
+  const currentTaskDefinitionMutationInstances = currentRuntimeTaskDefinitionChanges.map((change) => ({
+    terraformAddress: change.address,
+    mutationInstanceIdentity: stageBMutationInstanceIdentity(change),
+    classification: "CURRENT_RUNTIME_TASK_DEFINITION",
+  }));
+  const taskDefinitionMutationInstances = [...currentTaskDefinitionMutationInstances, ...deposedTaskDefinitionCleanups.map(({ terraformAddress, mutationInstanceIdentity, classification }) => ({ terraformAddress, mutationInstanceIdentity, classification }))]
+    .sort((left, right) => left.mutationInstanceIdentity.localeCompare(right.mutationInstanceIdentity));
 
   return {
     schemaVersion: STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
@@ -658,11 +730,14 @@ export function generateReferenceAudit({
       .map((entry) => retainedAuditByAddress.get(entry.address)),
     createOnlyTaskDefinitions,
     noOpTaskDefinitions,
+    taskDefinitionMutationInstances,
+    deposedTaskDefinitionCleanups,
     currentTaskDefinitions: {
       currentCreates: createOnlyTaskDefinitions.length,
       currentNoOps: noOpTaskDefinitions.length,
       total: createOnlyTaskDefinitions.length + noOpTaskDefinitions.length + oldDefinitions.filter((entry) => entry.classification === "rollover").length,
     },
+    currentTaskDefinitionReferenceCount: currentTaskDefinitionMutationInstances.length,
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
     planJsonSha256: planSha,

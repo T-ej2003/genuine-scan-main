@@ -396,6 +396,26 @@ function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", package
   });
 }
 
+function makeFreshImagePartialApplyReferenceFixture() {
+  const fixture = makeAtomicBrokerFixture({ appendOnly: false });
+  Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES)
+    .filter(([address]) => address !== backendAddress)
+    .forEach(([address, family], index) => fixture.plan.resource_changes.push({
+      address,
+      deposed: `${String(index + 1).padStart(7, "0")}a`,
+      mode: "managed",
+      type: "aws_ecs_task_definition",
+      change: {
+        actions: ["delete"],
+        before: { family, arn: oldArnFor(family).replace(":1", ":5"), skip_destroy: true },
+        after: null,
+      },
+    }));
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
+}
+
 function makeBrokerLagRetryFixture(mode = "full-rls-admin-bootstrap") {
   const address = taskDefinitionAddressForMode(mode);
   const fixture = makeAtomicBrokerFixture({ mode, brokerActions: ["update"] });
@@ -505,7 +525,48 @@ test("missing expected family fails closed", () => {
 
 test("duplicate family fails closed", () => {
   const fixture = makeFixture({ mutatePlan: (plan) => plan.resource_changes.push(structuredClone(plan.resource_changes[0])) });
-  assert.throws(() => generate(fixture), /duplicate Stage B task-definition family/);
+  assert.throws(() => generate(fixture), /duplicate current task-definition instance/);
+});
+
+test("fresh-image recovery partitions current runtime instances from reviewed deposed cleanups", () => {
+  const audit = generate(makeFreshImagePartialApplyReferenceFixture());
+  assert.equal(audit.currentTaskDefinitionReferenceCount, 12);
+  assert.equal(audit.deposedTaskDefinitionCleanups.length, 11);
+  assert.equal(audit.taskDefinitionMutationInstances.length, 23);
+  assert.equal(new Set(audit.taskDefinitionMutationInstances.map((entry) => entry.mutationInstanceIdentity)).size, 23);
+  assert.equal(audit.deposedTaskDefinitionCleanups.every((entry) => entry.classification === "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP" && entry.remoteDeletion === false), true);
+  assert.equal(audit.deposedTaskDefinitionCleanups.every((entry) => Object.values(entry.runtimeReferences).every((references) => references.length === 0)), true);
+});
+
+for (const [label, mutatePlan, expected] of [
+  ["malformed deposed identity", (fixture) => { fixture.plan.resource_changes.find((change) => Object.hasOwn(change, "deposed")).deposed = "bad!"; }, /unexpected or malformed deposed/],
+  ["duplicate deposed identity", (fixture) => { const cleanup = fixture.plan.resource_changes.find((change) => Object.hasOwn(change, "deposed")); fixture.plan.resource_changes.push(structuredClone(cleanup)); }, /duplicate deposed/],
+  ["unexpected deposed instance", (fixture) => { const cleanup = fixture.plan.resource_changes.find((change) => Object.hasOwn(change, "deposed")); cleanup.address = 'aws_ecs_task_definition.candidate["unknown"]'; }, /unknown Stage B task-definition family or address|unexpected or malformed deposed/],
+  ["current instance classified as deposed", (fixture) => { const current = fixture.plan.resource_changes.find((change) => change.address === backendAddress); current.deposed = "deadbeef"; }, /unexpected or malformed deposed/],
+  ["duplicate current instance", (fixture) => { const current = fixture.plan.resource_changes.find((change) => change.address === backendAddress); fixture.plan.resource_changes.push(structuredClone(current)); }, /duplicate current task-definition instance/],
+]) {
+  test(`fresh-image reference partition rejects ${label}`, () => {
+    const fixture = makeFreshImagePartialApplyReferenceFixture();
+    mutatePlan(fixture);
+    fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+    fixture.planJsonSha256 = sha256(fixture.planBytes);
+    assert.throws(() => generate(fixture), expected);
+  });
+}
+
+test("fresh-image reference audit rejects a deposed task definition that remains runtime-referenced", () => {
+  const fixture = makeFreshImagePartialApplyReferenceFixture();
+  const deposed = fixture.plan.resource_changes.find((change) => Object.hasOwn(change, "deposed"));
+  fixture.reader.listServices = () => [serviceArnFor(0)];
+  fixture.reader.describeServices = () => ({ services: [serviceRecord(serviceArnFor(0), 0, deposed.change.before.arn)], failures: [] });
+  const describeTaskDefinition = fixture.reader.describeTaskDefinition;
+  fixture.reader.describeTaskDefinition = (reference) => {
+    const response = describeTaskDefinition(reference);
+    response.taskDefinition.taskDefinitionArn = reference;
+    response.taskDefinition.revision = Number(reference.split(":").at(-1));
+    return response;
+  };
+  assert.throws(() => generate(fixture), /Deposed task definition remains referenced/);
 });
 
 for (const [label, mutateReader, expected] of [
