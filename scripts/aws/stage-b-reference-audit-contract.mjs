@@ -582,7 +582,7 @@ export function assertStageBCurrentRolloverReferenceBinding({ plan, change, audi
   const observedReferences = model.ecs.referencesByTaskDefinitionArn.get(beforeArn) || { services: [], runningTasks: [], pendingTasks: [], transitionalTasks: [] };
   assertCurrentPredecessorReferences({ address: change.address, entry, observed: observedReferences });
   const rollbackIdentity = currentTaskDefinitionArnPattern.exec(entry.rollbackArn || "");
-  if (!rollbackIdentity || rollbackIdentity[1] !== expectedFamily) throw new Error(`Stage B rollback ARN is missing or malformed: ${change.address}`);
+  if (!rollbackIdentity || rollbackIdentity[1] !== expectedFamily || entry.rollbackArn !== beforeArn) throw new Error(`Stage B rollback ARN is not the authenticated current predecessor: ${change.address}`);
   const brokerModes = Array.isArray(entry.brokerReferenceModes) ? entry.brokerReferenceModes : undefined;
   const atomicRollovers = Array.isArray(audit.plannedAtomicBrokerRollovers) ? audit.plannedAtomicBrokerRollovers : undefined;
   const liveMappings = audit.broker?.liveTaskDefinitionMappings;

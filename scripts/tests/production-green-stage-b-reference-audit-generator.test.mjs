@@ -591,6 +591,7 @@ test("fresh-image approval binds every current replacement to complete rollover 
   const audit = generate(fixture);
   assert.ok(audit.plannedAtomicBrokerRollovers.length > 0);
   const rolloverEntry = audit.oldTaskDefinitions.find((entry) => entry.brokerReferenceModes.length > 0);
+  const secondRolloverEntry = audit.oldTaskDefinitions.find((entry) => entry.terraformAddress !== rolloverEntry.terraformAddress);
   const rolloverMode = rolloverEntry.brokerReferenceModes[0];
   const rolloverMapping = audit.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode);
   const sameFamilyDifferentRevision = (arn, revision) => arn.replace(/:[1-9][0-9]*$/, `:${revision}`);
@@ -654,7 +655,18 @@ test("fresh-image approval binds every current replacement to complete rollover 
       const second = candidate.oldTaskDefinitions[1];
       [first.oldTaskDefinitionArn, second.oldTaskDefinitionArn] = [second.oldTaskDefinitionArn, first.oldTaskDefinitionArn];
     }],
-    ["mutation identity preserved but reference falsified", (candidate) => { candidate.oldTaskDefinitions[0].rollbackArn = oldArnFor("wrong-family"); }],
+    ["rollback different same-family revision", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn = sameFamilyDifferentRevision(rolloverEntry.rollbackArn, 2); }],
+    ["rollback newer same-family revision", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn = sameFamilyDifferentRevision(rolloverEntry.rollbackArn, 999999); }],
+    ["rollback wrong current predecessor", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn = secondRolloverEntry.rollbackArn; }],
+    ["rollback deposed revision", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn = audit.deposedTaskDefinitionCleanups[0].beforeTaskDefinitionArn; }],
+    ["rollback revision absent from plan", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn = sameFamilyDifferentRevision(rolloverEntry.rollbackArn, 777777); }],
+    ["rollback missing", (candidate) => { delete candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn; }],
+    ["rollback swapped between current entries", (candidate) => {
+      const first = candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress);
+      const second = candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === secondRolloverEntry.terraformAddress);
+      [first.rollbackArn, second.rollbackArn] = [second.rollbackArn, first.rollbackArn];
+    }],
+    ["rollback wrong family", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn = oldArnFor("wrong-family"); }],
     ["correct counts with wrong rollover identity", (candidate) => { candidate.oldTaskDefinitions[0].terraformAddress = candidate.oldTaskDefinitions[1].terraformAddress; }],
     ["stale audit plan binding", (candidate) => { candidate.planJsonSha256 = "f".repeat(64); }],
   ];
