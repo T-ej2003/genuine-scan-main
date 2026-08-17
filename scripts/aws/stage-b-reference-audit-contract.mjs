@@ -469,6 +469,45 @@ export function assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, broker
   assertTerraformDependencyCoversAddress({ relevantAttributes: relevant, expectedResourceAddress: taskDefinitionAddress });
 }
 
+export function assertStageBCurrentRolloverReferenceBinding({ plan, change, audit, planJsonSha256, terraformConfiguration } = {}) {
+  const expectedFamily = STAGE_B_TASK_DEFINITION_FAMILIES[change?.address];
+  if (!expectedFamily || change?.type !== "aws_ecs_task_definition") throw new Error(`Stage B rollover identity is outside the exact current task-definition contract: ${change?.address}`);
+  const rotation = assertStageBTaskDefinitionRotation(change, plan, { strict: true });
+  const beforeArn = change.change?.before?.arn || change.change?.before?.id;
+  if (!beforeArn || beforeArn !== rotation.oldArn) throw new Error(`Stage B old task-definition ARN rejected: ${change.address}`);
+  const entry = (audit?.oldTaskDefinitions || []).find((item) => item?.terraformAddress === change.address);
+  if (!entry || entry.oldTaskDefinitionArn !== beforeArn || entry.classification !== "rollover") throw new Error(`Stage B reference audit rollover entry is missing or mismatched: ${change.address}`);
+  if (entry.family !== expectedFamily || entry.proposedFamily !== expectedFamily || entry.sameFamilyAsReplacement !== true) throw new Error(`Stage B reference audit family mismatch: ${change.address}`);
+  if (JSON.stringify(entry.replacePaths) !== JSON.stringify(STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS)) throw new Error(`Stage B reference audit replace path mismatch: ${change.address}`);
+  for (const [field, value] of [["serviceReferences", entry.serviceReferences], ["runningTaskReferences", entry.runningTaskReferences], ["pendingTaskReferences", entry.pendingTaskReferences]]) {
+    if (!Array.isArray(value) || value.length !== 0) throw new Error(`Stage B ${field} contains a live reference: ${change.address}`);
+  }
+  const rollbackIdentity = currentTaskDefinitionArnPattern.exec(entry.rollbackArn || "");
+  if (!rollbackIdentity || rollbackIdentity[1] !== expectedFamily) throw new Error(`Stage B rollback ARN is missing or malformed: ${change.address}`);
+  const brokerModes = Array.isArray(entry.brokerReferenceModes) ? entry.brokerReferenceModes : undefined;
+  const atomicRollovers = Array.isArray(audit.plannedAtomicBrokerRollovers) ? audit.plannedAtomicBrokerRollovers : undefined;
+  if (!brokerModes || !atomicRollovers) throw new Error(`Stage B atomic broker rollover evidence is missing: ${change.address}`);
+  const atomicForChange = atomicRollovers.filter((item) => item?.taskDefinitionTerraformAddress === change.address);
+  if (brokerModes.length === 0) {
+    if (atomicForChange.length !== 0 || entry.brokerReferenceStatus === "planned-atomic-broker-rollover-v1") throw new Error(`Stage B atomic broker rollover is unexpected: ${change.address}`);
+    return rotation;
+  }
+  if (entry.brokerReferenceStatus !== "planned-atomic-broker-rollover-v1" || audit.allOldRevisionsUnreferenced !== false || atomicForChange.length !== brokerModes.length) throw new Error(`Stage B atomic broker rollover proof is incomplete: ${change.address}`);
+  for (const mode of brokerModes) {
+    const matches = atomicForChange.filter((item) => item?.mode === mode);
+    if (matches.length !== 1) throw new Error(`Stage B atomic broker rollover mode is missing or duplicated: ${change.address}:${mode}`);
+    const proof = matches[0];
+    assertStageBAtomicBrokerPlan(plan, change.address, mode, terraformConfiguration);
+    if (proof.brokerTerraformAddress !== STAGE_B_BROKER_TERRAFORM_ADDRESS
+      || proof.taskDefinitionArnReference !== `${change.address}.arn`
+      || proof.brokerEnvironmentReference !== STAGE_B_BROKER_TASK_DEFINITION_REFERENCE
+      || proof.family !== expectedFamily
+      || proof.oldTaskDefinitionArn !== beforeArn
+      || proof.planJsonSha256 !== planJsonSha256) throw new Error(`Stage B atomic broker rollover proof does not match the plan: ${change.address}`);
+  }
+  return rotation;
+}
+
 function brokerResource(plan) {
   return configuredResources(plan?.configuration?.root_module)
     .find((resource) => resource.address === STAGE_B_BROKER_TERRAFORM_ADDRESS);

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { assertStageBReferenceAuditFreshness, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
+import { assertStageBCurrentRolloverReferenceBinding, assertStageBReferenceAuditFreshness, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBMutationInstanceMultisetEqual, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
@@ -43,8 +43,9 @@ function assertNoDeposedRuntimeReferences(referenceAudit, deposedArns) {
   }
 }
 
-export function assertStageBFreshImageReferenceAuditBinding(plan, referenceAudit, { terraformConfiguration } = {}) {
+export function assertStageBFreshImageReferenceAuditBinding(plan, referenceAudit, { terraformConfiguration, planJsonSha256 } = {}) {
   if (!referenceAudit || typeof referenceAudit !== "object" || Array.isArray(referenceAudit)) throw new Error("Stage B fresh-image reference audit is missing.");
+  if (!/^[a-f0-9]{64}$/.test(planJsonSha256 || "") || referenceAudit.planJsonSha256 !== planJsonSha256) throw new Error("Stage B fresh-image reference audit is bound to a different plan JSON.");
   const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change?.type === "aws_ecs_task_definition");
   const currentChanges = taskDefinitionChanges.filter((change) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, change.address) && !Object.hasOwn(change, "deposed"));
   const deposedChanges = taskDefinitionChanges.filter((change) => Object.hasOwn(change, "deposed"));
@@ -60,6 +61,21 @@ export function assertStageBFreshImageReferenceAuditBinding(plan, referenceAudit
   assertStageBMutationInstanceMultisetEqual(expectedCurrent.map((entry) => mutationInstanceKey(entry, "expected")), actualAll.filter((entry) => entry?.classification === freshImageCurrentClassification).map((entry) => mutationInstanceKey(entry, "audit")), "Stage B fresh-image reference audit current runtime instances");
   assertStageBMutationInstanceMultisetEqual(expectedDeposed.map((entry) => mutationInstanceKey(entry, "expected")), actualDeposed.map((entry) => mutationInstanceKey(entry, "audit")), "Stage B fresh-image reference audit deposed cleanups");
   if (actualAll.length !== expectedAll.length || actualDeposed.length !== expectedDeposed.length || referenceAudit.currentTaskDefinitionReferenceCount !== expectedCurrent.length) throw new Error("Stage B fresh-image reference audit mutation-instance counts do not match the plan.");
+  const currentAuditedEntries = referenceAudit.oldTaskDefinitions;
+  if (!Array.isArray(currentAuditedEntries) || currentAuditedEntries.length !== expectedCurrent.length) throw new Error("Stage B fresh-image reference audit current rollover evidence is incomplete.");
+  const expectedCurrentAddresses = new Set(currentChanges.map((change) => change.address));
+  const actualCurrentAddresses = actualAll.filter((entry) => entry?.classification === freshImageCurrentClassification).map((entry) => entry?.terraformAddress);
+  if (new Set(actualCurrentAddresses).size !== actualCurrentAddresses.length || actualCurrentAddresses.some((address) => !expectedCurrentAddresses.has(address))) throw new Error("Stage B fresh-image reference audit current rollover entries are duplicated or unexpected.");
+  const expectedAtomicRolloverKeys = [];
+  for (const change of currentChanges) {
+    const entry = currentAuditedEntries.find((item) => item?.terraformAddress === change.address);
+    assertStageBCurrentRolloverReferenceBinding({ plan, change, audit: referenceAudit, planJsonSha256, terraformConfiguration });
+    for (const mode of entry.brokerReferenceModes) expectedAtomicRolloverKeys.push(`${change.address}|${mode}`);
+  }
+  const actualAtomicRolloverKeys = Array.isArray(referenceAudit.plannedAtomicBrokerRollovers)
+    ? referenceAudit.plannedAtomicBrokerRollovers.map((entry) => `${entry?.taskDefinitionTerraformAddress}|${entry?.mode}`)
+    : [];
+  assertStageBMutationInstanceMultisetEqual(expectedAtomicRolloverKeys.sort(), actualAtomicRolloverKeys.sort(), "Stage B fresh-image reference audit atomic broker rollovers");
   const deposedArns = new Set();
   for (const expected of expectedDeposed) {
     const actual = actualDeposed.find((entry) => entry?.mutationInstanceIdentity === expected.mutationInstanceIdentity);
@@ -403,7 +419,7 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
   if (report.planProfile === "PARTIAL_APPLY_RECOVERY" && plan) assertStageBPartialApplyRecoveryPlan(plan);
   if (report.planProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" && plan) {
     assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraformConfiguration });
-    assertStageBFreshImageReferenceAuditBinding(plan, boundReferenceAudit, { terraformConfiguration });
+    assertStageBFreshImageReferenceAuditBinding(plan, boundReferenceAudit, { terraformConfiguration, planJsonSha256: hashes.planJsonSha256 });
   }
   assertClassification(report);
   return true;
@@ -439,7 +455,7 @@ export function assertStageBPlanApprovedBinding(report, { approvalReportBytes, a
   if (report.planProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY") {
     const boundPlan = JSON.parse(planJsonBytes.toString("utf8"));
     assertStageBFreshImagePartialApplyRecoveryPlan(boundPlan, { terraformConfiguration });
-    assertStageBFreshImageReferenceAuditBinding(boundPlan, boundReferenceAudit, { terraformConfiguration });
+    assertStageBFreshImageReferenceAuditBinding(boundPlan, boundReferenceAudit, { terraformConfiguration, planJsonSha256: hashes.planJsonSha256 });
   }
   assertClassification(report);
   return true;

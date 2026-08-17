@@ -549,7 +549,7 @@ test("fresh-image recovery partitions current runtime instances from reviewed de
 test("fresh-image approval re-derives the exact reference-audit mutation partition", () => {
   const fixture = makeFreshImagePartialApplyReferenceFixture();
   const audit = generate(fixture);
-  assert.deepEqual(assertStageBFreshImageReferenceAuditBinding(fixture.plan, audit, { terraformConfiguration: fixture.options.terraformConfiguration }), { currentCount: 12, deposedCount: 11, mutationInstanceCount: 23 });
+  assert.deepEqual(assertStageBFreshImageReferenceAuditBinding(fixture.plan, audit, { terraformConfiguration: fixture.options.terraformConfiguration, planJsonSha256: fixture.planJsonSha256 }), { currentCount: 12, deposedCount: 11, mutationInstanceCount: 23 });
   const rejects = [
     ["missing deposed cleanup", (candidate) => candidate.deposedTaskDefinitionCleanups.pop()],
     ["fake deposed cleanup", (candidate) => candidate.deposedTaskDefinitionCleanups.push({ ...candidate.deposedTaskDefinitionCleanups[0], deposed: "deadbeef", mutationInstanceIdentity: candidate.deposedTaskDefinitionCleanups[0].mutationInstanceIdentity.replace(/deposed:[a-f0-9]{8}/, "deposed:deadbeef") })],
@@ -570,7 +570,37 @@ test("fresh-image approval re-derives the exact reference-audit mutation partiti
   for (const [label, mutate] of rejects) {
     const candidate = structuredClone(audit);
     mutate(candidate);
-    assert.throws(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, candidate, { terraformConfiguration: fixture.options.terraformConfiguration }), undefined, label);
+    assert.throws(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, candidate, { terraformConfiguration: fixture.options.terraformConfiguration, planJsonSha256: fixture.planJsonSha256 }), undefined, label);
+  }
+});
+
+test("fresh-image approval binds every current replacement to complete rollover evidence", () => {
+  const fixture = makeFreshImagePartialApplyReferenceFixture();
+  const audit = generate(fixture);
+  assert.ok(audit.plannedAtomicBrokerRollovers.length > 0);
+  const rejects = [
+    ["missing current rollover", (candidate) => candidate.oldTaskDefinitions.pop()],
+    ["duplicate current rollover", (candidate) => candidate.oldTaskDefinitions.push(structuredClone(candidate.oldTaskDefinitions[0]))],
+    ["wrong old task definition", (candidate) => { candidate.oldTaskDefinitions[0].oldTaskDefinitionArn = oldArnFor("wrong-family"); }],
+    ["missing service reference field", (candidate) => { delete candidate.oldTaskDefinitions[0].serviceReferences; }],
+    ["false service reference", (candidate) => { candidate.oldTaskDefinitions[0].serviceReferences = ["unexpected-service"]; }],
+    ["missing live task reference field", (candidate) => { delete candidate.oldTaskDefinitions[0].runningTaskReferences; }],
+    ["altered live task reference", (candidate) => { candidate.oldTaskDefinitions[0].runningTaskReferences = ["unexpected-task"]; }],
+    ["missing planned atomic rollover", (candidate) => { candidate.plannedAtomicBrokerRollovers.pop(); }],
+    ["altered planned atomic rollover", (candidate) => { candidate.plannedAtomicBrokerRollovers[0].oldTaskDefinitionArn = oldArnFor("wrong-family"); }],
+    ["swapped rollover evidence", (candidate) => {
+      const first = candidate.oldTaskDefinitions[0];
+      const second = candidate.oldTaskDefinitions[1];
+      [first.oldTaskDefinitionArn, second.oldTaskDefinitionArn] = [second.oldTaskDefinitionArn, first.oldTaskDefinitionArn];
+    }],
+    ["mutation identity preserved but reference falsified", (candidate) => { candidate.oldTaskDefinitions[0].rollbackArn = oldArnFor("wrong-family"); }],
+    ["correct counts with wrong rollover identity", (candidate) => { candidate.oldTaskDefinitions[0].terraformAddress = candidate.oldTaskDefinitions[1].terraformAddress; }],
+    ["stale audit plan binding", (candidate) => { candidate.planJsonSha256 = "f".repeat(64); }],
+  ];
+  for (const [label, mutate] of rejects) {
+    const candidate = structuredClone(audit);
+    mutate(candidate);
+    assert.throws(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, candidate, { terraformConfiguration: fixture.options.terraformConfiguration, planJsonSha256: fixture.planJsonSha256 }), undefined, label);
   }
 });
 
