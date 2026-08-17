@@ -161,6 +161,7 @@ export function prepareProductionCutoverRuntime({
   rotationId: requestedRotationId,
   constructAdapters,
   imageAuthorizationValidation,
+  verifyRootDropSignature,
 } = {}) {
   const directory = ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot, create: true, normalize: true, label: "Production cutover runtime directory" });
   const paths = phasePaths(directory);
@@ -188,7 +189,7 @@ export function prepareProductionCutoverRuntime({
     const artifactBindings = loadApprovedArtifactSigningBindings(artifactBindingFile);
     if (!rootDropEvidenceFile) throw new Error("Root-drop evidence file is required.");
     const rootDrop = readInputFile(rootDropEvidenceFile, repositoryRoot, "Root-drop evidence");
-    assertRootDropEvidence(rootDrop.value, { sourceSha: protectedSha });
+    assertRootDropEvidence(rootDrop.value, { sourceSha: protectedSha, ...(verifyRootDropSignature ? { verifySignature: verifyRootDropSignature } : {}) });
     if ((stageAPlanPath && stageARecoveryEvidenceFile) || (!stageAPlanPath && !stageARecoveryEvidenceFile)) throw new Error("Exactly one of preserved Stage-A saved plan or post-apply Stage-A recovery evidence is required.");
     const stageARecovery = stageARecoveryEvidenceFile ? readInputFile(stageARecoveryEvidenceFile, repositoryRoot, "Stage-A recovery evidence") : null;
     if (stageARecovery) assertPostApplyStageAPlanRecovery(stageARecovery.value, { sourceSha: protectedSha, expectedStageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", expectedStageBSerial: 98 });

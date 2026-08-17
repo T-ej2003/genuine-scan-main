@@ -32,7 +32,11 @@ const jsonFile = (filePath) => JSON.parse(readFileSync(filePath, "utf8"));
 const AWS_SERVICE_COMMANDS = new Set(["ec2", "ecs", "ecr", "iam", "kms", "logs", "rds", "s3", "secretsmanager", "ssm", "sts"]);
 
 export function createProductionCommandRunner({ profile, region = REGION, exec = execFileSync } = {}) {
-  const env = { ...process.env, AWS_REGION: region, AWS_DEFAULT_REGION: region, ...(profile ? { AWS_PROFILE: profile } : {}) };
+  const env = { ...process.env, AWS_REGION: region, AWS_DEFAULT_REGION: region };
+  if (profile) {
+    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) delete env[key];
+    env.AWS_PROFILE = profile;
+  }
   return (args) => {
     if (!Array.isArray(args) || args.length === 0) throw new Error("Production command arguments are required.");
     const command = args[0] === "aws" ? args.slice(1) : [...args];
@@ -46,6 +50,7 @@ export function createProductionCommandRunner({ profile, region = REGION, exec =
 const parseJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 
 export function describeStageAIngress({ run, endpointSecurityGroupId, runtimeSecurityGroupId } = {}) {
+  if (!/^sg-[a-f0-9]{8,17}$/.test(endpointSecurityGroupId || "") || !/^sg-[a-f0-9]{8,17}$/.test(runtimeSecurityGroupId || "") || endpointSecurityGroupId === runtimeSecurityGroupId) throw new Error("Stage A ingress security-group identities are malformed or collide.");
   const response = parseJson(run, ["ec2", "describe-security-group-rules", "--filters", `Name=group-id,Values=${endpointSecurityGroupId}`]);
   return {
     present: (response.SecurityGroupRules || []).some((rule) =>
@@ -56,6 +61,12 @@ export function describeStageAIngress({ run, endpointSecurityGroupId, runtimeSec
       rule.FromPort === 443 &&
       rule.ToPort === 443,
     ),
+    endpointSecurityGroupId,
+    runtimeSecurityGroupId,
+    direction: "ingress",
+    protocol: "tcp",
+    fromPort: 443,
+    toPort: 443,
   };
 }
 

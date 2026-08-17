@@ -11,7 +11,11 @@ export const VERIFIER_SESSION_MIN_REMAINING_MS = 60_000;
 const parse = (output) => JSON.parse(String(output || "{}"));
 
 export function createAwsStsRunner({ profile, region = "eu-west-2", run = execFileSync, now = Date.now } = {}) {
-  const env = { ...process.env, ...(profile ? { AWS_PROFILE: profile } : {}) };
+  const env = { ...process.env, AWS_REGION: region, AWS_DEFAULT_REGION: region };
+  if (profile) {
+    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) delete env[key];
+    env.AWS_PROFILE = profile;
+  }
   let verifierCredentials = null;
   let verifierCallerArn = null;
   let verifierExpiration = null;
@@ -29,7 +33,7 @@ export function createAwsStsRunner({ profile, region = "eu-west-2", run = execFi
   };
   const verifierEnvironment = () => {
     assertVerifierSessionUsable();
-    return {
+    const env = {
       ...process.env,
       AWS_ACCESS_KEY_ID: verifierCredentials.AccessKeyId,
       AWS_SECRET_ACCESS_KEY: verifierCredentials.SecretAccessKey,
@@ -37,6 +41,9 @@ export function createAwsStsRunner({ profile, region = "eu-west-2", run = execFi
       AWS_REGION: region,
       AWS_DEFAULT_REGION: region,
     };
+    delete env.AWS_PROFILE;
+    delete env.AWS_DEFAULT_PROFILE;
+    return env;
   };
   const invoke = (args, overrideEnv = env) => run("aws", [...args, "--region", region, "--output", "json", "--no-cli-pager"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: overrideEnv });
   const runAsVerifier = (args) => {

@@ -28,10 +28,11 @@ const rotationId = args.get("rotation-id");
 const staleRotationId = args.get("stale-rotation-id");
 if (!rotationId || !staleRotationId || !args.get("stale-source-sha")) throw new Error("Replacement and stale rotation identities are required.");
 const run = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
+const client = createInitialDualSlotSecretsManagerClient({ profile: "mscqr-production-release-deployer" });
+await client.assertCredentialIdentity();
 const service = JSON.parse(run(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2"])).services?.[0];
 if (!service?.taskDefinition) throw new Error("Current production task definition is unavailable.");
 const taskDefinition = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", service.taskDefinition, "--include", "TAGS"]));
-const client = createInitialDualSlotSecretsManagerClient();
 const result = await supersedeStalePendingRotation({
   send: (command) => client.send(command), sourceSha, staleSourceSha: args.get("stale-source-sha"), rotationId, staleRotationId,
   outputFile: path.join(outputDirectory, "rotation-supersession.json"), repositoryRoot: process.cwd(),

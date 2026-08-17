@@ -59,7 +59,7 @@ function evidenceFiles(directory, repositoryRoot) {
   const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha });
   const imageAuthorization = file("image-authorization.json", imageAuthorizationFixture.authorization);
   const iamEvidence = file("iam-evidence.json", { status: "valid", iamEvaluationCensus: { total: 158, executed: 158, invalid: 0, failures: [] }, evidenceSha256: "d".repeat(64) });
-  const rootDrop = file("root-drop.json", buildRootDropEvidence({ sourceSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "runtime-bootstrap-root" }));
+  const rootDrop = file("root-drop.json", buildRootDropEvidence({ sourceSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "runtime-bootstrap-root-with-entropy", signatureBase64: "c2lnbmF0dXJl" }));
   const stageAPlan = file("stage-a.tfplan", "binary-fixture");
   const tfvarsBytes = Buffer.from("production_rotation_enabled = false\n");
   const stageBTfvarsPath = path.join(directory, "stage-b.tfvars");
@@ -100,6 +100,7 @@ function fullInput(directory, repositoryRoot) {
     onboardingPaths: paths,
     constructAdapters: ({ config, sourceSha: actualSha, rotationId }) => createProductionCutoverAdapters({ config, sourceSha: actualSha, rotationId }),
     imageAuthorizationValidation: { now: evidence.imageAuthorizationFixture.now, verifyImageEvidence: evidence.imageAuthorizationFixture.verifyImageEvidence },
+    verifyRootDropSignature: () => true,
   };
 }
 

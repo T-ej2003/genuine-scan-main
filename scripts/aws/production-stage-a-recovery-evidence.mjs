@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
-import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateContract, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -12,7 +13,7 @@ export function assertPostApplyStageAPlanRecovery(evidence, { sourceSha, expecte
   if (!evidence || evidence.schemaVersion !== 1 || evidence.mode !== "POST_APPLY_STAGE_A_PLAN_RECOVERY" || evidence.valid !== true || evidence.sourceSha !== sourceSha || !SHA40.test(sourceSha || "")) throw new Error("Stage-A recovery evidence is not source-bound.");
   if (evidence.stageAStateObject !== STAGE_A_STATE_OBJECT || evidence.stageAStateLineage !== STAGE_A_EXPECTED_STATE_LINEAGE || !Number.isSafeInteger(evidence.stageAStateSerial) || evidence.stageAStateSerial < 1 || !SHA256.test(evidence.stageAStateSha256 || "") || !SHA256.test(evidence.stageAHandoffSha256 || "")) throw new Error("Stage-A recovery evidence has incomplete historical state identity.");
   if (evidence.stageBStateLineage !== expectedStageBLineage || !Number.isSafeInteger(evidence.stageBStateSerial) || evidence.stageBStateSerial !== expectedStageBSerial || !SHA256.test(evidence.stageBStateSha256 || "")) throw new Error("Stage-A recovery evidence is not bound to the converged Stage-B state.");
-  if (evidence.ingress?.present !== true || typeof evidence.ingress.endpointSecurityGroupId !== "string" || typeof evidence.ingress.runtimeSecurityGroupId !== "string") throw new Error("Stage-A recovery evidence lacks the authenticated ingress postcondition.");
+  if (evidence.ingress?.present !== true || !/^sg-[a-f0-9]{8,17}$/.test(evidence.ingress.endpointSecurityGroupId || "") || evidence.ingress.runtimeSecurityGroupId !== STAGE_B.executorSecurityGroupId || evidence.ingress.direction !== "ingress" || evidence.ingress.protocol !== "tcp" || evidence.ingress.fromPort !== 443 || evidence.ingress.toPort !== 443) throw new Error("Stage-A recovery evidence lacks the authenticated ingress postcondition.");
   if (evidence.postApplyConvergence?.status !== "PASS" || evidence.postApplyConvergence.sourceSha !== sourceSha || evidence.postApplyConvergence.stateLineage !== expectedStageBLineage || evidence.postApplyConvergence.stateSerial !== expectedStageBSerial || evidence.postApplyConvergence.stateSha256 !== evidence.stageBStateSha256) throw new Error("Stage-A recovery evidence lacks the converged post-apply proof.");
   if (!Number.isSafeInteger(Date.parse(evidence.generatedAt)) || Math.abs(now - Date.parse(evidence.generatedAt)) > maxAgeMs) throw new Error("Stage-A recovery evidence is stale.");
   if (!SHA256.test(evidence.evidenceSha256 || "")) throw new Error("Stage-A recovery evidence hash is invalid.");
@@ -26,8 +27,10 @@ export function producePostApplyStageAPlanRecovery({ sourceSha, stageAStatePath,
   const stageAState = read(stageAStatePath, repositoryRoot, "Stage-A state");
   const stageAHandoff = read(stageAHandoffPath, repositoryRoot, "Stage-A handoff");
   const stageBState = read(stageBStatePath, repositoryRoot, "Stage-B converged state");
+  const stageAContract = assertStageAStateContract(stageAState.value, { stateObject: STAGE_A_STATE_OBJECT });
   if (stageAHandoff.value.toolingSha !== sourceSha || stageAHandoff.value.stageAStateObject !== STAGE_A_STATE_OBJECT || stageAHandoff.value.stageAStateLineage !== STAGE_A_EXPECTED_STATE_LINEAGE || stageAHandoff.value.stageAStateSerial !== stageAState.value.serial || stageAHandoff.value.stageAStateSha256 !== hash(stageAState.bytes)) throw new Error("Stage-A handoff does not authenticate its state backup and protected source.");
   if (stageBState.value.serial !== expectedStageBSerial) throw new Error("Stage-B state is not the expected serial-98 converged state.");
+  if (ingress?.present !== true || ingress.endpointSecurityGroupId !== stageAContract.endpointSecurityGroupId || ingress.runtimeSecurityGroupId !== stageAContract.executorSecurityGroupId || ingress.direction !== "ingress" || ingress.protocol !== "tcp" || ingress.fromPort !== 443 || ingress.toPort !== 443) throw new Error("Stage-A recovery ingress is not the exact state-derived TCP/443 endpoint relationship.");
   const stageBStateSha256 = hash(stageBState.bytes);
   const evidence = {
     schemaVersion: 1, mode: "POST_APPLY_STAGE_A_PLAN_RECOVERY", valid: true, evidenceRef: `stage-a-recovery:${sourceSha}:${hash(stageAHandoff.bytes).slice(0, 16)}`,
