@@ -9,6 +9,50 @@ const importedBackendCandidateAddress = 'aws_ecs_task_definition.candidate["back
 const importedBackendCandidateFamily = STAGE_B_TASK_DEFINITION_FAMILIES[importedBackendCandidateAddress];
 const importedBackendCandidateArn = `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${importedBackendCandidateFamily}:9`;
 export const STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION = "imported-backend-task-definition-metadata-normalization";
+export const STAGE_B_RECOVERY_MODES = Object.freeze([
+  "NORMAL",
+  "RECOVERY_ALIAS_ONLY",
+  "PARTIAL_APPLY_RECOVERY",
+  "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY",
+]);
+
+export function resolveStageBRecoveryMode({ recoveryOnly = false, partialApplyRecovery = false, freshImagePartialApplyRecovery = false } = {}) {
+  for (const [name, value] of Object.entries({ recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery })) {
+    if (typeof value !== "boolean") throw new Error(`Stage B ${name} flag must be boolean.`);
+  }
+  if ([recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery].filter(Boolean).length > 1) {
+    throw new Error("Stage B recovery modes are mutually exclusive.");
+  }
+  return recoveryOnly ? "RECOVERY_ALIAS_ONLY"
+    : partialApplyRecovery ? "PARTIAL_APPLY_RECOVERY"
+      : freshImagePartialApplyRecovery ? "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"
+        : "NORMAL";
+}
+
+export function stageBMutationInstanceIdentity(change) {
+  const address = change?.address;
+  const actions = change?.change?.actions ?? change?.actions;
+  if (typeof address !== "string" || !Array.isArray(actions) || actions.some((action) => typeof action !== "string")) {
+    throw new Error("Stage B mutation instance identity requires a resource address and action sequence.");
+  }
+  const deposed = change.deposed;
+  if (deposed !== undefined && !/^[a-f0-9]{8}$/.test(deposed)) throw new Error(`Stage B mutation instance has malformed deposed identity: ${address}`);
+  return JSON.stringify({ address, instance: deposed === undefined ? "current" : `deposed:${deposed}`, actions });
+}
+
+export function assertStageBMutationInstanceMultisetEqual(expected, actual, label = "Stage B mutation instances") {
+  const count = (items) => {
+    const counts = new Map();
+    for (const item of items) counts.set(item, (counts.get(item) || 0) + 1);
+    return counts;
+  };
+  const expectedCounts = count(expected);
+  const actualCounts = count(actual);
+  if (expectedCounts.size !== actualCounts.size || [...expectedCounts].some(([identity, occurrences]) => actualCounts.get(identity) !== occurrences)) {
+    throw new Error(`${label} differ by canonical mutation-instance identity.`);
+  }
+  return true;
+}
 export const STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS = importedBackendCandidateAddress;
 const policyAddress = "aws_iam_policy.broker";
 const attachmentAddress = "aws_iam_role_policy_attachment.broker";
@@ -474,6 +518,7 @@ export function isStageBPartialApplyDeposedTaskDefinitionCleanup(change) {
 }
 
 export function assertStageBPartialApplyRecoveryPlan(plan) {
+  for (const change of plan?.resource_changes || []) if (Object.hasOwn(change, "deposed") && !/^[a-f0-9]{8}$/.test(change.deposed)) throw new Error(`Stage B partial-apply recovery contains a malformed deposed identity: ${change.address}.`);
   const changes = (plan?.resource_changes || []).filter((change) => !exactActions(change.change?.actions, ["no-op"]));
   const cleanups = changes.filter(isStageBPartialApplyDeposedTaskDefinitionCleanup);
   const expectedEcs = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).filter((address) => address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS);
@@ -490,6 +535,7 @@ export function assertStageBPartialApplyRecoveryPlan(plan) {
 }
 
 export function assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraformConfiguration } = {}) {
+  for (const change of plan?.resource_changes || []) if (Object.hasOwn(change, "deposed") && !/^[a-f0-9]{8}$/.test(change.deposed)) throw new Error(`Stage B fresh-image partial-apply recovery contains a malformed deposed identity: ${change.address}.`);
   const changes = (plan?.resource_changes || []).filter((change) => !exactActions(change.change?.actions, ["no-op"]));
   const currentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
   const expectedCleanupAddresses = currentAddresses.filter((address) => address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS);
@@ -497,7 +543,7 @@ export function assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraform
   const cleanups = new Map();
   const deposedIdentities = new Set();
   for (const change of changes) {
-    if (currentAddresses.includes(change.address) && !change.deposed) current.set(change.address, change);
+    if (currentAddresses.includes(change.address) && change.deposed === undefined) current.set(change.address, change);
     if (isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) {
       const identity = `${change.address}:${change.deposed}`;
       if (cleanups.has(change.address) || deposedIdentities.has(identity)) throw new Error(`Fresh-image partial-apply recovery contains a duplicate deposed task-definition cleanup: ${change.address}.`);
@@ -584,6 +630,9 @@ export function assertStageBBrokerFunctionUpdate(change) {
 }
 
 export function assertStageBPlanResourceChange(change, { strict = true, terraformConfiguration, validateActions = true, allowBrokerPolicyCreate = false, partialApplyRecovery = false, freshImagePartialApplyRecovery = false, plan } = {}) {
+  const recoveryMode = resolveStageBRecoveryMode({ partialApplyRecovery, freshImagePartialApplyRecovery });
+  partialApplyRecovery = recoveryMode === "PARTIAL_APPLY_RECOVERY";
+  freshImagePartialApplyRecovery = recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY";
   const address = change?.address || "<missing address>";
   const type = change?.type || "<missing type>";
   const actions = change?.change?.actions || [];
@@ -636,13 +685,15 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
 }
 
 export function classifyStageBPlan(plan, options = {}) {
-  if (options.freshImagePartialApplyRecovery) assertStageBFreshImagePartialApplyRecoveryPlan(plan, options);
-  else if (options.partialApplyRecovery) assertStageBPartialApplyRecoveryPlan(plan);
+  const recoveryMode = resolveStageBRecoveryMode(options);
+  const normalizedOptions = { ...options, partialApplyRecovery: recoveryMode === "PARTIAL_APPLY_RECOVERY", freshImagePartialApplyRecovery: recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" };
+  if (normalizedOptions.freshImagePartialApplyRecovery) assertStageBFreshImagePartialApplyRecoveryPlan(plan, normalizedOptions);
+  else if (normalizedOptions.partialApplyRecovery) assertStageBPartialApplyRecoveryPlan(plan);
   const classifiedResources = [];
   const errors = [];
   for (const change of plan?.resource_changes || []) {
     try {
-      classifiedResources.push(assertStageBPlanResourceChange(change, { ...options, plan }));
+      classifiedResources.push({ ...assertStageBPlanResourceChange(change, { ...normalizedOptions, plan }), ...(change.deposed === undefined ? {} : { deposed: change.deposed }) });
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
     }
@@ -656,8 +707,8 @@ export function classifyStageBPlan(plan, options = {}) {
     return counts;
   }, {});
   const taskDefinitionRotations = classifiedResources.filter((item) => item.rotation).map((item) => item.rotation);
-  const planProfile = options.freshImagePartialApplyRecovery ? STAGE_B_FRESH_IMAGE_PARTIAL_APPLY_RECOVERY
-    : options.partialApplyRecovery ? STAGE_B_PARTIAL_APPLY_RECOVERY
+  const planProfile = normalizedOptions.freshImagePartialApplyRecovery ? STAGE_B_FRESH_IMAGE_PARTIAL_APPLY_RECOVERY
+    : normalizedOptions.partialApplyRecovery ? STAGE_B_PARTIAL_APPLY_RECOVERY
     : classifiedResources.some(({ classification }) => classification === STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION)
     ? "IMPORTED_BACKEND_METADATA_NORMALIZATION"
     : taskDefinitionRotations.length ? "ECS_TASK_DEFINITION_ROTATION" : "BASELINE";

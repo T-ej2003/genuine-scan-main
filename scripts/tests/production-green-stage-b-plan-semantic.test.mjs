@@ -19,7 +19,8 @@ import {
   STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT,
 } from "../aws/stage-b-provider-semantic-snapshot.mjs";
 import { assertRecoveryPlanDelta } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
-import { assertStageBBrokerFunctionUpdate, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS } from "../aws/stage-b-deployment-contract.mjs";
+import { assertStageBBrokerFunctionUpdate, assertStageBFreshImagePartialApplyRecoveryPlan, assertStageBMutationInstanceMultisetEqual, classifyStageBPlan, stageBMutationInstanceIdentity, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS } from "../aws/stage-b-deployment-contract.mjs";
+import { assertStageBPlanCapture } from "../plan-production-green-stage-b.mjs";
 import {
   STAGE_B_CANDIDATE_FOR_EACH_REFERENCES,
   STAGE_B_EXECUTOR_FOR_EACH_REFERENCES,
@@ -765,6 +766,14 @@ test("fresh-image partial-apply recovery admits only the reviewed 12 rotations, 
   }
 });
 
+test("fresh-image recovery remains reachable through plan capture", () => {
+  const configurationText = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  assert.doesNotThrow(() => assertStageBPlanCapture(freshImagePartialApplyRecoveryPlan(), {
+    terraformConfiguration: configurationText,
+    freshImagePartialApplyRecovery: true,
+  }));
+});
+
 test("baseline initial-create semantics fail closed on action, identity, path, and reference drift", () => {
   const mutateBaseline = (mutator, expected = /UNCLASSIFIED/) => {
     const value = baselinePlan();
@@ -1418,4 +1427,20 @@ test("semantic census feeds the normal offline action classifier without widenin
   assert.equal(classification.actionCounts.replacement, 12);
   assert.equal(classification.actionCounts.update, 3);
   assert.equal(classification.actionCounts.destroy || 0, 0);
+});
+
+test("fresh recovery mutation identity preserves current/deposed instance cardinality", () => {
+  const current = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).map((address) => ({ address, change: { actions: ["create", "delete"] } }));
+  const deposed = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).filter((address) => address !== 'aws_ecs_task_definition.candidate["backend"]').map((address, index) => ({ address, deposed: `${String(index + 1).padStart(7, "0")}a`, change: { actions: ["delete"] } }));
+  const currentIds = current.map((change) => stageBMutationInstanceIdentity(change, "current-task-definition-rotation"));
+  const deposedIds = deposed.map((change) => stageBMutationInstanceIdentity(change, "partial-apply-deposed-task-definition-cleanup"));
+  assert.equal(new Set([...currentIds, ...deposedIds]).size, 23);
+  assert.equal(stageBMutationInstanceIdentity(current[0], "current-task-definition-rotation"), stageBMutationInstanceIdentity(current[0], "stage-b-task-definition-registration"));
+  assert.notEqual(stageBMutationInstanceIdentity(current[0], "current-task-definition-rotation"), stageBMutationInstanceIdentity(deposed[0], "partial-apply-deposed-task-definition-cleanup"));
+  assert.notEqual(stageBMutationInstanceIdentity(current[0], "current-task-definition-rotation"), stageBMutationInstanceIdentity({ ...current[0], change: { actions: ["update"] } }, "current-task-definition-rotation"));
+  assert.doesNotThrow(() => assertStageBMutationInstanceMultisetEqual([...currentIds, ...deposedIds], [...currentIds, ...deposedIds]));
+  assert.throws(() => assertStageBMutationInstanceMultisetEqual([...currentIds, ...deposedIds], [...currentIds, ...deposedIds.slice(1)]), /mutation-instance identity/);
+  assert.throws(() => assertStageBMutationInstanceMultisetEqual([...currentIds, ...deposedIds], [...currentIds, ...deposedIds, stageBMutationInstanceIdentity(deposed[0], "current-task-definition-rotation")]), /mutation-instance identity/);
+  assert.throws(() => stageBMutationInstanceIdentity({ ...deposed[0], deposed: "deadbeefdeadbeef" }, "partial-apply-deposed-task-definition-cleanup"), /malformed deposed identity/);
+  assert.throws(() => classifyStageBPlan(freshImagePartialApplyRecoveryPlan(), { partialApplyRecovery: true, freshImagePartialApplyRecovery: true }), /mutually exclusive/);
 });

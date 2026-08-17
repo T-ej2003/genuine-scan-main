@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   assertStageBPlan,
 } from "./plan-production-green-stage-b.mjs";
+import { assertStageBMutationInstanceMultisetEqual, stageBMutationInstanceIdentity } from "./aws/stage-b-deployment-contract.mjs";
 import {
   APPROVED_PREFLIGHT_GENERATOR_ARNS,
   assertPermissionEvaluationBindings,
@@ -256,7 +257,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   try { assertStageBReleaseCallerArn(callerArn); } catch { throw new Error("Current caller is not the production release-deployer STS assumed-role."); }
   const plan = JSON.parse(planBytes); const audit = JSON.parse(auditBytes);
   if (bindingReport.recoveryOnly !== (approvalReport.planProfile === "RECOVERY_ALIAS_ONLY")) throw new Error("Stage B recovery-only tfvars and approved plan profile disagree.");
-  if (Boolean(bindingReport.partialApplyRecovery) !== (partialApplyRecovery || freshImagePartialApplyRecovery) || Boolean(bindingReport.freshImagePartialApplyRecovery) !== freshImagePartialApplyRecovery || ((partialApplyRecovery || freshImagePartialApplyRecovery) && bindingReport.recoveryMode !== (freshImagePartialApplyRecovery ? "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" : "PARTIAL_APPLY_RECOVERY"))) throw new Error("Stage B recovery tfvars and approved plan profile disagree.");
+  if (Boolean(bindingReport.partialApplyRecovery) !== partialApplyRecovery || Boolean(bindingReport.freshImagePartialApplyRecovery) !== freshImagePartialApplyRecovery || bindingReport.recoveryMode !== (recoveryPlan ? "RECOVERY_ALIAS_ONLY" : freshImagePartialApplyRecovery ? "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" : partialApplyRecovery ? "PARTIAL_APPLY_RECOVERY" : "NORMAL")) throw new Error("Stage B recovery tfvars and approved plan profile disagree.");
   if (bindingReport.recoveryOnly) {
     if (!trustedRecovery) throw new Error("Recovery-only apply requires verified recovery evidence.");
     assertRecoveryOnlyPlan(plan, trustedRecovery.attestation);
@@ -315,12 +316,21 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
     protectedMainCheckout,
     now: new Date(now),
   });
-  const approvedRotationAddresses = new Set(partialApplyRecovery || freshImagePartialApplyRecovery
-    ? resourceClassification?.classifiedResources?.filter(({ classification }) => ["partial-apply-deposed-task-definition-cleanup", "current-task-definition-rotation"].includes(classification)).map(({ address }) => address) || []
-    : resourceClassification?.taskDefinitions?.currentRotations?.map((rotation) => rotation.address) || []);
-  const deleteChanges = (plan.resource_changes || []).filter((change) => (change.change?.actions || []).includes("delete"));
-  if (deleteChanges.length !== approvedRotationAddresses.size || deleteChanges.some((change) => !approvedRotationAddresses.has(change.address))) throw new Error("Stage B apply plan contains a delete action outside the exact task-definition rotation contract.");
   const mutationManifest = permissionReport.planCapabilities.mutationManifest;
+  const deleteChanges = (plan.resource_changes || []).filter((change) => (change.change?.actions || []).includes("delete"));
+  const actualMutationInstances = (plan.resource_changes || []).filter((change) => !(change.change?.actions || []).every((action) => action === "no-op")).map((change) => {
+    return stageBMutationInstanceIdentity(change);
+  });
+  if (!Array.isArray(permissionReport.planCapabilities.mutationInstances)) throw new Error("Permission-preflight mutation-instance coverage is missing.");
+  assertStageBMutationInstanceMultisetEqual(actualMutationInstances, permissionReport.planCapabilities.mutationInstances, "Stage B mutation instances");
+  const allowedDeleteClassifications = partialApplyRecovery || freshImagePartialApplyRecovery
+    ? ["PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP", "stage-b-task-definition-registration"]
+    : ["stage-b-task-definition-registration"];
+  const approvedDeleteIdentities = (mutationManifest.resources || [])
+    .filter(({ classification, actions }) => allowedDeleteClassifications.includes(classification) && actions.includes("delete"))
+    .map(({ mutation_instance_identity }) => mutation_instance_identity);
+  const actualDeleteInstances = deleteChanges.map((change) => stageBMutationInstanceIdentity(change));
+  assertStageBMutationInstanceMultisetEqual(approvedDeleteIdentities, actualDeleteInstances, "Stage B delete mutation instances");
   return { plan, audit, permissionReport, imageEvidence, deploymentIdentity, imageBindings, resourceClassification, trustedRecovery, mutationManifest, mutationManifestSha256: mutationManifest.mutationManifestSha256, savedPlanSha256, canonicalPlanJsonSha256, derivedPlanJsonSha256: sha256(derivedPlanBytes) };
 }
 

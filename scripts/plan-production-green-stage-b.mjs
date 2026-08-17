@@ -20,7 +20,7 @@ import {
 import { assertStageBBrokerConfigurationIdentity, canonicalJson, STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-stage-b-image-evidence.mjs";
 import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
-import { assertStageBBrokerFunctionUpdate, assertStageBImportedBackendMetadataNormalization, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./aws/stage-b-deployment-contract.mjs";
+import { assertStageBBrokerFunctionUpdate, assertStageBImportedBackendMetadataNormalization, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, resolveStageBRecoveryMode, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./aws/stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments } from "./aws/stage-b-terraform-workspace.mjs";
@@ -634,12 +634,16 @@ function assertRecoveryOnlyReferenceAuditBinding(plan, audit, auditBytes, auditS
 }
 
 export function assertStageBPlan(plan, options = {}) {
-  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration, imageEvidence, strictResourceContract = false, protectedMainCheckout, terraformWorkspace, requireReferenceAudit = true, captureMode = false, requireSemanticCompleteness = false, recoveryOnly = false, partialApplyRecovery = false, freshImagePartialApplyRecovery = false } = options;
+  const recoveryMode = resolveStageBRecoveryMode(options);
+  const { referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, trustedCallerArn, now = new Date(), terraformConfiguration, imageEvidence, strictResourceContract = false, protectedMainCheckout, terraformWorkspace, requireReferenceAudit = true, captureMode = false, requireSemanticCompleteness = false } = options;
+  const recoveryOnly = recoveryMode === "RECOVERY_ALIAS_ONLY";
+  const partialApplyRecovery = recoveryMode === "PARTIAL_APPLY_RECOVERY";
+  const freshImagePartialApplyRecovery = recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY";
   if (terraformWorkspace) assertStageBTerraformWorkspace(terraformWorkspace);
   const deploymentIdentity = strictResourceContract || imageEvidence ? assertStageBDeploymentIdentity({ plan, imageEvidence }) : undefined;
   if (strictResourceContract) assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout, deploymentIdentity });
-  const resourceClassification = classifyStageBPlan(plan, { strict: strictResourceContract, terraformConfiguration, allowBrokerPolicyCreate: captureMode, partialApplyRecovery, freshImagePartialApplyRecovery });
-  const planSemanticCensus = requireSemanticCompleteness ? assertStageBPlanSemanticCompleteness(plan, { terraformConfiguration, partialApplyRecovery, freshImagePartialApplyRecovery }) : undefined;
+  const resourceClassification = classifyStageBPlan(plan, { strict: strictResourceContract, terraformConfiguration, allowBrokerPolicyCreate: captureMode, recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery });
+  const planSemanticCensus = requireSemanticCompleteness ? assertStageBPlanSemanticCompleteness(plan, { terraformConfiguration, recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery }) : undefined;
   if (freshImagePartialApplyRecovery) assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraformConfiguration });
   else if (partialApplyRecovery) assertStageBPartialApplyRecoveryPlan(plan);
   const imageBindings = imageEvidence ? assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, planProfile: recoveryOnly ? "RECOVERY_ALIAS_ONLY" : resourceClassification.planProfile, terraformConfiguration }) : undefined;
@@ -711,10 +715,15 @@ export function assertStageBPlan(plan, options = {}) {
 }
 
 export function assertStageBPlanCapture(plan, options = {}) {
+  const recoveryMode = resolveStageBRecoveryMode(options);
+  const isPartialApplyRecovery = recoveryMode === "PARTIAL_APPLY_RECOVERY";
+  const isFreshImagePartialApplyRecovery = recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY";
   const result = assertStageBPlan(plan, { ...options, requireReferenceAudit: false, captureMode: true });
-  if (!options.partialApplyRecovery && ((result.actionCounts?.destroy || 0) !== 0 || result.unclassifiedResources?.length !== 0 || (result.actionCounts?.replacement || 0) !== (result.taskDefinitionRotations?.length || 0))) throw new Error("Stage B plan capture contains an unauthorized destructive or unclassified action.");
-  if (options.partialApplyRecovery && !options.freshImagePartialApplyRecovery && (result.actionCounts?.destroy !== 11 || result.actionCounts?.update !== 2 || result.unclassifiedResources?.length !== 0)) throw new Error("Stage B partial-apply recovery plan capture census is not exact.");
-  if (options.freshImagePartialApplyRecovery && (result.actionCounts?.replacement !== 12 || result.actionCounts?.destroy !== 11 || result.actionCounts?.update !== 3 || result.unclassifiedResources?.length !== 0)) throw new Error("Fresh-image partial-apply recovery plan capture census is not exact.");
+  if (recoveryMode === "NORMAL" || recoveryMode === "RECOVERY_ALIAS_ONLY") {
+    if ((result.actionCounts?.destroy || 0) !== 0 || result.unclassifiedResources?.length !== 0 || (result.actionCounts?.replacement || 0) !== (result.taskDefinitionRotations?.length || 0)) throw new Error("Stage B plan capture contains an unauthorized destructive or unclassified action.");
+  }
+  if (isPartialApplyRecovery && (result.actionCounts?.destroy !== 11 || result.actionCounts?.update !== 2 || result.unclassifiedResources?.length !== 0)) throw new Error("Stage B partial-apply recovery plan capture census is not exact.");
+  if (isFreshImagePartialApplyRecovery && (result.actionCounts?.replacement !== 12 || result.actionCounts?.destroy !== 11 || result.actionCounts?.update !== 3 || result.unclassifiedResources?.length !== 0)) throw new Error("Fresh-image partial-apply recovery plan capture census is not exact.");
   return result;
 }
 
@@ -750,15 +759,14 @@ export function readPlanningInputs(tfvars, cliOptions, protectedMainCheckout, de
   const partialApplyRecovery = cliOptions.includes("--partial-apply-recovery");
   const freshImagePartialApplyRecovery = cliOptions.includes("--fresh-image-partial-apply-recovery");
   const closureMode = readOption(cliOptions, "--closure-mode");
-  if ([recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery].filter(Boolean).length > 1 || (freshImagePartialApplyRecovery && !partialApplyRecovery)) throw new Error("Stage B recovery modes are mutually exclusive and fresh-image recovery requires partial-apply recovery.");
+  const recoveryMode = resolveStageBRecoveryMode({ recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery });
   if (!bindingReportPath || !bindingReportSha256 || !toolingTreeSha256 || !expectedImageReleaseSha || !refreshReportPath || !refreshReportSha256 || closureMode !== "production") throw new Error("Stage B planning requires canonical tfvars, refresh provenance, and production closure mode.");
-  if ((recoveryOnly || partialApplyRecovery || freshImagePartialApplyRecovery) && (!refreshBindingReportPath || !refreshBindingReportSha256)) throw new Error("Stage B recovery planning requires the original observation binding report and SHA256.");
+  if (recoveryMode !== "NORMAL" && (!refreshBindingReportPath || !refreshBindingReportSha256)) throw new Error("Stage B recovery planning requires the original observation binding report and SHA256.");
   const validateTfvarsBinding = deps.validateTfvarsBinding || assertStageBTfvarsBinding;
   const validateRecovery = deps.assertRecovery || assertVerifiedStageBRecovery;
   const validateRefresh = deps.assertRefresh || assertStageBRefreshEvidence;
   const bindingReport = validateTfvarsBinding({ tfvarsPath: tfvars, bindingReportPath, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedImageReleaseSha });
-  if (bindingReport.recoveryOnly !== recoveryOnly) throw new Error("Stage B recovery-only mode must exactly match the canonical tfvars binding report.");
-  if (Boolean(bindingReport.partialApplyRecovery) !== partialApplyRecovery || Boolean(bindingReport.freshImagePartialApplyRecovery) !== freshImagePartialApplyRecovery || ((partialApplyRecovery || freshImagePartialApplyRecovery) && bindingReport.recoveryMode !== (freshImagePartialApplyRecovery ? "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" : "PARTIAL_APPLY_RECOVERY"))) throw new Error("Stage B recovery mode must exactly match the canonical tfvars binding report.");
+  if (bindingReport.recoveryOnly !== (recoveryMode === "RECOVERY_ALIAS_ONLY") || Boolean(bindingReport.partialApplyRecovery) !== (recoveryMode === "PARTIAL_APPLY_RECOVERY") || Boolean(bindingReport.freshImagePartialApplyRecovery) !== (recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY") || bindingReport.recoveryMode !== recoveryMode) throw new Error("Stage B recovery mode must exactly match the canonical tfvars binding report.");
   const backendMetadata = deps.backendMetadata || assertStageBPlanningBackendMetadata();
   if (Boolean(recoveryClassificationPath) !== Boolean(recoveryClassificationSha256)) throw new Error("Recovery classification path and SHA256 are required together.");
   const refreshReport = JSON.parse(fs.readFileSync(refreshReportPath, "utf8"));
@@ -767,7 +775,7 @@ export function readPlanningInputs(tfvars, cliOptions, protectedMainCheckout, de
   const recoveryAttestationSignatureSha256 = readOption(cliOptions, "--recovery-attestation-signature-sha256");
   if (Boolean(recoveryAttestationSha256) !== Boolean(recoveryAttestationReportPath) || Boolean(recoveryAttestationSha256) !== Boolean(recoveryAttestationSignaturePath) || Boolean(recoveryAttestationSha256) !== Boolean(recoveryAttestationSignatureSha256)) throw new Error("Recovery attestation report, signature, and SHA256 values are required together.");
   if (refreshReport.status === "RESOURCE_DRIFT") {
-    if (!recoveryOnly && !partialApplyRecovery) throw new Error("Reviewed partial-apply residue requires an explicit recovery plan mode.");
+    if (recoveryMode === "NORMAL") throw new Error("Reviewed partial-apply residue requires an explicit recovery plan mode.");
     if ((partialApplyRecovery || freshImagePartialApplyRecovery) && (recoveryClassificationPath || recoveryAttestationSha256)) throw new Error("Partial-apply recovery profiles do not accept RECOVERY_ALIAS_ONLY attestation inputs.");
     if (recoveryOnly && (!recoveryClassificationPath || !recoveryAttestationSha256)) throw new Error("RECOVERY_ALIAS_ONLY RESOURCE_DRIFT requires a separately verified recovery classification and attestation.");
     assertStageBPrivateFile({ filePath: refreshBindingReportPath, repositoryRoot: process.cwd(), label: "Stage B observation binding report" });
@@ -781,14 +789,14 @@ export function readPlanningInputs(tfvars, cliOptions, protectedMainCheckout, de
       validateRecovery({ refreshReport, refreshReportBytes: fs.readFileSync(refreshReportPath), refreshReportSha256, classification, classificationBytes, classificationSha256: recoveryClassificationSha256, attestation: recovery, attestationBytes: recoveryBytes, attestationSha256: recoveryAttestationSha256, signature, signatureBytes, signatureSha256: recoveryAttestationSignatureSha256, expectedSourceSha: protectedMainCheckout.currentHead, expectedLineage: bindingReport.stateLineage, expectedSerial: bindingReport.stateSerial });
       if (bindingReport.recoveryAttestationSha256 !== recoveryAttestationSha256 || bindingReport.recoveryClassificationSha256 !== recoveryClassificationSha256 || bindingReport.recoveryRefreshReportSha256 !== refreshReportSha256 || bindingReport.recoveryDesiredVersion !== recovery.currentObservedEvidence.configuredDesiredVersion || bindingReport.recoveryLiveVersion !== recovery.currentObservedEvidence.liveVersion) throw new Error("Recovery-only tfvars is not bound to the verified attestation and refresh evidence.");
       assertStageBRecoveryProvenance({ refreshReport, refreshReportSha256, observationBindingReport: refreshBindingReport, observationBindingReportSha256: refreshBindingReportSha256, recoveryBindingReport: bindingReport, recoveryBindingReportSha256: bindingReportSha256, recoveryClassificationSha256: recoveryClassificationSha256, recoveryAttestationSha256 });
-    } else if (partialApplyRecovery) {
+    } else if (recoveryMode === "PARTIAL_APPLY_RECOVERY" || recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY") {
       if (bindingReport.recoveryRefreshReportSha256 !== refreshReportSha256 || bindingReport.recoveryObservationBindingSha256 !== refreshBindingReportSha256 || bindingReport.recoveryStateLineage !== bindingReport.stateLineage || bindingReport.recoveryStateSerial !== bindingReport.stateSerial) throw new Error("PARTIAL_APPLY_RECOVERY tfvars is not bound to the exact refresh and observation artifacts.");
       assertStageBRecoveryProvenance({ refreshReport, refreshReportSha256, observationBindingReport: refreshBindingReport, observationBindingReportSha256: refreshBindingReportSha256, recoveryBindingReport: bindingReport, recoveryBindingReportSha256: bindingReportSha256, recoveryMode: freshImagePartialApplyRecovery ? "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" : "PARTIAL_APPLY_RECOVERY" });
     }
     validateRefresh({ refreshReportPath, refreshReportSha256, bindingReport: refreshBindingReport, bindingReportSha256: refreshBindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: refreshBindingReport.toolingTreeSha256, expectedTfvarsSha256: refreshBindingReport.tfvarsSha256, expectedImageEvidenceSha256: refreshBindingReport.imageEvidenceCanonicalSha256, expectedStateSha256: refreshBindingReport.stateBackupSha256, expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir, allowReviewedResourceDrift: true });
   } else if (recoveryAttestationSha256 || recoveryClassificationPath || recoveryOnly || partialApplyRecovery || freshImagePartialApplyRecovery) throw new Error("Recovery planning requires the exact reviewed RESOURCE_DRIFT refresh evidence.");
   if (refreshReport.status !== "RESOURCE_DRIFT") validateRefresh({ refreshReportPath, refreshReportSha256, bindingReport, bindingReportSha256, expectedToolingSha: protectedMainCheckout.currentHead, expectedToolingTreeSha256: toolingTreeSha256, expectedTfvarsSha256: bindingReport.tfvarsSha256, expectedImageEvidenceSha256: bindingReport.imageEvidenceCanonicalSha256, expectedStateSha256: bindingReport.stateBackupSha256, expectedBackendMetadataSha256: backendMetadata.backendMetadataSha256, expectedTerraformDataDir: backendMetadata.terraformDataDir });
-  return { bindingReport, backendMetadata, bindingReportPath, bindingReportSha256, refreshBindingReportPath, refreshBindingReportSha256, toolingTreeSha256, refreshReportPath, refreshReportSha256, recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery, recoveryAttestationSha256, recoveryAttestationReportPath, recoveryAttestationSignaturePath, recoveryAttestationSignatureSha256, recoveryClassificationPath, recoveryClassificationSha256, expectedImageReleaseSha };
+  return { bindingReport, backendMetadata, bindingReportPath, bindingReportSha256, refreshBindingReportPath, refreshBindingReportSha256, toolingTreeSha256, refreshReportPath, refreshReportSha256, recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery, recoveryMode, recoveryAttestationSha256, recoveryAttestationReportPath, recoveryAttestationSignaturePath, recoveryAttestationSignatureSha256, recoveryClassificationPath, recoveryClassificationSha256, expectedImageReleaseSha };
 }
 
 export function captureStageBPlan({ tfvars, cliOptions, protectedMainCheckout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true }), plan = () => execFileSync("terraform", [`-chdir=${root}`, "plan", `-var-file=${tfvars}`, `-out=${readOption(cliOptions, "--saved-plan")}`], { stdio: "inherit" }), show = (savedPlanPath) => captureStageBTerraformJson({ args: [`-chdir=${root}`, "show", "-json", savedPlanPath], cwd: process.cwd() }), readInputs = readPlanningInputs, showWorkspace } = {}) {

@@ -27,6 +27,8 @@ import {
   assertStageBTerraformBrokerPolicySource,
   STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS,
   STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS,
+  stageBMutationInstanceIdentity,
+  resolveStageBRecoveryMode,
 } from "./stage-b-deployment-contract.mjs";
 import { assertStageBLambdaEnvironmentSize, STAGE_B } from "./production-green-stage-b-contract.mjs";
 
@@ -1109,6 +1111,9 @@ function assertComputedAliasBinding(plan) {
 
 export function censusStageBPlanSemantics(plan, options = {}) {
   if (!plan || !Array.isArray(plan.resource_changes)) throw new Error("Stage B semantic census requires Terraform plan resource_changes.");
+  for (const change of plan.resource_changes) if (Object.hasOwn(change, "deposed")) stageBMutationInstanceIdentity(change);
+  const recoveryMode = resolveStageBRecoveryMode(options);
+  options = { ...options, partialApplyRecovery: recoveryMode === "PARTIAL_APPLY_RECOVERY", freshImagePartialApplyRecovery: recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" };
   const manifest = assertStageBTypedRepresentationManifestComplete();
   assertStageBProviderResourceShapeUniverse();
   assertStageBProviderSemanticSnapshot();
@@ -1146,6 +1151,7 @@ export function censusStageBPlanSemantics(plan, options = {}) {
     const configurationReferences = collectConfigurationReferences(plan, change.address);
     resources.push({
       address: change.address,
+      mutationInstanceIdentity: stageBMutationInstanceIdentity(change, classification),
       mode: change.mode ?? null,
       type: change.type ?? null,
       module: change.module ?? null,
