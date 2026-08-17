@@ -578,6 +578,8 @@ test("fresh-image approval binds every current replacement to complete rollover 
   const fixture = makeFreshImagePartialApplyReferenceFixture();
   const audit = generate(fixture);
   assert.ok(audit.plannedAtomicBrokerRollovers.length > 0);
+  const rolloverEntry = audit.oldTaskDefinitions.find((entry) => entry.brokerReferenceModes.length > 0);
+  const rolloverMode = rolloverEntry.brokerReferenceModes[0];
   const rejects = [
     ["missing current rollover", (candidate) => candidate.oldTaskDefinitions.pop()],
     ["duplicate current rollover", (candidate) => candidate.oldTaskDefinitions.push(structuredClone(candidate.oldTaskDefinitions[0]))],
@@ -586,8 +588,19 @@ test("fresh-image approval binds every current replacement to complete rollover 
     ["false service reference", (candidate) => { candidate.oldTaskDefinitions[0].serviceReferences = ["unexpected-service"]; }],
     ["missing live task reference field", (candidate) => { delete candidate.oldTaskDefinitions[0].runningTaskReferences; }],
     ["altered live task reference", (candidate) => { candidate.oldTaskDefinitions[0].runningTaskReferences = ["unexpected-task"]; }],
+    ["top-level service reference contradiction", (candidate) => { candidate.services.push({ taskDefinition: rolloverEntry.oldTaskDefinitionArn, serviceName: "unexpected-service" }); }],
+    ["top-level running reference contradiction", (candidate) => { candidate.runningTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "unexpected-running-task" }); }],
+    ["top-level pending reference contradiction", (candidate) => { candidate.pendingTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "unexpected-pending-task" }); }],
+    ["entry service reference contradicts top level", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).serviceReferences = ["unexpected-service"]; }],
+    ["entry running reference contradicts top level", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).runningTaskReferences = ["unexpected-running-task"]; }],
+    ["entry pending reference contradicts top level", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).pendingTaskReferences = ["unexpected-pending-task"]; }],
     ["missing planned atomic rollover", (candidate) => { candidate.plannedAtomicBrokerRollovers.pop(); }],
     ["altered planned atomic rollover", (candidate) => { candidate.plannedAtomicBrokerRollovers[0].oldTaskDefinitionArn = oldArnFor("wrong-family"); }],
+    ["broker mapping wrong predecessor", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).taskDefinitionArn = oldArnFor("wrong-family"); }],
+    ["broker mapping missing", (candidate) => { candidate.broker.liveTaskDefinitionMappings = candidate.broker.liveTaskDefinitionMappings.filter((mapping) => mapping.mode !== rolloverMode); }],
+    ["broker mapping duplicate", (candidate) => { const mapping = candidate.broker.liveTaskDefinitionMappings.find((item) => item.mode === rolloverMode); candidate.broker.liveTaskDefinitionMappings.push(structuredClone(mapping)); }],
+    ["broker mapping wrong mode", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).mode = "wrong-mode"; }],
+    ["extra mapping for another current predecessor", (candidate) => { candidate.broker.liveTaskDefinitionMappings.push({ mode: "unexpected-mode", taskDefinitionArn: audit.oldTaskDefinitions.find((entry) => entry.brokerReferenceModes.length === 0).oldTaskDefinitionArn }); }],
     ["swapped rollover evidence", (candidate) => {
       const first = candidate.oldTaskDefinitions[0];
       const second = candidate.oldTaskDefinitions[1];
