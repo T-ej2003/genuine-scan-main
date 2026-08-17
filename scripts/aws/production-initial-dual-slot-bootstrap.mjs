@@ -227,3 +227,84 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
 export function createInitialDualSlotSecretsManagerClient({ region = INITIAL_DUAL_SLOT_REGION } = {}) {
   return new SecretsManagerClient({ region });
 }
+
+function assertRotationVersionTopology(response, name) {
+  const stages = response?.VersionIdsToStages;
+  if (!stages || typeof stages !== "object") throw new Error(`${name} rotation version topology is unavailable.`);
+  const labels = Object.values(stages).flatMap((value) => Array.isArray(value) ? value : []);
+  if (labels.some((label) => !["AWSCURRENT", "AWSPREVIOUS"].includes(label)) || labels.filter((label) => label === "AWSCURRENT").length !== 1 || labels.filter((label) => label === "AWSPREVIOUS").length > 1) {
+    throw new Error(`${name} has an unexpected rotation version topology.`);
+  }
+  return stages;
+}
+
+export async function supersedeStalePendingRotation({ send, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile, repositoryRoot = process.cwd() } = {}) {
+  if (typeof send !== "function") throw new Error("Stale rotation supersession Secrets Manager sender is required.");
+  if (!SHA40.test(sourceSha || "") || !SHA40.test(staleSourceSha || "") || !ROTATION_ID.test(rotationId || "") || !ROTATION_ID.test(staleRotationId || "")) throw new Error("Stale rotation supersession identity is invalid.");
+  if (sourceSha === staleSourceSha || rotationId === staleRotationId) throw new Error("Stale and replacement rotation identities must be distinct.");
+  const resources = {};
+  const existing = {};
+  const currentVersionIds = {};
+  for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
+    const described = await send(new DescribeSecretCommand({ SecretId: name }));
+    resources[slot] = exactArn(described, name);
+    const stages = assertRotationVersionTopology(described, name);
+    currentVersionIds[slot] = Object.entries(stages).find(([, labels]) => labels.includes("AWSCURRENT"))?.[0];
+    existing[slot] = parseStoredValue(await send(new GetSecretValueCommand({ SecretId: resources[slot] })), name);
+  }
+  const pendingSlots = ["jwtPending", "qrPrivatePending", "qrPublicPending"];
+  for (const slot of pendingSlots) {
+    const value = existing[slot];
+    if (value.sourceSha !== staleSourceSha || value.rotationId !== staleRotationId) throw new Error(`Stale ${slot} metadata does not match the authenticated pending rotation.`);
+  }
+  for (const slot of ["jwtPrevious", "qrPublicPrevious", "qrCurrentVersion", "qrPreviousVersion"]) {
+    if (existing[slot].sourceSha !== staleSourceSha) throw new Error(`Stale ${slot} metadata does not match the authenticated source.`);
+  }
+  const alreadySuperseded = Object.values(existing).every((value) => value.sourceSha === sourceSha && (value.rotationId === undefined || value.rotationId === rotationId));
+  if (!alreadySuperseded && Object.values(existing).some((value) => value.sourceSha !== staleSourceSha)) throw new Error("Rotation state is mixed; refusing blind supersession.");
+  if (alreadySuperseded) {
+    const evidence = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", idempotentReplay: true, sourceSha, staleSourceSha, rotationId, staleRotationId, generatedAt: new Date().toISOString(), resources: Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: currentVersionIds[slot], stages: ["AWSCURRENT"] }])) };
+    const persisted = writeStageBPrivateFileAtomic({ filePath: outputFile, bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), repositoryRoot, label: "Stale rotation supersession evidence" });
+    return { valid: true, ...evidence, writes: 0, evidenceFile: persisted.path, evidenceSha256: persisted.sha256, resources };
+  }
+
+  const material = generatePendingMaterial();
+  const payloads = pendingPayloads({ rotationId, material });
+  for (const payload of Object.values(payloads)) payload.sourceSha = sourceSha;
+  const replacement = {
+    jwtPending: payloads.jwtPending,
+    qrPrivatePending: payloads.qrPrivatePending,
+    qrPublicPending: payloads.qrPublicPending,
+    jwtPrevious: emptySlot("jwt_secrets", "empty", sourceSha),
+    qrPublicPrevious: emptySlot("qr_signing_keys", "empty", sourceSha),
+    qrCurrentVersion: versionSlot(existing.qrCurrentVersion.value, "current", sourceSha),
+    qrPreviousVersion: versionSlot("", "previous-empty", sourceSha),
+  };
+  const versionIds = {};
+  for (const [slot, value] of Object.entries(replacement)) {
+    const response = await send(new PutSecretValueCommand({ SecretId: resources[slot], ClientRequestToken: sha256(`${sourceSha}:${rotationId}:${slot}`), SecretString: JSON.stringify(value) }));
+    if (!response?.VersionId) throw new Error(`Rotation supersession did not return a version for ${slot}.`);
+    versionIds[slot] = response.VersionId;
+  }
+  for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
+    const described = await send(new DescribeSecretCommand({ SecretId: name }));
+    const stages = assertRotationVersionTopology(described, name);
+    const currentVersionId = Object.entries(stages).find(([, labels]) => labels.includes("AWSCURRENT"))?.[0];
+    if (currentVersionId !== versionIds[slot]) throw new Error(`Rotation supersession readback did not select the new ${slot} version.`);
+    const readback = parseStoredValue(await send(new GetSecretValueCommand({ SecretId: resources[slot] })), name);
+    if (readback.sourceSha !== sourceSha || (readback.rotationId !== undefined && readback.rotationId !== rotationId)) throw new Error(`Rotation supersession readback is not bound to the new ${slot} identity.`);
+  }
+  const evidence = {
+    schemaVersion: 1,
+    transition: "SUPERSEDE_STALE_PENDING",
+    sourceSha,
+    staleSourceSha,
+    rotationId,
+    staleRotationId,
+    generatedAt: new Date().toISOString(),
+    resources: Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: versionIds[slot], stages: ["AWSCURRENT"] }])),
+  };
+  const bytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`);
+  const persisted = writeStageBPrivateFileAtomic({ filePath: outputFile, bytes, repositoryRoot, label: "Stale rotation supersession evidence" });
+  return { valid: true, transition: evidence.transition, idempotentReplay: false, writes: Object.keys(versionIds).length, evidenceFile: persisted.path, evidenceSha256: persisted.sha256, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, versionIds };
+}

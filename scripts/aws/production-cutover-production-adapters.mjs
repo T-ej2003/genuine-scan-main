@@ -197,7 +197,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     bindingOutputFile: config.artifactBindingOutputFile || ARTIFACT_SIGNING_RUNTIME_BINDING_PATH,
     activeKeyVersion: config.artifactActiveKeyVersion,
   });
-  const stageA = createTerraformStageAAdapter({
+  const stageA = config.stageARecoveryEvidenceFile ? null : createTerraformStageAAdapter({
     root: config.stageARoot,
     planPath: config.stageAPlanPath,
     stageAPlanSha256: config.stageAPlanSha256,
@@ -231,7 +231,9 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
         };
       },
     },
-    stageA: { adapter: stageA, endpointSecurityGroupId: config.endpointSecurityGroupId, runtimeSecurityGroupId: config.runtimeSecurityGroupId },
+    stageA: config.stageARecoveryEvidenceFile
+      ? { recoveryEvidence: jsonFile(config.stageARecoveryEvidenceFile) }
+      : { adapter: stageA, endpointSecurityGroupId: config.endpointSecurityGroupId, runtimeSecurityGroupId: config.runtimeSecurityGroupId },
     artifactSigning: artifact,
     overlapTask: { input: config.overlapTaskInput, register: overlapRegistration, describe: async (arn) => parseJson(releaseRun, ["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]).taskDefinition },
     preDeploymentInventory: { execute: async ({ rotationId: currentRotationId }) => preDeploymentInventory.run({ rotationId: currentRotationId }) },

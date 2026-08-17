@@ -12,6 +12,8 @@ import { assertImageEvidence, imageEvidenceSha256 } from "./production-green-sta
 import { STAGE_B, canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { assertCanonicalImageImpactEvidence, imageAuthorizationSha256, IMAGE_AUTHORIZATION_PATHS } from "./production-image-authorization.mjs";
 import { assertCheckerChainStructuralEvidence } from "./production-checker-chain-contract.mjs";
+import { assertRootDropEvidence } from "./production-root-drop-evidence.mjs";
+import { assertPostApplyStageAPlanRecovery } from "./production-stage-a-recovery-evidence.mjs";
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -107,12 +109,12 @@ export function assertRotationInfrastructureConverged(result, { sourceSha, rotat
   return { ...result, rotationInfraConverged: true, overlapSecretCount: expectedArns.size, authorizedOverlapSecretCount: authorizedArns.size };
 }
 
-function assertIdentityEvidence(identities) {
+function assertIdentityEvidence(identities, { sourceSha } = {}) {
   if (identities?.releaseDeployer?.valid !== true || identities?.verifier?.valid !== true || identities?.rootDrop?.valid !== true) throw new Error("Required operational identities are invalid.");
   for (const name of ["releaseDeployer", "verifier", "rootDrop"]) requiredEvidence(name, identities[name]);
   if (!/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/.test(identities.releaseDeployer.callerArn || "")) throw new Error("Release-deployer identity is not the reviewed assumed role.");
   if (!/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-ecs-exec-verifier\/[^/]+$/.test(identities.verifier.callerArn || "")) throw new Error("Verifier identity is not the reviewed assumed role.");
-  if (identities.rootDrop.callerArn !== "arn:aws:iam::368992683803:root") throw new Error("Administrator root-drop evidence is not the exact reviewed root identity.");
+  assertRootDropEvidence(identities.rootDrop, { sourceSha });
 }
 
 export function buildTransitionMatrix(results) {
@@ -264,7 +266,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.checkerSourceTrust = { ...sourceTrust, sourceSha, evidenceSha256: sha(sourceTrust) };
 
   const identities = typeof suppliedIdentities?.establish === "function" ? await suppliedIdentities.establish() : suppliedIdentities;
-  assertIdentityEvidence(identities);
+  assertIdentityEvidence(identities, { sourceSha });
   results.iamIdentities = iamReport;
   results.identities = { ...identities, status: "valid", iamEvaluationCensus: iamReport.iamEvaluationCensus, ecsExecVerifierTrust: iamReport.ecsExecVerifierTrust, sourceSha, evidenceSha256: sha(identities) };
   results.identitiesStageA = identities;
@@ -272,7 +274,9 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.verifierIdentity = identities.verifier;
   results.rootDrop = identities.rootDrop;
 
-  const stageAResult = await runStageAControlPlane({ ...stageA, sourceSha });
+  const stageAResult = stageA?.recoveryEvidence
+    ? assertPostApplyStageAPlanRecovery(stageA.recoveryEvidence, { sourceSha, expectedStageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", expectedStageBSerial: 98 })
+    : await runStageAControlPlane({ ...stageA, sourceSha });
   recordMutation(mutations, "M2_STAGE_A_APPLY", stageAResult);
   results.stageA = { ...stageAResult, ...identities, sourceSha };
   const checkerChainEvidence = await checkerChain.verifyComplete();

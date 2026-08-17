@@ -14,8 +14,9 @@ import { createProductionPreDeploymentInventoryAdapter } from "../aws/production
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_TARGET_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
+import { buildRootDropEvidence } from "../aws/production-root-drop-evidence.mjs";
 
-const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
+export const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
 const imageDigest = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`;
 const rotationId = "rotation-rehearsal-1";
@@ -108,7 +109,7 @@ const inventory = Object.fromEntries(ROTATION_INVENTORY_CATEGORIES.map((name) =>
 const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/rehearsal";
 const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1";
 
-function fixtureInput(overrides = {}) {
+export function fixtureInput(overrides = {}) {
   const mutations = [];
   const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha });
   const strictProbes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
@@ -135,7 +136,7 @@ function fixtureInput(overrides = {}) {
       verifySourceTrust: async () => ({ exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }),
       verifyComplete: async () => ({ valid: true, sourceTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }, sourcePermission: { exact: true, action: "sts:AssumeRole", resource: CHECKER_TARGET_ROLE_ARN }, targetTrust: { exact: true, secondHopMfaRequired: false, principal: CHECKER_SOURCE_ROLE_ARN, roleArn: CHECKER_TARGET_ROLE_ARN }, checkerUserExact: true, firstHopMfaRequired: true, roleAAssumeTargetPermissionExact: true, roleBTrustExactRoleA: true, roleBSecondHopMfaRequired: false }),
     },
-    identities: { rootDrop: { ...validEvidence("root:drop"), callerArn: "arn:aws:iam::368992683803:root" }, releaseDeployer: { ...validEvidence("sts:release"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/rehearsal" }, verifier: { ...validEvidence("sts:verifier"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecs-exec-verifier/rehearsal" } },
+    identities: { rootDrop: buildRootDropEvidence({ sourceSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "rehearsal-root" }), releaseDeployer: { ...validEvidence("sts:release"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/rehearsal" }, verifier: { ...validEvidence("sts:verifier"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecs-exec-verifier/rehearsal" } },
     stageA,
     artifactSigning: artifactFixture(),
     overlapTask: { input: { backendImage: imageDigest, releaseSha: sourceSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } }, register: async () => { mutations.push("M4_REGISTER_TASK_DEFINITION"); return { taskDefinition: { taskDefinitionArn } }; }, describe: async (arn) => ({ taskDefinitionArn: arn, family: "mscqr-production-rls-green-backend-candidate", status: "ACTIVE", tags: [{ key: "MSCQRExecTarget", value: "production-backend" }] }) },
