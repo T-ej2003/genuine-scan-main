@@ -3,7 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertStageAStateIdentity, generateStageAPrerequisites, resolveStageASubnetRouteTable, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateContract, assertStageAStateIdentity, generateStageAPrerequisites, resolveStageASubnetRouteTable, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { STAGE_A_CHECKER_ROLE_TRUST } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
 
@@ -20,6 +21,31 @@ const run = (args) => {
 };
 
 test.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+const stateWithCheckerPrincipal = (principal) => productionStageAState({ serial: STAGE_A_MINIMUM_STATE_SERIAL, mutate: (state) => {
+  const checker = state.resources.find((resource) => resource.type === "aws_iam_role" && resource.name === "checker");
+  checker.instances[0].attributes.assume_role_policy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: principal }, Action: STAGE_A_CHECKER_ROLE_TRUST.action }] });
+  return state;
+} });
+
+test("Stage A checker trust accepts the Terraform singleton principal array and exact scalar form only", () => {
+  for (const principal of [STAGE_A_CHECKER_ROLE_TRUST.principal, [STAGE_A_CHECKER_ROLE_TRUST.principal]]) {
+    assert.doesNotThrow(() => assertStageAStateContract(stateWithCheckerPrincipal(principal), { stateObject: STAGE_A_STATE_OBJECT }));
+  }
+  for (const principal of [
+    [],
+    [STAGE_A_CHECKER_ROLE_TRUST.principal, "arn:aws:iam::368992683803:role/attacker"],
+    ["arn:aws:iam::368992683803:role/attacker"],
+    "arn:aws:iam::368992683803:role/attacker",
+    [[STAGE_A_CHECKER_ROLE_TRUST.principal]],
+    null,
+    {},
+    undefined,
+    "*",
+    [42],
+  ]) assert.throws(() => assertStageAStateContract(stateWithCheckerPrincipal(principal), { stateObject: STAGE_A_STATE_OBJECT }), /Stage A checker.*trust/);
+});
+
 test("canonical Stage A handoff derives every identifier from state and read-only live evidence", () => {
   const outputPath = path.join(directory, "handoff.json");
   const output = generateStageAPrerequisites({ stateBackup: statePath, stateObject: STAGE_A_STATE_OBJECT, toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), outputPath, run });

@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
-import { STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "./production-stage-a-control-plane.mjs";
+import { normalizeStageACheckerPrincipalAws, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "./production-stage-a-control-plane.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
@@ -68,7 +68,16 @@ function stageAValues(state, options) {
   if (oneResource(state, "aws_iam_role", "executor").arn !== STAGE_B.executorRoleArn || oneResource(state, "aws_iam_role", "broker").arn !== STAGE_B.brokerRoleArn) throw new Error("Stage A runtime IAM role identities are wrong.");
   const checkerRole = oneResource(state, "aws_iam_role", "checker");
   if (checkerRole.arn !== STAGE_B.checkerRoleArn) throw new Error("Stage A checker role identity is wrong.");
-  assertExactPolicy(parsePolicy(checkerRole.assume_role_policy, "Stage A checker trust"), { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: STAGE_A_CHECKER_ROLE_TRUST.principal }, Action: STAGE_A_CHECKER_ROLE_TRUST.action }] }, "Stage A checker trust");
+  const checkerTrust = parsePolicy(checkerRole.assume_role_policy, "Stage A checker trust");
+  const normalizedCheckerTrust = Array.isArray(checkerTrust.Statement) && checkerTrust.Statement.length > 0
+    ? {
+        ...checkerTrust,
+        Statement: checkerTrust.Statement.map((statement, index) => index === 0 && statement && typeof statement === "object" && !Array.isArray(statement) && statement.Principal && typeof statement.Principal === "object" && !Array.isArray(statement.Principal)
+          ? { ...statement, Principal: { ...statement.Principal, AWS: normalizeStageACheckerPrincipalAws(statement.Principal.AWS) } }
+          : statement),
+      }
+    : checkerTrust;
+  assertExactPolicy(normalizedCheckerTrust, { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: STAGE_A_CHECKER_ROLE_TRUST.principal }, Action: STAGE_A_CHECKER_ROLE_TRUST.action }] }, "Stage A checker trust");
   const rootDropKey = oneResource(state, "aws_kms_key", "root_drop");
   const rootDropAlias = oneResource(state, "aws_kms_alias", "root_drop");
   if (!new RegExp(`^arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/[a-f0-9-]{36}$`).test(rootDropKey.arn || "") || rootDropKey.key_usage !== "SIGN_VERIFY" || rootDropKey.customer_master_key_spec !== "RSA_3072" || rootDropAlias.arn !== STAGE_B.rootDropKmsKeyArn || rootDropAlias.target_key_arn !== rootDropKey.arn) throw new Error("Stage A root-drop key and alias identities are wrong.");
