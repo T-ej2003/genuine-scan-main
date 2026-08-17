@@ -349,9 +349,9 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
 
 test("permission manifest declares the exact normal and recovery mutation matrix", () => {
   const profilesFor = (id) => manifest.required.find((entry) => entry.id === id)?.profiles;
-  assert.deepEqual(profilesFor("update-broker-managed-policy"), ["NORMAL_STAGE_B_RELEASE"]);
-  assert.deepEqual(profilesFor("prune-broker-managed-policy-versions"), ["NORMAL_STAGE_B_RELEASE"]);
-  assert.deepEqual(profilesFor("update-reviewed-broker-alias"), ["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"]);
+  assert.deepEqual(profilesFor("update-broker-managed-policy"), ["NORMAL_STAGE_B_RELEASE", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"]);
+  assert.deepEqual(profilesFor("prune-broker-managed-policy-versions"), ["NORMAL_STAGE_B_RELEASE", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"]);
+  assert.deepEqual(profilesFor("update-reviewed-broker-alias"), ["NORMAL_STAGE_B_RELEASE", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"]);
   for (const entry of manifest.required.filter((candidate) => !candidate.plan)) assert.equal(entry.profiles, undefined);
 });
 
@@ -1217,7 +1217,7 @@ test("missing or mismatched task registration context fails before simulation", 
 
 test("normal permission profile still requires every ECS registration context", () => {
   const productionPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
-  const report = { requiredEvaluations: [], forbiddenEvaluations: [], planCapabilities: { schemaVersion: 1, required: [], forbidden: [] } };
+  const report = { requiredEvaluations: [], forbiddenEvaluations: [], planCapabilities: { schemaVersion: 1, required: [], forbidden: [], mutationInstances: deriveRequiredEvaluations(productionPlan, manifest).coveredChanges } };
   assert.doesNotThrow(() => assertPermissionEvaluationBindings(report, manifest, { plan: productionPlan, permissionProfile: "NORMAL_STAGE_B_RELEASE" }));
   const missing = structuredClone(productionPlan);
   missing.resource_changes = missing.resource_changes.filter(({ address }) => address !== manifest.taskDefinitionMappings[0].address);
@@ -1590,7 +1590,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   report.planSha256 = planHash;
   report.canonicalPlanJsonSha256 = canonicalHash;
   const projectCapabilities = (items) => items.map(({ id, action, resource, context, decision }) => ({ id, action, resource, context, decision }));
-  report.planCapabilities = { schemaVersion: 1, required: projectCapabilities(report.requiredEvaluations), forbidden: projectCapabilities(report.forbiddenEvaluations) };
+  report.planCapabilities = { schemaVersion: 1, required: projectCapabilities(report.requiredEvaluations), forbidden: projectCapabilities(report.forbiddenEvaluations), mutationInstances: deriveRequiredEvaluations(effectivePlan, manifest).coveredChanges };
   writePermissionPair(permissionPath, permissionSignaturePath, report);
   writePrivate(imageEvidencePath, `${JSON.stringify(imageEvidence, null, 2)}\n`);
   writePrivate(imageEvidenceSignaturePath, JSON.stringify(signImageEvidence(imageEvidence, { sign: () => "AQ==" })));
@@ -1634,7 +1634,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
     tfvarsFormat: "hcl", tfvarsFileName: path.basename(tfvarsPath), tfvarsExtension: ".tfvars",
     toolingSha: "b".repeat(40), toolingTreeSha256: "e".repeat(64), imageReleaseSha: "a".repeat(40), imageEvidenceCanonicalSha256: canonicalImageEvidenceSha256,
     stageAInputPath, stageAInputSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAInputPath)).digest("hex"), stageAStateBackupPath, stageAStateBackupSha256: crypto.createHash("sha256").update(fs.readFileSync(stageAStateBackupPath)).digest("hex"), stageAStateObject: "mscqr/production/rls-green/stage-a/terraform.tfstate", stageAStateLineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", stageAStateSerial: 35, stateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stateSerial: 76, brokerPackagePath, brokerPackageManifestPath, brokerPackageManifestSha256: crypto.createHash("sha256").update(fs.readFileSync(brokerPackageManifestPath)).digest("hex"), brokerPackageManifestFormat: "stage-b-broker-zip-v2",
-    brokerPackageRawSha256: crypto.createHash("sha256").update(brokerBytes).digest("hex"), brokerPackageBase64Sha256: crypto.createHash("sha256").update(brokerBytes).digest("base64"),
+    brokerPackageRawSha256: crypto.createHash("sha256").update(brokerBytes).digest("hex"), brokerPackageBase64Sha256: crypto.createHash("sha256").update(brokerBytes).digest("base64"), recoveryMode: "NORMAL",
     tfvarsSha256: crypto.createHash("sha256").update(tfvarsBytes).digest("hex"),
     images: Object.fromEntries(Object.entries(tfvarsValues).map(([variable, imageReference]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: variable === "worker_image" ? "worker" : variable === "executor_image" ? "rls-executor" : variable.includes("canary") ? "rls-canary" : "backend", repository: variable === "worker_image" ? "mscqr-worker" : "mscqr-backend", tag: "a".repeat(40), imageReference, digestLength: 71, digest: imageReference.slice(imageReference.indexOf("@") + 1), matchesEvidence: true }])),
   };
@@ -1913,7 +1913,7 @@ test("exact PARTIAL_APPLY_RECOVERY artifact set reaches the apply seam without E
   fixture.tfvarsBindingReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.tfvarsBindingReportPath)).digest("hex");
   approval.refreshReportSha256 = fixture.refreshReportSha256; const refreshedApprovalBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`); writePrivate(fixture.planApprovalReportPath, refreshedApprovalBytes); fixture.planApprovalReportSha256 = crypto.createHash("sha256").update(refreshedApprovalBytes).digest("hex");
   const permissionInput = planBoundPermissionInput(fixture); const permission = runPermissionPreflight(permissionInput); writePermissionPair(fixture.permissionReportPath, fixture.permissionReportSignaturePath, permission); fixture.permissionReportSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportPath)).digest("hex"); fixture.permissionReportSignatureSha256 = crypto.createHash("sha256").update(fs.readFileSync(fixture.permissionReportSignaturePath)).digest("hex");
-  const input = validRealApplyInput(fixture); let validationOptions; input.deps.validatePlan = (_plan, options) => { validationOptions = options; return { classifiedResources: partialPlan.resource_changes.filter((change) => change.change.actions[0] === "delete").map((change) => ({ address: change.address, classification: "partial-apply-deposed-task-definition-cleanup" })) }; }; let ecsRegistrations = 0; let ecsServiceUpdates = 0; input.deps.apply = (planPath) => { input.applyCalls.push(planPath); return { status: 0 }; };
+  const input = validRealApplyInput(fixture); let validationOptions; input.deps.validatePlan = (_plan, options) => { validationOptions = options; return { classifiedResources: partialPlan.resource_changes.filter((change) => change.change.actions[0] === "delete").map((change) => ({ address: change.address, deposed: change.deposed, actions: change.change.actions, classification: "partial-apply-deposed-task-definition-cleanup" })) }; }; let ecsRegistrations = 0; let ecsServiceUpdates = 0; input.deps.apply = (planPath) => { input.applyCalls.push(planPath); return { status: 0 }; };
   assert.equal(runApply(input).status, "applied-saved-plan"); assert.equal(input.applyCalls.length, 1); assert.equal(validationOptions.partialApplyRecovery, true); assert.equal(validationOptions.recoveryOnly, false); assert.equal(ecsRegistrations, 0); assert.equal(ecsServiceUpdates, 0);
 });
 

@@ -11,7 +11,7 @@ import {
   STAGE_B_PLAN_IMAGE_BINDINGS,
 } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B, STAGE_B_MODES, canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
+import { resolveStageBRecoveryMode, STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { assertStageBBrokerPackageManifest } from "./package-production-green-stage-b-broker.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageAStateIdentity, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
@@ -480,8 +480,11 @@ export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindi
   if (report.recoveryOnly === undefined) report.recoveryOnly = false;
   if (report.partialApplyRecovery !== undefined && typeof report.partialApplyRecovery !== "boolean") throw new Error("Stage B tfvars binding partial-recovery flag is malformed.");
   if (report.partialApplyRecovery === undefined) report.partialApplyRecovery = false;
-  const expectedRecoveryMode = report.recoveryOnly ? "RECOVERY_ALIAS_ONLY" : report.partialApplyRecovery ? "PARTIAL_APPLY_RECOVERY" : "NONE";
-  if (report.recoveryMode !== undefined && report.recoveryMode !== expectedRecoveryMode) throw new Error("Stage B tfvars binding recovery mode is inconsistent.");
+  if (report.freshImagePartialApplyRecovery !== undefined && typeof report.freshImagePartialApplyRecovery !== "boolean") throw new Error("Stage B tfvars binding fresh-image recovery flag is malformed.");
+  if (report.freshImagePartialApplyRecovery === undefined) report.freshImagePartialApplyRecovery = false;
+  if (typeof report.recoveryMode !== "string") throw new Error("Stage B tfvars binding recovery mode is missing.");
+  const expectedRecoveryMode = resolveStageBRecoveryMode({ recoveryOnly: report.recoveryOnly, partialApplyRecovery: report.partialApplyRecovery, freshImagePartialApplyRecovery: report.freshImagePartialApplyRecovery });
+  if (report.recoveryMode !== expectedRecoveryMode) throw new Error("Stage B tfvars binding recovery mode is inconsistent.");
   assertBrokerPackageBinding(tfvarsBytes, report);
   assertStageAPrerequisiteBinding(report);
   for (const [key, expected] of [["toolingSha", expectedToolingSha], ["toolingTreeSha256", expectedToolingTreeSha256], ["imageReleaseSha", expectedImageReleaseSha], ["imageEvidenceCanonicalSha256", expectedImageEvidenceSha256]]) if (expected !== undefined && report[key] !== expected) throw new Error(`Stage B tfvars binding report ${key} does not match the current deployment identity.`);
@@ -496,9 +499,12 @@ export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindi
     if (!digestPattern.test(report.recoveryAttestationSha256 || "") || !digestPattern.test(report.recoveryClassificationSha256 || "") || !digestPattern.test(report.recoveryRefreshReportSha256 || "") || report.recoveryStateLineage !== report.stateLineage || report.recoveryStateSerial !== report.stateSerial || report.recoveryDesiredVersion === null || !/^[1-9][0-9]*$/.test(String(report.recoveryDesiredVersion))) throw new Error("Recovery-only tfvars binding report is incomplete or state-unbound.");
     if (!tfvarsBytes.toString("utf8").includes("stage_b_recovery_only = true") || !tfvarsBytes.toString("utf8").includes(`stage_b_recovery_alias_target_version = ${quote(report.recoveryDesiredVersion)}`)) throw new Error("Recovery-only tfvars does not carry the exact attested target binding.");
   }
-  if (report.partialApplyRecovery === true) {
-    if (report.recoveryOnly === true || report.recoveryMode !== "PARTIAL_APPLY_RECOVERY" || !digestPattern.test(report.recoveryRefreshReportSha256 || "") || !digestPattern.test(report.recoveryObservationBindingSha256 || "") || report.recoveryStateLineage !== report.stateLineage || report.recoveryStateSerial !== report.stateSerial) throw new Error("Partial-apply recovery tfvars binding report is incomplete or state-unbound.");
+  if (["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(report.recoveryMode)) {
+    if (report.recoveryOnly === true || !digestPattern.test(report.recoveryRefreshReportSha256 || "") || !digestPattern.test(report.recoveryObservationBindingSha256 || "") || report.recoveryStateLineage !== report.stateLineage || report.recoveryStateSerial !== report.stateSerial) throw new Error("Partial-apply recovery tfvars binding report is incomplete or state-unbound.");
     if (tfvarsBytes.toString("utf8").includes("stage_b_recovery_only = true")) throw new Error("Partial-apply recovery tfvars cannot use RECOVERY_ALIAS_ONLY inputs.");
+  }
+  if (report.freshImagePartialApplyRecovery === true) {
+    if (report.recoveryMode !== "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" || report.imageReleaseSha !== report.toolingSha || report.imagePublicationSourceSha !== report.toolingSha || report.imagePublicationWorkflowDefinitionSha !== report.toolingSha || !digestPattern.test(report.imagePublicationIdentitySha256 || "") || !/^\d+$/.test(String(report.imageEvidenceWorkflowRunId || ""))) throw new Error("Fresh-image partial-apply recovery tfvars binding is not source-bound to fresh publication evidence.");
   }
   return report;
 }
@@ -511,10 +517,12 @@ function validateTfvarsValues(values) {
   for (const field of ["backend_image", "worker_image", "executor_image", "canary_image", "read_only_canary_image"]) if (!imageUriPattern.test(values[field] || "")) throw new Error(`${field} is not an immutable Stage B image reference.`);
 }
 
-export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, outputPath, bindingReportPath, allowOverwrite = false, recoveryOnly = false, partialApplyRecovery = false, recovery } = {}) {
+export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, outputPath, bindingReportPath, allowOverwrite = false, recoveryOnly = false, partialApplyRecovery = false, freshImagePartialApplyRecovery = false, recovery } = {}) {
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !digestPattern.test(toolingTreeSha256 || "") || !/^[a-f0-9]{40}$/.test(imageReleaseSha || "")) throw new Error("Tooling, tooling-tree, or image-release identity is malformed.");
-  if (recoveryOnly && partialApplyRecovery) throw new Error("Stage B recovery-only and partial-apply recovery modes are mutually exclusive.");
-  if (recovery && !recoveryOnly && !partialApplyRecovery) throw new Error("Recovery artifacts require an explicit Stage B recovery mode.");
+  const recoveryMode = resolveStageBRecoveryMode({ recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery });
+  const partialRecoveryMode = recoveryMode === "PARTIAL_APPLY_RECOVERY" || recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY";
+  if (recovery && recoveryMode === "NORMAL") throw new Error("Recovery artifacts require an explicit Stage B recovery mode.");
+  if (freshImagePartialApplyRecovery && imageReleaseSha !== toolingSha) throw new Error("Fresh-image partial-apply recovery requires images released from the protected source SHA.");
   if (environment !== STAGE_B_EXPECTED_ENVIRONMENT) throw new Error("Stage B tfvars require the production environment.");
   assertAbsoluteFile(imageEvidence, "Image evidence"); assertAbsoluteFile(imageEvidenceSignature, "Image-evidence signature"); assertAbsoluteFile(stateBackup, "State backup"); assertAbsoluteFile(stageAInput, "Stage-A prerequisite input"); assertAbsoluteFile(stageAStateBackup, "Stage-A state backup"); assertAbsoluteFile(brokerPackagePath, "Broker package");
   const brokerPackageStat = fs.lstatSync(brokerPackagePath);
@@ -523,11 +531,12 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   if (!outputPath || !bindingReportPath) throw new Error("Tfvars and binding-report output paths are required.");
   const report = readJson(imageEvidence); const signature = readJson(imageEvidenceSignature);
   assertImageEvidence(report, { signatureArtifact: signature, verifySignature, toolingSha, imageReleaseSha, workflowRunId, artifactSha256: canonicalArtifactSha256, now });
+  if (freshImagePartialApplyRecovery && (report.publicationIdentity?.imageReleaseSha !== toolingSha || report.publicationIdentity?.workflowDefinitionSha !== toolingSha || report.publicationIdentity?.headBranch !== "main" || report.publicationIdentity?.conclusion !== "success" || report.publicationIdentity?.artifactExpired !== false)) throw new Error("Fresh-image publication evidence is not bound to the protected source or a successful non-expired publication.");
   const evidenceSha256 = imageEvidenceSha256(report);
   const images = extractImages(report, imageReleaseSha);
   const state = readJson(stateBackup); const retained = deriveRetainedDefinitions(state);
   const recoveryEvidence = recoveryOnly ? assertRecoveryOnlyEvidence({ recovery, state, toolingSha }) : null;
-  const partialRecoveryEvidence = partialApplyRecovery ? assertPartialApplyRecoveryEvidence({ recovery: { ...recovery, stateBackupPath: stateBackup }, state, toolingSha, toolingTreeSha256 }) : null;
+  const partialRecoveryEvidence = partialRecoveryMode ? assertPartialApplyRecoveryEvidence({ recovery: { ...recovery, stateBackupPath: stateBackup }, state, toolingSha, toolingTreeSha256 }) : null;
   const recoveryBindings = recoveryOnly ? deriveRecoveryOnlyBindings(state) : null;
   if (recoveryOnly && path.resolve(brokerPackagePath) !== recoveryBindings.packagePath) throw new Error("Recovery-only broker package path must match the current Lambda state filename exactly.");
   if (recoveryOnly && base64Sha256(fs.readFileSync(brokerPackagePath)) !== recoveryBindings.sourceCodeHashBase64) throw new Error("Recovery-only broker package bytes do not match the current Lambda source_code_hash.");
@@ -561,10 +570,11 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
     tfvarsExtension: STAGE_B_TFVARS_EXTENSION,
     generator: STAGE_B_TFVARS_GENERATOR,
     recoveryOnly,
-    partialApplyRecovery,
-    recoveryMode: recoveryOnly ? "RECOVERY_ALIAS_ONLY" : partialApplyRecovery ? "PARTIAL_APPLY_RECOVERY" : "NONE",
+    partialApplyRecovery: recoveryMode === "PARTIAL_APPLY_RECOVERY",
+    freshImagePartialApplyRecovery,
+    recoveryMode,
     toolingSha, toolingTreeSha256, imageReleaseSha, imageEvidenceCanonicalSha256: evidenceSha256,
-    imageEvidenceSource: path.basename(imageEvidence), imageEvidenceSignatureSha256: sha256(fs.readFileSync(imageEvidenceSignature)), stageAInputPath: path.resolve(stageAInput), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stageAStateBackupPath: path.resolve(stageAStateBackup), stageAStateBackupSha256: stageAStateSha256, stageAStateObject: stageAPrerequisiteInput.stageAStateObject, stageAStateLineage: stageAState.lineage, stageAStateSerial: stageAState.serial, stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),
+    imageEvidenceSource: path.basename(imageEvidence), imageEvidenceWorkflowRunId: String(report.workflowRunId), imagePublicationIdentitySha256: report.publicationIdentitySha256, imagePublicationSourceSha: report.publicationIdentity.imageReleaseSha, imagePublicationWorkflowDefinitionSha: report.publicationIdentity.workflowDefinitionSha, imageEvidenceSignatureSha256: sha256(fs.readFileSync(imageEvidenceSignature)), stageAInputPath: path.resolve(stageAInput), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stageAStateBackupPath: path.resolve(stageAStateBackup), stageAStateBackupSha256: stageAStateSha256, stageAStateObject: stageAPrerequisiteInput.stageAStateObject, stageAStateLineage: stageAState.lineage, stageAStateSerial: stageAState.serial, stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),
     brokerPackagePath: path.resolve(brokerPackagePath), brokerPackageManifestPath: brokerManifest.path, brokerPackageManifestSha256: brokerManifest.sha256, brokerPackageManifestFormat: brokerManifest.manifest.format, brokerPackageRawSha256: sha256(brokerBytes), brokerPackageBase64Sha256: base64Sha256(brokerBytes), sourceContractSha256: contract.sourceContractSha256, migrationSetDigest: contract.migrationSetDigest, packageChecksumSha256: contract.packageChecksumSha256,
     images: Object.fromEntries(Object.entries(images).map(([variable, image]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: image.service, repository: image.repository, tag: image.tag, imageReference: image.value, digestLength: image.digest.length, digest: image.digest, matchesEvidence: report.images.find((record) => record.service === image.service)?.digest === image.digest }])),
     retainedDefinitions: { candidate: retained.counts.candidate, executor: retained.counts.executor },
@@ -580,7 +590,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
       recoveryBrokerPackageStatePath: recoveryBindings.packagePath,
       recoveryBrokerStateSourceCodeHashBase64: recoveryBindings.sourceCodeHashBase64,
     } : {}),
-    ...(partialApplyRecovery ? {
+    ...(partialRecoveryMode ? {
       recoveryRefreshReportSha256: partialRecoveryEvidence.refreshReportSha256,
       recoveryObservationBindingSha256: partialRecoveryEvidence.observationBindingSha256,
       recoveryStateLineage: partialRecoveryEvidence.stateLineage,
@@ -598,10 +608,11 @@ function requiredOption(argv, option) { const index = argv.indexOf(option); cons
 export function parseCli(argv = process.argv.slice(2)) {
   const recoveryOnly = argv.includes("--recovery-only");
   const partialApplyRecovery = argv.includes("--partial-apply-recovery");
-  if (recoveryOnly && partialApplyRecovery) throw new Error("Stage B recovery-only and partial-apply recovery modes are mutually exclusive.");
+  const freshImagePartialApplyRecovery = argv.includes("--fresh-image-partial-apply-recovery");
+  resolveStageBRecoveryMode({ recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery });
   const result = {
     imageEvidence: requiredOption(argv, "--image-evidence"), imageEvidenceSignature: requiredOption(argv, "--image-evidence-signature"), stateBackup: requiredOption(argv, "--state-backup"), stageAInput: requiredOption(argv, "--stage-a-input"), stageAStateBackup: requiredOption(argv, "--stage-a-state-backup"), brokerPackagePath: requiredOption(argv, "--broker-package"),
-    toolingSha: requiredOption(argv, "--tooling-sha"), toolingTreeSha256: requiredOption(argv, "--tooling-tree-sha256"), imageReleaseSha: requiredOption(argv, "--image-release-sha"), workflowRunId: requiredOption(argv, "--workflow-run-id"), canonicalArtifactSha256: requiredOption(argv, "--canonical-artifact-sha256"), environment: requiredOption(argv, "--environment"), outputPath: requiredOption(argv, "--output"), bindingReportPath: requiredOption(argv, "--binding-report"), allowOverwrite: argv.includes("--allow-overwrite"), recoveryOnly, partialApplyRecovery,
+    toolingSha: requiredOption(argv, "--tooling-sha"), toolingTreeSha256: requiredOption(argv, "--tooling-tree-sha256"), imageReleaseSha: requiredOption(argv, "--image-release-sha"), workflowRunId: requiredOption(argv, "--workflow-run-id"), canonicalArtifactSha256: requiredOption(argv, "--canonical-artifact-sha256"), environment: requiredOption(argv, "--environment"), outputPath: requiredOption(argv, "--output"), bindingReportPath: requiredOption(argv, "--binding-report"), allowOverwrite: argv.includes("--allow-overwrite"), recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery,
   };
   if (recoveryOnly) result.recovery = {
     refreshReportPath: requiredOption(argv, "--refresh-report"), refreshReportSha256: requiredOption(argv, "--refresh-report-sha256"),
@@ -609,7 +620,7 @@ export function parseCli(argv = process.argv.slice(2)) {
     signaturePath: requiredOption(argv, "--recovery-signature"), signatureSha256: requiredOption(argv, "--recovery-signature-sha256"),
     classificationPath: requiredOption(argv, "--recovery-classification"), classificationSha256: requiredOption(argv, "--recovery-classification-sha256"),
   };
-  if (partialApplyRecovery) result.recovery = {
+  if (["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(resolveStageBRecoveryMode({ recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery }))) result.recovery = {
     refreshReportPath: requiredOption(argv, "--refresh-report"),
     observationBindingPath: requiredOption(argv, "--refresh-binding-report"),
   };

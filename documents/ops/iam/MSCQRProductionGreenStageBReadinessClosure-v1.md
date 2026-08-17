@@ -185,6 +185,16 @@ metadata is limited to `code_sha256`, `source_code_size`, `last_modified`, `qual
 
 Recovery is additive and orthogonal:
 
+The serial-96 fresh-image path uses a separate `FRESH_IMAGE_PARTIAL_APPLY_RECOVERY`
+profile when fresh protected-source images change the twelve active task definitions.
+It is not an alias of `PARTIAL_APPLY_RECOVERY`: the profile binds fresh publication
+evidence to the protected source, admits exactly twelve create-before-delete ECS
+rotations, the eleven reviewed deposed state cleanups, the broker function and alias
+updates, and the exact broker managed-policy update. It rejects ordinary recovery
+artifacts, stale image evidence, extra registrations, real remote deletions, and
+unclassified changes. Deposed entries are state cleanup only; they do not grant ECS
+registration or remote deletion authority.
+
 ```text
 NORMAL_STAGE_B_ACTION_CONTRACT
   + exactly aws_lambda_alias.reviewed ["update"]

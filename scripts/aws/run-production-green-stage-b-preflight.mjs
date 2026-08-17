@@ -12,6 +12,7 @@ import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPriv
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
 import { generateStageAPrerequisites, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { generateStageBTfvars } from "./generate-production-green-stage-b-tfvars.mjs";
+import { resolveStageBRecoveryMode } from "./stage-b-deployment-contract.mjs";
 import {
   ACCOUNT,
   APPROVED_PREFLIGHT_GENERATOR_ARNS,
@@ -58,13 +59,15 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   const handoff = value(argv, "--stage-a-handoff"); const tfvars = value(argv, "--tfvars"); const bindingReport = value(argv, "--binding-report");
   const toolingSha = value(argv, "--tooling-sha"); const toolingTreeSha256 = value(argv, "--tooling-tree-sha256");
   const partialApplyRecovery = argv.includes("--partial-apply-recovery");
+  const freshImagePartialApplyRecovery = argv.includes("--fresh-image-partial-apply-recovery");
+  const recoveryMode = resolveStageBRecoveryMode({ recoveryOnly: false, partialApplyRecovery, freshImagePartialApplyRecovery });
   generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff });
   const generated = generateStageBTfvars({
     imageEvidence: value(argv, "--image-evidence"), imageEvidenceSignature: value(argv, "--image-evidence-signature"), stateBackup: stageBState,
     stageAInput: handoff, stageAStateBackup: stageAState, brokerPackagePath: value(argv, "--broker-package"), toolingSha, toolingTreeSha256,
     imageReleaseSha: value(argv, "--image-release-sha"), workflowRunId: value(argv, "--workflow-run-id"), canonicalArtifactSha256: value(argv, "--canonical-artifact-sha256"),
-    environment: "production", outputPath: tfvars, bindingReportPath: bindingReport, partialApplyRecovery,
-    ...(partialApplyRecovery ? { recovery: { refreshReportPath: value(argv, "--refresh-report"), observationBindingPath: value(argv, "--refresh-binding-report") } } : {}),
+    environment: "production", outputPath: tfvars, bindingReportPath: bindingReport, partialApplyRecovery, freshImagePartialApplyRecovery,
+    ...(["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(recoveryMode) ? { recovery: { refreshReportPath: value(argv, "--refresh-report"), observationBindingPath: value(argv, "--refresh-binding-report") } } : {}),
   });
   generateStageBTerraformBackendConfig({ outputPath: backendConfig });
   ensureStageBPrivateDirectory({ directory: terraformDataDir, repositoryRoot: root, create: true, normalize: true });

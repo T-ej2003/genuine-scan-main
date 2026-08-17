@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { assertStageBPartialApplyRecoveryPlan, classifyStageBPlan, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
 import { assertStageBReferenceAuditFreshness, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
+import { assertStageBMutationInstanceMultisetEqual, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 
@@ -12,16 +12,74 @@ export const STAGE_B_PLAN_APPROVED = "PLAN_APPROVED";
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const STAGE_B_CAPTURE_BROKER_ADDRESSES = ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"];
-export const STAGE_B_PLAN_PROFILES = Object.freeze(["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"]);
+export const STAGE_B_PLAN_PROFILES = Object.freeze(["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "ECS_TASK_DEFINITION_ROTATION", "RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"]);
+
+const freshImageCurrentClassification = "CURRENT_RUNTIME_TASK_DEFINITION";
+const freshImageDeposedClassification = "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP";
+const mutationInstanceKey = (entry, label) => {
+  if (!entry || typeof entry !== "object" || typeof entry.terraformAddress !== "string" || typeof entry.mutationInstanceIdentity !== "string" || typeof entry.classification !== "string") throw new Error(`Stage B fresh-image reference audit ${label} mutation instance is malformed.`);
+  return JSON.stringify([entry.terraformAddress, entry.mutationInstanceIdentity, entry.classification]);
+};
+
+function assertEmptyRuntimeReferences(entry, label) {
+  const references = entry?.runtimeReferences;
+  if (!references || typeof references !== "object" || Array.isArray(references) || JSON.stringify(Object.keys(references).sort()) !== JSON.stringify(["brokerModes", "pendingTasks", "runningTasks", "services"])) throw new Error(`Stage B fresh-image reference audit ${label} runtime-reference evidence is malformed.`);
+  for (const key of ["services", "runningTasks", "pendingTasks", "brokerModes"]) if (!Array.isArray(references[key]) || references[key].length !== 0) throw new Error(`Stage B fresh-image reference audit ${label} contains a live runtime reference.`);
+}
+
+function assertNoDeposedRuntimeReferences(referenceAudit, deposedArns) {
+  for (const [label, items, arnKey] of [["service", referenceAudit.services, "taskDefinition"], ["RUNNING task", referenceAudit.runningTasks, "taskDefinitionArn"], ["PENDING task", referenceAudit.pendingTasks, "taskDefinitionArn"], ["transitional task", referenceAudit.transitionalTasks, "taskDefinitionArn"]]) {
+    if (!Array.isArray(items)) throw new Error(`Stage B fresh-image reference audit ${label} evidence is missing.`);
+    for (const item of items) {
+      if (!item || typeof item[arnKey] !== "string") throw new Error(`Stage B fresh-image reference audit ${label} observation is malformed.`);
+      if (deposedArns.has(item[arnKey])) throw new Error(`Stage B fresh-image reference audit ${label} references a deposed task definition.`);
+    }
+  }
+  const mappings = referenceAudit.broker?.liveTaskDefinitionMappings;
+  if (!Array.isArray(mappings)) throw new Error("Stage B fresh-image reference audit broker mapping evidence is missing.");
+  for (const mapping of mappings) {
+    if (!mapping || typeof mapping.taskDefinitionArn !== "string") throw new Error("Stage B fresh-image reference audit broker mapping is malformed.");
+    if (deposedArns.has(mapping.taskDefinitionArn)) throw new Error("Stage B fresh-image reference audit broker mapping references a deposed task definition.");
+  }
+}
+
+export function assertStageBFreshImageReferenceAuditBinding(plan, referenceAudit, { terraformConfiguration } = {}) {
+  if (!referenceAudit || typeof referenceAudit !== "object" || Array.isArray(referenceAudit)) throw new Error("Stage B fresh-image reference audit is missing.");
+  const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change?.type === "aws_ecs_task_definition");
+  const currentChanges = taskDefinitionChanges.filter((change) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, change.address) && !Object.hasOwn(change, "deposed"));
+  const deposedChanges = taskDefinitionChanges.filter((change) => Object.hasOwn(change, "deposed"));
+  if (currentChanges.length !== 12 || deposedChanges.length !== 11) throw new Error("Stage B fresh-image reference audit plan partition is not the exact 12-current/11-deposed topology.");
+  for (const change of deposedChanges) if (!isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) throw new Error(`Stage B fresh-image reference audit contains an unexpected deposed task-definition instance: ${change.address}.`);
+  const expectedCurrent = currentChanges.map((change) => ({ terraformAddress: change.address, mutationInstanceIdentity: stageBMutationInstanceIdentity(change), classification: freshImageCurrentClassification }));
+  const expectedDeposed = deposedChanges.map((change) => ({ terraformAddress: change.address, deposed: change.deposed, mutationInstanceIdentity: stageBMutationInstanceIdentity(change), family: STAGE_B_TASK_DEFINITION_FAMILIES[change.address], beforeTaskDefinitionArn: change.change.before.arn, actions: ["delete"], classification: freshImageDeposedClassification, remoteDeletion: false }));
+  const expectedAll = [...expectedCurrent, ...expectedDeposed];
+  const actualAll = referenceAudit.taskDefinitionMutationInstances;
+  const actualDeposed = referenceAudit.deposedTaskDefinitionCleanups;
+  if (!Array.isArray(actualAll) || !Array.isArray(actualDeposed)) throw new Error("Stage B fresh-image reference audit mutation-instance evidence is missing.");
+  assertStageBMutationInstanceMultisetEqual(expectedAll.map((entry) => mutationInstanceKey(entry, "expected")), actualAll.map((entry) => mutationInstanceKey(entry, "audit")), "Stage B fresh-image reference audit mutation instances");
+  assertStageBMutationInstanceMultisetEqual(expectedCurrent.map((entry) => mutationInstanceKey(entry, "expected")), actualAll.filter((entry) => entry?.classification === freshImageCurrentClassification).map((entry) => mutationInstanceKey(entry, "audit")), "Stage B fresh-image reference audit current runtime instances");
+  assertStageBMutationInstanceMultisetEqual(expectedDeposed.map((entry) => mutationInstanceKey(entry, "expected")), actualDeposed.map((entry) => mutationInstanceKey(entry, "audit")), "Stage B fresh-image reference audit deposed cleanups");
+  if (actualAll.length !== expectedAll.length || actualDeposed.length !== expectedDeposed.length || referenceAudit.currentTaskDefinitionReferenceCount !== expectedCurrent.length) throw new Error("Stage B fresh-image reference audit mutation-instance counts do not match the plan.");
+  const deposedArns = new Set();
+  for (const expected of expectedDeposed) {
+    const actual = actualDeposed.find((entry) => entry?.mutationInstanceIdentity === expected.mutationInstanceIdentity);
+    if (!actual || actual.terraformAddress !== expected.terraformAddress || actual.deposed !== expected.deposed || actual.family !== expected.family || actual.beforeTaskDefinitionArn !== expected.beforeTaskDefinitionArn || JSON.stringify(actual.actions) !== JSON.stringify(expected.actions) || actual.classification !== expected.classification || actual.remoteDeletion !== false) throw new Error(`Stage B fresh-image reference audit deposed cleanup does not match the plan: ${expected.terraformAddress}:${expected.deposed}`);
+    assertEmptyRuntimeReferences(actual, `${expected.terraformAddress}:${expected.deposed}`);
+    deposedArns.add(expected.beforeTaskDefinitionArn);
+  }
+  assertNoDeposedRuntimeReferences(referenceAudit, deposedArns);
+  return { currentCount: expectedCurrent.length, deposedCount: expectedDeposed.length, mutationInstanceCount: expectedAll.length };
+}
 
 function assertPartialApplyRecoveryEvidence(report) {
-  if (report?.planProfile === "PARTIAL_APPLY_RECOVERY" && (report.recoveryAttestationSha256 !== undefined || report.recoveryPlan === true)) throw new Error("PARTIAL_APPLY_RECOVERY cannot carry RECOVERY_ALIAS_ONLY attestation evidence.");
+  if (["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(report?.planProfile) && (report.recoveryAttestationSha256 !== undefined || report.recoveryPlan === true)) throw new Error(`${report.planProfile} cannot carry RECOVERY_ALIAS_ONLY attestation evidence.`);
 }
-export const STAGE_B_BROKER_OPERATIONS = Object.freeze(["none", "initial-create", "update", "recovery-alias-only", "partial-apply-recovery"]);
+export const STAGE_B_BROKER_OPERATIONS = Object.freeze(["none", "initial-create", "update", "recovery-alias-only", "partial-apply-recovery", "fresh-image-partial-apply-recovery"]);
 export const STAGE_B_PLAN_PROFILE_CENSUS = Object.freeze({
   BASELINE: Object.freeze({ create: 12, replacement: 0, update: 3, destroy: 0, unclassified: 0 }),
   IMPORTED_BACKEND_METADATA_NORMALIZATION: Object.freeze({ create: 1, replacement: 11, update: 4, destroy: 0, unclassified: 0 }),
   PARTIAL_APPLY_RECOVERY: Object.freeze({ create: 0, replacement: 0, update: 2, destroy: 11, unclassified: 0 }),
+  FRESH_IMAGE_PARTIAL_APPLY_RECOVERY: Object.freeze({ create: 0, replacement: 12, update: 3, destroy: 11, unclassified: 0 }),
 });
 
 function assertPlanProfile(profile, label = "Stage B plan evidence") {
@@ -35,6 +93,7 @@ function expectedBrokerEvidence(operation) {
   if (operation === "update") return { updatePresent: true, actions: ["update"], addresses: STAGE_B_CAPTURE_BROKER_ADDRESSES, pending: true };
   if (operation === "recovery-alias-only") return { updatePresent: false, actions: ["no-op"], addresses: ["aws_lambda_alias.reviewed"], pending: false };
   if (operation === "partial-apply-recovery") return { updatePresent: true, actions: ["update"], addresses: ["aws_lambda_alias.reviewed", "aws_lambda_function.broker"], pending: true };
+  if (operation === "fresh-image-partial-apply-recovery") return { updatePresent: true, actions: ["update"], addresses: STAGE_B_CAPTURE_BROKER_ADDRESSES, pending: true };
   throw new Error(`Stage B broker operation is unsupported: ${operation}`);
 }
 
@@ -193,7 +252,7 @@ function assertClassification(report) {
     assertPlanProfileCensus(classification, profile, "Stage B imported-backend normalization classification");
     return;
   }
-  if (profile === "PARTIAL_APPLY_RECOVERY") {
+  if (profile === "PARTIAL_APPLY_RECOVERY" || profile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY") {
     assertPlanProfileCensus(classification, profile, "Stage B partial-apply recovery classification");
     return;
   }
@@ -267,7 +326,7 @@ export function assertStageBPlanCaptureReport(report, { captureReportBytes, hash
   }
   assertPlanProfile(report.planProfile, "Stage B plan capture");
   assertPartialApplyRecoveryEvidence(report);
-  if (["RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"].includes(report.planProfile) && !/^[a-f0-9]{64}$/.test(report.refreshBindingReportSha256 || "")) throw new Error("Stage B recovery plan capture observation-binding SHA256 is missing or malformed.");
+  if (["RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(report.planProfile) && !/^[a-f0-9]{64}$/.test(report.refreshBindingReportSha256 || "")) throw new Error("Stage B recovery plan capture observation-binding SHA256 is missing or malformed.");
   assertBrokerEvidence(report);
   if (!Buffer.isBuffer(captureReportBytes) || sha256(captureReportBytes) !== sha256(Buffer.from(JSON.stringify(report, null, 2) + "\n"))) throw new Error("Stage B plan capture report bytes are not self-consistent.");
   assertPlanHashes(report, hashes);
@@ -326,7 +385,7 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
   assertBrokerEvidence(report, { approved: true });
   assertPlanProfile(report.planProfile, "Stage B plan approval");
   assertPartialApplyRecoveryEvidence(report);
-  if (["RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"].includes(report.planProfile) && report.refreshBindingReportSha256 !== captureReport.refreshBindingReportSha256) throw new Error("Stage B recovery approval observation-binding SHA256 is not inherited from the captured plan.");
+  if (["RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(report.planProfile) && report.refreshBindingReportSha256 !== captureReport.refreshBindingReportSha256) throw new Error("Stage B recovery approval observation-binding SHA256 is not inherited from the captured plan.");
   if (report.planProfile !== captureReport.planProfile || JSON.stringify(report.taskDefinitionRotations || []) !== JSON.stringify(captureReport.taskDefinitionRotations || [])) throw new Error("Stage B plan approval profile is not bound to the captured plan.");
   if (report.captureReportSha256 !== sha256(captureReportBytes)) throw new Error("Stage B plan approval report is bound to a different capture report.");
   if (report.recoveryAttestationSha256 !== captureReport.recoveryAttestationSha256) throw new Error("Stage B approval recovery-attestation binding is not inherited from the capture report.");
@@ -335,13 +394,17 @@ export function assertStageBPlanApprovalReport(report, { approvalReportBytes, ca
     if (report[name] !== value) throw new Error(`Stage B plan approval report ${name} is not bound to the captured release.`);
   }
   if (report.logicalCanonicalPlanJsonSha256 !== logicalCanonicalPlanJsonSha256) throw new Error("Stage B logical canonical plan hash is not bound to the approved plan.");
-  assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required: true });
+  const boundReferenceAudit = assertBoundReferenceAudit(report, { referenceAudit, referenceAuditBytes, hashes, required: true });
   if (referenceAuditSha256 !== undefined && report.referenceAuditSha256 !== referenceAuditSha256) throw new Error("Stage B plan approval report reference-audit binding is invalid.");
   if (captureReport.recoveryAttestationSha256 !== referenceAudit?.recoveryAttestationSha256) throw new Error("Stage B reference audit does not inherit the recovery-attestation binding.");
   if (trustedCallerArn !== undefined && referenceAudit?.callerArn !== trustedCallerArn) throw new Error("Stage B reference audit caller does not match the trusted release caller.");
   if (report.referenceAuditCallerArn !== referenceAudit?.callerArn || report.referenceAuditAt !== referenceAudit?.auditedAt) throw new Error("Stage B plan approval report reference-audit identity is incomplete.");
   if (["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION"].includes(report.planProfile) && plan && referenceAudit) assertStageBNormalPlanCompleteness(plan, { referenceAudit, strict: false, terraformConfiguration });
   if (report.planProfile === "PARTIAL_APPLY_RECOVERY" && plan) assertStageBPartialApplyRecoveryPlan(plan);
+  if (report.planProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" && plan) {
+    assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraformConfiguration });
+    assertStageBFreshImageReferenceAuditBinding(plan, boundReferenceAudit, { terraformConfiguration });
+  }
   assertClassification(report);
   return true;
 }
@@ -362,17 +425,22 @@ export function assertStageBPlanApprovedBinding(report, { approvalReportBytes, a
   if (expectedRecoveryAttestationSha256 !== undefined && report.recoveryAttestationSha256 !== expectedRecoveryAttestationSha256) throw new Error("Stage B approval recovery-attestation binding differs from the current recovery evidence.");
   assertPlanProfile(report.planProfile, "Stage B plan approval");
   assertPartialApplyRecoveryEvidence(report);
-  if (["RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"].includes(report.planProfile) && expectedRefreshBindingReportSha256 !== undefined && report.refreshBindingReportSha256 !== expectedRefreshBindingReportSha256) throw new Error("Stage B recovery approval observation-binding SHA256 differs from the selected observation binding.");
+  if (["RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(report.planProfile) && expectedRefreshBindingReportSha256 !== undefined && report.refreshBindingReportSha256 !== expectedRefreshBindingReportSha256) throw new Error("Stage B recovery approval observation-binding SHA256 differs from the selected observation binding.");
   assertBrokerEvidence(report, { approved: true });
   assertStageBReferenceAuditFreshness(report.referenceAuditAt, now);
   const boundReferenceAudit = assertBoundReferenceAudit(report, {
     referenceAudit,
     referenceAuditBytes,
     hashes,
-    required: ["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "PARTIAL_APPLY_RECOVERY"].includes(report.planProfile),
+    required: ["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(report.planProfile),
   });
   if (["BASELINE", "IMPORTED_BACKEND_METADATA_NORMALIZATION"].includes(report.planProfile)) assertStageBNormalPlanCompleteness(JSON.parse(planJsonBytes.toString("utf8")), { referenceAudit: boundReferenceAudit, strict: false, terraformConfiguration });
   if (report.planProfile === "PARTIAL_APPLY_RECOVERY") assertStageBPartialApplyRecoveryPlan(JSON.parse(planJsonBytes.toString("utf8")));
+  if (report.planProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY") {
+    const boundPlan = JSON.parse(planJsonBytes.toString("utf8"));
+    assertStageBFreshImagePartialApplyRecoveryPlan(boundPlan, { terraformConfiguration });
+    assertStageBFreshImageReferenceAuditBinding(boundPlan, boundReferenceAudit, { terraformConfiguration });
+  }
   assertClassification(report);
   return true;
 }

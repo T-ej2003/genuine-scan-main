@@ -82,9 +82,11 @@ export function assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, plan
     bindings[variable] = Object.freeze({ repository: contract.repository, digest: record.digest, imageReference: expectedReference });
   }
 
-  const currentChanges = (plan.resource_changes || []).filter((change) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, change.address));
-  if (planProfile === "RECOVERY_ALIAS_ONLY") {
-    if (currentChanges.length !== 0) throw new Error("RECOVERY_ALIAS_ONLY image binding forbids current task-definition addresses.");
+  const recoveryProfile = ["RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(planProfile);
+  const currentChanges = (plan.resource_changes || []).filter((change) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, change.address)
+    && !change.deposed && (!recoveryProfile || JSON.stringify(change.change?.actions || []) !== JSON.stringify(["no-op"])));
+  if (["RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY"].includes(planProfile)) {
+    if (currentChanges.length !== 0) throw new Error(`${planProfile} image binding forbids current task-definition addresses.`);
   } else {
     const currentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
     if (currentChanges.length !== currentAddresses.length || new Set(currentChanges.map((change) => change.address)).size !== currentAddresses.length) throw new Error("Stage B plan image binding requires exactly the twelve current task-definition addresses.");
@@ -92,13 +94,15 @@ export function assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, plan
   }
   for (const change of currentChanges) {
     if (change.type !== "aws_ecs_task_definition") throw new Error(`Stage B current task-definition resource type is invalid: ${change.address}`);
-    if (planProfile === "PARTIAL_APPLY_RECOVERY" && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) continue;
+    if (["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(planProfile) && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) continue;
     const actions = change.change?.actions || [];
     const importedRollover = planProfile === "IMPORTED_BACKEND_METADATA_NORMALIZATION"
       && change.address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS
       && JSON.stringify(actions) === JSON.stringify(STAGE_B_IMPORTED_BACKEND_ROLLOVER_ACTIONS);
+    const freshRotation = planProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" && JSON.stringify(actions) === JSON.stringify(["create", "delete"]);
     if (!actions.length || (!actions.every((action) => action === "create" || action === "no-op")
       && !importedRollover
+      && !freshRotation
       && !(change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(actions) === JSON.stringify(["update"])))) throw new Error(`Stage B current task-definition actions are invalid: ${change.address}`);
     if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(actions) === JSON.stringify(["update"])) {
       assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });

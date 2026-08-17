@@ -8,9 +8,9 @@ import test from "node:test";
 import { signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
 import { publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
 import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
-import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, deriveContractDigests, deriveRecoveryOnlyBindings, deriveRetainedDefinitions, generateStageBTfvars, isTerraformDeposedInstance, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
+import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, deriveContractDigests, deriveRecoveryOnlyBindings, deriveRetainedDefinitions, generateStageBTfvars, isTerraformDeposedInstance, parseCli, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
-import { STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
+import { resolveStageBRecoveryMode, STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 
 const releaseSha = "7245a6036492f875654c414473737e33c1422f3c";
@@ -124,7 +124,44 @@ test("partial-apply recovery is generated from the exact observation and refresh
   assert.throws(() => partial({ refreshReportPath: alteredRefreshPath }), /not bound to the authenticated serial\/state residue/);
   assert.throws(() => partial({ observationBindingPath: path.join(path.dirname(args.outputPath), "missing.binding.json") }), /regular non-symlink file/);
   assert.throws(() => generateStageBTfvars({ ...args, partialApplyRecovery: true, recoveryOnly: true, recovery: { refreshReportPath: refreshPath, observationBindingPath: observationPath } }), /mutually exclusive/);
-  assert.equal(normal.bindingReport.recoveryMode, "NONE");
+  assert.equal(normal.bindingReport.recoveryMode, "NORMAL");
+});
+
+test("recovery mode truth table has one canonical reachable state per invocation", () => {
+  assert.equal(resolveStageBRecoveryMode(), "NORMAL");
+  assert.equal(resolveStageBRecoveryMode({ recoveryOnly: true }), "RECOVERY_ALIAS_ONLY");
+  assert.equal(resolveStageBRecoveryMode({ partialApplyRecovery: true }), "PARTIAL_APPLY_RECOVERY");
+  assert.equal(resolveStageBRecoveryMode({ freshImagePartialApplyRecovery: true }), "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY");
+  for (const flags of [
+    { recoveryOnly: true, partialApplyRecovery: true },
+    { recoveryOnly: true, freshImagePartialApplyRecovery: true },
+    { partialApplyRecovery: true, freshImagePartialApplyRecovery: true },
+  ]) assert.throws(() => resolveStageBRecoveryMode(flags), /mutually exclusive/);
+  assert.throws(() => parseCli(["--fresh-image-partial-apply-recovery", "--partial-apply-recovery"]), /mutually exclusive/);
+});
+
+test("fresh-image recovery is reachable through the canonical tfvars producer", () => {
+  const args = input({ imageReleaseSha: "b".repeat(40) });
+  const freshPublication = { ...publicationIdentity, workflowDefinitionSha: args.toolingSha, imageReleaseSha: args.imageReleaseSha };
+  const freshEvidence = {
+    ...evidence,
+    imageReleaseSha: args.imageReleaseSha,
+    publicationIdentity: freshPublication,
+    publicationIdentitySha256: publicationIdentitySha256(freshPublication),
+    images: evidence.images.map((image) => ({ ...image, tag: image.tag.replace(releaseSha, args.imageReleaseSha) })),
+  };
+  const freshEvidencePath = path.join(path.dirname(args.outputPath), "fresh-evidence.json");
+  const freshSignaturePath = path.join(path.dirname(args.outputPath), "fresh-signature.json");
+  fs.writeFileSync(freshEvidencePath, `${JSON.stringify(freshEvidence)}\n`, { mode: 0o600 });
+  fs.writeFileSync(freshSignaturePath, `${JSON.stringify(signImageEvidence(freshEvidence, { now, sign: () => "AQ==" }))}\n`, { mode: 0o600 });
+  const observation = generateStageBTfvars({ ...args, imageEvidence: freshEvidencePath, imageEvidenceSignature: freshSignaturePath, outputPath: path.join(path.dirname(args.outputPath), "fresh-observation.tfvars"), bindingReportPath: path.join(path.dirname(args.outputPath), "fresh-observation.json") });
+  const observationPath = path.join(path.dirname(args.outputPath), "fresh-observation.json");
+  const refreshPath = path.join(path.dirname(args.outputPath), "fresh.refresh.json");
+  fs.writeFileSync(refreshPath, `${JSON.stringify({ schemaVersion: 1, status: "RESOURCE_DRIFT", deployablePlan: false, bindingReportSha256: crypto.createHash("sha256").update(fs.readFileSync(observationPath)).digest("hex"), tfvarsSha256: observation.bindingReport.tfvarsSha256, stageBStateLineage: observation.bindingReport.stateLineage, stageBStateSerial: observation.bindingReport.stateSerial, stageBStateSha256: observation.bindingReport.stateBackupSha256, toolingSha: args.toolingSha, toolingTreeSha256: args.toolingTreeSha256 })}\n`, { mode: 0o600 });
+  const result = generateStageBTfvars({ ...args, imageEvidence: freshEvidencePath, imageEvidenceSignature: freshSignaturePath, freshImagePartialApplyRecovery: true, outputPath: path.join(path.dirname(args.outputPath), "fresh-recovery.tfvars"), bindingReportPath: path.join(path.dirname(args.outputPath), "fresh-recovery.json"), recovery: { refreshReportPath: refreshPath, observationBindingPath: observationPath } });
+  assert.equal(result.bindingReport.recoveryMode, "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY");
+  assert.equal(result.bindingReport.partialApplyRecovery, false);
+  assert.equal(result.bindingReport.freshImagePartialApplyRecovery, true);
 });
 
 test("canonical tfvars rejects JSON and ambiguous filenames before output", () => {
