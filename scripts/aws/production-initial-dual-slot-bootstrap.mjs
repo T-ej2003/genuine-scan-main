@@ -1,8 +1,8 @@
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes } from "node:crypto";
+import { createHash, createPublicKey, generateKeyPairSync, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
-import { lstatSync, readFileSync } from "node:fs";
+import { chmodSync, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { rotationBindingsToTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
 
 const requireBackend = createRequire(path.resolve("backend/package.json"));
@@ -14,7 +14,7 @@ const {
   SecretsManagerClient,
 } = requireBackend("@aws-sdk/client-secrets-manager");
 const { STSClient, GetCallerIdentityCommand } = requireBackend("@aws-sdk/client-sts");
-const { fromIni } = requireBackend("@aws-sdk/credential-provider-node");
+const { fromIni } = requireBackend("@aws-sdk/credential-provider-ini");
 
 export const INITIAL_DUAL_SLOT_SCHEMA_VERSION = 1;
 export const INITIAL_DUAL_SLOT_ACCOUNT = "368992683803";
@@ -35,6 +35,7 @@ const ROTATION_ID = /^[A-Za-z0-9._-]{8,128}$/;
 const VERSION = /^[A-Za-z0-9._:-]{1,128}$/;
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const fingerprint = (value) => sha256(value).slice(0, 16);
+const materialFileFor = (outputFile) => `${path.resolve(outputFile)}.material`;
 const required = (value, label) => {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required.`);
   return value.trim();
@@ -73,23 +74,14 @@ export function deriveLegacyRotationBaseline(taskDefinition) {
 const emptySlot = (family, slot, sourceSha) => ({ value: "", family, slot, sourceSha, initialMigration: true });
 const versionSlot = (value, slot, sourceSha) => ({ value, family: "qr_key_versions", slot, sourceSha, initialMigration: true });
 
-function generatePendingMaterial({ sourceSha, rotationId } = {}) {
-  let qrPrivate;
-  let qrPublic;
-  if (sourceSha && rotationId) {
-    const seed = createHash("sha256").update(`mscqr-rotation-ed25519:${sourceSha}:${rotationId}`).digest();
-    const privateKey = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
-    qrPrivate = privateKey.export({ format: "pem", type: "pkcs8" });
-    qrPublic = createPublicKey(privateKey).export({ format: "pem", type: "spki" });
-  } else {
-    const pair = generateKeyPairSync("ed25519", {
-      privateKeyEncoding: { format: "pem", type: "pkcs8" },
-      publicKeyEncoding: { format: "pem", type: "spki" },
-    });
-    qrPrivate = pair.privateKey;
-    qrPublic = pair.publicKey;
-  }
-  const jwt = sourceSha && rotationId ? createHash("sha512").update(`mscqr-rotation-jwt:${sourceSha}:${rotationId}`).digest("base64url") : randomBytes(48).toString("base64url");
+export function generatePendingMaterial() {
+  const pair = generateKeyPairSync("ed25519", {
+    privateKeyEncoding: { format: "pem", type: "pkcs8" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
+  const qrPrivate = pair.privateKey;
+  const qrPublic = pair.publicKey;
+  const jwt = randomBytes(48).toString("base64url");
   const qrKeyVersion = sha256(qrPublic).slice(0, 16);
   return { jwt, qrPrivate, qrPublic, qrKeyVersion };
 }
@@ -100,6 +92,62 @@ function pendingPayloads({ rotationId, material }) {
     qrPrivatePending: { rotationId, family: "qr_signing_keys", slot: "pending-private", keyVersion: material.qrKeyVersion, materialFingerprint: fingerprint(material.qrPrivate), value: material.qrPrivate },
     qrPublicPending: { rotationId, family: "qr_signing_keys", slot: "pending-public", keyVersion: material.qrKeyVersion, materialFingerprint: fingerprint(material.qrPublic), value: material.qrPublic },
   };
+}
+
+function assertPendingMaterial(material) {
+  if (!material || typeof material.jwt !== "string" || typeof material.qrPrivate !== "string" || typeof material.qrPublic !== "string" || !VERSION.test(material.qrKeyVersion || "")) throw new Error("Replacement material journal is malformed.");
+  let derivedPublic;
+  try { derivedPublic = createPublicKey(material.qrPrivate).export({ format: "pem", type: "spki" }); } catch { throw new Error("Replacement material journal contains a malformed QR private key."); }
+  if (derivedPublic !== material.qrPublic || sha256(derivedPublic).slice(0, 16) !== material.qrKeyVersion) throw new Error("Replacement material journal contains an inconsistent QR key pair.");
+  return material;
+}
+
+function readMaterialJournal(filePath, sourceSha, rotationId) {
+  const stat = lstatSync(filePath, { throwIfNoEntry: false });
+  if (!stat) return null;
+  if (!stat.isFile() || (stat.mode & 0o077) !== 0) throw new Error("Replacement material journal must be a private regular file.");
+  let journal;
+  try { journal = JSON.parse(readFileSync(filePath, "utf8")); } catch { throw new Error("Replacement material journal is malformed."); }
+  if (journal.schemaVersion !== 1 || journal.sourceSha !== sourceSha || journal.rotationId !== rotationId) throw new Error("Replacement material journal identity does not match the requested transition.");
+  return assertPendingMaterial(journal.material);
+}
+
+function writeMaterialJournal(filePath, sourceSha, rotationId, material) {
+  const existing = readMaterialJournal(filePath, sourceSha, rotationId);
+  if (existing) return existing;
+  const temporary = `${filePath}.tmp-${process.pid}`;
+  writeFileSync(temporary, `${JSON.stringify({ schemaVersion: 1, sourceSha, rotationId, material })}\n`, { mode: 0o600, flag: "wx" });
+  chmodSync(temporary, 0o600);
+  renameSync(temporary, filePath);
+  return material;
+}
+
+async function recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile }) {
+  const pendingSlots = ["jwtPending", "qrPrivatePending", "qrPublicPending"];
+  const existing = {};
+  for (const slot of pendingSlots) {
+    try {
+      existing[slot] = parseStoredValue(await send(new GetSecretValueCommand({ SecretId: resources[slot] })), `${slot} pending`);
+    } catch (error) {
+      if (!notFound(error)) throw error;
+    }
+  }
+  const present = pendingSlots.filter((slot) => existing[slot]).length;
+  const journal = readMaterialJournal(materialFile, sourceSha, rotationId);
+  if (present > 0 && present < pendingSlots.length && !journal) throw new Error("Initial rotation has a partial pending prefix without authenticated replacement material.");
+  if (present === pendingSlots.length) {
+    const expected = {
+      jwt: existing.jwtPending.value,
+      qrPrivate: existing.qrPrivatePending.value,
+      qrPublic: existing.qrPublicPending.value,
+      qrKeyVersion: existing.qrPrivatePending.keyVersion,
+    };
+    for (const [slot, value] of Object.entries(existing)) {
+      if (value.sourceSha !== sourceSha || value.rotationId !== rotationId || !value.materialFingerprint || value.materialFingerprint !== fingerprint(value.value)) throw new Error(`${slot} contains inconsistent pending metadata for the requested rotation.`);
+    }
+    return assertPendingMaterial(expected);
+  }
+  return journal || writeMaterialJournal(materialFile, sourceSha, rotationId, generatePendingMaterial());
 }
 
 function exactArn(response, expectedName) {
@@ -167,6 +215,7 @@ export function assertInitialDualSlotBindings(bindings) {
 export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, sourceSha, rotationId, legacyBindings, outputFile, repositoryRoot = process.cwd() } = {}) {
   if (typeof send !== "function") throw new Error("Initial dual-slot bootstrap Secrets Manager sender is required.");
   if (!SHA40.test(sourceSha || "") || !ROTATION_ID.test(rotationId || "")) throw new Error("Initial dual-slot source/rotation identity is invalid.");
+  if (typeof outputFile !== "string" || !outputFile) throw new Error("Initial dual-slot rotation binding output is required.");
   const baseline = deriveLegacyRotationBaseline(taskDefinition);
   assertLegacyMatches(legacyBindings, baseline);
   const resources = {};
@@ -178,7 +227,9 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
   }
   const existingMaterial = {};
   let secretValueWrites = 0;
-  const material = generatePendingMaterial();
+  ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(outputFile)), repositoryRoot, create: true, normalize: true, label: "Replacement material journal directory" });
+  const materialFile = materialFileFor(outputFile);
+  const material = await recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile });
   const payloads = pendingPayloads({ rotationId, material });
   for (const payload of Object.values(payloads)) payload.sourceSha = sourceSha;
   const ensure = async (options) => {
@@ -231,9 +282,11 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
   if (existingOutput) {
     ensureStageBPrivateFile({ filePath: outputFile, repositoryRoot, label: "Initial dual-slot rotation bindings" });
     if (readFileSync(outputFile, "utf8") !== output) throw new Error("Existing initial dual-slot binding manifest does not match the verified topology.");
+    if (lstatSync(materialFile, { throwIfNoEntry: false })) unlinkSync(materialFile);
     return { valid: true, bindings, bindingFile: path.resolve(outputFile), evidenceSha256: sha256(output), created, secretResourceCount: Object.keys(INITIAL_DUAL_SLOT_NAMES).length, secretValueWrites, pendingMaterialGenerated: true };
   }
   const evidence = writeStageBPrivateFileAtomic({ filePath: outputFile, bytes: Buffer.from(output), repositoryRoot, label: "Initial dual-slot rotation bindings" });
+  if (lstatSync(materialFile, { throwIfNoEntry: false })) unlinkSync(materialFile);
   return { valid: true, bindings, bindingFile: evidence.path, evidenceSha256: evidence.sha256, created, secretResourceCount: Object.keys(INITIAL_DUAL_SLOT_NAMES).length, secretValueWrites, pendingMaterialGenerated: true };
 }
 
@@ -260,6 +313,24 @@ function assertRotationVersionTopology(response, name) {
   return stages;
 }
 
+function supersessionEvidenceIdentity({ sourceSha, staleSourceSha, rotationId, staleRotationId, resources }) {
+  return sha256(JSON.stringify({ schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha, staleSourceSha, rotationId, staleRotationId, resources }));
+}
+
+function readExistingSupersessionEvidence({ outputFile, repositoryRoot, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, transitionVersionId }) {
+  const stat = lstatSync(outputFile, { throwIfNoEntry: false });
+  if (!stat) return null;
+  ensureStageBPrivateFile({ filePath: outputFile, repositoryRoot, label: "Stale rotation supersession evidence" });
+  const bytes = readFileSync(outputFile);
+  let evidence;
+  try { evidence = JSON.parse(bytes.toString("utf8")); } catch { throw new Error("Existing stale rotation supersession evidence is malformed."); }
+  const expectedResources = Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: transitionVersionId(slot), stages: ["AWSCURRENT"] }]));
+  const expectedIdentity = supersessionEvidenceIdentity({ sourceSha, staleSourceSha, rotationId, staleRotationId, resources: expectedResources });
+  const expectedKeys = ["schemaVersion", "transition", "sourceSha", "staleSourceSha", "rotationId", "staleRotationId", "generatedAt", "resources", "evidenceIdentitySha256"];
+  if (Object.keys(evidence).sort().join(",") !== expectedKeys.sort().join(",") || evidence.schemaVersion !== 1 || evidence.transition !== "SUPERSEDE_STALE_PENDING" || evidence.sourceSha !== sourceSha || evidence.staleSourceSha !== staleSourceSha || evidence.rotationId !== rotationId || evidence.staleRotationId !== staleRotationId || JSON.stringify(evidence.resources) !== JSON.stringify(expectedResources) || evidence.evidenceIdentitySha256 !== expectedIdentity || !Number.isFinite(Date.parse(evidence.generatedAt)) || bytes.toString("utf8") !== `${JSON.stringify(evidence, null, 2)}\n`) throw new Error("Existing stale rotation supersession evidence does not match the authenticated transition.");
+  return { evidence, sha256: sha256(bytes) };
+}
+
 export async function supersedeStalePendingRotation({ send, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile, repositoryRoot = process.cwd() } = {}) {
   if (typeof send !== "function") throw new Error("Stale rotation supersession Secrets Manager sender is required.");
   if (!SHA40.test(sourceSha || "") || !SHA40.test(staleSourceSha || "") || !ROTATION_ID.test(rotationId || "") || !ROTATION_ID.test(staleRotationId || "")) throw new Error("Stale rotation supersession identity is invalid.");
@@ -274,7 +345,7 @@ export async function supersedeStalePendingRotation({ send, sourceSha, staleSour
     currentVersionIds[slot] = Object.entries(stages).find(([, labels]) => labels.includes("AWSCURRENT"))?.[0];
     existing[slot] = parseStoredValue(await send(new GetSecretValueCommand({ SecretId: resources[slot] })), name);
   }
-  const replacementOrder = ["qrPrivatePending", "qrPublicPending", "jwtPending", "jwtPrevious", "qrPublicPrevious", "qrCurrentVersion", "qrPreviousVersion"];
+  const replacementOrder = ["jwtPending", "qrPrivatePending", "qrPublicPending", "jwtPrevious", "qrPublicPrevious", "qrCurrentVersion", "qrPreviousVersion"];
   const definitions = {
     jwtPrevious: ["jwt_secrets", "empty"], jwtPending: ["jwt_secrets", "pending"], qrPrivatePending: ["qr_signing_keys", "pending-private"],
     qrPublicPrevious: ["qr_signing_keys", "empty"], qrPublicPending: ["qr_signing_keys", "pending-public"], qrCurrentVersion: ["qr_key_versions", "current"], qrPreviousVersion: ["qr_key_versions", "previous-empty"],
@@ -301,15 +372,23 @@ export async function supersedeStalePendingRotation({ send, sourceSha, staleSour
   const newSlots = replacementOrder.filter((slot) => states[slot] === "NEW_AUTHENTICATED");
   if (newSlots.some((slot, index) => slot !== replacementOrder[index])) throw new Error("Rotation state is not an authenticated resumable transition prefix.");
   const allNew = newSlots.length === replacementOrder.length;
-  const material = states.qrPrivatePending === "NEW_AUTHENTICATED"
-    ? { qrPrivate: existing.qrPrivatePending.value, qrPublic: existing.qrPublicPending.value, jwt: existing.jwtPending.value, qrKeyVersion: existing.qrPrivatePending.keyVersion }
-    : generatePendingMaterial({ sourceSha, rotationId });
+  const expectedEvidenceResources = Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: transitionVersionId(slot), stages: ["AWSCURRENT"] }]));
+  const existingEvidence = readExistingSupersessionEvidence({ outputFile, repositoryRoot, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, transitionVersionId });
+  if (existingEvidence && !allNew) throw new Error("Existing stale rotation supersession evidence conflicts with a non-converged secret topology.");
+  const generated = allNew ? null : generatePendingMaterial();
+  const materialFile = materialFileFor(outputFile);
+  const journalMaterial = allNew ? null : readMaterialJournal(materialFile, sourceSha, rotationId);
+  const material = allNew
+    ? { jwt: existing.jwtPending.value, qrPrivate: existing.qrPrivatePending.value, qrPublic: existing.qrPublicPending.value, qrKeyVersion: existing.qrPrivatePending.keyVersion }
+    : journalMaterial || writeMaterialJournal(materialFile, sourceSha, rotationId, generated);
   const payloads = pendingPayloads({ rotationId, material });
   for (const payload of Object.values(payloads)) payload.sourceSha = sourceSha;
   let derivedPublic;
   try { derivedPublic = createPublicKey(material.qrPrivate).export({ format: "pem", type: "spki" }); } catch { throw new Error("Replacement QR pending private material is malformed."); }
+  const qrKeyVersion = sha256(derivedPublic).slice(0, 16);
+  payloads.qrPrivatePending = { ...payloads.qrPrivatePending, keyVersion: qrKeyVersion, materialFingerprint: fingerprint(material.qrPrivate), value: material.qrPrivate };
   if (states.qrPublicPending === "NEW_AUTHENTICATED" && existing.qrPublicPending.value !== derivedPublic) throw new Error("Replacement QR pending public material does not match its private key.");
-  payloads.qrPublicPending = { ...payloads.qrPublicPending, keyVersion: sha256(derivedPublic).slice(0, 16), materialFingerprint: fingerprint(derivedPublic), value: derivedPublic };
+  payloads.qrPublicPending = { ...payloads.qrPublicPending, keyVersion: qrKeyVersion, materialFingerprint: fingerprint(derivedPublic), value: derivedPublic };
   const replacement = {
     jwtPending: payloads.jwtPending,
     qrPrivatePending: payloads.qrPrivatePending,
@@ -325,7 +404,7 @@ export async function supersedeStalePendingRotation({ send, sourceSha, staleSour
     if (states[slot] === "NEW_AUTHENTICATED") { versionIds[slot] = currentVersionIds[slot]; continue; }
     const value = replacement[slot];
     const response = await send(new PutSecretValueCommand({ SecretId: resources[slot], ClientRequestToken: sha256(`${sourceSha}:${rotationId}:${slot}`), SecretString: JSON.stringify(value) }));
-    if (!response?.VersionId) throw new Error(`Rotation supersession did not return a version for ${slot}.`);
+    if (response?.VersionId !== transitionVersionId(slot)) throw new Error(`Rotation supersession returned an unexpected version for ${slot}.`);
     versionIds[slot] = response.VersionId;
   }
   for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
@@ -336,7 +415,7 @@ export async function supersedeStalePendingRotation({ send, sourceSha, staleSour
     const readback = parseStoredValue(await send(new GetSecretValueCommand({ SecretId: resources[slot] })), name);
     if (JSON.stringify(readback) !== JSON.stringify(replacement[slot])) throw new Error(`Rotation supersession readback is not bound to the new ${slot} identity.`);
   }
-  const evidence = {
+  const evidenceCore = {
     schemaVersion: 1,
     transition: "SUPERSEDE_STALE_PENDING",
     sourceSha,
@@ -344,9 +423,11 @@ export async function supersedeStalePendingRotation({ send, sourceSha, staleSour
     rotationId,
     staleRotationId,
     generatedAt: new Date().toISOString(),
-    resources: Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: versionIds[slot], stages: ["AWSCURRENT"] }])),
+    resources: expectedEvidenceResources,
   };
+  const evidence = { ...evidenceCore, evidenceIdentitySha256: supersessionEvidenceIdentity(evidenceCore) };
   const bytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`);
-  const persisted = writeStageBPrivateFileAtomic({ filePath: outputFile, bytes, repositoryRoot, label: "Stale rotation supersession evidence" });
-  return { valid: true, transition: evidence.transition, idempotentReplay: allNew, writes: Object.keys(versionIds).filter((slot) => states[slot] !== "NEW_AUTHENTICATED").length, evidenceFile: persisted.path, evidenceSha256: persisted.sha256, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, versionIds };
+  const persisted = existingEvidence || writeStageBPrivateFileAtomic({ filePath: outputFile, bytes, repositoryRoot, label: "Stale rotation supersession evidence" });
+  if (lstatSync(materialFile, { throwIfNoEntry: false })) unlinkSync(materialFile);
+  return { valid: true, transition: evidence.transition, idempotentReplay: allNew, writes: existingEvidence ? 0 : Object.keys(versionIds).filter((slot) => states[slot] !== "NEW_AUTHENTICATED").length, evidenceFile: existingEvidence ? path.resolve(outputFile) : persisted.path, evidenceSha256: persisted.sha256, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, versionIds };
 }

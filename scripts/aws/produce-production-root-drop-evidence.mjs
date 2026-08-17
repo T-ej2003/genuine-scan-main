@@ -27,7 +27,7 @@ const messagePath = path.join(directory, "message");
 try {
   writeFileSync(messagePath, canonicalRootDropPayload(payload), { mode: 0o600, flag: "wx" });
   const signed = JSON.parse(run(["kms", "sign", "--key-id", ROOT_DROP_SIGNING_KEY_ARN, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signing-algorithm", ROOT_DROP_SIGNING_ALGORITHM]));
-  const evidence = buildRootDropEvidence({ ...payload, signatureBase64: signed.Signature, signingKeyArn: ROOT_DROP_SIGNING_KEY_ARN, signingAlgorithm: ROOT_DROP_SIGNING_ALGORITHM });
+  const evidence = buildRootDropEvidence({ payload, signatureBase64: signed.Signature, signingKeyArn: ROOT_DROP_SIGNING_KEY_ARN, signingAlgorithm: ROOT_DROP_SIGNING_ALGORITHM });
   writeStageBPrivateFileAtomic({ filePath: args.get("output"), bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), repositoryRoot: process.cwd(), label: "Root-drop evidence" });
   process.stdout.write(`${JSON.stringify({ status: "valid", evidenceRef: evidence.evidenceRef, evidenceSha256: evidence.evidenceSha256, callerArn: evidence.callerArn, sourceSha: evidence.sourceSha }, null, 2)}\n`);
 } finally { rmSync(directory, { recursive: true, force: true }); }

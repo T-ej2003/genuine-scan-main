@@ -37,6 +37,12 @@ export function productionStageAState({ serial = 42, endpointSecurityGroupId = "
       resource("aws_iam_role", "broker", { arn: STAGE_B.brokerRoleArn, assume_role_policy: policy({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Service: "lambda.amazonaws.com" }, Action: "sts:AssumeRole" }] }) }),
       resource("aws_iam_role", "checker", { arn: STAGE_B.checkerRoleArn, assume_role_policy: policy({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: STAGE_A_CHECKER_ROLE_TRUST.principal }, Action: STAGE_A_CHECKER_ROLE_TRUST.action }] }) }),
       resource("aws_kms_key", "approval", { arn: STAGE_B.approvalKmsKeyArn }),
+      resource("aws_kms_key", "root_drop", { arn: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111", key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072", policy: policy({ Version: "2012-10-17", Statement: [
+        { Sid: "AccountAdministration", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:root" }, Action: "kms:*", Resource: "*" },
+        { Sid: "DenyNonRootRootDropSigning", Effect: "Deny", Principal: "*", Action: ["kms:Sign", "kms:Verify"], Resource: "*", Condition: { StringNotEquals: { "aws:PrincipalArn": "arn:aws:iam::368992683803:root" } } },
+        { Sid: "ReleaseReadsRootDropKey", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer" }, Action: ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetPublicKey", "kms:ListResourceTags"], Resource: "*" },
+      ] }) }),
+      resource("aws_kms_alias", "root_drop", { arn: STAGE_B.rootDropKmsKeyArn, target_key_arn: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111" }),
       resource("aws_secretsmanager_secret", "approval", { arn: STAGE_B.approvalSecretArn }),
       resource("aws_iam_role_policy", "checker_assume_target", { policy: policy({ Version: "2012-10-17", Statement: [{ Sid: "AssumeExactRlsIndependentChecker", Effect: "Allow", Action: "sts:AssumeRole", Resource: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker" }] }) }),
       resource("aws_iam_role_policy", "checker", { policy: policy({ Version: "2012-10-17", Statement: [{ Sid: "SignExactStageBApproval", Effect: "Allow", Action: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsAction, Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsResource }, { Sid: "PublishExactStageBApproval", Effect: "Allow", Action: STAGE_A_CHECKER_PUBLICATION_POLICY.publishAction, Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.publishResource }] }) }),

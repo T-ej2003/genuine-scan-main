@@ -21,6 +21,8 @@ import { assertStageBCanonicalTfvarsFile } from "./generate-production-green-sta
 import { assertStageBPrivateFile, ensureStageBPrivateDirectory } from "./stage-b-artifact-contract.mjs";
 import { assertRotationInfrastructurePlan, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
 import { createLiveCheckerChainAssertionAdapter } from "./production-checker-chain-contract.mjs";
+import { assertStageAStateContract } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -28,6 +30,9 @@ const CLUSTER = "mscqr-prod-euw2-main";
 const SERVICE = "mscqr-backend-servi-euw2";
 const CLUSTER_ARN = `arn:aws:ecs:${REGION}:${ACCOUNT}:cluster/${CLUSTER}`;
 const CONTAINER = "backend";
+const STATE_BUCKET = "mscqr-production-terraform-state-368992683803-eu-west-2";
+const STAGE_A_STATE_URI = `s3://${STATE_BUCKET}/mscqr/production/rls-green/stage-a/terraform.tfstate`;
+const STAGE_B_STATE_URI = `s3://${STATE_BUCKET}/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate`;
 const jsonFile = (filePath) => JSON.parse(readFileSync(filePath, "utf8"));
 const AWS_SERVICE_COMMANDS = new Set(["ec2", "ecs", "ecr", "iam", "kms", "logs", "rds", "s3", "secretsmanager", "ssm", "sts"]);
 
@@ -243,7 +248,21 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       },
     },
     stageA: config.stageARecoveryEvidenceFile
-      ? { recoveryEvidence: jsonFile(config.stageARecoveryEvidenceFile) }
+      ? {
+        recoveryEvidence: jsonFile(config.stageARecoveryEvidenceFile),
+        revalidateRecovery: async () => {
+          const local = readAuthenticatedStageARecoverySources({ stageAStatePath: config.stageAStatePath, stageAHandoffPath: config.stageAHandoffPath, stageBStatePath: config.stageBStatePath, repositoryRoot: process.cwd() });
+          const remoteStageABytes = Buffer.from(releaseRun(["s3", "cp", STAGE_A_STATE_URI, "-"]));
+          const remoteStageBBytes = Buffer.from(releaseRun(["s3", "cp", STAGE_B_STATE_URI, "-"]));
+          const authenticated = {
+            ...local,
+            stageAState: { ...local.stageAState, bytes: remoteStageABytes, value: JSON.parse(remoteStageABytes.toString("utf8")) },
+            stageBState: { ...local.stageBState, bytes: remoteStageBBytes, value: JSON.parse(remoteStageBBytes.toString("utf8")) },
+          };
+          const stageAContract = assertStageAStateContract(authenticated.stageAState.value);
+          return { ...authenticated, ingress: describeStageAIngress({ run: releaseRun, endpointSecurityGroupId: stageAContract.endpointSecurityGroupId, runtimeSecurityGroupId: stageAContract.executorSecurityGroupId }) };
+        },
+      }
       : { adapter: stageA, endpointSecurityGroupId: config.endpointSecurityGroupId, runtimeSecurityGroupId: config.runtimeSecurityGroupId },
     artifactSigning: artifact,
     overlapTask: { input: config.overlapTaskInput, register: overlapRegistration, describe: async (arn) => parseJson(releaseRun, ["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]).taskDefinition },

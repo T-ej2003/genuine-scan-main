@@ -274,9 +274,14 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.verifierIdentity = identities.verifier;
   results.rootDrop = identities.rootDrop;
 
-  const stageAResult = stageA?.recoveryEvidence
-    ? assertPostApplyStageAPlanRecovery(stageA.recoveryEvidence, { sourceSha, expectedStageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", expectedStageBSerial: 98 })
-    : await runStageAControlPlane({ ...stageA, sourceSha });
+  let stageAResult;
+  if (stageA?.recoveryEvidence) {
+    if (typeof stageA.revalidateRecovery !== "function") throw new Error("Stage-A recovery requires an independent source and live-postcondition revalidation callback.");
+    const authenticated = await stageA.revalidateRecovery({ sourceSha, expectedStageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", expectedStageBSerial: 98 });
+    stageAResult = assertPostApplyStageAPlanRecovery(stageA.recoveryEvidence, { sourceSha, expectedStageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", expectedStageBSerial: 98, authenticated });
+  } else {
+    stageAResult = await runStageAControlPlane({ ...stageA, sourceSha });
+  }
   recordMutation(mutations, "M2_STAGE_A_APPLY", stageAResult);
   results.stageA = { ...stageAResult, ...identities, sourceSha };
   const checkerChainEvidence = await checkerChain.verifyComplete();

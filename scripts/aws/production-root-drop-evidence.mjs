@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { constants, createHash, createPublicKey, verify } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -8,7 +8,7 @@ import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const ROOT_ARN = `arn:aws:iam::${STAGE_B.account}:root`;
-export const ROOT_DROP_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
+export const ROOT_DROP_SIGNING_KEY_ARN = STAGE_B.rootDropKmsKeyArn;
 export const ROOT_DROP_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
 export const ROOT_DROP_VERIFY_PROFILE = "mscqr-production-release-deployer";
 const canonical = (value) => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
@@ -22,8 +22,9 @@ export function buildRootDropPayload({ sourceSha, callerArn, accountId = STAGE_B
   return { schemaVersion: 1, valid: true, evidenceRef: `root-drop:${sourceSha}:${hash(nonce).slice(0, 16)}`, callerArn, accountId, region, sourceSha, generatedAt: now, nonceHash: hash(nonce) };
 }
 
-export function buildRootDropEvidence({ sourceSha, callerArn, accountId = STAGE_B.account, region = STAGE_B.region, now = new Date().toISOString(), nonce, signatureBase64, signingKeyArn = ROOT_DROP_SIGNING_KEY_ARN, signingAlgorithm = ROOT_DROP_SIGNING_ALGORITHM } = {}) {
-  const unsigned = buildRootDropPayload({ sourceSha, callerArn, accountId, region, now, nonce });
+export function buildRootDropEvidence({ payload, signatureBase64, signingKeyArn = ROOT_DROP_SIGNING_KEY_ARN, signingAlgorithm = ROOT_DROP_SIGNING_ALGORITHM } = {}) {
+  if (!payload || typeof payload !== "object" || Object.keys(payload).sort().join(",") !== unsignedFields.sort().join(",")) throw new Error("Root-drop evidence requires one canonical unsigned payload.");
+  const unsigned = { ...payload };
   if (signingKeyArn !== ROOT_DROP_SIGNING_KEY_ARN || signingAlgorithm !== ROOT_DROP_SIGNING_ALGORITHM || !/^[A-Za-z0-9+/]+={0,2}$/.test(signatureBase64 || "")) throw new Error("Root-drop evidence requires the reviewed KMS signature.");
   const signed = { ...unsigned, signingKeyArn, signingAlgorithm, signedPayloadSha256: hash(unsigned), signatureBase64 };
   return { ...signed, evidenceSha256: hash(signed) };
@@ -36,8 +37,10 @@ export function verifyRootDropEvidenceWithKms({ message, signature, keyArn = ROO
   try {
     writeFileSync(messagePath, message, { mode: 0o600, flag: "wx" });
     writeFileSync(signaturePath, signature, { mode: 0o600, flag: "wx" });
-    const result = JSON.parse(execFileSync("aws", ["kms", "verify", "--key-id", keyArn, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--profile", profile, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
-    return result.SignatureValid === true;
+    const result = JSON.parse(execFileSync("aws", ["kms", "get-public-key", "--key-id", keyArn, "--profile", profile, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+    if (typeof result.PublicKey !== "string") return false;
+    const publicKey = createPublicKey({ key: Buffer.from(result.PublicKey, "base64"), format: "der", type: "spki" });
+    return verify("sha256", message, { key: publicKey, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, signature);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }
 
