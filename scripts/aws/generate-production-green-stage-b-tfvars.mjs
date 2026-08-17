@@ -173,10 +173,15 @@ function isRootManagedTaskDefinition(resource) {
   return resource.mode === "managed" && (!Object.hasOwn(resource, "module") || resource.module === null);
 }
 
+export function isTerraformDeposedKey(value, label = "Terraform deposed identity") {
+  if (typeof value !== "string" || !/^[a-f0-9]{8}$/.test(value)) throw new Error(`${label} is malformed.`);
+  return true;
+}
+
 export function isTerraformDeposedInstance(instance, label = "Terraform state task-definition instance") {
   if (!instance || typeof instance !== "object" || Array.isArray(instance)) throw new Error(`${label} is malformed.`);
   if (!Object.hasOwn(instance, "deposed")) return false;
-  if (typeof instance.deposed !== "string" || !/^[a-f0-9]{8}$/.test(instance.deposed)) throw new Error(`${label} deposed identity is malformed.`);
+  isTerraformDeposedKey(instance.deposed, `${label} deposed identity`);
   return true;
 }
 

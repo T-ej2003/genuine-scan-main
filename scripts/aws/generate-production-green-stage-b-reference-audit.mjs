@@ -18,6 +18,7 @@ import {
 } from "./stage-b-reference-audit-contract.mjs";
 import { batch, createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
 import { assertStageBImportedBackendMetadataNormalization, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
+import { isTerraformDeposedKey } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
@@ -256,9 +257,22 @@ function currentManagedTaskDefinitionPredecessors(plan) {
     for (const child of module?.child_modules || []) visit(child);
   };
   visit(plan?.prior_state?.values?.root_module);
-  return new Map(resources
-    .filter((resource) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, resource?.address))
-    .map((resource) => [resource.address, { arn: resource.values?.arn, family: resource.values?.family }]));
+  const current = new Map();
+  const deposed = new Set();
+  for (const resource of resources.filter((candidate) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, candidate?.address))) {
+    const values = resource.values;
+    if (!values || typeof values !== "object" || Array.isArray(values)) throw new Error(`Terraform prior-state task-definition values are malformed: ${resource.address}`);
+    if (Object.hasOwn(resource, "deposed_key")) {
+      isTerraformDeposedKey(resource.deposed_key, `Terraform prior-state deposed identity ${resource.address}`);
+      const identity = `${resource.address}:${resource.deposed_key}`;
+      if (deposed.has(identity)) throw new Error(`Terraform prior-state contains a duplicate deposed task-definition instance: ${identity}`);
+      deposed.add(identity);
+      continue;
+    }
+    if (current.has(resource.address)) throw new Error(`Terraform prior-state contains duplicate current task-definition instances: ${resource.address}`);
+    current.set(resource.address, { arn: values.arn, family: values.family });
+  }
+  return current;
 }
 
 function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256, terraformConfiguration) {
