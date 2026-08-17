@@ -48,6 +48,23 @@ const canonicalBrokerFamily = (mode) => mode === "full-rls-application-canary"
 const sortStrings = (values) => [...values].sort();
 const sameStringSet = (left, right) => JSON.stringify(sortStrings(left)) === JSON.stringify(sortStrings(right));
 
+function assertCurrentPredecessorReferences({ address, entry, observed }) {
+  for (const [field, kind] of [["serviceReferences", "services"], ["runningTaskReferences", "runningTasks"], ["pendingTaskReferences", "pendingTasks"]]) {
+    const value = entry[field];
+    if (!Array.isArray(value)) throw new Error(`Stage B ${field} is malformed: ${address}`);
+    if (!value.every((reference) => typeof reference === "string" && reference.length > 0) || !sameStringSet(observed[kind], value)) {
+      throw new Error(`Stage B ${field} does not match authoritative runtime observations: ${address}`);
+    }
+  }
+  if (entry.transitionalTaskReferences !== undefined
+    && (!Array.isArray(entry.transitionalTaskReferences) || !sameStringSet(observed.transitionalTasks, entry.transitionalTaskReferences))) {
+    throw new Error(`Stage B transitional task references do not match authoritative runtime observations: ${address}`);
+  }
+  if (Object.values(observed).some((references) => references.length > 0)) {
+    throw new Error(`Stage B current predecessor has a live or transitional runtime reference: ${address}`);
+  }
+}
+
 function normalizeEcsReferences(audit) {
   const referenceSets = [
     ["services", audit.services, "taskDefinition", "serviceName"],
@@ -558,21 +575,7 @@ export function assertStageBCurrentRolloverReferenceBinding({ plan, change, audi
   if (JSON.stringify(entry.replacePaths) !== JSON.stringify(STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS)) throw new Error(`Stage B reference audit replace path mismatch: ${change.address}`);
   const model = runtimeModel || normalizeStageBFreshImageRuntimeModel({ plan, audit });
   const observedReferences = model.ecs.referencesByTaskDefinitionArn.get(beforeArn) || { services: [], runningTasks: [], pendingTasks: [], transitionalTasks: [] };
-  const referenceSets = [
-    ["serviceReferences", "services"],
-    ["runningTaskReferences", "runningTasks"],
-    ["pendingTaskReferences", "pendingTasks"],
-  ];
-  for (const [field, kind] of referenceSets) {
-    const value = entry[field];
-    if (!Array.isArray(value)) throw new Error(`Stage B ${field} is malformed: ${change.address}`);
-    if (!value.every((reference) => typeof reference === "string" && reference.length > 0) || !sameStringSet(observedReferences[kind], value)) {
-      throw new Error(`Stage B ${field} does not match authoritative runtime observations: ${change.address}`);
-    }
-  }
-  if (observedReferences.transitionalTasks.length > 0 || (entry.transitionalTaskReferences !== undefined && (!Array.isArray(entry.transitionalTaskReferences) || !sameStringSet(observedReferences.transitionalTasks, entry.transitionalTaskReferences)))) {
-    throw new Error(`Stage B transitional task references contain the current predecessor: ${change.address}`);
-  }
+  assertCurrentPredecessorReferences({ address: change.address, entry, observed: observedReferences });
   const rollbackIdentity = currentTaskDefinitionArnPattern.exec(entry.rollbackArn || "");
   if (!rollbackIdentity || rollbackIdentity[1] !== expectedFamily) throw new Error(`Stage B rollback ARN is missing or malformed: ${change.address}`);
   const brokerModes = Array.isArray(entry.brokerReferenceModes) ? entry.brokerReferenceModes : undefined;

@@ -591,6 +591,26 @@ test("fresh-image approval binds every current replacement to complete rollover 
     ["top-level service reference contradiction", (candidate) => { candidate.services.push({ taskDefinition: rolloverEntry.oldTaskDefinitionArn, serviceName: "unexpected-service" }); }],
     ["top-level running reference contradiction", (candidate) => { candidate.runningTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "unexpected-running-task" }); }],
     ["top-level pending reference contradiction", (candidate) => { candidate.pendingTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "unexpected-pending-task" }); }],
+    ["synchronized service predecessor reference", (candidate) => {
+      const entry = candidate.oldTaskDefinitions.find((item) => item.terraformAddress === rolloverEntry.terraformAddress);
+      candidate.services.push({ taskDefinition: rolloverEntry.oldTaskDefinitionArn, serviceName: "live-service" });
+      entry.serviceReferences = ["live-service"];
+    }],
+    ["synchronized running predecessor reference", (candidate) => {
+      const entry = candidate.oldTaskDefinitions.find((item) => item.terraformAddress === rolloverEntry.terraformAddress);
+      candidate.runningTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "live-running-task" });
+      entry.runningTaskReferences = ["live-running-task"];
+    }],
+    ["synchronized pending predecessor reference", (candidate) => {
+      const entry = candidate.oldTaskDefinitions.find((item) => item.terraformAddress === rolloverEntry.terraformAddress);
+      candidate.pendingTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "live-pending-task" });
+      entry.pendingTaskReferences = ["live-pending-task"];
+    }],
+    ["synchronized transitional predecessor reference", (candidate) => {
+      const entry = candidate.oldTaskDefinitions.find((item) => item.terraformAddress === rolloverEntry.terraformAddress);
+      candidate.transitionalTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "live-transitional-task", lastStatus: "ACTIVATING" });
+      entry.transitionalTaskReferences = ["live-transitional-task"];
+    }],
     ["entry service reference contradicts top level", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).serviceReferences = ["unexpected-service"]; }],
     ["entry running reference contradicts top level", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).runningTaskReferences = ["unexpected-running-task"]; }],
     ["entry pending reference contradicts top level", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).pendingTaskReferences = ["unexpected-pending-task"]; }],
