@@ -45,7 +45,7 @@ import simulatorAllowed from "./fixtures/aws-iam-simulate-principal-policy-allow
 import { assertStageBReleaseCallerArn } from "../plan-production-green-stage-b.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
-import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
+import { STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "../aws/stage-b-reference-audit-contract.mjs";
 import { buildStageBProtectedMainCheckoutEvidence } from "../aws/stage-b-deployment-identity.mjs";
 import { inspectStageBRefreshChecks, STAGE_B_EXPECTED_CHECK_ADDRESSES, STAGE_B_EXPECTED_RESOURCE_PRECONDITION_ADDRESSES, STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
 import { generateImageEvidence, imageEvidenceSha256, signImageEvidence, IMAGE_EVIDENCE_MAX_AGE_MS } from "../aws/production-green-stage-b-image-evidence.mjs";
@@ -191,6 +191,30 @@ const productionPlanBytes = fs.readFileSync("scripts/tests/fixtures/production-g
 const productionPlan = JSON.parse(productionPlanBytes);
 const fixture = productionPlan;
 const terraformConfiguration = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+
+function freshImageRecoveryRegistrationPlan() {
+  const value = structuredClone(productionPlan);
+  const current = value.resource_changes.filter((change) => change.type === "aws_ecs_task_definition" && Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, change.address));
+  for (const [index, change] of current.entries()) {
+    const family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address];
+    const after = { ...structuredClone(change.change.after), network_mode: "awsvpc", volume: [], ipc_mode: null, pid_mode: null };
+    const afterContainers = JSON.parse(after.container_definitions).map((container) => ({ ...container, image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr@sha256:${"a".repeat(64)}` }));
+    after.container_definitions = JSON.stringify(afterContainers);
+    const beforeContainers = afterContainers.map((container) => ({ ...container, image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr@sha256:${"b".repeat(64)}` }));
+    const beforeArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:5`;
+    const before = { ...structuredClone(after), arn: beforeArn, id: beforeArn, container_definitions: JSON.stringify(beforeContainers) };
+    change.mode = "managed";
+    change.change = { ...change.change, actions: ["create", "delete"], before, after, replace_paths: STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS };
+    if (index > 0) value.resource_changes.push({
+      address: change.address,
+      deposed: `${String(index).padStart(7, "0")}a`,
+      mode: "managed",
+      type: "aws_ecs_task_definition",
+      change: { actions: ["delete"], before: { family, arn: beforeArn, skip_destroy: true }, after: null },
+    });
+  }
+  return value;
+}
 
 function importedBackendPlan() {
   const value = structuredClone(fixture);
@@ -1222,6 +1246,31 @@ test("normal permission profile still requires every ECS registration context", 
   const missing = structuredClone(productionPlan);
   missing.resource_changes = missing.resource_changes.filter(({ address }) => address !== manifest.taskDefinitionMappings[0].address);
   assert.throws(() => assertPermissionEvaluationBindings(report, manifest, { plan: missing, permissionProfile: "NORMAL_STAGE_B_RELEASE" }), /exactly one reviewed task-definition registration/);
+});
+
+test("fresh-image recovery separates twelve registrations from eleven reviewed deposed cleanups", () => {
+  const fresh = freshImageRecoveryRegistrationPlan();
+  assert.doesNotThrow(() => assertTaskDefinitionRegistrationContexts(fresh, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration }));
+  const derived = deriveRequiredEvaluations(fresh, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration });
+  assert.doesNotThrow(() => assertPermissionEvaluationBindings({
+    requiredEvaluations: [],
+    forbiddenEvaluations: [],
+    planCapabilities: { schemaVersion: 1, required: [], forbidden: [], mutationInstances: derived.coveredChanges, zeroAwsMutationChanges: derived.zeroAwsMutationChanges },
+  }, manifest, { plan: fresh, permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration }));
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(fresh, manifest, { terraformConfiguration }), /unreviewed task-definition change/);
+
+  const missingCleanup = structuredClone(fresh);
+  missingCleanup.resource_changes = missingCleanup.resource_changes.filter((change) => !Object.hasOwn(change, "deposed") || change.address !== 'aws_ecs_task_definition.candidate["worker"]');
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(missingCleanup, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration }), /exactly one reviewed deposed cleanup/);
+
+  const duplicateCleanup = structuredClone(fresh);
+  const cleanup = duplicateCleanup.resource_changes.find((change) => Object.hasOwn(change, "deposed"));
+  duplicateCleanup.resource_changes.push({ ...structuredClone(cleanup), deposed: "deadbeef" });
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(duplicateCleanup, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration }), /exactly one reviewed deposed cleanup/);
+
+  const contextForCleanup = structuredClone(fresh);
+  contextForCleanup.resource_changes.find((change) => Object.hasOwn(change, "deposed")).change.actions = ["create"];
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(contextForCleanup, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration }), /exactly one reviewed deposed cleanup|exactly one reviewed task-definition registration|unreviewed task-definition change/);
 });
 
 test("manifest rejects missing, duplicate, and cross-family ECS registration context", () => {
