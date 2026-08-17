@@ -21,13 +21,14 @@ const mutationInstanceKey = (entry, label) => {
   return JSON.stringify([entry.terraformAddress, entry.mutationInstanceIdentity, entry.classification]);
 };
 
-function assertEmptyRuntimeReferences(entry, label) {
+function assertEmptyRuntimeReferences(entry, label, expectedBrokerModes = []) {
   const references = entry?.runtimeReferences;
   if (!references || typeof references !== "object" || Array.isArray(references) || JSON.stringify(Object.keys(references).sort()) !== JSON.stringify(["brokerModes", "pendingTasks", "runningTasks", "services"])) throw new Error(`Stage B fresh-image reference audit ${label} runtime-reference evidence is malformed.`);
-  for (const key of ["services", "runningTasks", "pendingTasks", "brokerModes"]) if (!Array.isArray(references[key]) || references[key].length !== 0) throw new Error(`Stage B fresh-image reference audit ${label} contains a live runtime reference.`);
+  for (const key of ["services", "runningTasks", "pendingTasks"]) if (!Array.isArray(references[key]) || references[key].length !== 0) throw new Error(`Stage B fresh-image reference audit ${label} contains a live runtime reference.`);
+  if (!Array.isArray(references.brokerModes) || JSON.stringify([...references.brokerModes].sort()) !== JSON.stringify([...expectedBrokerModes].sort())) throw new Error(`Stage B fresh-image reference audit ${label} broker predecessor evidence is not exact.`);
 }
 
-function assertNoDeposedRuntimeReferences(referenceAudit, deposedArns) {
+function assertNoDeposedRuntimeReferences(referenceAudit, deposedArns, allowedBrokerModesByArn) {
   for (const [label, items, arnKey] of [["service", referenceAudit.services, "taskDefinition"], ["RUNNING task", referenceAudit.runningTasks, "taskDefinitionArn"], ["PENDING task", referenceAudit.pendingTasks, "taskDefinitionArn"], ["transitional task", referenceAudit.transitionalTasks, "taskDefinitionArn"]]) {
     if (!Array.isArray(items)) throw new Error(`Stage B fresh-image reference audit ${label} evidence is missing.`);
     for (const item of items) {
@@ -39,7 +40,8 @@ function assertNoDeposedRuntimeReferences(referenceAudit, deposedArns) {
   if (!Array.isArray(mappings)) throw new Error("Stage B fresh-image reference audit broker mapping evidence is missing.");
   for (const mapping of mappings) {
     if (!mapping || typeof mapping.taskDefinitionArn !== "string") throw new Error("Stage B fresh-image reference audit broker mapping is malformed.");
-    if (deposedArns.has(mapping.taskDefinitionArn)) throw new Error("Stage B fresh-image reference audit broker mapping references a deposed task definition.");
+    if (deposedArns.has(mapping.taskDefinitionArn)
+      && !allowedBrokerModesByArn.get(mapping.taskDefinitionArn)?.includes(mapping.mode)) throw new Error("Stage B fresh-image reference audit broker mapping references an unauthorized deposed task definition.");
   }
 }
 
@@ -80,10 +82,10 @@ export function assertStageBFreshImageReferenceAuditBinding(plan, referenceAudit
   for (const expected of expectedDeposed) {
     const actual = actualDeposed.find((entry) => entry?.mutationInstanceIdentity === expected.mutationInstanceIdentity);
     if (!actual || actual.terraformAddress !== expected.terraformAddress || actual.deposed !== expected.deposed || actual.family !== expected.family || actual.beforeTaskDefinitionArn !== expected.beforeTaskDefinitionArn || JSON.stringify(actual.actions) !== JSON.stringify(expected.actions) || actual.classification !== expected.classification || actual.remoteDeletion !== false) throw new Error(`Stage B fresh-image reference audit deposed cleanup does not match the plan: ${expected.terraformAddress}:${expected.deposed}`);
-    assertEmptyRuntimeReferences(actual, `${expected.terraformAddress}:${expected.deposed}`);
+    assertEmptyRuntimeReferences(actual, `${expected.terraformAddress}:${expected.deposed}`, runtimeModel.broker.deposedMappingsByArn.get(expected.beforeTaskDefinitionArn) || []);
     deposedArns.add(expected.beforeTaskDefinitionArn);
   }
-  assertNoDeposedRuntimeReferences(referenceAudit, deposedArns);
+  assertNoDeposedRuntimeReferences(referenceAudit, deposedArns, runtimeModel.broker.deposedMappingsByArn);
   return { currentCount: expectedCurrent.length, deposedCount: expectedDeposed.length, mutationInstanceCount: expectedAll.length };
 }
 

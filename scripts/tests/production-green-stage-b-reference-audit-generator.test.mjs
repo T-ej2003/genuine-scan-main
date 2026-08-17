@@ -431,6 +431,58 @@ function makeFreshImagePartialApplyReferenceFixture() {
         after: null,
       },
     }));
+  const priorResources = fixture.plan.prior_state.values.root_module.resources;
+  fixture.plan.resource_changes
+    .filter((change) => change.type === "aws_ecs_task_definition" && Object.hasOwn(change, "deposed"))
+    .forEach((change) => {
+      const current = priorResources.find((resource) => resource.address === change.address && !Object.hasOwn(resource, "deposed_key"));
+      priorResources.push({
+        ...structuredClone(current),
+        deposed_key: change.deposed,
+        values: { ...structuredClone(current.values), arn: change.change.before.arn },
+      });
+    });
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
+}
+
+function makeSerial96DeposedBrokerPredecessorFixture() {
+  const fixture = makeFreshImagePartialApplyReferenceFixture();
+  const revisionForAddress = (address) => address === backendAddress ? 9 : address === readOnlyCanaryAddress ? 3 : 6;
+  const arnAt = (family, revision) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${revision}`;
+  const currentChanges = fixture.plan.resource_changes.filter((change) => change.type === "aws_ecs_task_definition" && !Object.hasOwn(change, "deposed") && STAGE_B_TASK_DEFINITION_FAMILIES[change.address]);
+  for (const change of currentChanges) {
+    const family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address];
+    const currentRevision = revisionForAddress(change.address);
+    change.change.before.arn = arnAt(family, currentRevision);
+    change.change.after.arn = arnAt(family, currentRevision + 1);
+  }
+  for (const change of fixture.plan.resource_changes.filter((item) => item.type === "aws_ecs_task_definition" && Object.hasOwn(item, "deposed"))) {
+    const family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address];
+    change.change.before.arn = arnAt(family, change.address === readOnlyCanaryAddress ? 2 : 5);
+  }
+  for (const resource of fixture.plan.prior_state.values.root_module.resources) {
+    const current = currentChanges.find((change) => change.address === resource.address);
+    const deposed = fixture.plan.resource_changes.find((change) => change.address === resource.address && change.deposed === resource.deposed_key);
+    if (deposed) resource.values.arn = deposed.change.before.arn;
+    else if (current && !resource.address.includes("_retained")) resource.values.arn = current.change.before.arn;
+  }
+  const originalDescribe = fixture.reader.describeTaskDefinition;
+  fixture.reader.describeTaskDefinition = (reference) => {
+    const response = originalDescribe(reference);
+    response.taskDefinition.taskDefinitionArn = reference;
+    response.taskDefinition.revision = Number(reference.split(":").at(-1));
+    return response;
+  };
+  const originalConfiguration = fixture.reader.getFunctionConfiguration;
+  fixture.reader.getFunctionConfiguration = () => {
+    const configuration = originalConfiguration();
+    const taskDefinitions = JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+    for (const mode of STAGE_B_MODES) taskDefinitions[mode] = arnAt(familyForMode(mode), 5);
+    configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+    return configuration;
+  };
   fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
   fixture.planJsonSha256 = sha256(fixture.planBytes);
   return fixture;
@@ -558,17 +610,68 @@ test("fresh-image recovery partitions current runtime instances from reviewed de
   assert.equal(audit.deposedTaskDefinitionCleanups.every((entry) => Object.values(entry.runtimeReferences).every((references) => references.length === 0)), true);
 });
 
+test("serial-96 live broker mappings bind reviewed deposed predecessors without collapsing current identity", () => {
+  const fixture = makeSerial96DeposedBrokerPredecessorFixture();
+  const audit = generate(fixture);
+  const mode = "full-rls-admin-bootstrap";
+  const current = audit.oldTaskDefinitions.find((entry) => entry.family === familyForMode(mode));
+  const cleanup = audit.deposedTaskDefinitionCleanups.find((entry) => entry.family === familyForMode(mode));
+  const proof = audit.plannedAtomicBrokerRollovers.find((entry) => entry.mode === mode);
+  assert.equal(current.oldTaskDefinitionArn.endsWith(":6"), true);
+  assert.deepEqual(current.brokerReferenceModes, [mode]);
+  assert.equal(cleanup.beforeTaskDefinitionArn.endsWith(":5"), true);
+  assert.deepEqual(cleanup.runtimeReferences.brokerModes, [mode]);
+  assert.equal(proof.oldTaskDefinitionArn, current.oldTaskDefinitionArn);
+  assert.equal(proof.observedTaskDefinitionArn, cleanup.beforeTaskDefinitionArn);
+  assert.equal(proof.observedTaskDefinitionClassification, "DEPOSED");
+  assert.doesNotThrow(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, audit, { terraformConfiguration: fixture.options.terraformConfiguration, planJsonSha256: fixture.planJsonSha256 }));
+});
+
+for (const [label, mutate] of [
+  ["live broker mapping to an unreviewed same-family revision", (fixture) => {
+    const mode = "full-rls-admin-bootstrap";
+    const mapping = JSON.parse(fixture.reader.getFunctionConfiguration().Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+    mapping[mode] = mapping[mode].replace(/:[0-9]+$/, ":4");
+    const original = fixture.reader.getFunctionConfiguration;
+    fixture.reader.getFunctionConfiguration = () => {
+      const configuration = original();
+      configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(mapping);
+      return configuration;
+    };
+  }],
+  ["live broker mapping to the replacement revision", (fixture) => {
+    const mode = "full-rls-admin-bootstrap";
+    const mapping = JSON.parse(fixture.reader.getFunctionConfiguration().Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+    mapping[mode] = mapping[mode].replace(/:[0-9]+$/, ":7");
+    const original = fixture.reader.getFunctionConfiguration;
+    fixture.reader.getFunctionConfiguration = () => {
+      const configuration = original();
+      configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(mapping);
+      return configuration;
+    };
+  }],
+  ["live broker mapping to a different reviewed deposed family", (fixture) => {
+    const mode = "full-rls-admin-bootstrap";
+    const other = "full-rls-admin-ownership";
+    const mapping = JSON.parse(fixture.reader.getFunctionConfiguration().Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+    mapping[mode] = mapping[other];
+    const original = fixture.reader.getFunctionConfiguration;
+    fixture.reader.getFunctionConfiguration = () => {
+      const configuration = original();
+      configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(mapping);
+      return configuration;
+    };
+  }],
+]) {
+  test(`serial-96 deposed broker relation rejects ${label}`, () => {
+    const fixture = makeSerial96DeposedBrokerPredecessorFixture();
+    mutate(fixture);
+    assert.throws(() => generate(fixture), /not an explicitly retained|family is wrong|family is unexpected/);
+  });
+}
+
 test("serial-96 prior state keeps current predecessors distinct from deposed instances", () => {
   const fixture = makeFreshImagePartialApplyReferenceFixture();
-  const resources = fixture.plan.prior_state.values.root_module.resources;
-  for (const change of fixture.plan.resource_changes.filter((item) => Object.hasOwn(item, "deposed"))) {
-    const current = resources.find((resource) => resource.address === change.address);
-    resources.push({
-      ...structuredClone(current),
-      deposed_key: change.deposed,
-      values: { ...structuredClone(current.values), arn: change.change.before.arn },
-    });
-  }
   fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
   fixture.planJsonSha256 = sha256(fixture.planBytes);
   const audit = generate(fixture);

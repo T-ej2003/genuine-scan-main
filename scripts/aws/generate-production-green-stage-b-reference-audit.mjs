@@ -258,7 +258,7 @@ function currentManagedTaskDefinitionPredecessors(plan) {
   };
   visit(plan?.prior_state?.values?.root_module);
   const current = new Map();
-  const deposed = new Set();
+  const deposed = new Map();
   for (const resource of resources.filter((candidate) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, candidate?.address))) {
     const values = resource.values;
     if (!values || typeof values !== "object" || Array.isArray(values)) throw new Error(`Terraform prior-state task-definition values are malformed: ${resource.address}`);
@@ -266,16 +266,16 @@ function currentManagedTaskDefinitionPredecessors(plan) {
       isTerraformDeposedKey(resource.deposed_key, `Terraform prior-state deposed identity ${resource.address}`);
       const identity = `${resource.address}:${resource.deposed_key}`;
       if (deposed.has(identity)) throw new Error(`Terraform prior-state contains a duplicate deposed task-definition instance: ${identity}`);
-      deposed.add(identity);
+      deposed.set(identity, { arn: values.arn, family: values.family, address: resource.address, deposed: resource.deposed_key });
       continue;
     }
     if (current.has(resource.address)) throw new Error(`Terraform prior-state contains duplicate current task-definition instances: ${resource.address}`);
     current.set(resource.address, { arn: values.arn, family: values.family });
   }
-  return current;
+  return { current, deposed };
 }
 
-function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256, terraformConfiguration) {
+function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256, terraformConfiguration, observed = {}) {
   const taskDefinitionAddress = brokerTaskDefinitionAddress(mode);
   const rollover = rolloverByAddress.get(taskDefinitionAddress);
   if (!rollover) throw new Error(`Broker atomic rollover target is not a planned rollover: ${taskDefinitionAddress}`);
@@ -288,6 +288,11 @@ function proveAtomicBrokerReference(plan, mode, rolloverByAddress, planSha256, t
     oldTaskDefinitionArn: rollover.oldArn,
     brokerEnvironmentReference: STAGE_B_BROKER_TASK_DEFINITION_REFERENCE,
     taskDefinitionArnReference: `${taskDefinitionAddress}.arn`,
+    ...(observed.classification === "DEPOSED" ? {
+      observedTaskDefinitionArn: observed.taskDefinitionArn,
+      observedTaskDefinitionClassification: "DEPOSED",
+      observedDeposedKey: observed.deposedKey,
+    } : {}),
     planJsonSha256: planSha256,
   };
 }
@@ -326,7 +331,7 @@ function proveBrokerPackagePlan(plan, terraformConfiguration, expectedPackageChe
   return proof;
 }
 
-function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPackageChecksum, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha256, terraformConfiguration) {
+function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPackageChecksum, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, deposedByAddress, freshImagePartialApplyRecovery, planSha256, terraformConfiguration) {
   const brokerIdentity = assertStageBBrokerConfigurationIdentity({ configuration: config, alias });
   const variables = normalizeEnvironment(config);
   const taskDefinitions = requireObject(parseJson(variables.BROKER_TASK_DEFINITIONS_JSON, "BROKER_TASK_DEFINITIONS_JSON"), "BROKER_TASK_DEFINITIONS_JSON");
@@ -334,6 +339,7 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
   if (JSON.stringify(Object.keys(taskDefinitions).sort()) !== JSON.stringify(expectedModes)) throw new Error("Broker task-definition mode set is not exact.");
   const brokerReferences = new Map();
   const brokerReferencesByFamily = new Map();
+  const brokerPredecessorsByMode = new Map();
   for (const mode of expectedModes) {
     const identity = familyFromArn(taskDefinitions[mode], `broker task definition for ${mode}`);
     if (identity.family !== expectedBrokerFamily(mode)) throw new Error(`Broker task definition family is unexpected for ${mode}.`);
@@ -343,8 +349,13 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
     const currentManagedArns = new Set([...rolloverByAddress.values()]
       .filter((entry) => entry.family === identity.family)
       .map((entry) => entry.oldArn));
-    if ((retainedArns.size > 0 || currentNoOpArns.size > 0)
-      && !retainedArns.has(identity.arn) && !currentNoOpArns.has(identity.arn) && !currentArns.has(identity.arn) && !currentManagedArns.has(identity.arn)) throw new Error(`Broker task-definition ARN is not an explicitly retained or current no-op revision: ${mode}.`);
+    const rollover = rolloverByAddress.get(brokerTaskDefinitionAddress(mode));
+    const deposed = rollover ? (deposedByAddress.get(rollover.address) || []).find((entry) => entry.arn === identity.arn) : undefined;
+    const allowedReviewedDeposed = Boolean(freshImagePartialApplyRecovery && rollover && deposed);
+    if ((freshImagePartialApplyRecovery || retainedArns.size > 0 || currentNoOpArns.size > 0)
+      && !retainedArns.has(identity.arn) && !currentNoOpArns.has(identity.arn) && !currentArns.has(identity.arn) && !currentManagedArns.has(identity.arn) && !allowedReviewedDeposed) throw new Error(`Broker task-definition ARN is not an explicitly retained or current no-op revision or reviewed deposed predecessor: ${mode}.`);
+    if (allowedReviewedDeposed) brokerPredecessorsByMode.set(mode, { taskDefinitionArn: identity.arn, classification: "DEPOSED", deposedKey: deposed.deposed, address: rollover.address });
+    else if (currentManagedArns.has(identity.arn)) brokerPredecessorsByMode.set(mode, { taskDefinitionArn: identity.arn, classification: "CURRENT", address: rollover?.address });
     brokerReferences.set(identity.arn, mode);
     brokerReferencesByFamily.set(identity.family, [...(brokerReferencesByFamily.get(identity.family) || []), mode]);
   }
@@ -366,18 +377,25 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
     const rollover = rolloverByFamily.get(identity.family);
     const retainedArns = retainedArnSetByFamily.get(identity.family) || new Set();
     const currentNoOpArns = currentNoOpByFamily.get(identity.family) || new Set();
+    const observed = brokerPredecessorsByMode.get(mode);
     if (!rollover) continue;
-    if (retainedArns.has(identity.arn)) {
+    if (observed?.classification === "DEPOSED") {
+      try {
+        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, atomicByAddress, planSha256, terraformConfiguration, observed));
+      } catch (error) {
+        throw new Error(`Broker Lambda still references reviewed deposed task definition ${arn}: ${error.message}`);
+      }
+    } else if (retainedArns.has(identity.arn)) {
       try {
         const atomicByLiveArn = new Map(atomicByAddress);
         atomicByLiveArn.set(rollover.address, { ...rollover, oldArn: identity.arn });
-        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, atomicByLiveArn, planSha256, terraformConfiguration));
+        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, atomicByLiveArn, planSha256, terraformConfiguration, observed));
       } catch (error) {
         throw new Error(`Broker Lambda still references superseded task definition ${arn}: ${error.message}`);
       }
     } else if (rollover.oldArn === identity.arn) {
       try {
-        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, atomicByAddress, planSha256, terraformConfiguration));
+        plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, atomicByAddress, planSha256, terraformConfiguration, observed));
       } catch (error) {
         throw new Error(`Broker Lambda still references superseded task definition ${arn}: ${error.message}`);
       }
@@ -428,9 +446,13 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
       liveTaskDefinitionMappings: [...brokerReferences.entries()]
         .map(([taskDefinitionArn, mode]) => ({ mode, taskDefinitionArn }))
         .sort((left, right) => left.mode.localeCompare(right.mode)),
+      liveTaskDefinitionPredecessors: [...brokerPredecessorsByMode.entries()]
+        .map(([mode, predecessor]) => ({ mode, ...predecessor }))
+        .sort((left, right) => left.mode.localeCompare(right.mode)),
     },
     referencesByFamily: brokerReferencesByFamily,
     referencesByArn: brokerReferences,
+    brokerPredecessorsByMode,
     plannedAtomicBrokerRollovers: plannedAtomicBrokerRollovers.sort((left, right) => left.taskDefinitionTerraformAddress.localeCompare(right.taskDefinitionTerraformAddress)),
     plannedAtomicPackageChecksumTransition,
   };
@@ -548,12 +570,33 @@ export function generateReferenceAudit({
     currentRuntimeTaskDefinitionChanges,
     deposedTaskDefinitionChanges,
   } = planTaskDefinitions(plan, terraformConfiguration);
-  const currentManagedByAddress = currentManagedTaskDefinitionPredecessors(plan);
+  const priorStateTaskDefinitions = currentManagedTaskDefinitionPredecessors(plan);
+  const currentManagedByAddress = priorStateTaskDefinitions.current;
+  const deposedByAddress = new Map();
+  const plannedDeposedIdentities = new Set();
+  for (const change of deposedTaskDefinitionChanges) {
+    const identity = `${change.address}:${change.deposed}`;
+    const prior = priorStateTaskDefinitions.deposed.get(identity);
+    if (!prior || prior.arn !== change.change?.before?.arn || prior.family !== change.change?.before?.family) {
+      throw new Error(`Terraform plan deposed task-definition instance is not bound to the authenticated prior state: ${identity}`);
+    }
+    plannedDeposedIdentities.add(identity);
+    deposedByAddress.set(change.address, [...(deposedByAddress.get(change.address) || []), {
+      address: change.address,
+      deposed: change.deposed,
+      arn: prior.arn,
+      family: prior.family,
+    }]);
+  }
+  for (const identity of priorStateTaskDefinitions.deposed.keys()) {
+    if (!plannedDeposedIdentities.has(identity)) throw new Error(`Terraform prior-state deposed task-definition instance is missing from the authenticated plan: ${identity}`);
+  }
   for (const rollover of rolloverByAddress.values()) {
     const current = currentManagedByAddress.get(rollover.address);
     if (!current || current.family !== rollover.family || current.arn !== rollover.oldArn) throw new Error(`Terraform plan rollover predecessor is not the exact current managed task definition: ${rollover.address}`);
     if (retainedArnSet.has(current.arn)) throw new Error(`Terraform plan rollover predecessor is also present in retained history: ${rollover.address}`);
   }
+  const freshImagePartialApplyRecovery = rolloverByAddress.size === 12 && deposedTaskDefinitionChanges.length === 11;
   const createOnlyFamilies = new Set([...createOnlyByAddress.values()].map((entry) => entry.family));
   const noOpFamilies = new Set([...noOpByAddress.values()].map((entry) => entry.family));
   const retainedArnSetByFamily = new Map([...retainedByFamily].map(([family, entries]) => [family, new Set(entries.map((entry) => entry.oldArn))]));
@@ -603,9 +646,10 @@ export function generateReferenceAudit({
     summary: broker,
     referencesByFamily: brokerReferencesByFamily,
     referencesByArn: brokerReferencesByArn,
+    brokerPredecessorsByMode,
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
-  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerAliasArn), reader.getAlias(STAGE_B.brokerFunctionArn, STAGE_B.brokerAliasQualifier), brokerAliasArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, planSha, terraformConfiguration);
+  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerAliasArn), reader.getAlias(STAGE_B.brokerFunctionArn, STAGE_B.brokerAliasQualifier), brokerAliasArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, deposedByAddress, freshImagePartialApplyRecovery, planSha, terraformConfiguration);
   const serviceReferences = referenceNames(stageBServices, oldArns, "taskDefinition", "serviceName");
   const runningReferences = referenceNames(stageBRunningTasks, oldArns, "taskDefinitionArn", "taskArn");
   const pendingReferences = referenceNames(stageBPendingTasks, oldArns, "taskDefinitionArn", "taskArn");
@@ -621,14 +665,19 @@ export function generateReferenceAudit({
       actions: [...change.change.actions],
       classification: "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP",
       remoteDeletion: false,
-      runtimeReferences: { services: [], runningTasks: [], pendingTasks: [], brokerModes: [] },
+      runtimeReferences: {
+        services: [],
+        runningTasks: [],
+        pendingTasks: [],
+        brokerModes: [...(brokerReferencesByArn.has(identity.arn) ? [brokerReferencesByArn.get(identity.arn)] : [])].sort(),
+      },
     };
   });
   const deposedArns = new Set(deposedTaskDefinitionCleanups.map((entry) => entry.beforeTaskDefinitionArn));
   for (const [items, arnKey, nameKey] of [[stageBServices, "taskDefinition", "serviceName"], [stageBRunningTasks, "taskDefinitionArn", "taskArn"], [stageBPendingTasks, "taskDefinitionArn", "taskArn"], [stageBTransitionalTasks, "taskDefinitionArn", "taskArn"]]) {
     for (const item of items) if (deposedArns.has(item[arnKey])) throw new Error(`Deposed task definition remains referenced by ${nameKey}: ${item[arnKey]}`);
   }
-  for (const arn of deposedArns) if (brokerReferencesByArn.has(arn)) throw new Error(`Deposed task definition remains referenced by the broker: ${arn}`);
+  for (const arn of deposedArns) if (brokerReferencesByArn.has(arn) && ![...brokerPredecessorsByMode.values()].some((entry) => entry.classification === "DEPOSED" && entry.taskDefinitionArn === arn)) throw new Error(`Deposed task definition remains referenced by the broker outside the reviewed recovery relation: ${arn}`);
   assertStageBLiveReferences(stageBServices, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinition", "serviceName");
   assertStageBLiveReferences(stageBRunningTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
   assertStageBLiveReferences(stageBPendingTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
@@ -644,7 +693,10 @@ export function generateReferenceAudit({
     const serviceRefs = [...(serviceReferences.get(entry.oldArn) || [])].sort();
     const runningRefs = [...(runningReferences.get(entry.oldArn) || [])].sort();
     const pendingRefs = [...(pendingReferences.get(entry.oldArn) || [])].sort();
-    const brokerRefs = brokerReferencesByArn.has(entry.oldArn) ? [brokerReferencesByArn.get(entry.oldArn)] : [];
+    const brokerRefs = [...brokerPredecessorsByMode.entries()]
+      .filter(([, predecessor]) => predecessor.address === entry.address)
+      .map(([mode]) => mode)
+      .sort();
     const atomicBrokerRollovers = plannedAtomicBrokerRollovers.filter((rollover) => rollover.oldTaskDefinitionArn === entry.oldArn);
     const transitionalRefs = [...(referenceNames(stageBTransitionalTasks, [entry.oldArn], "taskDefinitionArn", "taskArn").get(entry.oldArn) || [])].sort();
     if (serviceRefs.length || runningRefs.length || pendingRefs.length || transitionalRefs.length || (brokerRefs.length && !atomicBrokerRollovers.length)) throw new Error(`Superseded task definition remains referenced: ${entry.address}`);
