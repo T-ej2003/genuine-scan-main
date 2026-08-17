@@ -14,6 +14,12 @@ const canonicalPath = path.join(release, "stage-b-deployment.plan.canonical.json
 const available = [planPath, planJsonPath, canonicalPath].every((filePath) => fs.existsSync(filePath));
 const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 
+test("partial-apply captured-plan recovery does not require RECOVERY_ALIAS_ONLY attestation", () => {
+  const source = fs.readFileSync("scripts/plan-production-green-stage-b.mjs", "utf8");
+  assert.match(source, /const partialApplyRecovery = cliOptions\.includes\("--partial-apply-recovery"\);/);
+  assert.match(source, /Object\.entries\(expected\)\.some\(\(\[name, value\]\) => name !== "recoveryAttestationSha256"/);
+});
+
 test("preserved production plan recovers to PLAN_CAPTURED without Terraform", { skip: !available }, () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-plan-recovery-"));
   const previousWorkspace = process.env.TF_WORKSPACE;
