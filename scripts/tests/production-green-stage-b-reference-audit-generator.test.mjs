@@ -558,6 +558,53 @@ test("fresh-image recovery partitions current runtime instances from reviewed de
   assert.equal(audit.deposedTaskDefinitionCleanups.every((entry) => Object.values(entry.runtimeReferences).every((references) => references.length === 0)), true);
 });
 
+test("serial-96 prior state keeps current predecessors distinct from deposed instances", () => {
+  const fixture = makeFreshImagePartialApplyReferenceFixture();
+  const resources = fixture.plan.prior_state.values.root_module.resources;
+  for (const change of fixture.plan.resource_changes.filter((item) => Object.hasOwn(item, "deposed"))) {
+    const current = resources.find((resource) => resource.address === change.address);
+    resources.push({
+      ...structuredClone(current),
+      deposed_key: change.deposed,
+      values: { ...structuredClone(current.values), arn: change.change.before.arn },
+    });
+  }
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  const audit = generate(fixture);
+  assert.equal(audit.currentTaskDefinitionReferenceCount, 12);
+  assert.equal(audit.deposedTaskDefinitionCleanups.length, 11);
+  assert.equal(audit.taskDefinitionMutationInstances.length, 23);
+  assert.equal(new Set(audit.oldTaskDefinitions.map((entry) => entry.oldTaskDefinitionArn)).size, 12);
+
+  fixture.plan.prior_state.values.root_module.resources.reverse();
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  const reversedAudit = generate(fixture);
+  assert.deepEqual(
+    reversedAudit.oldTaskDefinitions.map((entry) => [entry.terraformAddress, entry.oldTaskDefinitionArn]).sort(),
+    audit.oldTaskDefinitions.map((entry) => [entry.terraformAddress, entry.oldTaskDefinitionArn]).sort(),
+  );
+});
+
+test("serial-96 prior-state deposed identities are validated before exclusion", () => {
+  const malformed = makeFreshImagePartialApplyReferenceFixture();
+  const current = malformed.plan.prior_state.values.root_module.resources[0];
+  malformed.plan.prior_state.values.root_module.resources.push({
+    ...structuredClone(current),
+    deposed_key: "not-hex",
+  });
+  assert.throws(() => generate(malformed), /Terraform prior-state deposed identity .* is malformed/);
+
+  const duplicate = makeFreshImagePartialApplyReferenceFixture();
+  const duplicateCurrent = duplicate.plan.prior_state.values.root_module.resources[0];
+  duplicate.plan.prior_state.values.root_module.resources.push(
+    { ...structuredClone(duplicateCurrent), deposed_key: "deadbeef" },
+    { ...structuredClone(duplicateCurrent), deposed_key: "deadbeef" },
+  );
+  assert.throws(() => generate(duplicate), /duplicate deposed task-definition instance/);
+});
+
 test("fresh-image approval re-derives the exact reference-audit mutation partition", () => {
   const fixture = makeFreshImagePartialApplyReferenceFixture();
   const audit = generate(fixture);
