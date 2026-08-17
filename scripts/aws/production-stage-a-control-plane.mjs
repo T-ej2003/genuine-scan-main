@@ -72,7 +72,14 @@ const stablePolicy = (value, key) => {
   return value;
 };
 const stablePolicyJson = (value) => JSON.stringify(stablePolicy(value));
-const exactPrincipal = (value, expected) => value === expected || (Array.isArray(value) && value.length === 1 && value[0] === expected);
+export function normalizeStageACheckerPrincipalAws(value) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && value.length === 1 && typeof value[0] === "string") return value[0];
+  throw new Error("Stage A checker role trust AWS principal must be a string or singleton string array.");
+}
+const exactPrincipal = (value, expected) => {
+  try { return normalizeStageACheckerPrincipalAws(value) === expected; } catch { return false; }
+};
 const decodePolicy = (value, label) => {
   if (typeof value !== "string") throw new Error(`${label} is missing.`);
   try { return JSON.parse(value); } catch { throw new Error(`${label} is malformed.`); }
