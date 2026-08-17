@@ -21,6 +21,8 @@ import { assertStageBCanonicalTfvarsFile } from "./generate-production-green-sta
 import { assertStageBPrivateFile, ensureStageBPrivateDirectory } from "./stage-b-artifact-contract.mjs";
 import { assertRotationInfrastructurePlan, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
 import { createLiveCheckerChainAssertionAdapter } from "./production-checker-chain-contract.mjs";
+import { assertStageAStateContract } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -28,11 +30,18 @@ const CLUSTER = "mscqr-prod-euw2-main";
 const SERVICE = "mscqr-backend-servi-euw2";
 const CLUSTER_ARN = `arn:aws:ecs:${REGION}:${ACCOUNT}:cluster/${CLUSTER}`;
 const CONTAINER = "backend";
+const STATE_BUCKET = "mscqr-production-terraform-state-368992683803-eu-west-2";
+const STAGE_A_STATE_URI = `s3://${STATE_BUCKET}/mscqr/production/rls-green/stage-a/terraform.tfstate`;
+const STAGE_B_STATE_URI = `s3://${STATE_BUCKET}/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate`;
 const jsonFile = (filePath) => JSON.parse(readFileSync(filePath, "utf8"));
 const AWS_SERVICE_COMMANDS = new Set(["ec2", "ecs", "ecr", "iam", "kms", "logs", "rds", "s3", "secretsmanager", "ssm", "sts"]);
 
 export function createProductionCommandRunner({ profile, region = REGION, exec = execFileSync } = {}) {
-  const env = { ...process.env, AWS_REGION: region, AWS_DEFAULT_REGION: region, ...(profile ? { AWS_PROFILE: profile } : {}) };
+  const env = { ...process.env, AWS_REGION: region, AWS_DEFAULT_REGION: region };
+  if (profile) {
+    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) delete env[key];
+    env.AWS_PROFILE = profile;
+  }
   return (args) => {
     if (!Array.isArray(args) || args.length === 0) throw new Error("Production command arguments are required.");
     const command = args[0] === "aws" ? args.slice(1) : [...args];
@@ -46,6 +55,7 @@ export function createProductionCommandRunner({ profile, region = REGION, exec =
 const parseJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 
 export function describeStageAIngress({ run, endpointSecurityGroupId, runtimeSecurityGroupId } = {}) {
+  if (!/^sg-[a-f0-9]{8,17}$/.test(endpointSecurityGroupId || "") || !/^sg-[a-f0-9]{8,17}$/.test(runtimeSecurityGroupId || "") || endpointSecurityGroupId === runtimeSecurityGroupId) throw new Error("Stage A ingress security-group identities are malformed or collide.");
   const response = parseJson(run, ["ec2", "describe-security-group-rules", "--filters", `Name=group-id,Values=${endpointSecurityGroupId}`]);
   return {
     present: (response.SecurityGroupRules || []).some((rule) =>
@@ -56,6 +66,12 @@ export function describeStageAIngress({ run, endpointSecurityGroupId, runtimeSec
       rule.FromPort === 443 &&
       rule.ToPort === 443,
     ),
+    endpointSecurityGroupId,
+    runtimeSecurityGroupId,
+    direction: "ingress",
+    protocol: "tcp",
+    fromPort: 443,
+    toPort: 443,
   };
 }
 
@@ -197,7 +213,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     bindingOutputFile: config.artifactBindingOutputFile || ARTIFACT_SIGNING_RUNTIME_BINDING_PATH,
     activeKeyVersion: config.artifactActiveKeyVersion,
   });
-  const stageA = createTerraformStageAAdapter({
+  const stageA = config.stageARecoveryEvidenceFile ? null : createTerraformStageAAdapter({
     root: config.stageARoot,
     planPath: config.stageAPlanPath,
     stageAPlanSha256: config.stageAPlanSha256,
@@ -231,7 +247,23 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
         };
       },
     },
-    stageA: { adapter: stageA, endpointSecurityGroupId: config.endpointSecurityGroupId, runtimeSecurityGroupId: config.runtimeSecurityGroupId },
+    stageA: config.stageARecoveryEvidenceFile
+      ? {
+        recoveryEvidence: jsonFile(config.stageARecoveryEvidenceFile),
+        revalidateRecovery: async () => {
+          const local = readAuthenticatedStageARecoverySources({ stageAStatePath: config.stageAStatePath, stageAHandoffPath: config.stageAHandoffPath, stageBStatePath: config.stageBStatePath, repositoryRoot: process.cwd() });
+          const remoteStageABytes = Buffer.from(releaseRun(["s3", "cp", STAGE_A_STATE_URI, "-"]));
+          const remoteStageBBytes = Buffer.from(releaseRun(["s3", "cp", STAGE_B_STATE_URI, "-"]));
+          const authenticated = {
+            ...local,
+            stageAState: { ...local.stageAState, bytes: remoteStageABytes, value: JSON.parse(remoteStageABytes.toString("utf8")) },
+            stageBState: { ...local.stageBState, bytes: remoteStageBBytes, value: JSON.parse(remoteStageBBytes.toString("utf8")) },
+          };
+          const stageAContract = assertStageAStateContract(authenticated.stageAState.value);
+          return { ...authenticated, ingress: describeStageAIngress({ run: releaseRun, endpointSecurityGroupId: stageAContract.endpointSecurityGroupId, runtimeSecurityGroupId: stageAContract.executorSecurityGroupId }) };
+        },
+      }
+      : { adapter: stageA, endpointSecurityGroupId: config.endpointSecurityGroupId, runtimeSecurityGroupId: config.runtimeSecurityGroupId },
     artifactSigning: artifact,
     overlapTask: { input: config.overlapTaskInput, register: overlapRegistration, describe: async (arn) => parseJson(releaseRun, ["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]).taskDefinition },
     preDeploymentInventory: { execute: async ({ rotationId: currentRotationId }) => preDeploymentInventory.run({ rotationId: currentRotationId }) },

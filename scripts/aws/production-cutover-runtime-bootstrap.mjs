@@ -10,6 +10,8 @@ import { RELEASE_ROLE_ARN } from "./production-identity-adapters.mjs";
 import { assertImageAuthorization, authorizedBackendDigest, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertOnboardingPaths, PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
+import { assertPostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
+import { assertRootDropEvidence } from "./production-root-drop-evidence.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -148,6 +150,10 @@ export function prepareProductionCutoverRuntime({
   artifactBindingFile,
   rootDropEvidenceFile,
   stageAPlanPath,
+  stageARecoveryEvidenceFile,
+  stageAStatePath,
+  stageAHandoffPath,
+  stageBStatePath,
   currentTaskDefinition,
   inventoryApprovalId,
   onboardingPaths,
@@ -158,6 +164,7 @@ export function prepareProductionCutoverRuntime({
   rotationId: requestedRotationId,
   constructAdapters,
   imageAuthorizationValidation,
+  verifyRootDropSignature,
 } = {}) {
   const directory = ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot, create: true, normalize: true, label: "Production cutover runtime directory" });
   const paths = phasePaths(directory);
@@ -185,8 +192,13 @@ export function prepareProductionCutoverRuntime({
     const artifactBindings = loadApprovedArtifactSigningBindings(artifactBindingFile);
     if (!rootDropEvidenceFile) throw new Error("Root-drop evidence file is required.");
     const rootDrop = readInputFile(rootDropEvidenceFile, repositoryRoot, "Root-drop evidence");
-    if (!stageAPlanPath) throw new Error("Preserved Stage-A saved-plan path is required.");
-    ensureStageBPrivateFile({ filePath: stageAPlanPath, repositoryRoot, label: "Preserved Stage-A saved plan" });
+    assertRootDropEvidence(rootDrop.value, { sourceSha: protectedSha, ...(verifyRootDropSignature ? { verifySignature: verifyRootDropSignature } : {}) });
+    if ((stageAPlanPath && stageARecoveryEvidenceFile) || (!stageAPlanPath && !stageARecoveryEvidenceFile)) throw new Error("Exactly one of preserved Stage-A saved plan or post-apply Stage-A recovery evidence is required.");
+    const stageARecovery = stageARecoveryEvidenceFile ? readInputFile(stageARecoveryEvidenceFile, repositoryRoot, "Stage-A recovery evidence") : null;
+    if (stageARecovery && (!stageAStatePath || !stageAHandoffPath || !stageBStatePath)) throw new Error("Stage-A recovery requires the independently authenticated Stage-A and converged Stage-B state artifacts.");
+    for (const [filePath, label] of [[stageAStatePath, "Stage-A state"], [stageAHandoffPath, "Stage-A handoff"], [stageBStatePath, "Stage-B state"]]) if (stageARecovery) ensureStageBPrivateFile({ filePath, repositoryRoot, label });
+    if (stageARecovery) assertPostApplyStageAPlanRecovery(stageARecovery.value, { sourceSha: protectedSha, expectedStageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", expectedStageBSerial: 98, authenticated: { ...readAuthenticatedStageARecoverySources({ stageAStatePath, stageAHandoffPath, stageBStatePath, repositoryRoot }), ingress: stageARecovery.value.ingress } });
+    if (stageAPlanPath) ensureStageBPrivateFile({ filePath: stageAPlanPath, repositoryRoot, label: "Preserved Stage-A saved plan" });
     const taskDefinition = currentTaskDefinition?.taskDefinition || currentTaskDefinition;
     const { baseUrl, currentKeyVersion } = deriveRuntimeMetadata(taskDefinition);
     const approvalConfig = buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, liveCurrentKeyVersion: currentKeyVersion });
@@ -230,8 +242,14 @@ export function prepareProductionCutoverRuntime({
       rootDropEvidenceFile: rootDrop.path,
       rootDropEvidenceSha256: rootDrop.sha256,
       stageARoot: path.resolve("infra/aws/terraform/production-green-stage-a"),
-      stageAPlanPath: path.resolve(stageAPlanPath),
-      stageAPlanSha256: ensureStageBPrivateFile({ filePath: stageAPlanPath, repositoryRoot, label: "Preserved Stage-A saved plan" }).sha256,
+      stageAPlanPath: stageAPlanPath ? path.resolve(stageAPlanPath) : null,
+      stageAPlanSha256: stageAPlanPath ? ensureStageBPrivateFile({ filePath: stageAPlanPath, repositoryRoot, label: "Preserved Stage-A saved plan" }).sha256 : null,
+      stageARecoveryEvidenceFile: stageARecovery?.path || null,
+      stageARecoveryEvidenceSha256: stageARecovery?.sha256 || null,
+      stageARecoveryMode: stageARecovery?.value?.mode || null,
+      stageAStatePath: stageARecovery ? path.resolve(stageAStatePath) : null,
+      stageAHandoffPath: stageARecovery ? path.resolve(stageAHandoffPath) : null,
+      stageBStatePath: stageARecovery ? path.resolve(stageBStatePath) : null,
       artifactBindingSha256: hash(readFileSync(artifactBindingFile)),
       imageAuthorizationSha256: imageAuthorization.filePath ? ensureStageBPrivateFile({ filePath: imageAuthorization.filePath, repositoryRoot, label: "Image authorization evidence" }).sha256 : null,
       iamEvidenceFileSha256: iamEvidence.filePath ? ensureStageBPrivateFile({ filePath: iamEvidence.filePath, repositoryRoot, label: "IAM evidence" }).sha256 : null,
@@ -316,7 +334,7 @@ export function parseBootstrapArgs(argv) {
   const supported = new Set([
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
     "minimum-grace-seconds", "rotation-bindings", "image-authorization", "iam-evidence",
-    "artifact-binding", "root-drop-evidence", "stage-a-plan", "inventory-approval-id", "onboarding-paths",
+    "artifact-binding", "root-drop-evidence", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "inventory-approval-id", "onboarding-paths",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir",
   ]);
   const values = new Map();

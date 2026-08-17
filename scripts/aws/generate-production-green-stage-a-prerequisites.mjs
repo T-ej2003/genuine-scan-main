@@ -5,6 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "./production-stage-a-control-plane.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
@@ -19,8 +20,24 @@ const json = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const exact = (value, expected, label) => { if (value !== expected) throw new Error(`${label} does not match the reviewed Stage A contract.`); return value; };
 
 function resourceInstances(state, type, name) {
-  return (state.resources || []).filter((resource) => resource.type === type && resource.name === name).flatMap((resource) => resource.instances || []);
+  return (state.resources || []).filter((resource) => resource.mode === "managed" && resource.type === type && resource.name === name).flatMap((resource) => resource.instances || []);
 }
+
+const oneResource = (state, type, name) => {
+  const instances = resourceInstances(state, type, name);
+  if (instances.length !== 1) throw new Error(`Stage A state must contain exactly one ${type}.${name} instance.`);
+  return instances[0]?.attributes || {};
+};
+
+const parsePolicy = (value, label) => {
+  if (typeof value !== "string") throw new Error(`${label} policy is missing.`);
+  try { return JSON.parse(value); } catch { throw new Error(`${label} policy is malformed.`); }
+};
+
+const stable = (value) => Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])])) : value;
+const assertExactPolicy = (actual, expected, label) => {
+  if (JSON.stringify(stable(actual)) !== JSON.stringify(stable(expected))) throw new Error(`${label} policy semantics are not the reviewed contract.`);
+};
 
 export function assertStageAStateIdentity(state, { stateObject = STAGE_A_STATE_OBJECT } = {}) {
   if (stateObject !== STAGE_A_STATE_OBJECT) throw new Error(`Stage A state object is wrong: expected ${STAGE_A_STATE_OBJECT}, got ${stateObject}.`);
@@ -36,12 +53,45 @@ function stageAValues(state, options) {
   const value = state.outputs?.stage_b_prerequisites?.value;
   if (!value || typeof value !== "object") throw new Error("Stage A state has no stage_b_prerequisites output.");
   const endpoints = resourceInstances(state, "aws_vpc_endpoint", "executor").map((instance) => instance.attributes || {});
+  const expectedEndpointServices = ["ecr.api", "ecr.dkr", "logs", "secretsmanager", "kms"].map((service) => `com.amazonaws.${STAGE_B.region}.${service}`);
+  if (endpoints.length !== expectedEndpointServices.length || JSON.stringify(endpoints.map((item) => item.service_name).sort()) !== JSON.stringify([...expectedEndpointServices].sort())) throw new Error("Stage A state interface endpoints are incomplete or unexpected.");
   const vpcIds = [...new Set(endpoints.map((item) => item.vpc_id).filter(Boolean))];
   const subnetIds = [...new Set(endpoints.flatMap((item) => item.subnet_ids || []))].sort();
-  if (vpcIds.length !== 1 || subnetIds.length !== 2 || JSON.stringify(subnetIds) !== JSON.stringify([...STAGE_B.privateSubnetIds].sort())) throw new Error("Stage A state networking output is incomplete or does not match the reviewed private subnets.");
-  const database = resourceInstances(state, "aws_db_instance", "green")[0]?.attributes || {};
+  if (vpcIds.length !== 1 || subnetIds.length !== 2 || endpoints.some((item) => JSON.stringify([...(item.subnet_ids || [])].sort()) !== JSON.stringify([...STAGE_B.privateSubnetIds].sort())) || JSON.stringify(subnetIds) !== JSON.stringify([...STAGE_B.privateSubnetIds].sort())) throw new Error("Stage A state networking output is incomplete or does not match the reviewed private subnets.");
+  const database = oneResource(state, "aws_db_instance", "green");
   if (!database.identifier) throw new Error("Stage A state does not identify the green database.");
-  return { value, vpcId: vpcIds[0], subnetIds, databaseIdentifier: database.identifier };
+  const endpointGroup = oneResource(state, "aws_security_group", "executor_endpoints");
+  const databaseGroup = oneResource(state, "aws_security_group", "database");
+  const executorGroup = oneResource(state, "aws_security_group", "executor");
+  if (!endpointGroup.id || databaseGroup.id !== STAGE_B.databaseSecurityGroupId || executorGroup.id !== STAGE_B.executorSecurityGroupId) throw new Error("Stage A security-group identities do not match the reviewed contract.");
+  if (value.database_security_group_id !== STAGE_B.databaseSecurityGroupId || value.executor_security_group_id !== STAGE_B.executorSecurityGroupId) throw new Error("Stage A prerequisite security-group outputs are wrong.");
+  if (oneResource(state, "aws_iam_role", "executor").arn !== STAGE_B.executorRoleArn || oneResource(state, "aws_iam_role", "broker").arn !== STAGE_B.brokerRoleArn) throw new Error("Stage A runtime IAM role identities are wrong.");
+  const checkerRole = oneResource(state, "aws_iam_role", "checker");
+  if (checkerRole.arn !== STAGE_B.checkerRoleArn) throw new Error("Stage A checker role identity is wrong.");
+  assertExactPolicy(parsePolicy(checkerRole.assume_role_policy, "Stage A checker trust"), { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: STAGE_A_CHECKER_ROLE_TRUST.principal }, Action: STAGE_A_CHECKER_ROLE_TRUST.action }] }, "Stage A checker trust");
+  const rootDropKey = oneResource(state, "aws_kms_key", "root_drop");
+  const rootDropAlias = oneResource(state, "aws_kms_alias", "root_drop");
+  if (!new RegExp(`^arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/[a-f0-9-]{36}$`).test(rootDropKey.arn || "") || rootDropKey.key_usage !== "SIGN_VERIFY" || rootDropKey.customer_master_key_spec !== "RSA_3072" || rootDropAlias.arn !== STAGE_B.rootDropKmsKeyArn || rootDropAlias.target_key_arn !== rootDropKey.arn) throw new Error("Stage A root-drop key and alias identities are wrong.");
+  assertExactPolicy(parsePolicy(rootDropKey.policy, "Stage A root-drop key"), { Version: "2012-10-17", Statement: [
+    { Sid: "AccountAdministration", Effect: "Allow", Principal: { AWS: `arn:aws:iam::${STAGE_B.account}:root` }, Action: "kms:*", Resource: "*" },
+    { Sid: "DenyNonRootRootDropSigning", Effect: "Deny", Principal: "*", Action: ["kms:Sign", "kms:Verify"], Resource: "*", Condition: { StringNotEquals: { "aws:PrincipalArn": `arn:aws:iam::${STAGE_B.account}:root` } } },
+    { Sid: "ReleaseReadsRootDropKey", Effect: "Allow", Principal: { AWS: `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-release-deployer` }, Action: ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetPublicKey", "kms:ListResourceTags"], Resource: "*" },
+  ] }, "Stage A root-drop key");
+  if (oneResource(state, "aws_kms_key", "approval").arn !== STAGE_B.approvalKmsKeyArn || oneResource(state, "aws_secretsmanager_secret", "approval").arn !== STAGE_B.approvalSecretArn) throw new Error("Stage A approval resource identities are wrong.");
+  assertExactPolicy(parsePolicy(oneResource(state, "aws_iam_role", "executor").assume_role_policy, "Stage A executor trust"), { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Service: "ecs-tasks.amazonaws.com" }, Action: "sts:AssumeRole" }] }, "Stage A executor trust");
+  assertExactPolicy(parsePolicy(oneResource(state, "aws_iam_role", "broker").assume_role_policy, "Stage A broker trust"), { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Service: "lambda.amazonaws.com" }, Action: "sts:AssumeRole" }] }, "Stage A broker trust");
+  const checkerPolicy = oneResource(state, "aws_iam_role_policy", "checker_assume_target");
+  assertExactPolicy(parsePolicy(checkerPolicy.policy, "Stage A checker role-chain"), { Version: "2012-10-17", Statement: [{ Sid: "AssumeExactRlsIndependentChecker", Effect: "Allow", Action: "sts:AssumeRole", Resource: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker" }] }, "Stage A checker role-chain");
+  const checkerPublicationPolicy = oneResource(state, "aws_iam_role_policy", "checker");
+  assertExactPolicy(parsePolicy(checkerPublicationPolicy.policy, "Stage A checker publication"), { Version: "2012-10-17", Statement: [{ Sid: "SignExactStageBApproval", Effect: "Allow", Action: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsAction, Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsResource }, { Sid: "PublishExactStageBApproval", Effect: "Allow", Action: STAGE_A_CHECKER_PUBLICATION_POLICY.publishAction, Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.publishResource }] }, "Stage A checker publication");
+  for (const key of ["approval_kms_key_arn", "approval_secret_arn", "executor_role_arn", "broker_role_arn", "database_security_group_id", "executor_security_group_id", "executor_log_group_name", "executor_log_group_arn", "broker_log_group_name", "broker_log_group_arn", "runtime_secret_arns", "read_only_canary_database_secret_arn"]) if (value[key] === undefined || value[key] === null) throw new Error("Stage A prerequisite output is incomplete.");
+  if (!value.runtime_secret_arns || typeof value.runtime_secret_arns !== "object" || Array.isArray(value.runtime_secret_arns) || Object.keys(value.runtime_secret_arns).length === 0) throw new Error("Stage A runtime secret output is incomplete.");
+  return { value, vpcId: vpcIds[0], subnetIds, databaseIdentifier: database.identifier, endpointSecurityGroupId: endpointGroup.id, databaseSecurityGroupId: databaseGroup.id, executorSecurityGroupId: executorGroup.id };
+}
+
+export function assertStageAStateContract(state, options = {}) {
+  const result = stageAValues(state, options);
+  return Object.freeze({ ...result, stateLineage: state.lineage, stateSerial: state.serial });
 }
 
 function awsJson(args, run) { return JSON.parse(run(args)); }
@@ -80,7 +130,7 @@ export function generateStageAPrerequisites({ stateBackup, stateObject, toolingS
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !/^[a-f0-9]{64}$/.test(toolingTreeSha256 || "")) throw new Error("Stage A prerequisite tooling identity is malformed.");
   if (fs.existsSync(outputPath)) throw new Error("Refusing to overwrite an existing Stage A prerequisite artifact.");
   const stateArtifact = assertStageBPrivateFile({ filePath: stateBackup, repositoryRoot: root, label: "Stage A state backup" });
-  const bytes = fs.readFileSync(stateArtifact.path); const state = JSON.parse(bytes); const { value, vpcId, subnetIds, databaseIdentifier } = stageAValues(state, { stateObject });
+  const bytes = fs.readFileSync(stateArtifact.path); const state = JSON.parse(bytes); const { value, vpcId, subnetIds, databaseIdentifier } = assertStageAStateContract(state, { stateObject });
   const network = liveEvidence({ vpcId, subnetIds, databaseIdentifier, run });
   const output = {
     schemaVersion: STAGE_A_PREREQUISITES_SCHEMA_VERSION, generator: STAGE_A_PREREQUISITES_GENERATOR, toolingSha, toolingTreeSha256,

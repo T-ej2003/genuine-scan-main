@@ -15,6 +15,7 @@ export const STAGE_B = Object.freeze({
   receiptBucket: "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
   approvalSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho",
   approvalKmsKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478",
+  rootDropKmsKeyArn: "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-drop",
   brokerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
   checkerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
   executorRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",

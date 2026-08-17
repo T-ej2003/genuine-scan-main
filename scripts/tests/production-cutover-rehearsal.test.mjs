@@ -14,8 +14,9 @@ import { createProductionPreDeploymentInventoryAdapter } from "../aws/production
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_TARGET_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
+import { buildRootDropEvidence, buildRootDropPayload } from "../aws/production-root-drop-evidence.mjs";
 
-const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
+export const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
 const imageDigest = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`;
 const rotationId = "rotation-rehearsal-1";
@@ -108,7 +109,7 @@ const inventory = Object.fromEntries(ROTATION_INVENTORY_CATEGORIES.map((name) =>
 const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/rehearsal";
 const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1";
 
-function fixtureInput(overrides = {}) {
+export function fixtureInput(overrides = {}) {
   const mutations = [];
   const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha });
   const strictProbes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
@@ -118,7 +119,7 @@ function fixtureInput(overrides = {}) {
     adapter: {
       createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null } } }, checkerPolicyChange(), checkerRoleChange(), checkerPublicationChange()] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
       applySavedPlan: async () => { mutations.push("M2_STAGE_A_APPLY"); },
-      describeIngress: async () => ({ present: true }),
+      describeIngress: async () => ({ present: true, endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime", direction: "ingress", protocol: "tcp", fromPort: 443, toPort: 443 }),
     },
   };
   const ecsJsonKeyBindings = new Set(["JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"]);
@@ -135,7 +136,8 @@ function fixtureInput(overrides = {}) {
       verifySourceTrust: async () => ({ exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }),
       verifyComplete: async () => ({ valid: true, sourceTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }, sourcePermission: { exact: true, action: "sts:AssumeRole", resource: CHECKER_TARGET_ROLE_ARN }, targetTrust: { exact: true, secondHopMfaRequired: false, principal: CHECKER_SOURCE_ROLE_ARN, roleArn: CHECKER_TARGET_ROLE_ARN }, checkerUserExact: true, firstHopMfaRequired: true, roleAAssumeTargetPermissionExact: true, roleBTrustExactRoleA: true, roleBSecondHopMfaRequired: false }),
     },
-    identities: { rootDrop: { ...validEvidence("root:drop"), callerArn: "arn:aws:iam::368992683803:root" }, releaseDeployer: { ...validEvidence("sts:release"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/rehearsal" }, verifier: { ...validEvidence("sts:verifier"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecs-exec-verifier/rehearsal" } },
+    identities: { rootDrop: buildRootDropEvidence({ payload: buildRootDropPayload({ sourceSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "rehearsal-root-with-enough-entropy" }), signatureBase64: "c2lnbmF0dXJl" }), releaseDeployer: { ...validEvidence("sts:release"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/rehearsal" }, verifier: { ...validEvidence("sts:verifier"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecs-exec-verifier/rehearsal" } },
+    verifyRootDropSignature: () => true,
     stageA,
     artifactSigning: artifactFixture(),
     overlapTask: { input: { backendImage: imageDigest, releaseSha: sourceSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } }, register: async () => { mutations.push("M4_REGISTER_TASK_DEFINITION"); return { taskDefinition: { taskDefinitionArn } }; }, describe: async (arn) => ({ taskDefinitionArn: arn, family: "mscqr-production-rls-green-backend-candidate", status: "ACTIVE", tags: [{ key: "MSCQRExecTarget", value: "production-backend" }] }) },
@@ -393,26 +395,26 @@ test("Stage A rechecks the preserved-plan digest immediately before apply", asyn
 });
 
 test("Stage A postcondition reads exact SG-to-SG ingress from production-shaped AWS responses", () => {
-  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  const inputs = { endpointSecurityGroupId: "sg-0123456789abcdef0", runtimeSecurityGroupId: "sg-051a24aedff773761" };
   const rule = (overrides = {}) => ({
-    GroupId: "sg-endpoint", ReferencedGroupInfo: { GroupId: "sg-runtime" }, IsEgress: false,
+    GroupId: inputs.endpointSecurityGroupId, ReferencedGroupInfo: { GroupId: inputs.runtimeSecurityGroupId }, IsEgress: false,
     IpProtocol: "tcp", FromPort: 443, ToPort: 443, ...overrides,
   });
   const calls = [];
   const read = (rules) => describeStageAIngress({ run: (args) => { calls.push(args); return JSON.stringify({ SecurityGroupRules: rules }); }, ...inputs });
-  assert.deepEqual(read([rule()]), { present: true });
+  assert.deepEqual(read([rule()]), { present: true, ...inputs, direction: "ingress", protocol: "tcp", fromPort: 443, toPort: 443 });
   assert.equal(calls[0].some((arg) => String(arg).includes("referenced-group-id")), false);
   for (const rules of [
-    [rule({ ReferencedGroupInfo: { GroupId: "sg-other" } })],
+    [rule({ ReferencedGroupInfo: { GroupId: "sg-0123456789abcdef1" } })],
     [rule({ ReferencedGroupInfo: undefined })],
-    [rule({ GroupId: "sg-other" })],
+    [rule({ GroupId: "sg-0123456789abcdef1" })],
     [rule({ IsEgress: true })],
     [rule({ IpProtocol: "udp" })],
     [rule({ FromPort: 80 })],
     [rule({ ToPort: 80 })],
-    [{ GroupId: "sg-endpoint", CidrIpv4: "10.0.0.0/8", IsEgress: false, IpProtocol: "tcp", FromPort: 443, ToPort: 443 }],
-    [{ GroupId: "sg-endpoint", PrefixListId: "pl-unsupported", IsEgress: false, IpProtocol: "tcp", FromPort: 443, ToPort: 443 }],
-  ]) assert.deepEqual(read(rules), { present: false });
+    [{ GroupId: inputs.endpointSecurityGroupId, CidrIpv4: "10.0.0.0/8", IsEgress: false, IpProtocol: "tcp", FromPort: 443, ToPort: 443 }],
+    [{ GroupId: inputs.endpointSecurityGroupId, PrefixListId: "pl-unsupported", IsEgress: false, IpProtocol: "tcp", FromPort: 443, ToPort: 443 }],
+  ]) assert.equal(read(rules).present, false);
 });
 
 test("the real cutover orchestrator reaches synthetic onboarding with ordered mutation intents", async () => {

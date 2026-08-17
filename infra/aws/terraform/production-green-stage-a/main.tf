@@ -216,6 +216,24 @@ resource "aws_kms_alias" "approval" {
   target_key_id = aws_kms_key.approval.key_id
 }
 
+resource "aws_kms_key" "root_drop" {
+  description              = "Root-only MSCQR production cutover evidence signing key"
+  key_usage                = "SIGN_VERIFY"
+  customer_master_key_spec = "RSA_3072"
+  deletion_window_in_days  = 30
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Sid = "AccountAdministration", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:root" }, Action = "kms:*", Resource = "*" },
+    { Sid = "DenyNonRootRootDropSigning", Effect = "Deny", Principal = "*", Action = ["kms:Sign", "kms:Verify"], Resource = "*", Condition = { StringNotEquals = { "aws:PrincipalArn" = "arn:aws:iam::368992683803:root" } } },
+    { Sid = "ReleaseReadsRootDropKey", Effect = "Allow", Principal = { AWS = var.release_role_arn }, Action = ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetPublicKey", "kms:ListResourceTags"], Resource = "*" }
+  ] })
+  tags = local.tags
+}
+
+resource "aws_kms_alias" "root_drop" {
+  name          = "alias/mscqr-production-root-drop"
+  target_key_id = aws_kms_key.root_drop.key_id
+}
+
 resource "aws_iam_role_policy" "checker" {
   name = "mscqr-production-rls-independent-checker"
   role = aws_iam_role.checker.id

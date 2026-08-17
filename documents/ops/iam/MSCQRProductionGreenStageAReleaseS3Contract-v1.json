@@ -65,7 +65,8 @@
       ],
       "Resource": [
         "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478",
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-drop"
       ],
       "Condition": {
         "StringEquals": {

@@ -5,17 +5,10 @@ import path from "node:path";
 import test from "node:test";
 import { assertStageAStateIdentity, generateStageAPrerequisites, resolveStageASubnetRouteTable, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
+import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-a-prerequisites-"));
-const roles = Object.fromEntries(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"].map((role) => [role, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/${role}-abc123`]));
-const stage = {
-  lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: STAGE_A_MINIMUM_STATE_SERIAL,
-  outputs: { stage_b_prerequisites: { value: { approval_kms_key_arn: STAGE_B.approvalKmsKeyArn, approval_secret_arn: STAGE_B.approvalSecretArn, executor_role_arn: STAGE_B.executorRoleArn, broker_role_arn: STAGE_B.brokerRoleArn, database_security_group_id: STAGE_B.databaseSecurityGroupId, executor_security_group_id: STAGE_B.executorSecurityGroupId, executor_log_group_name: "/ecs/mscqr-production/full-rls-green", executor_log_group_arn: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green:*", broker_log_group_name: "/aws/lambda/mscqr-production-rls-approval-broker", broker_log_group_arn: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker:*", runtime_secret_arns: roles, read_only_canary_database_secret_arn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-abc123" } } },
-  resources: [
-    { type: "aws_vpc_endpoint", name: "executor", instances: [{ attributes: { vpc_id: "vpc-0123456789abcdef0", subnet_ids: STAGE_B.privateSubnetIds } }] },
-    { type: "aws_db_instance", name: "green", instances: [{ attributes: { identifier: "mscqr-production-rls-green" } }] },
-  ],
-};
+const stage = productionStageAState({ serial: STAGE_A_MINIMUM_STATE_SERIAL });
 const statePath = path.join(directory, "stage-a-state.json"); fs.writeFileSync(statePath, JSON.stringify(stage), { mode: 0o600 });
 const run = (args) => {
   if (args[1] === "describe-subnets") return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId, index) => ({ SubnetId, VpcId: "vpc-0123456789abcdef0", State: "available", MapPublicIpOnLaunch: false, AvailabilityZone: `eu-west-2${index ? "b" : "a"}`, CidrBlock: `10.0.${index}.0/24` })) });

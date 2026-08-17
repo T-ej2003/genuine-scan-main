@@ -32,11 +32,11 @@ const fresh = readFreshProtectedMainIdentity({ run: gitRun, expectedSourceSha: v
 const sourceSha = fresh.headSha;
 const rotationId = values.get("--rotation-id") || `rotation-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
 const run = createProductionCommandRunner({ profile: "mscqr-production-release-deployer", region: REGION });
+const client = createInitialDualSlotSecretsManagerClient({ region: REGION, profile: "mscqr-production-release-deployer" });
+await client.assertCredentialIdentity();
 const service = JSON.parse(run(["ecs", "describe-services", "--cluster", CLUSTER, "--services", SERVICE])).services?.[0];
 if (!service?.taskDefinition) throw new Error("Current production task definition is unavailable.");
 const taskDefinition = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", service.taskDefinition, "--include", "TAGS"]));
-process.env.AWS_PROFILE = "mscqr-production-release-deployer";
-const client = createInitialDualSlotSecretsManagerClient({ region: REGION });
 const result = await bootstrapInitialDualSlotRotation({
   send: (command) => client.send(command),
   taskDefinition,
