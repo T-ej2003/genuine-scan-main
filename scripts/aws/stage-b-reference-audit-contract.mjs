@@ -30,6 +30,7 @@ export const STAGE_B_REFERENCE_AUDIT_CLOCK_SKEW_MS = STAGE_B_DEPLOYMENT_EVIDENCE
 export const STAGE_B_REFERENCE_AUDIT_VALIDITY_MODEL = STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL;
 export const STAGE_B_BROKER_TERRAFORM_ADDRESS = "aws_lambda_function.broker";
 export const STAGE_B_BROKER_TASK_DEFINITION_REFERENCE = "local.active_broker_task_definition_arns";
+export const STAGE_B_BROKER_ENVIRONMENT_REFERENCE = "local.broker_environment";
 export const STAGE_B_ACTIVE_BROKER_TASK_DEFINITION_LOCAL_EXPRESSION = "var.stage_b_recovery_only ? var.stage_b_recovery_task_definition_arns : local.broker_task_definition_arns";
 export const STAGE_B_BROKER_APPROVAL_REFERENCE = "local.broker_approval_expected";
 export const STAGE_B_BROKER_APPROVAL_INPUT = "var.package_checksum_sha256";
@@ -104,6 +105,31 @@ export function normalizeStageBFreshImageRuntimeModel({ plan, audit } = {}) {
   if (new Set(currentPlanReplacements.map((change) => change.address)).size !== currentPlanReplacements.length || new Set(currentPlanReplacements.map((change) => change.beforeArn)).size !== currentPlanReplacements.length) {
     throw new Error("Stage B current replacement identities are duplicated.");
   }
+  const deposedCleanups = (plan.resource_changes || [])
+    .filter((change) => change?.type === "aws_ecs_task_definition" && Object.hasOwn(change, "deposed"));
+  const deposedByAddress = new Map();
+  const deposedByArn = new Map();
+  for (const change of deposedCleanups) {
+    const family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address];
+    const beforeArn = change.change?.before?.arn;
+    if (!family || typeof change.deposed !== "string" || !/^[a-f0-9]{8}$/.test(change.deposed)
+      || JSON.stringify(change.change?.actions) !== JSON.stringify(["delete"])
+      || change.change?.after !== null || change.change?.before?.skip_destroy !== true
+      || change.change?.before?.family !== family
+      || !currentTaskDefinitionArnPattern.test(beforeArn || "")
+      || currentTaskDefinitionArnPattern.exec(beforeArn)[1] !== family) {
+      throw new Error(`Stage B deposed task-definition cleanup is malformed: ${change.address}`);
+    }
+    const identity = `${change.address}:deposed:${change.deposed}`;
+    if (deposedByAddress.get(change.address)?.some((entry) => entry.identity === identity)
+      || deposedByArn.has(beforeArn)) throw new Error(`Stage B deposed task-definition cleanup identity is duplicated: ${identity}`);
+    const entry = { address: change.address, family, deposed: change.deposed, arn: beforeArn, identity };
+    deposedByAddress.set(change.address, [...(deposedByAddress.get(change.address) || []), entry]);
+    deposedByArn.set(beforeArn, entry);
+  }
+  if (currentPlanReplacements.length !== Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length || deposedCleanups.length !== 11) {
+    throw new Error("Stage B fresh-image recovery task-definition partition is not the exact 12-current/11-deposed topology.");
+  }
   const referencesByTaskDefinitionArn = normalizeEcsReferences(audit);
   const liveMappings = audit.broker?.liveTaskDefinitionMappings;
   if (!Array.isArray(liveMappings)) throw new Error("Stage B broker live mappings are missing.");
@@ -122,10 +148,26 @@ export function normalizeStageBFreshImageRuntimeModel({ plan, audit } = {}) {
     const candidates = currentByFamily.get(family) || [];
     if (candidates.length !== 1) throw new Error(`Stage B canonical broker mode does not bind to exactly one current plan replacement: ${mode}`);
     const mapping = observedMappingsByMode.get(mode);
-    if (mapping.taskDefinitionArn !== candidates[0].beforeArn) throw new Error(`Stage B canonical broker mapping does not match its authenticated plan predecessor: ${mode}`);
-    return { ...mapping, ...candidates[0] };
+    const current = candidates[0];
+    if (mapping.taskDefinitionArn === current.beforeArn) {
+      return { ...mapping, ...current, planPredecessorArn: current.beforeArn, observedTaskDefinitionArn: current.beforeArn, observedClassification: "CURRENT" };
+    }
+    const deposed = deposedByAddress.get(current.address)?.find((entry) => entry.arn === mapping.taskDefinitionArn);
+    if (!deposed) throw new Error(`Stage B canonical broker mapping does not match its authenticated current or reviewed deposed predecessor: ${mode}`);
+    return {
+      ...mapping,
+      ...current,
+      planPredecessorArn: current.beforeArn,
+      observedClassification: "DEPOSED",
+      observedDeposedKey: deposed.deposed,
+      observedTaskDefinitionArn: deposed.arn,
+    };
   });
-  const deposedCleanups = (plan.resource_changes || []).filter((change) => change?.type === "aws_ecs_task_definition" && Object.hasOwn(change, "deposed"));
+  const deposedMappingsByArn = new Map();
+  for (const rollover of currentRolloverModes.filter((entry) => entry.observedClassification === "DEPOSED")) {
+    const modes = deposedMappingsByArn.get(rollover.observedTaskDefinitionArn) || [];
+    deposedMappingsByArn.set(rollover.observedTaskDefinitionArn, [...modes, rollover.mode]);
+  }
   return {
     currentPlanReplacements,
     deposedCleanups,
@@ -136,7 +178,7 @@ export function normalizeStageBFreshImageRuntimeModel({ plan, audit } = {}) {
       transitionalTasks: audit.transitionalTasks,
       referencesByTaskDefinitionArn,
     },
-    broker: { canonicalRequiredModes: [...STAGE_B_MODES], observedMappingsByMode, currentRolloverModes },
+    broker: { canonicalRequiredModes: [...STAGE_B_MODES], observedMappingsByMode, currentRolloverModes, deposedMappingsByArn },
   };
 }
 
@@ -530,7 +572,8 @@ export function assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, broker
     }
     return references;
   });
-  if (!variableReferences.includes(STAGE_B_BROKER_TASK_DEFINITION_REFERENCE)) {
+  if (!variableReferences.includes(STAGE_B_BROKER_TASK_DEFINITION_REFERENCE)
+    && !variableReferences.includes(STAGE_B_BROKER_ENVIRONMENT_REFERENCE)) {
     throw new Error(`Broker atomic rollover Terraform reference to ${STAGE_B_BROKER_TASK_DEFINITION_REFERENCE} is missing.`);
   }
   assertStageBBrokerTaskDefinitionMapping(plan, terraformConfiguration);
@@ -601,12 +644,20 @@ export function assertStageBCurrentRolloverReferenceBinding({ plan, change, audi
     const proof = matches[0];
     assertStageBAtomicBrokerPlan(plan, change.address, mode, terraformConfiguration);
     const observedMapping = model.broker.observedMappingsByMode.get(mode);
-    if (!observedMapping || observedMapping.taskDefinitionArn !== beforeArn) throw new Error(`Stage B live broker mapping does not match the current predecessor: ${change.address}`);
+    const modeledRollover = model.broker.currentRolloverModes.find((item) => item.mode === mode && item.address === change.address);
+    if (!observedMapping || !modeledRollover || modeledRollover.planPredecessorArn !== beforeArn
+      || observedMapping.taskDefinitionArn !== modeledRollover.observedTaskDefinitionArn) {
+      throw new Error(`Stage B live broker mapping does not match the authenticated current/deposed predecessor: ${change.address}`);
+    }
+    const proofObservedArn = proof.observedTaskDefinitionArn || (modeledRollover.observedClassification === "CURRENT" ? beforeArn : undefined);
     if (proof.brokerTerraformAddress !== STAGE_B_BROKER_TERRAFORM_ADDRESS
       || proof.taskDefinitionArnReference !== `${change.address}.arn`
       || proof.brokerEnvironmentReference !== STAGE_B_BROKER_TASK_DEFINITION_REFERENCE
       || proof.family !== expectedFamily
       || proof.oldTaskDefinitionArn !== beforeArn
+      || proofObservedArn !== modeledRollover.observedTaskDefinitionArn
+      || (modeledRollover.observedClassification === "DEPOSED" && proof.observedTaskDefinitionClassification !== "DEPOSED")
+      || (modeledRollover.observedClassification === "DEPOSED" && proof.observedDeposedKey !== modeledRollover.observedDeposedKey)
       || proof.planJsonSha256 !== planJsonSha256) throw new Error(`Stage B atomic broker rollover proof does not match the plan: ${change.address}`);
   }
   return rotation;
@@ -682,7 +733,9 @@ function assertBrokerPackagePlanCommon(plan, proof, terraformConfiguration, expe
   if (proof.packageInputReference !== STAGE_B_BROKER_APPROVAL_INPUT) {
     throw new Error("Broker release checksum input reference is missing.");
   }
-  if (!brokerEnvironmentReferences(plan).includes(STAGE_B_BROKER_APPROVAL_REFERENCE)) {
+  const plannedBrokerEnvironmentReferences = brokerEnvironmentReferences(plan);
+  if (!plannedBrokerEnvironmentReferences.includes(STAGE_B_BROKER_APPROVAL_REFERENCE)
+    && !plannedBrokerEnvironmentReferences.includes(STAGE_B_BROKER_ENVIRONMENT_REFERENCE)) {
     throw new Error("Broker approval local reference is missing from the planned environment.");
   }
   const normalizedConfiguration = terraformConfiguration.replace(/\s+/g, " ");
