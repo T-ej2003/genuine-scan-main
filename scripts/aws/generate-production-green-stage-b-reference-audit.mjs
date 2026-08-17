@@ -584,6 +584,7 @@ export function generateReferenceAudit({
   const stageBServices = services.filter((service) => service.stageBScoped);
   const stageBRunningTasks = runningTasks.filter((task) => task.stageBScoped);
   const stageBPendingTasks = pendingTasks.filter((task) => task.stageBScoped);
+  const stageBTransitionalTasks = transitionalTasks.filter((task) => task.stageBScoped);
   const {
     summary: broker,
     referencesByFamily: brokerReferencesByFamily,
@@ -610,13 +611,14 @@ export function generateReferenceAudit({
     };
   });
   const deposedArns = new Set(deposedTaskDefinitionCleanups.map((entry) => entry.beforeTaskDefinitionArn));
-  for (const [items, arnKey, nameKey] of [[stageBServices, "taskDefinition", "serviceName"], [stageBRunningTasks, "taskDefinitionArn", "taskArn"], [stageBPendingTasks, "taskDefinitionArn", "taskArn"]]) {
+  for (const [items, arnKey, nameKey] of [[stageBServices, "taskDefinition", "serviceName"], [stageBRunningTasks, "taskDefinitionArn", "taskArn"], [stageBPendingTasks, "taskDefinitionArn", "taskArn"], [stageBTransitionalTasks, "taskDefinitionArn", "taskArn"]]) {
     for (const item of items) if (deposedArns.has(item[arnKey])) throw new Error(`Deposed task definition remains referenced by ${nameKey}: ${item[arnKey]}`);
   }
   for (const arn of deposedArns) if (brokerReferencesByArn.has(arn)) throw new Error(`Deposed task definition remains referenced by the broker: ${arn}`);
   assertStageBLiveReferences(stageBServices, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinition", "serviceName");
   assertStageBLiveReferences(stageBRunningTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
   assertStageBLiveReferences(stageBPendingTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
+  assertStageBLiveReferences(stageBTransitionalTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
   const unretainedCreateOnlyFamilies = new Set([...createOnlyFamilies].filter((family) => !newestRetainedByFamily.has(family)));
   const createOnlyServiceReferences = referenceNamesByFamily(stageBServices, unretainedCreateOnlyFamilies, "taskDefinition", "serviceName");
   const createOnlyRunningReferences = referenceNamesByFamily(stageBRunningTasks, unretainedCreateOnlyFamilies, "taskDefinitionArn", "taskArn");
@@ -630,7 +632,8 @@ export function generateReferenceAudit({
     const pendingRefs = [...(pendingReferences.get(entry.oldArn) || [])].sort();
     const brokerRefs = brokerReferencesByArn.has(entry.oldArn) ? [brokerReferencesByArn.get(entry.oldArn)] : [];
     const atomicBrokerRollovers = plannedAtomicBrokerRollovers.filter((rollover) => rollover.oldTaskDefinitionArn === entry.oldArn);
-    if (serviceRefs.length || runningRefs.length || pendingRefs.length || (brokerRefs.length && !atomicBrokerRollovers.length)) throw new Error(`Superseded task definition remains referenced: ${entry.address}`);
+    const transitionalRefs = [...(referenceNames(stageBTransitionalTasks, [entry.oldArn], "taskDefinitionArn", "taskArn").get(entry.oldArn) || [])].sort();
+    if (serviceRefs.length || runningRefs.length || pendingRefs.length || transitionalRefs.length || (brokerRefs.length && !atomicBrokerRollovers.length)) throw new Error(`Superseded task definition remains referenced: ${entry.address}`);
     return {
       terraformAddress: entry.address,
       oldTaskDefinitionArn: entry.oldArn,
@@ -642,6 +645,7 @@ export function generateReferenceAudit({
       serviceReferences: serviceRefs,
       runningTaskReferences: runningRefs,
       pendingTaskReferences: pendingRefs,
+      transitionalTaskReferences: transitionalRefs,
       brokerReferenceModes: brokerRefs,
       brokerReferenceStatus: atomicBrokerRollovers.length ? "planned-atomic-broker-rollover-v1" : "not-referenced-by-broker-v1",
       rollbackArn: entry.rollbackArn,

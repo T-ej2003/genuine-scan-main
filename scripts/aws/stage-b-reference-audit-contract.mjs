@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
 import { assertStageBDeploymentEvidenceFreshness, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
 import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 import { STAGE_B_BACKEND_PORT_MAPPING } from "./production-green-stage-b-task-definitions.mjs";
@@ -40,6 +41,104 @@ export const STAGE_B_EXECUTOR_FOR_EACH_REFERENCES = Object.freeze([
   "local.executor_definitions_for_resources",
 ]);
 const currentTaskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([^:]+):([1-9][0-9]*)$/;
+
+const canonicalBrokerFamily = (mode) => mode === "full-rls-application-canary"
+  ? STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']
+  : `mscqr-production-full-rls-green-${mode}`;
+const sortStrings = (values) => [...values].sort();
+const sameStringSet = (left, right) => JSON.stringify(sortStrings(left)) === JSON.stringify(sortStrings(right));
+
+function assertCurrentPredecessorReferences({ address, entry, observed }) {
+  for (const [field, kind] of [["serviceReferences", "services"], ["runningTaskReferences", "runningTasks"], ["pendingTaskReferences", "pendingTasks"]]) {
+    const value = entry[field];
+    if (!Array.isArray(value)) throw new Error(`Stage B ${field} is malformed: ${address}`);
+    if (!value.every((reference) => typeof reference === "string" && reference.length > 0) || !sameStringSet(observed[kind], value)) {
+      throw new Error(`Stage B ${field} does not match authoritative runtime observations: ${address}`);
+    }
+  }
+  if (entry.transitionalTaskReferences !== undefined
+    && (!Array.isArray(entry.transitionalTaskReferences) || !sameStringSet(observed.transitionalTasks, entry.transitionalTaskReferences))) {
+    throw new Error(`Stage B transitional task references do not match authoritative runtime observations: ${address}`);
+  }
+  if (Object.values(observed).some((references) => references.length > 0)) {
+    throw new Error(`Stage B current predecessor has a live or transitional runtime reference: ${address}`);
+  }
+}
+
+function normalizeEcsReferences(audit) {
+  const referenceSets = [
+    ["services", audit.services, "taskDefinition", "serviceName"],
+    ["runningTasks", audit.runningTasks, "taskDefinitionArn", "taskArn"],
+    ["pendingTasks", audit.pendingTasks, "taskDefinitionArn", "taskArn"],
+    ["transitionalTasks", audit.transitionalTasks, "taskDefinitionArn", "taskArn"],
+  ];
+  const byArn = new Map();
+  for (const [kind, items, arnKey, referenceKey] of referenceSets) {
+    if (!Array.isArray(items)) throw new Error(`Stage B ${kind} observations are missing.`);
+    for (const item of items) {
+      if (!item || typeof item[arnKey] !== "string" || !currentTaskDefinitionArnPattern.test(item[arnKey]) || typeof item[referenceKey] !== "string" || item[referenceKey].length === 0) {
+        throw new Error(`Stage B ${kind} observation is malformed.`);
+      }
+      const references = byArn.get(item[arnKey]) || { services: [], runningTasks: [], pendingTasks: [], transitionalTasks: [] };
+      if (references[kind].includes(item[referenceKey])) throw new Error(`Stage B ${kind} observation is duplicated.`);
+      references[kind].push(item[referenceKey]);
+      byArn.set(item[arnKey], references);
+    }
+  }
+  for (const references of byArn.values()) {
+    for (const key of Object.keys(references)) references[key].sort();
+  }
+  return byArn;
+}
+
+export function normalizeStageBFreshImageRuntimeModel({ plan, audit } = {}) {
+  if (!plan || typeof plan !== "object" || !audit || typeof audit !== "object") throw new Error("Stage B fresh-image runtime model inputs are missing.");
+  const currentPlanReplacements = (plan.resource_changes || [])
+    .filter((change) => change?.type === "aws_ecs_task_definition" && Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, change.address) && !Object.hasOwn(change, "deposed"))
+    .map((change) => {
+      const beforeArn = change.change?.before?.arn || change.change?.before?.id;
+      const family = STAGE_B_TASK_DEFINITION_FAMILIES[change.address];
+      if (!currentTaskDefinitionArnPattern.test(beforeArn || "") || !Array.isArray(change.change?.actions)) throw new Error(`Stage B current replacement is malformed: ${change.address}`);
+      return { address: change.address, family, beforeArn, actions: [...change.change.actions] };
+    });
+  if (new Set(currentPlanReplacements.map((change) => change.address)).size !== currentPlanReplacements.length || new Set(currentPlanReplacements.map((change) => change.beforeArn)).size !== currentPlanReplacements.length) {
+    throw new Error("Stage B current replacement identities are duplicated.");
+  }
+  const referencesByTaskDefinitionArn = normalizeEcsReferences(audit);
+  const liveMappings = audit.broker?.liveTaskDefinitionMappings;
+  if (!Array.isArray(liveMappings)) throw new Error("Stage B broker live mappings are missing.");
+  const observedMappingsByMode = new Map();
+  for (const mapping of liveMappings) {
+    if (!mapping || !STAGE_B_MODES.includes(mapping.mode) || typeof mapping.taskDefinitionArn !== "string" || !currentTaskDefinitionArnPattern.test(mapping.taskDefinitionArn) || observedMappingsByMode.has(mapping.mode)) throw new Error("Stage B broker live mappings are missing, unknown, or duplicated.");
+    const family = currentTaskDefinitionArnPattern.exec(mapping.taskDefinitionArn)[1];
+    if (family !== canonicalBrokerFamily(mapping.mode)) throw new Error(`Stage B broker live mapping family is wrong: ${mapping.mode}`);
+    observedMappingsByMode.set(mapping.mode, { mode: mapping.mode, taskDefinitionArn: mapping.taskDefinitionArn, family });
+  }
+  if (!sameStringSet([...observedMappingsByMode.keys()], STAGE_B_MODES)) throw new Error("Stage B broker live mappings do not cover the canonical mode set.");
+  const currentByFamily = new Map();
+  for (const change of currentPlanReplacements) currentByFamily.set(change.family, [...(currentByFamily.get(change.family) || []), change]);
+  const currentRolloverModes = STAGE_B_MODES.map((mode) => {
+    const family = canonicalBrokerFamily(mode);
+    const candidates = currentByFamily.get(family) || [];
+    if (candidates.length !== 1) throw new Error(`Stage B canonical broker mode does not bind to exactly one current plan replacement: ${mode}`);
+    const mapping = observedMappingsByMode.get(mode);
+    if (mapping.taskDefinitionArn !== candidates[0].beforeArn) throw new Error(`Stage B canonical broker mapping does not match its authenticated plan predecessor: ${mode}`);
+    return { ...mapping, ...candidates[0] };
+  });
+  const deposedCleanups = (plan.resource_changes || []).filter((change) => change?.type === "aws_ecs_task_definition" && Object.hasOwn(change, "deposed"));
+  return {
+    currentPlanReplacements,
+    deposedCleanups,
+    ecs: {
+      services: audit.services,
+      runningTasks: audit.runningTasks,
+      pendingTasks: audit.pendingTasks,
+      transitionalTasks: audit.transitionalTasks,
+      referencesByTaskDefinitionArn,
+    },
+    broker: { canonicalRequiredModes: [...STAGE_B_MODES], observedMappingsByMode, currentRolloverModes },
+  };
+}
 
 export const STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS = Object.freeze([
   Object.freeze(["create", "delete"]),
@@ -467,6 +566,50 @@ export function assertStageBAtomicBrokerPlan(plan, taskDefinitionAddress, broker
     }
   }
   assertTerraformDependencyCoversAddress({ relevantAttributes: relevant, expectedResourceAddress: taskDefinitionAddress });
+}
+
+export function assertStageBCurrentRolloverReferenceBinding({ plan, change, audit, planJsonSha256, terraformConfiguration, runtimeModel } = {}) {
+  const expectedFamily = STAGE_B_TASK_DEFINITION_FAMILIES[change?.address];
+  if (!expectedFamily || change?.type !== "aws_ecs_task_definition") throw new Error(`Stage B rollover identity is outside the exact current task-definition contract: ${change?.address}`);
+  const rotation = assertStageBTaskDefinitionRotation(change, plan, { strict: true });
+  const beforeArn = change.change?.before?.arn || change.change?.before?.id;
+  if (!beforeArn || beforeArn !== rotation.oldArn) throw new Error(`Stage B old task-definition ARN rejected: ${change.address}`);
+  const entry = (audit?.oldTaskDefinitions || []).find((item) => item?.terraformAddress === change.address);
+  if (!entry || entry.oldTaskDefinitionArn !== beforeArn || entry.classification !== "rollover") throw new Error(`Stage B reference audit rollover entry is missing or mismatched: ${change.address}`);
+  if (entry.family !== expectedFamily || entry.proposedFamily !== expectedFamily || entry.sameFamilyAsReplacement !== true) throw new Error(`Stage B reference audit family mismatch: ${change.address}`);
+  if (JSON.stringify(entry.replacePaths) !== JSON.stringify(STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS)) throw new Error(`Stage B reference audit replace path mismatch: ${change.address}`);
+  const model = runtimeModel || normalizeStageBFreshImageRuntimeModel({ plan, audit });
+  const observedReferences = model.ecs.referencesByTaskDefinitionArn.get(beforeArn) || { services: [], runningTasks: [], pendingTasks: [], transitionalTasks: [] };
+  assertCurrentPredecessorReferences({ address: change.address, entry, observed: observedReferences });
+  const rollbackIdentity = currentTaskDefinitionArnPattern.exec(entry.rollbackArn || "");
+  if (!rollbackIdentity || rollbackIdentity[1] !== expectedFamily || entry.rollbackArn !== beforeArn) throw new Error(`Stage B rollback ARN is not the authenticated current predecessor: ${change.address}`);
+  const brokerModes = Array.isArray(entry.brokerReferenceModes) ? entry.brokerReferenceModes : undefined;
+  const atomicRollovers = Array.isArray(audit.plannedAtomicBrokerRollovers) ? audit.plannedAtomicBrokerRollovers : undefined;
+  const liveMappings = audit.broker?.liveTaskDefinitionMappings;
+  if (!brokerModes || !atomicRollovers || !Array.isArray(liveMappings)) throw new Error(`Stage B atomic broker rollover evidence is missing: ${change.address}`);
+  const expectedModes = model.broker.currentRolloverModes.filter((item) => item.address === change.address).map((item) => item.mode);
+  if (!sameStringSet(expectedModes, brokerModes) || !brokerModes.every((mode) => STAGE_B_MODES.includes(mode))) throw new Error(`Stage B current broker mode evidence does not match canonical observations: ${change.address}`);
+  const atomicForChange = atomicRollovers.filter((item) => item?.taskDefinitionTerraformAddress === change.address);
+  if (brokerModes.length === 0) {
+    if (atomicForChange.length !== 0 || entry.brokerReferenceStatus === "planned-atomic-broker-rollover-v1") throw new Error(`Stage B atomic broker rollover is unexpected: ${change.address}`);
+    return rotation;
+  }
+  if (entry.brokerReferenceStatus !== "planned-atomic-broker-rollover-v1" || audit.allOldRevisionsUnreferenced !== false || atomicForChange.length !== brokerModes.length) throw new Error(`Stage B atomic broker rollover proof is incomplete: ${change.address}`);
+  for (const mode of brokerModes) {
+    const matches = atomicForChange.filter((item) => item?.mode === mode);
+    if (matches.length !== 1) throw new Error(`Stage B atomic broker rollover mode is missing or duplicated: ${change.address}:${mode}`);
+    const proof = matches[0];
+    assertStageBAtomicBrokerPlan(plan, change.address, mode, terraformConfiguration);
+    const observedMapping = model.broker.observedMappingsByMode.get(mode);
+    if (!observedMapping || observedMapping.taskDefinitionArn !== beforeArn) throw new Error(`Stage B live broker mapping does not match the current predecessor: ${change.address}`);
+    if (proof.brokerTerraformAddress !== STAGE_B_BROKER_TERRAFORM_ADDRESS
+      || proof.taskDefinitionArnReference !== `${change.address}.arn`
+      || proof.brokerEnvironmentReference !== STAGE_B_BROKER_TASK_DEFINITION_REFERENCE
+      || proof.family !== expectedFamily
+      || proof.oldTaskDefinitionArn !== beforeArn
+      || proof.planJsonSha256 !== planJsonSha256) throw new Error(`Stage B atomic broker rollover proof does not match the plan: ${change.address}`);
+  }
+  return rotation;
 }
 
 function brokerResource(plan) {

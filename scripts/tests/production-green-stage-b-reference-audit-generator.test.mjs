@@ -399,6 +399,18 @@ function makeAtomicBrokerFixture({ mode = "full-rls-application-canary", package
 
 function makeFreshImagePartialApplyReferenceFixture() {
   const fixture = makeAtomicBrokerFixture({ appendOnly: false });
+  fixture.plan.relevant_attributes = [
+    { resource: executorCollectionAddress, attribute: [] },
+    { resource: "aws_ecs_task_definition.candidate", attribute: [] },
+  ];
+  const originalGetFunctionConfiguration = fixture.reader.getFunctionConfiguration;
+  fixture.reader.getFunctionConfiguration = () => {
+    const configuration = originalGetFunctionConfiguration();
+    const taskDefinitions = JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+    for (const mode of STAGE_B_MODES) taskDefinitions[mode] = oldArnFor(familyForMode(mode));
+    configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(taskDefinitions);
+    return configuration;
+  };
   fixture.plan.resource_changes.filter((change) => change.type === "aws_ecs_task_definition" && !Object.hasOwn(change, "deposed")).forEach((change) => { change.change.actions = ["create", "delete"]; });
   const brokerFunction = fixture.plan.resource_changes.find((change) => change.address === "aws_lambda_function.broker");
   brokerFunction.change.after_unknown = { code_sha256: true, source_code_size: true, last_modified: true, qualified_arn: true, qualified_invoke_arn: true, version: true, environment: [{ variables: true }] };
@@ -549,7 +561,7 @@ test("fresh-image recovery partitions current runtime instances from reviewed de
 test("fresh-image approval re-derives the exact reference-audit mutation partition", () => {
   const fixture = makeFreshImagePartialApplyReferenceFixture();
   const audit = generate(fixture);
-  assert.deepEqual(assertStageBFreshImageReferenceAuditBinding(fixture.plan, audit, { terraformConfiguration: fixture.options.terraformConfiguration }), { currentCount: 12, deposedCount: 11, mutationInstanceCount: 23 });
+  assert.deepEqual(assertStageBFreshImageReferenceAuditBinding(fixture.plan, audit, { terraformConfiguration: fixture.options.terraformConfiguration, planJsonSha256: fixture.planJsonSha256 }), { currentCount: 12, deposedCount: 11, mutationInstanceCount: 23 });
   const rejects = [
     ["missing deposed cleanup", (candidate) => candidate.deposedTaskDefinitionCleanups.pop()],
     ["fake deposed cleanup", (candidate) => candidate.deposedTaskDefinitionCleanups.push({ ...candidate.deposedTaskDefinitionCleanups[0], deposed: "deadbeef", mutationInstanceIdentity: candidate.deposedTaskDefinitionCleanups[0].mutationInstanceIdentity.replace(/deposed:[a-f0-9]{8}/, "deposed:deadbeef") })],
@@ -570,7 +582,98 @@ test("fresh-image approval re-derives the exact reference-audit mutation partiti
   for (const [label, mutate] of rejects) {
     const candidate = structuredClone(audit);
     mutate(candidate);
-    assert.throws(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, candidate, { terraformConfiguration: fixture.options.terraformConfiguration }), undefined, label);
+    assert.throws(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, candidate, { terraformConfiguration: fixture.options.terraformConfiguration, planJsonSha256: fixture.planJsonSha256 }), undefined, label);
+  }
+});
+
+test("fresh-image approval binds every current replacement to complete rollover evidence", () => {
+  const fixture = makeFreshImagePartialApplyReferenceFixture();
+  const audit = generate(fixture);
+  assert.ok(audit.plannedAtomicBrokerRollovers.length > 0);
+  const rolloverEntry = audit.oldTaskDefinitions.find((entry) => entry.brokerReferenceModes.length > 0);
+  const secondRolloverEntry = audit.oldTaskDefinitions.find((entry) => entry.terraformAddress !== rolloverEntry.terraformAddress);
+  const rolloverMode = rolloverEntry.brokerReferenceModes[0];
+  const rolloverMapping = audit.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode);
+  const sameFamilyDifferentRevision = (arn, revision) => arn.replace(/:[1-9][0-9]*$/, `:${revision}`);
+  const rejects = [
+    ["missing current rollover", (candidate) => candidate.oldTaskDefinitions.pop()],
+    ["duplicate current rollover", (candidate) => candidate.oldTaskDefinitions.push(structuredClone(candidate.oldTaskDefinitions[0]))],
+    ["wrong old task definition", (candidate) => { candidate.oldTaskDefinitions[0].oldTaskDefinitionArn = oldArnFor("wrong-family"); }],
+    ["missing service reference field", (candidate) => { delete candidate.oldTaskDefinitions[0].serviceReferences; }],
+    ["false service reference", (candidate) => { candidate.oldTaskDefinitions[0].serviceReferences = ["unexpected-service"]; }],
+    ["missing live task reference field", (candidate) => { delete candidate.oldTaskDefinitions[0].runningTaskReferences; }],
+    ["altered live task reference", (candidate) => { candidate.oldTaskDefinitions[0].runningTaskReferences = ["unexpected-task"]; }],
+    ["top-level service reference contradiction", (candidate) => { candidate.services.push({ taskDefinition: rolloverEntry.oldTaskDefinitionArn, serviceName: "unexpected-service" }); }],
+    ["top-level running reference contradiction", (candidate) => { candidate.runningTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "unexpected-running-task" }); }],
+    ["top-level pending reference contradiction", (candidate) => { candidate.pendingTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "unexpected-pending-task" }); }],
+    ["synchronized service predecessor reference", (candidate) => {
+      const entry = candidate.oldTaskDefinitions.find((item) => item.terraformAddress === rolloverEntry.terraformAddress);
+      candidate.services.push({ taskDefinition: rolloverEntry.oldTaskDefinitionArn, serviceName: "live-service" });
+      entry.serviceReferences = ["live-service"];
+    }],
+    ["synchronized running predecessor reference", (candidate) => {
+      const entry = candidate.oldTaskDefinitions.find((item) => item.terraformAddress === rolloverEntry.terraformAddress);
+      candidate.runningTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "live-running-task" });
+      entry.runningTaskReferences = ["live-running-task"];
+    }],
+    ["synchronized pending predecessor reference", (candidate) => {
+      const entry = candidate.oldTaskDefinitions.find((item) => item.terraformAddress === rolloverEntry.terraformAddress);
+      candidate.pendingTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "live-pending-task" });
+      entry.pendingTaskReferences = ["live-pending-task"];
+    }],
+    ["synchronized transitional predecessor reference", (candidate) => {
+      const entry = candidate.oldTaskDefinitions.find((item) => item.terraformAddress === rolloverEntry.terraformAddress);
+      candidate.transitionalTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "live-transitional-task", lastStatus: "ACTIVATING" });
+      entry.transitionalTaskReferences = ["live-transitional-task"];
+    }],
+    ["entry service reference contradicts top level", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).serviceReferences = ["unexpected-service"]; }],
+    ["entry running reference contradicts top level", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).runningTaskReferences = ["unexpected-running-task"]; }],
+    ["entry pending reference contradicts top level", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).pendingTaskReferences = ["unexpected-pending-task"]; }],
+    ["ACTIVATING predecessor reference", (candidate) => { candidate.transitionalTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "activating-task", lastStatus: "ACTIVATING" }); }],
+    ["DEACTIVATING predecessor reference", (candidate) => { candidate.transitionalTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "deactivating-task", lastStatus: "DEACTIVATING" }); }],
+    ["STOPPING predecessor reference", (candidate) => { candidate.transitionalTasks.push({ taskDefinitionArn: rolloverEntry.oldTaskDefinitionArn, taskArn: "stopping-task", lastStatus: "STOPPING" }); }],
+    ["canonical broker mode removed from entry", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).brokerReferenceModes = []; }],
+    ["canonical broker mode removed from proof", (candidate) => { candidate.plannedAtomicBrokerRollovers = candidate.plannedAtomicBrokerRollovers.filter((proof) => proof.mode !== rolloverMode); }],
+    ["missing planned atomic rollover", (candidate) => { candidate.plannedAtomicBrokerRollovers.pop(); }],
+    ["altered planned atomic rollover", (candidate) => { candidate.plannedAtomicBrokerRollovers[0].oldTaskDefinitionArn = oldArnFor("wrong-family"); }],
+    ["broker mapping wrong predecessor", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).taskDefinitionArn = oldArnFor("wrong-family"); }],
+    ["broker mapping different same-family revision", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).taskDefinitionArn = sameFamilyDifferentRevision(rolloverMapping.taskDefinitionArn, 2); }],
+    ["broker mapping newer same-family revision", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).taskDefinitionArn = sameFamilyDifferentRevision(rolloverMapping.taskDefinitionArn, 999999); }],
+    ["broker mapping absent plan predecessor", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).taskDefinitionArn = sameFamilyDifferentRevision(rolloverMapping.taskDefinitionArn, 777777); }],
+    ["broker mapping missing", (candidate) => { candidate.broker.liveTaskDefinitionMappings = candidate.broker.liveTaskDefinitionMappings.filter((mapping) => mapping.mode !== rolloverMode); }],
+    ["broker mapping duplicate", (candidate) => { const mapping = candidate.broker.liveTaskDefinitionMappings.find((item) => item.mode === rolloverMode); candidate.broker.liveTaskDefinitionMappings.push(structuredClone(mapping)); }],
+    ["broker mapping wrong mode", (candidate) => { candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).mode = "wrong-mode"; }],
+    ["extra mapping for another current predecessor", (candidate) => { candidate.broker.liveTaskDefinitionMappings.push({ mode: "unexpected-mode", taskDefinitionArn: audit.oldTaskDefinitions.find((entry) => entry.brokerReferenceModes.length === 0).oldTaskDefinitionArn }); }],
+    ["swapped broker mode mappings", (candidate) => { const first = candidate.broker.liveTaskDefinitionMappings[0]; const second = candidate.broker.liveTaskDefinitionMappings[1]; [first.taskDefinitionArn, second.taskDefinitionArn] = [second.taskDefinitionArn, first.taskDefinitionArn]; }],
+    ["wrong revision plus omitted mode and proof", (candidate) => {
+      candidate.broker.liveTaskDefinitionMappings.find((mapping) => mapping.mode === rolloverMode).taskDefinitionArn = sameFamilyDifferentRevision(rolloverMapping.taskDefinitionArn, 777778);
+      candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).brokerReferenceModes = [];
+      candidate.plannedAtomicBrokerRollovers = candidate.plannedAtomicBrokerRollovers.filter((proof) => proof.mode !== rolloverMode);
+    }],
+    ["swapped rollover evidence", (candidate) => {
+      const first = candidate.oldTaskDefinitions[0];
+      const second = candidate.oldTaskDefinitions[1];
+      [first.oldTaskDefinitionArn, second.oldTaskDefinitionArn] = [second.oldTaskDefinitionArn, first.oldTaskDefinitionArn];
+    }],
+    ["rollback different same-family revision", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn = sameFamilyDifferentRevision(rolloverEntry.rollbackArn, 2); }],
+    ["rollback newer same-family revision", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn = sameFamilyDifferentRevision(rolloverEntry.rollbackArn, 999999); }],
+    ["rollback wrong current predecessor", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn = secondRolloverEntry.rollbackArn; }],
+    ["rollback deposed revision", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn = audit.deposedTaskDefinitionCleanups[0].beforeTaskDefinitionArn; }],
+    ["rollback revision absent from plan", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn = sameFamilyDifferentRevision(rolloverEntry.rollbackArn, 777777); }],
+    ["rollback missing", (candidate) => { delete candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn; }],
+    ["rollback swapped between current entries", (candidate) => {
+      const first = candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress);
+      const second = candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === secondRolloverEntry.terraformAddress);
+      [first.rollbackArn, second.rollbackArn] = [second.rollbackArn, first.rollbackArn];
+    }],
+    ["rollback wrong family", (candidate) => { candidate.oldTaskDefinitions.find((entry) => entry.terraformAddress === rolloverEntry.terraformAddress).rollbackArn = oldArnFor("wrong-family"); }],
+    ["correct counts with wrong rollover identity", (candidate) => { candidate.oldTaskDefinitions[0].terraformAddress = candidate.oldTaskDefinitions[1].terraformAddress; }],
+    ["stale audit plan binding", (candidate) => { candidate.planJsonSha256 = "f".repeat(64); }],
+  ];
+  for (const [label, mutate] of rejects) {
+    const candidate = structuredClone(audit);
+    mutate(candidate);
+    assert.throws(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, candidate, { terraformConfiguration: fixture.options.terraformConfiguration, planJsonSha256: fixture.planJsonSha256 }), undefined, label);
   }
 });
 

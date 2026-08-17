@@ -646,7 +646,7 @@ export function assertStageBPlan(plan, options = {}) {
   const planSemanticCensus = requireSemanticCompleteness ? assertStageBPlanSemanticCompleteness(plan, { terraformConfiguration, recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery }) : undefined;
   if (freshImagePartialApplyRecovery) assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraformConfiguration });
   else if (partialApplyRecovery) assertStageBPartialApplyRecoveryPlan(plan);
-  if (freshImagePartialApplyRecovery && !captureMode && requireReferenceAudit) assertStageBFreshImageReferenceAuditBinding(plan, referenceAudit, { terraformConfiguration });
+  if (freshImagePartialApplyRecovery && !captureMode && requireReferenceAudit) assertStageBFreshImageReferenceAuditBinding(plan, referenceAudit, { terraformConfiguration, planJsonSha256 });
   const imageBindings = imageEvidence ? assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, planProfile: recoveryOnly ? "RECOVERY_ALIAS_ONLY" : resourceClassification.planProfile, terraformConfiguration }) : undefined;
   if (recoveryOnly) {
     if (plan.variables?.stage_b_recovery_only?.value !== true) throw new Error("Recovery-only validation requires the explicit recovery-only plan variable.");
