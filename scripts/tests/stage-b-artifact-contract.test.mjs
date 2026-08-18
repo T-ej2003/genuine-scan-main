@@ -29,6 +29,26 @@ const binding = (stateHash, tfvarsHash) => ({
 
 test.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
+test("Stage-A state identity registers its producer and authorization consumer", () => {
+  const artifact = STAGE_B_ARTIFACT_CONTRACTS.find(({ id }) => id === "stage-a-state-identity");
+  assert.deepEqual(artifact, {
+    id: "stage-a-state-identity",
+    kind: "file",
+    producer: "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight",
+    consumers: ["scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs"],
+    directoryMode: "0700",
+    fileMode: "0600",
+    symlink: "reject",
+    outsideRepository: true,
+    atomic: true,
+    overwrite: true,
+    hashBound: true,
+  });
+  const generated = canonicalStageBArtifactContracts().artifacts.filter(({ id }) => id === "stage-a-state-identity");
+  assert.equal(generated.length, 1);
+  assert.deepEqual(generated[0], { ...artifact, atomicGroup: "stage-a-state-identity", allOrNone: true, rollback: "remove-committed-or-restore-backups" });
+});
+
 test("reference-audit contract registers every production consumer", () => {
   const referenceAudit = STAGE_B_ARTIFACT_CONTRACTS.find(({ id }) => id === "reference-audit");
   assert.deepEqual(referenceAudit?.consumers, [
