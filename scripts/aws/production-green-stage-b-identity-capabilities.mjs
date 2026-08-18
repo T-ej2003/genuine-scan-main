@@ -7,7 +7,7 @@ import { buildStageAStateIdentity, STAGE_A_STATE_OBJECT } from "./generate-produ
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 import { RELEASE_CALLER_PATTERN } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
-import { ensureStageBPrivateDirectory, ensureStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
+import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { CHECKER_SOURCE_ROLE_NAME, assertRoleATrustResponse } from "./production-checker-chain-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -73,7 +73,8 @@ export function runReleaseReadPreflight({
   if (!path.isAbsolute(outputDirectory || "")) throw new Error("Stage B release preflight requires an absolute private output directory.");
   readIdentityCapabilityMatrix();
   ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot: root, create: true, normalize: true });
-  fs.rmSync(path.join(outputDirectory, "stage-a-state-identity.json"), { force: true });
+  const stageAStateIdentityOutputPath = path.join(outputDirectory, "stage-a-state-identity.json");
+  fs.rmSync(stageAStateIdentityOutputPath, { force: true });
   const requiredReads = {}; const failed = []; const responses = new Map(); let total = 0;
   let caller; let checkerTrust = null; let stageAStateIdentity = null;
   for (const probe of RELEASE_READ_PROBES) {
@@ -122,5 +123,10 @@ export function runReleaseReadPreflight({
     catch (error) { requiredReads[probe.action] = "denied"; failed.push({ id: probe.id, action: probe.action, classification: safeError(error) }); }
   }
   const status = failed.length === 0 && checkerTrust?.exact === true && checkerTrust?.mfaRequired === true && stageAStateIdentity ? "valid" : "blocked";
-  return { schemaVersion: RELEASE_PREFLIGHT_SCHEMA_VERSION, caller: caller || null, account: STAGE_B.account, region, total, allowed: total - failed.length, requiredReads, checkerTrust, stageAStateIdentity: status === "valid" ? stageAStateIdentity : null, failed, skipped: [], status };
+  let stageAStateIdentityPath = null;
+  if (status === "valid") {
+    stageAStateIdentityPath = stageAStateIdentityOutputPath;
+    writeStageBPrivateFileAtomic({ filePath: stageAStateIdentityPath, bytes: Buffer.from(`${JSON.stringify(stageAStateIdentity, null, 2)}\n`), repositoryRoot: root, overwrite: true, label: "Stage-A state identity" });
+  }
+  return { schemaVersion: RELEASE_PREFLIGHT_SCHEMA_VERSION, caller: caller || null, account: STAGE_B.account, region, total, allowed: total - failed.length, requiredReads, checkerTrust, stageAStateIdentityPath, failed, skipped: [], status };
 }

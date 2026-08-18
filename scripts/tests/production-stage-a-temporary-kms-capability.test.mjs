@@ -25,9 +25,8 @@ import {
   temporaryKmsCapabilityStatement,
 } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 import { ensureStageBPrivateFile } from "../aws/stage-b-artifact-contract.mjs";
-import { createTemporaryKmsCapabilityRunner, verifyStageAReadinessEvidence } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
+import { createTemporaryKmsCapabilityRunner } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
@@ -69,7 +68,7 @@ function capacityFixture() {
   };
 }
 
-function createPolicyVersionRunner({ fixture = capacityFixture(), onList, onCreate, failCreate = false, loseCreateResponse = false, loseCreateResponseOn = null, failDeleteVersion = null, loseDeleteResponse = false } = {}) {
+function createPolicyVersionRunner({ fixture = capacityFixture(), onList, onCreate, failCreate = false, loseCreateResponse = false, loseCreateResponseOn = null, createResponse = ({ versionId }) => JSON.stringify({ PolicyVersion: { VersionId: versionId } }), createResponseOn = null, failDeleteVersion = null, loseDeleteResponse = false } = {}) {
   const documents = fixture.documents;
   const dates = fixture.dates;
   let defaultVersionId = fixture.defaultVersionId;
@@ -112,7 +111,7 @@ function createPolicyVersionRunner({ fixture = capacityFixture(), onList, onCrea
       defaultVersionId = versionId;
       onCreate?.({ versionId, documents, dates, setDefaultVersionId(value) { defaultVersionId = value; } });
       if (loseCreateResponse || loseCreateResponseOn === createCalls) throw new Error("network response lost after CreatePolicyVersion acceptance");
-      return JSON.stringify({ PolicyVersion: { VersionId: versionId } });
+      return createResponseOn === createCalls ? createResponse({ versionId }) : JSON.stringify({ PolicyVersion: { VersionId: versionId } });
     }
     throw new Error(`unexpected AWS operation: ${args.join(" ")}`);
   };
@@ -268,8 +267,7 @@ test("launch handoff resolves the canonical manifest path", () => {
   assert.doesNotMatch(handoff, /launch-handoff-manifest\.json/);
   const node = JSON.parse(readFileSync(manifestPath, "utf8")).nodes.find(({ id }) => id === 8);
   assert.match(node.canonicalCommandOrFunction, /--stage-a-state <fresh-stage-a-state>/);
-  assert.match(node.canonicalCommandOrFunction, /--stage-a-readiness-report <signed-stage-a-readiness-report>/);
-  assert.match(node.canonicalCommandOrFunction, /--stage-a-readiness-signature <signed-stage-a-readiness-signature>/);
+  assert.match(node.canonicalCommandOrFunction, /--stage-a-state-identity <fresh-stage-a-state-identity>/);
 });
 
 test("canonical producer replays authorization and safely aborts a failed apply", () => {
@@ -831,24 +829,7 @@ test("CLI authorization rejects state without an independently produced identity
       "--plan-sha256", planSha256, "--plan-json", planJsonFile, "--stage-a-state", stageAStateFile,
     ], { encoding: "utf8" });
     assert.notEqual(result.status, 0);
-    assert.match(`${result.stdout}${result.stderr}`, /authenticated Stage-A readiness report and signature are required/);
-  } finally { rmSync(directory, { recursive: true, force: true }); }
-});
-
-test("signed final readiness binds source and exact Stage-A state bytes before authorization", () => {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-signed-readiness-"));
-  const stageAStateFile = path.join(directory, "stage-a-state.json"); const reportPath = path.join(directory, "readiness.json"); const signaturePath = path.join(directory, "readiness.signature.json");
-  const state = { lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 44, resources: [] }; const stateBytes = Buffer.from(`${JSON.stringify(state)}\n`); writeFileSync(stageAStateFile, stateBytes, { mode: 0o600 });
-  const identity = buildStageAStateIdentity(state, { stateBytes }); const report = { schemaVersion: 1, evidenceKind: "STAGE_A_READINESS", phase: "readiness", purpose: "stage-a-root-drop-authorization", status: "valid", generatedAt: new Date().toISOString(), readyForPlan: true, sourceSha, account: "368992683803", region: "eu-west-2", releaseReportSha256: "a".repeat(64), stageAStateIdentity: identity };
-  const reportBytes = Buffer.from(`${JSON.stringify(report, null, 2)}\n`); const signature = signPermissionReport(report, { reportBytes, sign: () => "AQ==" }); writeFileSync(reportPath, reportBytes, { mode: 0o600 }); writeFileSync(signaturePath, `${JSON.stringify(signature, null, 2)}\n`, { mode: 0o600 });
-  const verifyRun = () => JSON.stringify({ SignatureValid: true });
-  try {
-    assert.deepEqual(verifyStageAReadinessEvidence({ reportPath, signaturePath, stageAStateFile, sourceSha, run: verifyRun }).stageAStateIdentity, identity);
-    writeFileSync(stageAStateFile, `${JSON.stringify({ ...state, substituted: true })}\n`, { mode: 0o600 });
-    assert.throws(() => verifyStageAReadinessEvidence({ reportPath, signaturePath, stageAStateFile, sourceSha, run: verifyRun }), /state identity binding/);
-    writeFileSync(stageAStateFile, stateBytes, { mode: 0o600 });
-    writeFileSync(reportPath, `${JSON.stringify({ ...report, sourceSha: "b".repeat(40) }, null, 2)}\n`, { mode: 0o600 });
-    assert.throws(() => verifyStageAReadinessEvidence({ reportPath, signaturePath, stageAStateFile, sourceSha, run: verifyRun }), /signature|binding/);
+    assert.match(`${result.stdout}${result.stderr}`, /--stage-a-state-identity is required/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -896,7 +877,34 @@ test("accepted CreatePolicyVersion with a lost response is recovered by exact re
     const result = createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
     assert.equal(result.mutationAccounting.iamWrites, 1);
     assert.equal(result.mutationAccounting.unknownMutations, 0);
+    assert.equal(result.mutationAccounting.policyVersionCreations, 1);
+    assert.equal(result.mutationAccounting.policyDefaultChanges, 1);
+    assert.equal(fake.calls.filter((operation) => operation === "create-policy-version").length, 1);
     assert.deepEqual(result.mutationAccounting.mutationOutcomes, [{ action: "CreatePolicyVersion", outcome: "CONFIRMED_SUCCESS_READBACK" }]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("malformed CreatePolicyVersion responses recover one accepted mutation exactly once", () => {
+  for (const response of [JSON.stringify({ PolicyVersion: {} }), JSON.stringify({ PolicyVersion: { VersionId: "invalid" } })]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-malformed-create-response-"));
+    const stateFile = path.join(directory, "capability.json"); const planJsonFile = writePlanFile(directory);
+    const fake = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) }, createResponse: () => response, createResponseOn: 1 });
+    try {
+      const result = createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+      assert.equal(result.mutationAccounting.iamWrites, 1); assert.equal(result.mutationAccounting.policyVersionCreations, 1); assert.equal(result.mutationAccounting.policyDefaultChanges, 1); assert.equal(result.mutationAccounting.unknownMutations, 0);
+      assert.deepEqual(result.mutationAccounting.mutationOutcomes, [{ action: "CreatePolicyVersion", outcome: "CONFIRMED_SUCCESS_READBACK" }]);
+      assert.equal(fake.calls.filter((operation) => operation === "create-policy-version").length, 1);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
+test("malformed CreatePolicyVersion response with ambiguous readback remains unknown", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-malformed-create-ambiguous-"));
+  const stateFile = path.join(directory, "capability.json"); const planJsonFile = writePlanFile(directory);
+  const fake = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) }, createResponse: () => JSON.stringify({ PolicyVersion: {} }), createResponseOn: 1, onCreate: ({ setDefaultVersionId }) => setDefaultVersionId("v1") });
+  try {
+    assert.throws(() => createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile }), (error) => error.mutationAccounting?.unknownMutations === 1 && error.mutationAccounting.iamWriteAttempts === 1 && error.mutationAccounting.policyVersionCreations === 0 && error.mutationAccounting.policyDefaultChanges === 0);
+    assert.equal(fake.calls.filter((operation) => operation === "create-policy-version").length, 1);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -924,6 +932,9 @@ test("lost revoke CreatePolicyVersion response uses the authenticated active def
       assert.equal(fake.documents.has(`v${Math.max(...versionIds.map((id) => Number(id.slice(1)))) + 1}`), false);
       assert.equal(fake.calls.filter((operation) => operation === "create-policy-version").length, 2);
       assert.equal(fake.calls.filter((operation) => operation === "delete-policy-version").length, 1);
+      assert.equal(result.mutationAccounting.policyVersionCreations, 1);
+      assert.equal(result.mutationAccounting.policyDefaultChanges, 1);
+      assert.equal(result.mutationAccounting.mutationOutcomes.filter(({ action }) => action === "CreatePolicyVersion").length, 1);
       assert.ok(result.mutationAccounting.mutationOutcomes.some(({ action, outcome }) => action === "CreatePolicyVersion" && outcome === "CONFIRMED_SUCCESS_READBACK"));
     } finally { rmSync(directory, { recursive: true, force: true }); }
   }

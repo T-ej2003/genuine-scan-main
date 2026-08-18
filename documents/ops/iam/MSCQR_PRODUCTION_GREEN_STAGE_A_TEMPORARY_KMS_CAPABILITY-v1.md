@@ -8,12 +8,10 @@ administrator-controlled managed-policy version window described by
 
 The administrator must use the canonical producer:
 
-The authenticated release-read preflight keeps the Stage-A identity in the
-final `ready-for-plan` report. The approved administrator then signs the
-final readiness evidence with the existing Stage B permission-report KMS
-contract. Authorization must consume that signed pair and the fresh Stage-A
-state backup; it must not accept an unsigned identity or derive authority from
-the state backup itself.
+The authenticated release-read preflight writes both the fresh Stage-A state
+backup and `stage-a-state-identity.json` in the private release artifact
+directory. Authorization must consume both artifacts; it must not derive an
+expected identity from the state backup itself.
 
 ```sh
 npm run stage-a:temporary-kms-capability -- \
@@ -23,8 +21,7 @@ npm run stage-a:temporary-kms-capability -- \
   --plan-sha256 <fresh-saved-plan-sha256> \
   --plan-json <fresh-classified-plan-json> \
   --stage-a-state <fresh-stage-a-state> \
-  --stage-a-readiness-report <signed-stage-a-readiness-report> \
-  --stage-a-readiness-signature <signed-stage-a-readiness-signature> \
+  --stage-a-state-identity <fresh-stage-a-state-identity> \
   --state-file <private-capability-state.json> \
   --admin-profile <explicit-administrator-profile> \
   --release-profile mscqr-production-release-deployer
