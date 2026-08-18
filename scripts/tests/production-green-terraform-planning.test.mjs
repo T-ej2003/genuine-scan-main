@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 const root = "infra/aws/terraform/production-green-stage-a";
@@ -15,6 +18,98 @@ test("Stage A accepts only the reviewed production receipt bucket", () => {
   assert.equal(receiptPattern.test("arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"), true);
   for (const value of ["arn:aws:s3:::mscqr-staging-euw2-artifacts-368992683803", "arn:aws:s3:::mscqr-prod-euw2-artifacts-000000000000-eu-west-2-an", "arn:aws:s3:::arbitrary", "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/*"]) assert.equal(receiptPattern.test(value), false);
   assert.match(variables, /mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/);
+});
+
+test("Stage A canonically owns its existing Stack tag", () => {
+  assert.match(source.match(/resource "aws_kms_key" "root_drop" \{([\s\S]*?)\n\}/)?.[1] || "", /tags\s*=\s*local\.tags/);
+});
+
+const terraformVariables = (tags) => [
+    "aws_region=eu-west-2",
+    "vpc_id=vpc-00000000000000000",
+    "private_subnet_ids=[]",
+    "runtime_security_group_ids=[]",
+    "s3_prefix_list_id=pl-00000000",
+    "vpc_dns_resolver_cidr=10.0.0.2/32",
+    "checker_principal_arns=[\"arn:aws:iam::368992683803:role/mscqr-production-independent-checker\"]",
+    "release_role_arn=arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+    "receipt_bucket_arn=arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+    `tags=${JSON.stringify(tags)}`,
+];
+
+const terraformDiagnostic = (phase, result) => {
+  const output = `${result.stderr || ""}\n${result.stdout || ""}`
+    .replace(/(AWS_[A-Z_]+|(?:access|secret|session)[-_]?(?:key|token)|password|authorization)\s*=\s*\S+/gi, "$1=<redacted>")
+    .trim()
+    .slice(-2000);
+  return `${phase} failed${result.error ? `: ${result.error.message}` : ""}${output ? `\n${output}` : ""}`;
+};
+
+const createTerraformConsole = () => {
+  const executionDir = fs.mkdtempSync(path.join(os.tmpdir(), "stage-a-terraform-test-"));
+  const cleanup = () => fs.rmSync(executionDir, { recursive: true, force: true });
+  try {
+    const terraformRoot = path.join(executionDir, "configuration");
+    fs.cpSync(path.resolve(root), terraformRoot, {
+      recursive: true,
+      filter(sourcePath) {
+        const relativePath = path.relative(path.resolve(root), sourcePath);
+        return relativePath !== ".terraform" && !relativePath.startsWith(`.terraform${path.sep}`);
+      },
+    });
+    assert.equal(fs.existsSync(path.join(terraformRoot, ".terraform")), false, "Terraform test must not copy ambient .terraform data");
+    assert.equal(fs.existsSync(path.join(terraformRoot, ".terraform.lock.hcl")), true, "Terraform test must retain the committed provider lockfile");
+    const versionsPath = path.join(terraformRoot, "versions.tf");
+    const versions = fs.readFileSync(versionsPath, "utf8");
+    assert.match(versions, /backend\s+"s3"\s*\{\s*\}/);
+    fs.writeFileSync(versionsPath, versions.replace(/\n\s*backend\s+"s3"\s*\{\s*\}\s*/, "\n"));
+    const tfDataDir = path.join(executionDir, "terraform-data");
+    fs.mkdirSync(tfDataDir);
+    assert.deepEqual(fs.readdirSync(tfDataDir), [], "Terraform test data directory must start empty");
+    const env = { ...process.env, TF_DATA_DIR: tfDataDir };
+    const init = spawnSync("terraform", [
+      `-chdir=${terraformRoot}`,
+      "init",
+      "-backend=false",
+      "-input=false",
+      "-lockfile=readonly",
+    ], { cwd: process.cwd(), env, encoding: "utf8" });
+    assert.equal(init.status, 0, terraformDiagnostic("terraform init", init));
+
+    return {
+      cleanup,
+      evaluateTags(tags) {
+        const result = spawnSync("terraform", [
+          `-chdir=${terraformRoot}`,
+          "console",
+          "-state=/dev/null",
+          "-input=false",
+          ...terraformVariables(tags).flatMap((value) => ["-var", value]),
+        ], { cwd: process.cwd(), env, input: "jsonencode(local.tags)\n", encoding: "utf8" });
+        assert.equal(result.status, 0, terraformDiagnostic("terraform console", result));
+        return JSON.parse(JSON.parse(result.stdout.trim()));
+      },
+    };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+};
+
+test("Terraform keeps Stack canonical while preserving unrelated caller tags", () => {
+  const runtime = createTerraformConsole();
+  try {
+    assert.equal(runtime.evaluateTags({}).Stack, "production-green-stage-a");
+    assert.deepEqual(runtime.evaluateTags({ Stack: "legacy", Owner: "test" }), {
+      Component: "full-rls-green-stage-a",
+      Environment: "production",
+      ManagedBy: "Terraform",
+      Owner: "test",
+      Stack: "production-green-stage-a",
+    });
+  } finally {
+    runtime.cleanup();
+  }
 });
 
 test("Stage A keeps checker and protected deployer distinct", () => {
