@@ -48,6 +48,23 @@ export function assertStageAStateIdentity(state, { stateObject = STAGE_A_STATE_O
   return state;
 }
 
+export function buildStageAStateIdentity(state, { stateObject = STAGE_A_STATE_OBJECT, stateBytes } = {}) {
+  assertStageAStateIdentity(state, { stateObject });
+  return Object.freeze({
+    stateObject,
+    lineage: state.lineage,
+    serial: state.serial,
+    ...(stateBytes === undefined ? {} : { stateSha256: sha256(Buffer.isBuffer(stateBytes) ? stateBytes : Buffer.from(stateBytes)) }),
+    account: STAGE_B.account,
+    region: STAGE_B.region,
+  });
+}
+
+export function assertStageAStateIdentityBinding(actual, expected) {
+  if (!actual || !expected || actual.stateObject !== expected.stateObject || actual.lineage !== expected.lineage || actual.serial !== expected.serial || actual.account !== expected.account || actual.region !== expected.region || (expected.stateSha256 !== undefined && actual.stateSha256 !== expected.stateSha256)) throw new Error("Stage A state identity binding is not exact.");
+  return true;
+}
+
 function stageAValues(state, options) {
   assertStageAStateIdentity(state, options);
   const value = state.outputs?.stage_b_prerequisites?.value;

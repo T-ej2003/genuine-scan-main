@@ -15,6 +15,7 @@ npm run stage-a:temporary-kms-capability -- \
   --transition-id <fresh-transition-id> \
   --plan-sha256 <fresh-saved-plan-sha256> \
   --plan-json <fresh-classified-plan-json> \
+  --stage-a-state <fresh-stage-a-state> \
   --state-file <private-capability-state.json> \
   --admin-profile <explicit-administrator-profile> \
   --release-profile mscqr-production-release-deployer

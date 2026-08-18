@@ -137,6 +137,7 @@ export function buildTemporaryCapabilityEvidence(fields = {}) {
     region: TEMPORARY_KMS_CAPABILITY.region,
     operation: TEMPORARY_KMS_CAPABILITY.operation,
     action: TEMPORARY_KMS_CAPABILITY.action,
+    ...(fields.stageAStateIdentity === undefined ? {} : { stageAStateIdentity: fields.stageAStateIdentity }),
     defaultVersionId: fields.defaultVersionId ?? null,
     temporaryVersionId: fields.temporaryVersionId ?? null,
     planSha256: fields.planSha256 ?? null,
