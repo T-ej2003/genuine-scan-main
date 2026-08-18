@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,8 @@ import {
   AWS_MANAGED_POLICY_DOCUMENT_LIMIT,
   TEMPORARY_POLICY_MIN_HEADROOM,
   TEMPORARY_POLICY_MAX_BYTES,
+  IAM_STATEMENT_SID_MAX_LENGTH,
+  IAM_STATEMENT_SID_PATTERN,
   assertPreCutoverTemporaryCapabilityAbsent,
   assertRootDropOwnershipEvidence,
   assertSteadyStateReleasePolicy,
@@ -17,6 +20,7 @@ import {
   buildRootDropOwnershipEvidence,
   buildTemporaryCapabilityEvidence,
   buildTemporaryReleasePolicy,
+  canonicalTemporaryKmsStatementSid,
   temporaryKmsCapabilityStatement,
 } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 import { ensureStageBPrivateFile } from "../aws/stage-b-artifact-contract.mjs";
@@ -61,6 +65,37 @@ test("temporary capability is exact-purpose, source-bound, and non-signing", () 
   assert.equal(temporary.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("kms:Sign")), false);
   assert.throws(() => assertTemporaryReleasePolicy(buildTemporaryReleasePolicy(policy, { sourceSha, transitionId: "different-transition" }), { steadyStatePolicy: policy, sourceSha, transitionId }), /not exact/);
   assert.throws(() => assertTemporaryReleasePolicy({ ...temporary, Statement: [...temporary.Statement, { Effect: "Allow", Action: "kms:TagResource", Resource: "*" }] }, { steadyStatePolicy: policy, sourceSha, transitionId }), /changes more/);
+});
+
+test("temporary capability SID is AWS-compatible, deterministic, bounded, and collision-resistant", () => {
+  const productionTransitionId = "stage-a-root-drop-9aa12fd-20260818";
+  const sid = canonicalTemporaryKmsStatementSid({ sourceSha: "9aa12fdfa3ca24f9055a700dc58a0319cb5f8db9", transitionId: productionTransitionId });
+  assert.match(sid, IAM_STATEMENT_SID_PATTERN);
+  assert.ok(sid.length <= IAM_STATEMENT_SID_MAX_LENGTH);
+  assert.equal(sid, canonicalTemporaryKmsStatementSid({ sourceSha: "9aa12fdfa3ca24f9055a700dc58a0319cb5f8db9", transitionId: productionTransitionId }));
+  assert.notEqual(canonicalTemporaryKmsStatementSid({ sourceSha, transitionId: "a-b" }), canonicalTemporaryKmsStatementSid({ sourceSha, transitionId: "ab" }));
+  for (const value of ["stage-a", "stage_a", "stage:a", "stage/a", "stage.a", "a b", "--stage--", "MixedCase", "x".repeat(128)]) {
+    const candidate = canonicalTemporaryKmsStatementSid({ sourceSha, transitionId: value });
+    assert.match(candidate, IAM_STATEMENT_SID_PATTERN, value);
+    assert.ok(candidate.length <= IAM_STATEMENT_SID_MAX_LENGTH, value);
+  }
+});
+
+test("the production failure-case statement is accepted without changing the logical transition identity", () => {
+  const productionTransitionId = "stage-a-root-drop-9aa12fd-20260818";
+  const statement = temporaryKmsCapabilityStatement({ sourceSha: "9aa12fdfa3ca24f9055a700dc58a0319cb5f8db9", transitionId: productionTransitionId });
+  assert.match(statement.Sid, IAM_STATEMENT_SID_PATTERN);
+  assert.equal(statement.Sid.length, 111);
+  const evidence = buildTemporaryCapabilityEvidence({ state: "ABSENT", sourceSha, transitionId: productionTransitionId, observedAt: "2026-08-18T12:00:00.000Z" });
+  assert.equal(evidence.transitionId, productionTransitionId);
+});
+
+test("legacy temporary SID remains narrowly recognizable for revoke/recovery compatibility", () => {
+  const temporary = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId });
+  const legacySid = `TemporaryStageARootDropKeyTagAtCreation_${sourceSha}_${createHash("sha256").update(transitionId).digest("hex").slice(0, 16)}`;
+  temporary.Statement = temporary.Statement.map((statement) => statement.Sid?.startsWith("TemporaryStageARootDropKeyTagAtCreation") ? { ...statement, Sid: legacySid } : statement);
+  assert.doesNotThrow(() => assertTemporaryReleasePolicy(temporary, { steadyStatePolicy: policy, sourceSha, transitionId }));
+  assert.throws(() => assertTemporaryReleasePolicy(temporary, { steadyStatePolicy: policy, sourceSha: "0".repeat(40), transitionId }), /not exact/);
 });
 
 test("temporary policy compacts representation-only statement IDs with meaningful AWS size headroom", () => {

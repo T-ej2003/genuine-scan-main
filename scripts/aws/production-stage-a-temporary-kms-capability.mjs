@@ -27,10 +27,13 @@ export const TEMPORARY_KMS_CAPABILITY = Object.freeze({
 export const AWS_MANAGED_POLICY_DOCUMENT_LIMIT = 6144;
 export const TEMPORARY_POLICY_MIN_HEADROOM = 512;
 export const TEMPORARY_POLICY_MAX_BYTES = AWS_MANAGED_POLICY_DOCUMENT_LIMIT - TEMPORARY_POLICY_MIN_HEADROOM;
+export const IAM_STATEMENT_SID_MAX_LENGTH = 128;
+export const IAM_STATEMENT_SID_PATTERN = /^[A-Za-z0-9]+$/;
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const VERSION = /^v[1-9][0-9]*$/;
+const TEMPORARY_KMS_STATEMENT_SID_PREFIX = "TemporaryStageARootDropKeyTagAtCreation";
 const canonical = (value) => Array.isArray(value)
   ? `[${value.map(canonical).join(",")}]`
   : value && typeof value === "object"
@@ -53,10 +56,20 @@ export function assertManagedPolicyDocumentSize(policy, { label = "IAM managed p
 
 function fail(message) { throw new Error(`Temporary Stage-A KMS capability: ${message}`); }
 
+export function canonicalTemporaryKmsStatementSid({ sourceSha, transitionId } = {}) {
+  const suffix = sourceSha && transitionId ? `${sourceSha}${sha256(transitionId).slice(0, 32)}` : "";
+  const sid = `${TEMPORARY_KMS_STATEMENT_SID_PREFIX}${suffix}`;
+  if (sid.length > IAM_STATEMENT_SID_MAX_LENGTH || !IAM_STATEMENT_SID_PATTERN.test(sid)) fail("temporary KMS statement SID is not AWS-compatible");
+  return sid;
+}
+
+function legacyTemporaryKmsStatementSid({ sourceSha, transitionId } = {}) {
+  return sourceSha && transitionId ? `${TEMPORARY_KMS_STATEMENT_SID_PREFIX}_${sourceSha}_${sha256(transitionId).slice(0, 16)}` : TEMPORARY_KMS_STATEMENT_SID_PREFIX;
+}
+
 export function temporaryKmsCapabilityStatement({ sourceSha, transitionId } = {}) {
-  const suffix = sourceSha && transitionId ? `_${sourceSha}_${sha256(transitionId).slice(0, 16)}` : "";
   return {
-    Sid: `TemporaryStageARootDropKeyTagAtCreation${suffix}`,
+    Sid: canonicalTemporaryKmsStatementSid({ sourceSha, transitionId }),
     Effect: "Allow",
     Action: TEMPORARY_KMS_CAPABILITY.action,
     Resource: TEMPORARY_KMS_CAPABILITY.resource,
@@ -101,7 +114,9 @@ export function assertTemporaryReleasePolicy(policy, { steadyStatePolicy, source
   if (!steadyStatePolicy) fail("steady-state source policy is required");
   assertSteadyStateReleasePolicy(steadyStatePolicy);
   const temporary = statements(policy).filter(isTemporaryTagResourceStatement);
-  if (temporary.length !== 1 || !equal(temporary[0], temporaryKmsCapabilityStatement({ sourceSha, transitionId }))) fail("temporary policy statement is not exact");
+  const expected = temporaryKmsCapabilityStatement({ sourceSha, transitionId });
+  const legacy = { ...expected, Sid: legacyTemporaryKmsStatementSid({ sourceSha, transitionId }) };
+  if (temporary.length !== 1 || ![expected, legacy].some((candidate) => equal(temporary[0], candidate))) fail("temporary policy statement is not exact");
   const withoutTemporary = statements(policy).filter((statement) => !isTemporaryTagResourceStatement(statement));
   if (!equal(withoutStatementIds({ ...policy, Statement: withoutTemporary }), withoutStatementIds(steadyStatePolicy))) fail("temporary policy changes more than the exact creation capability");
   if (statements(policy).some((statement) => (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).some((action) => ["kms:Sign", "kms:Decrypt", "kms:Encrypt", "kms:CreateGrant", "kms:PutKeyPolicy", "kms:ScheduleKeyDeletion", "kms:DisableKey"].includes(action)))) fail("temporary policy grants an unrelated KMS capability");
