@@ -16,6 +16,7 @@ export const STAGE_A_EXPECTED_STATE_LINEAGE = "02afb75a-f902-ab8a-f4c1-751d4aef7
 export const STAGE_A_MINIMUM_STATE_SERIAL = 35;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
+const SHA256 = /^[a-f0-9]{64}$/;
 const json = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const exact = (value, expected, label) => { if (value !== expected) throw new Error(`${label} does not match the reviewed Stage A contract.`); return value; };
 
@@ -46,6 +47,25 @@ export function assertStageAStateIdentity(state, { stateObject = STAGE_A_STATE_O
   assertCanonicalTerraformSerialNumber(state.serial, "Stage A state serial");
   if (state.serial < STAGE_A_MINIMUM_STATE_SERIAL) throw new Error(`Stage A state serial is stale: minimum ${STAGE_A_MINIMUM_STATE_SERIAL}, got ${state.serial}.`);
   return state;
+}
+
+export function buildStageAStateIdentity(state, { stateObject = STAGE_A_STATE_OBJECT, stateBytes } = {}) {
+  assertStageAStateIdentity(state, { stateObject });
+  if (!Buffer.isBuffer(stateBytes) && !(stateBytes instanceof Uint8Array)) throw new Error("Stage A state identity requires the exact authenticated state bytes.");
+  return Object.freeze({
+    stateObject,
+    lineage: state.lineage,
+    serial: state.serial,
+    stateSha256: sha256(stateBytes),
+    account: STAGE_B.account,
+    region: STAGE_B.region,
+  });
+}
+
+export function assertStageAStateIdentityBinding(actual, expected) {
+  const validSha256 = (value) => typeof value === "string" && SHA256.test(value);
+  if (!actual || !expected || !validSha256(actual.stateSha256) || !validSha256(expected.stateSha256) || actual.stateObject !== expected.stateObject || actual.lineage !== expected.lineage || actual.serial !== expected.serial || actual.account !== expected.account || actual.region !== expected.region || actual.stateSha256 !== expected.stateSha256) throw new Error("Stage A state identity binding is not exact.");
+  return true;
 }
 
 function stageAValues(state, options) {

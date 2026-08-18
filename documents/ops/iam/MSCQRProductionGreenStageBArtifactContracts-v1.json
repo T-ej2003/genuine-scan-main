@@ -146,6 +146,24 @@
       "rollback": "none"
     },
     {
+      "id": "stage-a-state-identity",
+      "kind": "file",
+      "producer": "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight",
+      "consumers": [
+        "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": true,
+      "hashBound": true,
+      "atomicGroup": "stage-a-state-identity",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "stage-b-state-backup",
       "kind": "file",
       "producer": "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight",

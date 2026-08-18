@@ -9,6 +9,7 @@ import {
   readIdentityCapabilityMatrix,
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
+import { STAGE_A_EXPECTED_STATE_LINEAGE } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
@@ -16,6 +17,7 @@ import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operato
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 
 const caller = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test";
+const stageAState = JSON.stringify({ lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: 35, resources: [] });
 const shapedPolicyEvidence = () => {
   const policies = sourcePolicyEvidence().map((policy) => ({ ...policy, defaultVersionId: "v1", liveSha256: policy.sourceSha256, attached: true, matchesSource: true }));
   return { roleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: [], inlinePolicies: [], permissionsBoundaryArn: null, policies, status: "valid" };
@@ -25,7 +27,7 @@ const allowed = (args) => {
   if (args[0] === "sts") return JSON.stringify({ Arn: caller });
   if (args[0] === "iam" && args[1] === "get-role" && args.includes("mscqr-production-independent-checker")) return JSON.stringify({ Role: { Arn: CHECKER_SOURCE_ROLE_ARN, AssumeRolePolicyDocument: { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: CHECKER_USER_ARN }, Action: "sts:AssumeRole", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }] } } });
   if (args[0] === "s3api" && args[1] === "get-object") {
-    fs.writeFileSync(args.at(-1), JSON.stringify({ lineage: "fixture", serial: 1 }), { mode: 0o644 });
+    fs.writeFileSync(args.at(-1), args.includes("mscqr/production/rls-green/stage-a/terraform.tfstate") ? stageAState : JSON.stringify({ lineage: "fixture", serial: 1 }), { mode: 0o644 });
     return "";
   }
   if (args[0] === "ecs" && args[1] === "list-services") return JSON.stringify({ serviceArns: ["arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/frontend"] });
@@ -81,8 +83,8 @@ test("release probes cover policy-list access on both canary roles", () => {
 });
 
 test("release preflight aggregates independent read denials and never simulates IAM", () => {
-  const calls = [];
-  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+  const calls = []; const directory = temp();
+  const report = runReleaseReadPreflight({ outputDirectory: directory, run: (args, probe) => {
     calls.push(probe.action);
     if (["ecs:DescribeClusters", "rds:DescribeDBInstances"].includes(probe.action)) throw new Error("AccessDenied");
     return allowed(args);
@@ -91,21 +93,53 @@ test("release preflight aggregates independent read denials and never simulates 
   assert.deepEqual(report.failed.map(({ action }) => action), ["ecs:DescribeClusters", "rds:DescribeDBInstances"]);
   assert(calls.length >= RELEASE_READ_PROBES.length);
   assert(!calls.includes("iam:SimulatePrincipalPolicy"));
+  assert.equal(fs.existsSync(path.join(directory, "stage-a-state-identity.json")), false);
 });
 
 test("complete release preflight is valid and has no skipped probes", () => {
-  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: allowed });
+  const directory = temp();
+  const report = runReleaseReadPreflight({ outputDirectory: directory, run: allowed });
   assert.equal(report.status, "valid");
   assert.deepEqual(report.failed, []);
   assert.deepEqual(report.skipped, []);
   assert.equal(report.caller, caller);
+  assert.equal(report.stageAStateIdentityPath, path.join(directory, "stage-a-state-identity.json"));
+  assert.deepEqual(JSON.parse(fs.readFileSync(report.stageAStateIdentityPath, "utf8")), { stateObject: "mscqr/production/rls-green/stage-a/terraform.tfstate", lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: 35, stateSha256: crypto.createHash("sha256").update(stageAState).digest("hex"), account: "368992683803", region: "eu-west-2" });
+});
+
+test("release preflight blocks when authenticated Stage-A state cannot produce an identity", () => {
+  const directory = temp();
+  const report = runReleaseReadPreflight({ outputDirectory: directory, run: (args, probe) => {
+    if (probe.id === "stage-a-state") { fs.writeFileSync(args.at(-1), JSON.stringify({ lineage: "wrong", serial: 35 }), { mode: 0o600 }); return ""; }
+    return allowed(args);
+  } });
+  assert.equal(report.status, "blocked");
+  assert.equal(report.stageAStateIdentityPath, null);
+  assert(report.failed.some(({ id }) => id === "stage-a-state"));
+  assert.equal(fs.existsSync(path.join(directory, "stage-a-state-identity.json")), false);
 });
 
 test("wrong caller and region fail closed", () => {
-  const wrongCaller = runReleaseReadPreflight({ outputDirectory: temp(), run: (args) => args[0] === "sts" ? JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" }) : "{}" });
+  const directory = temp();
+  const wrongCaller = runReleaseReadPreflight({ outputDirectory: directory, run: (args) => args[0] === "sts" ? JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" }) : allowed(args) });
   assert.equal(wrongCaller.status, "blocked");
   assert.equal(wrongCaller.failed[0].id, "caller");
+  assert.equal(wrongCaller.stageAStateIdentityPath, null);
+  assert.equal(fs.existsSync(path.join(directory, "stage-a-state-identity.json")), false);
   assert.throws(() => runReleaseReadPreflight({ outputDirectory: temp(), region: "us-east-1", run: allowed }), /region/);
+});
+
+test("failed preflight removes a stale Stage-A identity instead of preserving it", () => {
+  const directory = temp();
+  const identityPath = path.join(directory, "stage-a-state-identity.json");
+  fs.writeFileSync(identityPath, JSON.stringify({ stateSha256: "f".repeat(64) }), { mode: 0o600 });
+  const report = runReleaseReadPreflight({ outputDirectory: directory, run: (args, probe) => {
+    if (probe.id === "stage-a-cluster") throw new Error("AccessDenied");
+    return allowed(args);
+  } });
+  assert.equal(report.status, "blocked");
+  assert.equal(report.stageAStateIdentityPath, null);
+  assert.equal(fs.existsSync(identityPath), false);
 });
 
 test("one command keeps administrator simulation and release reads on separate identities", () => {
@@ -140,4 +174,13 @@ test("invalid release capability report stops before backend readiness", () => {
     continueReadiness: () => { continued += 1; }, validateCapabilityGraph: () => capabilityGraph,
   }), /Cutover-critical release capability lacks valid evidence/);
   assert.equal(continued, 0);
+});
+
+test("administrator cannot promote an unsigned readiness report", () => {
+  const directory = temp();
+  try {
+    assert.throws(() => runProductionPreflightCli([
+      "--identity", "administrator", "--phase", "readiness", "--output", path.join(directory, "readiness.json"),
+    ], { caller: () => "arn:aws:iam::368992683803:root" }), /phase initial/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

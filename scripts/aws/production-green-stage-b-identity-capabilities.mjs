@@ -3,11 +3,11 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
-import { STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { buildStageAStateIdentity, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 import { RELEASE_CALLER_PATTERN } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
-import { ensureStageBPrivateDirectory, ensureStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
+import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { CHECKER_SOURCE_ROLE_NAME, assertRoleATrustResponse } from "./production-checker-chain-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -73,8 +73,10 @@ export function runReleaseReadPreflight({
   if (!path.isAbsolute(outputDirectory || "")) throw new Error("Stage B release preflight requires an absolute private output directory.");
   readIdentityCapabilityMatrix();
   ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot: root, create: true, normalize: true });
+  const stageAStateIdentityOutputPath = path.join(outputDirectory, "stage-a-state-identity.json");
+  fs.rmSync(stageAStateIdentityOutputPath, { force: true });
   const requiredReads = {}; const failed = []; const responses = new Map(); let total = 0;
-  let caller; let checkerTrust = null;
+  let caller; let checkerTrust = null; let stageAStateIdentity = null;
   for (const probe of RELEASE_READ_PROBES) {
     total += 1;
     const outputPath = path.join(outputDirectory, `${probe.id}.json`);
@@ -83,6 +85,10 @@ export function runReleaseReadPreflight({
       const response = run(args, probe);
       if (probe.id === "stage-a-state" || probe.id === "stage-b-state") {
         ensureStageBPrivateFile({ filePath: outputPath, repositoryRoot: root, normalize: true, label: `${probe.id} backup` });
+        if (probe.id === "stage-a-state") {
+          const stateBytes = fs.readFileSync(outputPath);
+          stageAStateIdentity = buildStageAStateIdentity(JSON.parse(stateBytes), { stateBytes });
+        }
       }
       responses.set(probe.id, response);
       if (probe.id === "caller") {
@@ -116,5 +122,11 @@ export function runReleaseReadPreflight({
     try { run(probe.args, probe); if (requiredReads[probe.action] !== "denied") requiredReads[probe.action] = "allowed"; }
     catch (error) { requiredReads[probe.action] = "denied"; failed.push({ id: probe.id, action: probe.action, classification: safeError(error) }); }
   }
-  return { schemaVersion: RELEASE_PREFLIGHT_SCHEMA_VERSION, caller: caller || null, account: STAGE_B.account, region, total, allowed: total - failed.length, requiredReads, checkerTrust, failed, skipped: [], status: failed.length === 0 && checkerTrust?.exact === true && checkerTrust?.mfaRequired === true ? "valid" : "blocked" };
+  const status = failed.length === 0 && checkerTrust?.exact === true && checkerTrust?.mfaRequired === true && stageAStateIdentity ? "valid" : "blocked";
+  let stageAStateIdentityPath = null;
+  if (status === "valid") {
+    stageAStateIdentityPath = stageAStateIdentityOutputPath;
+    writeStageBPrivateFileAtomic({ filePath: stageAStateIdentityPath, bytes: Buffer.from(`${JSON.stringify(stageAStateIdentity, null, 2)}\n`), repositoryRoot: root, overwrite: true, label: "Stage-A state identity" });
+  }
+  return { schemaVersion: RELEASE_PREFLIGHT_SCHEMA_VERSION, caller: caller || null, account: STAGE_B.account, region, total, allowed: total - failed.length, requiredReads, checkerTrust, stageAStateIdentityPath, failed, skipped: [], status };
 }

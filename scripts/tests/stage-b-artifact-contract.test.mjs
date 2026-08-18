@@ -11,6 +11,7 @@ import { STAGE_B_EXPECTED_CHECK_ADDRESSES, STAGE_B_EXPECTED_RESOURCE_PRECONDITIO
 import { runRefreshOnly } from "../refresh-production-green-stage-b.mjs";
 import { STAGE_B_ARTIFACT_CONTRACTS, STAGE_B_PRIVATE_FILE_MODE, STAGE_B_PRIVATE_DIRECTORY_MODE, canonicalStageBArtifactContracts, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "../aws/stage-b-artifact-contract.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
+import { STAGE_A_EXPECTED_STATE_LINEAGE } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-artifact-contract-"));
@@ -28,6 +29,26 @@ const binding = (stateHash, tfvarsHash) => ({
 
 test.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
+test("Stage-A state identity registers its producer and authorization consumer", () => {
+  const artifact = STAGE_B_ARTIFACT_CONTRACTS.find(({ id }) => id === "stage-a-state-identity");
+  assert.deepEqual(artifact, {
+    id: "stage-a-state-identity",
+    kind: "file",
+    producer: "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight",
+    consumers: ["scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs"],
+    directoryMode: "0700",
+    fileMode: "0600",
+    symlink: "reject",
+    outsideRepository: true,
+    atomic: true,
+    overwrite: true,
+    hashBound: true,
+  });
+  const generated = canonicalStageBArtifactContracts().artifacts.filter(({ id }) => id === "stage-a-state-identity");
+  assert.equal(generated.length, 1);
+  assert.deepEqual(generated[0], { ...artifact, atomicGroup: "stage-a-state-identity", allOrNone: true, rollback: "remove-committed-or-restore-backups" });
+});
+
 test("reference-audit contract registers every production consumer", () => {
   const referenceAudit = STAGE_B_ARTIFACT_CONTRACTS.find(({ id }) => id === "reference-audit");
   assert.deepEqual(referenceAudit?.consumers, [
@@ -43,10 +64,11 @@ test("reference-audit contract registers every production consumer", () => {
 test("real release-read and backend producers normalize generated permissions", () => {
   const directory = path.join(root, "release"); fs.mkdirSync(directory, { recursive: true, mode: 0o755 }); fs.chmodSync(directory, 0o755);
   const stateBytes = Buffer.from(`${JSON.stringify(state)}\n`);
+  const stageAStateBytes = Buffer.from(`${JSON.stringify({ lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: 35, resources: [] })}\n`);
   const run = (args, probe) => {
     if (probe.id === "caller") return JSON.stringify({ Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test" });
     if (probe.id === "checker-role-a-trust") return JSON.stringify({ Role: { Arn: CHECKER_SOURCE_ROLE_ARN, AssumeRolePolicyDocument: { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: CHECKER_USER_ARN }, Action: "sts:AssumeRole", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }] } } });
-    if (probe.id === "stage-a-state" || probe.id === "stage-b-state") { fs.writeFileSync(args.at(-1), stateBytes); return ""; }
+    if (probe.id === "stage-a-state" || probe.id === "stage-b-state") { fs.writeFileSync(args.at(-1), probe.id === "stage-a-state" ? stageAStateBytes : stateBytes); return ""; }
     if (probe.id === "audit-services" || probe.id === "audit-tasks" || probe.id === "refresh-broker-policy") return "{}";
     if (probe.id.includes("inline-policies")) return JSON.stringify({ PolicyNames: [] });
     return "{}";
@@ -54,6 +76,7 @@ test("real release-read and backend producers normalize generated permissions", 
   const result = runReleaseReadPreflight({ outputDirectory: directory, run });
   assert.equal(result.status, "valid"); assert.equal(mode(directory), STAGE_B_PRIVATE_DIRECTORY_MODE);
   assert.equal(mode(path.join(directory, "stage-a-state.json")), STAGE_B_PRIVATE_FILE_MODE);
+  assert.equal(mode(path.join(directory, "stage-a-state-identity.json")), STAGE_B_PRIVATE_FILE_MODE);
   assert.equal(mode(path.join(directory, "stage-b-state.json")), STAGE_B_PRIVATE_FILE_MODE);
 
   const dataDir = path.join(directory, "terraform-data"); fs.mkdirSync(dataDir, { mode: 0o755 }); fs.chmodSync(dataDir, 0o755);

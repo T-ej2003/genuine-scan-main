@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertStageAStateContract, assertStageAStateIdentity, generateStageAPrerequisites, resolveStageASubnetRouteTable, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateContract, assertStageAStateIdentity, assertStageAStateIdentityBinding, buildStageAStateIdentity, generateStageAPrerequisites, resolveStageASubnetRouteTable, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_A_CHECKER_ROLE_TRUST } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
@@ -66,6 +66,19 @@ test("Stage A state identity is independent from Stage B and accepts later Stage
     assert.throws(() => assertStageAStateIdentity({ ...stage, serial }), /safe non-negative integer number/);
   }
   assert.throws(() => assertStageAStateIdentity(stage, { stateObject: "env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate" }), /state object is wrong/);
+});
+
+test("Stage A identity requires an exact lowercase SHA-256 binding", () => {
+  const bytes = Buffer.from(JSON.stringify(stage));
+  const identity = buildStageAStateIdentity(stage, { stateBytes: bytes });
+  assert.doesNotThrow(() => assertStageAStateIdentityBinding(identity, identity));
+  assert.throws(() => buildStageAStateIdentity(stage), /exact authenticated state bytes/);
+  for (const stateSha256 of [undefined, null, "", "a".repeat(63), "a".repeat(65), "g".repeat(64), "A".repeat(64)]) {
+    assert.throws(() => assertStageAStateIdentityBinding(identity, { ...identity, stateSha256 }), /identity binding/);
+  }
+  assert.throws(() => assertStageAStateIdentityBinding({ ...identity, stateSha256: undefined }, identity), /identity binding/);
+  assert.throws(() => assertStageAStateIdentityBinding(identity, { ...identity, stateSha256: "f".repeat(64) }), /identity binding/);
+  assert.throws(() => assertStageAStateIdentityBinding(identity, { ...identity, stateSha256: undefined }), /identity binding/);
 });
 
 const routeTable = (id, associations, routes = [{ DestinationCidrBlock: "0.0.0.0/0", NatGatewayId: "nat-12345678" }], vpcId = "vpc-0123456789abcdef0") => ({ RouteTableId: id, VpcId: vpcId, Associations: associations, Routes: routes });
