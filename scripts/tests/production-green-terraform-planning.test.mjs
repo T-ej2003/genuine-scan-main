@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import test from "node:test";
 
@@ -18,8 +19,36 @@ test("Stage A accepts only the reviewed production receipt bucket", () => {
 });
 
 test("Stage A canonically owns its existing Stack tag", () => {
-  assert.match(source, /tags\s*=\s*merge\(\{[\s\S]*Stack\s*=\s*"production-green-stage-a"/);
   assert.match(source.match(/resource "aws_kms_key" "root_drop" \{([\s\S]*?)\n\}/)?.[1] || "", /tags\s*=\s*local\.tags/);
+});
+
+const terraformTags = (tags) => {
+  const variables = [
+    "aws_region=eu-west-2",
+    "vpc_id=vpc-00000000000000000",
+    "private_subnet_ids=[]",
+    "runtime_security_group_ids=[]",
+    "s3_prefix_list_id=pl-00000000",
+    "vpc_dns_resolver_cidr=10.0.0.2/32",
+    "checker_principal_arns=[\"arn:aws:iam::368992683803:role/mscqr-production-independent-checker\"]",
+    "release_role_arn=arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+    "receipt_bucket_arn=arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+    `tags=${JSON.stringify(tags)}`,
+  ];
+  const result = spawnSync("terraform", ["-chdir=infra/aws/terraform/production-green-stage-a", "console", "-state=/dev/null", "-input=false", ...variables.flatMap((value) => ["-var", value])], { input: "jsonencode(local.tags)\n", encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(JSON.parse(result.stdout.trim()));
+};
+
+test("Terraform keeps Stack canonical while preserving unrelated caller tags", () => {
+  assert.equal(terraformTags({}).Stack, "production-green-stage-a");
+  assert.deepEqual(terraformTags({ Stack: "legacy", Owner: "test" }), {
+    Component: "full-rls-green-stage-a",
+    Environment: "production",
+    ManagedBy: "Terraform",
+    Owner: "test",
+    Stack: "production-green-stage-a",
+  });
 });
 
 test("Stage A keeps checker and protected deployer distinct", () => {
