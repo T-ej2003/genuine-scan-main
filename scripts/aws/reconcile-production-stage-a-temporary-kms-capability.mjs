@@ -415,7 +415,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const stageAStateFile = option(argv, "--stage-a-state", false);
   if (phase === "authorize" && !stageAStateFile) fail("--stage-a-state is required before temporary capability authorization");
   const stageAStateIdentityFile = option(argv, "--stage-a-state-identity", false);
-  const stageAStateIdentity = stageAStateIdentityFile ? readJson(stageAStateIdentityFile) : stageAStateFile ? buildStageAStateIdentity(readJson(stageAStateFile), { stateBytes: readFileSync(stageAStateFile) }) : null;
+  if (phase === "authorize" && !stageAStateIdentityFile) fail("--stage-a-state-identity is required before temporary capability authorization");
+  const stageAStateIdentity = stageAStateIdentityFile ? readJson(stageAStateIdentityFile) : null;
   const result = createTemporaryKmsCapabilityRunner({ run, requireStageAStateBinding: Boolean(stageAStateFile) }).runPhase({ phase, sourceSha, transitionId, stateFile, planSha256: option(argv, "--plan-sha256", false), planJsonFile: option(argv, "--plan-json", false), terraformStateFile: option(argv, "--terraform-state", false), stageAStateFile, stageAStateIdentity, applyFailed: argv.includes("--apply-failed"), partialOperationCensus: argv.includes("--partial-operation-census-verified") });
   process.stdout.write(`${JSON.stringify({ state: result.evidence.state, evidenceSha256: result.evidence.evidenceSha256, writes: result.writes, mutationAccounting: result.mutationAccounting || null })}\n`);
 }

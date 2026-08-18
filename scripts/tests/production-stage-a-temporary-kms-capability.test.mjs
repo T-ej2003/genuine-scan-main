@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import {
   TEMPORARY_KMS_CAPABILITY,
@@ -264,6 +265,7 @@ test("launch handoff resolves the canonical manifest path", () => {
   assert.doesNotMatch(handoff, /launch-handoff-manifest\.json/);
   const node = JSON.parse(readFileSync(manifestPath, "utf8")).nodes.find(({ id }) => id === 8);
   assert.match(node.canonicalCommandOrFunction, /--stage-a-state <fresh-stage-a-state>/);
+  assert.match(node.canonicalCommandOrFunction, /--stage-a-state-identity <fresh-stage-a-state-identity>/);
 });
 
 test("canonical producer replays authorization and safely aborts a failed apply", () => {
@@ -787,6 +789,49 @@ test("strict authorization binds the temporary capability to the current Stage-A
     const advanced = { ...state, serial: 45 };
     writeFileSync(stageAStateFile, JSON.stringify(advanced), { mode: 0o600 });
     assert.throws(() => runner.runPhase({ phase: "authorize", sourceSha, transitionId: "stage-a-root-drop-20260819", stateFile: path.join(directory, "other.json"), planSha256, planJsonFile, stageAStateFile, stageAStateIdentity: identity }), /state identity binding/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("CLI authorization rejects state without an independently produced identity before AWS", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-missing-state-identity-"));
+  const stateFile = path.join(directory, "capability.json");
+  const stageAStateFile = path.join(directory, "stage-a.tfstate");
+  const planJsonFile = writePlanFile(directory);
+  writeFileSync(stageAStateFile, JSON.stringify({ lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 44 }), { mode: 0o600 });
+  try {
+    const result = spawnSync(process.execPath, [
+      path.resolve("scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs"),
+      "--phase", "authorize", "--source-sha", sourceSha, "--transition-id", transitionId,
+      "--state-file", stateFile, "--admin-profile", "administrator", "--release-profile", "release",
+      "--plan-sha256", planSha256, "--plan-json", planJsonFile, "--stage-a-state", stageAStateFile,
+    ], { encoding: "utf8" });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /--stage-a-state-identity is required/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("state identity binding rejects same metadata with changed bytes and each identity dimension", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-state-identity-dimensions-"));
+  const stateFile = path.join(directory, "capability.json");
+  const stageAStateFile = path.join(directory, "stage-a.tfstate");
+  const planJsonFile = writePlanFile(directory);
+  const state = { lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 44, resources: [] };
+  const bytes = Buffer.from(JSON.stringify(state));
+  writeFileSync(stageAStateFile, bytes, { mode: 0o600 });
+  const identity = buildStageAStateIdentity(state, { stateBytes: bytes });
+  const fixture = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) } });
+  const mismatches = [
+    { stateSha256: "f".repeat(64) },
+    { stateObject: "wrong-stage-a.tfstate" },
+    { lineage: "wrong-lineage" },
+    { serial: 45 },
+    { account: "000000000000" },
+    { region: "us-east-1" },
+  ];
+  try {
+    for (const mismatch of mismatches) assert.throws(() => createTemporaryKmsCapabilityRunner({ run: fixture.run, requireStageAStateBinding: true }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile, stageAStateFile, stageAStateIdentity: { ...identity, ...mismatch } }), /state identity binding/);
+    writeFileSync(stageAStateFile, JSON.stringify({ ...state, changed: true }), { mode: 0o600 });
+    assert.throws(() => createTemporaryKmsCapabilityRunner({ run: fixture.run, requireStageAStateBinding: true }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile: path.join(directory, "changed-capability.json"), planSha256, planJsonFile, stageAStateFile, stageAStateIdentity: identity }), /state identity binding/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
