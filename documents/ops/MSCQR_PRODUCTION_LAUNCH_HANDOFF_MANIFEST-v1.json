@@ -17,7 +17,7 @@
     "producer": "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs",
     "states": ["ABSENT", "AUTHORIZED_FOR_ROOT_DROP_CREATION", "STAGE_A_APPLY", "ROOT_DROP_OWNERSHIP_VERIFIED", "REVOKED", "ABSENCE_VERIFIED"],
     "edges": ["ABSENT->AUTHORIZED_FOR_ROOT_DROP_CREATION", "AUTHORIZED_FOR_ROOT_DROP_CREATION->STAGE_A_APPLY", "AUTHORIZED_FOR_ROOT_DROP_CREATION->REVOKED on authenticated failed-apply census", "STAGE_A_APPLY->ROOT_DROP_OWNERSHIP_VERIFIED", "STAGE_A_APPLY->REVOKED on authenticated failed-apply census", "ROOT_DROP_OWNERSHIP_VERIFIED->REVOKED", "REVOKED->ABSENCE_VERIFIED"],
-    "steadyStateInvariant": "The release policy has no standalone kms:TagResource capability before authorization and after ABSENCE_VERIFIED.",
+    "steadyStateInvariant": "The release policy has none of kms:CreateKey, kms:TagResource, or kms:CreateAlias before authorization and after ABSENCE_VERIFIED; those actions exist only in the exact temporary root-drop capability.",
     "cutoverGate": "ABSENCE_VERIFIED is mandatory; capability residue, failed revocation, unknown policy version, or missing root-drop ownership blocks cutover."
   },
   "nodes": [

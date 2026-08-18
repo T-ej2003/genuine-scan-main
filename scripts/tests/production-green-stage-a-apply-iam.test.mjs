@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { assertSteadyStateReleasePolicy, assertTemporaryReleasePolicy, buildTemporaryReleasePolicy, temporaryKmsCapabilityStatement } from "../aws/production-stage-a-temporary-kms-capability.mjs";
+import { assertSteadyStateReleasePolicy, assertTemporaryReleasePolicy, buildTemporaryReleasePolicy, temporaryKmsCapabilityAliasKeyStatement, temporaryKmsCapabilityAliasStatement, temporaryKmsCapabilityStatement } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 
 const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
@@ -19,6 +19,7 @@ const production = Object.freeze({
   endpointSecurityGroupArn: "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412",
   storageKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
   approvalKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478",
+  rootDropKeyResource: "arn:aws:kms:eu-west-2:368992683803:key/*",
   rootDropKeyArn: "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-drop",
   approvalSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho",
   subnetGroupArn: "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
@@ -54,6 +55,16 @@ const rootDropTagContext = (overrides = {}) => ({
   ...overrides,
 });
 
+const rootDropAliasKeyContext = (overrides = {}) => ({
+  "aws:ResourceTag/Environment": "production",
+  "aws:ResourceTag/ManagedBy": "Terraform",
+  "aws:ResourceTag/Component": "full-rls-green-stage-a",
+  "aws:ResourceTag/Stack": "production-green-stage-a",
+  "kms:KeySpec": "RSA_3072",
+  "kms:KeyUsage": "SIGN_VERIFY",
+  ...overrides,
+});
+
 const conditionMatches = (condition = {}, values) => Object.entries(condition).every(([operator, entries]) => Object.entries(entries).every(([key, expectedValue]) => {
   const expected = asArray(expectedValue).map(String);
   const actual = values[key];
@@ -66,6 +77,10 @@ const allows = ({ action, resource, values }) => statements.some((statement) => 
   && asArray(statement.Action).includes(action)
   && asArray(statement.Resource).some((pattern) => matches(pattern, resource))
   && conditionMatches(statement.Condition, values));
+const statementAllows = (statement, { action, resource, values = {} }) => statement.Effect === "Allow"
+  && asArray(statement.Action).includes(action)
+  && asArray(statement.Resource).some((pattern) => matches(pattern, resource))
+  && conditionMatches(statement.Condition, values);
 
 const readCases = [
   ["ec2:DescribeVpcEndpoints", "*"],
@@ -73,6 +88,8 @@ const readCases = [
   ["kms:DescribeKey", production.storageKeyArn],
   ["kms:DescribeKey", production.approvalKeyArn],
   ["kms:DescribeKey", production.rootDropKeyArn],
+  ["kms:GetKeyPolicy", production.rootDropKeyArn],
+  ["kms:ListResourceTags", production.rootDropKeyArn],
   ["rds:DescribeDBSubnetGroups", production.subnetGroupArn],
   ["rds:ListTagsForResource", production.subnetGroupArn],
   ["rds:DescribeDBParameterGroups", production.parameterGroupArn],
@@ -137,17 +154,40 @@ test("Stage A apply permits only the exact endpoint security-group ingress", () 
 
 test("Stage A steady-state release policy has no permanent KMS tagging capability", () => {
   assert.doesNotThrow(() => assertSteadyStateReleasePolicy(policy));
-  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext() }), false);
-  assert.equal(statements.some(({ Action }) => asArray(Action).includes("kms:TagResource")), false);
+  for (const action of ["kms:CreateKey", "kms:TagResource", "kms:CreateAlias", "kms:*"]) {
+    assert.equal(allows({ action, resource: "*", values: rootDropTagContext() }), false, action);
+    assert.equal(statements.some(({ Action }) => asArray(Action).includes(action)), false, action);
+  }
 });
 
 test("temporary KMS capability is exact-purpose and cannot broaden the release role", () => {
   const temporary = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId });
   assert.doesNotThrow(() => assertTemporaryReleasePolicy(temporary, { steadyStatePolicy: policy, sourceSha, transitionId }));
-  const tag = temporaryKmsCapabilityStatement({ sourceSha, transitionId });
-  assert.deepEqual(tag.Condition.StringEquals["aws:RequestTag/Stack"], "production-green-stage-a");
+  const key = temporaryKmsCapabilityStatement({ sourceSha, transitionId });
+  const alias = temporaryKmsCapabilityAliasStatement({ sourceSha, transitionId });
+  const aliasKey = temporaryKmsCapabilityAliasKeyStatement();
+  assert.deepEqual(key.Action, ["kms:CreateKey", "kms:TagResource"]);
+  assert.deepEqual(key.Condition.StringEquals["aws:RequestTag/Stack"], "production-green-stage-a");
+  assert.equal(alias.Action, "kms:CreateAlias");
+  assert.equal(alias.Resource, production.rootDropKeyArn);
+  assert.equal(alias.Condition, undefined);
+  assert.equal(aliasKey.Action, "kms:CreateAlias");
+  assert.equal(aliasKey.Resource, production.rootDropKeyResource);
+  assert.equal(statementAllows(aliasKey, { action: "kms:CreateAlias", resource: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111", values: rootDropAliasKeyContext() }), true);
+  assert.equal(statementAllows(aliasKey, { action: "kms:CreateAlias", resource: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111", values: rootDropAliasKeyContext({ "aws:ResourceTag/Stack": "unrelated" }) }), false);
+  assert.equal(statementAllows(key, { action: "kms:CreateKey", resource: "*", values: rootDropTagContext() }), true);
+  assert.equal(statementAllows(key, { action: "kms:TagResource", resource: "*", values: rootDropTagContext() }), true);
+  assert.equal(statementAllows(key, { action: "kms:CreateKey", resource: "*", values: rootDropTagContext({ "kms:KeySpec": "ECC_NIST_P256" }) }), false);
+  assert.equal(statementAllows(alias, { action: "kms:CreateAlias", resource: production.rootDropKeyArn }), true);
+  assert.equal(statementAllows(alias, { action: "kms:CreateAlias", resource: "arn:aws:kms:eu-west-2:368992683803:alias/unrelated" }), false);
   assert.equal(allows({ action: "kms:Sign", resource: "*", values: rootDropTagContext() }), false);
   assert.equal(temporary.Statement.some(({ Action }) => asArray(Action).includes("kms:Sign")), false);
+  assert.ok(temporary.Statement.some(({ Action }) => asArray(Action).includes("kms:CreateKey")));
+  assert.ok(temporary.Statement.some(({ Action }) => asArray(Action).includes("kms:TagResource")));
+  assert.equal(temporary.Statement.filter(({ Action }) => asArray(Action).includes("kms:CreateAlias")).length, 2);
+  assert.ok(temporary.Statement.some(({ Action, Resource }) => asArray(Action).includes("kms:CreateAlias") && Resource === production.rootDropKeyArn));
+  assert.ok(temporary.Statement.some(({ Action, Resource }) => asArray(Action).includes("kms:CreateAlias") && Resource === production.rootDropKeyResource));
+  assert.equal(temporary.Statement.some(({ Action }) => asArray(Action).includes("kms:*")), false);
   assert.throws(() => assertTemporaryReleasePolicy({ ...temporary, Statement: [...temporary.Statement, { Effect: "Allow", Action: "kms:TagResource", Resource: "arn:aws:kms:eu-west-2:368992683803:key/unrelated" }] }, { steadyStatePolicy: policy }));
 });
 
