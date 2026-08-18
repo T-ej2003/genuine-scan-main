@@ -29,6 +29,7 @@ import {
   verifyPermissionReportSignature,
 } from "./validate-production-green-stage-b-permissions.mjs";
 import { collectLiveEcsExecOperatorEvidence } from "./production-ecs-exec-operator-contract.mjs";
+import { assertStageARootDropKeyPolicySource } from "./production-stage-a-control-plane.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -93,6 +94,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
   releasePreflight = runReleaseReadPreflight,
   continueReadiness = (argv) => continueReleaseReadiness(argv),
   validateCapabilityGraph = assertStageBDeploymentCapabilityGraph,
+  readStageATerraformSource = () => fs.readFileSync(path.join(root, "infra/aws/terraform/production-green-stage-a/main.tf"), "utf8"),
 } = {}) {
   const identity = value(argv, "--identity"); const output = value(argv, "--output"); const capabilityGraph = validateCapabilityGraph(); const observedCaller = caller();
   if (identity === "administrator") {
@@ -101,6 +103,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     const planPath = path.join(root, "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
     const manifestPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json");
     const planBytes = fs.readFileSync(planPath); const plan = JSON.parse(planBytes); const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    assertStageARootDropKeyPolicySource(readStageATerraformSource());
     const generatedAt = new Date().toISOString();
     const report = permissionPreflight({
       reportGeneratorCallerArn: observedCaller, simulatedRoleArn: RELEASE_ROLE_ARN, manifest, plan, planBytes,

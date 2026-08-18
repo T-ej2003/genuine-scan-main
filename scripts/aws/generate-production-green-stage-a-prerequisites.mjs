@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
-import { normalizeStageACheckerPrincipalAws, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "./production-stage-a-control-plane.mjs";
+import { assertStageARootDropKeyPolicyDocument, normalizeStageACheckerPrincipalAws, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "./production-stage-a-control-plane.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
@@ -112,11 +112,7 @@ function stageAValues(state, options = {}) {
     const rootDropKey = oneResource(state, "aws_kms_key", "root_drop");
     const rootDropAlias = oneResource(state, "aws_kms_alias", "root_drop");
     if (!new RegExp(`^arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/[a-f0-9-]{36}$`).test(rootDropKey.arn || "") || rootDropKey.key_usage !== "SIGN_VERIFY" || rootDropKey.customer_master_key_spec !== "RSA_3072" || rootDropAlias.arn !== STAGE_B.rootDropKmsKeyArn || rootDropAlias.target_key_arn !== rootDropKey.arn) throw new Error("Stage A root-drop key and alias identities are wrong.");
-    assertExactPolicy(parsePolicy(rootDropKey.policy, "Stage A root-drop key"), { Version: "2012-10-17", Statement: [
-      { Sid: "AccountAdministration", Effect: "Allow", Principal: { AWS: `arn:aws:iam::${STAGE_B.account}:root` }, Action: "kms:*", Resource: "*" },
-      { Sid: "DenyNonRootRootDropSigning", Effect: "Deny", Principal: "*", Action: ["kms:Sign", "kms:Verify"], Resource: "*", Condition: { StringNotEquals: { "aws:PrincipalArn": `arn:aws:iam::${STAGE_B.account}:root` } } },
-      { Sid: "ReleaseReadsRootDropKey", Effect: "Allow", Principal: { AWS: `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-release-deployer` }, Action: ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetPublicKey", "kms:ListResourceTags"], Resource: "*" },
-    ] }, "Stage A root-drop key");
+    assertStageARootDropKeyPolicyDocument(parsePolicy(rootDropKey.policy, "Stage A root-drop key"));
   }
   if (oneResource(state, "aws_kms_key", "approval").arn !== STAGE_B.approvalKmsKeyArn || oneResource(state, "aws_secretsmanager_secret", "approval").arn !== STAGE_B.approvalSecretArn) throw new Error("Stage A approval resource identities are wrong.");
   assertExactPolicy(parsePolicy(oneResource(state, "aws_iam_role", "executor").assume_role_policy, "Stage A executor trust"), { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Service: "ecs-tasks.amazonaws.com" }, Action: "sts:AssumeRole" }] }, "Stage A executor trust");

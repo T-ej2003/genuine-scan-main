@@ -2,13 +2,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { assertSteadyStateReleasePolicy, assertTemporaryReleasePolicy, buildTemporaryReleasePolicy, temporaryKmsCapabilityAliasKeyStatement, temporaryKmsCapabilityAliasStatement, temporaryKmsCapabilityStatement } from "../aws/production-stage-a-temporary-kms-capability.mjs";
+import { assertStageARootDropKeyPolicySource } from "../aws/production-stage-a-control-plane.mjs";
 
 const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
+const providerReadPolicy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json", "utf8"));
 const terraformSource = fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
 const transitionId = "stage-a-root-drop-20260818";
 const refreshContract = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAProviderRefreshContract-v1.json", "utf8"));
 const statements = policy.Statement;
+const allStatements = [...statements, ...providerReadPolicy.Statement];
 const asArray = (value) => Array.isArray(value) ? value : [value];
 const matches = (pattern, value) => pattern === "*" || pattern === value || (pattern.endsWith("*") && value.startsWith(pattern.slice(0, -1)));
 
@@ -74,7 +77,7 @@ const conditionMatches = (condition = {}, values) => Object.entries(condition).e
   return actual !== undefined && expected.includes(String(actual));
 }));
 
-const allows = ({ action, resource, values }) => statements.some((statement) => statement.Effect === "Allow"
+const allows = ({ action, resource, values }) => allStatements.some((statement) => statement.Effect === "Allow"
   && asArray(statement.Action).includes(action)
   && asArray(statement.Resource).some((pattern) => matches(pattern, resource))
   && conditionMatches(statement.Condition, values));
@@ -88,9 +91,10 @@ const readCases = [
   ["ec2:DescribeSecurityGroupRules", "*"],
   ["kms:DescribeKey", production.storageKeyArn],
   ["kms:DescribeKey", production.approvalKeyArn],
-  ["kms:DescribeKey", production.rootDropKeyArn],
-  ["kms:GetKeyPolicy", production.rootDropKeyArn],
-  ["kms:ListResourceTags", production.rootDropKeyArn],
+  ["kms:DescribeKey", production.rootDropKeyResource],
+  ["kms:GetKeyPolicy", production.rootDropKeyResource],
+  ["kms:GetKeyRotationStatus", production.rootDropKeyResource],
+  ["kms:ListResourceTags", production.rootDropKeyResource],
   ["rds:DescribeDBSubnetGroups", production.subnetGroupArn],
   ["rds:ListTagsForResource", production.subnetGroupArn],
   ["rds:DescribeDBParameterGroups", production.parameterGroupArn],
@@ -162,10 +166,8 @@ test("Stage A steady-state release policy has no permanent KMS tagging capabilit
 });
 
 test("root-drop key policy retains account administration without making the release role a permanent administrator", () => {
-  const rootDrop = terraformSource.match(/resource "aws_kms_key" "root_drop" \{([\s\S]*?)\n\}/)?.[1] || "";
-  assert.match(rootDrop, /Sid = "AccountAdministration", Effect = "Allow", Principal = \{ AWS = "arn:aws:iam::368992683803:root" \}, Action = "kms:\*", Resource = "\*"/);
-  assert.match(rootDrop, /Sid = "ReleaseReadsRootDropKey"/);
-  assert.doesNotMatch(rootDrop, /release_role_arn[^\n]*PutKeyPolicy|PutKeyPolicy[^\n]*release_role_arn/);
+  assert.doesNotThrow(() => assertStageARootDropKeyPolicySource(terraformSource));
+  assert.throws(() => assertStageARootDropKeyPolicySource(terraformSource.replace("kms:GetKeyRotationStatus", "kms:GetKeyPolicy")), /provider read/);
 });
 
 test("temporary KMS capability is exact-purpose and cannot broaden the release role", () => {

@@ -72,6 +72,41 @@ const stablePolicy = (value, key) => {
   return value;
 };
 const stablePolicyJson = (value) => JSON.stringify(stablePolicy(value));
+export const STAGE_A_ROOT_DROP_RELEASE_ROLE_ARN = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
+export const STAGE_A_ROOT_DROP_PROVIDER_READ_ACTIONS = Object.freeze([
+  "kms:DescribeKey",
+  "kms:GetKeyPolicy",
+  "kms:GetKeyRotationStatus",
+  "kms:ListResourceTags",
+]);
+
+export function buildStageARootDropKeyPolicy({ releaseRoleArn = STAGE_A_ROOT_DROP_RELEASE_ROLE_ARN } = {}) {
+  return {
+    Version: "2012-10-17",
+    Statement: [
+      { Sid: "AccountAdministration", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:root" }, Action: "kms:*", Resource: "*" },
+      { Sid: "DenyNonRootRootDropSigning", Effect: "Deny", Principal: "*", Action: ["kms:Sign", "kms:Verify"], Resource: "*", Condition: { StringNotEquals: { "aws:PrincipalArn": "arn:aws:iam::368992683803:root" } } },
+      { Sid: "ReleaseReadsRootDropKey", Effect: "Allow", Principal: { AWS: releaseRoleArn }, Action: [...STAGE_A_ROOT_DROP_PROVIDER_READ_ACTIONS, "kms:GetPublicKey"], Resource: "*" },
+    ],
+  };
+}
+
+export function assertStageARootDropKeyPolicyDocument(document, { releaseRoleArn = STAGE_A_ROOT_DROP_RELEASE_ROLE_ARN } = {}) {
+  if (stablePolicyJson(document) !== stablePolicyJson(buildStageARootDropKeyPolicy({ releaseRoleArn }))) throw new Error("Stage A root-drop key policy does not match the provider read and signing contract.");
+  return true;
+}
+
+export function assertStageARootDropKeyPolicySource(source, { releaseRoleArn = STAGE_A_ROOT_DROP_RELEASE_ROLE_ARN } = {}) {
+  if (typeof source !== "string") throw new Error("Stage A root-drop Terraform source is missing.");
+  const block = source.match(/resource "aws_kms_key" "root_drop" \{([\s\S]*?)\n\}/)?.[1];
+  if (!block) throw new Error("Stage A root-drop Terraform resource is missing.");
+  const expectedActions = `Action = ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetKeyRotationStatus", "kms:GetPublicKey", "kms:ListResourceTags"]`;
+  if (!block.includes(expectedActions)) throw new Error("Stage A root-drop Terraform key policy omits a required provider read action.");
+  if (!block.includes(`Principal = { AWS = var.release_role_arn }`) || releaseRoleArn !== STAGE_A_ROOT_DROP_RELEASE_ROLE_ARN) throw new Error("Stage A root-drop Terraform release principal is not the reviewed role.");
+  if (/release_role_arn[^\n]*(?:kms:\*|kms:PutKeyPolicy)/.test(block) || /(?:kms:\*|kms:PutKeyPolicy)[^\n]*release_role_arn/.test(block)) throw new Error("Stage A root-drop Terraform release principal has permanent administration.");
+  if (!block.includes('Action = "kms:*"') || !block.includes('AWS = "arn:aws:iam::368992683803:root"')) throw new Error("Stage A root-drop Terraform account administration path is missing.");
+  return true;
+}
 export function normalizeStageACheckerPrincipalAws(value) {
   if (typeof value === "string") return value;
   if (Array.isArray(value) && value.length === 1 && typeof value[0] === "string") return value[0];

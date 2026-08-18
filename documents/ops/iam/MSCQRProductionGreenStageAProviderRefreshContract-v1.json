@@ -27,10 +27,10 @@
       "type": "aws_kms_key",
       "addresses": ["aws_kms_key.storage", "aws_kms_key.approval", "aws_kms_key.root_drop"],
       "readActions": [
-        { "action": "kms:DescribeKey", "resources": ["arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5", "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478", "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-drop"], "region": "eu-west-2", "sourceOfProof": "provider kms/key.go findKeyInfo" },
-        { "action": "kms:GetKeyPolicy", "resources": ["arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5", "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478", "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-drop"], "region": "eu-west-2", "sourceOfProof": "provider kms/key.go findKeyInfo" },
-        { "action": "kms:GetKeyRotationStatus", "resources": ["arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5"], "region": "eu-west-2", "sourceOfProof": "provider kms/key.go findKeyInfo" },
-        { "action": "kms:ListResourceTags", "resources": ["arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5", "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478", "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-drop"], "region": "eu-west-2", "sourceOfProof": "provider kms/key.go findKeyInfo" }
+        { "action": "kms:DescribeKey", "resources": ["arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5", "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478", "arn:aws:kms:eu-west-2:368992683803:key/*"], "region": "eu-west-2", "sourceOfProof": "provider kms/key.go findKeyInfo" },
+        { "action": "kms:GetKeyPolicy", "resources": ["arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5", "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478", "arn:aws:kms:eu-west-2:368992683803:key/*"], "region": "eu-west-2", "sourceOfProof": "provider kms/key.go findKeyInfo" },
+        { "action": "kms:GetKeyRotationStatus", "resources": ["arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5", "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478", "arn:aws:kms:eu-west-2:368992683803:key/*"], "region": "eu-west-2", "sourceOfProof": "provider kms/key.go findKeyInfo" },
+        { "action": "kms:ListResourceTags", "resources": ["arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5", "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478", "arn:aws:kms:eu-west-2:368992683803:key/*"], "region": "eu-west-2", "sourceOfProof": "provider kms/key.go findKeyInfo" }
       ]
     },
     {

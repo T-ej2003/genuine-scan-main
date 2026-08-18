@@ -96,6 +96,375 @@
       "evidence": "conditional If-None-Match:* creates the exact artifact-set reservation once"
     },
     {
+      "id": "refresh-stage-a-storage-approval-key-describe",
+      "phase": "refresh",
+      "action": "kms:DescribeKey",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 kms/key.go findKeyInfo refresh of the existing Stage A storage and approval keys"
+    },
+    {
+      "id": "refresh-stage-a-storage-approval-key-policy",
+      "phase": "refresh",
+      "action": "kms:GetKeyPolicy",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 kms/key.go key-policy refresh of the existing Stage A storage and approval keys"
+    },
+    {
+      "id": "refresh-stage-a-storage-approval-key-rotation",
+      "phase": "refresh",
+      "action": "kms:GetKeyRotationStatus",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 kms/key.go rotation-status refresh of the existing Stage A storage and approval keys"
+    },
+    {
+      "id": "refresh-stage-a-storage-approval-key-tags",
+      "phase": "refresh",
+      "action": "kms:ListResourceTags",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 kms/key.go tag refresh of the existing Stage A storage and approval keys"
+    },
+    {
+      "id": "refresh-stage-a-root-drop-key-describe",
+      "phase": "refresh",
+      "action": "kms:DescribeKey",
+      "resources": ["arn:aws:kms:eu-west-2:368992683803:key/*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:ResourceTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:ResourceTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:ResourceTag/Component", "type": "string", "values": ["full-rls-green-stage-a"]}
+      ],
+      "evidence": "locked hashicorp/aws 6.56.0 kms/key.go findKeyInfo readback of the Stage A root-drop key"
+    },
+    {
+      "id": "refresh-stage-a-root-drop-key-policy",
+      "phase": "refresh",
+      "action": "kms:GetKeyPolicy",
+      "resources": ["arn:aws:kms:eu-west-2:368992683803:key/*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:ResourceTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:ResourceTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:ResourceTag/Component", "type": "string", "values": ["full-rls-green-stage-a"]}
+      ],
+      "evidence": "locked hashicorp/aws 6.56.0 kms/key.go findKeyInfo readback of the Stage A root-drop key policy"
+    },
+    {
+      "id": "refresh-stage-a-root-drop-key-rotation-status",
+      "phase": "refresh",
+      "action": "kms:GetKeyRotationStatus",
+      "resources": ["arn:aws:kms:eu-west-2:368992683803:key/*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:ResourceTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:ResourceTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:ResourceTag/Component", "type": "string", "values": ["full-rls-green-stage-a"]}
+      ],
+      "evidence": "locked hashicorp/aws 6.56.0 kms/key.go findKeyInfo readback of the Stage A root-drop key rotation status"
+    },
+    {
+      "id": "refresh-stage-a-root-drop-key-tags",
+      "phase": "refresh",
+      "action": "kms:ListResourceTags",
+      "resources": ["arn:aws:kms:eu-west-2:368992683803:key/*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:ResourceTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:ResourceTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:ResourceTag/Component", "type": "string", "values": ["full-rls-green-stage-a"]}
+      ],
+      "evidence": "locked hashicorp/aws 6.56.0 kms/key.go findKeyInfo readback of the Stage A root-drop key tags"
+    },
+    {
+      "id": "reference-audit-stage-a-root-drop-public-key",
+      "phase": "reference-audit",
+      "action": "kms:GetPublicKey",
+      "resources": ["arn:aws:kms:eu-west-2:368992683803:key/*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:ResourceTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:ResourceTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:ResourceTag/Component", "type": "string", "values": ["full-rls-green-stage-a"]}
+      ],
+      "evidence": "production-root-drop-evidence.mjs release-deployer GetPublicKey verification of the Terraform-created Stage A key"
+    },
+    {
+      "id": "refresh-stage-a-kms-aliases",
+      "phase": "refresh",
+      "action": "kms:ListAliases",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 kms/alias.go findAliasByName refresh of Stage A aliases"
+    },
+    {
+      "id": "refresh-stage-a-rds-subnet-group",
+      "phase": "refresh",
+      "action": "rds:DescribeDBSubnetGroups",
+      "resources": ["arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 rds/subnet_group.go read of the Stage A subnet group"
+    },
+    {
+      "id": "refresh-stage-a-rds-parameter-groups",
+      "phase": "refresh",
+      "action": "rds:DescribeDBParameterGroups",
+      "resources": ["arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 rds/parameter_group.go parameter-group metadata refresh"
+    },
+    {
+      "id": "refresh-stage-a-rds-parameters",
+      "phase": "refresh",
+      "action": "rds:DescribeDBParameters",
+      "resources": ["arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 rds/parameter_group.go parameter readback"
+    },
+    {
+      "id": "refresh-stage-a-security-group-rules",
+      "phase": "refresh",
+      "action": "ec2:DescribeSecurityGroupRules",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 ec2/security_group_rule.go rule refresh"
+    },
+    {
+      "id": "refresh-stage-a-vpc-endpoints",
+      "phase": "refresh",
+      "action": "ec2:DescribeVpcEndpoints",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 ec2/vpc_endpoint.go endpoint refresh"
+    },
+    {
+      "id": "refresh-stage-a-vpc-endpoint-interfaces",
+      "phase": "refresh",
+      "action": "ec2:DescribeNetworkInterfaces",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 ec2/vpc_endpoint.go network-interface readback"
+    },
+    {
+      "id": "refresh-stage-a-vpc-endpoint-prefix-lists",
+      "phase": "refresh",
+      "action": "ec2:DescribePrefixLists",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 ec2/vpc_endpoint.go prefix-list readback"
+    },
+    {
+      "id": "refresh-stage-a-provider-role-metadata",
+      "phase": "refresh",
+      "action": "iam:GetRole",
+      "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 iam/role.go refresh of Stage A provider-managed roles"
+    },
+    {
+      "id": "refresh-stage-a-provider-role-attachments",
+      "phase": "refresh",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 iam/role.go attached-policy refresh of Stage A provider-managed roles"
+    },
+    {
+      "id": "refresh-stage-a-provider-role-policy-lists",
+      "phase": "refresh",
+      "action": "iam:ListRolePolicies",
+      "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 iam/role.go inline-policy list refresh of Stage A provider-managed roles"
+    },
+    {
+      "id": "refresh-stage-a-provider-log-groups",
+      "phase": "refresh",
+      "action": "logs:DescribeLogGroups",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 cloudwatch/log_group.go log-group refresh"
+    },
+    {
+      "id": "refresh-stage-a-provider-log-tags",
+      "phase": "refresh",
+      "action": "logs:ListTagsForResource",
+      "resources": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker"
+      ],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 cloudwatch/log_group.go Stage A log-group tag refresh"
+    },
+    {
+      "id": "refresh-stage-a-provider-secret-describe",
+      "phase": "refresh",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": ["*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:ResourceTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:ResourceTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:ResourceTag/Component", "type": "string", "values": ["full-rls-green-stage-a"]}
+      ],
+      "evidence": "locked hashicorp/aws 6.56.0 secretsmanager/secret.go metadata refresh"
+    },
+    {
+      "id": "refresh-stage-a-provider-secret-policy",
+      "phase": "refresh",
+      "action": "secretsmanager:GetResourcePolicy",
+      "resources": ["*"],
+      "context": [
+        {"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]},
+        {"key": "aws:ResourceTag/Environment", "type": "string", "values": ["production"]},
+        {"key": "aws:ResourceTag/ManagedBy", "type": "string", "values": ["Terraform"]},
+        {"key": "aws:ResourceTag/Component", "type": "string", "values": ["full-rls-green-stage-a"]}
+      ],
+      "evidence": "locked hashicorp/aws 6.56.0 secretsmanager/secret.go resource-policy refresh"
+    },
+    {
+      "id": "refresh-stage-b-provider-role-metadata",
+      "phase": "refresh",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task"
+      ],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 iam/role.go refresh of all Stage B Terraform-managed roles"
+    },
+    {
+      "id": "refresh-stage-b-provider-role-policies",
+      "phase": "refresh",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task"
+      ],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 iam/role.go and iam/role_policy.go inline-policy refresh"
+    },
+    {
+      "id": "refresh-stage-b-provider-role-policy-lists",
+      "phase": "refresh",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task"
+      ],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 iam/role.go inline-policy list refresh"
+    },
+    {
+      "id": "refresh-stage-b-provider-role-attachments",
+      "phase": "refresh",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task"
+      ],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 iam/role.go attached-policy refresh; required by every Stage B aws_iam_role read"
+    },
+    {
+      "id": "refresh-stage-b-provider-dynamodb",
+      "phase": "refresh",
+      "action": "dynamodb:DescribeTable",
+      "resources": ["arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 dynamodb/table.go table refresh"
+    },
+    {
+      "id": "refresh-stage-b-provider-dynamodb-backups",
+      "phase": "refresh",
+      "action": "dynamodb:DescribeContinuousBackups",
+      "resources": ["arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 dynamodb/table.go continuous-backup refresh"
+    },
+    {
+      "id": "refresh-stage-b-provider-dynamodb-ttl",
+      "phase": "refresh",
+      "action": "dynamodb:DescribeTimeToLive",
+      "resources": ["arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 dynamodb/table.go TTL refresh"
+    },
+    {
+      "id": "refresh-stage-b-provider-dynamodb-tags",
+      "phase": "refresh",
+      "action": "dynamodb:ListTagsOfResource",
+      "resources": ["arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 dynamodb/tags_gen.go table-tag refresh"
+    },
+    {
+      "id": "refresh-stage-b-provider-lambda-function",
+      "phase": "refresh",
+      "action": "lambda:GetFunction",
+      "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 lambda/function.go function refresh"
+    },
+    {
+      "id": "refresh-stage-b-provider-lambda-versions",
+      "phase": "refresh",
+      "action": "lambda:ListVersionsByFunction",
+      "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 lambda/function.go published-version refresh"
+    },
+    {
+      "id": "refresh-stage-b-provider-lambda-code-signing",
+      "phase": "refresh",
+      "action": "lambda:GetFunctionCodeSigningConfig",
+      "resources": ["arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "locked hashicorp/aws 6.56.0 lambda/function.go commercial-region zip-function readback"
+    },
+    {
       "id": "collect-stage-a-prerequisite-state",
       "phase": "preflight",
       "action": "s3:GetObject",

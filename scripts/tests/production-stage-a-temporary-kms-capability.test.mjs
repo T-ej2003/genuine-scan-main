@@ -29,6 +29,7 @@ import {
 import { ensureStageBPrivateFile } from "../aws/stage-b-artifact-contract.mjs";
 import { AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES, classifyTemporaryKmsPolicyVersion, createTemporaryKmsCapabilityRunner, runCli } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { buildStageARootDropKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
@@ -53,11 +54,15 @@ function stateFixture() {
 
 function writePlanFile(directory) {
   const planJsonFile = path.join(directory, "plan.json");
-  writeFileSync(planJsonFile, JSON.stringify({ resource_changes: [
-    { address: "aws_kms_key.root_drop", change: { actions: ["create"] } },
-    { address: "aws_kms_alias.root_drop", change: { actions: ["create"] } },
-  ] }), { mode: 0o600 });
+  writeFileSync(planJsonFile, JSON.stringify({ resource_changes: rootDropPlanChanges() }), { mode: 0o600 });
   return planJsonFile;
+}
+
+function rootDropPlanChanges() {
+  return [
+    { address: "aws_kms_key.root_drop", change: { actions: ["create"], after: { policy: JSON.stringify(buildStageARootDropKeyPolicy()), customer_master_key_spec: "RSA_3072", key_usage: "SIGN_VERIFY", bypass_policy_lockout_safety_check: false } } },
+    { address: "aws_kms_alias.root_drop", change: { actions: ["create"], after: { name: "alias/mscqr-production-root-drop", region: "eu-west-2" } } },
+  ];
 }
 
 function writeCliStageAInputs(directory) {
@@ -304,8 +309,10 @@ test("root-drop ownership is exact and both Terraform resources are required", (
 
 test("fresh Stage-A plan accepts only the exact two-create root-drop envelope", () => {
   const create = (address) => ({ address, change: { actions: ["create"] } });
-  const valid = { resource_changes: [create("aws_kms_key.root_drop"), create("aws_kms_alias.root_drop")] };
+  const valid = { resource_changes: rootDropPlanChanges() };
   assert.doesNotThrow(() => assertStageARootDropCreationPlan(valid));
+  const missingRead = structuredClone(valid); missingRead.resource_changes[0].change.after.policy = JSON.stringify({ ...buildStageARootDropKeyPolicy(), Statement: buildStageARootDropKeyPolicy().Statement.map((statement) => statement.Sid === "ReleaseReadsRootDropKey" ? { ...statement, Action: statement.Action.filter((action) => action !== "kms:GetKeyRotationStatus") } : statement) });
+  assert.throws(() => assertStageARootDropCreationPlan(missingRead), /provider read/);
   for (const plan of [
     { resource_changes: [...valid.resource_changes, create("aws_s3_bucket.unrelated")] },
     { resource_changes: [{ address: "aws_kms_key.root_drop", change: { actions: ["delete", "create"] } }, valid.resource_changes[1]] },
@@ -406,7 +413,7 @@ test("canonical producer replays authorization and safely aborts a failed apply"
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-runner-"));
   const stateFile = path.join(directory, "capability.json");
   const planJsonFile = path.join(directory, "plan.json");
-  writeFileSync(planJsonFile, JSON.stringify({ resource_changes: [{ address: "aws_kms_key.root_drop", change: { actions: ["create"] } }, { address: "aws_kms_alias.root_drop", change: { actions: ["create"] } }] }), { mode: 0o600 });
+  writeFileSync(planJsonFile, JSON.stringify({ resource_changes: rootDropPlanChanges() }), { mode: 0o600 });
   let defaultVersionId = "v1";
   let nextVersion = 2;
   const versions = new Map([["v1", policy]]);
@@ -470,7 +477,7 @@ test("canonical producer accepts an AWS CLI parsed PolicyVersion.Document object
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-object-document-"));
   const stateFile = path.join(directory, "capability.json");
   const planJsonFile = path.join(directory, "plan.json");
-  writeFileSync(planJsonFile, JSON.stringify({ resource_changes: [{ address: "aws_kms_key.root_drop", change: { actions: ["create"] } }, { address: "aws_kms_alias.root_drop", change: { actions: ["create"] } }] }), { mode: 0o600 });
+  writeFileSync(planJsonFile, JSON.stringify({ resource_changes: rootDropPlanChanges() }), { mode: 0o600 });
   let defaultVersionId = "v1";
   let nextVersion = 2;
   const versions = new Map([["v1", policy]]);
@@ -507,7 +514,7 @@ test("an unrecorded post-write capability can be recovered only with exact faile
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-recovery-"));
   const stateFile = path.join(directory, "capability.json");
   const planJsonFile = path.join(directory, "plan.json");
-  writeFileSync(planJsonFile, JSON.stringify({ resource_changes: [{ address: "aws_kms_key.root_drop", change: { actions: ["create"] } }, { address: "aws_kms_alias.root_drop", change: { actions: ["create"] } }] }), { mode: 0o600 });
+  writeFileSync(planJsonFile, JSON.stringify({ resource_changes: rootDropPlanChanges() }), { mode: 0o600 });
   let defaultVersionId = "v1";
   let nextVersion = 2;
   const versions = new Map([["v1", policy]]);

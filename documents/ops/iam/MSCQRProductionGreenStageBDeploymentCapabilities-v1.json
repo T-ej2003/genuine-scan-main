@@ -586,7 +586,7 @@
         "sid": "PublishExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a2a25b3f878315c3a843ed02eb70bd7f37a88a9152d6ef1f52d741877c39b5d1"
+        "expectedPolicySha256": "8e07ab5b92b9756ba97dbb0bfb3d27e7d8cf148f21eb09c6d5f9f17f02a2b5d7"
       },
       "required": true,
       "mutation": true
@@ -3446,7 +3446,7 @@
         "sid": "ReadExactStageBBrokerAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "a4e547a9882a2bd64c4f68db9643512a1e4eeea5bab9034b0b28c447ac496a95"
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
       },
       "required": true,
       "mutation": false
@@ -3651,6 +3651,60 @@
       "mutation": false
     },
     {
+      "id": "manifest-reference-audit-stage-a-root-drop-public-key",
+      "phase": "reference-audit",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "reference-audit-stage-a-root-drop-public-key",
+      "action": "kms:GetPublicKey",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-a"
+          ]
+        }
+      ],
+      "classification": "POST_APPLY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageARootDropProviderKey",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "manifest-refresh-read-only-canary-attached-policy-lists",
       "phase": "refresh-only",
       "identity": "RELEASE_DEPLOYER",
@@ -3820,6 +3874,404 @@
       "mutation": false
     },
     {
+      "id": "manifest-refresh-stage-a-kms-aliases",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-kms-aliases",
+      "action": "kms:ListAliases",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAKmsAliases",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-provider-log-groups",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-provider-log-groups",
+      "action": "logs:DescribeLogGroups",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAProviderLogGroups",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-provider-log-tags",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-provider-log-tags",
+      "action": "logs:ListTagsForResource",
+      "resources": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "refresh-log-tags-1",
+        "refresh-log-tags-2",
+        "refresh-log-tags-3",
+        "refresh-log-tags-4"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageALogTags",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-provider-role-attachments",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-provider-role-attachments",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "refresh-broker-attachments",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-attached-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageACheckerRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-provider-role-metadata",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-provider-role-metadata",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "checker-role-a-trust",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageACheckerRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-provider-role-policy-lists",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-provider-role-policy-lists",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-inline-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-inline-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageACheckerRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-provider-secret-describe",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-provider-secret-describe",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-a"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageASecretMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-provider-secret-policy",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-provider-secret-policy",
+      "action": "secretsmanager:GetResourcePolicy",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-a"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageASecretMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-rds-parameter-groups",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-rds-parameter-groups",
+      "action": "rds:DescribeDBParameterGroups",
+      "resources": [
+        "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAGreenRdsParameters",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-rds-parameters",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-rds-parameters",
+      "action": "rds:DescribeDBParameters",
+      "resources": [
+        "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAGreenRdsParameters",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-rds-subnet-group",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-rds-subnet-group",
+      "action": "rds:DescribeDBSubnetGroups",
+      "resources": [
+        "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAGreenRdsGroups",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "manifest-refresh-stage-a-rds-tags",
       "phase": "refresh-only",
       "identity": "RELEASE_DEPLOYER",
@@ -3846,6 +4298,490 @@
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageAGreenRdsTags",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-root-drop-key-describe",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-root-drop-key-describe",
+      "action": "kms:DescribeKey",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-a"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageARootDropProviderKey",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-root-drop-key-policy",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-root-drop-key-policy",
+      "action": "kms:GetKeyPolicy",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-a"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageARootDropProviderKey",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-root-drop-key-rotation-status",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-root-drop-key-rotation-status",
+      "action": "kms:GetKeyRotationStatus",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-a"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageARootDropProviderKey",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-root-drop-key-tags",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-root-drop-key-tags",
+      "action": "kms:ListResourceTags",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Environment",
+          "type": "string",
+          "values": [
+            "production"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/ManagedBy",
+          "type": "string",
+          "values": [
+            "Terraform"
+          ]
+        },
+        {
+          "key": "aws:ResourceTag/Component",
+          "type": "string",
+          "values": [
+            "full-rls-green-stage-a"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageARootDropProviderKey",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-security-group-rules",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-security-group-rules",
+      "action": "ec2:DescribeSecurityGroupRules",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAProviderEndpointMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-storage-approval-key-describe",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-storage-approval-key-describe",
+      "action": "kms:DescribeKey",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAStorageKeys",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-storage-approval-key-policy",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-storage-approval-key-policy",
+      "action": "kms:GetKeyPolicy",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAStorageKeys",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-storage-approval-key-rotation",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-storage-approval-key-rotation",
+      "action": "kms:GetKeyRotationStatus",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAStorageKeys",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-storage-approval-key-tags",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-storage-approval-key-tags",
+      "action": "kms:ListResourceTags",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAStorageKeys",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-vpc-endpoint-interfaces",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-vpc-endpoint-interfaces",
+      "action": "ec2:DescribeNetworkInterfaces",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAProviderEndpointMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-vpc-endpoint-prefix-lists",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-vpc-endpoint-prefix-lists",
+      "action": "ec2:DescribePrefixLists",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAProviderEndpointMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-a-vpc-endpoints",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-vpc-endpoints",
+      "action": "ec2:DescribeVpcEndpoints",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAProviderEndpointMetadata",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
         "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
@@ -4053,6 +4989,379 @@
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
         "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-b-provider-dynamodb",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-provider-dynamodb",
+      "action": "dynamodb:DescribeTable",
+      "resources": [
+        "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBReplayTable",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-b-provider-dynamodb-backups",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-provider-dynamodb-backups",
+      "action": "dynamodb:DescribeContinuousBackups",
+      "resources": [
+        "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBReplayTable",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-b-provider-dynamodb-tags",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-provider-dynamodb-tags",
+      "action": "dynamodb:ListTagsOfResource",
+      "resources": [
+        "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBReplayTable",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-b-provider-dynamodb-ttl",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-provider-dynamodb-ttl",
+      "action": "dynamodb:DescribeTimeToLive",
+      "resources": [
+        "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBReplayTable",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-b-provider-lambda-code-signing",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-provider-lambda-code-signing",
+      "action": "lambda:GetFunctionCodeSigningConfig",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBBrokerCodeSigningRead-v1.json",
+        "sid": "ReadExactStageBBrokerCodeSigningConfig",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBBrokerCodeSigningRead",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "e42b311138e9d88b4aee380a3096e9304845b129262ade4b3d43136b05a0f323"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-b-provider-lambda-function",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-provider-lambda-function",
+      "action": "lambda:GetFunction",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerFunction",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-b-provider-lambda-versions",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-provider-lambda-versions",
+      "action": "lambda:ListVersionsByFunction",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerFunction",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-b-provider-role-attachments",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-provider-role-attachments",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "refresh-broker-attachments",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-attached-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-b-provider-role-metadata",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-provider-role-metadata",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "checker-role-a-trust",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-b-provider-role-policies",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-provider-role-policies",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-refresh-stage-b-provider-role-policy-lists",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-b-provider-role-policy-lists",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "direct",
+      "probeIds": [
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-inline-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-inline-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a"
       },
       "required": true,
       "mutation": false
@@ -7456,6 +8765,14 @@
       "action": "rds:DescribeDBInstances"
     },
     {
+      "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs",
+      "action": "kms:Sign"
+    },
+    {
+      "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
       "sourceFile": "scripts/aws/production-checker-chain-contract.mjs",
       "action": "iam:GetRole"
     },
@@ -7610,6 +8927,10 @@
     {
       "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs",
       "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/production-root-drop-evidence.mjs",
+      "action": "kms:GetPublicKey"
     },
     {
       "sourceFile": "scripts/aws/publish-production-green-stage-b-approval.mjs",

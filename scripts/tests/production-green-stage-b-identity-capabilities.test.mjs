@@ -47,7 +47,7 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 33, capabilities: 224, uniqueActions: 103, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 33, capabilities: 259, uniqueActions: 125, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
@@ -161,6 +161,16 @@ test("one command keeps administrator simulation and release reads on separate i
     continueReadiness: () => ({ backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true }), validateCapabilityGraph: () => admin.capabilityGraph,
   });
   assert.equal(release.status, "ready-for-plan"); assert.equal(releaseReads, 1);
+});
+
+test("administrator preflight rejects a root-drop policy missing provider rotation readback", () => {
+  const directory = temp(); let simulated = false;
+  assert.throws(() => runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--output", path.join(directory, "admin.json"), "--signature-output", path.join(directory, "admin.signature.json")], {
+    caller: () => "arn:aws:iam::368992683803:root",
+    readStageATerraformSource: () => fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8").replace("kms:GetKeyRotationStatus", "kms:GetKeyPolicy"),
+    permissionPreflight: () => { simulated = true; return {}; },
+  }), /provider read/);
+  assert.equal(simulated, false);
 });
 
 test("invalid release capability report stops before backend readiness", () => {
