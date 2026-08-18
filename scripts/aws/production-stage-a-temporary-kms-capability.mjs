@@ -24,6 +24,10 @@ export const TEMPORARY_KMS_CAPABILITY = Object.freeze({
   keyUsage: "SIGN_VERIFY",
 });
 
+export const AWS_MANAGED_POLICY_DOCUMENT_LIMIT = 6144;
+export const TEMPORARY_POLICY_MIN_HEADROOM = 512;
+export const TEMPORARY_POLICY_MAX_BYTES = AWS_MANAGED_POLICY_DOCUMENT_LIMIT - TEMPORARY_POLICY_MIN_HEADROOM;
+
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const VERSION = /^v[1-9][0-9]*$/;
@@ -35,6 +39,17 @@ const canonical = (value) => Array.isArray(value)
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const equal = (left, right) => canonical(left) === canonical(right);
 const exactAction = (value) => value === TEMPORARY_KMS_CAPABILITY.action || (Array.isArray(value) && value.length === 1 && value[0] === TEMPORARY_KMS_CAPABILITY.action);
+const withoutStatementIds = (policy) => ({ ...policy, Statement: statements(policy).map(({ Sid, ...statement }) => statement) });
+
+export function policyDocumentBytes(policy) {
+  return Buffer.byteLength(JSON.stringify(policy));
+}
+
+export function assertManagedPolicyDocumentSize(policy, { label = "IAM managed policy document" } = {}) {
+  const bytes = policyDocumentBytes(policy);
+  if (bytes > TEMPORARY_POLICY_MAX_BYTES) fail(`${label} is ${bytes} bytes; maximum is ${TEMPORARY_POLICY_MAX_BYTES} bytes to retain ${TEMPORARY_POLICY_MIN_HEADROOM} bytes of AWS policy-size headroom`);
+  return bytes;
+}
 
 function fail(message) { throw new Error(`Temporary Stage-A KMS capability: ${message}`); }
 
@@ -76,7 +91,10 @@ export function assertSteadyStateReleasePolicy(policy) {
 
 export function buildTemporaryReleasePolicy(steadyStatePolicy, identity) {
   assertSteadyStateReleasePolicy(steadyStatePolicy);
-  return { ...structuredClone(steadyStatePolicy), Statement: [...steadyStatePolicy.Statement, temporaryKmsCapabilityStatement(identity)] };
+  const compactSteadyState = withoutStatementIds(structuredClone(steadyStatePolicy));
+  const policy = { ...compactSteadyState, Statement: [...compactSteadyState.Statement, temporaryKmsCapabilityStatement(identity)] };
+  assertManagedPolicyDocumentSize(policy, { label: "Temporary Stage-A KMS policy" });
+  return policy;
 }
 
 export function assertTemporaryReleasePolicy(policy, { steadyStatePolicy, sourceSha, transitionId } = {}) {
@@ -85,8 +103,9 @@ export function assertTemporaryReleasePolicy(policy, { steadyStatePolicy, source
   const temporary = statements(policy).filter(isTemporaryTagResourceStatement);
   if (temporary.length !== 1 || !equal(temporary[0], temporaryKmsCapabilityStatement({ sourceSha, transitionId }))) fail("temporary policy statement is not exact");
   const withoutTemporary = statements(policy).filter((statement) => !isTemporaryTagResourceStatement(statement));
-  if (!equal(withoutTemporary, statements(steadyStatePolicy))) fail("temporary policy changes more than the exact creation capability");
+  if (!equal(withoutStatementIds({ ...policy, Statement: withoutTemporary }), withoutStatementIds(steadyStatePolicy))) fail("temporary policy changes more than the exact creation capability");
   if (statements(policy).some((statement) => (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).some((action) => ["kms:Sign", "kms:Decrypt", "kms:Encrypt", "kms:CreateGrant", "kms:PutKeyPolicy", "kms:ScheduleKeyDeletion", "kms:DisableKey"].includes(action)))) fail("temporary policy grants an unrelated KMS capability");
+  assertManagedPolicyDocumentSize(policy, { label: "Temporary Stage-A KMS policy" });
   return true;
 }
 
