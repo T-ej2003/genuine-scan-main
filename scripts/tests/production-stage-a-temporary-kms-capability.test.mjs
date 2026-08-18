@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import {
   TEMPORARY_KMS_CAPABILITY,
@@ -33,14 +33,8 @@ const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenSt
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
 const transitionId = "stage-a-root-drop-20260818";
 const planSha256 = "a".repeat(64);
-const policySourcePath = "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json";
-const historicalPolicyCommits = new Map([
-  ["v4", "2cf74660e9765204e1dece3cb4b81260fe3abc4c"],
-  ["v5", "6931632f86d39ab85bc140756d36ae19800198f6"],
-  ["v6", "dafe2a08ff10d67a8d3d7307dc3686358c18b2fe"],
-  ["v7", "87cdff9abf3b3841770bd9cca4bbb42f7e9b8c10"],
-]);
-const historicalPolicies = new Map([...historicalPolicyCommits].map(([versionId, commit]) => [versionId, JSON.parse(execFileSync("git", ["show", `${commit}:${policySourcePath}`], { encoding: "utf8" }))]));
+const historicalPolicyFixtures = JSON.parse(readFileSync("scripts/tests/fixtures/production-stage-a-historical-policies.json", "utf8"));
+const historicalPolicies = new Map(historicalPolicyFixtures.map(({ versionId, document }) => [versionId, document]));
 const canonicalPolicy = (value) => Array.isArray(value) ? `[${value.map(canonicalPolicy).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalPolicy(value[key])}`).join(",")}}` : JSON.stringify(value);
 const policySha256 = (value) => createHash("sha256").update(canonicalPolicy(value)).digest("hex");
 
@@ -327,9 +321,11 @@ test("launch handoff resolves the canonical manifest path", () => {
 
 test("historical steady-state recognition is exact, repository-bound, and default-protected", () => {
   for (const source of AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES) {
-    const versionId = [...historicalPolicyCommits].find(([, commit]) => commit === source.repositoryCommit)?.[0];
-    const document = historicalPolicies.get(versionId);
-    assert.equal(policySha256(document), source.policySha256);
+    const fixture = historicalPolicyFixtures.find(({ sourceCommitSha }) => sourceCommitSha === source.repositoryCommit);
+    const versionId = fixture?.versionId;
+    const document = fixture?.document;
+    assert.equal(fixture?.canonicalSha256, source.policySha256);
+    assert.equal(policySha256(document), fixture?.canonicalSha256);
     assert.equal(classifyTemporaryKmsPolicyVersion({ VersionId: versionId, IsDefaultVersion: false, document }, { steadyStatePolicy: policy, sourceSha, transitionId }), "RECOGNIZED_STALE_STEADY_STATE");
     assert.equal(classifyTemporaryKmsPolicyVersion({ VersionId: versionId, IsDefaultVersion: true, document }, { steadyStatePolicy: policy, sourceSha, transitionId }), "UNKNOWN");
   }

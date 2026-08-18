@@ -1,0 +1,923 @@
+[
+  {
+    "versionId": "v4",
+    "sourceCommitSha": "2cf74660e9765204e1dece3cb4b81260fe3abc4c",
+    "sourcePath": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+    "canonicalSha256": "86c0bcbc8ba8bfeb6491681d6f85e801c4e5c9a9a8f168ed931a9051ffeb3531",
+    "document": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "ReadExactStageAStateForHandoff",
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+        },
+        {
+          "Sid": "ReadExactStageABackendBucketLocation",
+          "Effect": "Allow",
+          "Action": "s3:GetBucketLocation",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"
+        },
+        {
+          "Sid": "WriteExactStageAState",
+          "Effect": "Allow",
+          "Action": "s3:PutObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+        },
+        {
+          "Sid": "ReadExactStageALock",
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+        },
+        {
+          "Sid": "WriteExactStageALock",
+          "Effect": "Allow",
+          "Action": "s3:PutObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+        },
+        {
+          "Sid": "ReleaseExactStageALock",
+          "Effect": "Allow",
+          "Action": "s3:DeleteObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+        },
+        {
+          "Sid": "ReadExactStageAProviderEndpointMetadata",
+          "Effect": "Allow",
+          "Action": [
+            "ec2:DescribeSecurityGroups",
+            "ec2:DescribeSecurityGroupRules",
+            "ec2:DescribeVpcEndpoints",
+            "ec2:DescribeNetworkInterfaces",
+            "ec2:DescribePrefixLists"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAStorageKeys",
+          "Effect": "Allow",
+          "Action": [
+            "kms:DescribeKey",
+            "kms:GetKeyPolicy",
+            "kms:GetKeyRotationStatus",
+            "kms:ListResourceTags"
+          ],
+          "Resource": [
+            "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+            "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsGroups",
+          "Effect": "Allow",
+          "Action": "rds:DescribeDBSubnetGroups",
+          "Resource": "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsTags",
+          "Effect": "Allow",
+          "Action": "rds:ListTagsForResource",
+          "Resource": [
+            "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
+            "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsParameters",
+          "Effect": "Allow",
+          "Action": [
+            "rds:DescribeDBParameterGroups",
+            "rds:DescribeDBParameters"
+          ],
+          "Resource": "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsInstance",
+          "Effect": "Allow",
+          "Action": "rds:DescribeDBInstances",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAKmsAliases",
+          "Effect": "Allow",
+          "Action": "kms:ListAliases",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageASecretMetadata",
+          "Effect": "Allow",
+          "Action": [
+            "secretsmanager:DescribeSecret",
+            "secretsmanager:GetResourcePolicy"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2",
+              "aws:ResourceTag/Environment": "production",
+              "aws:ResourceTag/ManagedBy": "Terraform",
+              "aws:ResourceTag/Component": "full-rls-green-stage-a"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageACheckerRole",
+          "Effect": "Allow",
+          "Action": [
+            "iam:GetRole",
+            "iam:ListAttachedRolePolicies",
+            "iam:ListRolePolicies"
+          ],
+          "Resource": [
+            "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+            "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
+            "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"
+          ]
+        },
+        {
+          "Sid": "ReadExactStageACheckerRolePolicy",
+          "Effect": "Allow",
+          "Action": "iam:GetRolePolicy",
+          "Resource": "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+        },
+        {
+          "Sid": "ReadExactStageAProviderLogGroups",
+          "Effect": "Allow",
+          "Action": "logs:DescribeLogGroups",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageALogTags",
+          "Effect": "Allow",
+          "Action": "logs:ListTagsForResource",
+          "Resource": [
+            "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker",
+            "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ApplyExactStageAEndpointSecurityGroupIngress",
+          "Effect": "Allow",
+          "Action": "ec2:AuthorizeSecurityGroupIngress",
+          "Resource": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ApplyExactStageACheckerRoleChainPolicy",
+          "Effect": "Allow",
+          "Action": "iam:PutRolePolicy",
+          "Resource": "arn:aws:iam::368992683803:role/mscqr-production-independent-checker"
+        }
+      ]
+    }
+  },
+  {
+    "versionId": "v5",
+    "sourceCommitSha": "6931632f86d39ab85bc140756d36ae19800198f6",
+    "sourcePath": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+    "canonicalSha256": "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef",
+    "document": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "ReadExactStageAStateForHandoff",
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+        },
+        {
+          "Sid": "ReadExactStageABackendBucketLocation",
+          "Effect": "Allow",
+          "Action": "s3:GetBucketLocation",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"
+        },
+        {
+          "Sid": "WriteExactStageAState",
+          "Effect": "Allow",
+          "Action": "s3:PutObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+        },
+        {
+          "Sid": "ReadExactStageALock",
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+        },
+        {
+          "Sid": "WriteExactStageALock",
+          "Effect": "Allow",
+          "Action": "s3:PutObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+        },
+        {
+          "Sid": "ReleaseExactStageALock",
+          "Effect": "Allow",
+          "Action": "s3:DeleteObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+        },
+        {
+          "Sid": "ReadExactStageAProviderEndpointMetadata",
+          "Effect": "Allow",
+          "Action": [
+            "ec2:DescribeSecurityGroups",
+            "ec2:DescribeSecurityGroupRules",
+            "ec2:DescribeVpcEndpoints",
+            "ec2:DescribeNetworkInterfaces",
+            "ec2:DescribePrefixLists"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAStorageKeys",
+          "Effect": "Allow",
+          "Action": [
+            "kms:DescribeKey",
+            "kms:GetKeyPolicy",
+            "kms:GetKeyRotationStatus",
+            "kms:ListResourceTags"
+          ],
+          "Resource": [
+            "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+            "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsGroups",
+          "Effect": "Allow",
+          "Action": "rds:DescribeDBSubnetGroups",
+          "Resource": "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsTags",
+          "Effect": "Allow",
+          "Action": "rds:ListTagsForResource",
+          "Resource": [
+            "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
+            "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsParameters",
+          "Effect": "Allow",
+          "Action": [
+            "rds:DescribeDBParameterGroups",
+            "rds:DescribeDBParameters"
+          ],
+          "Resource": "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsInstance",
+          "Effect": "Allow",
+          "Action": "rds:DescribeDBInstances",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAKmsAliases",
+          "Effect": "Allow",
+          "Action": "kms:ListAliases",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageASecretMetadata",
+          "Effect": "Allow",
+          "Action": [
+            "secretsmanager:DescribeSecret",
+            "secretsmanager:GetResourcePolicy"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2",
+              "aws:ResourceTag/Environment": "production",
+              "aws:ResourceTag/ManagedBy": "Terraform",
+              "aws:ResourceTag/Component": "full-rls-green-stage-a"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageACheckerRole",
+          "Effect": "Allow",
+          "Action": [
+            "iam:GetRole",
+            "iam:ListAttachedRolePolicies",
+            "iam:ListRolePolicies"
+          ],
+          "Resource": [
+            "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+            "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
+            "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"
+          ]
+        },
+        {
+          "Sid": "ReadExactStageACheckerRolePolicy",
+          "Effect": "Allow",
+          "Action": "iam:GetRolePolicy",
+          "Resource": [
+            "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+            "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+          ]
+        },
+        {
+          "Sid": "ReadExactStageAProviderLogGroups",
+          "Effect": "Allow",
+          "Action": "logs:DescribeLogGroups",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageALogTags",
+          "Effect": "Allow",
+          "Action": "logs:ListTagsForResource",
+          "Resource": [
+            "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker",
+            "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ApplyExactStageAEndpointSecurityGroupIngress",
+          "Effect": "Allow",
+          "Action": "ec2:AuthorizeSecurityGroupIngress",
+          "Resource": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ApplyExactStageACheckerRoleChainPolicy",
+          "Effect": "Allow",
+          "Action": "iam:PutRolePolicy",
+          "Resource": "arn:aws:iam::368992683803:role/mscqr-production-independent-checker"
+        }
+      ]
+    }
+  },
+  {
+    "versionId": "v6",
+    "sourceCommitSha": "dafe2a08ff10d67a8d3d7307dc3686358c18b2fe",
+    "sourcePath": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+    "canonicalSha256": "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580",
+    "document": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "ReadExactStageAStateForHandoff",
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+        },
+        {
+          "Sid": "ReadExactStageABackendBucketLocation",
+          "Effect": "Allow",
+          "Action": "s3:GetBucketLocation",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"
+        },
+        {
+          "Sid": "WriteExactStageAState",
+          "Effect": "Allow",
+          "Action": "s3:PutObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+        },
+        {
+          "Sid": "ReadExactStageALock",
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+        },
+        {
+          "Sid": "WriteExactStageALock",
+          "Effect": "Allow",
+          "Action": "s3:PutObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+        },
+        {
+          "Sid": "ReleaseExactStageALock",
+          "Effect": "Allow",
+          "Action": "s3:DeleteObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+        },
+        {
+          "Sid": "ReadExactStageAProviderEndpointMetadata",
+          "Effect": "Allow",
+          "Action": [
+            "ec2:DescribeSecurityGroups",
+            "ec2:DescribeSecurityGroupRules",
+            "ec2:DescribeVpcEndpoints",
+            "ec2:DescribeNetworkInterfaces",
+            "ec2:DescribePrefixLists"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAStorageKeys",
+          "Effect": "Allow",
+          "Action": [
+            "kms:DescribeKey",
+            "kms:GetKeyPolicy",
+            "kms:GetKeyRotationStatus",
+            "kms:ListResourceTags"
+          ],
+          "Resource": [
+            "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+            "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsGroups",
+          "Effect": "Allow",
+          "Action": "rds:DescribeDBSubnetGroups",
+          "Resource": "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsTags",
+          "Effect": "Allow",
+          "Action": "rds:ListTagsForResource",
+          "Resource": [
+            "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
+            "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsParameters",
+          "Effect": "Allow",
+          "Action": [
+            "rds:DescribeDBParameterGroups",
+            "rds:DescribeDBParameters"
+          ],
+          "Resource": "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsInstance",
+          "Effect": "Allow",
+          "Action": "rds:DescribeDBInstances",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAKmsAliases",
+          "Effect": "Allow",
+          "Action": "kms:ListAliases",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageASecretMetadata",
+          "Effect": "Allow",
+          "Action": [
+            "secretsmanager:DescribeSecret",
+            "secretsmanager:GetResourcePolicy"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2",
+              "aws:ResourceTag/Environment": "production",
+              "aws:ResourceTag/ManagedBy": "Terraform",
+              "aws:ResourceTag/Component": "full-rls-green-stage-a"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageACheckerRole",
+          "Effect": "Allow",
+          "Action": [
+            "iam:GetRole",
+            "iam:ListAttachedRolePolicies",
+            "iam:ListRolePolicies"
+          ],
+          "Resource": [
+            "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+            "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+            "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
+            "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"
+          ]
+        },
+        {
+          "Sid": "ReadExactStageACheckerRolePolicy",
+          "Effect": "Allow",
+          "Action": "iam:GetRolePolicy",
+          "Resource": [
+            "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+            "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+          ]
+        },
+        {
+          "Sid": "ReadExactStageAProviderLogGroups",
+          "Effect": "Allow",
+          "Action": "logs:DescribeLogGroups",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageALogTags",
+          "Effect": "Allow",
+          "Action": "logs:ListTagsForResource",
+          "Resource": [
+            "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker",
+            "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ApplyExactStageAEndpointSecurityGroupIngress",
+          "Effect": "Allow",
+          "Action": "ec2:AuthorizeSecurityGroupIngress",
+          "Resource": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ApplyExactStageACheckerRoleChainPolicy",
+          "Effect": "Allow",
+          "Action": "iam:PutRolePolicy",
+          "Resource": "arn:aws:iam::368992683803:role/mscqr-production-independent-checker"
+        },
+        {
+          "Sid": "ApplyExactStageACheckerRoleTrust",
+          "Effect": "Allow",
+          "Action": "iam:UpdateAssumeRolePolicy",
+          "Resource": "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+        }
+      ]
+    }
+  },
+  {
+    "versionId": "v7",
+    "sourceCommitSha": "87cdff9abf3b3841770bd9cca4bbb42f7e9b8c10",
+    "sourcePath": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+    "canonicalSha256": "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6",
+    "document": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "ReadExactStageAStateForHandoff",
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+        },
+        {
+          "Sid": "ReadExactStageABackendBucketLocation",
+          "Effect": "Allow",
+          "Action": "s3:GetBucketLocation",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"
+        },
+        {
+          "Sid": "WriteExactStageAState",
+          "Effect": "Allow",
+          "Action": "s3:PutObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+        },
+        {
+          "Sid": "ReadExactStageALock",
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+        },
+        {
+          "Sid": "WriteExactStageALock",
+          "Effect": "Allow",
+          "Action": "s3:PutObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+        },
+        {
+          "Sid": "ReleaseExactStageALock",
+          "Effect": "Allow",
+          "Action": "s3:DeleteObject",
+          "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+        },
+        {
+          "Sid": "ReadExactStageAProviderEndpointMetadata",
+          "Effect": "Allow",
+          "Action": [
+            "ec2:DescribeSecurityGroups",
+            "ec2:DescribeSecurityGroupRules",
+            "ec2:DescribeVpcEndpoints",
+            "ec2:DescribeNetworkInterfaces",
+            "ec2:DescribePrefixLists"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAStorageKeys",
+          "Effect": "Allow",
+          "Action": [
+            "kms:DescribeKey",
+            "kms:GetKeyPolicy",
+            "kms:GetKeyRotationStatus",
+            "kms:ListResourceTags"
+          ],
+          "Resource": [
+            "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
+            "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsGroups",
+          "Effect": "Allow",
+          "Action": "rds:DescribeDBSubnetGroups",
+          "Resource": "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsTags",
+          "Effect": "Allow",
+          "Action": "rds:ListTagsForResource",
+          "Resource": [
+            "arn:aws:rds:eu-west-2:368992683803:subgrp:mscqr-production-rls-green-phase2",
+            "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsParameters",
+          "Effect": "Allow",
+          "Action": [
+            "rds:DescribeDBParameterGroups",
+            "rds:DescribeDBParameters"
+          ],
+          "Resource": "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAGreenRdsInstance",
+          "Effect": "Allow",
+          "Action": "rds:DescribeDBInstances",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageAKmsAliases",
+          "Effect": "Allow",
+          "Action": "kms:ListAliases",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageASecretMetadata",
+          "Effect": "Allow",
+          "Action": [
+            "secretsmanager:DescribeSecret",
+            "secretsmanager:GetResourcePolicy"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2",
+              "aws:ResourceTag/Environment": "production",
+              "aws:ResourceTag/ManagedBy": "Terraform",
+              "aws:ResourceTag/Component": "full-rls-green-stage-a"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageACheckerRole",
+          "Effect": "Allow",
+          "Action": [
+            "iam:GetRole",
+            "iam:ListAttachedRolePolicies",
+            "iam:ListRolePolicies"
+          ],
+          "Resource": [
+            "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+            "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+            "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
+            "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"
+          ]
+        },
+        {
+          "Sid": "ReadExactStageACheckerRolePolicy",
+          "Effect": "Allow",
+          "Action": "iam:GetRolePolicy",
+          "Resource": [
+            "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+            "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+          ]
+        },
+        {
+          "Sid": "ReadExactStageAProviderLogGroups",
+          "Effect": "Allow",
+          "Action": "logs:DescribeLogGroups",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExactStageALogTags",
+          "Effect": "Allow",
+          "Action": "logs:ListTagsForResource",
+          "Resource": [
+            "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker",
+            "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/full-rls-green"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ApplyExactStageAEndpointSecurityGroupIngress",
+          "Effect": "Allow",
+          "Action": "ec2:AuthorizeSecurityGroupIngress",
+          "Resource": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "eu-west-2"
+            }
+          }
+        },
+        {
+          "Sid": "ApplyExactStageACheckerRoleChainPolicy",
+          "Effect": "Allow",
+          "Action": "iam:PutRolePolicy",
+          "Resource": "arn:aws:iam::368992683803:role/mscqr-production-independent-checker"
+        },
+        {
+          "Sid": "ApplyExactStageACheckerPublicationPolicy",
+          "Effect": "Allow",
+          "Action": "iam:PutRolePolicy",
+          "Resource": "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+        },
+        {
+          "Sid": "ApplyExactStageACheckerRoleTrust",
+          "Effect": "Allow",
+          "Action": "iam:UpdateAssumeRolePolicy",
+          "Resource": "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+        }
+      ]
+    }
+  }
+]
