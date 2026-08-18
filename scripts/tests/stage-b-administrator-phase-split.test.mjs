@@ -62,10 +62,11 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
   });
   assertStageBPermissionEvidenceKind(report, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredAllowedCount, 156);
+  assert.equal(report.requiredAllowedCount, 157);
   assert.equal(report.forbiddenDeniedCount, 37);
   assert.equal(report.principalEvaluations.ecsExecVerifier.status, "valid");
   assert.equal(report.cutoverCritical.stageAIngress, "allowed");
+  assert.equal(report.cutoverCritical.stageARootDropKeyTags, "allowed");
   assert.equal(report.cutoverCritical.stageACheckerRoleChain, "allowed");
   assert.equal(report.cutoverCritical.stageACheckerPublication, "allowed");
   assert.equal(report.cutoverCritical.releaseEcsExec, "implicitDeny");
@@ -79,6 +80,9 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
   const missingStageAEvidence = structuredClone(report);
   missingStageAEvidence.requiredEvaluations = missingStageAEvidence.requiredEvaluations.filter((item) => item.manifestId !== "apply-stage-a-checker-role-chain-policy");
   assert.throws(() => assertCutoverCriticalEvidence(missingStageAEvidence), /apply-stage-a-checker-role-chain-policy/);
+  const missingRootDropTagEvidence = structuredClone(report);
+  missingRootDropTagEvidence.requiredEvaluations = missingRootDropTagEvidence.requiredEvaluations.filter((item) => item.manifestId !== "apply-stage-a-root-drop-key-tags");
+  assert.throws(() => assertCutoverCriticalEvidence(missingRootDropTagEvidence), /apply-stage-a-root-drop-key-tags/);
   const wrongTrust = structuredClone(report);
   wrongTrust.ecsExecVerifierTrust.converged = false;
   assert.throws(() => assertCutoverCriticalEvidence(wrongTrust), /trust evidence/);

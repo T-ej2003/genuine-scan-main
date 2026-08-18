@@ -63,6 +63,7 @@ const checkerRoleChange = ({ actions = ["no-op"], before = {}, after = {} } = {}
 function iamFixture() {
   const required = [
     { manifestId: "apply-stage-a-endpoint-security-group-ingress", action: "ec2:AuthorizeSecurityGroupIngress", resource: "arn:aws:ec2:eu-west-2:368992683803:security-group/endpoint", decision: "allowed" },
+    { manifestId: "apply-stage-a-root-drop-key-tags", action: "kms:TagResource", resource: "*", decision: "allowed" },
     { manifestId: "apply-stage-a-checker-role-chain-policy", action: "iam:PutRolePolicy", resource: "arn:aws:iam::368992683803:role/mscqr-production-independent-checker", decision: "allowed" },
     { manifestId: "apply-stage-a-checker-publication-policy", action: "iam:PutRolePolicy", resource: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", decision: "allowed" },
     { manifestId: "activate-exact-ecs-service", action: "ecs:UpdateService", resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2", decision: "allowed" },

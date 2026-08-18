@@ -38,9 +38,23 @@ const context = (region = production.region, overrides = {}) => ({
   ...overrides,
 });
 
+const rootDropTagContext = (overrides = {}) => ({
+  "aws:RequestedRegion": production.region,
+  "aws:RequestTag/Environment": "production",
+  "aws:RequestTag/ManagedBy": "Terraform",
+  "aws:RequestTag/Component": "full-rls-green-stage-a",
+  "aws:RequestTag/Stack": "production-green-stage-a",
+  "aws:TagKeys": ["Environment", "ManagedBy", "Component", "Stack"],
+  "kms:CallerAccount": "368992683803",
+  "kms:KeySpec": "RSA_3072",
+  "kms:KeyUsage": "SIGN_VERIFY",
+  ...overrides,
+});
+
 const conditionMatches = (condition = {}, values) => Object.entries(condition).every(([operator, entries]) => Object.entries(entries).every(([key, expectedValue]) => {
   const expected = asArray(expectedValue).map(String);
   const actual = values[key];
+  if (operator === "ForAllValues:StringEquals") return Array.isArray(actual) && actual.every((value) => expected.includes(String(value)));
   if (operator !== "StringEquals") throw new Error(`Unsupported condition operator in focused contract: ${operator}`);
   return actual !== undefined && expected.includes(String(actual));
 }));
@@ -118,6 +132,14 @@ test("Stage A apply permits only the exact endpoint security-group ingress", () 
   assert.equal(allows({ action: "ec2:AuthorizeSecurityGroupIngress", resource: production.endpointSecurityGroupArn, values: context("us-east-1") }), false);
 });
 
+test("Stage A root-drop creation permits only exact KMS tag-on-create context", () => {
+  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext() }), true);
+  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext({ "aws:RequestTag/Stack": "legacy" }) }), false);
+  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext({ "kms:KeyUsage": "ENCRYPT_DECRYPT" }) }), false);
+  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext({ "aws:RequestedRegion": "us-east-1" }) }), false);
+  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext({ "aws:TagKeys": ["Environment", "ManagedBy", "Component", "Stack", "Extra"] }) }), false);
+});
+
 test("Stage A apply identity permits only the exact checker inline policies", () => {
   assert.equal(allows({ action: "iam:GetRolePolicy", resource: production.checkerSourceRoleArn, values: context() }), true);
   assert.equal(allows({ action: "iam:GetRolePolicy", resource: production.checkerRoleArn, values: context() }), true);
@@ -153,6 +175,8 @@ test("Stage A policy has no unrelated mutation or secret/value authority", () =>
     "logs:DeleteLogGroup", "ec2:RevokeSecurityGroupIngress", "ec2:ModifySecurityGroupRules", "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup", "ecs:UpdateService", "ecs:RegisterTaskDefinition",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);
   assert.equal(actions.some((action) => /^(ec2|rds|secretsmanager|kms):\*$/.test(action)), false);
+  assert.equal(actions.includes("kms:Sign"), false);
+  assert.equal(actions.includes("kms:PutKeyPolicy"), false);
   assert.equal(statements.filter(({ Action }) => asArray(Action).includes("ec2:AuthorizeSecurityGroupIngress")).length, 1);
   assert.equal(actions.includes("s3:DeleteObject"), true);
   assert.equal(actions.includes("s3:PutObject"), true);

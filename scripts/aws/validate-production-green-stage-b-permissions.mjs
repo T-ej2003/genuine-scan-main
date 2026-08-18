@@ -30,6 +30,7 @@ export const REGION = "eu-west-2";
 export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
 export const CUTOVER_CRITICAL_CAPABILITIES = Object.freeze([
   Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "apply-stage-a-endpoint-security-group-ingress", action: "ec2:AuthorizeSecurityGroupIngress" }),
+  Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "apply-stage-a-root-drop-key-tags", action: "kms:TagResource" }),
   Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "apply-stage-a-checker-role-chain-policy", action: "iam:PutRolePolicy" }),
   Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "apply-stage-a-checker-publication-policy", action: "iam:PutRolePolicy" }),
   Object.freeze({ principal: RELEASE_ROLE_ARN, evaluationId: "activate-exact-ecs-service", action: "ecs:UpdateService" }),
@@ -349,11 +350,12 @@ function sameStringSet(left, right) {
 }
 
 export const REVIEWED_SIMULATION_CONTEXT_REGISTRY = Object.freeze([
-  { key: "aws:RequestTag/Component", type: "string", values: Object.freeze(["full-rls-green-stage-b"]) },
+  { key: "aws:RequestTag/Component", type: "string", values: Object.freeze(["full-rls-green-stage-a", "full-rls-green-stage-b"]) },
   { key: "aws:RequestTag/Environment", type: "string", values: Object.freeze(["production"]) },
   { key: "aws:RequestTag/ManagedBy", type: "string", values: Object.freeze(["Terraform"]) },
   { key: "aws:RequestTag/MSCQRExecTarget", type: "string", values: Object.freeze(["production-backend"]) },
   { key: "aws:RequestTag/MSCQRPreDeploymentInventory", type: "string", values: Object.freeze(["rotation-inventory"]) },
+  { key: "aws:RequestTag/Stack", type: "string", values: Object.freeze(["production-green-stage-a"]) },
   { key: "aws:RequestedRegion", type: "string", values: Object.freeze([REGION]) },
   { key: "aws:ResourceTag/Component", type: "string", values: Object.freeze(["full-rls-green-stage-b"]) },
   { key: "aws:ResourceTag/Environment", type: "string", values: Object.freeze(["production"]) },
@@ -366,6 +368,9 @@ export const REVIEWED_SIMULATION_CONTEXT_REGISTRY = Object.freeze([
   { key: "ecs:task-definition", type: "stringList", values: Object.freeze(["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47"]) },
   { key: "ecs:task-memory", type: "numeric", values: Object.freeze(["512", "1024", "2048"]) },
   { key: "iam:PassedToService", type: "string", values: Object.freeze(["ecs-tasks.amazonaws.com"]) },
+  { key: "kms:CallerAccount", type: "string", values: Object.freeze([ACCOUNT]) },
+  { key: "kms:KeySpec", type: "string", values: Object.freeze(["RSA_3072"]) },
+  { key: "kms:KeyUsage", type: "string", values: Object.freeze(["SIGN_VERIFY"]) },
   { key: "s3:if-none-match", type: "string", values: Object.freeze(["present"]) },
   { key: "secretsmanager:Name", type: "string", values: Object.freeze(["mscqr/production/rls-green/artifact-signing/private-key-current", "mscqr/production/rls-green/artifact-signing/public-key-current", "mscqr/production/rls-green/artifact-signing/active-key-version", "mscqr/production/rls-green/artifact-signing/public-keys-json", "mscqr/prod/rotation/jwt-previous", "mscqr/prod/rotation/jwt-pending", "mscqr/prod/rotation/qr-private-pending", "mscqr/prod/rotation/qr-public-previous", "mscqr/prod/rotation/qr-public-pending", "mscqr/prod/rotation/qr-current-version", "mscqr/prod/rotation/qr-previous-version"]) },
 ]);
@@ -1223,6 +1228,7 @@ export function runPermissionPreflight({
     ecsExecVerifierTrust: ecsExecVerifierEvidence || null,
     cutoverCritical: {
       stageAIngress: requiredResults.find(({ manifestId }) => manifestId === "apply-stage-a-endpoint-security-group-ingress")?.decision || null,
+      stageARootDropKeyTags: requiredResults.find(({ manifestId }) => manifestId === "apply-stage-a-root-drop-key-tags")?.decision || null,
       stageACheckerRoleChain: requiredResults.find(({ manifestId }) => manifestId === "apply-stage-a-checker-role-chain-policy")?.decision || null,
       stageACheckerPublication: requiredResults.find(({ manifestId }) => manifestId === "apply-stage-a-checker-publication-policy")?.decision || null,
       releaseForward: requiredResults.find(({ manifestId }) => manifestId === "activate-exact-ecs-service")?.decision || null,

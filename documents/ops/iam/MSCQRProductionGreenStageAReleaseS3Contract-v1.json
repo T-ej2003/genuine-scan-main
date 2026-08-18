@@ -136,6 +136,27 @@
       }
     },
     {
+      "Sid": "TagOnlyExactStageARootDropKeyAtCreation",
+      "Effect": "Allow",
+      "Action": "kms:TagResource",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Component": "full-rls-green-stage-a",
+          "aws:RequestTag/Stack": "production-green-stage-a",
+          "kms:CallerAccount": "368992683803",
+          "kms:KeySpec": "RSA_3072",
+          "kms:KeyUsage": "SIGN_VERIFY"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": ["Environment", "ManagedBy", "Component", "Stack"]
+        }
+      }
+    },
+    {
       "Sid": "ReadExactStageASecretMetadata",
       "Effect": "Allow",
       "Action": [

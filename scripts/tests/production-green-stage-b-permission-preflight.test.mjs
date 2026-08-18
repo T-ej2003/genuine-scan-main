@@ -366,8 +366,8 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.length, 12);
   assert.equal(new Set(manifest.taskDefinitionMappings.map((entry) => entry.address)).size, 12);
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
-  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 19);
-  assert.equal(assertReviewedSimulationContextRegistry().length, 19);
+  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 23);
+  assert.equal(assertReviewedSimulationContextRegistry().length, 23);
   assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0 && !values.includes("*")));
 });
 
@@ -845,7 +845,7 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 156);
+  assert.equal(report.requiredEvaluations.length, 157);
   assert.equal(report.forbiddenEvaluations.length, 37);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
