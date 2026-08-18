@@ -269,7 +269,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
             stageAState: { ...local.stageAState, bytes: remoteStageABytes, value: JSON.parse(remoteStageABytes.toString("utf8")) },
             stageBState: { ...local.stageBState, bytes: remoteStageBBytes, value: JSON.parse(remoteStageBBytes.toString("utf8")) },
           };
-          const stageAContract = assertStageAStateContract(authenticated.stageAState.value);
+          const stageAContract = assertStageAStateContract(authenticated.stageAState.value, { phase: "POST_APPLY" });
           return { ...authenticated, ingress: describeStageAIngress({ run: releaseRun, endpointSecurityGroupId: stageAContract.endpointSecurityGroupId, runtimeSecurityGroupId: stageAContract.executorSecurityGroupId }) };
         },
       }

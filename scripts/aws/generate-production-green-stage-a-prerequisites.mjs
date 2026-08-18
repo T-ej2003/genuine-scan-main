@@ -166,12 +166,13 @@ function liveEvidence({ vpcId, subnetIds, databaseIdentifier, run }) {
   return { vpcId, privateSubnets: checkedSubnets, securityGroups: groups.map((group) => ({ groupId: group.GroupId, vpcId: group.VpcId })).sort((a, b) => a.groupId.localeCompare(b.groupId)), ecsClusterArn: cluster[0].clusterArn, databaseIdentifier, rdsSubnetIds: rdsSubnets };
 }
 
-export function generateStageAPrerequisites({ stateBackup, stateObject, toolingSha, toolingTreeSha256, outputPath, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+export function generateStageAPrerequisites({ stateBackup, stateObject, toolingSha, toolingTreeSha256, outputPath, phase, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+  if (!["PRE_APPLY", "POST_APPLY"].includes(phase)) throw new Error("Stage A prerequisite generation requires an explicit PRE_APPLY or POST_APPLY phase.");
   if (!path.isAbsolute(stateBackup || "") || !path.isAbsolute(outputPath || "") || outputPath.startsWith(`${root}${path.sep}`)) throw new Error("Stage A prerequisite inputs and output must be absolute private paths.");
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !/^[a-f0-9]{64}$/.test(toolingTreeSha256 || "")) throw new Error("Stage A prerequisite tooling identity is malformed.");
   if (fs.existsSync(outputPath)) throw new Error("Refusing to overwrite an existing Stage A prerequisite artifact.");
   const stateArtifact = assertStageBPrivateFile({ filePath: stateBackup, repositoryRoot: root, label: "Stage A state backup" });
-  const bytes = fs.readFileSync(stateArtifact.path); const state = JSON.parse(bytes); const { value, vpcId, subnetIds, databaseIdentifier } = assertStageAStateContract(state, { stateObject, phase: "PRE_APPLY" });
+  const bytes = fs.readFileSync(stateArtifact.path); const state = JSON.parse(bytes); const { value, vpcId, subnetIds, databaseIdentifier } = assertStageAStateContract(state, { stateObject, phase });
   const network = liveEvidence({ vpcId, subnetIds, databaseIdentifier, run });
   const output = {
     schemaVersion: STAGE_A_PREREQUISITES_SCHEMA_VERSION, generator: STAGE_A_PREREQUISITES_GENERATOR, toolingSha, toolingTreeSha256,
@@ -187,5 +188,5 @@ export function generateStageAPrerequisites({ stateBackup, stateObject, toolingS
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const option = (name) => { const i = process.argv.indexOf(name); const value = i === -1 ? undefined : process.argv[i + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
-  generateStageAPrerequisites({ stateBackup: option("--stage-a-state-backup"), stateObject: option("--stage-a-state-object"), toolingSha: option("--tooling-sha"), toolingTreeSha256: option("--tooling-tree-sha256"), outputPath: option("--output") });
+  generateStageAPrerequisites({ stateBackup: option("--stage-a-state-backup"), stateObject: option("--stage-a-state-object"), toolingSha: option("--tooling-sha"), toolingTreeSha256: option("--tooling-tree-sha256"), outputPath: option("--output"), phase: option("--phase") });
 }
