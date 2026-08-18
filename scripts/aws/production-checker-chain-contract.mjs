@@ -1,4 +1,5 @@
 import { assertStageACheckerRoleTrustDocument, STAGE_A_CHECKER_POLICY } from "./production-stage-a-control-plane.mjs";
+import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 
 export const CHECKER_ACCOUNT = "368992683803";
 export const CHECKER_USER_ARN = `arn:aws:iam::${CHECKER_ACCOUNT}:user/mscqr-production-checker-operator`;
@@ -7,11 +8,7 @@ export const CHECKER_TARGET_ROLE_ARN = `arn:aws:iam::${CHECKER_ACCOUNT}:role/msc
 export const CHECKER_SOURCE_ROLE_NAME = "mscqr-production-independent-checker";
 export const CHECKER_TARGET_ROLE_NAME = "mscqr-production-rls-independent-checker";
 
-const decodeDocument = (value) => {
-  if (value && typeof value === "object") return value;
-  if (typeof value !== "string" || !value) throw new Error("Checker policy document is missing.");
-  try { return JSON.parse(decodeURIComponent(value)); } catch { throw new Error("Checker policy document is malformed."); }
-};
+const decodeDocument = (value) => normalizeIamPolicyDocument(value, "Checker policy document");
 
 const oneStatement = (document, label) => {
   if (!document || document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== 1) throw new Error(`${label} must contain exactly one policy statement.`);

@@ -24,6 +24,7 @@ import { createLiveCheckerChainAssertionAdapter } from "./production-checker-cha
 import { assertStageAStateContract } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
+import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -176,7 +177,7 @@ export function createProductionRotationInfrastructureAdapter({ run = execFileSy
       terraform(["apply", "-input=false", "-no-color", config.rotationTerraformPlanFile]);
       const policy = parseJson((args) => run("aws", args, { cwd: process.cwd(), env: terraformEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), ["iam", "get-role-policy", "--role-name", ROTATION_EXECUTION_ROLE, "--policy-name", "stage-b-exact-image-logs-and-secrets"]);
       let document;
-      try { document = JSON.parse(decodeURIComponent(policy.PolicyVersion?.Document || policy.PolicyDocument || "{}")); } catch { throw new Error("Backend execution-role policy is not readable after rotation convergence."); }
+      try { document = normalizeIamPolicyDocument(policy.PolicyVersion?.Document || policy.PolicyDocument, "Backend execution-role policy document"); } catch { throw new Error("Backend execution-role policy is not readable after rotation convergence."); }
       const overlapSecretSet = Object.values(rotationInputs.production_rotation_secret_value_from).map((value) => value.replace(/:value::$/, ""));
       const authorizedSecretSet = [...new Set((document.Statement || []).filter((statement) => statement?.Effect === "Allow" && (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes("secretsmanager:GetSecretValue")).flatMap((statement) => Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource]).filter(Boolean))];
       const authorizedOverlapSecretSet = overlapSecretSet.filter((arn) => authorizedSecretSet.includes(arn));

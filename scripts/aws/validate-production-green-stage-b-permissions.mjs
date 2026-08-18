@@ -15,6 +15,7 @@ import { assertStageBPlanApprovedBinding, STAGE_B_PLAN_PROFILES } from "./stage-
 import { assertStageBImportedBackendRolloverActions, assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 import { assertEcsExecOperatorEvidence, assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorSourceContract, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 import { buildTemporaryCapabilityEvidence } from "./production-stage-a-temporary-kms-capability.mjs";
+import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION = 3;
@@ -198,7 +199,7 @@ export function assertPermissionReportPlanBinding(report, { planJsonBytes, saved
   return expected;
 }
 
-const decodePolicyDocument = (document) => typeof document === "string" ? JSON.parse(decodeURIComponent(document)) : document;
+const decodePolicyDocument = (document) => normalizeIamPolicyDocument(document, "Release IAM policy document");
 export function sourcePolicyEvidence() {
   return RELEASE_POLICY_SOURCES.map(({ name, arn, sourcePath }) => {
     const document = JSON.parse(fs.readFileSync(path.join(stageBRoot, sourcePath), "utf8"));
