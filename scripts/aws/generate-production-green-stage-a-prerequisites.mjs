@@ -30,6 +30,13 @@ const oneResource = (state, type, name) => {
   return instances[0]?.attributes || {};
 };
 
+function assertPreApplyRootDropAbsent(state) {
+  const keyCount = resourceInstances(state, "aws_kms_key", "root_drop").length;
+  const aliasCount = resourceInstances(state, "aws_kms_alias", "root_drop").length;
+  if (keyCount === 0 && aliasCount === 0) return;
+  throw new Error(`Stage A pre-apply root-drop state must be ABSENT; observed key=${keyCount}, alias=${aliasCount}. Use authenticated recovery/state census for pre-existing or partial state.`);
+}
+
 const parsePolicy = (value, label) => {
   if (typeof value !== "string") throw new Error(`${label} policy is missing.`);
   try { return JSON.parse(value); } catch { throw new Error(`${label} policy is malformed.`); }
@@ -68,8 +75,10 @@ export function assertStageAStateIdentityBinding(actual, expected) {
   return true;
 }
 
-function stageAValues(state, options) {
+function stageAValues(state, options = {}) {
   assertStageAStateIdentity(state, options);
+  const phase = options.phase || "POST_APPLY";
+  if (phase !== "PRE_APPLY" && phase !== "POST_APPLY") throw new Error(`Unsupported Stage A state contract phase: ${phase}.`);
   const value = state.outputs?.stage_b_prerequisites?.value;
   if (!value || typeof value !== "object") throw new Error("Stage A state has no stage_b_prerequisites output.");
   const endpoints = resourceInstances(state, "aws_vpc_endpoint", "executor").map((instance) => instance.attributes || {});
@@ -98,14 +107,17 @@ function stageAValues(state, options) {
       }
     : checkerTrust;
   assertExactPolicy(normalizedCheckerTrust, { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: STAGE_A_CHECKER_ROLE_TRUST.principal }, Action: STAGE_A_CHECKER_ROLE_TRUST.action }] }, "Stage A checker trust");
-  const rootDropKey = oneResource(state, "aws_kms_key", "root_drop");
-  const rootDropAlias = oneResource(state, "aws_kms_alias", "root_drop");
-  if (!new RegExp(`^arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/[a-f0-9-]{36}$`).test(rootDropKey.arn || "") || rootDropKey.key_usage !== "SIGN_VERIFY" || rootDropKey.customer_master_key_spec !== "RSA_3072" || rootDropAlias.arn !== STAGE_B.rootDropKmsKeyArn || rootDropAlias.target_key_arn !== rootDropKey.arn) throw new Error("Stage A root-drop key and alias identities are wrong.");
-  assertExactPolicy(parsePolicy(rootDropKey.policy, "Stage A root-drop key"), { Version: "2012-10-17", Statement: [
-    { Sid: "AccountAdministration", Effect: "Allow", Principal: { AWS: `arn:aws:iam::${STAGE_B.account}:root` }, Action: "kms:*", Resource: "*" },
-    { Sid: "DenyNonRootRootDropSigning", Effect: "Deny", Principal: "*", Action: ["kms:Sign", "kms:Verify"], Resource: "*", Condition: { StringNotEquals: { "aws:PrincipalArn": `arn:aws:iam::${STAGE_B.account}:root` } } },
-    { Sid: "ReleaseReadsRootDropKey", Effect: "Allow", Principal: { AWS: `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-release-deployer` }, Action: ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetPublicKey", "kms:ListResourceTags"], Resource: "*" },
-  ] }, "Stage A root-drop key");
+  if (phase === "PRE_APPLY") assertPreApplyRootDropAbsent(state);
+  else {
+    const rootDropKey = oneResource(state, "aws_kms_key", "root_drop");
+    const rootDropAlias = oneResource(state, "aws_kms_alias", "root_drop");
+    if (!new RegExp(`^arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/[a-f0-9-]{36}$`).test(rootDropKey.arn || "") || rootDropKey.key_usage !== "SIGN_VERIFY" || rootDropKey.customer_master_key_spec !== "RSA_3072" || rootDropAlias.arn !== STAGE_B.rootDropKmsKeyArn || rootDropAlias.target_key_arn !== rootDropKey.arn) throw new Error("Stage A root-drop key and alias identities are wrong.");
+    assertExactPolicy(parsePolicy(rootDropKey.policy, "Stage A root-drop key"), { Version: "2012-10-17", Statement: [
+      { Sid: "AccountAdministration", Effect: "Allow", Principal: { AWS: `arn:aws:iam::${STAGE_B.account}:root` }, Action: "kms:*", Resource: "*" },
+      { Sid: "DenyNonRootRootDropSigning", Effect: "Deny", Principal: "*", Action: ["kms:Sign", "kms:Verify"], Resource: "*", Condition: { StringNotEquals: { "aws:PrincipalArn": `arn:aws:iam::${STAGE_B.account}:root` } } },
+      { Sid: "ReleaseReadsRootDropKey", Effect: "Allow", Principal: { AWS: `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-release-deployer` }, Action: ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetPublicKey", "kms:ListResourceTags"], Resource: "*" },
+    ] }, "Stage A root-drop key");
+  }
   if (oneResource(state, "aws_kms_key", "approval").arn !== STAGE_B.approvalKmsKeyArn || oneResource(state, "aws_secretsmanager_secret", "approval").arn !== STAGE_B.approvalSecretArn) throw new Error("Stage A approval resource identities are wrong.");
   assertExactPolicy(parsePolicy(oneResource(state, "aws_iam_role", "executor").assume_role_policy, "Stage A executor trust"), { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Service: "ecs-tasks.amazonaws.com" }, Action: "sts:AssumeRole" }] }, "Stage A executor trust");
   assertExactPolicy(parsePolicy(oneResource(state, "aws_iam_role", "broker").assume_role_policy, "Stage A broker trust"), { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Service: "lambda.amazonaws.com" }, Action: "sts:AssumeRole" }] }, "Stage A broker trust");
@@ -159,7 +171,7 @@ export function generateStageAPrerequisites({ stateBackup, stateObject, toolingS
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !/^[a-f0-9]{64}$/.test(toolingTreeSha256 || "")) throw new Error("Stage A prerequisite tooling identity is malformed.");
   if (fs.existsSync(outputPath)) throw new Error("Refusing to overwrite an existing Stage A prerequisite artifact.");
   const stateArtifact = assertStageBPrivateFile({ filePath: stateBackup, repositoryRoot: root, label: "Stage A state backup" });
-  const bytes = fs.readFileSync(stateArtifact.path); const state = JSON.parse(bytes); const { value, vpcId, subnetIds, databaseIdentifier } = assertStageAStateContract(state, { stateObject });
+  const bytes = fs.readFileSync(stateArtifact.path); const state = JSON.parse(bytes); const { value, vpcId, subnetIds, databaseIdentifier } = assertStageAStateContract(state, { stateObject, phase: "PRE_APPLY" });
   const network = liveEvidence({ vpcId, subnetIds, databaseIdentifier, run });
   const output = {
     schemaVersion: STAGE_A_PREREQUISITES_SCHEMA_VERSION, generator: STAGE_A_PREREQUISITES_GENERATOR, toolingSha, toolingTreeSha256,
