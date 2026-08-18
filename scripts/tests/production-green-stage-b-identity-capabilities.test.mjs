@@ -9,9 +9,9 @@ import {
   readIdentityCapabilityMatrix,
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
-import { STAGE_A_EXPECTED_STATE_LINEAGE } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { buildStageAStateIdentity, STAGE_A_EXPECTED_STATE_LINEAGE } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
-import { buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
+import { buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signPermissionReport, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
@@ -103,8 +103,9 @@ test("complete release preflight is valid and has no skipped probes", () => {
   assert.deepEqual(report.failed, []);
   assert.deepEqual(report.skipped, []);
   assert.equal(report.caller, caller);
-  assert.equal(report.stageAStateIdentityPath, path.join(directory, "stage-a-state-identity.json"));
-  assert.deepEqual(JSON.parse(fs.readFileSync(report.stageAStateIdentityPath, "utf8")), { stateObject: "mscqr/production/rls-green/stage-a/terraform.tfstate", lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: 35, stateSha256: crypto.createHash("sha256").update(stageAState).digest("hex"), account: "368992683803", region: "eu-west-2" });
+  assert.equal(report.stageAStateIdentityPath, undefined);
+  assert.deepEqual(report.stageAStateIdentity, buildStageAStateIdentity(JSON.parse(stageAState), { stateBytes: Buffer.from(stageAState) }));
+  assert.equal(fs.existsSync(path.join(directory, "stage-a-state-identity.json")), false);
 });
 
 test("release preflight blocks when authenticated Stage-A state cannot produce an identity", () => {
@@ -114,7 +115,7 @@ test("release preflight blocks when authenticated Stage-A state cannot produce a
     return allowed(args);
   } });
   assert.equal(report.status, "blocked");
-  assert.equal(report.stageAStateIdentityPath, null);
+  assert.equal(report.stageAStateIdentity, null);
   assert(report.failed.some(({ id }) => id === "stage-a-state"));
   assert.equal(fs.existsSync(path.join(directory, "stage-a-state-identity.json")), false);
 });
@@ -124,7 +125,7 @@ test("wrong caller and region fail closed", () => {
   const wrongCaller = runReleaseReadPreflight({ outputDirectory: directory, run: (args) => args[0] === "sts" ? JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" }) : allowed(args) });
   assert.equal(wrongCaller.status, "blocked");
   assert.equal(wrongCaller.failed[0].id, "caller");
-  assert.equal(wrongCaller.stageAStateIdentityPath, null);
+  assert.equal(wrongCaller.stageAStateIdentity, null);
   assert.equal(fs.existsSync(path.join(directory, "stage-a-state-identity.json")), false);
   assert.throws(() => runReleaseReadPreflight({ outputDirectory: temp(), region: "us-east-1", run: allowed }), /region/);
 });
@@ -138,7 +139,7 @@ test("failed preflight removes a stale Stage-A identity instead of preserving it
     return allowed(args);
   } });
   assert.equal(report.status, "blocked");
-  assert.equal(report.stageAStateIdentityPath, null);
+  assert.equal(report.stageAStateIdentity, null);
   assert.equal(fs.existsSync(identityPath), false);
 });
 
@@ -154,13 +155,19 @@ test("one command keeps administrator simulation and release reads on separate i
   });
   assert.equal(admin.status, "valid"); assert.equal(administratorSimulations, 1);
   const releasePath = path.join(directory, "release.json"); let releaseReads = 0;
-  const release = runProductionPreflightCli(["--identity", "release-deployer", "--output", releasePath, "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
+  const release = runProductionPreflightCli(["--identity", "release-deployer", "--source-sha", "a".repeat(40), "--output", releasePath, "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
     caller: () => caller,
     verify: () => true,
-    releasePreflight: () => { releaseReads += 1; return { schemaVersion: 1, caller, account: "368992683803", region: "eu-west-2", requiredReads: {}, failed: [], skipped: [], status: "valid" }; },
+    releasePreflight: () => { releaseReads += 1; return { schemaVersion: 1, caller, account: "368992683803", region: "eu-west-2", requiredReads: {}, failed: [], skipped: [], status: "valid", stageAStateIdentity: buildStageAStateIdentity(JSON.parse(stageAState), { stateBytes: Buffer.from(stageAState) }) }; },
     continueReadiness: () => ({ backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true }), validateCapabilityGraph: () => admin.capabilityGraph,
   });
   assert.equal(release.status, "ready-for-plan"); assert.equal(releaseReads, 1);
+  fs.writeFileSync(path.join(directory, "stage-a-state.json"), stageAState, { mode: 0o600 });
+  const readinessReportPath = path.join(directory, "stage-a-readiness.json"); const readinessSignaturePath = path.join(directory, "stage-a-readiness.signature.json");
+  const readiness = runProductionPreflightCli(["--identity", "administrator", "--phase", "readiness", "--source-sha", "a".repeat(40), "--release-report", releasePath, "--output", readinessReportPath, "--signature-output", readinessSignaturePath], {
+    caller: () => "arn:aws:iam::368992683803:root", sign: (report, options) => signPermissionReport(report, { ...options, sign: () => "AQ==" }), validateCapabilityGraph: () => admin.capabilityGraph,
+  });
+  assert.equal(readiness.status, "valid"); assert.equal(fs.existsSync(readinessReportPath), true); assert.equal(fs.existsSync(readinessSignaturePath), true);
 });
 
 test("invalid release capability report stops before backend readiness", () => {
@@ -168,10 +175,25 @@ test("invalid release capability report stops before backend readiness", () => {
   const capabilityGraph = assertStageBDeploymentCapabilityGraph();
   fs.writeFileSync(adminPath, JSON.stringify({ schemaVersion: 1, evidenceKind: "INITIAL_ADMIN_CAPABILITY", phase: "initial", purpose: "pre-plan-capability", status: "valid", simulatedRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", policyEvidence: shapedPolicyEvidence(), capabilityGraph }));
   fs.writeFileSync(signaturePath, "{}"); let continued = 0;
-  assert.throws(() => runProductionPreflightCli(["--identity", "release-deployer", "--output", path.join(directory, "release.json"), "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
+  assert.throws(() => runProductionPreflightCli(["--identity", "release-deployer", "--source-sha", "a".repeat(40), "--output", path.join(directory, "release.json"), "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
     caller: () => caller, verify: () => true,
     releasePreflight: () => ({ requiredReads: { "ecs:DescribeClusters": "denied" }, failed: [{ action: "ecs:DescribeClusters" }], skipped: [], status: "blocked" }),
     continueReadiness: () => { continued += 1; }, validateCapabilityGraph: () => capabilityGraph,
   }), /Cutover-critical release capability lacks valid evidence/);
   assert.equal(continued, 0);
+});
+
+test("failed outer readiness cannot publish authorization-valid Stage-A evidence", () => {
+  const directory = temp(); const adminPath = path.join(directory, "admin.json"); const signaturePath = path.join(directory, "signature.json"); const releasePath = path.join(directory, "release.json"); const readinessPath = path.join(directory, "readiness.json");
+  const admin = runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--output", adminPath, "--signature-output", signaturePath], {
+    caller: () => "arn:aws:iam::368992683803:root", collectPolicies: shapedPolicyEvidence, collectEcsExecOperatorEvidence: () => buildEcsExecOperatorEvidence(),
+    permissionPreflight: (input) => runPermissionPreflight({ ...input, simulate: ({ evaluation }) => ({ decision: evaluation.expectedDecision || "allowed", matchedStatements: evaluation.expectedDecision ? 0 : 1, missingContextValues: evaluation.expectedDecision ? evaluation.expectedMissingContextValues : [] }), cloudTrail: () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] }) }),
+    sign: (report, options) => signPermissionReport(report, { ...options, sign: () => "AQ==" }),
+  });
+  const capabilityGraph = admin.capabilityGraph;
+  assert.throws(() => runProductionPreflightCli(["--identity", "release-deployer", "--source-sha", "a".repeat(40), "--output", releasePath, "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
+    caller: () => caller, verify: () => true, releasePreflight: () => ({ schemaVersion: 1, caller, account: "368992683803", region: "eu-west-2", requiredReads: {}, failed: [], skipped: [], status: "valid", stageAStateIdentity: buildStageAStateIdentity(JSON.parse(stageAState), { stateBytes: Buffer.from(stageAState) }) }),
+    continueReadiness: () => { throw new Error("ready-for-plan failed"); }, validateCapabilityGraph: () => capabilityGraph,
+  }), /ready-for-plan failed/);
+  assert.equal(fs.existsSync(releasePath), false); assert.equal(fs.existsSync(readinessPath), false);
 });

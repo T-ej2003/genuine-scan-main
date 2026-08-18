@@ -25,8 +25,9 @@ import {
   temporaryKmsCapabilityStatement,
 } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 import { ensureStageBPrivateFile } from "../aws/stage-b-artifact-contract.mjs";
-import { createTemporaryKmsCapabilityRunner } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
+import { createTemporaryKmsCapabilityRunner, verifyStageAReadinessEvidence } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
@@ -267,7 +268,8 @@ test("launch handoff resolves the canonical manifest path", () => {
   assert.doesNotMatch(handoff, /launch-handoff-manifest\.json/);
   const node = JSON.parse(readFileSync(manifestPath, "utf8")).nodes.find(({ id }) => id === 8);
   assert.match(node.canonicalCommandOrFunction, /--stage-a-state <fresh-stage-a-state>/);
-  assert.match(node.canonicalCommandOrFunction, /--stage-a-state-identity <fresh-stage-a-state-identity>/);
+  assert.match(node.canonicalCommandOrFunction, /--stage-a-readiness-report <signed-stage-a-readiness-report>/);
+  assert.match(node.canonicalCommandOrFunction, /--stage-a-readiness-signature <signed-stage-a-readiness-signature>/);
 });
 
 test("canonical producer replays authorization and safely aborts a failed apply", () => {
@@ -829,7 +831,24 @@ test("CLI authorization rejects state without an independently produced identity
       "--plan-sha256", planSha256, "--plan-json", planJsonFile, "--stage-a-state", stageAStateFile,
     ], { encoding: "utf8" });
     assert.notEqual(result.status, 0);
-    assert.match(`${result.stdout}${result.stderr}`, /--stage-a-state-identity is required/);
+    assert.match(`${result.stdout}${result.stderr}`, /authenticated Stage-A readiness report and signature are required/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("signed final readiness binds source and exact Stage-A state bytes before authorization", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-signed-readiness-"));
+  const stageAStateFile = path.join(directory, "stage-a-state.json"); const reportPath = path.join(directory, "readiness.json"); const signaturePath = path.join(directory, "readiness.signature.json");
+  const state = { lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 44, resources: [] }; const stateBytes = Buffer.from(`${JSON.stringify(state)}\n`); writeFileSync(stageAStateFile, stateBytes, { mode: 0o600 });
+  const identity = buildStageAStateIdentity(state, { stateBytes }); const report = { schemaVersion: 1, evidenceKind: "STAGE_A_READINESS", phase: "readiness", purpose: "stage-a-root-drop-authorization", status: "valid", generatedAt: new Date().toISOString(), readyForPlan: true, sourceSha, account: "368992683803", region: "eu-west-2", releaseReportSha256: "a".repeat(64), stageAStateIdentity: identity };
+  const reportBytes = Buffer.from(`${JSON.stringify(report, null, 2)}\n`); const signature = signPermissionReport(report, { reportBytes, sign: () => "AQ==" }); writeFileSync(reportPath, reportBytes, { mode: 0o600 }); writeFileSync(signaturePath, `${JSON.stringify(signature, null, 2)}\n`, { mode: 0o600 });
+  const verifyRun = () => JSON.stringify({ SignatureValid: true });
+  try {
+    assert.deepEqual(verifyStageAReadinessEvidence({ reportPath, signaturePath, stageAStateFile, sourceSha, run: verifyRun }).stageAStateIdentity, identity);
+    writeFileSync(stageAStateFile, `${JSON.stringify({ ...state, substituted: true })}\n`, { mode: 0o600 });
+    assert.throws(() => verifyStageAReadinessEvidence({ reportPath, signaturePath, stageAStateFile, sourceSha, run: verifyRun }), /state identity binding/);
+    writeFileSync(stageAStateFile, stateBytes, { mode: 0o600 });
+    writeFileSync(reportPath, `${JSON.stringify({ ...report, sourceSha: "b".repeat(40) }, null, 2)}\n`, { mode: 0o600 });
+    assert.throws(() => verifyStageAReadinessEvidence({ reportPath, signaturePath, stageAStateFile, sourceSha, run: verifyRun }), /signature|binding/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

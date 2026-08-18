@@ -86,6 +86,42 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "stage-a-readiness-report",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-green-stage-b-preflight.mjs:runStageAReadinessEvidence",
+      "consumers": [
+        "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "stage-a-readiness-report",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stage-a-readiness-signature",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-green-stage-b-preflight.mjs:runStageAReadinessEvidence",
+      "consumers": [
+        "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "stage-a-readiness-signature",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "image-manifest",
       "kind": "file",
       "producer": "external:protected image workflow artifact",

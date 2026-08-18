@@ -22,6 +22,7 @@ import {
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageAStateIdentityBinding, buildStageAStateIdentity } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { ACCOUNT, REGION, STAGE_A_READINESS_EVIDENCE_KIND, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sourcePolicyPath = path.join(root, TEMPORARY_KMS_CAPABILITY.sourcePolicyPath);
@@ -92,6 +93,24 @@ function assertIdentity({ sourceSha, transitionId } = {}) {
 }
 
 function readJson(filePath) { return JSON.parse(readFileSync(filePath, "utf8")); }
+
+export function verifyStageAReadinessEvidence({ reportPath, signaturePath, stageAStateFile, sourceSha, run, now = new Date().toISOString() } = {}) {
+  if (!reportPath || !signaturePath || !stageAStateFile || !existsSync(reportPath) || !existsSync(signaturePath) || !existsSync(stageAStateFile)) fail("authenticated Stage-A readiness evidence and state are required");
+  const reportBytes = readFileSync(reportPath); const signatureBytes = readFileSync(signaturePath); const report = JSON.parse(reportBytes); const signature = readJson(signaturePath);
+  const verify = ({ keyArn, signingAlgorithm, digest, signature: rawSignature }) => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-readiness-verify-")); const digestPath = path.join(directory, "digest"); const signaturePathValue = path.join(directory, "signature");
+    writeFileSync(digestPath, digest, { mode: 0o600, flag: "wx" }); writeFileSync(signaturePathValue, rawSignature, { mode: 0o600, flag: "wx" });
+    try { return JSON.parse(run(["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePathValue}`, "--signing-algorithm", signingAlgorithm])).SignatureValid === true; }
+    finally { unlinkSync(digestPath); unlinkSync(signaturePathValue); rmdirSync(directory); }
+  };
+  try {
+    verifyPermissionReportSignature({ report, signatureArtifact: signature, reportBytes, signatureBytes, now, verify });
+  } catch (error) { fail(`Stage-A readiness evidence signature is invalid: ${error.message}`); }
+  if (report.evidenceKind !== STAGE_A_READINESS_EVIDENCE_KIND || report.phase !== "readiness" || report.purpose !== "stage-a-root-drop-authorization" || report.status !== "valid" || report.readyForPlan !== true || report.sourceSha !== sourceSha || report.account !== ACCOUNT || report.region !== REGION || !/^[a-f0-9]{40}$/.test(sourceSha || "") || !report.stageAStateIdentity) fail("Stage-A readiness evidence binding is incomplete");
+  const stateBytes = readFileSync(stageAStateFile); const actualIdentity = buildStageAStateIdentity(JSON.parse(stateBytes), { stateBytes });
+  assertStageAStateIdentityBinding(actualIdentity, report.stageAStateIdentity);
+  return report;
+}
 
 function writeEvidence(filePath, value, repositoryRoot = root) {
   return writeStageBPrivateFileAtomic({ filePath, bytes: Buffer.from(`${JSON.stringify(value, null, 2)}\n`), repositoryRoot, overwrite: true, label: "Temporary Stage-A KMS capability evidence" });
@@ -414,9 +433,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (releaseProfile && releaseProfile === profile) fail("administrator and release profiles must be distinct");
   const stageAStateFile = option(argv, "--stage-a-state", false);
   if (phase === "authorize" && !stageAStateFile) fail("--stage-a-state is required before temporary capability authorization");
-  const stageAStateIdentityFile = option(argv, "--stage-a-state-identity", false);
-  if (phase === "authorize" && !stageAStateIdentityFile) fail("--stage-a-state-identity is required before temporary capability authorization");
-  const stageAStateIdentity = stageAStateIdentityFile ? readJson(stageAStateIdentityFile) : null;
+  const stageAReadinessReportFile = option(argv, "--stage-a-readiness-report", false);
+  const stageAReadinessSignatureFile = option(argv, "--stage-a-readiness-signature", false);
+  if (phase === "authorize" && (!stageAReadinessReportFile || !stageAReadinessSignatureFile)) fail("authenticated Stage-A readiness report and signature are required before temporary capability authorization");
+  const stageAReadinessEvidence = phase === "authorize" ? verifyStageAReadinessEvidence({ reportPath: stageAReadinessReportFile, signaturePath: stageAReadinessSignatureFile, stageAStateFile, sourceSha, run }) : null;
+  const stageAStateIdentity = stageAReadinessEvidence?.stageAStateIdentity || null;
   const result = createTemporaryKmsCapabilityRunner({ run, requireStageAStateBinding: Boolean(stageAStateFile) }).runPhase({ phase, sourceSha, transitionId, stateFile, planSha256: option(argv, "--plan-sha256", false), planJsonFile: option(argv, "--plan-json", false), terraformStateFile: option(argv, "--terraform-state", false), stageAStateFile, stageAStateIdentity, applyFailed: argv.includes("--apply-failed"), partialOperationCensus: argv.includes("--partial-operation-census-verified") });
   process.stdout.write(`${JSON.stringify({ state: result.evidence.state, evidenceSha256: result.evidence.evidenceSha256, writes: result.writes, mutationAccounting: result.mutationAccounting || null })}\n`);
 }

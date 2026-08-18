@@ -10,7 +10,7 @@ import { generateStageBTerraformBackendConfig } from "./generate-production-gree
 import { assertStageBTerraformInitializedBackendMetadata, ensureStageBTerraformBackendMetadataPrivate } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
-import { generateStageAPrerequisites, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateIdentityBinding, buildStageAStateIdentity, generateStageAPrerequisites, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { generateStageBTfvars } from "./generate-production-green-stage-b-tfvars.mjs";
 import { resolveStageBRecoveryMode } from "./stage-b-deployment-contract.mjs";
 import {
@@ -25,6 +25,7 @@ import {
   assertCutoverCriticalEvidence,
   assertStageBPermissionEvidenceKind,
   INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND,
+  STAGE_A_READINESS_EVIDENCE_KIND,
   signPermissionReport,
   verifyPermissionReportSignature,
 } from "./validate-production-green-stage-b-permissions.mjs";
@@ -82,6 +83,17 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   return { backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, tfvarsSha256: generated.tfvarsSha256, ...backendMetadata };
 }
 
+export function runStageAReadinessEvidence({ releaseReportPath, sourceSha, output, signatureOutput, signReport = signPermissionReport } = {}) {
+  const releasePath = path.resolve(releaseReportPath); const releaseReportBytes = fs.readFileSync(releasePath); const releaseReport = JSON.parse(releaseReportBytes);
+  if (!/^[a-f0-9]{40}$/.test(sourceSha || "")) throw new Error("Stage-A readiness evidence source SHA is malformed.");
+  if (releaseReport.status !== "ready-for-plan" || releaseReport.readyForPlan !== true || releaseReport.sourceSha !== sourceSha || releaseReport.account !== ACCOUNT || releaseReport.region !== REGION || !releaseReport.stageAStateIdentity) throw new Error("Stage-A readiness evidence requires a successful, source-bound release preflight.");
+  const stageAStatePath = path.join(path.dirname(releasePath), "stage-a-state.json"); const stageAStateBytes = fs.readFileSync(stageAStatePath);
+  assertStageAStateIdentityBinding(buildStageAStateIdentity(JSON.parse(stageAStateBytes), { stateBytes: stageAStateBytes }), releaseReport.stageAStateIdentity);
+  const evidence = { schemaVersion: 1, evidenceKind: STAGE_A_READINESS_EVIDENCE_KIND, phase: "readiness", purpose: "stage-a-root-drop-authorization", status: "valid", generatedAt: new Date().toISOString(), readyForPlan: true, sourceSha, account: ACCOUNT, region: REGION, releaseReportSha256: sha256(releaseReportBytes), stageAStateIdentity: releaseReport.stageAStateIdentity };
+  const reportBytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`); const signature = signReport(evidence, { now: evidence.generatedAt, reportBytes });
+  return { evidence, ...writePair(output, signatureOutput, evidence, signature) };
+}
+
 export function runProductionPreflightCli(argv = process.argv.slice(2), {
   caller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"], { encoding: "utf8" })).Arn,
   collectPolicies = collectLiveReleasePolicyEvidence,
@@ -95,8 +107,13 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
 } = {}) {
   const identity = value(argv, "--identity"); const output = value(argv, "--output"); const capabilityGraph = validateCapabilityGraph(); const observedCaller = caller();
   if (identity === "administrator") {
-    if (value(argv, "--phase") !== "initial") throw new Error("Administrator capability preflight requires --phase initial.");
+    const phase = value(argv, "--phase");
     if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(observedCaller)) throw new Error("Administrator production preflight requires the approved root identity.");
+    if (phase === "readiness") {
+      const result = runStageAReadinessEvidence({ releaseReportPath: value(argv, "--release-report"), sourceSha: value(argv, "--source-sha"), output, signatureOutput: value(argv, "--signature-output"), signReport: sign });
+      return { identity, status: "valid", report: result.report, signature: result.signature, evidenceKind: STAGE_A_READINESS_EVIDENCE_KIND };
+    }
+    if (phase !== "initial") throw new Error("Administrator capability preflight requires --phase initial or readiness.");
     const planPath = path.join(root, "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
     const manifestPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json");
     const planBytes = fs.readFileSync(planPath); const plan = JSON.parse(planBytes); const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
@@ -129,6 +146,8 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     assertCutoverCriticalEvidence(adminReport);
     if (canonicalizeJson(adminReport.capabilityGraph) !== canonicalizeJson(capabilityGraph)) throw new Error("Administrator pre-plan capability graph is stale.");
     assertReleasePolicyEvidence(adminReport.policyEvidence);
+    const sourceSha = value(argv, "--source-sha");
+    if (!/^[a-f0-9]{40}$/.test(sourceSha)) throw new Error("Release preflight source SHA is malformed.");
     const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)) });
     report.requiredReads["kms:Verify"] = "allowed";
     report.administratorReportSha256 = sha256(adminReportBytes);
@@ -138,7 +157,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
       const reportFile = write(output, blockedReport);
       return { identity, status: report.status, releaseReadCapabilities: { failed: report.failed.length, skipped: report.skipped.length }, report: reportFile, backendReady: false, stateReady: false, handoffReady: false, tfvarsReady: false, capabilityGraph };
     }
-    const readiness = continueReadiness(argv); const finalReport = { ...report, ...readiness, capabilityGraph, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, releaseReadFailures: 0, configurationFailures: 0, status: "ready-for-plan" }; const reportFile = write(output, finalReport);
+    const readiness = continueReadiness(argv); const finalReport = { ...report, ...readiness, sourceSha, readyForPlan: true, capabilityGraph, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, releaseReadFailures: 0, configurationFailures: 0, status: "ready-for-plan" }; const reportFile = write(output, finalReport);
     return { identity, status: "ready-for-plan", releaseReadCapabilities: { failed: 0, skipped: 0 }, report: reportFile, ...readiness, capabilityGraph };
   }
   throw new Error("--identity must be administrator or release-deployer.");

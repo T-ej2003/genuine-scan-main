@@ -56,7 +56,7 @@ test("real release-read and backend producers normalize generated permissions", 
   const result = runReleaseReadPreflight({ outputDirectory: directory, run });
   assert.equal(result.status, "valid"); assert.equal(mode(directory), STAGE_B_PRIVATE_DIRECTORY_MODE);
   assert.equal(mode(path.join(directory, "stage-a-state.json")), STAGE_B_PRIVATE_FILE_MODE);
-  assert.equal(mode(path.join(directory, "stage-a-state-identity.json")), STAGE_B_PRIVATE_FILE_MODE);
+  assert.equal(fs.existsSync(path.join(directory, "stage-a-state-identity.json")), false);
   assert.equal(mode(path.join(directory, "stage-b-state.json")), STAGE_B_PRIVATE_FILE_MODE);
 
   const dataDir = path.join(directory, "terraform-data"); fs.mkdirSync(dataDir, { mode: 0o755 }); fs.chmodSync(dataDir, 0o755);
