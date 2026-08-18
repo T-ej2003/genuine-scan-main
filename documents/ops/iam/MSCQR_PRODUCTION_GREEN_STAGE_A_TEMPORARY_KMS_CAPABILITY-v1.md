@@ -1,8 +1,10 @@
 # Temporary Stage-A KMS creation capability
 
-`kms:TagResource` is not part of the steady-state
-`MSCQRProductionGreenStageARelease` policy. AWS requires that action when tags
-are supplied to `CreateKey`, so the only permitted exception is an
+`kms:CreateKey`, `kms:TagResource`, and `kms:CreateAlias` are not part of the
+steady-state `MSCQRProductionGreenStageARelease` policy. AWS requires the
+first two for the tagged key creation, while the alias operation is scoped to
+the exact root-drop alias ARN and its associated key is limited to the
+production-tagged `RSA_3072`/`SIGN_VERIFY` key family. The only permitted exception is an
 administrator-controlled managed-policy version window described by
 `MSCQRProductionGreenStageATemporaryRootDropCreation-v1.json`.
 

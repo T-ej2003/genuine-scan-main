@@ -23,6 +23,7 @@ import {
   buildTemporaryCapabilityEvidence,
   buildTemporaryReleasePolicy,
   canonicalTemporaryKmsStatementSid,
+  isTemporaryTagResourceStatement,
   temporaryKmsCapabilityStatement,
 } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 import { ensureStageBPrivateFile } from "../aws/stage-b-artifact-contract.mjs";
@@ -174,6 +175,8 @@ test("temporary capability is exact-purpose, source-bound, and non-signing", () 
     "kms:KeyUsage": "SIGN_VERIFY",
   });
   assert.equal(temporary.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("kms:Sign")), false);
+  const evidence = buildTemporaryCapabilityEvidence({ state: "ABSENT", sourceSha, transitionId, observedAt: "2026-08-18T12:00:00.000Z" });
+  assert.deepEqual(evidence.actions, ["kms:CreateKey", "kms:TagResource", "kms:CreateAlias"]);
   assert.throws(() => assertTemporaryReleasePolicy(buildTemporaryReleasePolicy(policy, { sourceSha, transitionId: "different-transition" }), { steadyStatePolicy: policy, sourceSha, transitionId }), /not exact/);
   assert.throws(() => assertTemporaryReleasePolicy({ ...temporary, Statement: [...temporary.Statement, { Effect: "Allow", Action: "kms:TagResource", Resource: "*" }] }, { steadyStatePolicy: policy, sourceSha, transitionId }), /changes more/);
 });
@@ -212,7 +215,7 @@ test("legacy temporary SID remains narrowly recognizable for revoke/recovery com
 test("temporary policy compacts representation-only statement IDs with meaningful AWS size headroom", () => {
   const temporary = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId });
   const sourceAuthorization = policy.Statement.map(({ Sid, ...statement }) => statement);
-  const temporaryAuthorization = temporary.Statement.filter(({ Sid }) => !Sid?.startsWith("TemporaryStageARootDropKeyTagAtCreation")).map(({ Sid, ...statement }) => statement);
+  const temporaryAuthorization = temporary.Statement.filter((statement) => !isTemporaryTagResourceStatement(statement)).map(({ Sid, ...statement }) => statement);
   assert.deepEqual(temporaryAuthorization, sourceAuthorization);
   const bytes = Buffer.byteLength(JSON.stringify(temporary));
   assert.equal(AWS_MANAGED_POLICY_DOCUMENT_LIMIT, 6144);

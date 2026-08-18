@@ -5,8 +5,22 @@
   "policyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
   "sourcePolicy": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
   "operation": "stage-a-root-drop-key-creation",
-  "temporaryAction": "kms:TagResource",
-  "temporaryResource": "*",
+  "temporaryActions": [
+    "kms:CreateKey",
+    "kms:TagResource",
+    "kms:CreateAlias"
+  ],
+  "temporaryKeyResource": "*",
+  "temporaryAliasResource": "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-drop",
+  "temporaryAliasKeyResource": "arn:aws:kms:eu-west-2:368992683803:key/*",
+  "temporaryAliasKeyConditions": {
+    "aws:ResourceTag/Environment": "production",
+    "aws:ResourceTag/ManagedBy": "Terraform",
+    "aws:ResourceTag/Component": "full-rls-green-stage-a",
+    "aws:ResourceTag/Stack": "production-green-stage-a",
+    "kms:KeySpec": "RSA_3072",
+    "kms:KeyUsage": "SIGN_VERIFY"
+  },
   "requiredAccount": "368992683803",
   "requiredRegion": "eu-west-2",
   "requiredKeySpec": "RSA_3072",
@@ -25,7 +39,7 @@
     "REVOKED",
     "ABSENCE_VERIFIED"
   ],
-  "steadyStateInvariant": "The attached release policy contains no kms:TagResource or kms:* statement.",
+  "steadyStateInvariant": "The attached release policy contains none of kms:CreateKey, kms:TagResource, kms:CreateAlias, or kms:*; those actions exist only in the exact temporary three-statement capability.",
   "cutoverInvariant": "Only ABSENCE_VERIFIED may reach the governed cutover boundary.",
   "failureRule": "Apply failure or revocation failure blocks cutover; unknown policy/version topology fails closed."
 }
