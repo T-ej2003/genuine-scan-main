@@ -93,6 +93,7 @@
     "stage-b:bootstrap-initial-dual-slot": "node scripts/aws/bootstrap-production-initial-dual-slot.mjs",
     "stage-b:supersede-stale-rotation": "node scripts/aws/supersede-production-stale-rotation.mjs",
     "stage-b:produce-root-drop-evidence": "node scripts/aws/produce-production-root-drop-evidence.mjs",
+    "stage-a:temporary-kms-capability": "node scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs",
     "rls:full-certify": "node scripts/rls/certify-full-database.mjs",
     "rls:partition-generate": "node scripts/rls/generate-workflow-session-partition.mjs",
     "rls:partition-check": "node scripts/rls/validate-workflow-session-partition.mjs && node --test scripts/tests/workflow-session-partition.test.mjs",

@@ -16,8 +16,10 @@ if (!currentService?.taskDefinition) throw new Error("Current production task de
 const currentTaskDefinition = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", currentService.taskDefinition, "--include", "TAGS"]));
 const imageAuthorizationPath = required("image-authorization");
 const iamEvidencePath = required("iam-evidence");
+const temporaryKmsCapabilityPath = required("temporary-kms-capability");
 ensureStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: process.cwd(), label: "Image authorization evidence" });
 ensureStageBPrivateFile({ filePath: iamEvidencePath, repositoryRoot: process.cwd(), label: "IAM evidence" });
+ensureStageBPrivateFile({ filePath: temporaryKmsCapabilityPath, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
 const imageAuthorization = read("image-authorization");
 const iamEvidence = read("iam-evidence");
 iamEvidence.filePath = path.resolve(required("iam-evidence"));
@@ -41,6 +43,7 @@ const result = prepareProductionCutoverRuntime({
   iamEvidence,
   artifactBindingFile: required("artifact-binding"),
   rootDropEvidenceFile: required("root-drop-evidence"),
+  temporaryKmsCapabilityFile: temporaryKmsCapabilityPath,
   stageAPlanPath: args.get("stage-a-plan"),
   stageARecoveryEvidenceFile: args.get("stage-a-recovery-evidence"),
   stageAStatePath: args.get("stage-a-state"),

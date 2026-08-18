@@ -23,6 +23,7 @@ import { assertRotationInfrastructurePlan, buildRotationTerraformInputs, renderR
 import { createLiveCheckerChainAssertionAdapter } from "./production-checker-chain-contract.mjs";
 import { assertStageAStateContract } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
+import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -34,6 +35,7 @@ const STATE_BUCKET = "mscqr-production-terraform-state-368992683803-eu-west-2";
 const STAGE_A_STATE_URI = `s3://${STATE_BUCKET}/mscqr/production/rls-green/stage-a/terraform.tfstate`;
 const STAGE_B_STATE_URI = `s3://${STATE_BUCKET}/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate`;
 const jsonFile = (filePath) => JSON.parse(readFileSync(filePath, "utf8"));
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const AWS_SERVICE_COMMANDS = new Set(["ec2", "ecs", "ecr", "iam", "kms", "logs", "rds", "s3", "secretsmanager", "ssm", "sts"]);
 
 export function createProductionCommandRunner({ profile, region = REGION, exec = execFileSync } = {}) {
@@ -205,7 +207,14 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     return { serviceStable: service?.status === "ACTIVE" && service.runningCount === service.desiredCount && service.pendingCount === 0, taskDefinitionArn: task.taskDefinitionArn, imageDigest: task.containers.find(({ name }) => name === CONTAINER)?.imageDigest, taskMarker: true };
   };
   const rotationStateReadback = async () => jsonFile(config.rotationStateFile);
-  const readIamEvidence = () => ({ ...jsonFile(config.iamEvidenceFile), evidence: jsonFile(config.iamEvidenceFile).evidence || { valid: true, evidenceRef: `iam:${config.iamEvidenceFile}`, evidenceSha256: config.iamEvidenceSha256 } });
+  const readIamEvidence = () => {
+    const report = jsonFile(config.iamEvidenceFile);
+    const temporaryFile = assertStageBPrivateFile({ filePath: config.temporaryKmsCapabilityFile, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
+    if (temporaryFile.sha256 !== config.temporaryKmsCapabilitySha256) throw new Error("Temporary Stage-A KMS capability evidence changed after runtime preparation.");
+    assertPreCutoverTemporaryCapabilityAbsent(jsonFile(temporaryFile.path), { sourceSha });
+    assertPreCutoverTemporaryCapabilityAbsent(report.temporaryKmsCapability, { sourceSha });
+    return report;
+  };
   const artifact = createAwsArtifactSigningAdapter({
     run: async (args) => releaseRun(args),
     approvedBindings: config.artifactBindingFile,

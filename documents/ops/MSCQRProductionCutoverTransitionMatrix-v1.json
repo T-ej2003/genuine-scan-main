@@ -151,9 +151,9 @@
       "ordinal": 6
     },
     {
-      "edgeId": "rotationPrepare-to-overlapTaskDefinition",
+      "edgeId": "rotationPrepare-to-rotationInfrastructure",
       "producer": "rotationPrepare",
-      "consumer": "overlapTaskDefinition",
+      "consumer": "rotationInfrastructure",
       "producedFields": [
         "rotationId",
         "rotationStateSha256",
@@ -171,6 +171,28 @@
       "negativeTest": true,
       "result": "PASS",
       "ordinal": 7
+    },
+    {
+      "edgeId": "rotationInfrastructure-to-overlapTaskDefinition",
+      "producer": "rotationInfrastructure",
+      "consumer": "overlapTaskDefinition",
+      "producedFields": [
+        "rotationId",
+        "rotationStateSha256",
+        "rotationInfraConverged"
+      ],
+      "requiredFields": [
+        "rotationId",
+        "rotationStateSha256",
+        "rotationInfraConverged"
+      ],
+      "schemaMatch": true,
+      "identityMatch": true,
+      "resourceMatch": true,
+      "shaBindingMatch": true,
+      "negativeTest": true,
+      "result": "PASS",
+      "ordinal": 8
     },
     {
       "edgeId": "overlapTaskDefinition-to-registrationReadback",
@@ -192,7 +214,7 @@
       "shaBindingMatch": true,
       "negativeTest": true,
       "result": "PASS",
-      "ordinal": 8
+      "ordinal": 9
     },
     {
       "edgeId": "registrationReadback-to-readiness",
@@ -214,7 +236,7 @@
       "shaBindingMatch": true,
       "negativeTest": true,
       "result": "PASS",
-      "ordinal": 9
+      "ordinal": 10
     },
     {
       "edgeId": "readiness-to-deployment",
@@ -238,7 +260,7 @@
       "shaBindingMatch": true,
       "negativeTest": true,
       "result": "PASS",
-      "ordinal": 10
+      "ordinal": 11
     },
     {
       "edgeId": "deployment-to-postDeploy",
@@ -260,7 +282,7 @@
       "shaBindingMatch": true,
       "negativeTest": true,
       "result": "PASS",
-      "ordinal": 11
+      "ordinal": 12
     },
     {
       "edgeId": "postDeploy-to-ecsExecSelection",
@@ -286,7 +308,7 @@
       "shaBindingMatch": true,
       "negativeTest": true,
       "result": "PASS",
-      "ordinal": 12
+      "ordinal": 13
     },
     {
       "edgeId": "ecsExecSelection-to-ecsExecRuntime",
@@ -310,7 +332,7 @@
       "shaBindingMatch": true,
       "negativeTest": true,
       "result": "PASS",
-      "ordinal": 13
+      "ordinal": 14
     },
     {
       "edgeId": "ecsExecRuntime-to-onboarding",
@@ -332,7 +354,7 @@
       "shaBindingMatch": true,
       "negativeTest": true,
       "result": "PASS",
-      "ordinal": 14
+      "ordinal": 15
     },
     {
       "edgeId": "onboarding-to-onboardingEvidence",
@@ -354,7 +376,7 @@
       "shaBindingMatch": true,
       "negativeTest": true,
       "result": "PASS",
-      "ordinal": 15
+      "ordinal": 16
     },
     {
       "edgeId": "onboardingEvidence-to-readyForOnboarding",
@@ -374,7 +396,7 @@
       "shaBindingMatch": true,
       "negativeTest": true,
       "result": "PASS",
-      "ordinal": 16
+      "ordinal": 17
     }
   ]
 }

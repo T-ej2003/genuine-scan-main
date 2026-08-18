@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import { assertSteadyStateReleasePolicy, assertTemporaryReleasePolicy, buildTemporaryReleasePolicy, temporaryKmsCapabilityStatement } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 
 const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
+const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
+const transitionId = "stage-a-root-drop-20260818";
 const refreshContract = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAProviderRefreshContract-v1.json", "utf8"));
 const statements = policy.Statement;
 const asArray = (value) => Array.isArray(value) ? value : [value];
@@ -38,9 +41,23 @@ const context = (region = production.region, overrides = {}) => ({
   ...overrides,
 });
 
+const rootDropTagContext = (overrides = {}) => ({
+  "aws:RequestedRegion": production.region,
+  "aws:RequestTag/Environment": "production",
+  "aws:RequestTag/ManagedBy": "Terraform",
+  "aws:RequestTag/Component": "full-rls-green-stage-a",
+  "aws:RequestTag/Stack": "production-green-stage-a",
+  "aws:TagKeys": ["Environment", "ManagedBy", "Component", "Stack"],
+  "kms:CallerAccount": "368992683803",
+  "kms:KeySpec": "RSA_3072",
+  "kms:KeyUsage": "SIGN_VERIFY",
+  ...overrides,
+});
+
 const conditionMatches = (condition = {}, values) => Object.entries(condition).every(([operator, entries]) => Object.entries(entries).every(([key, expectedValue]) => {
   const expected = asArray(expectedValue).map(String);
   const actual = values[key];
+  if (operator === "ForAllValues:StringEquals") return Array.isArray(actual) && actual.every((value) => expected.includes(String(value)));
   if (operator !== "StringEquals") throw new Error(`Unsupported condition operator in focused contract: ${operator}`);
   return actual !== undefined && expected.includes(String(actual));
 }));
@@ -118,6 +135,22 @@ test("Stage A apply permits only the exact endpoint security-group ingress", () 
   assert.equal(allows({ action: "ec2:AuthorizeSecurityGroupIngress", resource: production.endpointSecurityGroupArn, values: context("us-east-1") }), false);
 });
 
+test("Stage A steady-state release policy has no permanent KMS tagging capability", () => {
+  assert.doesNotThrow(() => assertSteadyStateReleasePolicy(policy));
+  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext() }), false);
+  assert.equal(statements.some(({ Action }) => asArray(Action).includes("kms:TagResource")), false);
+});
+
+test("temporary KMS capability is exact-purpose and cannot broaden the release role", () => {
+  const temporary = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId });
+  assert.doesNotThrow(() => assertTemporaryReleasePolicy(temporary, { steadyStatePolicy: policy, sourceSha, transitionId }));
+  const tag = temporaryKmsCapabilityStatement({ sourceSha, transitionId });
+  assert.deepEqual(tag.Condition.StringEquals["aws:RequestTag/Stack"], "production-green-stage-a");
+  assert.equal(allows({ action: "kms:Sign", resource: "*", values: rootDropTagContext() }), false);
+  assert.equal(temporary.Statement.some(({ Action }) => asArray(Action).includes("kms:Sign")), false);
+  assert.throws(() => assertTemporaryReleasePolicy({ ...temporary, Statement: [...temporary.Statement, { Effect: "Allow", Action: "kms:TagResource", Resource: "arn:aws:kms:eu-west-2:368992683803:key/unrelated" }] }, { steadyStatePolicy: policy }));
+});
+
 test("Stage A apply identity permits only the exact checker inline policies", () => {
   assert.equal(allows({ action: "iam:GetRolePolicy", resource: production.checkerSourceRoleArn, values: context() }), true);
   assert.equal(allows({ action: "iam:GetRolePolicy", resource: production.checkerRoleArn, values: context() }), true);
@@ -153,6 +186,8 @@ test("Stage A policy has no unrelated mutation or secret/value authority", () =>
     "logs:DeleteLogGroup", "ec2:RevokeSecurityGroupIngress", "ec2:ModifySecurityGroupRules", "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup", "ecs:UpdateService", "ecs:RegisterTaskDefinition",
   ]) assert.equal(actions.includes(forbidden), false, forbidden);
   assert.equal(actions.some((action) => /^(ec2|rds|secretsmanager|kms):\*$/.test(action)), false);
+  assert.equal(actions.includes("kms:Sign"), false);
+  assert.equal(actions.includes("kms:PutKeyPolicy"), false);
   assert.equal(statements.filter(({ Action }) => asArray(Action).includes("ec2:AuthorizeSecurityGroupIngress")).length, 1);
   assert.equal(actions.includes("s3:DeleteObject"), true);
   assert.equal(actions.includes("s3:PutObject"), true);

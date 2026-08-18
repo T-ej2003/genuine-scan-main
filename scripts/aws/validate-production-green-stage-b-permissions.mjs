@@ -14,6 +14,7 @@ import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidence
 import { assertStageBPlanApprovedBinding, STAGE_B_PLAN_PROFILES } from "./stage-b-plan-approval-contract.mjs";
 import { assertStageBImportedBackendRolloverActions, assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 import { assertEcsExecOperatorEvidence, assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorSourceContract, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
+import { buildTemporaryCapabilityEvidence } from "./production-stage-a-temporary-kms-capability.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION = 3;
@@ -349,7 +350,7 @@ function sameStringSet(left, right) {
 }
 
 export const REVIEWED_SIMULATION_CONTEXT_REGISTRY = Object.freeze([
-  { key: "aws:RequestTag/Component", type: "string", values: Object.freeze(["full-rls-green-stage-b"]) },
+  { key: "aws:RequestTag/Component", type: "string", values: Object.freeze(["full-rls-green-stage-a", "full-rls-green-stage-b"]) },
   { key: "aws:RequestTag/Environment", type: "string", values: Object.freeze(["production"]) },
   { key: "aws:RequestTag/ManagedBy", type: "string", values: Object.freeze(["Terraform"]) },
   { key: "aws:RequestTag/MSCQRExecTarget", type: "string", values: Object.freeze(["production-backend"]) },
@@ -1221,6 +1222,13 @@ export function runPermissionPreflight({
       ecsExecVerifier: { principalArn: ECS_EXEC_OPERATOR_ROLE_ARN, requiredEvaluations: operatorRequiredResults, forbiddenEvaluations: operatorForbiddenResults, status: operatorStatus },
     },
     ecsExecVerifierTrust: ecsExecVerifierEvidence || null,
+    temporaryKmsCapability: buildTemporaryCapabilityEvidence({
+      state: "ABSENCE_VERIFIED",
+      sourceSha: deploymentIdentity.toolingSha,
+      transitionId: `preflight-${deploymentIdentity.toolingSha.slice(0, 12)}`,
+      defaultVersionId: policyEvidence.policies.find(({ name }) => name === "MSCQRProductionGreenStageARelease")?.defaultVersionId,
+      observedAt: generatedAt,
+    }),
     cutoverCritical: {
       stageAIngress: requiredResults.find(({ manifestId }) => manifestId === "apply-stage-a-endpoint-security-group-ingress")?.decision || null,
       stageACheckerRoleChain: requiredResults.find(({ manifestId }) => manifestId === "apply-stage-a-checker-role-chain-policy")?.decision || null,

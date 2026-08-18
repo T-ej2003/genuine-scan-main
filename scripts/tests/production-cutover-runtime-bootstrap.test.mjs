@@ -13,6 +13,7 @@ import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-auth
 import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
 import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 import { buildRootDropEvidence, buildRootDropPayload } from "../aws/production-root-drop-evidence.mjs";
+import { buildTemporaryCapabilityEvidence } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
@@ -59,6 +60,11 @@ function evidenceFiles(directory, repositoryRoot) {
   const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha });
   const imageAuthorization = file("image-authorization.json", imageAuthorizationFixture.authorization);
   const iamEvidence = file("iam-evidence.json", { status: "valid", iamEvaluationCensus: { total: 158, executed: 158, invalid: 0, failures: [] }, evidenceSha256: "d".repeat(64) });
+  const temporaryKmsCapability = file("temporary-kms-capability.json", buildTemporaryCapabilityEvidence({ state: "ABSENCE_VERIFIED", sourceSha, transitionId: "rehearsal-transition", defaultVersionId: "v1", observedAt: "2026-08-18T12:00:00.000Z" }));
+  const iamDocument = JSON.parse(readFileSync(iamEvidence, "utf8"));
+  iamDocument.temporaryKmsCapability = JSON.parse(readFileSync(temporaryKmsCapability, "utf8"));
+  writeFileSync(iamEvidence, JSON.stringify(iamDocument) + "\n", { mode: 0o600 });
+  chmodSync(iamEvidence, 0o600);
   const rootDrop = file("root-drop.json", buildRootDropEvidence({ payload: buildRootDropPayload({ sourceSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "runtime-bootstrap-root-with-entropy" }), signatureBase64: "c2lnbmF0dXJl" }));
   const stageAPlan = file("stage-a.tfplan", "binary-fixture");
   const tfvarsBytes = Buffer.from("production_rotation_enabled = false\n");
@@ -75,7 +81,7 @@ function evidenceFiles(directory, repositoryRoot) {
     ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-d",
   } }, null, 2));
   chmodSync(artifactBinding, 0o600);
-  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
+  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, temporaryKmsCapability, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
 }
 
 function fullInput(directory, repositoryRoot) {
@@ -88,6 +94,7 @@ function fullInput(directory, repositoryRoot) {
     git: gitFixture(),
     imageAuthorization: { ...JSON.parse(readFileSync(evidence.imageAuthorization, "utf8")), filePath: evidence.imageAuthorization },
     iamEvidence: { ...JSON.parse(readFileSync(evidence.iamEvidence, "utf8")), filePath: evidence.iamEvidence },
+    temporaryKmsCapabilityFile: evidence.temporaryKmsCapability,
     artifactBindingFile: evidence.artifactBinding,
     rootDropEvidenceFile: evidence.rootDrop,
     stageAPlanPath: evidence.stageAPlan,
