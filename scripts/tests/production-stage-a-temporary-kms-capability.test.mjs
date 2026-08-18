@@ -300,7 +300,7 @@ test("canonical producer replays authorization and safely aborts a failed apply"
     assert.equal(authorized.evidence.state, "AUTHORIZED_FOR_ROOT_DROP_CREATION");
     assert.equal(replay.writes, 0);
     runner.runPhase({ phase: "mark-stage-a-apply", sourceSha, transitionId, stateFile, planSha256 });
-    const revoked = runner.runPhase({ phase: "abort", sourceSha, transitionId, stateFile, applyFailed: true, partialOperationCensus: true });
+    const revoked = runner.runPhase({ phase: "abort", sourceSha, transitionId, stateFile, planSha256, planJsonFile, applyFailed: true, partialOperationCensus: true });
     assert.equal(revoked.evidence.state, "REVOKED");
     assert.equal(runner.runPhase({ phase: "revoke", sourceSha, transitionId, stateFile }).writes, 0);
     const absent = runner.runPhase({ phase: "verify-absent", sourceSha, transitionId, stateFile });
@@ -400,9 +400,89 @@ test("an unrecorded post-write capability can be recovered only with exact faile
     const recovered = runner.runPhase({ phase: "abort", sourceSha, transitionId, stateFile, planSha256, planJsonFile, applyFailed: true, partialOperationCensus: true });
     assert.equal(recovered.evidence.state, "REVOKED");
     assert.equal(recovered.writes, 2);
-    assert.throws(() => runner.runPhase({ phase: "abort", sourceSha, transitionId, stateFile, applyFailed: true, partialOperationCensus: true }), /apply failure and authenticated partial-operation census/);
+    assert.throws(() => runner.runPhase({ phase: "abort", sourceSha, transitionId, stateFile, applyFailed: true, partialOperationCensus: true }), /apply failure.*partial-operation census/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("abort recovery reconstructs completed aborts after temporary deletion without new IAM writes", () => {
+  for (const lifecycle of ["AUTHORIZED_FOR_ROOT_DROP_CREATION", "STAGE_A_APPLY"]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-abort-recovery-"));
+    const stateFile = path.join(directory, "capability.json");
+    const planJsonFile = writePlanFile(directory);
+    const fixture = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) } });
+    let failRevokedWrite = true;
+    const persist = (filePath, value) => {
+      if (value.state === "REVOKED" && failRevokedWrite) { failRevokedWrite = false; throw new Error("simulated process death after abort revocation"); }
+      writeFileSync(filePath, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+    };
+    try {
+      const runner = createTemporaryKmsCapabilityRunner({ run: fixture.run, writeEvidence: persist, now: () => "2026-08-18T12:00:00.000Z" });
+      runner.runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+      if (lifecycle === "STAGE_A_APPLY") runner.runPhase({ phase: "mark-stage-a-apply", sourceSha, transitionId, stateFile, planSha256 });
+      const beforeAbort = fixture.calls.length;
+      assert.throws(() => runner.runPhase({ phase: "abort", sourceSha, transitionId, stateFile, planSha256, planJsonFile, applyFailed: true, partialOperationCensus: true }), /simulated process death/);
+      const afterAbort = fixture.calls.length;
+      assert.equal(fixture.calls.filter((operation) => operation === "create-policy-version").length, 2);
+      assert.equal(fixture.calls.filter((operation) => operation === "delete-policy-version").length, 1);
+      assert.throws(() => createTemporaryKmsCapabilityRunner({ run: fixture.run }).runPhase({ phase: "abort", sourceSha, transitionId, stateFile, planSha256, planJsonFile }), /apply failure/);
+      assert.equal(fixture.calls.filter((operation) => ["create-policy-version", "delete-policy-version"].includes(operation)).length, 3);
+      const recovered = createTemporaryKmsCapabilityRunner({ run: fixture.run }).runPhase({ phase: "abort", sourceSha, transitionId, stateFile, planSha256, planJsonFile, applyFailed: true, partialOperationCensus: true });
+      assert.equal(recovered.recovery, "AUTHENTICATED_ABORT_ALREADY_REVOKED");
+      assert.equal(recovered.evidence.state, "REVOKED");
+      assert.equal(recovered.writes, 0);
+      assert.ok(fixture.calls.length > afterAbort);
+      assert.equal(fixture.calls.filter((operation) => operation === "create-policy-version").length, 2);
+      assert.equal(fixture.calls.filter((operation) => operation === "delete-policy-version").length, 1);
+      assert.ok(fixture.calls.length > beforeAbort);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
+test("completed abort recovery rejects missing or mismatched authenticated bindings", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-abort-bindings-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const fixture = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) } });
+  let failRevokedWrite = true;
+  const persist = (filePath, value) => {
+    if (value.state === "REVOKED" && failRevokedWrite) { failRevokedWrite = false; throw new Error("simulated process death after abort revocation"); }
+    writeFileSync(filePath, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+  };
+  try {
+    const runner = createTemporaryKmsCapabilityRunner({ run: fixture.run, writeEvidence: persist });
+    runner.runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    assert.throws(() => runner.runPhase({ phase: "abort", sourceSha, transitionId, stateFile, planSha256, planJsonFile, applyFailed: true, partialOperationCensus: true }), /simulated process death/);
+    const mutationCountsAfterCompletion = fixture.calls.filter((operation) => ["create-policy-version", "delete-policy-version"].includes(operation)).length;
+    for (const input of [
+      { sourceSha: "b".repeat(40) },
+      { transitionId: "different-transition" },
+      { planSha256: "b".repeat(64) },
+      { partialOperationCensus: false },
+    ]) {
+      assert.throws(() => createTemporaryKmsCapabilityRunner({ run: fixture.run }).runPhase({ phase: "abort", sourceSha, transitionId, stateFile, planSha256, planJsonFile, applyFailed: true, partialOperationCensus: true, ...input }), /abort recovery|evidence identity|authenticated partial-operation census|different transition or plan/);
+      assert.equal(fixture.calls.filter((operation) => ["create-policy-version", "delete-policy-version"].includes(operation)).length, mutationCountsAfterCompletion);
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("completed abort recovery fails closed for unknown or ambiguous policy topology", () => {
+  for (const mode of ["unknown", "ambiguous"]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-abort-topology-"));
+    const stateFile = path.join(directory, "capability.json");
+    const planJsonFile = writePlanFile(directory);
+    const fixtureConfig = { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) };
+    const fixture = createPolicyVersionRunner({ fixture: fixtureConfig });
+    try {
+      const runner = createTemporaryKmsCapabilityRunner({ run: fixture.run });
+      runner.runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+      if (mode === "unknown") fixture.documents.set("v3", ["malformed"]);
+      if (mode === "ambiguous") fixtureConfig.extraDefaultVersionId = "v1";
+      const mutationsBefore = fixture.calls.filter((operation) => ["create-policy-version", "delete-policy-version"].includes(operation)).length;
+      assert.throws(() => runner.runPhase({ phase: "abort", sourceSha, transitionId, stateFile, planSha256, planJsonFile, applyFailed: true, partialOperationCensus: true }), /policy version document|default-version topology/);
+      assert.equal(fixture.calls.filter((operation) => ["create-policy-version", "delete-policy-version"].includes(operation)).length, mutationsBefore);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   }
 });
 

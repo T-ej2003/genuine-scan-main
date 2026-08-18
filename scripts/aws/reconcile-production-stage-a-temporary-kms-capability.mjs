@@ -240,6 +240,23 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       persistEvidence(stateFile, previous);
       state = previous.state;
     }
+    if (phase === "abort") {
+      if (!applyFailed || !partialOperationCensus || !SHA256.test(planSha256 || "") || !planJsonFile || !existsSync(planJsonFile) || !["AUTHORIZED_FOR_ROOT_DROP_CREATION", "STAGE_A_APPLY"].includes(state)) fail("apply failure, authenticated partial-operation census, and exact Stage-A plan bindings are required");
+      const planFile = ensureStageBPrivateFile({ filePath: planJsonFile, repositoryRoot: root, label: "Classified Stage-A plan JSON" });
+      assertStageARootDropCreationPlan(readJson(planFile.path));
+      if (previous && (previous.transitionId !== transitionId || previous.planSha256 !== planSha256)) fail("abort recovery belongs to a different transition or plan");
+      const persistedTemporary = current.versions.find(({ VersionId }) => VersionId === previous?.temporaryVersionId);
+      const completedAbort = previous && !activeTemporary && !persistedTemporary && current.active.VersionId !== previous.temporaryVersionId && !current.versions.some(({ document }) => document.Statement?.some(isTemporaryTagResourceStatement));
+      if (completedAbort) {
+        assertTemporaryCapabilityEvidence(previous, { sourceSha, state });
+        assertSource(current.active);
+        const evidence = buildTemporaryCapabilityEvidence({ ...previous, state: "REVOKED", temporaryVersionId: null, defaultVersionId: current.active.VersionId, ownership: null, observedAt: now() });
+        assertTemporaryCapabilityEvidence(evidence, { sourceSha, state: "REVOKED" });
+        assertTemporaryCapabilityTransition(state, evidence.state, { sourceSha });
+        persistEvidence(stateFile, evidence);
+        return { evidence, writes: 0, recovery: "AUTHENTICATED_ABORT_ALREADY_REVOKED", mutationAccounting: accounting };
+      }
+    }
     if (previous && ["AUTHORIZED_FOR_ROOT_DROP_CREATION", "STAGE_A_APPLY", "ROOT_DROP_OWNERSHIP_VERIFIED"].includes(state)) {
       const persistedTemporary = current.versions.find(({ VersionId }) => VersionId === previous.temporaryVersionId);
       const alreadySteadyAfterWrite = ["abort", "revoke"].includes(phase) && !activeTemporary && persistedTemporary?.document.Statement?.some(isTemporaryTagResourceStatement);
@@ -312,7 +329,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       return { evidence, writes: 0 };
     }
     if (phase === "abort") {
-      if (!applyFailed || !partialOperationCensus || !["AUTHORIZED_FOR_ROOT_DROP_CREATION", "STAGE_A_APPLY"].includes(state)) fail("apply failure and authenticated partial-operation census are required");
+      // Inputs and completed-abort recovery were validated before lifecycle replay.
     } else if (phase === "revoke") {
       if (state === "REVOKED") {
         assertTemporaryCapabilityEvidence(previous, { sourceSha, state });
