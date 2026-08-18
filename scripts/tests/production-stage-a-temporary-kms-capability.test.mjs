@@ -17,6 +17,7 @@ import {
   assertSteadyStateReleasePolicy,
   assertTemporaryCapabilityEvidence,
   assertTemporaryCapabilityTransition,
+  assertStageARootDropCreationPlan,
   assertTemporaryReleasePolicy,
   buildRootDropOwnershipEvidence,
   buildTemporaryCapabilityEvidence,
@@ -272,6 +273,19 @@ test("root-drop ownership is exact and both Terraform resources are required", (
   assert.doesNotThrow(() => assertRootDropOwnershipEvidence(ownership, { sourceSha, planSha256 }));
   assert.throws(() => buildRootDropOwnershipEvidence({ terraformState: { resources: stateFixture().resources.slice(0, 1) }, sourceSha, transitionId, planSha256, observedAt: "2026-08-18T12:00:00.000Z" }), /key and alias/);
   assert.throws(() => assertRootDropOwnershipEvidence({ ...ownership, aliasResolves: false }, { sourceSha, planSha256 }), /not exact/);
+});
+
+test("fresh Stage-A plan accepts only the exact two-create root-drop envelope", () => {
+  const create = (address) => ({ address, change: { actions: ["create"] } });
+  const valid = { resource_changes: [create("aws_kms_key.root_drop"), create("aws_kms_alias.root_drop")] };
+  assert.doesNotThrow(() => assertStageARootDropCreationPlan(valid));
+  for (const plan of [
+    { resource_changes: [...valid.resource_changes, create("aws_s3_bucket.unrelated")] },
+    { resource_changes: [{ address: "aws_kms_key.root_drop", change: { actions: ["delete", "create"] } }, valid.resource_changes[1]] },
+    { resource_changes: [{ address: "aws_kms_key.root_drop", change: { actions: ["delete"] } }, valid.resource_changes[1]] },
+    { resource_changes: [valid.resource_changes[0]] },
+    { resource_changes: [{ address: "aws_kms_key.root_drop", change: { actions: ["unknown"] } }, valid.resource_changes[1]] },
+  ]) assert.throws(() => assertStageARootDropCreationPlan(plan), /exact two-resource root-drop creation envelope/);
 });
 
 test("private capability evidence is not replaceable through a symlink", () => {

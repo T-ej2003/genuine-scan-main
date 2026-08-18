@@ -10,7 +10,10 @@ import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-a-prerequisites-"));
 const stage = productionStageAState({ serial: STAGE_A_MINIMUM_STATE_SERIAL });
-const statePath = path.join(directory, "stage-a-state.json"); fs.writeFileSync(statePath, JSON.stringify(stage), { mode: 0o600 });
+const withoutRootDrop = (state, resources) => ({ ...state, resources: state.resources.map((resource) => resources.some(([type, name]) => resource.type === type && resource.name === name) ? { ...resource, instances: [] } : resource) });
+const preApplyStage = withoutRootDrop(productionStageAState({ serial: 43 }), [["aws_kms_key", "root_drop"], ["aws_kms_alias", "root_drop"]]);
+const statePath = path.join(directory, "stage-a-state.json"); fs.writeFileSync(statePath, JSON.stringify(preApplyStage), { mode: 0o600 });
+const postApplyStatePath = path.join(directory, "post-apply-stage-a-state.json"); fs.writeFileSync(postApplyStatePath, JSON.stringify(stage), { mode: 0o600 });
 const run = (args) => {
   if (args[1] === "describe-subnets") return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId, index) => ({ SubnetId, VpcId: "vpc-0123456789abcdef0", State: "available", MapPublicIpOnLaunch: false, AvailabilityZone: `eu-west-2${index ? "b" : "a"}`, CidrBlock: `10.0.${index}.0/24` })) });
   if (args[1] === "describe-route-tables") return JSON.stringify({ RouteTables: [{ RouteTableId: "rtb-12345678", VpcId: "vpc-0123456789abcdef0", Associations: [{ Main: true }], Routes: [{ DestinationCidrBlock: "0.0.0.0/0", NatGatewayId: "nat-12345678" }] }] });
@@ -48,12 +51,44 @@ test("Stage A checker trust accepts the Terraform singleton principal array and 
 
 test("canonical Stage A handoff derives every identifier from state and read-only live evidence", () => {
   const outputPath = path.join(directory, "handoff.json");
-  const output = generateStageAPrerequisites({ stateBackup: statePath, stateObject: STAGE_A_STATE_OBJECT, toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), outputPath, run });
-  assert.equal(output.schemaVersion, 2); assert.equal(output.stageAStateObject, STAGE_A_STATE_OBJECT); assert.equal(output.stageAStateLineage, STAGE_A_EXPECTED_STATE_LINEAGE); assert.equal(output.stageAStateSerial, STAGE_A_MINIMUM_STATE_SERIAL); assert.deepEqual(output.privateSubnetIds, [...STAGE_B.privateSubnetIds].sort()); assert.equal(output.networkEvidence.privateSubnets.length, 2); assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
+  const output = generateStageAPrerequisites({ stateBackup: statePath, stateObject: STAGE_A_STATE_OBJECT, toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), outputPath, phase: "PRE_APPLY", run });
+  assert.equal(output.schemaVersion, 2); assert.equal(output.stageAStateObject, STAGE_A_STATE_OBJECT); assert.equal(output.stageAStateLineage, STAGE_A_EXPECTED_STATE_LINEAGE); assert.equal(output.stageAStateSerial, 43); assert.deepEqual(output.privateSubnetIds, [...STAGE_B.privateSubnetIds].sort()); assert.equal(output.networkEvidence.privateSubnets.length, 2); assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
+});
+
+test("generator requires an explicit lifecycle phase and preserves post-apply handoff state binding", () => {
+  assert.throws(() => generateStageAPrerequisites({ stateBackup: statePath, stateObject: STAGE_A_STATE_OBJECT, toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), outputPath: path.join(directory, "missing-phase.json"), run }), /requires an explicit .* phase/);
+  const outputPath = path.join(directory, "post-apply-handoff.json");
+  const output = generateStageAPrerequisites({ stateBackup: postApplyStatePath, stateObject: STAGE_A_STATE_OBJECT, toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), outputPath, phase: "POST_APPLY", run });
+  assert.equal(output.stageAStateSerial, stage.serial);
+  assert.equal(output.stageAStateSha256, buildStageAStateIdentity(stage, { stateBytes: fs.readFileSync(postApplyStatePath) }).stateSha256);
+  assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
+});
+
+test("pre-apply ABSENT root-drop state reaches the fresh-plan boundary", () => {
+  assert.doesNotThrow(() => assertStageAStateContract(preApplyStage, { stateObject: STAGE_A_STATE_OBJECT, phase: "PRE_APPLY" }));
+  assert.throws(() => assertStageAStateContract(stage, { stateObject: STAGE_A_STATE_OBJECT, phase: "PRE_APPLY" }), /pre-apply root-drop state must be ABSENT/);
+});
+
+test("pre-apply partial root-drop state fails closed", () => {
+  for (const resources of [
+    [["aws_kms_key", "root_drop"]],
+    [["aws_kms_alias", "root_drop"]],
+  ]) assert.throws(() => assertStageAStateContract(withoutRootDrop(stage, resources), { stateObject: STAGE_A_STATE_OBJECT, phase: "PRE_APPLY" }), /pre-apply root-drop state must be ABSENT/);
+});
+
+test("post-apply root-drop ownership remains required and exact", () => {
+  assert.doesNotThrow(() => assertStageAStateContract(stage, { stateObject: STAGE_A_STATE_OBJECT }));
+  assert.throws(() => assertStageAStateContract(preApplyStage, { stateObject: STAGE_A_STATE_OBJECT }), /exactly one aws_kms_key\.root_drop/);
+  const wrongAlias = productionStageAState({ serial: STAGE_A_MINIMUM_STATE_SERIAL, mutate: (state) => {
+    const alias = state.resources.find((resource) => resource.type === "aws_kms_alias" && resource.name === "root_drop");
+    alias.instances[0].attributes.target_key_arn = "arn:aws:kms:eu-west-2:368992683803:key/22222222-2222-2222-2222-222222222222";
+    return state;
+  } });
+  assert.throws(() => assertStageAStateContract(wrongAlias, { stateObject: STAGE_A_STATE_OBJECT }), /root-drop key and alias identities/);
 });
 
 test("canonical Stage A handoff rejects a subnet without NAT routing", () => {
-  assert.throws(() => generateStageAPrerequisites({ stateBackup: statePath, stateObject: STAGE_A_STATE_OBJECT, toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), outputPath: path.join(directory, "bad.json"), run: (args) => args[1] === "describe-route-tables" ? JSON.stringify({ RouteTables: [{ RouteTableId: "rtb-12345678", VpcId: "vpc-0123456789abcdef0", Associations: [{ Main: true }], Routes: [] }] }) : run(args) }), /NAT default route/);
+  assert.throws(() => generateStageAPrerequisites({ stateBackup: statePath, stateObject: STAGE_A_STATE_OBJECT, toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), outputPath: path.join(directory, "bad.json"), phase: "PRE_APPLY", run: (args) => args[1] === "describe-route-tables" ? JSON.stringify({ RouteTables: [{ RouteTableId: "rtb-12345678", VpcId: "vpc-0123456789abcdef0", Associations: [{ Main: true }], Routes: [] }] }) : run(args) }), /NAT default route/);
 });
 
 test("Stage A state identity is independent from Stage B and accepts later Stage A serials", () => {

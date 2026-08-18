@@ -21,7 +21,7 @@ const fresh = readFreshProtectedMainIdentity({ run: gitRun, expectedSourceSha: a
 const run = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
 const stageAStatePath = assertStageBPrivateFile({ filePath: args.get("stage-a-state"), repositoryRoot: process.cwd(), label: "Stage-A state" }).path;
 const stageAState = JSON.parse(readFileSync(stageAStatePath, "utf8"));
-const stageAContract = assertStageAStateContract(stageAState);
+const stageAContract = assertStageAStateContract(stageAState, { phase: "POST_APPLY" });
 const ingress = describeStageAIngress({ run, endpointSecurityGroupId: stageAContract.endpointSecurityGroupId, runtimeSecurityGroupId: stageAContract.executorSecurityGroupId });
 const evidence = producePostApplyStageAPlanRecovery({ sourceSha: fresh.headSha, stageAStatePath, stageAHandoffPath: args.get("stage-a-handoff"), stageBStatePath: args.get("stage-b-state"), ingress, outputPath: args.get("output"), repositoryRoot: process.cwd() });
 process.stdout.write(`${JSON.stringify({ status: "valid", mode: evidence.mode, evidenceRef: evidence.evidenceRef, evidenceSha256: evidence.fileSha256, sourceSha: evidence.sourceSha, historicalPlanPresent: evidence.historicalPlanPresent }, null, 2)}\n`);
