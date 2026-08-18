@@ -180,7 +180,11 @@ test("temporary KMS capability is exact-purpose and cannot broaden the release r
   assert.equal(alias.Resource, production.rootDropKeyArn);
   assert.equal(alias.Condition, undefined);
   assert.deepEqual(aliasKey.Action, ["kms:CreateAlias", "kms:PutKeyPolicy"]);
-  assert.equal(statementAllows(aliasKey, { action: "kms:PutKeyPolicy", resource: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111", values: rootDropAliasKeyContext() }), true);
+  const keyResourceContext = rootDropAliasKeyContext();
+  assert.deepEqual(Object.keys(aliasKey.Condition.StringEquals).sort(), ["aws:ResourceTag/Component", "aws:ResourceTag/Environment", "aws:ResourceTag/ManagedBy", "aws:ResourceTag/Stack", "kms:KeySpec", "kms:KeyUsage"].sort());
+  assert.equal(keyResourceContext["aws:RequestTag/Stack"], undefined);
+  assert.equal(keyResourceContext["aws:TagKeys"], undefined);
+  assert.equal(statementAllows(aliasKey, { action: "kms:PutKeyPolicy", resource: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111", values: keyResourceContext }), true);
   assert.equal(statementAllows(aliasKey, { action: "kms:PutKeyPolicy", resource: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111", values: rootDropAliasKeyContext({ "aws:ResourceTag/Stack": "unrelated" }) }), false);
   assert.equal(statementAllows(aliasKey, { action: "kms:PutKeyPolicy", resource: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111", values: rootDropAliasKeyContext({ "kms:KeySpec": "ECC_NIST_P256" }) }), false);
   assert.equal(aliasKey.Resource, production.rootDropKeyResource);

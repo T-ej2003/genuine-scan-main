@@ -155,6 +155,26 @@ function createPolicyVersionRunner({ fixture = capacityFixture(), onGetPolicy, o
   return { run, documents, dates, calls, get defaultVersionId() { return defaultVersionId; }, set defaultVersionId(value) { defaultVersionId = value; }, get listCalls() { return listCalls; } };
 }
 
+function priorTemporaryPolicy() {
+  const current = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId });
+  return { ...current, Statement: current.Statement.map((statement) => Array.isArray(statement.Action) && statement.Action.includes("kms:PutKeyPolicy") ? { ...statement, Action: TEMPORARY_KMS_CAPABILITY.aliasAction } : statement) };
+}
+
+function legacyTemporaryPolicy() {
+  const current = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId });
+  const keyStatement = current.Statement.find(({ Sid }) => Sid?.startsWith("TemporaryStageARootDropKeyTagAtCreation"));
+  const legacySid = `TemporaryStageARootDropKeyTagAtCreation_${sourceSha}_${createHash("sha256").update(transitionId).digest("hex").slice(0, 16)}`;
+  return { ...current, Statement: [...current.Statement.filter((statement) => !isTemporaryTagResourceStatement(statement)), { ...keyStatement, Sid: legacySid, Action: TEMPORARY_KMS_CAPABILITY.action }] };
+}
+
+function writeAuthorizedEvidence(stateFile, { temporaryVersionId = "v2", actions = ["kms:CreateKey", "kms:TagResource", "kms:PutKeyPolicy", "kms:CreateAlias"] } = {}) {
+  const evidence = buildTemporaryCapabilityEvidence({ state: "AUTHORIZED_FOR_ROOT_DROP_CREATION", sourceSha, transitionId, planSha256, defaultVersionId: temporaryVersionId, temporaryVersionId, observedAt: "2026-08-18T12:00:00.000Z" });
+  evidence.actions = actions;
+  const { evidenceSha256, ...unsigned } = evidence;
+  evidence.evidenceSha256 = createHash("sha256").update(canonicalPolicy(unsigned)).digest("hex");
+  writeFileSync(stateFile, `${JSON.stringify(evidence)}\n`, { mode: 0o600 });
+}
+
 test("steady state contains no permanent wildcard KMS TagResource authority", () => {
   assert.doesNotThrow(() => assertSteadyStateReleasePolicy(policy));
   assert.equal(policy.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("kms:TagResource")), false);
@@ -934,6 +954,91 @@ test("an authenticated active temporary version is protected during authorizatio
     assert.equal(fake.documents.has("v5"), true);
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("authorization replay replaces the recognized pre-PutKeyPolicy temporary policy", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-prior-replay-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const prior = priorTemporaryPolicy();
+  const fake = createPolicyVersionRunner({ fixture: {
+    defaultVersionId: "v2",
+    documents: new Map([["v1", policy], ["v2", prior]]),
+    dates: new Map([["v1", "2026-01-01T00:00:00.000Z"], ["v2", "2026-01-02T00:00:00.000Z"]]),
+  } });
+  try {
+    writeAuthorizedEvidence(stateFile, { actions: ["kms:CreateKey", "kms:TagResource", "kms:CreateAlias"] });
+    const result = createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    assert.equal(result.evidence.temporaryVersionId, "v3");
+    assert.deepEqual(result.evidence.actions, ["kms:CreateKey", "kms:TagResource", "kms:PutKeyPolicy", "kms:CreateAlias"]);
+    assert.equal(result.writes, 2);
+    assert.equal(result.mutationAccounting.policyVersionCreations, 1);
+    assert.equal(result.mutationAccounting.policyVersionDeletions, 1);
+    assert.equal(fake.documents.has("v2"), false);
+    assert.equal(fake.defaultVersionId, "v3");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("recognized pre-PutKeyPolicy temporary policy remains abort- and revoke-revocable", () => {
+  for (const phase of ["abort", "revoke"]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-prior-recovery-"));
+    const stateFile = path.join(directory, "capability.json");
+    const planJsonFile = writePlanFile(directory);
+    const prior = priorTemporaryPolicy();
+    const fake = createPolicyVersionRunner({ fixture: {
+      defaultVersionId: "v2",
+      documents: new Map([["v1", policy], ["v2", prior]]),
+      dates: new Map([["v1", "2026-01-01T00:00:00.000Z"], ["v2", "2026-01-02T00:00:00.000Z"]]),
+    } });
+    try {
+      writeAuthorizedEvidence(stateFile, { actions: ["kms:CreateKey", "kms:TagResource", "kms:CreateAlias"] });
+      const runner = createTemporaryKmsCapabilityRunner({ run: fake.run });
+      if (phase === "revoke") {
+        runner.runPhase({ phase: "mark-stage-a-apply", sourceSha, transitionId, stateFile, planSha256 });
+        const terraformStateFile = path.join(directory, "terraform.tfstate");
+        writeFileSync(terraformStateFile, JSON.stringify(stateFixture()), { mode: 0o600 });
+        runner.runPhase({ phase: "mark-root-drop-owned", sourceSha, transitionId, stateFile, planSha256, terraformStateFile });
+      }
+      const result = runner.runPhase({ phase, sourceSha, transitionId, stateFile, planSha256, planJsonFile, applyFailed: phase === "abort", partialOperationCensus: phase === "abort" });
+      assert.equal(result.evidence.state, "REVOKED");
+      assert.equal(fake.defaultVersionId, "v3");
+      assert.equal(fake.documents.has("v2"), false);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
+test("legacy TagResource-only temporary policy cannot authorize but remains abort- and revoke-revocable", () => {
+  for (const phase of ["authorize", "abort", "revoke"]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-legacy-replay-"));
+    const stateFile = path.join(directory, "capability.json");
+    const planJsonFile = writePlanFile(directory);
+    const legacy = legacyTemporaryPolicy();
+    const fake = createPolicyVersionRunner({ fixture: {
+      defaultVersionId: "v2",
+      documents: new Map([["v1", policy], ["v2", legacy]]),
+      dates: new Map([["v1", "2026-01-01T00:00:00.000Z"], ["v2", "2026-01-02T00:00:00.000Z"]]),
+    } });
+    try {
+      writeAuthorizedEvidence(stateFile);
+      if (phase === "authorize") {
+        assert.throws(() => createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase, sourceSha, transitionId, stateFile, planSha256, planJsonFile }), /legacy temporary policy cannot authorize/);
+        assert.equal(fake.defaultVersionId, "v2");
+        assert.deepEqual(fake.calls.filter((operation) => ["create-policy-version", "delete-policy-version"].includes(operation)), []);
+      } else {
+        if (phase === "revoke") {
+          const runner = createTemporaryKmsCapabilityRunner({ run: fake.run });
+          runner.runPhase({ phase: "mark-stage-a-apply", sourceSha, transitionId, stateFile, planSha256 });
+          const terraformStateFile = path.join(directory, "terraform.tfstate");
+          writeFileSync(terraformStateFile, JSON.stringify(stateFixture()), { mode: 0o600 });
+          runner.runPhase({ phase: "mark-root-drop-owned", sourceSha, transitionId, stateFile, planSha256, terraformStateFile });
+        }
+        const result = createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase, sourceSha, transitionId, stateFile, planSha256, planJsonFile, applyFailed: true, partialOperationCensus: true });
+        assert.equal(result.evidence.state, "REVOKED");
+        assert.equal(fake.defaultVersionId, "v3");
+        assert.equal(fake.documents.has("v2"), false);
+      }
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   }
 });
 

@@ -141,7 +141,7 @@ export function buildTemporaryReleasePolicy(steadyStatePolicy, identity) {
   return policy;
 }
 
-export function assertTemporaryReleasePolicy(policy, { steadyStatePolicy, sourceSha, transitionId } = {}) {
+export function assertTemporaryReleasePolicy(policy, { steadyStatePolicy, sourceSha, transitionId, allowLegacyTemporary = true } = {}) {
   if (!steadyStatePolicy) fail("steady-state source policy is required");
   assertSteadyStateReleasePolicy(steadyStatePolicy);
   const temporary = statements(policy).filter(isTemporaryTagResourceStatement);
@@ -156,12 +156,21 @@ export function assertTemporaryReleasePolicy(policy, { steadyStatePolicy, source
     && temporary.some((statement) => equal(statement, priorCurrent[0]) || equal(statement, legacyKey))
     && priorCurrent.slice(1).every((candidate) => temporary.some((statement) => equal(statement, candidate)));
   const exactLegacy = temporary.length === 1 && equal(temporary[0], legacyTag);
-  if (!exactCurrent && !exactPriorCurrent && !exactLegacy) fail("temporary policy statements are not exact");
+  if (!exactCurrent && !(allowLegacyTemporary && (exactPriorCurrent || exactLegacy))) fail("temporary policy statements are not exact");
   const withoutTemporary = statements(policy).filter((statement) => !isTemporaryTagResourceStatement(statement));
   if (!equal(withoutStatementIds({ ...policy, Statement: withoutTemporary }), withoutStatementIds(steadyStatePolicy))) fail("temporary policy changes more than the exact creation capability");
   if (statements(policy).some((statement) => (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).some((action) => ["kms:Sign", "kms:Decrypt", "kms:Encrypt", "kms:CreateGrant", "kms:ScheduleKeyDeletion", "kms:DisableKey"].includes(action)))) fail("temporary policy grants an unrelated KMS capability");
   assertManagedPolicyDocumentSize(policy, { label: "Temporary Stage-A KMS policy" });
   return true;
+}
+
+export function isCurrentTemporaryReleasePolicy(policy, { steadyStatePolicy, sourceSha, transitionId } = {}) {
+  try {
+    assertTemporaryReleasePolicy(policy, { steadyStatePolicy, sourceSha, transitionId, allowLegacyTemporary: false });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function buildTemporaryCapabilityEvidence(fields = {}) {
