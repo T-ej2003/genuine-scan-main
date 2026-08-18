@@ -146,12 +146,12 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       if (!error.mutationOutcome) {
         try {
           const recovered = readState?.({ allowTemporaryVersionId });
-          const candidates = recovered?.versions?.filter(({ document: observed }) => canonical(observed) === canonical(document) && canonical(recovered.active?.document) === canonical(document)) || [];
-          if (candidates.length === 1) {
+          const active = recovered?.active;
+          if (active && VERSION.test(active.VersionId || "") && recovered.policy?.DefaultVersionId === active.VersionId && canonical(active.document) === canonical(document)) {
             recordMutation(accounting, "CreatePolicyVersion", "CONFIRMED_SUCCESS_READBACK");
             accounting.policyVersionCreations += 1;
             accounting.policyDefaultChanges += 1;
-            return candidates[0];
+            return active;
           }
           error.mutationOutcome = "OUTCOME_UNKNOWN";
         } catch { error.mutationOutcome = "OUTCOME_UNKNOWN"; }
@@ -243,7 +243,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     if (previous && ["AUTHORIZED_FOR_ROOT_DROP_CREATION", "STAGE_A_APPLY", "ROOT_DROP_OWNERSHIP_VERIFIED"].includes(state)) {
       const persistedTemporary = current.versions.find(({ VersionId }) => VersionId === previous.temporaryVersionId);
       const alreadySteadyAfterWrite = ["abort", "revoke"].includes(phase) && !activeTemporary && persistedTemporary?.document.Statement?.some(isTemporaryTagResourceStatement);
-      const authenticatedAlreadyRevoked = phase === "revoke" && !activeTemporary && !persistedTemporary && current.active.VersionId !== previous.temporaryVersionId;
+      const authenticatedAlreadyRevoked = state === "ROOT_DROP_OWNERSHIP_VERIFIED" && phase === "revoke" && !activeTemporary && !persistedTemporary && current.active.VersionId !== previous.temporaryVersionId;
       if (authenticatedAlreadyRevoked) {
         assertTemporaryCapabilityEvidence(previous, { sourceSha, state });
         if (previous.transitionId !== transitionId || !SHA256.test(previous.planSha256 || "")) fail("already-revoked recovery identity is incomplete");

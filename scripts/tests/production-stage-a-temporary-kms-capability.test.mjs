@@ -68,12 +68,13 @@ function capacityFixture() {
   };
 }
 
-function createPolicyVersionRunner({ fixture = capacityFixture(), onList, onCreate, failCreate = false, loseCreateResponse = false, failDeleteVersion = null, loseDeleteResponse = false } = {}) {
+function createPolicyVersionRunner({ fixture = capacityFixture(), onList, onCreate, failCreate = false, loseCreateResponse = false, loseCreateResponseOn = null, failDeleteVersion = null, loseDeleteResponse = false } = {}) {
   const documents = fixture.documents;
   const dates = fixture.dates;
   let defaultVersionId = fixture.defaultVersionId;
   let nextVersion = Math.max(...[...documents.keys()].map((id) => Number(id.slice(1)))) + 1;
   let listCalls = 0;
+  let createCalls = 0;
   let pendingDeleteFailure = failDeleteVersion;
   const calls = [];
   const run = (args) => {
@@ -82,7 +83,7 @@ function createPolicyVersionRunner({ fixture = capacityFixture(), onList, onCrea
     if (operation === "get-policy") return JSON.stringify({ Policy: { DefaultVersionId: defaultVersionId } });
     if (operation === "list-policy-versions") {
       listCalls += 1;
-      onList?.({ listCalls, documents, dates, get defaultVersionId() { return defaultVersionId; }, set defaultVersionId(value) { defaultVersionId = value; } });
+      onList?.({ listCalls, documents, dates, setDefaultVersionId(value) { defaultVersionId = value; } });
       return JSON.stringify({ Versions: [...documents.keys()].map((VersionId) => ({ VersionId, IsDefaultVersion: VersionId === defaultVersionId || VersionId === fixture.extraDefaultVersionId, CreateDate: dates.get(VersionId) })) });
     }
     if (operation === "get-policy-version") {
@@ -103,17 +104,18 @@ function createPolicyVersionRunner({ fixture = capacityFixture(), onList, onCrea
     }
     if (operation === "create-policy-version") {
       if (failCreate) throw new Error("LimitExceeded: create policy version test failure");
+      createCalls += 1;
       const policyDocument = JSON.parse(readFileSync(args[args.indexOf("--policy-document") + 1].slice("file://".length), "utf8"));
       const versionId = `v${nextVersion++}`;
       documents.set(versionId, policyDocument);
       defaultVersionId = versionId;
-      onCreate?.({ versionId, documents, dates, get defaultVersionId() { return defaultVersionId; }, set defaultVersionId(value) { defaultVersionId = value; } });
-      if (loseCreateResponse) throw new Error("network response lost after CreatePolicyVersion acceptance");
+      onCreate?.({ versionId, documents, dates, setDefaultVersionId(value) { defaultVersionId = value; } });
+      if (loseCreateResponse || loseCreateResponseOn === createCalls) throw new Error("network response lost after CreatePolicyVersion acceptance");
       return JSON.stringify({ PolicyVersion: { VersionId: versionId } });
     }
     throw new Error(`unexpected AWS operation: ${args.join(" ")}`);
   };
-  return { run, documents, dates, calls, get defaultVersionId() { return defaultVersionId; }, get listCalls() { return listCalls; } };
+  return { run, documents, dates, calls, get defaultVersionId() { return defaultVersionId; }, set defaultVersionId(value) { defaultVersionId = value; }, get listCalls() { return listCalls; } };
 }
 
 test("steady state contains no permanent wildcard KMS TagResource authority", () => {
@@ -308,6 +310,27 @@ test("canonical producer replays authorization and safely aborts a failed apply"
     assert.doesNotThrow(() => assertPreCutoverTemporaryCapabilityAbsent(absent.evidence, { sourceSha }));
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("revoke recovery cannot reconstruct REVOKED before root-drop ownership verification", () => {
+  for (const phase of ["authorized", "stage-a-apply"]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-revoke-state-"));
+    const stateFile = path.join(directory, "capability.json");
+    const planJsonFile = writePlanFile(directory);
+    const fake = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) } });
+    try {
+      const runner = createTemporaryKmsCapabilityRunner({ run: fake.run });
+      runner.runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+      if (phase === "stage-a-apply") runner.runPhase({ phase: "mark-stage-a-apply", sourceSha, transitionId, stateFile, planSha256 });
+      fake.documents.delete("v2");
+      fake.dates.delete("v2");
+      fake.defaultVersionId = "v1";
+      assert.throws(() => runner.runPhase({ phase: "revoke", sourceSha, transitionId, stateFile }), /authenticated temporary capability is not the live default version/);
+      assert.notEqual(JSON.parse(readFileSync(stateFile, "utf8")).state, "REVOKED");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }
 });
 
@@ -855,6 +878,78 @@ test("accepted CreatePolicyVersion with a lost response is recovered by exact re
     assert.equal(result.mutationAccounting.iamWrites, 1);
     assert.equal(result.mutationAccounting.unknownMutations, 0);
     assert.deepEqual(result.mutationAccounting.mutationOutcomes, [{ action: "CreatePolicyVersion", outcome: "CONFIRMED_SUCCESS_READBACK" }]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("lost revoke CreatePolicyVersion response uses the authenticated active default with duplicate steady history", () => {
+  for (const versionIds of [["v1", "v3"], ["v1", "v3", "v5"]]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-revoke-create-recovery-"));
+    const stateFile = path.join(directory, "capability.json");
+    const planJsonFile = writePlanFile(directory);
+    const fixture = {
+      defaultVersionId: "v1",
+      documents: new Map(versionIds.map((versionId) => [versionId, policy])),
+      dates: new Map(versionIds.map((versionId, index) => [versionId, `2026-01-0${index + 1}T00:00:00.000Z`])),
+    };
+    const fake = createPolicyVersionRunner({ fixture, loseCreateResponseOn: 2 });
+    try {
+      const runner = createTemporaryKmsCapabilityRunner({ run: fake.run });
+      runner.runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+      runner.runPhase({ phase: "mark-stage-a-apply", sourceSha, transitionId, stateFile, planSha256 });
+      const terraformStateFile = path.join(directory, "terraform.tfstate");
+      writeFileSync(terraformStateFile, JSON.stringify(stateFixture()), { mode: 0o600 });
+      runner.runPhase({ phase: "mark-root-drop-owned", sourceSha, transitionId, stateFile, planSha256, terraformStateFile });
+      const result = runner.runPhase({ phase: "revoke", sourceSha, transitionId, stateFile });
+      assert.equal(result.evidence.state, "REVOKED");
+      assert.equal(fake.defaultVersionId, `v${Math.max(...versionIds.map((id) => Number(id.slice(1)))) + 2}`);
+      assert.equal(fake.documents.has(`v${Math.max(...versionIds.map((id) => Number(id.slice(1)))) + 1}`), false);
+      assert.equal(fake.calls.filter((operation) => operation === "create-policy-version").length, 2);
+      assert.equal(fake.calls.filter((operation) => operation === "delete-policy-version").length, 1);
+      assert.ok(result.mutationAccounting.mutationOutcomes.some(({ action, outcome }) => action === "CreatePolicyVersion" && outcome === "CONFIRMED_SUCCESS_READBACK"));
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
+test("lost revoke CreatePolicyVersion response fails closed when active default is not the intended steady state", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-revoke-create-mismatch-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const fixture = { defaultVersionId: "v1", documents: new Map([["v1", policy], ["v3", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"], ["v3", "2026-01-02T00:00:00.000Z"]]) };
+  let createCount = 0;
+  const fake = createPolicyVersionRunner({ fixture, loseCreateResponseOn: 2, onCreate: ({ versionId, documents }) => {
+    createCount += 1;
+    if (createCount === 2) documents.set(versionId, { ...policy, Statement: [...policy.Statement, { Effect: "Deny", Action: "kms:Sign", Resource: "*" }] });
+  } });
+  try {
+    const runner = createTemporaryKmsCapabilityRunner({ run: fake.run });
+    runner.runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    runner.runPhase({ phase: "mark-stage-a-apply", sourceSha, transitionId, stateFile, planSha256 });
+    const terraformStateFile = path.join(directory, "terraform.tfstate");
+    writeFileSync(terraformStateFile, JSON.stringify(stateFixture()), { mode: 0o600 });
+    runner.runPhase({ phase: "mark-root-drop-owned", sourceSha, transitionId, stateFile, planSha256, terraformStateFile });
+    assert.throws(() => runner.runPhase({ phase: "revoke", sourceSha, transitionId, stateFile }), (error) => error.mutationAccounting?.unknownMutations === 1 && error.mutationAccounting?.iamWriteAttempts === 1);
+    assert.equal(fake.documents.has("v4"), true);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("lost revoke CreatePolicyVersion response fails closed when active default identity is missing", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-revoke-create-identity-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const fixture = { defaultVersionId: "v1", documents: new Map([["v1", policy], ["v3", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"], ["v3", "2026-01-02T00:00:00.000Z"]]) };
+  let createCount = 0;
+  const fake = createPolicyVersionRunner({ fixture, loseCreateResponseOn: 2, onCreate: ({ setDefaultVersionId }) => {
+    createCount += 1;
+    if (createCount === 2) setDefaultVersionId("v999");
+  } });
+  try {
+    const runner = createTemporaryKmsCapabilityRunner({ run: fake.run });
+    runner.runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    runner.runPhase({ phase: "mark-stage-a-apply", sourceSha, transitionId, stateFile, planSha256 });
+    const terraformStateFile = path.join(directory, "terraform.tfstate");
+    writeFileSync(terraformStateFile, JSON.stringify(stateFixture()), { mode: 0o600 });
+    runner.runPhase({ phase: "mark-root-drop-owned", sourceSha, transitionId, stateFile, planSha256, terraformStateFile });
+    assert.throws(() => runner.runPhase({ phase: "revoke", sourceSha, transitionId, stateFile }), (error) => error.mutationAccounting?.unknownMutations === 1 && error.mutationAccounting?.iamWriteAttempts === 1);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
