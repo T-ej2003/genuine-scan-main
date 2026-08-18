@@ -20,7 +20,7 @@ import {
   isTemporaryTagResourceStatement,
 } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
-import { ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageAStateIdentityBinding, buildStageAStateIdentity } from "./generate-production-green-stage-a-prerequisites.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -83,8 +83,42 @@ const assertSameVersion = (before, after, versionId) => {
 };
 
 function attachMutationAccounting(error, mutationAccounting, details = {}) {
-  Object.assign(error, { mutationAccounting: { ...mutationAccounting }, capacityRecovery: details });
+  Object.assign(error, { mutationAccounting: { ...mutationAccounting }, capacityRecovery: { ...(error.capacityRecovery || {}), ...details } });
   return error;
+}
+
+const createMutationAccounting = () => ({ iamWriteAttempts: 0, iamWrites: 0, policyVersionDeletions: 0, policyVersionCreations: 0, policyDefaultChanges: 0, unknownMutations: 0, mutationOutcomes: [] });
+
+function validateStageAInput(filePath, label) {
+  ensureStageBPrivateDirectory({ directory: path.dirname(filePath), repositoryRoot: root, label: `${label} parent directory` });
+  const privateFile = ensureStageBPrivateFile({ filePath, repositoryRoot: root, label });
+  return privateFile.path;
+}
+
+function cliFailureOutput(error) {
+  const mutationAccounting = error?.mutationAccounting || createMutationAccounting();
+  const lastMutation = Array.isArray(mutationAccounting.mutationOutcomes) ? mutationAccounting.mutationOutcomes.at(-1) : undefined;
+  const capacityRecovery = error?.capacityRecovery || null;
+  const affectedVersionIds = [...new Set([
+    ...(capacityRecovery?.attemptedVersionIds || []),
+    ...(capacityRecovery?.deletedVersionIds || []),
+    ...(capacityRecovery?.createdVersionIds || []),
+  ])];
+  return {
+    state: null,
+    evidenceSha256: null,
+    writes: mutationAccounting.iamWrites,
+    mutationAccounting,
+    capacityRecovery,
+    failure: {
+      classification: error?.code || error?.mutationOutcome || error?.name || "RECONCILIATION_FAILED",
+      message: error instanceof Error ? error.message : "Temporary Stage-A KMS capability reconciliation failed.",
+      operation: lastMutation?.action || null,
+      action: lastMutation?.action || null,
+      mutationOutcome: error?.mutationOutcome || lastMutation?.outcome || null,
+      affectedVersionIds,
+    },
+  };
 }
 
 function assertIdentity({ sourceSha, transitionId } = {}) {
@@ -183,7 +217,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
         error.mutationOutcome = "ATTEMPTED_REJECTED";
       } catch { error.mutationOutcome = "OUTCOME_UNKNOWN"; }
       recordMutation(accounting, "DeletePolicyVersion", error.mutationOutcome === "OUTCOME_UNKNOWN" ? "OUTCOME_UNKNOWN" : "ATTEMPTED_REJECTED");
-      throw attachMutationAccounting(error, accounting, { deletedVersionIds: [] });
+      throw attachMutationAccounting(error, accounting, { deletedVersionIds: [], attemptedVersionIds: [versionId] });
     }
   };
   const ensurePolicyVersionCapacity = ({ current, readState, allowTemporaryVersionId, accounting } = {}) => {
@@ -219,11 +253,11 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
   };
   const runPhase = ({ phase, sourceSha, transitionId, stateFile, planSha256, planJsonFile, terraformStateFile, stageAStateFile, stageAStateIdentity, applyFailed = false, partialOperationCensus = false } = {}) => {
     assertIdentity({ sourceSha, transitionId });
-    const accounting = { iamWriteAttempts: 0, iamWrites: 0, policyVersionDeletions: 0, policyVersionCreations: 0, policyDefaultChanges: 0, unknownMutations: 0, mutationOutcomes: [] };
+    const accounting = createMutationAccounting();
     const persistEvidence = (filePath, value) => writeEvidenceFn(filePath, value);
     if (phase === "authorize" && requireStageAStateBinding) {
       if (!stageAStateFile || !stageAStateIdentity || !existsSync(stageAStateFile)) fail("authenticated Stage A state identity is required before temporary capability authorization");
-      const stateBytes = readFileSync(stageAStateFile);
+      const stateBytes = readFileSync(validateStageAInput(stageAStateFile, "Stage-A state"));
       const currentIdentity = buildStageAStateIdentity(JSON.parse(stateBytes), { stateBytes });
       assertStageAStateIdentityBinding(currentIdentity, stageAStateIdentity);
     }
@@ -419,23 +453,34 @@ function option(argv, name, required = true) {
   return value;
 }
 
+export function runCli(argv = process.argv.slice(2), { run: injectedRun, write = (value) => process.stdout.write(value) } = {}) {
+  try {
+    const profile = option(argv, "--admin-profile");
+    const releaseProfile = option(argv, "--release-profile", false);
+    const region = option(argv, "--region", false) || TEMPORARY_KMS_CAPABILITY.region;
+    if (region !== TEMPORARY_KMS_CAPABILITY.region) fail("region is outside the protected production boundary");
+    const phase = option(argv, "--phase");
+    const sourceSha = option(argv, "--source-sha");
+    const transitionId = option(argv, "--transition-id");
+    const stateFile = option(argv, "--state-file");
+    const run = injectedRun || ((args) => execFileSync("aws", [...args, "--region", region, "--profile", profile, "--output", "json", "--no-cli-pager"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+    if (releaseProfile && releaseProfile === profile) fail("administrator and release profiles must be distinct");
+    const stageAStateFileOption = option(argv, "--stage-a-state", false);
+    if (phase === "authorize" && !stageAStateFileOption) fail("--stage-a-state is required before temporary capability authorization");
+    const stageAStateIdentityFile = option(argv, "--stage-a-state-identity", false);
+    if (phase === "authorize" && !stageAStateIdentityFile) fail("--stage-a-state-identity is required before temporary capability authorization");
+    const stageAStateFile = stageAStateFileOption ? validateStageAInput(stageAStateFileOption, "Stage-A state") : null;
+    const stageAStateIdentityPath = stageAStateIdentityFile ? validateStageAInput(stageAStateIdentityFile, "Stage-A state identity") : null;
+    const stageAStateIdentity = stageAStateIdentityPath ? readJson(stageAStateIdentityPath) : null;
+    const result = createTemporaryKmsCapabilityRunner({ run, requireStageAStateBinding: Boolean(stageAStateFile) }).runPhase({ phase, sourceSha, transitionId, stateFile, planSha256: option(argv, "--plan-sha256", false), planJsonFile: option(argv, "--plan-json", false), terraformStateFile: option(argv, "--terraform-state", false), stageAStateFile, stageAStateIdentity, applyFailed: argv.includes("--apply-failed"), partialOperationCensus: argv.includes("--partial-operation-census-verified") });
+    write(`${JSON.stringify({ state: result.evidence.state, evidenceSha256: result.evidence.evidenceSha256, writes: result.writes, mutationAccounting: result.mutationAccounting || null })}\n`);
+    return result;
+  } catch (error) {
+    write(`${JSON.stringify(cliFailureOutput(error))}\n`);
+    throw error;
+  }
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const argv = process.argv.slice(2);
-  const profile = option(argv, "--admin-profile");
-  const releaseProfile = option(argv, "--release-profile", false);
-  const region = option(argv, "--region", false) || TEMPORARY_KMS_CAPABILITY.region;
-  if (region !== TEMPORARY_KMS_CAPABILITY.region) fail("region is outside the protected production boundary");
-  const phase = option(argv, "--phase");
-  const sourceSha = option(argv, "--source-sha");
-  const transitionId = option(argv, "--transition-id");
-  const stateFile = option(argv, "--state-file");
-  const run = (args) => execFileSync("aws", [...args, "--region", region, "--profile", profile, "--output", "json", "--no-cli-pager"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  if (releaseProfile && releaseProfile === profile) fail("administrator and release profiles must be distinct");
-  const stageAStateFile = option(argv, "--stage-a-state", false);
-  if (phase === "authorize" && !stageAStateFile) fail("--stage-a-state is required before temporary capability authorization");
-  const stageAStateIdentityFile = option(argv, "--stage-a-state-identity", false);
-  if (phase === "authorize" && !stageAStateIdentityFile) fail("--stage-a-state-identity is required before temporary capability authorization");
-  const stageAStateIdentity = stageAStateIdentityFile ? readJson(stageAStateIdentityFile) : null;
-  const result = createTemporaryKmsCapabilityRunner({ run, requireStageAStateBinding: Boolean(stageAStateFile) }).runPhase({ phase, sourceSha, transitionId, stateFile, planSha256: option(argv, "--plan-sha256", false), planJsonFile: option(argv, "--plan-json", false), terraformStateFile: option(argv, "--terraform-state", false), stageAStateFile, stageAStateIdentity, applyFailed: argv.includes("--apply-failed"), partialOperationCensus: argv.includes("--partial-operation-census-verified") });
-  process.stdout.write(`${JSON.stringify({ state: result.evidence.state, evidenceSha256: result.evidence.evidenceSha256, writes: result.writes, mutationAccounting: result.mutationAccounting || null })}\n`);
+  try { runCli(); } catch { process.exitCode = 1; }
 }

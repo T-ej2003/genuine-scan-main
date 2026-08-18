@@ -25,7 +25,7 @@ import {
   temporaryKmsCapabilityStatement,
 } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 import { ensureStageBPrivateFile } from "../aws/stage-b-artifact-contract.mjs";
-import { createTemporaryKmsCapabilityRunner } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
+import { createTemporaryKmsCapabilityRunner, runCli } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
@@ -52,6 +52,32 @@ function writePlanFile(directory) {
     { address: "aws_kms_alias.root_drop", change: { actions: ["create"] } },
   ] }), { mode: 0o600 });
   return planJsonFile;
+}
+
+function writeCliStageAInputs(directory) {
+  const state = { lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 44, resources: [] };
+  const stateBytes = Buffer.from(JSON.stringify(state));
+  const stageAStateFile = path.join(directory, "stage-a.tfstate");
+  const stageAStateIdentityFile = path.join(directory, "stage-a-state-identity.json");
+  writeFileSync(stageAStateFile, stateBytes, { mode: 0o600 });
+  writeFileSync(stageAStateIdentityFile, `${JSON.stringify(buildStageAStateIdentity(state, { stateBytes }))}\n`, { mode: 0o600 });
+  return { stageAStateFile, stageAStateIdentityFile };
+}
+
+function cliArgs({ phase = "authorize", stateFile, planJsonFile, stageAStateFile, stageAStateIdentityFile }) {
+  return [
+    "--admin-profile", "administrator", "--release-profile", "release", "--phase", phase,
+    "--source-sha", sourceSha, "--transition-id", transitionId, "--state-file", stateFile,
+    ...(planJsonFile ? ["--plan-sha256", planSha256, "--plan-json", planJsonFile] : []),
+    ...(stageAStateFile ? ["--stage-a-state", stageAStateFile] : []),
+    ...(stageAStateIdentityFile ? ["--stage-a-state-identity", stageAStateIdentityFile] : []),
+  ];
+}
+
+function runCliAndReadFailure(argv, run) {
+  let output = "";
+  assert.throws(() => runCli(argv, { run, write: (value) => { output += value; } }));
+  return JSON.parse(output);
 }
 
 function capacityFixture() {
@@ -977,6 +1003,127 @@ test("CLI authorization rejects state without an independently produced identity
     assert.notEqual(result.status, 0);
     assert.match(`${result.stdout}${result.stderr}`, /--stage-a-state-identity is required/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("CLI emits a zero-mutation machine-readable failure before any IAM mutation", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-cli-zero-failure-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const inputs = writeCliStageAInputs(directory);
+  try {
+    const failure = runCliAndReadFailure(cliArgs({ stateFile, planJsonFile, ...inputs }), () => { throw new Error("pre-mutation read failed"); });
+    assert.equal(failure.writes, 0);
+    assert.equal(failure.mutationAccounting.iamWriteAttempts, 0);
+    assert.equal(failure.mutationAccounting.unknownMutations, 0);
+    assert.deepEqual(failure.mutationAccounting.mutationOutcomes, []);
+    assert.match(failure.failure.message, /pre-mutation read failed/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("CLI failure output preserves confirmed mutation accounting after a later failure", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-cli-confirmed-failure-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const inputs = writeCliStageAInputs(directory);
+  const fake = createPolicyVersionRunner({ onCreate: ({ documents, dates }) => {
+    documents.set("v99", policy);
+    dates.set("v99", "2026-01-07T00:00:00.000Z");
+  } });
+  try {
+    const failure = runCliAndReadFailure(cliArgs({ stateFile, planJsonFile, ...inputs }), fake.run);
+    assert.equal(failure.writes, 2);
+    assert.equal(failure.mutationAccounting.policyVersionCreations, 1);
+    assert.equal(failure.mutationAccounting.iamWrites, 2);
+    assert.deepEqual(failure.capacityRecovery.deletedVersionIds, ["v4"]);
+    assert.deepEqual(failure.capacityRecovery.createdVersionIds, ["v9"]);
+    assert.equal(failure.failure.operation, "CreatePolicyVersion");
+    assert.deepEqual(failure.failure.affectedVersionIds, ["v4", "v9"]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("CLI failure output preserves unknown CreatePolicyVersion accounting and recovery metadata", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-cli-create-unknown-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const inputs = writeCliStageAInputs(directory);
+  const fake = createPolicyVersionRunner({ failCreate: true });
+  try {
+    const failure = runCliAndReadFailure(cliArgs({ stateFile, planJsonFile, ...inputs }), fake.run);
+    assert.equal(failure.writes, 1);
+    assert.equal(failure.mutationAccounting.iamWriteAttempts, 2);
+    assert.equal(failure.mutationAccounting.unknownMutations, 1);
+    assert.deepEqual(failure.capacityRecovery.deletedVersionIds, ["v4"]);
+    assert.equal(failure.failure.operation, "CreatePolicyVersion");
+    assert.equal(failure.failure.mutationOutcome, "OUTCOME_UNKNOWN");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("CLI failure output preserves unknown DeletePolicyVersion accounting and affected versions", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-cli-delete-unknown-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const fake = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) }, loseDeleteResponse: true });
+  const runner = createTemporaryKmsCapabilityRunner({ run: fake.run });
+  try {
+    runner.runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    runner.runPhase({ phase: "mark-stage-a-apply", sourceSha, transitionId, stateFile, planSha256 });
+    const terraformStateFile = path.join(directory, "terraform.tfstate");
+    writeFileSync(terraformStateFile, JSON.stringify(stateFixture()), { mode: 0o600 });
+    runner.runPhase({ phase: "mark-root-drop-owned", sourceSha, transitionId, stateFile, planSha256, terraformStateFile });
+    let deleteAccepted = false;
+    const run = (args) => {
+      if (args[1] === "delete-policy-version") { deleteAccepted = true; return fake.run(args); }
+      if (deleteAccepted && args[1] === "get-policy") throw new Error("ambiguous delete recovery read");
+      return fake.run(args);
+    };
+    const failure = runCliAndReadFailure(cliArgs({ phase: "revoke", stateFile }), run);
+    assert.equal(failure.writes, 1);
+    assert.equal(failure.mutationAccounting.iamWriteAttempts, 2);
+    assert.equal(failure.mutationAccounting.unknownMutations, 1);
+    assert.equal(failure.failure.operation, "DeletePolicyVersion");
+    assert.equal(failure.failure.mutationOutcome, "OUTCOME_UNKNOWN");
+    assert.deepEqual(failure.failure.affectedVersionIds, ["v2", "v3"]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("CLI success output remains compatible while enforcing valid Stage-A private inputs", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-cli-success-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const inputs = writeCliStageAInputs(directory);
+  const fake = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) } });
+  let output = "";
+  try {
+    const result = runCli(cliArgs({ stateFile, planJsonFile, ...inputs }), { run: fake.run, write: (value) => { output += value; } });
+    const success = JSON.parse(output);
+    assert.deepEqual(Object.keys(success).sort(), ["evidenceSha256", "mutationAccounting", "state", "writes"].sort());
+    assert.equal(success.state, "AUTHORIZED_FOR_ROOT_DROP_CREATION");
+    assert.equal(success.writes, result.writes);
+    assert.equal(success.mutationAccounting.iamWrites, 1);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("CLI rejects every registered Stage-A private-input violation before AWS", () => {
+  const cases = [
+    ["repository-resident identity", (files) => { files.stageAStateIdentityFile = path.resolve("package.json"); }, /outside the repository/],
+    ["repository-resident state", (files) => { files.stageAStateFile = path.resolve("package.json"); }, /outside the repository/],
+    ["identity symlink", (files, directory) => { const link = path.join(directory, "identity-link"); symlinkSync(files.stageAStateIdentityFile, link); files.stageAStateIdentityFile = link; }, /regular non-symlink file/],
+    ["state symlink", (files, directory) => { const link = path.join(directory, "state-link"); symlinkSync(files.stageAStateFile, link); files.stageAStateFile = link; }, /regular non-symlink file/],
+    ["permissive identity mode", (files) => chmodSync(files.stageAStateIdentityFile, 0o644), /mode 0600/],
+    ["permissive state mode", (files) => chmodSync(files.stageAStateFile, 0o644), /mode 0600/],
+    ["non-private parent directory", (files, directory) => { chmodSync(directory, 0o755); }, /mode 0700/],
+  ];
+  for (const [, mutate, expected] of cases) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-cli-contract-"));
+    const files = { ...writeCliStageAInputs(directory), stateFile: path.join(directory, "capability.json"), planJsonFile: writePlanFile(directory) };
+    try {
+      mutate(files, directory);
+      const failure = runCliAndReadFailure(cliArgs(files), () => { throw new Error("AWS must not be called"); });
+      assert.match(failure.failure.message, expected);
+      assert.equal(failure.mutationAccounting.iamWriteAttempts, 0);
+      assert.equal(failure.mutationAccounting.unknownMutations, 0);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
 });
 
 test("state identity binding rejects same metadata with changed bytes and each identity dimension", () => {
