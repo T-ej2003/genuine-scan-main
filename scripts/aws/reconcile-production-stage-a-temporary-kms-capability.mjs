@@ -338,7 +338,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
           let finalRead;
           try {
             if (persistedTemporary && previous.temporaryVersionId !== current.active.VersionId) {
-              deletePolicyVersion(previous.temporaryVersionId, accounting, readState, current.active.VersionId);
+              deletePolicyVersion(previous.temporaryVersionId, accounting, readState, previous.temporaryVersionId);
               persistedTemporaryDeleted = true;
             }
             finalRead = readState();
@@ -367,7 +367,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
         }
         let persistedTemporaryDeleted = false;
         try {
-          deletePolicyVersion(previous.temporaryVersionId, accounting, readState, version.VersionId);
+          deletePolicyVersion(previous.temporaryVersionId, accounting, readState, previous.temporaryVersionId);
           persistedTemporaryDeleted = true;
           const finalRead = readState();
           if (finalRead.active.VersionId !== version.VersionId || !isCurrentTemporaryReleasePolicy(finalRead.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId }) || finalRead.versions.some(({ document, VersionId }) => VersionId !== finalRead.active.VersionId && document.Statement?.some(isTemporaryTagResourceStatement))) fail("temporary authorization replay retained an obsolete temporary policy");

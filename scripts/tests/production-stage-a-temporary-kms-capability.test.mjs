@@ -980,6 +980,144 @@ test("authorization replay replaces the recognized pre-PutKeyPolicy temporary po
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test("obsolete authorization replacement records a known old-version delete rejection", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-prior-replay-reject-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const prior = priorTemporaryPolicy();
+  const fake = createPolicyVersionRunner({ fixture: {
+    defaultVersionId: "v2",
+    documents: new Map([["v1", policy], ["v2", prior]]),
+    dates: new Map([["v1", "2026-01-01T00:00:00.000Z"], ["v2", "2026-01-02T00:00:00.000Z"]]),
+  }, failDeleteVersion: "v2" });
+  try {
+    writeAuthorizedEvidence(stateFile, { actions: ["kms:CreateKey", "kms:TagResource", "kms:CreateAlias"] });
+    let failure;
+    try {
+      createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    } catch (error) { failure = error; }
+    assert.match(failure?.message || "", /delete policy version test failure/);
+    assert.equal(fake.defaultVersionId, "v3");
+    assert.equal(fake.documents.has("v2"), true);
+    assert.equal(failure.mutationAccounting.iamWriteAttempts, 2);
+    assert.equal(failure.mutationAccounting.iamWrites, 1);
+    assert.equal(failure.mutationAccounting.unknownMutations, 0);
+    assert.deepEqual(failure.mutationAccounting.mutationOutcomes, [
+      { action: "CreatePolicyVersion", outcome: "CONFIRMED_SUCCESS" },
+      { action: "DeletePolicyVersion", outcome: "ATTEMPTED_REJECTED" },
+    ]);
+    assert.deepEqual(failure.capacityRecovery.attemptedVersionIds, ["v2"]);
+    assert.deepEqual(failure.capacityRecovery.createdVersionIds, ["v3"]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("interrupted replay cleanup records a known old-version delete rejection", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-interrupted-replay-reject-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const prior = priorTemporaryPolicy();
+  const current = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId });
+  const fake = createPolicyVersionRunner({ fixture: {
+    defaultVersionId: "v3",
+    documents: new Map([["v1", policy], ["v2", prior], ["v3", current]]),
+    dates: new Map([["v1", "2026-01-01T00:00:00.000Z"], ["v2", "2026-01-02T00:00:00.000Z"], ["v3", "2026-01-03T00:00:00.000Z"]]),
+  }, failDeleteVersion: "v2" });
+  try {
+    writeAuthorizedEvidence(stateFile, { actions: ["kms:CreateKey", "kms:TagResource", "kms:CreateAlias"] });
+    let failure;
+    try {
+      createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    } catch (error) { failure = error; }
+    assert.match(failure?.message || "", /delete policy version test failure/);
+    assert.equal(fake.defaultVersionId, "v3");
+    assert.equal(fake.documents.has("v2"), true);
+    assert.equal(failure.mutationAccounting.iamWriteAttempts, 1);
+    assert.equal(failure.mutationAccounting.iamWrites, 0);
+    assert.equal(failure.mutationAccounting.unknownMutations, 0);
+    assert.deepEqual(failure.mutationAccounting.mutationOutcomes, [{ action: "DeletePolicyVersion", outcome: "ATTEMPTED_REJECTED" }]);
+    assert.deepEqual(failure.capacityRecovery.attemptedVersionIds, ["v2"]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("obsolete authorization replacement confirms an accepted old-version delete after response loss", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-prior-replay-lost-delete-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const prior = priorTemporaryPolicy();
+  const fake = createPolicyVersionRunner({ fixture: {
+    defaultVersionId: "v2",
+    documents: new Map([["v1", policy], ["v2", prior]]),
+    dates: new Map([["v1", "2026-01-01T00:00:00.000Z"], ["v2", "2026-01-02T00:00:00.000Z"]]),
+  }, loseDeleteResponse: true });
+  try {
+    writeAuthorizedEvidence(stateFile, { actions: ["kms:CreateKey", "kms:TagResource", "kms:CreateAlias"] });
+    const result = createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    assert.equal(result.evidence.temporaryVersionId, "v3");
+    assert.equal(fake.documents.has("v2"), false);
+    assert.equal(result.mutationAccounting.iamWriteAttempts, 2);
+    assert.equal(result.mutationAccounting.iamWrites, 2);
+    assert.equal(result.mutationAccounting.unknownMutations, 0);
+    assert.deepEqual(result.mutationAccounting.mutationOutcomes, [
+      { action: "CreatePolicyVersion", outcome: "CONFIRMED_SUCCESS" },
+      { action: "DeletePolicyVersion", outcome: "CONFIRMED_SUCCESS_READBACK" },
+    ]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("interrupted replay cleanup confirms an accepted old-version delete after response loss", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-interrupted-replay-lost-delete-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const prior = priorTemporaryPolicy();
+  const current = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId });
+  const fake = createPolicyVersionRunner({ fixture: {
+    defaultVersionId: "v3",
+    documents: new Map([["v1", policy], ["v2", prior], ["v3", current]]),
+    dates: new Map([["v1", "2026-01-01T00:00:00.000Z"], ["v2", "2026-01-02T00:00:00.000Z"], ["v3", "2026-01-03T00:00:00.000Z"]]),
+  }, loseDeleteResponse: true });
+  try {
+    writeAuthorizedEvidence(stateFile, { actions: ["kms:CreateKey", "kms:TagResource", "kms:CreateAlias"] });
+    const result = createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    assert.equal(result.evidence.temporaryVersionId, "v3");
+    assert.equal(fake.documents.has("v2"), false);
+    assert.equal(result.mutationAccounting.iamWriteAttempts, 1);
+    assert.equal(result.mutationAccounting.iamWrites, 1);
+    assert.equal(result.mutationAccounting.unknownMutations, 0);
+    assert.deepEqual(result.mutationAccounting.mutationOutcomes, [{ action: "DeletePolicyVersion", outcome: "CONFIRMED_SUCCESS_READBACK" }]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("obsolete authorization replacement preserves an ambiguous old-version delete outcome", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-prior-replay-ambiguous-delete-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const prior = priorTemporaryPolicy();
+  const fake = createPolicyVersionRunner({ fixture: {
+    defaultVersionId: "v2",
+    documents: new Map([["v1", policy], ["v2", prior]]),
+    dates: new Map([["v1", "2026-01-01T00:00:00.000Z"], ["v2", "2026-01-02T00:00:00.000Z"]]),
+  }, loseDeleteResponse: true, onList: ({ documents }) => {
+    if (!documents.has("v2")) throw new Error("policy topology read unavailable");
+  } });
+  try {
+    writeAuthorizedEvidence(stateFile, { actions: ["kms:CreateKey", "kms:TagResource", "kms:CreateAlias"] });
+    let failure;
+    try {
+      createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    } catch (error) { failure = error; }
+    assert.match(failure?.message || "", /network response lost after DeletePolicyVersion acceptance/);
+    assert.equal(fake.defaultVersionId, "v3");
+    assert.equal(fake.documents.has("v2"), false);
+    assert.equal(failure.mutationAccounting.iamWriteAttempts, 2);
+    assert.equal(failure.mutationAccounting.iamWrites, 1);
+    assert.equal(failure.mutationAccounting.unknownMutations, 1);
+    assert.deepEqual(failure.mutationAccounting.mutationOutcomes, [
+      { action: "CreatePolicyVersion", outcome: "CONFIRMED_SUCCESS" },
+      { action: "DeletePolicyVersion", outcome: "OUTCOME_UNKNOWN" },
+    ]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("recognized pre-PutKeyPolicy temporary policy remains abort- and revoke-revocable", () => {
   for (const phase of ["abort", "revoke"]) {
     const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-prior-recovery-"));
