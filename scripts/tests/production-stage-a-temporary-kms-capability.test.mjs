@@ -68,19 +68,24 @@ function capacityFixture() {
   };
 }
 
-function createPolicyVersionRunner({ fixture = capacityFixture(), onList, onCreate, failCreate = false, loseCreateResponse = false, loseCreateResponseOn = null, createResponse = ({ versionId }) => JSON.stringify({ PolicyVersion: { VersionId: versionId } }), createResponseOn = null, failDeleteVersion = null, loseDeleteResponse = false } = {}) {
+function createPolicyVersionRunner({ fixture = capacityFixture(), onGetPolicy, onList, onCreate, failCreate = false, loseCreateResponse = false, loseCreateResponseOn = null, createResponse = ({ versionId }) => JSON.stringify({ PolicyVersion: { VersionId: versionId } }), createResponseOn = null, failDeleteVersion = null, loseDeleteResponse = false } = {}) {
   const documents = fixture.documents;
   const dates = fixture.dates;
   let defaultVersionId = fixture.defaultVersionId;
   let nextVersion = Math.max(...[...documents.keys()].map((id) => Number(id.slice(1)))) + 1;
   let listCalls = 0;
+  let getPolicyCalls = 0;
   let createCalls = 0;
   let pendingDeleteFailure = failDeleteVersion;
   const calls = [];
   const run = (args) => {
     const operation = args[1];
     calls.push(operation);
-    if (operation === "get-policy") return JSON.stringify({ Policy: { DefaultVersionId: defaultVersionId } });
+    if (operation === "get-policy") {
+      getPolicyCalls += 1;
+      onGetPolicy?.({ getPolicyCalls });
+      return JSON.stringify({ Policy: { DefaultVersionId: defaultVersionId } });
+    }
     if (operation === "list-policy-versions") {
       listCalls += 1;
       onList?.({ listCalls, documents, dates, setDefaultVersionId(value) { defaultVersionId = value; } });
@@ -626,6 +631,67 @@ test("topology change after deletion blocks creation without deleting another ve
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("pre-create readState failure does not enter CreatePolicyVersion recovery", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-pre-create-read-failure-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const fixture = capacityFixture();
+  fixture.documents.delete("v7");
+  fixture.dates.delete("v7");
+  const fake = createPolicyVersionRunner({ fixture, onList: ({ listCalls }) => { if (listCalls === 2) throw new Error("pre-create topology read failed"); } });
+  try {
+    let error;
+    try { createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile }); } catch (caught) { error = caught; }
+    assert.match(error?.message || "", /pre-create topology read failed/);
+    assert.equal(fake.calls.filter((operation) => operation === "create-policy-version").length, 0);
+    assert.equal(fake.listCalls, 2);
+    assert.equal(error.mutationAccounting?.iamWriteAttempts, 0);
+    assert.equal(error.mutationAccounting?.unknownMutations, 0);
+    assert.deepEqual(error.mutationAccounting?.mutationOutcomes, []);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("pre-create topology fingerprint failure does not enter CreatePolicyVersion recovery", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-pre-create-topology-change-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const fixture = capacityFixture();
+  fixture.documents.delete("v7");
+  fixture.dates.delete("v7");
+  const fake = createPolicyVersionRunner({ fixture, onList: ({ listCalls, documents, dates }) => {
+    if (listCalls === 2) { documents.delete("v4"); dates.delete("v4"); }
+  } });
+  try {
+    let error;
+    try { createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile }); } catch (caught) { error = caught; }
+    assert.match(error?.message || "", /topology changed before policy-version creation/);
+    assert.equal(fake.calls.filter((operation) => operation === "create-policy-version").length, 0);
+    assert.equal(fake.listCalls, 2);
+    assert.equal(error.mutationAccounting?.iamWriteAttempts, 0);
+    assert.equal(error.mutationAccounting?.unknownMutations, 0);
+    assert.deepEqual(error.mutationAccounting?.mutationOutcomes, []);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("pre-create GetPolicy failure does not enter CreatePolicyVersion recovery", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-pre-create-policy-failure-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const fixture = capacityFixture();
+  fixture.documents.delete("v7");
+  fixture.dates.delete("v7");
+  const fake = createPolicyVersionRunner({ fixture, onGetPolicy: ({ getPolicyCalls }) => { if (getPolicyCalls === 2) throw new Error("pre-create policy read failed"); } });
+  try {
+    let error;
+    try { createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile }); } catch (caught) { error = caught; }
+    assert.match(error?.message || "", /pre-create policy read failed/);
+    assert.equal(fake.calls.filter((operation) => operation === "create-policy-version").length, 0);
+    assert.equal(error.mutationAccounting?.iamWriteAttempts, 0);
+    assert.equal(error.mutationAccounting?.unknownMutations, 0);
+    assert.deepEqual(error.mutationAccounting?.mutationOutcomes, []);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("delete failure prevents create and reports the failed mutation attempt", () => {

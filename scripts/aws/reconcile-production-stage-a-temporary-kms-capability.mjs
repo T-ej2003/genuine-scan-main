@@ -135,29 +135,31 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
         if (versionTopologyFingerprint(beforeCreate) !== versionTopologyFingerprint(expectedState)) fail("managed-policy topology changed before policy-version creation");
       }
       accounting.iamWriteAttempts += 1;
-      const result = JSON.parse(run(["iam", "create-policy-version", "--policy-arn", TEMPORARY_KMS_CAPABILITY.policyArn, "--policy-document", `file://${temporaryPath}`, "--set-as-default"]));
-      const version = result.PolicyVersion;
-      if (!version || !VERSION.test(version.VersionId || "")) fail("CreatePolicyVersion returned an invalid version identity");
-      accounting.policyVersionCreations += 1;
-      accounting.policyDefaultChanges += 1;
-      recordMutation(accounting, "CreatePolicyVersion", "CONFIRMED_SUCCESS");
-      return version;
-    } catch (error) {
-      if (!error.mutationOutcome) {
-        try {
-          const recovered = readState?.({ allowTemporaryVersionId });
-          const active = recovered?.active;
-          if (active && VERSION.test(active.VersionId || "") && recovered.policy?.DefaultVersionId === active.VersionId && canonical(active.document) === canonical(document)) {
-            recordMutation(accounting, "CreatePolicyVersion", "CONFIRMED_SUCCESS_READBACK");
-            accounting.policyVersionCreations += 1;
-            accounting.policyDefaultChanges += 1;
-            return active;
-          }
-          error.mutationOutcome = "OUTCOME_UNKNOWN";
-        } catch { error.mutationOutcome = "OUTCOME_UNKNOWN"; }
+      try {
+        const result = JSON.parse(run(["iam", "create-policy-version", "--policy-arn", TEMPORARY_KMS_CAPABILITY.policyArn, "--policy-document", `file://${temporaryPath}`, "--set-as-default"]));
+        const version = result.PolicyVersion;
+        if (!version || !VERSION.test(version.VersionId || "")) fail("CreatePolicyVersion returned an invalid version identity");
+        accounting.policyVersionCreations += 1;
+        accounting.policyDefaultChanges += 1;
+        recordMutation(accounting, "CreatePolicyVersion", "CONFIRMED_SUCCESS");
+        return version;
+      } catch (error) {
+        if (!error.mutationOutcome) {
+          try {
+            const recovered = readState?.({ allowTemporaryVersionId });
+            const active = recovered?.active;
+            if (active && VERSION.test(active.VersionId || "") && recovered.policy?.DefaultVersionId === active.VersionId && canonical(active.document) === canonical(document)) {
+              recordMutation(accounting, "CreatePolicyVersion", "CONFIRMED_SUCCESS_READBACK");
+              accounting.policyVersionCreations += 1;
+              accounting.policyDefaultChanges += 1;
+              return active;
+            }
+            error.mutationOutcome = "OUTCOME_UNKNOWN";
+          } catch { error.mutationOutcome = "OUTCOME_UNKNOWN"; }
+        }
+        if (error.mutationOutcome === "OUTCOME_UNKNOWN") recordMutation(accounting, "CreatePolicyVersion", "OUTCOME_UNKNOWN");
+        throw attachMutationAccounting(error, accounting);
       }
-      if (error.mutationOutcome === "OUTCOME_UNKNOWN") recordMutation(accounting, "CreatePolicyVersion", "OUTCOME_UNKNOWN");
-      throw attachMutationAccounting(error, accounting);
     } finally {
       unlinkSync(temporaryPath);
       rmdirSync(directory);
