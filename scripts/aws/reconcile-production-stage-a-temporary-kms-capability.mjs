@@ -18,6 +18,7 @@ import {
   buildTemporaryReleasePolicy,
   isTemporaryTagResourceStatement,
 } from "./production-stage-a-temporary-kms-capability.mjs";
+import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -27,8 +28,6 @@ const SHA256 = /^[a-f0-9]{64}$/;
 const VERSION = /^v[1-9][0-9]*$/;
 const canonical = (value) => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
-const text = (value) => decodeURIComponent(value || "");
-const parseDocument = (value) => JSON.parse(text(value));
 const fail = (message) => { throw new Error(`Temporary Stage-A KMS capability: ${message}`); };
 
 function assertIdentity({ sourceSha, transitionId } = {}) {
@@ -46,7 +45,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
   const readVersions = ({ allowTemporaryVersionId } = {}) => {
     const policy = JSON.parse(run(["iam", "get-policy", "--policy-arn", TEMPORARY_KMS_CAPABILITY.policyArn]));
     const versions = JSON.parse(run(["iam", "list-policy-versions", "--policy-arn", TEMPORARY_KMS_CAPABILITY.policyArn])).Versions || [];
-    const documents = versions.map((version) => ({ ...version, document: parseDocument(JSON.parse(run(["iam", "get-policy-version", "--policy-arn", TEMPORARY_KMS_CAPABILITY.policyArn, "--version-id", version.VersionId])).PolicyVersion?.Document) }));
+    const documents = versions.map((version) => ({ ...version, document: normalizeIamPolicyDocument(JSON.parse(run(["iam", "get-policy-version", "--policy-arn", TEMPORARY_KMS_CAPABILITY.policyArn, "--version-id", version.VersionId])).PolicyVersion?.Document, "IAM policy version document") }));
     const active = documents.find(({ VersionId }) => VersionId === policy.Policy?.DefaultVersionId);
     if (!active || !VERSION.test(active.VersionId)) fail("default managed-policy version is unreadable");
     const temporary = documents.filter(({ document }) => document.Statement?.some(isTemporaryTagResourceStatement));

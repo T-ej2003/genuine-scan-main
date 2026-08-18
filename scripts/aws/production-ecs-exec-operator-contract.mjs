@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 
 export const ACCOUNT = "368992683803";
 export const REGION = "eu-west-2";
@@ -102,7 +103,7 @@ const canonicalize = (value) => {
   return JSON.stringify(value);
 };
 const sha256 = (value) => crypto.createHash("sha256").update(Buffer.from(canonicalize(value))).digest("hex");
-const decodeDocument = (value) => typeof value === "string" ? JSON.parse(decodeURIComponent(value)) : value;
+const decodeDocument = (value) => normalizeIamPolicyDocument(value, "ECS Exec IAM policy document");
 const sourcePolicy = () => readJson(ECS_EXEC_OPERATOR_POLICY_PATH);
 const sourceTrust = () => readJson(ECS_EXEC_OPERATOR_TRUST_POLICY_PATH);
 export const ECS_EXEC_OPERATOR_SOURCE_POLICY_SHA256 = sha256(sourcePolicy());

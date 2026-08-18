@@ -149,6 +149,38 @@ test("canonical producer replays authorization and safely aborts a failed apply"
   }
 });
 
+test("canonical producer accepts an AWS CLI parsed PolicyVersion.Document object", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-object-document-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = path.join(directory, "plan.json");
+  writeFileSync(planJsonFile, JSON.stringify({ resource_changes: [{ address: "aws_kms_key.root_drop", change: { actions: ["create"] } }, { address: "aws_kms_alias.root_drop", change: { actions: ["create"] } }] }), { mode: 0o600 });
+  let defaultVersionId = "v1";
+  let nextVersion = 2;
+  const versions = new Map([["v1", policy]]);
+  let policyWrites = 0;
+  const run = (args) => {
+    const operation = args[1];
+    if (operation === "get-policy") return JSON.stringify({ Policy: { DefaultVersionId: defaultVersionId } });
+    if (operation === "list-policy-versions") return JSON.stringify({ Versions: [...versions.keys()].map((VersionId) => ({ VersionId })) });
+    if (operation === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: versions.get(args[args.indexOf("--version-id") + 1]) } });
+    if (operation === "create-policy-version") {
+      const policyDocument = JSON.parse(readFileSync(args[args.indexOf("--policy-document") + 1].slice("file://".length), "utf8"));
+      const versionId = `v${nextVersion++}`;
+      versions.set(versionId, policyDocument); defaultVersionId = versionId; policyWrites += 1;
+      return JSON.stringify({ PolicyVersion: { VersionId: versionId } });
+    }
+    throw new Error(`unexpected AWS operation: ${args.join(" ")}`);
+  };
+  try {
+    const runner = createTemporaryKmsCapabilityRunner({ run, now: () => "2026-08-18T12:00:00.000Z" });
+    const result = runner.runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    assert.equal(result.evidence.state, "AUTHORIZED_FOR_ROOT_DROP_CREATION");
+    assert.equal(policyWrites, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("an unrecorded post-write capability can be recovered only with exact failed-apply inputs", () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-recovery-"));
   const stateFile = path.join(directory, "capability.json");
