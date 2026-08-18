@@ -18,6 +18,7 @@ import {
   buildTemporaryCapabilityEvidence,
   buildTemporaryReleasePolicy,
   isTemporaryTagResourceStatement,
+  isCurrentTemporaryReleasePolicy,
 } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
@@ -277,6 +278,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     const readState = ({ allowTemporaryVersionId } = {}) => readVersions({ allowTemporaryVersionId, sourceSha, transitionId });
     const current = readState({ allowTemporaryVersionId: previous?.temporaryVersionId });
     const activeTemporary = current.active.document.Statement?.some(isTemporaryTagResourceStatement);
+    const authorizationReplay = phase === "authorize" && state === "AUTHORIZED_FOR_ROOT_DROP_CREATION" && activeTemporary;
     if (!previous && phase === "abort" && activeTemporary) {
       if (!applyFailed || !partialOperationCensus || !SHA256.test(planSha256 || "") || !planJsonFile) fail("authenticated recovery inputs are required for an unrecorded temporary capability");
       const planFile = ensureStageBPrivateFile({ filePath: planJsonFile, repositoryRoot: root, label: "Classified Stage-A plan JSON" });
@@ -303,7 +305,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
         return { evidence, writes: 0, recovery: "AUTHENTICATED_ABORT_ALREADY_REVOKED", mutationAccounting: accounting };
       }
     }
-    if (previous && ["AUTHORIZED_FOR_ROOT_DROP_CREATION", "STAGE_A_APPLY", "ROOT_DROP_OWNERSHIP_VERIFIED"].includes(state)) {
+    if (previous && ["AUTHORIZED_FOR_ROOT_DROP_CREATION", "STAGE_A_APPLY", "ROOT_DROP_OWNERSHIP_VERIFIED"].includes(state) && !authorizationReplay) {
       const persistedTemporary = current.versions.find(({ VersionId }) => VersionId === previous.temporaryVersionId);
       const alreadySteadyAfterWrite = ["abort", "revoke"].includes(phase) && !activeTemporary && persistedTemporary?.document.Statement?.some(isTemporaryTagResourceStatement);
       const authenticatedAlreadyRevoked = state === "ROOT_DROP_OWNERSHIP_VERIFIED" && phase === "revoke" && !activeTemporary && !persistedTemporary && current.active.VersionId !== previous.temporaryVersionId;
@@ -321,14 +323,66 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       assertTemporaryReleasePolicy((alreadySteadyAfterWrite ? persistedTemporary : current.active).document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId: previous.transitionId });
     }
     if (phase === "authorize") {
-      if (state === "AUTHORIZED_FOR_ROOT_DROP_CREATION" && activeTemporary) {
+      if (authorizationReplay) {
         assertTemporaryCapabilityEvidence(previous, { sourceSha, state });
         if (requireStageAStateBinding) assertStageAStateIdentityBinding(previous.stageAStateIdentity, stageAStateIdentity);
-        if (previous.transitionId !== transitionId || previous.temporaryVersionId !== current.active.VersionId || previous.planSha256 !== planSha256) fail("existing authorization belongs to a different transition or plan");
+        if (previous.transitionId !== transitionId || !VERSION.test(previous.temporaryVersionId || "") || previous.planSha256 !== planSha256) fail("existing authorization belongs to a different transition or plan");
         if (!planJsonFile) fail("exact classified Stage-A plan JSON is required for replay");
         const planFile = ensureStageBPrivateFile({ filePath: planJsonFile, repositoryRoot: root, label: "Classified Stage-A plan JSON" });
         assertStageARootDropCreationPlan(readJson(planFile.path));
-        return { evidence: previous, writes: 0, mutationAccounting: accounting };
+        const temporaryDocument = buildTemporaryReleasePolicy(sourcePolicy, { sourceSha, transitionId });
+        const currentIsCanonical = isCurrentTemporaryReleasePolicy(current.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId });
+        if (currentIsCanonical) {
+          const persistedTemporary = current.versions.find(({ VersionId }) => VersionId === previous.temporaryVersionId);
+          let persistedTemporaryDeleted = false;
+          let finalRead;
+          try {
+            if (persistedTemporary && previous.temporaryVersionId !== current.active.VersionId) {
+              deletePolicyVersion(previous.temporaryVersionId, accounting, readState, previous.temporaryVersionId);
+              persistedTemporaryDeleted = true;
+            }
+            finalRead = readState();
+            if (finalRead.active.VersionId !== current.active.VersionId || !isCurrentTemporaryReleasePolicy(finalRead.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId }) || finalRead.versions.some(({ document, VersionId }) => VersionId !== finalRead.active.VersionId && document.Statement?.some(isTemporaryTagResourceStatement))) fail("authorization replay did not converge to the current temporary policy only");
+          } catch (error) {
+            if (persistedTemporaryDeleted) throw attachMutationAccounting(error, accounting, { deletedVersionIds: [previous.temporaryVersionId] });
+            throw error;
+          }
+          const evidence = buildTemporaryCapabilityEvidence({ ...previous, state, defaultVersionId: finalRead.active.VersionId, temporaryVersionId: finalRead.active.VersionId, observedAt: now() });
+          assertTemporaryCapabilityEvidence(evidence, { sourceSha, state });
+          persistEvidence(stateFile, evidence);
+          return { evidence, writes: accounting.iamWrites, mutationAccounting: accounting };
+        }
+        const activeActions = current.active.document.Statement?.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]) || [];
+        if (current.active.VersionId !== previous.temporaryVersionId || !activeActions.includes(TEMPORARY_KMS_CAPABILITY.keyActions[0])) fail("legacy temporary policy cannot authorize root-drop creation");
+        assertTemporaryReleasePolicy(current.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId });
+        const capacityState = ensurePolicyVersionCapacity({ current, readState, allowTemporaryVersionId: previous.temporaryVersionId, accounting });
+        let version;
+        try {
+          version = writePolicyVersion(temporaryDocument, { accounting, expectedState: capacityState, readState, allowTemporaryVersionId: previous.temporaryVersionId });
+          const readback = readState({ allowTemporaryVersionId: previous.temporaryVersionId });
+          if (readback.versions.length !== capacityState.versions.length + 1 || readback.policy.DefaultVersionId !== version.VersionId || !isCurrentTemporaryReleasePolicy(readback.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId })) fail("temporary authorization replay replacement is not exact");
+          for (const existing of capacityState.versions) assertSameVersion(capacityState, readback, existing.VersionId);
+        } catch (error) {
+          throw attachMutationAccounting(error, accounting, { deletedVersionIds: capacityState.capacityDeletedVersionId ? [capacityState.capacityDeletedVersionId] : [], createdVersionIds: version?.VersionId ? [version.VersionId] : [] });
+        }
+        let persistedTemporaryDeleted = false;
+        try {
+          deletePolicyVersion(previous.temporaryVersionId, accounting, readState, previous.temporaryVersionId);
+          persistedTemporaryDeleted = true;
+          const finalRead = readState();
+          if (finalRead.active.VersionId !== version.VersionId || !isCurrentTemporaryReleasePolicy(finalRead.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId }) || finalRead.versions.some(({ document, VersionId }) => VersionId !== finalRead.active.VersionId && document.Statement?.some(isTemporaryTagResourceStatement))) fail("temporary authorization replay retained an obsolete temporary policy");
+          const evidence = buildTemporaryCapabilityEvidence({ ...previous, state, defaultVersionId: finalRead.active.VersionId, temporaryVersionId: finalRead.active.VersionId, observedAt: now() });
+          assertTemporaryCapabilityEvidence(evidence, { sourceSha, state });
+          persistEvidence(stateFile, evidence);
+          return { evidence, writes: accounting.iamWrites, mutationAccounting: accounting };
+        } catch (error) {
+          const recovery = error.capacityRecovery || {};
+          throw attachMutationAccounting(error, accounting, {
+            deletedVersionIds: [...new Set([...(capacityState.capacityDeletedVersionId ? [capacityState.capacityDeletedVersionId] : []), ...(persistedTemporaryDeleted ? [previous.temporaryVersionId] : (recovery.deletedVersionIds || []))])],
+            attemptedVersionIds: [...new Set([...(recovery.attemptedVersionIds || []), ...(persistedTemporaryDeleted ? [] : [previous.temporaryVersionId])])],
+            createdVersionIds: [...new Set([...(recovery.createdVersionIds || []), version.VersionId])],
+          });
+        }
       }
       if (state !== "ABSENT" || activeTemporary) fail("authorization state or live policy topology is not ALL_OLD");
       assertSource(current.active);

@@ -1,8 +1,14 @@
 # Temporary Stage-A KMS creation capability
 
-`kms:CreateKey`, `kms:TagResource`, and `kms:CreateAlias` are not part of the
+`kms:CreateKey`, `kms:TagResource`, `kms:PutKeyPolicy`, and `kms:CreateAlias` are not part of the
 steady-state `MSCQRProductionGreenStageARelease` policy. AWS requires the
-first two for the tagged key creation, while the alias operation is scoped to
+first two for the tagged key creation and requires the temporary caller to have
+`kms:PutKeyPolicy` so KMS lockout-safety can validate the supplied initial key
+policy. That administration permission is bounded to the tagged
+`RSA_3072`/`SIGN_VERIFY` root-drop key. The canonical Terraform `CreateKey`
+request uses the AWS default `BypassPolicyLockoutSafetyCheck=false`; the launch
+path never requests the bypass. The alias
+operation is scoped to
 the exact root-drop alias ARN and its associated key is limited to the
 production-tagged `RSA_3072`/`SIGN_VERIFY` key family. The only permitted exception is an
 administrator-controlled managed-policy version window described by
