@@ -13,6 +13,7 @@ import {
   assertTemporaryCapabilityTransition,
   assertTemporaryReleasePolicy,
   assertStageARootDropCreationPlan,
+  assertManagedPolicyDocumentSize,
   buildRootDropOwnershipEvidence,
   buildTemporaryCapabilityEvidence,
   buildTemporaryReleasePolicy,
@@ -53,6 +54,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     return { policy: policy.Policy, versions: documents, active };
   };
   const writePolicyVersion = (document) => {
+    assertManagedPolicyDocumentSize(document);
     const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temporary-kms-policy-"));
     const temporaryPath = path.join(directory, "policy.json");
     const bytes = Buffer.from(JSON.stringify(document));

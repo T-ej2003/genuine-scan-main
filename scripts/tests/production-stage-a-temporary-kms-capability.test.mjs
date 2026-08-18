@@ -5,6 +5,9 @@ import path from "node:path";
 import test from "node:test";
 import {
   TEMPORARY_KMS_CAPABILITY,
+  AWS_MANAGED_POLICY_DOCUMENT_LIMIT,
+  TEMPORARY_POLICY_MIN_HEADROOM,
+  TEMPORARY_POLICY_MAX_BYTES,
   assertPreCutoverTemporaryCapabilityAbsent,
   assertRootDropOwnershipEvidence,
   assertSteadyStateReleasePolicy,
@@ -58,6 +61,54 @@ test("temporary capability is exact-purpose, source-bound, and non-signing", () 
   assert.equal(temporary.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("kms:Sign")), false);
   assert.throws(() => assertTemporaryReleasePolicy(buildTemporaryReleasePolicy(policy, { sourceSha, transitionId: "different-transition" }), { steadyStatePolicy: policy, sourceSha, transitionId }), /not exact/);
   assert.throws(() => assertTemporaryReleasePolicy({ ...temporary, Statement: [...temporary.Statement, { Effect: "Allow", Action: "kms:TagResource", Resource: "*" }] }, { steadyStatePolicy: policy, sourceSha, transitionId }), /changes more/);
+});
+
+test("temporary policy compacts representation-only statement IDs with meaningful AWS size headroom", () => {
+  const temporary = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId });
+  const sourceAuthorization = policy.Statement.map(({ Sid, ...statement }) => statement);
+  const temporaryAuthorization = temporary.Statement.filter(({ Sid }) => !Sid?.startsWith("TemporaryStageARootDropKeyTagAtCreation")).map(({ Sid, ...statement }) => statement);
+  assert.deepEqual(temporaryAuthorization, sourceAuthorization);
+  const bytes = Buffer.byteLength(JSON.stringify(temporary));
+  assert.equal(AWS_MANAGED_POLICY_DOCUMENT_LIMIT, 6144);
+  assert.ok(bytes <= TEMPORARY_POLICY_MAX_BYTES);
+  assert.ok(AWS_MANAGED_POLICY_DOCUMENT_LIMIT - bytes >= TEMPORARY_POLICY_MIN_HEADROOM);
+});
+
+test("temporary policy allows only the exact root-drop tag-on-create context", () => {
+  const temporary = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId });
+  const statement = temporary.Statement.find(({ Sid }) => Sid?.startsWith("TemporaryStageARootDropKeyTagAtCreation"));
+  const asArray = (value) => Array.isArray(value) ? value : [value];
+  const context = {
+    "aws:RequestedRegion": "eu-west-2",
+    "aws:RequestTag/Environment": "production",
+    "aws:RequestTag/ManagedBy": "Terraform",
+    "aws:RequestTag/Component": "full-rls-green-stage-a",
+    "aws:RequestTag/Stack": "production-green-stage-a",
+    "aws:TagKeys": ["Environment", "ManagedBy", "Component", "Stack"],
+    "kms:CallerAccount": "368992683803",
+    "kms:KeySpec": "RSA_3072",
+    "kms:KeyUsage": "SIGN_VERIFY",
+  };
+  const allows = (action, resource, values) => statement.Effect === "Allow"
+    && asArray(statement.Action).includes(action)
+    && asArray(statement.Resource).includes(resource)
+    && Object.entries(statement.Condition).every(([operator, entries]) => Object.entries(entries).every(([key, expected]) => {
+      const actual = values[key];
+      if (operator === "ForAllValues:StringEquals") return Array.isArray(actual) && actual.every((value) => expected.includes(value));
+      return actual !== undefined && actual === expected;
+    }));
+  assert.equal(allows("kms:TagResource", "*", context), true);
+  for (const mutation of [
+    { "kms:CallerAccount": "111111111111" },
+    { "aws:RequestedRegion": "us-east-1" },
+    { "kms:KeySpec": "ECC_NIST_P256" },
+    { "kms:KeyUsage": "ENCRYPT_DECRYPT" },
+    { "aws:RequestTag/Stack": "legacy" },
+    { "aws:TagKeys": ["Environment", "ManagedBy", "Component", "Stack", "Owner"] },
+    { "kms:CallerAccount": undefined },
+  ]) assert.equal(allows("kms:TagResource", "*", { ...context, ...mutation }), false);
+  assert.equal(allows("kms:TagResource", "arn:aws:kms:eu-west-2:368992683803:key/unrelated", context), false);
+  assert.equal(allows("kms:Sign", "*", context), false);
 });
 
 test("capability lifecycle rejects residue and requires ownership before revocation", () => {
@@ -158,6 +209,7 @@ test("canonical producer accepts an AWS CLI parsed PolicyVersion.Document object
   let nextVersion = 2;
   const versions = new Map([["v1", policy]]);
   let policyWrites = 0;
+  let submittedDocument;
   const run = (args) => {
     const operation = args[1];
     if (operation === "get-policy") return JSON.stringify({ Policy: { DefaultVersionId: defaultVersionId } });
@@ -165,6 +217,7 @@ test("canonical producer accepts an AWS CLI parsed PolicyVersion.Document object
     if (operation === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: versions.get(args[args.indexOf("--version-id") + 1]) } });
     if (operation === "create-policy-version") {
       const policyDocument = JSON.parse(readFileSync(args[args.indexOf("--policy-document") + 1].slice("file://".length), "utf8"));
+      submittedDocument = policyDocument;
       const versionId = `v${nextVersion++}`;
       versions.set(versionId, policyDocument); defaultVersionId = versionId; policyWrites += 1;
       return JSON.stringify({ PolicyVersion: { VersionId: versionId } });
@@ -176,6 +229,9 @@ test("canonical producer accepts an AWS CLI parsed PolicyVersion.Document object
     const result = runner.runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
     assert.equal(result.evidence.state, "AUTHORIZED_FOR_ROOT_DROP_CREATION");
     assert.equal(policyWrites, 1);
+    const submittedBytes = Buffer.byteLength(JSON.stringify(submittedDocument));
+    assert.ok(submittedBytes <= TEMPORARY_POLICY_MAX_BYTES);
+    assert.ok(AWS_MANAGED_POLICY_DOCUMENT_LIMIT - submittedBytes >= TEMPORARY_POLICY_MIN_HEADROOM);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
