@@ -18,6 +18,7 @@ import {
 } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { generateStageBTerraformBackendConfig } from "../aws/generate-production-green-stage-b-backend-config.mjs";
 import { validateManifest } from "../aws/validate-production-green-stage-b-permissions.mjs";
+import { assertSteadyStateReleasePolicy } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 
 const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json", "utf8"));
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
@@ -245,7 +246,6 @@ test("the canonical Stage A managed contract is exact and recovery-scoped", () =
     "ReadExactStageAGreenRdsParameters",
     "ReadExactStageAGreenRdsInstance",
     "ReadExactStageAKmsAliases",
-    "TagOnlyExactStageARootDropKeyAtCreation",
     "ReadExactStageASecretMetadata",
     "ReadExactStageACheckerRole",
     "ReadExactStageACheckerRolePolicy",
@@ -281,10 +281,8 @@ test("the canonical Stage A managed contract is exact and recovery-scoped", () =
   assert.match(stageAStatement("ReleaseExactStageALock").Resource, /stage-a\/terraform\.tfstate\.tflock$/);
   assert.equal(stageA.Statement.some(({ Action }) => asArray(Action).includes("s3:ListBucket")), false);
   assert.equal(stageA.Statement.some(({ Action, Resource }) => asArray(Action).includes("s3:DeleteObject") && asArray(Resource).some((value) => value.endsWith("terraform.tfstate"))), false);
-  const rootDropTag = stageAStatement("TagOnlyExactStageARootDropKeyAtCreation");
-  assert.equal(rootDropTag.Action, "kms:TagResource");
-  assert.equal(rootDropTag.Resource, "*");
-  assert.deepEqual(rootDropTag.Condition.StringEquals["aws:RequestTag/Stack"], "production-green-stage-a");
+  assert.doesNotThrow(() => assertSteadyStateReleasePolicy(stageA));
+  assert.equal(stageA.Statement.some(({ Action }) => asArray(Action).includes("kms:TagResource")), false);
   const apply = stageAStatement("ApplyExactStageAEndpointSecurityGroupIngress");
   assert.equal(apply.Action, "ec2:AuthorizeSecurityGroupIngress");
   assert.equal(apply.Resource, "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412");

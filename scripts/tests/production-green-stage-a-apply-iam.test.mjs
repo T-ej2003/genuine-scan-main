@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import { assertSteadyStateReleasePolicy, assertTemporaryReleasePolicy, buildTemporaryReleasePolicy, temporaryKmsCapabilityStatement } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 
 const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
+const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
+const transitionId = "stage-a-root-drop-20260818";
 const refreshContract = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAProviderRefreshContract-v1.json", "utf8"));
 const statements = policy.Statement;
 const asArray = (value) => Array.isArray(value) ? value : [value];
@@ -132,12 +135,20 @@ test("Stage A apply permits only the exact endpoint security-group ingress", () 
   assert.equal(allows({ action: "ec2:AuthorizeSecurityGroupIngress", resource: production.endpointSecurityGroupArn, values: context("us-east-1") }), false);
 });
 
-test("Stage A root-drop creation permits only exact KMS tag-on-create context", () => {
-  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext() }), true);
-  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext({ "aws:RequestTag/Stack": "legacy" }) }), false);
-  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext({ "kms:KeyUsage": "ENCRYPT_DECRYPT" }) }), false);
-  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext({ "aws:RequestedRegion": "us-east-1" }) }), false);
-  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext({ "aws:TagKeys": ["Environment", "ManagedBy", "Component", "Stack", "Extra"] }) }), false);
+test("Stage A steady-state release policy has no permanent KMS tagging capability", () => {
+  assert.doesNotThrow(() => assertSteadyStateReleasePolicy(policy));
+  assert.equal(allows({ action: "kms:TagResource", resource: "*", values: rootDropTagContext() }), false);
+  assert.equal(statements.some(({ Action }) => asArray(Action).includes("kms:TagResource")), false);
+});
+
+test("temporary KMS capability is exact-purpose and cannot broaden the release role", () => {
+  const temporary = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId });
+  assert.doesNotThrow(() => assertTemporaryReleasePolicy(temporary, { steadyStatePolicy: policy, sourceSha, transitionId }));
+  const tag = temporaryKmsCapabilityStatement({ sourceSha, transitionId });
+  assert.deepEqual(tag.Condition.StringEquals["aws:RequestTag/Stack"], "production-green-stage-a");
+  assert.equal(allows({ action: "kms:Sign", resource: "*", values: rootDropTagContext() }), false);
+  assert.equal(temporary.Statement.some(({ Action }) => asArray(Action).includes("kms:Sign")), false);
+  assert.throws(() => assertTemporaryReleasePolicy({ ...temporary, Statement: [...temporary.Statement, { Effect: "Allow", Action: "kms:TagResource", Resource: "arn:aws:kms:eu-west-2:368992683803:key/unrelated" }] }, { steadyStatePolicy: policy }));
 });
 
 test("Stage A apply identity permits only the exact checker inline policies", () => {

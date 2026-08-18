@@ -12,6 +12,7 @@ import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mj
 import { assertOnboardingPaths, PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
 import { assertPostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
 import { assertRootDropEvidence } from "./production-root-drop-evidence.mjs";
+import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -149,6 +150,7 @@ export function prepareProductionCutoverRuntime({
   iamEvidence,
   artifactBindingFile,
   rootDropEvidenceFile,
+  temporaryKmsCapabilityFile,
   stageAPlanPath,
   stageARecoveryEvidenceFile,
   stageAStatePath,
@@ -188,6 +190,9 @@ export function prepareProductionCutoverRuntime({
     const backendImageDigest = authorizedBackendDigest(imageAuthorization);
     if (!backendImageDigest) throw new Error("Authorized backend image digest is missing.");
     if (!iamEvidence || iamEvidence.status !== "valid" || iamEvidence.iamEvaluationCensus?.executed !== iamEvidence.iamEvaluationCensus?.total || iamEvidence.iamEvaluationCensus?.invalid !== 0) throw new Error("IAM evidence is incomplete.");
+    if (!temporaryKmsCapabilityFile) throw new Error("Temporary Stage-A KMS capability absence evidence is required.");
+    const temporaryKmsCapability = readInputFile(temporaryKmsCapabilityFile, repositoryRoot, "Temporary Stage-A KMS capability evidence");
+    assertPreCutoverTemporaryCapabilityAbsent(temporaryKmsCapability.value, { sourceSha: protectedSha });
     if (!artifactBindingFile) throw new Error("Existing artifact-signing runtime binding file is required.");
     const artifactBindings = loadApprovedArtifactSigningBindings(artifactBindingFile);
     if (!rootDropEvidenceFile) throw new Error("Root-drop evidence file is required.");
@@ -241,6 +246,8 @@ export function prepareProductionCutoverRuntime({
       iamEvidenceSha256: iamEvidence.evidence?.evidenceSha256 || iamEvidence.evidenceSha256 || null,
       rootDropEvidenceFile: rootDrop.path,
       rootDropEvidenceSha256: rootDrop.sha256,
+      temporaryKmsCapabilityFile: temporaryKmsCapability.path,
+      temporaryKmsCapabilitySha256: temporaryKmsCapability.sha256,
       stageARoot: path.resolve("infra/aws/terraform/production-green-stage-a"),
       stageAPlanPath: stageAPlanPath ? path.resolve(stageAPlanPath) : null,
       stageAPlanSha256: stageAPlanPath ? ensureStageBPrivateFile({ filePath: stageAPlanPath, repositoryRoot, label: "Preserved Stage-A saved plan" }).sha256 : null,
@@ -334,7 +341,7 @@ export function parseBootstrapArgs(argv) {
   const supported = new Set([
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
     "minimum-grace-seconds", "rotation-bindings", "image-authorization", "iam-evidence",
-    "artifact-binding", "root-drop-evidence", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "inventory-approval-id", "onboarding-paths",
+    "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "inventory-approval-id", "onboarding-paths",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir",
   ]);
   const values = new Map();

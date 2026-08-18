@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "kind": "MSCQR_TEMPORARY_STAGE_A_KMS_CAPABILITY",
+  "policyName": "MSCQRProductionGreenStageARelease",
+  "policyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+  "sourcePolicy": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+  "operation": "stage-a-root-drop-key-creation",
+  "temporaryAction": "kms:TagResource",
+  "temporaryResource": "*",
+  "requiredAccount": "368992683803",
+  "requiredRegion": "eu-west-2",
+  "requiredKeySpec": "RSA_3072",
+  "requiredKeyUsage": "SIGN_VERIFY",
+  "requiredTags": {
+    "Environment": "production",
+    "ManagedBy": "Terraform",
+    "Component": "full-rls-green-stage-a",
+    "Stack": "production-green-stage-a"
+  },
+  "states": [
+    "ABSENT",
+    "AUTHORIZED_FOR_ROOT_DROP_CREATION",
+    "STAGE_A_APPLY",
+    "ROOT_DROP_OWNERSHIP_VERIFIED",
+    "REVOKED",
+    "ABSENCE_VERIFIED"
+  ],
+  "steadyStateInvariant": "The attached release policy contains no kms:TagResource or kms:* statement.",
+  "cutoverInvariant": "Only ABSENCE_VERIFIED may reach the governed cutover boundary.",
+  "failureRule": "Apply failure or revocation failure blocks cutover; unknown policy/version topology fails closed."
+}

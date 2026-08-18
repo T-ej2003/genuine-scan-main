@@ -14,6 +14,7 @@ import { assertCanonicalImageImpactEvidence, imageAuthorizationSha256, IMAGE_AUT
 import { assertCheckerChainStructuralEvidence } from "./production-checker-chain-contract.mjs";
 import { assertRootDropEvidence } from "./production-root-drop-evidence.mjs";
 import { assertPostApplyStageAPlanRecovery } from "./production-stage-a-recovery-evidence.mjs";
+import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -236,11 +237,12 @@ function assertOverlapInputBinding(overlapTask, imageAuthorization, artifact, so
   }
 }
 
-function assertIamReport(report) {
+function assertIamReport(report, sourceSha) {
   if (!report || report.status !== "valid") throw new Error("IAM preflight is invalid.");
   if (report.iamEvaluationCensus && report.iamEvaluationCensus.executed !== report.iamEvaluationCensus.total) throw new Error("IAM census is incomplete.");
   if (report.iamEvaluationCensus?.invalid !== 0 || (report.iamEvaluationCensus?.failures || []).length !== 0) throw new Error("IAM census contains failed evaluations.");
   assertCutoverCriticalEvidence(report);
+  assertPreCutoverTemporaryCapabilityAbsent(report.temporaryKmsCapability, { sourceSha });
   if (report.checkerTrust?.exact !== true || report.checkerTrust?.mfaRequired !== true) throw new Error("Live Role-A MFA trust evidence is required before checker readiness.");
 }
 
@@ -257,7 +259,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
   assertImageAuthorization(imageAuthorization, sourceSha, imageAuthorizationValidation);
 
   if (typeof iam?.reconcile === "function") recordMutation(mutations, "M1_IAM_RECONCILIATION", await iam.reconcile());
-  assertIamReport(iamReport);
+  assertIamReport(iamReport, sourceSha);
   results.iamPreflight = { ...iamReport, sourceSha, evidenceSha256: (iamReport.evidence || iamReport).evidenceSha256 };
 
   if (typeof checkerChain?.verifySourceTrust !== "function" || typeof checkerChain?.verifyComplete !== "function") throw new Error("Live checker-chain trust assertion is required before Stage A convergence.");

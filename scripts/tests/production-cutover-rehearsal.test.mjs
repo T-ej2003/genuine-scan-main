@@ -15,6 +15,7 @@ import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-auth
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_TARGET_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 import { buildRootDropEvidence, buildRootDropPayload } from "../aws/production-root-drop-evidence.mjs";
+import { buildTemporaryCapabilityEvidence } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 
 export const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
@@ -63,7 +64,6 @@ const checkerRoleChange = ({ actions = ["no-op"], before = {}, after = {} } = {}
 function iamFixture() {
   const required = [
     { manifestId: "apply-stage-a-endpoint-security-group-ingress", action: "ec2:AuthorizeSecurityGroupIngress", resource: "arn:aws:ec2:eu-west-2:368992683803:security-group/endpoint", decision: "allowed" },
-    { manifestId: "apply-stage-a-root-drop-key-tags", action: "kms:TagResource", resource: "*", decision: "allowed" },
     { manifestId: "apply-stage-a-checker-role-chain-policy", action: "iam:PutRolePolicy", resource: "arn:aws:iam::368992683803:role/mscqr-production-independent-checker", decision: "allowed" },
     { manifestId: "apply-stage-a-checker-publication-policy", action: "iam:PutRolePolicy", resource: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", decision: "allowed" },
     { manifestId: "activate-exact-ecs-service", action: "ecs:UpdateService", resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2", decision: "allowed" },
@@ -87,6 +87,7 @@ function iamFixture() {
     ecsExecVerifierTrust: buildEcsExecOperatorEvidence(),
     iamEvaluationCensus: { total: all.length, executed: all.length, invalid: 0, failures: [] },
     checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN },
+    temporaryKmsCapability: buildTemporaryCapabilityEvidence({ state: "ABSENCE_VERIFIED", sourceSha, transitionId: "rehearsal-transition", defaultVersionId: "v1", observedAt: "2026-08-18T12:00:00.000Z" }),
   };
 }
 
@@ -636,6 +637,7 @@ const failCases = [
   ["invalid-provenance", (i) => { i.imageAuthorization.provenanceVerified = false; }],
   ["iam-incomplete-census", (i) => { i.iamReport.iamEvaluationCensus.executed -= 1; }],
   ["iam-evaluation-failure", (i) => { i.iamReport.status = "invalid"; }],
+  ["temporary-kms-capability-residue", (i) => { i.iamReport.temporaryKmsCapability = buildTemporaryCapabilityEvidence({ state: "AUTHORIZED_FOR_ROOT_DROP_CREATION", sourceSha, transitionId: "rehearsal-transition", defaultVersionId: "v2", temporaryVersionId: "v2", observedAt: "2026-08-18T12:00:00.000Z" }); }],
   ["release-identity-mismatch", (i) => { i.identities.releaseDeployer.valid = false; }],
   ["verifier-identity-mismatch", (i) => { i.identities.verifier.valid = false; }],
   ["mfa-absent", (i) => { i.iamReport.ecsExecVerifierTrust.mfaRequired = false; }],
@@ -704,7 +706,7 @@ test("every cutover failure injection fails closed", async () => {
     }
   }
   assert.equal(unexpectedPasses, 0);
-  assert.equal(failCases.length, 52);
+  assert.equal(failCases.length, 53);
   assert.equal(failureResults.length, failCases.length);
   assert.equal(failureResults.filter(({ result }) => result !== "EXPECTED_FAILURE").length, 0);
 });

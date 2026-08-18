@@ -601,6 +601,26 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "temporary-stage-a-kms-capability",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs:createTemporaryKmsCapabilityRunner",
+      "consumers": [
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/production-cutover-control-plane.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": true,
+      "hashBound": true,
+      "atomicGroup": "temporary-stage-a-kms-capability",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "apply-attempt",
       "kind": "file",
       "producer": "scripts/apply-production-green-stage-b.mjs:runApply",
