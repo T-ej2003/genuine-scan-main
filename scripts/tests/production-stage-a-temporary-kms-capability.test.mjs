@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import test from "node:test";
 import {
   TEMPORARY_KMS_CAPABILITY,
@@ -26,13 +26,23 @@ import {
   temporaryKmsCapabilityStatement,
 } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 import { ensureStageBPrivateFile } from "../aws/stage-b-artifact-contract.mjs";
-import { createTemporaryKmsCapabilityRunner, runCli } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
+import { AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES, classifyTemporaryKmsPolicyVersion, createTemporaryKmsCapabilityRunner, runCli } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
 const transitionId = "stage-a-root-drop-20260818";
 const planSha256 = "a".repeat(64);
+const policySourcePath = "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json";
+const historicalPolicyCommits = new Map([
+  ["v4", "2cf74660e9765204e1dece3cb4b81260fe3abc4c"],
+  ["v5", "6931632f86d39ab85bc140756d36ae19800198f6"],
+  ["v6", "dafe2a08ff10d67a8d3d7307dc3686358c18b2fe"],
+  ["v7", "87cdff9abf3b3841770bd9cca4bbb42f7e9b8c10"],
+]);
+const historicalPolicies = new Map([...historicalPolicyCommits].map(([versionId, commit]) => [versionId, JSON.parse(execFileSync("git", ["show", `${commit}:${policySourcePath}`], { encoding: "utf8" }))]));
+const canonicalPolicy = (value) => Array.isArray(value) ? `[${value.map(canonicalPolicy).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalPolicy(value[key])}`).join(",")}}` : JSON.stringify(value);
+const policySha256 = (value) => createHash("sha256").update(canonicalPolicy(value)).digest("hex");
 
 function stateFixture() {
   return {
@@ -313,6 +323,64 @@ test("launch handoff resolves the canonical manifest path", () => {
   const node = JSON.parse(readFileSync(manifestPath, "utf8")).nodes.find(({ id }) => id === 8);
   assert.match(node.canonicalCommandOrFunction, /--stage-a-state <fresh-stage-a-state>/);
   assert.match(node.canonicalCommandOrFunction, /--stage-a-state-identity <fresh-stage-a-state-identity>/);
+});
+
+test("historical steady-state recognition is exact, repository-bound, and default-protected", () => {
+  for (const source of AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES) {
+    const versionId = [...historicalPolicyCommits].find(([, commit]) => commit === source.repositoryCommit)?.[0];
+    const document = historicalPolicies.get(versionId);
+    assert.equal(policySha256(document), source.policySha256);
+    assert.equal(classifyTemporaryKmsPolicyVersion({ VersionId: versionId, IsDefaultVersion: false, document }, { steadyStatePolicy: policy, sourceSha, transitionId }), "RECOGNIZED_STALE_STEADY_STATE");
+    assert.equal(classifyTemporaryKmsPolicyVersion({ VersionId: versionId, IsDefaultVersion: true, document }, { steadyStatePolicy: policy, sourceSha, transitionId }), "UNKNOWN");
+  }
+  const modified = structuredClone(historicalPolicies.get("v7"));
+  modified.Statement = [...modified.Statement, { Effect: "Allow", Action: "kms:GetKeyPolicy", Resource: "*" }];
+  assert.equal(classifyTemporaryKmsPolicyVersion({ VersionId: "v7", IsDefaultVersion: false, document: modified }, { steadyStatePolicy: policy, sourceSha, transitionId }), "UNKNOWN");
+  const temporary = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId });
+  assert.equal(classifyTemporaryKmsPolicyVersion({ VersionId: "v9", IsDefaultVersion: true, document: temporary }, { steadyStatePolicy: policy, sourceSha, transitionId }), "CURRENT_ACTIVE_TEMPORARY");
+});
+
+test("live four-version historical topology creates without cleanup", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-historical-capacity-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const fixture = {
+    defaultVersionId: "v8",
+    documents: new Map([["v5", historicalPolicies.get("v5")], ["v6", historicalPolicies.get("v6")], ["v7", historicalPolicies.get("v7")], ["v8", policy]]),
+    dates: new Map([["v5", "2026-08-12T21:40:45.000Z"], ["v6", "2026-08-13T00:53:22.000Z"], ["v7", "2026-08-13T07:23:15.000Z"], ["v8", "2026-08-17T19:39:34.000Z"]]),
+  };
+  const fake = createPolicyVersionRunner({ fixture });
+  try {
+    const result = createTemporaryKmsCapabilityRunner({ run: fake.run, now: () => "2026-08-18T12:00:00.000Z" }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    assert.equal(result.writes, 1);
+    assert.equal(result.mutationAccounting.policyVersionDeletions, 0);
+    assert.equal(result.mutationAccounting.policyVersionCreations, 1);
+    assert.deepEqual(fake.calls.filter((operation) => operation === "delete-policy-version"), []);
+    assert.deepEqual(fake.calls.filter((operation) => operation === "create-policy-version"), ["create-policy-version"]);
+    for (const versionId of ["v5", "v6", "v7", "v8"]) assert.equal(fake.documents.has(versionId), true);
+    assert.deepEqual(fake.documents.get("v8"), policy);
+    assert.equal(fake.defaultVersionId, "v9");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("five-version historical topology deletes exactly the oldest authenticated stale version", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-historical-capacity-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const fixture = {
+    defaultVersionId: "v8",
+    documents: new Map([["v4", historicalPolicies.get("v4")], ["v5", historicalPolicies.get("v5")], ["v6", historicalPolicies.get("v6")], ["v7", historicalPolicies.get("v7")], ["v8", policy]]),
+    dates: new Map([["v4", "2026-08-12T20:34:36.000Z"], ["v5", "2026-08-12T21:40:45.000Z"], ["v6", "2026-08-13T00:53:22.000Z"], ["v7", "2026-08-13T07:23:15.000Z"], ["v8", "2026-08-17T19:39:34.000Z"]]),
+  };
+  const fake = createPolicyVersionRunner({ fixture });
+  try {
+    const result = createTemporaryKmsCapabilityRunner({ run: fake.run, now: () => "2026-08-18T12:00:00.000Z" }).runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256, planJsonFile });
+    assert.equal(result.mutationAccounting.policyVersionDeletions, 1);
+    assert.deepEqual(fake.calls.filter((operation) => operation === "delete-policy-version"), ["delete-policy-version"]);
+    assert.equal(fake.documents.has("v4"), false);
+    for (const versionId of ["v5", "v6", "v7", "v8", "v9"]) assert.equal(fake.documents.has(versionId), true);
+    assert.equal(fake.defaultVersionId, "v9");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("canonical producer replays authorization and safely aborts a failed apply", () => {

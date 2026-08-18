@@ -38,6 +38,12 @@ export const TEMPORARY_KMS_POLICY_VERSION_CLASSES = Object.freeze([
   "UNKNOWN",
   "AMBIGUOUS",
 ]);
+export const AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES = Object.freeze([
+  Object.freeze({ repositoryCommit: "2cf74660e9765204e1dece3cb4b81260fe3abc4c", policySha256: "86c0bcbc8ba8bfeb6491681d6f85e801c4e5c9a9a8f168ed931a9051ffeb3531" }),
+  Object.freeze({ repositoryCommit: "6931632f86d39ab85bc140756d36ae19800198f6", policySha256: "9a218b34d79bfb898a9666490577f54d19533318bfa544e3a1cfacda9d6debef" }),
+  Object.freeze({ repositoryCommit: "dafe2a08ff10d67a8d3d7307dc3686358c18b2fe", policySha256: "a6b200533afd61bbfd9e9cb739fc666f21475e0a97e2640db00fe68cf3d6e580" }),
+  Object.freeze({ repositoryCommit: "87cdff9abf3b3841770bd9cca4bbb42f7e9b8c10", policySha256: "953881a594d7b213fded709c0c30a5ca6b65b959db386cdf07cbf56c24c297a6" }),
+]);
 // AWS permits five managed-policy versions; one authenticated non-default slot must be free before each create.
 const canonical = (value) => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -49,15 +55,19 @@ const validCreateDate = (value) => typeof value === "string" && Number.isFinite(
 export function classifyTemporaryKmsPolicyVersion(version, { steadyStatePolicy, sourceSha, transitionId } = {}) {
   if (!version || typeof version !== "object" || !VERSION.test(version.VersionId || "") || typeof version.IsDefaultVersion !== "boolean" || !version.document) return "UNKNOWN";
   const temporary = version.document.Statement?.some(isTemporaryTagResourceStatement) === true;
+  const versionPolicySha256 = policyDocumentFingerprint(version.document);
+  const currentSteadyStatePolicySha256 = steadyStatePolicy ? policyDocumentFingerprint(steadyStatePolicy) : null;
+  const recognizedSteadyState = versionPolicySha256 === currentSteadyStatePolicySha256
+    || AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES.some(({ policySha256 }) => policySha256 === versionPolicySha256);
   const expectedTemporary = temporary && SHA40.test(sourceSha || "") && /^[A-Za-z0-9._-]{8,128}$/.test(transitionId || "")
     ? (() => { try { assertTemporaryReleasePolicy(version.document, { steadyStatePolicy, sourceSha, transitionId }); return true; } catch { return false; } })()
     : false;
   if (version.IsDefaultVersion) {
     if (temporary) return expectedTemporary ? "CURRENT_ACTIVE_TEMPORARY" : "AMBIGUOUS";
-    return canonical(version.document) === canonical(steadyStatePolicy) ? "CURRENT_DEFAULT_STEADY_STATE" : "UNKNOWN";
+    return versionPolicySha256 === currentSteadyStatePolicySha256 ? "CURRENT_DEFAULT_STEADY_STATE" : "UNKNOWN";
   }
   if (temporary) return expectedTemporary ? "RECOGNIZED_STALE_TEMPORARY" : "UNKNOWN";
-  if (canonical(version.document) === canonical(steadyStatePolicy)) return "RECOGNIZED_STALE_STEADY_STATE";
+  if (recognizedSteadyState) return "RECOGNIZED_STALE_STEADY_STATE";
   return "UNKNOWN";
 }
 
