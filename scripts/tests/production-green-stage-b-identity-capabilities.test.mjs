@@ -83,8 +83,8 @@ test("release probes cover policy-list access on both canary roles", () => {
 });
 
 test("release preflight aggregates independent read denials and never simulates IAM", () => {
-  const calls = [];
-  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+  const calls = []; const directory = temp();
+  const report = runReleaseReadPreflight({ outputDirectory: directory, run: (args, probe) => {
     calls.push(probe.action);
     if (["ecs:DescribeClusters", "rds:DescribeDBInstances"].includes(probe.action)) throw new Error("AccessDenied");
     return allowed(args);
@@ -93,6 +93,7 @@ test("release preflight aggregates independent read denials and never simulates 
   assert.deepEqual(report.failed.map(({ action }) => action), ["ecs:DescribeClusters", "rds:DescribeDBInstances"]);
   assert(calls.length >= RELEASE_READ_PROBES.length);
   assert(!calls.includes("iam:SimulatePrincipalPolicy"));
+  assert.equal(fs.existsSync(path.join(directory, "stage-a-state-identity.json")), false);
 });
 
 test("complete release preflight is valid and has no skipped probes", () => {
@@ -115,13 +116,30 @@ test("release preflight blocks when authenticated Stage-A state cannot produce a
   assert.equal(report.status, "blocked");
   assert.equal(report.stageAStateIdentityPath, null);
   assert(report.failed.some(({ id }) => id === "stage-a-state"));
+  assert.equal(fs.existsSync(path.join(directory, "stage-a-state-identity.json")), false);
 });
 
 test("wrong caller and region fail closed", () => {
-  const wrongCaller = runReleaseReadPreflight({ outputDirectory: temp(), run: (args) => args[0] === "sts" ? JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" }) : "{}" });
+  const directory = temp();
+  const wrongCaller = runReleaseReadPreflight({ outputDirectory: directory, run: (args) => args[0] === "sts" ? JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" }) : allowed(args) });
   assert.equal(wrongCaller.status, "blocked");
   assert.equal(wrongCaller.failed[0].id, "caller");
+  assert.equal(wrongCaller.stageAStateIdentityPath, null);
+  assert.equal(fs.existsSync(path.join(directory, "stage-a-state-identity.json")), false);
   assert.throws(() => runReleaseReadPreflight({ outputDirectory: temp(), region: "us-east-1", run: allowed }), /region/);
+});
+
+test("failed preflight removes a stale Stage-A identity instead of preserving it", () => {
+  const directory = temp();
+  const identityPath = path.join(directory, "stage-a-state-identity.json");
+  fs.writeFileSync(identityPath, JSON.stringify({ stateSha256: "f".repeat(64) }), { mode: 0o600 });
+  const report = runReleaseReadPreflight({ outputDirectory: directory, run: (args, probe) => {
+    if (probe.id === "stage-a-cluster") throw new Error("AccessDenied");
+    return allowed(args);
+  } });
+  assert.equal(report.status, "blocked");
+  assert.equal(report.stageAStateIdentityPath, null);
+  assert.equal(fs.existsSync(identityPath), false);
 });
 
 test("one command keeps administrator simulation and release reads on separate identities", () => {
