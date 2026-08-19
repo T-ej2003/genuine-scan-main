@@ -185,6 +185,26 @@ test("Stage A preserves numeric identity for safe, fractional, exponent, nested,
   assert.throws(() => parseAuthenticatedStateBytes(Buffer.from(`{"value":Infinity}`)), /valid JSON state bytes/);
 });
 
+const utf8StateBytes = (valueBytes) => Buffer.concat([Buffer.from('{"value":"'), valueBytes, Buffer.from('"}')]);
+
+test("Stage A state decoding rejects malformed UTF-8 before identity hashing", () => {
+  assert.equal(parseAuthenticatedStateBytes(utf8StateBytes(Buffer.from("ascii"))).value, "ascii");
+  assert.equal(parseAuthenticatedStateBytes(utf8StateBytes(Buffer.from("café 日本"))).value, "café 日本");
+  assert.equal(parseAuthenticatedStateBytes(utf8StateBytes(Buffer.from("x�y"))).value, "x�y");
+  const invalidSequences = [
+    [0xff],
+    [0xfe],
+    [0xe2, 0x82],
+    [0xc2, 0x41],
+    [0xc0, 0xaf],
+  ];
+  for (const sequence of invalidSequences) assert.throws(() => parseAuthenticatedStateBytes(utf8StateBytes(Buffer.from(sequence))), /valid JSON state bytes/);
+  const invalid = utf8StateBytes(Buffer.from([0xff]));
+  const replacement = utf8StateBytes(Buffer.from("�"));
+  assert.throws(() => parseAuthenticatedStateBytes(invalid), /valid JSON state bytes/);
+  assert.doesNotThrow(() => parseAuthenticatedStateBytes(replacement));
+});
+
 const routeTable = (id, associations, routes = [{ DestinationCidrBlock: "0.0.0.0/0", NatGatewayId: "nat-12345678" }], vpcId = "vpc-0123456789abcdef0") => ({ RouteTableId: id, VpcId: vpcId, Associations: associations, Routes: routes });
 const subnetA = STAGE_B.privateSubnetIds[0]; const subnetB = STAGE_B.privateSubnetIds[1];
 

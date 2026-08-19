@@ -32,8 +32,9 @@ raw-byte identities are not silently reinterpreted. The historical failed-
 apply state hash in `ROOT_DROP_LEGACY_POLICY_BINDING` remains immutable
 provenance evidence and is not converted to the current identity format.
 
-Authenticated Stage-A state bytes are checked for numeric precision before
-JSON parsing. A numeric literal is accepted only when its normalized decimal
+Authenticated Stage-A state bytes are decoded with fatal UTF-8 before any
+numeric precision check or JSON parsing; malformed byte sequences fail closed.
+A numeric literal is accepted only when its normalized decimal
 value round-trips through the runtime number representation; literals that
 would collapse to a different value (for example `9007199254740993` after
 rounding to `9007199254740992`) fail closed. Equivalent spellings such as

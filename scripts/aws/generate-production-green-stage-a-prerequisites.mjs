@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { TextDecoder } from "node:util";
 import { fileURLToPath } from "node:url";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertStageARootDropKeyPolicyDocument, normalizeStageACheckerPrincipalAws, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "./production-stage-a-control-plane.mjs";
@@ -16,6 +17,7 @@ export const STAGE_A_STATE_OBJECT = "mscqr/production/rls-green/stage-a/terrafor
 export const STAGE_A_EXPECTED_STATE_LINEAGE = "02afb75a-f902-ab8a-f4c1-751d4aef7837";
 export const STAGE_A_MINIMUM_STATE_SERIAL = 35;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const SHA256 = /^[a-f0-9]{64}$/;
 const json = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
@@ -66,8 +68,7 @@ function canonicalJsonNumber(literal) {
   return `${sign}${digits}e${-scale}`;
 }
 
-function assertJsonNumberPrecision(stateBytes) {
-  const source = Buffer.from(stateBytes).toString("utf8");
+function assertJsonNumberPrecision(source) {
   const numberPattern = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
   for (let index = 0; index < source.length;) {
     if (source[index] === '"') {
@@ -114,8 +115,9 @@ export function stageAStateSemanticSha256(state) {
 
 export function parseAuthenticatedStateBytes(stateBytes) {
   try {
-    assertJsonNumberPrecision(stateBytes);
-    return JSON.parse(Buffer.from(stateBytes).toString("utf8"));
+    const source = UTF8_DECODER.decode(Buffer.from(stateBytes));
+    assertJsonNumberPrecision(source);
+    return JSON.parse(source);
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Stage A state identity rejects lossy JSON number")) throw error;
     throw new Error("Stage A state identity requires valid JSON state bytes.");
