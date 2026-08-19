@@ -119,7 +119,7 @@ const legacyAliasPolicyPlan = ({ key = legacyKeyId, beforePolicy = buildLegacyRo
 const refreshOnlyIdentityPlan = ({ key = legacyKeyId, beforeArn = null, beforeKeyId = null, beforeId = null, afterArn = legacyKeyArn, afterKeyId = key, afterId = key } = {}) => ({ resource_drift: [
   { address: ROOT_DROP_KEY_ADDRESS, mode: "managed", type: "aws_kms_key", name: "root_drop", change: { before: { arn: beforeArn, custom_key_store_id: null, key_id: beforeKeyId, id: beforeId, multi_region: null, rotation_period_in_days: null, xks_key_id: null, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, actions: ["update"], after: { arn: afterArn, custom_key_store_id: "", key_id: afterKeyId, id: afterId, multi_region: false, rotation_period_in_days: 0, xks_key_id: "", key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, replace_paths: [] } },
 ] });
-const rdsRefreshDrift = { address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", change: { actions: ["update"], before: { latest_restorable_time: "2026-08-18T22:41:17Z" }, after: { latest_restorable_time: "2026-08-19T19:26:15Z" }, replace_paths: [] } };
+const rdsRefreshDrift = { address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", change: { actions: ["update"], before: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-18T22:41:17Z", storage_encrypted: true }, after: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-19T19:26:15Z", storage_encrypted: true }, replace_paths: [] } };
 const keyState = () => ({ ...absentState, resources: absentState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: keyArn, key_id: keyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) });
 const ownedState = () => ({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(buildStageARootDropKeyPolicy()) } })) } : resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: keyId, target_key_arn: keyArn } }] } : resource) });
 const stateWithRootDropPolicy = (value, policy) => ({ ...value, resources: value.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(policy) } })) } : resource) });
@@ -158,7 +158,7 @@ test("key-only census accepts the exact imported key when computed ARN is unset"
 });
 
 test("authorized legacy refresh binds the exact 1/0 pre/post state transition", () => {
-  const before = historicalKeyOnlyState();
+  const before = structuredClone(historicalKeyOnlyState());
   before.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.id = null;
   before.check_results = [
     { object_kind: "resource", config_addr: "aws_kms_key.root_drop", status: "pass" },
@@ -167,6 +167,8 @@ test("authorized legacy refresh binds the exact 1/0 pre/post state transition", 
   const after = structuredClone(before);
   after.serial += 1;
   after.check_results = [...after.check_results].reverse();
+  before.resources.find(({ type, name }) => type === "aws_db_instance" && name === "green").instances[0].attributes.latest_restorable_time = "2026-08-18T22:41:17Z";
+  after.resources.find(({ type, name }) => type === "aws_db_instance" && name === "green").instances[0].attributes.latest_restorable_time = "2026-08-19T19:26:15Z";
   after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = legacyKeyArn;
   Object.assign(after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes, { key_id: legacyKeyId, custom_key_store_id: "", multi_region: false, rotation_period_in_days: 0, xks_key_id: "" });
   const transition = () => assertAuthorizedRootDropRefreshTransition({ beforeState: before, beforeStateBytes: Buffer.from(JSON.stringify(before)), afterState: after, afterStateBytes: Buffer.from(JSON.stringify(after)), keyId: legacyKeyId });
@@ -186,6 +188,15 @@ test("authorized legacy refresh binds the exact 1/0 pre/post state transition", 
     const candidateState = structuredClone(after);
     mutate(candidateState);
     assert.throws(() => assertAuthorizedRootDropRefreshTransition({ beforeState: before, beforeStateBytes: Buffer.from(JSON.stringify(before)), afterState: candidateState, afterStateBytes: Buffer.from(JSON.stringify(candidateState)), keyId: legacyKeyId }), /authorized root-drop refresh|different or non-conforming|state lineage|state identity|topology|outside/, label);
+  }
+  for (const [label, mutate] of [
+    ["backwards RDS timestamp", (attributes) => { attributes.latest_restorable_time = "2026-08-17T22:41:17Z"; }],
+    ["malformed RDS timestamp", (attributes) => { attributes.latest_restorable_time = "invalid"; }],
+    ["RDS configuration change", (attributes) => { attributes.identifier = "wrong"; }],
+  ]) {
+    const candidateState = structuredClone(after);
+    mutate(candidateState.resources.find(({ type, name }) => type === "aws_db_instance" && name === "green").instances[0].attributes);
+    assert.throws(() => assertAuthorizedRootDropRefreshTransition({ beforeState: before, beforeStateBytes: Buffer.from(JSON.stringify(before)), afterState: candidateState, afterStateBytes: Buffer.from(JSON.stringify(candidateState)), keyId: legacyKeyId }), /refresh-only root-drop plan|authorized root-drop refresh/, label);
   }
 });
 
@@ -208,7 +219,6 @@ test("refresh-only classification permits only exact computed identity convergen
     ["delete", (value) => { value.resource_drift[0].change.actions = ["delete"]; }],
     ["create", (value) => { value.resource_drift[0].change.actions = ["create"]; }],
     ["unknown attribute", (value) => { value.resource_drift[0].change.after.unreviewed = true; }],
-    ["RDS drift", (value) => { value.resource_drift.push(structuredClone(rdsRefreshDrift)); }],
     ["unrelated", (value) => { value.resource_drift.push({ address: "aws_vpc.other", mode: "managed", type: "aws_vpc", name: "other", change: { actions: ["update"], before: {}, after: { changed: true } } }); }],
     ["unknown action", (value) => { value.resource_drift[0].change.actions = ["forget"]; }],
     ["actionable resource_changes", (value) => { value.resource_changes = [{ address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { actions: ["create"] } }]; }],
@@ -227,7 +237,47 @@ test("Terraform 1.15.8 refresh drift accepts only the captured root-drop converg
   assert.equal(assertRootDropRefreshOnlyPlan(rootDropOnly, { keyId: legacyKeyId }).valid, true);
   const productionShape = structuredClone(rootDropOnly);
   productionShape.resource_drift.unshift(structuredClone(rdsRefreshDrift));
-  assert.throws(() => assertRootDropRefreshOnlyPlan(productionShape, { keyId: legacyKeyId }), /must contain only the root-drop key state convergence/);
+  assert.equal(assertRootDropRefreshOnlyPlan(productionShape, { keyId: legacyKeyId }).valid, true);
+  assert.equal(assertRootDropRefreshOnlyPlan({ resource_drift: [structuredClone(rdsRefreshDrift)] }, { keyId: legacyKeyId, stateAlreadyConverged: true }).stateConverged, true);
+});
+
+test("RDS refresh drift permits only the exact forward computed timestamp transition", () => {
+  const accepted = () => ({ resource_drift: [structuredClone(refreshOnlyIdentityPlan().resource_drift[0]), structuredClone(rdsRefreshDrift)] });
+  for (const [label, mutate] of [
+    ["address", (value) => { value.resource_drift[1].address = "aws_db_instance.other"; }],
+    ["name", (value) => { value.resource_drift[1].name = "other"; }],
+    ["type", (value) => { value.resource_drift[1].type = "aws_rds_cluster"; }],
+    ["data mode", (value) => { value.resource_drift[1].mode = "data"; }],
+    ["create", (value) => { value.resource_drift[1].change.actions = ["create"]; }],
+    ["delete", (value) => { value.resource_drift[1].change.actions = ["delete"]; }],
+    ["replace", (value) => { value.resource_drift[1].change.actions = ["delete", "create"]; }],
+    ["no-op", (value) => { value.resource_drift[1].change.actions = ["no-op"]; }],
+    ["replacement path", (value) => { value.resource_drift[1].change.replace_paths = [["identifier"]]; }],
+    ["allocated storage", (value) => { value.resource_drift[1].change.after.allocated_storage = 200; }],
+    ["engine version", (value) => { value.resource_drift[1].change.after.engine_version = "19"; }],
+    ["storage encrypted", (value) => { value.resource_drift[1].change.after.storage_encrypted = false; }],
+    ["public access", (value) => { value.resource_drift[1].change.after.publicly_accessible = true; }],
+    ["deletion protection", (value) => { value.resource_drift[1].change.after.deletion_protection = false; }],
+    ["backup retention", (value) => { value.resource_drift[1].change.after.backup_retention_period = 0; }],
+    ["tags", (value) => { value.resource_drift[1].change.after.tags_all = { Environment: "wrong" }; }],
+    ["unknown attribute", (value) => { value.resource_drift[1].change.after.unreviewed = true; }],
+    ["before unknown", (value) => { value.resource_drift[1].change.before_unknown = { latest_restorable_time: true }; }],
+    ["after unknown", (value) => { value.resource_drift[1].change.after_unknown = { latest_restorable_time: true }; }],
+    ["malformed before", (value) => { value.resource_drift[1].change.before = null; }],
+    ["malformed after", (value) => { value.resource_drift[1].change.after = []; }],
+    ["malformed timestamp", (value) => { value.resource_drift[1].change.after.latest_restorable_time = "not-a-time"; }],
+    ["non-UTC timestamp", (value) => { value.resource_drift[1].change.after.latest_restorable_time = "2026-08-19T20:26:15+01:00"; }],
+    ["backwards timestamp", (value) => { value.resource_drift[1].change.after.latest_restorable_time = "2026-08-17T22:41:17Z"; }],
+    ["null before", (value) => { value.resource_drift[1].change.before.latest_restorable_time = null; }],
+    ["unrelated drift", (value) => { value.resource_drift.push({ address: "aws_vpc.other", mode: "managed", type: "aws_vpc", name: "other", change: { actions: ["update"], before: {}, after: { changed: true } } }); }],
+  ]) {
+    const invalid = accepted();
+    mutate(invalid);
+    assert.throws(() => assertRootDropRefreshOnlyPlan(invalid, { keyId: legacyKeyId }), /refresh-only root-drop plan/, label);
+  }
+  const actionableChange = accepted();
+  actionableChange.resource_changes = [{ address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", change: { actions: ["update"] } }];
+  assert.throws(() => assertRootDropRefreshOnlyPlan(actionableChange, { keyId: legacyKeyId }), /configuration-driven resource changes/);
 });
 
 test("exact orphan authentication requires account, region, metadata, tags, policy, no alias, and CloudTrail creator/window", () => {
