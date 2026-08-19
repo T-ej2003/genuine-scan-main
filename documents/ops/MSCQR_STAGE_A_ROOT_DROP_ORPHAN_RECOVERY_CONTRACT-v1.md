@@ -123,10 +123,17 @@ topology, and unrelated state values are revalidated against the pre-refresh
 identity. The RDS exception is valid only for the exact managed green database,
 an update with no replacement or unknown values, strict forward RFC3339 UTC
 timestamps, and no other attribute difference; it never authorizes a
-configuration-driven `resource_changes` entry. The provider may advance
-serial/state bytes only while populating the exact root-drop ARN/key ID and,
-when observed, that exact RDS computed timestamp. The resulting post-refresh
-state identity is then bound to the new recovery plan and all subsequent checks.
+configuration-driven `resource_changes` entry. The authenticated historical
+pre-refresh instance has `identity_schema_version = 0` and `identity = null`;
+the refreshed instance must retain schema version zero and replace only that
+null identity with the exact provider identity below. The provider may advance
+serial/state bytes only while populating the exact root-drop ARN/key ID, the
+AWS provider v6.56.0 instance identity
+`{ account_id: "368992683803", id: <authenticated-key-id>, region: "eu-west-2" }`,
+and, when observed, that exact RDS computed timestamp. Missing, substituted,
+or extended root-drop identity metadata fails closed. The resulting
+post-refresh state identity is then bound to the new recovery plan and all
+subsequent checks.
 Auto-loaded `terraform.tfvars` and `*.auto.tfvars` files are rejected so the reviewed inputs remain authoritative. The executing
 checkout must have a clean execution-relevant tree and its exact `HEAD` must
 equal the census `sourceSha`; for the exact historical legacy-policy binding,
@@ -156,7 +163,9 @@ is not required for this exact legacy 1/0 authorization because the current
 candidate, state, policy, metadata, stable census, CloudTrail, and failed-apply
 bindings authenticate the existing partial mutation independently. The fresh
 post-authorization recovery plan is the only plan eligible for classification
-or apply. The existing temporary Stage-A capability
+or apply. Its `resource_drift` is independently classified and may contain only
+the same exact forward green-database timestamp transition; any other provider
+drift blocks apply and zero-drift completion. The existing temporary Stage-A capability
 grants only `kms:GetKeyRotationStatus`, `kms:PutKeyPolicy`, and
 `kms:CreateAlias` for the exact authenticated orphan key (plus the exact alias
 resource), and is the only approved mutation path for this convergence.

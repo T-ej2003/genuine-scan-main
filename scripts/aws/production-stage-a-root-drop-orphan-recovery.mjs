@@ -301,6 +301,13 @@ function configurationResources(module) {
   return [...(module.resources || []), ...(module.child_modules || []).flatMap(configurationResources)];
 }
 
+function assertRootDropRecoveryResourceDrift(plan) {
+  if (plan?.resource_drift === undefined) return true;
+  if (!Array.isArray(plan.resource_drift) || plan.resource_drift.length > 1) fail("recovery plan contains uncontracted provider drift");
+  if (plan.resource_drift.length === 1) assertRdsLatestRestorableTimeDrift(plan.resource_drift[0]);
+  return true;
+}
+
 export function assertRootDropCreationInterlock({ plan, terraformState, census, sourceSha, transitionId, stageAStateIdentity } = {}) {
   assertRootDropCensus(census, { sourceSha, transitionId, stageAStateIdentity });
   const counts = assertStateRootDropCounts(terraformState, { allowKeyOnly: true });
@@ -315,6 +322,7 @@ export function assertRootDropCreationInterlock({ plan, terraformState, census, 
 }
 
 export function assertRootDropAliasOnlyPlan(plan, { keyId, policyCompatibility = "CANONICAL" } = {}) {
+  assertRootDropRecoveryResourceDrift(plan);
   const changes = actionable(plan);
   const alias = changes.find(({ address }) => address === ROOT_DROP_ALIAS_ADDRESS);
   if (!alias || !same(alias.change?.actions, ["create"]) || alias.change?.replace_paths?.length) fail("recovery plan must contain a non-replacing root-drop alias create");
@@ -435,6 +443,7 @@ export function assertRootDropPreImportPlan(plan) {
 export function assertRootDropStateIdentity(state, { keyId, aliasArn = STAGE_B.rootDropKmsKeyArn, requireCanonicalPolicy = false } = {}) {
   assertStateShape(state);
   const counts = assertStateRootDropCounts(state, { key: 1, alias: 1 });
+  assertRootDropKeyIdentity(state, keyId);
   const key = stateInstances(state, "aws_kms_key", "root_drop")[0].attributes || {};
   const alias = stateInstances(state, "aws_kms_alias", "root_drop")[0].attributes || {};
   const stateKeyId = String(key.key_id || key.id || key.arn || "").split("/").at(-1);
@@ -482,6 +491,7 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
         assertRootDropStateIdentity(state, { keyId: suppliedCandidate.keyId, requireCanonicalPolicy: true });
         const zeroDriftPlan = await createPlan({ keyId: suppliedCandidate.keyId, zeroDrift: true });
         const zeroDriftJson = await readPlan(zeroDriftPlan);
+        assertRootDropRecoveryResourceDrift(zeroDriftJson);
         if (actionable(zeroDriftJson).length !== 0) fail("completed root-drop recovery is not zero drift");
         return { status: "ALREADY_RECOVERED", accounting, keyId: suppliedCandidate.keyId, zeroDrift: true, observedAt: now() };
       }
@@ -530,6 +540,7 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
       accounting.kmsWrites = planClassification.policyConverged ? 2 : 1;
       const zeroDriftPlan = await createPlan({ keyId: candidate.keyId, zeroDrift: true });
       const zeroDriftJson = await readPlan(zeroDriftPlan);
+      assertRootDropRecoveryResourceDrift(zeroDriftJson);
       if (actionable(zeroDriftJson).length !== 0) fail("post-recovery Terraform plan is not zero drift");
       return { status: "RECOVERED", accounting, keyId: candidate.keyId, imported, zeroDrift: true, observedAt: now() };
     } catch (error) {
@@ -542,13 +553,17 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
 export function assertRootDropKeyIdentity(state, keyId, { allowMissingComputedIdentity = false } = {}) {
   const key = stateInstances(state, "aws_kms_key", "root_drop");
   if (key.length !== 1) fail("Terraform refresh did not return exactly one imported root-drop key");
-  const attributes = key[0].attributes || {};
+  const instance = key[0];
+  const attributes = instance.attributes || {};
   const expectedArn = `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}`;
+  const expectedProviderIdentity = { account_id: STAGE_B.account, id: keyId, region: STAGE_B.region };
   const identityMatches = (value, expected) => value === null || value === undefined || value === expected;
   const computedIdentityValid = allowMissingComputedIdentity
     ? identityMatches(attributes.key_id, keyId) && identityMatches(attributes.id, keyId) && identityMatches(attributes.arn, expectedArn)
     : attributes.key_id === keyId && attributes.arn === expectedArn && (attributes.id === null || attributes.id === undefined || attributes.id === keyId);
-  if (!computedIdentityValid || attributes.key_usage !== TEMPORARY_KMS_CAPABILITY.keyUsage || attributes.customer_master_key_spec !== TEMPORARY_KMS_CAPABILITY.keySpec) fail("Terraform refresh returned a different or non-conforming root-drop key");
+  const providerIdentityValid = allowMissingComputedIdentity && instance.identity === null && instance.identity_schema_version === 0
+    || instance.identity_schema_version === 0 && same(instance.identity, expectedProviderIdentity);
+  if (!computedIdentityValid || !providerIdentityValid || attributes.key_usage !== TEMPORARY_KMS_CAPABILITY.keyUsage || attributes.customer_master_key_spec !== TEMPORARY_KMS_CAPABILITY.keySpec) fail("Terraform refresh returned a different or non-conforming root-drop key");
   return { keyId, arn: attributes.arn, computedIdentityComplete: attributes.key_id === keyId && attributes.arn === expectedArn };
 }
 
@@ -561,7 +576,7 @@ export function assertAuthorizedRootDropRefreshTransition({ beforeState, beforeS
   const beforeIdentity = buildStageAStateIdentity(beforeState, { stateBytes: beforeStateBytes });
   const afterIdentity = buildStageAStateIdentity(afterState, { stateBytes: afterStateBytes });
   if (beforeIdentity.stateObject !== afterIdentity.stateObject || beforeIdentity.lineage !== afterIdentity.lineage || beforeIdentity.account !== afterIdentity.account || beforeIdentity.region !== afterIdentity.region) fail("authorized root-drop refresh changed the state binding");
-  if (afterIdentity.serial < beforeIdentity.serial || afterIdentity.stateSha256 === beforeIdentity.stateSha256 && afterIdentity.serial !== beforeIdentity.serial || afterIdentity.stateSha256 !== beforeIdentity.stateSha256 && afterIdentity.serial === beforeIdentity.serial) fail("authorized root-drop refresh has an invalid state identity transition");
+  if (afterIdentity.serial !== beforeIdentity.serial + 1 || afterIdentity.stateSha256 === beforeIdentity.stateSha256) fail("authorized root-drop refresh has an invalid state identity transition");
   const beforeDatabase = stateInstances(beforeState, "aws_db_instance", "green");
   const afterDatabase = stateInstances(afterState, "aws_db_instance", "green");
   if (beforeDatabase.length !== 1 || afterDatabase.length !== 1) fail("authorized root-drop refresh changed the exact green database identity");
@@ -572,6 +587,7 @@ export function assertAuthorizedRootDropRefreshTransition({ beforeState, beforeS
     copy.serial = beforeState.serial;
     const key = stateInstances(copy, "aws_kms_key", "root_drop")[0];
     for (const field of ["arn", "key_id", "id", "custom_key_store_id", "multi_region", "rotation_period_in_days", "xks_key_id"]) key.attributes[field] = null;
+    key.identity = { account_id: STAGE_B.account, id: keyId, region: STAGE_B.region };
     if (rdsTimestampChanged) stateInstances(copy, "aws_db_instance", "green")[0].attributes.latest_restorable_time = null;
     return copy;
   };

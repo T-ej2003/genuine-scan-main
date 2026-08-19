@@ -112,6 +112,7 @@ const exactCreatePlan = { resource_changes: [
   { address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { before: null, actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: null }, after_unknown: { target_key_id: true } } },
 ], configuration: { root_module: { resources: [{ address: ROOT_DROP_ALIAS_ADDRESS, expressions: { name: { constant_value: ROOT_DROP_ALIAS_NAME }, target_key_id: { references: [`${ROOT_DROP_KEY_ADDRESS}.key_id`] } } }] } } };
 const aliasPlan = (changes = [{ address: ROOT_DROP_ALIAS_ADDRESS, change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: keyId } } }]) => ({ resource_changes: changes });
+const providerIdentity = (id) => ({ account_id: STAGE_B.account, id, region: STAGE_B.region });
 const legacyAliasPolicyPlan = ({ key = legacyKeyId, beforePolicy = buildLegacyRootDropKeyPolicy(), afterPolicy = buildStageARootDropKeyPolicy() } = {}) => ({ resource_changes: [
   { address: ROOT_DROP_KEY_ADDRESS, type: "aws_kms_key", change: { before: { policy: JSON.stringify(beforePolicy) }, actions: ["update"], after: { policy: JSON.stringify(afterPolicy) }, replace_paths: [] } },
   { address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: key }, replace_paths: [] } },
@@ -120,16 +121,16 @@ const refreshOnlyIdentityPlan = ({ key = legacyKeyId, beforeArn = null, beforeKe
   { address: ROOT_DROP_KEY_ADDRESS, mode: "managed", type: "aws_kms_key", name: "root_drop", change: { before: { arn: beforeArn, custom_key_store_id: null, key_id: beforeKeyId, id: beforeId, multi_region: null, rotation_period_in_days: null, xks_key_id: null, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, actions: ["update"], after: { arn: afterArn, custom_key_store_id: "", key_id: afterKeyId, id: afterId, multi_region: false, rotation_period_in_days: 0, xks_key_id: "", key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, replace_paths: [] } },
 ] });
 const rdsRefreshDrift = { address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", change: { actions: ["update"], before: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-18T22:41:17Z", storage_encrypted: true }, after: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-19T19:26:15Z", storage_encrypted: true }, replace_paths: [] } };
-const keyState = () => ({ ...absentState, resources: absentState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: keyArn, key_id: keyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) });
+const keyState = () => ({ ...absentState, resources: absentState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, identity_schema_version: 0, identity: providerIdentity(keyId), attributes: { arn: keyArn, key_id: keyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) });
 const ownedState = () => ({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(buildStageARootDropKeyPolicy()) } })) } : resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: keyId, target_key_arn: keyArn } }] } : resource) });
 const stateWithRootDropPolicy = (value, policy) => ({ ...value, resources: value.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(policy) } })) } : resource) });
 const identityForState = (value) => buildStageAStateIdentity(value, { stateBytes: Buffer.from(JSON.stringify(value)) });
-const legacyKeyState = (policy) => stateWithRootDropPolicy({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: legacyKeyArn, key_id: legacyKeyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) }, policy);
+const legacyKeyState = (policy) => stateWithRootDropPolicy({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, identity_schema_version: 0, identity: providerIdentity(legacyKeyId), attributes: { arn: legacyKeyArn, key_id: legacyKeyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) }, policy);
 const keyOnlyStateIdentity = () => identityForState(keyState());
 const ownedStateIdentity = () => identityForState(ownedState());
 const keyOnlyCensus = () => buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: keyOnlyStateIdentity(), keyUniverse: [keyId], candidates: [{ ...candidate(), ...authenticated() }], failedApplyEvidence });
 
-const historicalKeyOnlyState = () => ({ ...legacyKeyState(buildLegacyRootDropKeyPolicy()), resources: legacyKeyState(buildLegacyRootDropKeyPolicy()).resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, arn: null, key_id: null, id: legacyKeyId } })) } : resource) });
+const historicalKeyOnlyState = () => ({ ...legacyKeyState(buildLegacyRootDropKeyPolicy()), resources: legacyKeyState(buildLegacyRootDropKeyPolicy()).resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, identity: null, attributes: { ...instance.attributes, arn: null, key_id: null, id: legacyKeyId } })) } : resource) });
 
 const legacyAwsAdapter = () => {
   const snapshot = legacyCandidate();
@@ -149,6 +150,7 @@ test("key-only census accepts the exact imported key when computed ARN is unset"
   const keyOnly = historicalKeyOnlyState();
   assert.equal(keyOnly.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn, null);
   assert.equal(keyOnly.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.id, legacyKeyId);
+  assert.equal(keyOnly.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].identity, null);
   assert.equal(collectRootDropCensus({ adapter: legacyAwsAdapter(), terraformState: keyOnly, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: identityForState(keyOnly), failedApplyEvidence: legacyFailedApplyEvidence, allowKeyOnly: true, allowMissingArn: true }).status, "AUTHENTICATED_ORPHAN");
   assert.doesNotThrow(() => assertRootDropKeyIdentity(keyOnly, legacyKeyId, { allowMissingComputedIdentity: true }));
   assert.throws(() => assertRootDropKeyIdentity(keyOnly, legacyKeyId), /different or non-conforming/);
@@ -170,7 +172,9 @@ test("authorized legacy refresh binds the exact 1/0 pre/post state transition", 
   before.resources.find(({ type, name }) => type === "aws_db_instance" && name === "green").instances[0].attributes.latest_restorable_time = "2026-08-18T22:41:17Z";
   after.resources.find(({ type, name }) => type === "aws_db_instance" && name === "green").instances[0].attributes.latest_restorable_time = "2026-08-19T19:26:15Z";
   after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = legacyKeyArn;
-  Object.assign(after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes, { key_id: legacyKeyId, custom_key_store_id: "", multi_region: false, rotation_period_in_days: 0, xks_key_id: "" });
+  const refreshedKey = after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0];
+  Object.assign(refreshedKey.attributes, { key_id: legacyKeyId, custom_key_store_id: "", multi_region: false, rotation_period_in_days: 0, xks_key_id: "" });
+  refreshedKey.identity = providerIdentity(legacyKeyId);
   const transition = () => assertAuthorizedRootDropRefreshTransition({ beforeState: before, beforeStateBytes: Buffer.from(JSON.stringify(before)), afterState: after, afterStateBytes: Buffer.from(JSON.stringify(after)), keyId: legacyKeyId });
   assert.equal(transition().serial, after.serial);
 
@@ -178,17 +182,27 @@ test("authorized legacy refresh binds the exact 1/0 pre/post state transition", 
     ["lineage", (value) => { value.lineage = "4e438e59-8b8b-194d-030c-5ede0c26344a"; }],
     ["key id", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.id = keyId; }],
     ["wrong ARN", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = `${legacyKeyArn}-wrong`; }],
+    ["missing provider identity", (value) => { delete value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].identity; }],
+    ["wrong provider account", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].identity.account_id = "000000000000"; }],
+    ["wrong provider region", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].identity.region = "us-east-1"; }],
+    ["wrong provider key", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].identity.id = keyId; }],
+    ["unexpected provider identity field", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].identity.unexpected = true; }],
+    ["wrong provider identity schema", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].identity_schema_version = 1; }],
     ["missing key", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances = []; }],
     ["second key", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances.push(structuredClone(value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0])); }],
     ["unexpected alias", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_alias" && name === "root_drop").instances = [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: legacyKeyId, target_key_arn: legacyKeyArn } }]; }],
     ["unrelated resource", (value) => { value.resources.find(({ type, name }) => type === "aws_db_instance" && name === "green").instances[0].attributes.identifier = "unrelated"; }],
     ["non-refresh state change", (value) => { value.serial = before.serial; }],
+    ["unexplained serial jump", (value) => { value.serial = before.serial + 2; }],
   ];
   for (const [label, mutate] of invalid) {
     const candidateState = structuredClone(after);
     mutate(candidateState);
     assert.throws(() => assertAuthorizedRootDropRefreshTransition({ beforeState: before, beforeStateBytes: Buffer.from(JSON.stringify(before)), afterState: candidateState, afterStateBytes: Buffer.from(JSON.stringify(candidateState)), keyId: legacyKeyId }), /authorized root-drop refresh|different or non-conforming|state lineage|state identity|topology|outside/, label);
   }
+  const malformedBefore = structuredClone(before);
+  delete malformedBefore.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].identity;
+  assert.throws(() => assertAuthorizedRootDropRefreshTransition({ beforeState: malformedBefore, beforeStateBytes: Buffer.from(JSON.stringify(malformedBefore)), afterState: after, afterStateBytes: Buffer.from(JSON.stringify(after)), keyId: legacyKeyId }), /different or non-conforming/);
   for (const [label, mutate] of [
     ["backwards RDS timestamp", (attributes) => { attributes.latest_restorable_time = "2026-08-17T22:41:17Z"; }],
     ["malformed RDS timestamp", (attributes) => { attributes.latest_restorable_time = "invalid"; }],
@@ -278,6 +292,17 @@ test("RDS refresh drift permits only the exact forward computed timestamp transi
   const actionableChange = accepted();
   actionableChange.resource_changes = [{ address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", change: { actions: ["update"] } }];
   assert.throws(() => assertRootDropRefreshOnlyPlan(actionableChange, { keyId: legacyKeyId }), /configuration-driven resource changes/);
+});
+
+test("recovery and zero-drift plans reject uncontracted provider drift", async () => {
+  assert.doesNotThrow(() => assertRootDropAliasOnlyPlan({ ...aliasPlan(), resource_drift: [structuredClone(rdsRefreshDrift)] }, { keyId }));
+  for (const resource_drift of [
+    [{ ...structuredClone(rdsRefreshDrift), address: "aws_db_instance.other", name: "other" }],
+    [structuredClone(rdsRefreshDrift), structuredClone(rdsRefreshDrift)],
+    [{ address: "aws_kms_key.other", mode: "managed", type: "aws_kms_key", name: "other", change: { actions: ["update"], before: {}, after: {} } }],
+  ]) assert.throws(() => assertRootDropAliasOnlyPlan({ ...aliasPlan(), resource_drift }, { keyId }), /uncontracted|refresh-only root-drop plan/);
+  const value = runner({ execute: true, initial: ownedState(), zeroDrift: { resource_changes: [], resource_drift: [{ address: "aws_vpc.other", mode: "managed", type: "aws_vpc", name: "other", change: { actions: ["update"], before: {}, after: {} } }] } });
+  await assert.rejects(() => value.run({ census: buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: ownedStateIdentity(), keyUniverse: [keyId], candidates: [{ ...candidate(), ...authenticated() }], failedApplyEvidence }), terraformState: ownedState(), stageAStateIdentity: ownedStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), /uncontracted.*drift/);
 });
 
 test("exact orphan authentication requires account, region, metadata, tags, policy, no alias, and CloudTrail creator/window", () => {
@@ -381,7 +406,7 @@ test("partial, conflicting, and ambiguous state never authenticates an orphan", 
   const partial = { ...absentState, resources: absentState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ attributes: { arn: keyArn } }] } : resource) };
   assert.throws(() => authenticateRootDropOrphan({ candidate: candidate(), terraformState: partial, sourceSha, transitionId, failedApplyEvidence }), /counts|partial/);
   const foreign = { ...ownedState(), resources: ownedState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ attributes: { arn: `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/22222222-2222-2222-2222-222222222222` } }] } : resource) };
-  assert.throws(() => assertRootDropStateIdentity(foreign, { keyId }), /does not own/);
+  assert.throws(() => assertRootDropStateIdentity(foreign, { keyId }), /does not own|different or non-conforming/);
   const ambiguous = buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: stateIdentity, keyUniverse: [keyId], candidates: [authenticated(), authenticated()] });
   assert.throws(() => assertRootDropCreationInterlock({ plan: exactCreatePlan, terraformState: absentState, census: ambiguous, sourceSha, transitionId, stageAStateIdentity: stateIdentity }), /blocked/);
 });
@@ -1216,8 +1241,8 @@ test("successful adoption imports exactly once, creates only the alias, verifies
 
 test("historical policy adoption converges policy before reporting the alias recovered", async () => {
   const legacyCensus = buildRootDropCensus({ sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: stateIdentity, keyUniverse: [legacyKeyId], candidates: [{ ...legacyCandidate(), ...authenticateRootDropOrphan({ candidate: legacyCandidate(), terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }) }], failedApplyEvidence: legacyFailedApplyEvidence });
-  const legacyState = stateWithRootDropPolicy({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: legacyKeyArn, key_id: legacyKeyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) }, buildLegacyRootDropKeyPolicy());
-  const canonicalOwnedState = stateWithRootDropPolicy({ ...ownedState(), resources: ownedState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: legacyKeyArn, key_id: legacyKeyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: legacyKeyId, target_key_arn: legacyKeyArn } }] } : resource) }, buildStageARootDropKeyPolicy());
+  const legacyState = stateWithRootDropPolicy({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, identity_schema_version: 0, identity: providerIdentity(legacyKeyId), attributes: { arn: legacyKeyArn, key_id: legacyKeyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) }, buildLegacyRootDropKeyPolicy());
+  const canonicalOwnedState = stateWithRootDropPolicy({ ...ownedState(), resources: ownedState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, identity_schema_version: 0, identity: providerIdentity(legacyKeyId), attributes: { arn: legacyKeyArn, key_id: legacyKeyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: legacyKeyId, target_key_arn: legacyKeyArn } }] } : resource) }, buildStageARootDropKeyPolicy());
   let current = absentState;
   let imports = 0;
   let applies = 0;
@@ -1294,7 +1319,9 @@ test("runAdoption accepts the authenticated legacy 1/0 ARN-populating refresh", 
   const after = structuredClone(before);
   after.serial += 1;
   after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = legacyKeyArn;
-  Object.assign(after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes, { key_id: legacyKeyId, custom_key_store_id: "", multi_region: false, rotation_period_in_days: 0, xks_key_id: "" });
+  const refreshedKey = after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0];
+  Object.assign(refreshedKey.attributes, { key_id: legacyKeyId, custom_key_store_id: "", multi_region: false, rotation_period_in_days: 0, xks_key_id: "" });
+  refreshedKey.identity = providerIdentity(legacyKeyId);
   const beforeIdentity = identityForState(before);
   const afterIdentity = identityForState(after);
   const finalState = { ...after, resources: after.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop"
