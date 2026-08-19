@@ -18,6 +18,7 @@ import {
   assertRootDropStateIdentity,
   buildRootDropAwsReadAdapter,
   collectRootDropCensus,
+  rootDropStateCounts,
   createRootDropRecoveryRunner,
   assertRootDropAliasOnlyPlan,
   assertRootDropPreImportPlan,
@@ -155,10 +156,11 @@ export async function runCensus({ argv = process.argv.slice(2), run, execFile = 
   const state = JSON.parse(stateBytes);
   const stageAStateIdentity = readJson(identityPath);
   assertStageAStateIdentityBinding(buildStageAStateIdentity(state, { stateBytes }), stageAStateIdentity);
+  const { keyCount, aliasCount } = rootDropStateCounts(state);
   const evidence = failedEvidence(argv);
   const env = buildRecoveryAwsEnvironment(releaseProfile);
   const adapter = buildRootDropAwsReadAdapter({ run: run || ((args) => execFile("aws", args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })), profile: releaseProfile, discoveryProfile: adminProfile, provenanceProfile: adminProfile, actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS, region });
-  const census = collectRootDropCensus({ adapter, terraformState: state, sourceSha: evidence.sourceSha, transitionId: evidence.transitionId, stageAStateIdentity, failedApplyEvidence: evidence });
+  const census = collectRootDropCensus({ adapter, terraformState: state, sourceSha: evidence.sourceSha, transitionId: evidence.transitionId, stageAStateIdentity, failedApplyEvidence: evidence, allowKeyOnly: keyCount === 1 && aliasCount === 0 });
   writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(census, null, 2)}\n`), repositoryRoot: root, label: "Stage-A root-drop census" });
   write(`${JSON.stringify({ status: census.status, candidateCount: census.candidateCount, output: outputPath }, null, 2)}\n`);
   return census;

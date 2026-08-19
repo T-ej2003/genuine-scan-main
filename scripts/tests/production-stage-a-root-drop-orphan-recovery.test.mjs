@@ -13,11 +13,13 @@ import {
   ROOT_DROP_ALIAS_ADDRESS,
   ROOT_DROP_KEY_ADDRESS,
   ROOT_DROP_KEY_DESCRIPTION,
+  ROOT_DROP_CENSUS_ACTOR_BINDINGS,
   ROOT_DROP_LEGACY_POLICY_BINDING,
   assertRootDropAliasOnlyPlan,
   assertLegacyRootDropPolicyBinding,
   assertRootDropCensus,
   assertRootDropCreationInterlock,
+  assertRootDropKeyIdentity,
   assertRootDropPreImportPlan,
   assertRootDropStateIdentity,
   authenticateRootDropOrphan,
@@ -121,6 +123,32 @@ const keyOnlyStateIdentity = () => identityForState(keyState());
 const ownedStateIdentity = () => identityForState(ownedState());
 const keyOnlyCensus = () => buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: keyOnlyStateIdentity(), keyUniverse: [keyId], candidates: [{ ...candidate(), ...authenticated() }], failedApplyEvidence });
 
+const historicalKeyOnlyState = () => ({ ...legacyKeyState(buildLegacyRootDropKeyPolicy()), resources: legacyKeyState(buildLegacyRootDropKeyPolicy()).resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, arn: null, key_id: null, id: legacyKeyId } })) } : resource) });
+
+const legacyAwsAdapter = () => {
+  const snapshot = legacyCandidate();
+  return {
+    actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS,
+    listKeys: () => [{ KeyId: legacyKeyId }],
+    describeKey: () => snapshot.metadata,
+    listTags: () => Object.entries(snapshot.tags).map(([TagKey, TagValue]) => ({ TagKey, TagValue })),
+    getPolicy: () => snapshot.policy,
+    getPublicKey: () => snapshot.publicKey,
+    listAliases: () => snapshot.aliases,
+    lookupCreateKeyEvents: () => snapshot.creationEvents,
+  };
+};
+
+test("key-only census accepts the exact imported key when computed ARN is unset", () => {
+  const keyOnly = historicalKeyOnlyState();
+  assert.equal(keyOnly.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn, null);
+  assert.equal(keyOnly.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.id, legacyKeyId);
+  assert.equal(collectRootDropCensus({ adapter: legacyAwsAdapter(), terraformState: keyOnly, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: identityForState(keyOnly), failedApplyEvidence: legacyFailedApplyEvidence, allowKeyOnly: true }).status, "AUTHENTICATED_ORPHAN");
+  const wrongArn = structuredClone(keyOnly);
+  wrongArn.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = `${legacyKeyArn}-wrong`;
+  assert.throws(() => assertRootDropKeyIdentity(wrongArn, legacyKeyId), /different or non-conforming/);
+});
+
 test("exact orphan authentication requires account, region, metadata, tags, policy, no alias, and CloudTrail creator/window", () => {
   assert.equal(authenticated().authenticated, true);
   for (const [label, overrides] of [
@@ -173,6 +201,36 @@ test("production candidate snapshot shape authenticates and persists the exact h
   assert.equal(census.candidates[0].keyArn, legacyKeyArn);
   const persisted = JSON.parse(JSON.stringify(census));
   assert.doesNotThrow(() => assertRootDropCensus(persisted, { sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity }));
+});
+
+test("canonical census entry path supports the existing historical 1/0 topology", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-root-drop-key-only-census-"));
+  const stageAState = historicalKeyOnlyState();
+  const stageAStatePath = path.join(directory, "stage-a.tfstate");
+  const stateIdentityPath = path.join(directory, "state-identity.json");
+  const historicalIdentityPath = path.join(directory, "historical-state-identity.json");
+  const outputPath = path.join(directory, "census.json");
+  writeFileSync(stageAStatePath, JSON.stringify(stageAState), { mode: 0o600 });
+  writeFileSync(stateIdentityPath, `${JSON.stringify(identityForState(stageAState))}\n`, { mode: 0o600 });
+  writeFileSync(historicalIdentityPath, `${JSON.stringify(ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity)}\n`, { mode: 0o600 });
+  const snapshot = legacyCandidate();
+  snapshot.creationEvents = [{ ...snapshot.creationEvents[0], eventTime: "2026-08-18T22:50:22.000Z" }];
+  const legacyEvent = snapshot.creationEvents[0];
+  const lookupEvent = { EventId: legacyEvent.eventId, EventName: legacyEvent.eventName, EventSource: legacyEvent.eventSource, EventTime: legacyEvent.eventTime, CloudTrailEvent: JSON.stringify({ eventID: legacyEvent.eventId, eventName: legacyEvent.eventName, eventSource: legacyEvent.eventSource, awsRegion: legacyEvent.awsRegion, recipientAccountId: legacyEvent.recipientAccountId, eventTime: legacyEvent.eventTime, userIdentity: legacyEvent.userIdentity, resources: legacyEvent.resources }) };
+  const run = (args) => {
+    if (args[0] === "kms" && args[1] === "list-keys") return JSON.stringify({ Keys: [{ KeyId: legacyKeyId }] });
+    if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: snapshot.metadata });
+    if (args[0] === "kms" && args[1] === "list-resource-tags") return JSON.stringify({ Tags: Object.entries(snapshot.tags).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) });
+    if (args[0] === "kms" && args[1] === "get-key-policy") return JSON.stringify({ Policy: encodeURIComponent(JSON.stringify(snapshot.policy)) });
+    if (args[0] === "kms" && args[1] === "get-public-key") return JSON.stringify(snapshot.publicKey);
+    if (args[0] === "kms" && args[1] === "list-aliases") return JSON.stringify({ Aliases: [] });
+    if (args[0] === "cloudtrail") return JSON.stringify({ Events: [lookupEvent] });
+    throw new Error(`unexpected AWS read ${args.join(" ")}`);
+  };
+  try {
+    const result = await runCensus({ argv: ["--admin-profile", "administrator", "--release-profile", "release", "--stage-a-state", stageAStatePath, "--stage-a-state-identity", stateIdentityPath, "--source-sha", ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, "--transition-id", ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, "--plan-sha256", ROOT_DROP_LEGACY_POLICY_BINDING.planSha256, "--failed-apply-start", "2026-08-18T22:45:00.000Z", "--failed-apply-end", "2026-08-18T23:00:00.000Z", "--creation-event-id", ROOT_DROP_LEGACY_POLICY_BINDING.creationEventId, "--failed-apply-state-identity", historicalIdentityPath, "--output", outputPath], run, write: () => {} });
+    assert.equal(result.status, "AUTHENTICATED_ORPHAN");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("legacy policy convergence requires the exact update plus alias plan", () => {

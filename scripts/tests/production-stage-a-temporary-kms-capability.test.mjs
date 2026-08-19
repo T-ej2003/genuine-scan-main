@@ -34,7 +34,7 @@ import { AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES, classifyTemporary
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { buildStageARootDropKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
-import { ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_KEY_DESCRIPTION, ROOT_DROP_LEGACY_POLICY_BINDING, ROOT_DROP_RECOVERY_SCHEMA_VERSION, buildLegacyRootDropKeyPolicy, buildRootDropCensus, rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
+import { ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_KEY_DESCRIPTION, ROOT_DROP_LEGACY_POLICY_BINDING, ROOT_DROP_RECOVERY_SCHEMA_VERSION, buildLegacyRootDropKeyPolicy, buildRootDropAwsReadAdapter, buildRootDropCensus, collectRootDropCensus, rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
@@ -246,6 +246,67 @@ test("legacy recovery adds rotation status only for the authenticated orphan ARN
   assert(evidence.actions.includes("kms:GetKeyRotationStatus"));
   assert.equal(evidence.legacyRootDropKeyArn, legacyRootDropKeyArn);
   assert.doesNotThrow(() => assertTemporaryCapabilityEvidence(evidence, { sourceSha, state: "AUTHORIZED_FOR_ROOT_DROP_CREATION" }));
+});
+
+test("canonical authorization reaches the legacy capability before provider refresh on exact 1/0 state", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-key-only-bootstrap-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory, buildLegacyRootDropKeyPolicy());
+  const stageAStateFile = path.join(directory, "stage-a.tfstate");
+  const stageAStateIdentityFile = path.join(directory, "stage-a-state-identity.json");
+  const rootDropCensusFile = path.join(directory, "root-drop-census.json");
+  const keyId = ROOT_DROP_LEGACY_POLICY_BINDING.keyArn.split("/").at(-1);
+  const keyArn = ROOT_DROP_LEGACY_POLICY_BINDING.keyArn;
+  const stageAState = {
+    ...stateFixture(),
+    resources: stateFixture().resources.map((resource) => resource.type === "aws_kms_key" && resource.address === "aws_kms_key.root_drop"
+      ? { ...resource, name: "root_drop", instances: [{ attributes: { id: keyId, arn: null, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] }
+      : resource.type === "aws_kms_alias" && resource.address === "aws_kms_alias.root_drop" ? { ...resource, name: "root_drop", instances: [] } : resource),
+  };
+  const stateBytes = Buffer.from(JSON.stringify(stageAState));
+  const stageAStateIdentity = buildStageAStateIdentity(stageAState, { stateBytes });
+  const creatorArn = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/launch";
+  const creationEvent = { eventId: ROOT_DROP_LEGACY_POLICY_BINDING.creationEventId, eventName: "CreateKey", eventSource: "kms.amazonaws.com", awsRegion: "eu-west-2", recipientAccountId: "368992683803", eventTime: "2026-08-18T22:50:22.000Z", userIdentity: { arn: creatorArn }, resources: [{ ARN: keyArn }] };
+  const snapshot = {
+    keyId,
+    metadata: { KeyId: keyId, Arn: keyArn, AWSAccountId: "368992683803", KeyState: "Enabled", KeyManager: "CUSTOMER", Origin: "AWS_KMS", KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY", MultiRegion: false, Description: ROOT_DROP_KEY_DESCRIPTION },
+    tags: { ...TEMPORARY_KMS_CAPABILITY.tags },
+    policy: buildLegacyRootDropKeyPolicy(),
+    publicKey: { KeyId: keyId, KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY", SigningAlgorithms: ["RSASSA_PSS_SHA_256"] },
+    aliases: [],
+    creationEvents: [creationEvent],
+  };
+  const failedApplyEvidence = { sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256, creatorArn, creationEventId: ROOT_DROP_LEGACY_POLICY_BINDING.creationEventId, failedApplyWindow: { start: "2026-08-18T22:45:00.000Z", end: "2026-08-18T23:00:00.000Z" }, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity };
+  const events = [];
+  const fixture = { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) };
+  const iam = createPolicyVersionRunner({ fixture });
+  const awsRead = (args) => {
+    events.push("release-read");
+    if (args[0] === "kms" && args[1] === "list-keys") return JSON.stringify({ Keys: [{ KeyId: keyId }] });
+    if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: snapshot.metadata });
+    if (args[0] === "kms" && args[1] === "list-resource-tags") return JSON.stringify({ Tags: Object.entries(snapshot.tags).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) });
+    if (args[0] === "kms" && args[1] === "get-key-policy") return JSON.stringify({ Policy: encodeURIComponent(JSON.stringify(snapshot.policy)) });
+    if (args[0] === "kms" && args[1] === "get-public-key") return JSON.stringify(snapshot.publicKey);
+    if (args[0] === "kms" && args[1] === "list-aliases") return JSON.stringify({ Aliases: [] });
+    if (args[0] === "cloudtrail") return JSON.stringify({ Events: [{ EventId: creationEvent.eventId, EventName: creationEvent.eventName, EventSource: creationEvent.eventSource, EventTime: creationEvent.eventTime, CloudTrailEvent: JSON.stringify({ eventID: creationEvent.eventId, eventName: creationEvent.eventName, eventSource: creationEvent.eventSource, awsRegion: creationEvent.awsRegion, recipientAccountId: creationEvent.recipientAccountId, eventTime: creationEvent.eventTime, userIdentity: creationEvent.userIdentity, resources: creationEvent.resources }) }] });
+    throw new Error(`unexpected AWS read ${args.join(" ")}`);
+  };
+  const adapter = buildRootDropAwsReadAdapter({ run: awsRead, profile: "release", discoveryProfile: "administrator", provenanceProfile: "administrator", actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS });
+  const census = collectRootDropCensus({ adapter, terraformState: stageAState, sourceSha: failedApplyEvidence.sourceSha, transitionId: failedApplyEvidence.transitionId, stageAStateIdentity, failedApplyEvidence, allowKeyOnly: true });
+  assert.equal(census.status, "AUTHENTICATED_ORPHAN", JSON.stringify(census.candidates));
+  assert.equal(census.candidates[0].policyCompatibility, "LEGACY_BOUND_HISTORICAL");
+  writeFileSync(stageAStateFile, stateBytes, { mode: 0o600 });
+  writeFileSync(stageAStateIdentityFile, `${JSON.stringify(stageAStateIdentity)}\n`, { mode: 0o600 });
+  writeFileSync(rootDropCensusFile, `${JSON.stringify(census)}\n`, { mode: 0o600 });
+  try {
+    const result = runCli(["--admin-profile", "administrator", "--release-profile", "release", "--phase", "authorize", "--source-sha", failedApplyEvidence.sourceSha, "--transition-id", failedApplyEvidence.transitionId, "--state-file", stateFile, "--plan-sha256", failedApplyEvidence.planSha256, "--plan-json", planJsonFile, "--stage-a-state", stageAStateFile, "--stage-a-state-identity", stageAStateIdentityFile, "--root-drop-census", rootDropCensusFile], { run: (args) => { if (args[1] === "create-policy-version") events.push("create-policy-version"); return iam.run(args); }, readRootDropCensus: () => census, execFile: (_command, args) => awsRead(args), write: () => {} });
+    assert.equal(result.writes, 1);
+    assert.equal(events.includes("create-policy-version"), true);
+    assert.equal(events.indexOf("create-policy-version") > events.lastIndexOf("release-read"), true);
+    const temporary = iam.documents.get(result.evidence.temporaryVersionId);
+    assert.deepEqual(temporary.Statement.find(({ Action }) => Action === "kms:GetKeyRotationStatus"), temporaryKmsLegacyRotationStatusStatement({ sourceSha: failedApplyEvidence.sourceSha, transitionId: failedApplyEvidence.transitionId, keyArn }));
+    assert.equal(temporary.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("kms:CreateKey")), false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("legacy authorization treats the historical plan as provenance and replays without another IAM write", () => {

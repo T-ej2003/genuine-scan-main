@@ -24,7 +24,7 @@ import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageAStateIdentityBinding, buildStageAStateIdentity } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { buildRecoveryAwsEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
-import { assertRootDropCensus, assertRootDropCensusMatch, assertRootDropCreationInterlock, buildLegacyRootDropKeyPolicy, buildRootDropAwsReadAdapter, collectRootDropCensus, ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_LEGACY_POLICY_BINDING } from "./production-stage-a-root-drop-orphan-recovery.mjs";
+import { assertRootDropCensus, assertRootDropCensusMatch, assertRootDropCreationInterlock, buildLegacyRootDropKeyPolicy, buildRootDropAwsReadAdapter, collectRootDropCensus, rootDropStateCounts, ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_LEGACY_POLICY_BINDING } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sourcePolicyPath = path.join(root, TEMPORARY_KMS_CAPABILITY.sourcePolicyPath);
@@ -584,6 +584,7 @@ export function runCli(argv = process.argv.slice(2), { run: injectedRun, readRoo
     const stageAStateIdentityPath = stageAStateIdentityFile ? validateStageAInput(stageAStateIdentityFile, "Stage-A state identity") : null;
     const stageAStateIdentity = stageAStateIdentityPath ? readJson(stageAStateIdentityPath) : null;
     const rootDropState = stageAStateFile ? readJson(stageAStateFile) : null;
+    const rootDropCounts = rootDropState ? rootDropStateCounts(rootDropState) : null;
     const suppliedRootDropCensus = phase === "authorize" ? readJson(validateStageAInput(rootDropCensusFileOption, "Stage-A root-drop census")) : null;
     const freshRootDropCensus = phase === "authorize"
       ? injectedReadRootDropCensus
@@ -595,6 +596,7 @@ export function runCli(argv = process.argv.slice(2), { run: injectedRun, readRoo
           transitionId,
           stageAStateIdentity,
           failedApplyEvidence: suppliedRootDropCensus.failedApplyEvidence,
+          allowKeyOnly: rootDropCounts?.keyCount === 1 && rootDropCounts.aliasCount === 0,
         })
       : null;
     const result = createTemporaryKmsCapabilityRunner({ run, requireStageAStateBinding: Boolean(stageAStateFile) }).runPhase({ phase, sourceSha, transitionId, stateFile, planSha256: option(argv, "--plan-sha256", false), planJsonFile: option(argv, "--plan-json", false), terraformStateFile: option(argv, "--terraform-state", false), stageAStateFile, stageAStateIdentity, rootDropCensusFile: rootDropCensusFileOption, freshRootDropCensus, applyFailed: argv.includes("--apply-failed"), partialOperationCensus: argv.includes("--partial-operation-census-verified") });

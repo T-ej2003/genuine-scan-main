@@ -1,7 +1,9 @@
 # MSCQR Stage-A root-drop orphan recovery
 
-This contract covers the partial apply where `aws_kms_key.root_drop` exists in
-AWS but Terraform does not own it and `aws_kms_alias.root_drop` is absent.
+This contract covers both the external-orphan `0/0` topology and the
+partial-recovery `1/0` topology where Terraform already owns the exact
+`aws_kms_key.root_drop`, its alias is absent, and provider-computed ARN fields
+may still be unset before a successful refresh.
 
 ## Read-only census (schema version 3)
 
@@ -43,7 +45,10 @@ The census is valid only as one of:
 - `NO_CANDIDATE`: the fresh 0/0 Terraform state may use the normal exact
   two-create plan;
 - `AUTHENTICATED_ORPHAN`: exactly one key passes every identity and event
-  check and is eligible for adoption;
+  check and is eligible for adoption or exact key-only continuation. In the
+  `1/0` topology, Terraform ownership is bound by the exact state resource ID;
+  a missing computed ARN is not treated as a different key, while any present
+  non-matching ARN still fails closed;
 - `AMBIGUOUS`: creation is blocked.
 
 The census captures each potentially relevant key's complete security snapshot
@@ -59,8 +64,11 @@ same producer and compares the candidate result with the supplied artifact.
 Thus a replayed `NO_CANDIDATE` census cannot authorize after a key appears;
 newly created candidates are included even when they fall outside the old
 failed-apply window. An authenticated or ambiguous candidate makes `CreateKey`
-fail closed before Terraform apply. A partial Terraform state also fails
-closed.
+fail closed before Terraform apply. For the exact authenticated historical
+`1/0` topology, authorization occurs before provider refresh and installs the
+exact-key `kms:GetKeyRotationStatus` capability required by the locked
+provider; no steady-state IAM permission is broadened. Any other partial
+Terraform state fails closed.
 
 ## Adoption
 

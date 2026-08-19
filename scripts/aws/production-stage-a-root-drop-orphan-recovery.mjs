@@ -87,9 +87,15 @@ function assertStateShape(state) {
   return state;
 }
 
+export function rootDropStateCounts(state) {
+  return {
+    keyCount: stateInstances(state, "aws_kms_key", "root_drop").length,
+    aliasCount: stateInstances(state, "aws_kms_alias", "root_drop").length,
+  };
+}
+
 function assertStateRootDropCounts(state, { key, alias, allowKeyOnly = false } = {}) {
-  const keyCount = stateInstances(state, "aws_kms_key", "root_drop").length;
-  const aliasCount = stateInstances(state, "aws_kms_alias", "root_drop").length;
+  const { keyCount, aliasCount } = rootDropStateCounts(state);
   if (key !== undefined && keyCount !== key || alias !== undefined && aliasCount !== alias) fail(`Terraform root-drop state counts are not exact: key=${keyCount}, alias=${aliasCount}`);
   if ((keyCount === 1) !== (aliasCount === 1) && !(allowKeyOnly && keyCount === 1 && aliasCount === 0)) fail("Terraform root-drop state is partial");
   if (keyCount > 1 || aliasCount > 1) fail("Terraform root-drop state contains multiple root-drop instances");
@@ -469,7 +475,8 @@ export function assertRootDropKeyIdentity(state, keyId) {
   if (key.length !== 1) fail("Terraform refresh did not return exactly one imported root-drop key");
   const attributes = key[0].attributes || {};
   const actual = String(attributes.key_id || attributes.id || attributes.arn || "").split("/").at(-1);
-  if (actual !== keyId || attributes.arn !== `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}` || attributes.key_usage !== TEMPORARY_KMS_CAPABILITY.keyUsage || attributes.customer_master_key_spec !== TEMPORARY_KMS_CAPABILITY.keySpec) fail("Terraform refresh returned a different or non-conforming root-drop key");
+  const expectedArn = `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}`;
+  if (actual !== keyId || (attributes.arn !== null && attributes.arn !== undefined && attributes.arn !== expectedArn) || attributes.key_usage !== TEMPORARY_KMS_CAPABILITY.keyUsage || attributes.customer_master_key_spec !== TEMPORARY_KMS_CAPABILITY.keySpec) fail("Terraform refresh returned a different or non-conforming root-drop key");
   return { keyId, arn: attributes.arn };
 }
 
