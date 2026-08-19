@@ -20,6 +20,7 @@ import {
   collectRootDropCensus,
   rootDropStateCounts,
   assertAuthorizedRootDropRefreshTransition,
+  assertAuthorizedRootDropUntaintTransition,
   createRootDropRecoveryRunner,
   assertRootDropAliasOnlyPlan,
   assertRootDropPreImportPlan,
@@ -169,11 +170,11 @@ export async function runCensus({ argv = process.argv.slice(2), run, execFile = 
 }
 
 export async function runAdoption(options = {}) {
-  const refreshAccounting = { terraformRefreshOnlyApplies: 0, terraformStateWrites: 0 };
+  const refreshAccounting = { terraformRefreshOnlyApplies: 0, terraformUntaintWrites: 0, terraformStateWrites: 0 };
   try {
     return await runAdoptionInternal({ ...options, refreshAccounting });
   } catch (error) {
-    if (refreshAccounting.terraformRefreshOnlyApplies || refreshAccounting.terraformStateWrites) {
+    if (Object.values(refreshAccounting).some(Boolean)) {
       const value = error instanceof Error ? error : new Error(String(error));
       value.recoveryAccounting = { ...(value.recoveryAccounting || {}), ...refreshAccounting };
       throw value;
@@ -229,8 +230,8 @@ async function runAdoptionInternal({ argv = process.argv.slice(2), runTerraform,
   const readPlan = async (savedPath) => JSON.parse(tf(["show", "-json", savedPath]));
   const applyPlan = async (savedPath) => { if (!execute) throw new Error("alias apply requires explicit --execute"); tf(["apply", "-input=false", "-lock=true", savedPath]); return { outcome: "CONFIRMED_SUCCESS" }; };
   const rootDropCounts = stageARootDropCounts;
-  const initialSnapshot = await readStateSnapshot();
-  const initialStateIdentity = buildStageAStateIdentity(initialSnapshot.state, { stateBytes: initialSnapshot.stateBytes });
+  let initialSnapshot = await readStateSnapshot();
+  let initialStateIdentity = buildStageAStateIdentity(initialSnapshot.state, { stateBytes: initialSnapshot.stateBytes });
   const initialCounts = rootDropCounts(initialSnapshot.state);
   if (census.status !== "AUTHENTICATED_ORPHAN" || !census.candidates?.[0]?.keyId) throw new Error("Stage-A root-drop adoption requires an authenticated orphan census");
   if (initialCounts.keyCount === 0 && initialCounts.aliasCount === 0) {
@@ -242,6 +243,39 @@ async function runAdoptionInternal({ argv = process.argv.slice(2), runTerraform,
     assertRootDropStateIdentity(initialSnapshot.state, { keyId: census.candidates[0].keyId, requireCanonicalPolicy: true });
   } else {
     throw new Error("Stage-A root-drop adoption encountered an unsupported Terraform state topology");
+  }
+  const rootDropKeyInstance = (state) => (state.resources || []).filter((resource) => resource?.type === "aws_kms_key" && resource?.name === "root_drop").flatMap((resource) => Array.isArray(resource.instances) ? resource.instances : [])[0];
+  if (legacyPolicyBound && initialCounts.keyCount === 1 && initialCounts.aliasCount === 0) {
+    const keyId = census.candidates[0].keyId;
+    const status = rootDropKeyInstance(initialSnapshot.state)?.status;
+    if (status === "tainted") {
+      assertRootDropKeyIdentity(initialSnapshot.state, keyId);
+      if (!execute) throw new Error("Stage-A historical 1/0 recovery requires --execute to clear the authenticated root-drop taint marker");
+      let observed;
+      let commandConfirmed = false;
+      try {
+        tf(["untaint", "-lock=true", ROOT_DROP_KEY_ADDRESS]);
+        commandConfirmed = true;
+        refreshAccounting.terraformUntaintWrites += 1;
+        refreshAccounting.terraformStateWrites += 1;
+        observed = await readStateSnapshot();
+        initialStateIdentity = assertAuthorizedRootDropUntaintTransition({ beforeState: initialSnapshot.state, beforeStateBytes: initialSnapshot.stateBytes, afterState: observed.state, afterStateBytes: observed.stateBytes, keyId });
+      } catch (error) {
+        if (!observed) {
+          try { observed = await readStateSnapshot(); } catch { if (!commandConfirmed) error.recoveryAccounting = { ...(error.recoveryAccounting || {}), unknownMutations: (error.recoveryAccounting?.unknownMutations || 0) + 1 }; error.mutationOutcome = commandConfirmed ? "CONFIRMED_SUCCESS" : "AMBIGUOUS"; throw error; }
+        }
+        try {
+          initialStateIdentity = assertAuthorizedRootDropUntaintTransition({ beforeState: initialSnapshot.state, beforeStateBytes: initialSnapshot.stateBytes, afterState: observed.state, afterStateBytes: observed.stateBytes, keyId });
+          if (!commandConfirmed) { refreshAccounting.terraformUntaintWrites += 1; refreshAccounting.terraformStateWrites += 1; }
+        } catch {
+          const observedIdentity = buildStageAStateIdentity(observed.state, { stateBytes: observed.stateBytes });
+          if (!commandConfirmed && observedIdentity.stateSha256 === initialStateIdentity.stateSha256 && observedIdentity.serial === initialStateIdentity.serial) error.mutationOutcome = "DEFINITE_FAILURE";
+          else { error.recoveryAccounting = { ...(error.recoveryAccounting || {}), unknownMutations: (error.recoveryAccounting?.unknownMutations || 0) + 1 }; error.mutationOutcome = "AMBIGUOUS"; }
+          throw error;
+        }
+      }
+      initialSnapshot = observed;
+    } else if (status !== undefined) throw new Error("Stage-A historical 1/0 recovery found an unsupported root-drop instance status");
   }
   let refreshedSnapshot = initialSnapshot;
   let currentStateIdentity = initialStateIdentity;
@@ -317,7 +351,7 @@ async function runAdoptionInternal({ argv = process.argv.slice(2), runTerraform,
   }
   const runner = createRootDropRecoveryRunner({ execute, readState, readStateSnapshot, importKey, refreshState, createPlan, readPlan, readPlanBytes: async (savedPath) => readFileSync(savedPath), applyPlan });
   const result = await runner({ census, freshCensus, terraformState: refreshedSnapshot.state, stageAStateIdentity: currentStateIdentity, sourceSha: census.sourceSha, transitionId: census.transitionId, planSha256: census.failedApplyEvidence?.planSha256 });
-  const report = { ...result, preImportPlanSha256, terraformRefreshOnlyApplies: refreshAccounting.terraformRefreshOnlyApplies, terraformStateWrites: refreshAccounting.terraformStateWrites, ...(refreshOnlyPlanSha256 ? { refreshOnlyPlanSha256 } : {}) };
+  const report = { ...result, preImportPlanSha256, terraformRefreshOnlyApplies: refreshAccounting.terraformRefreshOnlyApplies, terraformUntaintWrites: refreshAccounting.terraformUntaintWrites, terraformStateWrites: refreshAccounting.terraformStateWrites, ...(refreshOnlyPlanSha256 ? { refreshOnlyPlanSha256 } : {}) };
   write(`${JSON.stringify(report, null, 2)}\n`);
   return report;
 }

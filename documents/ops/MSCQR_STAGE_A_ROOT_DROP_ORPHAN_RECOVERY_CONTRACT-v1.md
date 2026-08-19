@@ -110,7 +110,12 @@ For the normal 0/0 path, the refresh-enabled, non-mutating Terraform plan is
 saved, shown as JSON, and classified before import; only the exact root-drop
 key and alias create envelope is accepted. For the authenticated historical
 1/0 path, the provider boundary is different and explicit: after temporary
-authorization, `terraform plan -refresh-only -out <refresh-only-plan>` is
+authorization, an exact already-refreshed key instance marked `tainted` is
+first reconciled with `terraform untaint -lock=true aws_kms_key.root_drop`.
+That state-only command is allowed only for the authenticated 1/0 key/provider
+identity; its post-state must advance the serial once and differ only by
+removal of that marker. It performs no AWS resource write and is recorded as
+one Terraform state write. Then `terraform plan -refresh-only -out <refresh-only-plan>` is
 saved, shown as JSON, classified as the exact root-drop computed-identity
 transition plus, when present, only the exact provider-computed forward
 `aws_db_instance.green.latest_restorable_time` UTC timestamp transition,
@@ -178,7 +183,7 @@ repair never runs that command against production.
 
 Import replay reads current state first and never retries an ambiguous import.
 Recovery accounting records Terraform imports, ordinary Terraform applies,
-refresh-only Terraform applies/state writes, KMS writes, IAM writes, unknown
+refresh-only Terraform applies, exact untaint/state writes, KMS writes, IAM writes, unknown
 mutations, and unclassified mutations. The refresh-only state write is not an
 AWS resource mutation and is never counted as a KMS/IAM write. No destructive
 KMS action, permanent release-role administration, lockout bypass, or manual
