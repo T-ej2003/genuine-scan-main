@@ -28,6 +28,16 @@ GitHub deploy, and application/runtime roles cannot assume the release role.
 No GitHub OIDC trust is added here; that later migration requires separate
 review. The checker must be distinct from the release deployer.
 
+## Root-drop orphan recovery boundary
+
+The canonical orphan-recovery command is bound to this Terraform root, the
+initialized S3 backend coordinates above, and the `default` workspace. It
+removes inherited `TF_*` redirect variables and uses the release-deployer
+profile for every Terraform subprocess. Before import it compares the live
+state lineage, serial, and exact state-byte SHA-256 with the fresh census
+identity; any mismatch fails closed. Recovery imports only the authenticated
+root-drop key and may apply only the exact Terraform-managed alias plan.
+
 Stage A also manages the one exact inline role-chain policy on the existing
 `mscqr-production-independent-checker` role that permits only
 `sts:AssumeRole` into the Stage A-owned

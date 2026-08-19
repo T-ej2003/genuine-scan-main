@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
+import { assertStageAStateIdentityBinding, buildStageAStateIdentity, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { buildStageARootDropKeyPolicy } from "./production-stage-a-control-plane.mjs";
 import { TEMPORARY_KMS_CAPABILITY } from "./production-stage-a-temporary-kms-capability.mjs";
 
@@ -11,6 +13,7 @@ export const ROOT_DROP_RECOVERY_STATUSES = Object.freeze(["NO_CANDIDATE", "AUTHE
 export const ROOT_DROP_EXPECTED_SIGNING_ALGORITHM = "RSASSA_PSS_SHA_256";
 export const ROOT_DROP_CENSUS_MAX_AGE_MS = 5 * 60 * 1000;
 export const ROOT_DROP_CENSUS_ACTOR_BINDINGS = Object.freeze({ discovery: "ADMINISTRATOR", resourceReads: "RELEASE_DEPLOYER", provenance: "ADMINISTRATOR" });
+export const STAGE_A_TERRAFORM_BACKEND = Object.freeze({ type: "s3", bucket: STAGE_B_TERRAFORM_BACKEND.bucketName, key: STAGE_A_STATE_OBJECT, region: STAGE_B.region, encrypt: true, use_lockfile: true });
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -178,8 +181,17 @@ export function assertRootDropStateIdentity(state, { keyId, aliasArn = STAGE_B.r
   return { valid: true, ...counts, keyId };
 }
 
-export function createRootDropRecoveryRunner({ execute = false, allowImport = execute, readState, importKey, refreshState, createPlan, readPlan, applyPlan, now = () => new Date().toISOString() } = {}) {
-  if (typeof readState !== "function" || typeof importKey !== "function" || typeof refreshState !== "function" || typeof createPlan !== "function" || typeof readPlan !== "function" || typeof applyPlan !== "function") throw new Error("Root-drop recovery runner dependencies are incomplete");
+export function assertStageATerraformBackendMetadata(metadata) {
+  const value = metadata?.backend || metadata;
+  if (!value || value.type !== STAGE_A_TERRAFORM_BACKEND.type || !value.config || Object.entries(STAGE_A_TERRAFORM_BACKEND).some(([key, expected]) => key !== "type" && value.config[key] !== expected)) fail("Terraform backend is outside the canonical production Stage-A contract");
+  for (const [key, configured] of Object.entries(value.config)) {
+    if (!(key in STAGE_A_TERRAFORM_BACKEND) && configured !== undefined && configured !== null && configured !== "") fail(`Terraform backend has an unreviewed configuration field: ${key}`);
+  }
+  return true;
+}
+
+export function createRootDropRecoveryRunner({ execute = false, allowImport = execute, readState, readStateSnapshot, importKey, refreshState, createPlan, readPlan, applyPlan, now = () => new Date().toISOString() } = {}) {
+  if (typeof readState !== "function" || typeof readStateSnapshot !== "function" || typeof importKey !== "function" || typeof refreshState !== "function" || typeof createPlan !== "function" || typeof readPlan !== "function" || typeof applyPlan !== "function") throw new Error("Root-drop recovery runner dependencies are incomplete");
   return async function run({ census, freshCensus, terraformState, stageAStateIdentity, sourceSha, transitionId, planSha256 } = {}) {
     if (!freshCensus) fail("orphan adoption requires a fresh authoritative census");
     assertRootDropCensusMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity });
@@ -191,12 +203,16 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
     const accounting = { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 };
     const withAccounting = (error) => { const value = error instanceof Error ? error : new Error(String(error)); value.recoveryAccounting = { ...accounting }; return value; };
     try {
-      let state = await readState();
+      const initialSnapshot = await readStateSnapshot();
+      if (!initialSnapshot || !initialSnapshot.state || !Buffer.isBuffer(initialSnapshot.stateBytes) && !(initialSnapshot.stateBytes instanceof Uint8Array)) fail("pre-import Terraform state snapshot is incomplete");
+      let state = initialSnapshot.state;
       const stateCounts = { keyCount: stateInstances(state, "aws_kms_key", "root_drop").length, aliasCount: stateInstances(state, "aws_kms_alias", "root_drop").length };
       if (stateCounts.keyCount > 1 || stateCounts.aliasCount > 1 || stateCounts.aliasCount === 1 && stateCounts.keyCount === 0) fail("Terraform refresh returned an invalid root-drop state");
       const keyCount = stateCounts.keyCount;
       if (keyCount === 0) {
         if (counts.keyCount !== 0 || counts.aliasCount !== 0) fail("pre-import Terraform state changed from the authenticated snapshot");
+        assertStageAStateIdentityBinding(buildStageAStateIdentity(initialSnapshot.state, { stateBytes: initialSnapshot.stateBytes }), stageAStateIdentity);
+        assertStateRootDropCounts(initialSnapshot.state, { key: 0, alias: 0 });
         if (!allowImport) fail("Terraform import requires explicit recovery execution authorization");
         accounting.terraformImports += 1;
         let importResult;

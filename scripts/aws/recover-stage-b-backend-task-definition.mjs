@@ -24,6 +24,12 @@ export function buildRecoveryAwsEnvironment(profile, baseEnv = process.env) {
   return env;
 }
 
+export function buildRecoveryTerraformEnvironment(profile, baseEnv = process.env) {
+  const env = buildRecoveryAwsEnvironment(profile, baseEnv);
+  for (const key of Object.keys(env)) if (key.startsWith("TF_")) delete env[key];
+  return env;
+}
+
 export function deriveCanonicalRecoveryProvenance({ sourceSha, repositoryRoot = root } = {}) {
   const toolingTreeSha256 = deriveStageBToolingInputTreeSha256(sourceSha);
   const { sourceContractSha256 } = calculateCleanRoomSourceContract(repositoryRoot);

@@ -22,6 +22,8 @@ import {
   collectRootDropCensus,
   rootDropRecoverySha256,
   createRootDropRecoveryRunner,
+  STAGE_A_TERRAFORM_BACKEND,
+  assertStageATerraformBackendMetadata,
 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
 import { runAdoption, runCensus } from "../aws/recover-production-green-stage-a-root-drop-orphan.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
@@ -132,19 +134,19 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
   const censusPath = path.join(directory, "census.json");
   const outputPath = path.join(directory, "output.json");
   const planPath = path.join(directory, "alias.plan");
-  const terraformRoot = path.join(directory, "terraform");
+  const terraformRoot = path.join(process.cwd(), "infra/aws/terraform/production-green-stage-a");
   const stateBytes = Buffer.from(JSON.stringify(absentState));
   writeFileSync(statePath, stateBytes, { mode: 0o600 });
   writeFileSync(identityPath, `${JSON.stringify(stateIdentity)}\n`, { mode: 0o600 });
   const suppliedCensus = census();
   writeFileSync(censusPath, `${JSON.stringify(suppliedCensus)}\n`, { mode: 0o600 });
-  const saved = Object.fromEntries(["AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE"].map((key) => [key, process.env[key]]));
+  const saved = Object.fromEntries(["AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "TF_DATA_DIR", "TF_WORKSPACE", "TF_CLI_CONFIG_FILE", "TF_CLI_ARGS", "TF_CLI_ARGS_init", "TF_CLI_ARGS_import", "TF_CLI_ARGS_plan", "TF_CLI_ARGS_apply", "TF_VAR_aws_region"].map((key) => [key, process.env[key]]));
   const restore = () => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } };
   const observedAws = [];
   const observedTerraform = [];
   let currentState = absentState;
   try {
-    Object.assign(process.env, { AWS_PROFILE: "administrator", AWS_ACCESS_KEY_ID: "ambient-key", AWS_SECRET_ACCESS_KEY: "ambient-secret", AWS_SESSION_TOKEN: "ambient-session", AWS_SECURITY_TOKEN: "ambient-security", AWS_DEFAULT_PROFILE: "ambient-default", AWS_REGION: "us-east-1", AWS_DEFAULT_REGION: "us-east-1", AWS_CONFIG_FILE: "/tmp/config", AWS_SHARED_CREDENTIALS_FILE: "/tmp/credentials" });
+    Object.assign(process.env, { AWS_PROFILE: "administrator", AWS_ACCESS_KEY_ID: "ambient-key", AWS_SECRET_ACCESS_KEY: "ambient-secret", AWS_SESSION_TOKEN: "ambient-session", AWS_SECURITY_TOKEN: "ambient-security", AWS_DEFAULT_PROFILE: "ambient-default", AWS_REGION: "us-east-1", AWS_DEFAULT_REGION: "us-east-1", AWS_CONFIG_FILE: "/tmp/config", AWS_SHARED_CREDENTIALS_FILE: "/tmp/credentials", TF_DATA_DIR: "/tmp/hostile-data", TF_WORKSPACE: "wrong-workspace", TF_CLI_CONFIG_FILE: "/tmp/hostile-cli.tfrc", TF_CLI_ARGS: "-refresh=false", TF_CLI_ARGS_init: "-backend-config=/tmp/wrong-backend", TF_CLI_ARGS_import: "-state=/tmp/wrong.tfstate", TF_CLI_ARGS_plan: "-target=aws_kms_key.wrong", TF_CLI_ARGS_apply: "-auto-approve", TF_VAR_aws_region: "us-east-1" });
     await runCensus({ argv: ["--admin-profile", "administrator", "--release-profile", "release", "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--source-sha", sourceSha, "--transition-id", transitionId, "--plan-sha256", failedApplyEvidence.planSha256, "--failed-apply-start", failedApplyEvidence.failedApplyWindow.start, "--failed-apply-end", failedApplyEvidence.failedApplyWindow.end, "--output", outputPath], execFile: (command, args, options) => { observedAws.push({ command, args, env: options.env }); return JSON.stringify({ Keys: [] }); }, write: () => {} });
     assert.equal(observedAws[0].args[observedAws[0].args.indexOf("--profile") + 1], "administrator");
     assert.equal(observedAws[0].env.AWS_PROFILE, "release");
@@ -154,8 +156,9 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
     assert.equal(observedAws[0].env.AWS_CONFIG_FILE, "/tmp/config");
     assert.equal(observedAws[0].env.AWS_SHARED_CREDENTIALS_FILE, "/tmp/credentials");
     let adoptionCensusProfile;
-    const result = await runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--terraform-root", terraformRoot, "--plan-path", planPath, "--execute"], readRootDropCensus: ({ profile, adminProfile, releaseProfile }) => { adoptionCensusProfile = { profile, adminProfile, releaseProfile }; return suppliedCensus; }, execFile: (command, args, options) => {
+    const result = await runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--terraform-root", terraformRoot, "--plan-path", planPath, "--execute"], readRootDropCensus: ({ profile, adminProfile, releaseProfile }) => { adoptionCensusProfile = { profile, adminProfile, releaseProfile }; return suppliedCensus; }, readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }), execFile: (command, args, options) => {
       observedTerraform.push({ command, args, env: options.env });
+      if (args.includes("workspace") && args.includes("show")) return "default\n";
       if (args.includes("state") && args.includes("pull")) return JSON.stringify(currentState);
       if (args.includes("import")) { currentState = keyState(); return ""; }
       if (args.includes("apply")) { currentState = ownedState(); return ""; }
@@ -173,11 +176,59 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
       assert.equal(env.AWS_REGION, STAGE_B.region);
       assert.equal(env.AWS_DEFAULT_REGION, STAGE_B.region);
       for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(env[key], undefined);
+      for (const key of ["TF_DATA_DIR", "TF_WORKSPACE", "TF_CLI_CONFIG_FILE", "TF_CLI_ARGS", "TF_CLI_ARGS_init", "TF_CLI_ARGS_import", "TF_CLI_ARGS_plan", "TF_CLI_ARGS_apply", "TF_VAR_aws_region"]) assert.equal(env[key], undefined);
       assert.equal(env.AWS_CONFIG_FILE, "/tmp/config");
       assert.equal(env.AWS_SHARED_CREDENTIALS_FILE, "/tmp/credentials");
     }
     assert.deepEqual({ AWS_PROFILE: process.env.AWS_PROFILE, AWS_REGION: process.env.AWS_REGION, AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION }, { AWS_PROFILE: "administrator", AWS_REGION: "us-east-1", AWS_DEFAULT_REGION: "us-east-1" });
   } finally { restore(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("adoption rejects a non-canonical Terraform root before any Terraform subprocess", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-root-pin-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  try {
+    writeFileSync(statePath, stateBytes, { mode: 0o600 });
+    writeFileSync(identityPath, `${JSON.stringify(stateIdentity)}\n`, { mode: 0o600 });
+    writeFileSync(censusPath, `${JSON.stringify(census())}\n`, { mode: 0o600 });
+    let terraformCalls = 0;
+    await assert.rejects(() => runAdoption({
+      argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--terraform-root", directory, "--plan-path", path.join(directory, "alias.plan"), "--execute"],
+      readRootDropCensus: async () => census(),
+      execFile: () => { terraformCalls += 1; throw new Error("Terraform must not run"); },
+      write: () => {},
+    }), /canonical production Stage-A Terraform root/);
+    assert.equal(terraformCalls, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("Stage-A backend metadata is exact and rejects a redirected state target", () => {
+  const valid = { type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } };
+  assert.doesNotThrow(() => assertStageATerraformBackendMetadata(valid));
+  for (const config of [{ ...valid.config, key: "wrong/state.tfstate" }, { ...valid.config, bucket: "wrong-bucket" }, { ...valid.config, region: "us-east-1" }, { ...valid.config, use_lockfile: false }]) assert.throws(() => assertStageATerraformBackendMetadata({ ...valid, config }), /backend/);
+});
+
+test("adoption rejects a non-default workspace before state access", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-workspace-pin-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  try {
+    writeFileSync(statePath, stateBytes, { mode: 0o600 });
+    writeFileSync(identityPath, `${JSON.stringify(stateIdentity)}\n`, { mode: 0o600 });
+    writeFileSync(censusPath, `${JSON.stringify(census())}\n`, { mode: 0o600 });
+    let terraformCalls = 0;
+    await assert.rejects(() => runAdoption({
+      argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", path.join(directory, "alias.plan"), "--execute"],
+      readRootDropCensus: async () => census(),
+      readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
+      execFile: () => { terraformCalls += 1; return "wrong-workspace\n"; },
+      write: () => {},
+    }), /canonical default Terraform workspace/);
+    assert.equal(terraformCalls, 1);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("root-drop census consumes every paginated KMS and CloudTrail page", () => {
@@ -388,7 +439,7 @@ function runner({ execute = false, initial = absentState, importOutcome, applyOu
   let current = initial;
   let imports = 0;
   let applies = 0;
-  const recovery = createRootDropRecoveryRunner({ execute, readState: async () => current, importKey: async () => { imports += 1; if (importOutcome) { const error = new Error(importOutcome); error.mutationOutcome = importOutcome; throw error; } current = keyState(); }, refreshState: async () => current, createPlan: async ({ zeroDrift: requested }) => requested ? "zero" : "alias", readPlan: async (path) => path === "zero" ? zeroDrift : plan, applyPlan: async () => { applies += 1; if (applyOutcome) { const error = new Error(applyOutcome); error.mutationOutcome = applyOutcome; throw error; } current = ownedState(); }, });
+  const recovery = createRootDropRecoveryRunner({ execute, readState: async () => current, readStateSnapshot: async () => ({ state: current, stateBytes: Buffer.from(JSON.stringify(current)) }), importKey: async () => { imports += 1; if (importOutcome) { const error = new Error(importOutcome); error.mutationOutcome = importOutcome; throw error; } current = keyState(); }, refreshState: async () => current, createPlan: async ({ zeroDrift: requested }) => requested ? "zero" : "alias", readPlan: async (path) => path === "zero" ? zeroDrift : plan, applyPlan: async () => { applies += 1; if (applyOutcome) { const error = new Error(applyOutcome); error.mutationOutcome = applyOutcome; throw error; } current = ownedState(); }, });
   return {
     counts: () => ({ imports, applies }),
     run: (input) => injectFresh ? recovery({ ...input, freshCensus: input.freshCensus || input.census }) : recovery(input),
@@ -430,6 +481,24 @@ test("successful import replay never imports again", async () => {
   assert.deepEqual(value.counts(), { imports: 0, applies: 0 });
 });
 
+test("state identity changes with unchanged root-drop counts block import", async () => {
+  const changedState = { ...absentState, serial: absentState.serial + 1 };
+  const changedStateBytes = Buffer.from(JSON.stringify(changedState));
+  let imports = 0;
+  const recovery = createRootDropRecoveryRunner({
+    execute: true,
+    readState: async () => changedState,
+    readStateSnapshot: async () => ({ state: changedState, stateBytes: changedStateBytes }),
+    importKey: async () => { imports += 1; },
+    refreshState: async () => keyState(),
+    createPlan: async () => "alias",
+    readPlan: async () => aliasPlan(),
+    applyPlan: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
+  });
+  await assert.rejects(() => recovery({ census: census(), freshCensus: census(), terraformState: absentState, stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), /state identity|authenticated snapshot/);
+  assert.equal(imports, 0);
+});
+
 test("every post-mutation recovery failure preserves the accumulated accounting", async () => {
   const cases = [
     {
@@ -438,6 +507,7 @@ test("every post-mutation recovery failure preserves the accumulated accounting"
       build: () => createRootDropRecoveryRunner({
         execute: true,
         readState: async () => absentState,
+        readStateSnapshot: async () => ({ state: absentState, stateBytes: Buffer.from(JSON.stringify(absentState)) }),
         importKey: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
         refreshState: async () => { throw new Error("refresh failed after import"); },
         createPlan: async () => "alias",
@@ -451,6 +521,7 @@ test("every post-mutation recovery failure preserves the accumulated accounting"
       build: () => createRootDropRecoveryRunner({
         execute: true,
         readState: async () => absentState,
+        readStateSnapshot: async () => ({ state: absentState, stateBytes: Buffer.from(JSON.stringify(absentState)) }),
         importKey: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
         refreshState: async () => keyState(),
         createPlan: async () => { throw new Error("plan failed after import"); },
@@ -464,6 +535,7 @@ test("every post-mutation recovery failure preserves the accumulated accounting"
       build: () => createRootDropRecoveryRunner({
         execute: true,
         readState: async () => keyState(),
+        readStateSnapshot: async () => ({ state: keyState(), stateBytes: Buffer.from(JSON.stringify(keyState())) }),
         importKey: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
         refreshState: async () => { throw new Error("readback failed after alias apply"); },
         createPlan: async () => "alias",
@@ -492,7 +564,7 @@ test("definite and ambiguous import failures are never retried and are distingui
 
 test("refresh denial, wrong imported key, alias failure, ambiguous alias apply, and non-zero drift fail closed", async () => {
   const wrongState = { ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ attributes: { arn: `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/22222222-22222222-2222-2222-222222222222`, key_id: "22222222-2222-2222-2222-222222222222", key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) };
-  const wrong = createRootDropRecoveryRunner({ execute: true, readState: async () => wrongState, importKey: async () => {}, refreshState: async () => wrongState, createPlan: async () => "alias", readPlan: async () => aliasPlan(), applyPlan: async () => {} });
+  const wrong = createRootDropRecoveryRunner({ execute: true, readState: async () => wrongState, readStateSnapshot: async () => ({ state: wrongState, stateBytes: Buffer.from(JSON.stringify(wrongState)) }), importKey: async () => {}, refreshState: async () => wrongState, createPlan: async () => "alias", readPlan: async () => aliasPlan(), applyPlan: async () => {} });
   await assert.rejects(() => wrong({ census: census(), freshCensus: census(), terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }));
   for (const [label, options] of [["alias failure", { execute: true, applyOutcome: "DEFINITE_FAILURE" }], ["ambiguous alias", { execute: true, applyOutcome: "AMBIGUOUS" }], ["drift", { execute: true, zeroDrift: aliasPlan() }]]) {
     const value = runner(options);
