@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildStageAStateIdentity, assertStageAStateIdentityBinding } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { buildRecoveryAwsEnvironment, buildRecoveryTerraformEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import {
   ROOT_DROP_KEY_ADDRESS,
   ROOT_DROP_ALIAS_ADDRESS,
@@ -75,6 +76,39 @@ export function assertNoAutoLoadedTerraformVariableFiles(terraformRoot) {
   return true;
 }
 
+const isExecutionRelevantTerraformPath = (value) => {
+  const normalized = value.replace(/^"|"$/g, "");
+  return /(?:^|\/)(?:terraform\.tfvars(?:\.json)?|[^/]+\.auto\.tfvars(?:\.json)?|override\.tf(?:\.json)?|[^/]+_override\.tf(?:\.json)?|[^/]+\.tf(?:\.json)?)$/.test(normalized);
+};
+
+export function assertRootDropExecutionSource({ sourceSha, repositoryRoot = root, terraformRoot = canonicalTerraformRoot, runGit = (args) => execFileSync("git", args, { cwd: repositoryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+  const repositoryRealpath = realpathSync(repositoryRoot);
+  const terraformRealpath = realpathSync(terraformRoot);
+  if (path.relative(repositoryRealpath, terraformRealpath).startsWith(`..${path.sep}`)) throw new Error("Stage-A root-drop adoption Terraform root is outside the authenticated repository");
+  const currentHead = String(runGit(["rev-parse", "HEAD"])).trim();
+  const status = String(runGit(["status", "--porcelain=v1", "--untracked-files=all"]));
+  const shallow = String(runGit(["rev-parse", "--is-shallow-repository"])).trim() === "true";
+  const topLevel = realpathSync(String(runGit(["rev-parse", "--show-toplevel"])).trim());
+  if (topLevel !== repositoryRealpath) throw new Error("Stage-A root-drop adoption is not running from the authenticated repository root");
+  if (currentHead !== sourceSha) throw new Error("Stage-A root-drop adoption checkout HEAD does not match census.sourceSha");
+  assertStageBProtectedMainCheckout({
+    mode: "review",
+    toolingSha: sourceSha,
+    currentHead,
+    originMainHead: undefined,
+    isAncestor: false,
+    porcelainStatus: status,
+    repositoryState: { remoteDefaultBranch: undefined, shallow, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false },
+  });
+  const relativeTerraformRoot = path.relative(repositoryRealpath, terraformRealpath);
+  const ignoredStatus = String(runGit(["status", "--porcelain=v1", "--ignored=matching", "--untracked-files=all", "--", relativeTerraformRoot]));
+  const ignoredRelevant = ignoredStatus.split("\n").filter((line) => line.startsWith("!!") && isExecutionRelevantTerraformPath(line.slice(3).trim()));
+  if (ignoredRelevant.length) throw new Error(`Stage-A root-drop adoption has ignored Terraform configuration: ${ignoredRelevant.join(", ")}`);
+  const trackedModes = String(runGit(["ls-files", "-s", "--", relativeTerraformRoot])).split("\n").filter(Boolean);
+  if (trackedModes.some((line) => /^(?:120000|160000)\s/.test(line))) throw new Error("Stage-A root-drop adoption rejects symlinked or submodule Terraform configuration");
+  return Object.freeze({ sourceSha, currentHead, repositoryRoot: repositoryRealpath, terraformRoot: terraformRealpath, clean: true });
+}
+
 export function validateRootDropPlanPaths({ planPath, repositoryRoot = root, reservedPaths = [] } = {}) {
   const repositoryRealpath = realpathSync(repositoryRoot);
   const reserved = new Set(reservedPaths.map((filePath) => realpathSync(filePath)));
@@ -133,7 +167,7 @@ export async function runCensus({ argv = process.argv.slice(2), run, execFile = 
   return census;
 }
 
-export async function runAdoption({ argv = process.argv.slice(2), runTerraform, readRootDropCensus, readTerraformBackendMetadata = readCanonicalTerraformBackend, execFile = execFileSync, write = (value) => process.stdout.write(value) } = {}) {
+export async function runAdoption({ argv = process.argv.slice(2), runTerraform, readRootDropCensus, readTerraformBackendMetadata = readCanonicalTerraformBackend, execFile = execFileSync, runGit, write = (value) => process.stdout.write(value) } = {}) {
   const censusPath = privatePath(option(argv, "--census"), "Stage-A root-drop census");
   const census = readJson(censusPath);
   const statePath = privatePath(option(argv, "--stage-a-state"), "Stage-A state");
@@ -153,6 +187,7 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const planPath = option(argv, "--plan-path");
   const { planPath: validatedPlanPath, zeroDriftPlanPath, preImportPlanPath } = validateRootDropPlanPaths({ planPath, reservedPaths: [censusPath, statePath, identityPath] });
   assertNoAutoLoadedTerraformVariableFiles(terraformRoot);
+  assertRootDropExecutionSource({ sourceSha: census.sourceSha, terraformRoot, runGit: runGit || ((args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })) });
   readTerraformBackendMetadata(terraformRoot);
   assertStageATerraformVariables();
   const env = buildRecoveryTerraformEnvironment(releaseProfile, process.env, { allowedTerraformVariableKeys: STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS });
@@ -197,6 +232,14 @@ export async function runCli(argv = process.argv.slice(2), dependencies = {}) {
   throw new Error("--mode must be census or adopt");
 }
 
+const ZERO_RECOVERY_ACCOUNTING = Object.freeze({ terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 });
+export function formatRootDropRecoveryFailure(error) {
+  const value = error instanceof Error ? error : new Error(String(error));
+  const result = { status: "FAILED", error: value.message, recoveryAccounting: { ...ZERO_RECOVERY_ACCOUNTING, ...(value.recoveryAccounting || {}) } };
+  if (typeof value.mutationOutcome === "string") result.mutationOutcome = value.mutationOutcome;
+  return `${JSON.stringify(result)}\n`;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  runCli().catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
+  runCli().catch((error) => { process.stderr.write(formatRootDropRecoveryFailure(error)); process.exitCode = 1; });
 }

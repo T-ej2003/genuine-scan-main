@@ -171,6 +171,11 @@ function actionable(plan) {
   return plan.resource_changes.filter(({ change }) => JSON.stringify(change?.actions || []) !== JSON.stringify(["no-op"]) && JSON.stringify(change?.actions || []) !== JSON.stringify(["read"]));
 }
 
+function configurationResources(module) {
+  if (!module || typeof module !== "object") return [];
+  return [...(module.resources || []), ...(module.child_modules || []).flatMap(configurationResources)];
+}
+
 export function assertRootDropCreationInterlock({ plan, terraformState, census, sourceSha, transitionId, stageAStateIdentity } = {}) {
   assertRootDropCensus(census, { sourceSha, transitionId, stageAStateIdentity });
   const counts = assertStateRootDropCounts(terraformState, { allowKeyOnly: true });
@@ -205,10 +210,15 @@ export function assertRootDropPreImportPlan(plan) {
   const keyAfter = key.change.after || {};
   let policy = keyAfter.policy;
   if (typeof policy === "string") { try { policy = JSON.parse(policy); } catch { fail("pre-import root-drop key policy is malformed"); } }
+  const aliasConfiguration = configurationResources(plan.configuration?.root_module).find(({ address }) => address === ROOT_DROP_ALIAS_ADDRESS);
+  const targetReferences = aliasConfiguration?.expressions?.target_key_id?.references;
+  const aliasAfter = alias.change.after || {};
+  const aliasTargetIsComputed = alias.change.after_unknown?.target_key_id === true && (aliasAfter.target_key_id === undefined || aliasAfter.target_key_id === null);
   if (keyAfter.description !== ROOT_DROP_KEY_DESCRIPTION || keyAfter.key_usage !== TEMPORARY_KMS_CAPABILITY.keyUsage
     || keyAfter.customer_master_key_spec !== TEMPORARY_KMS_CAPABILITY.keySpec || keyAfter.deletion_window_in_days !== 30
     || keyAfter.bypass_policy_lockout_safety_check !== false || !same(keyAfter.tags, EXPECTED_TAGS)
-    || !same(policy, buildStageARootDropKeyPolicy()) || alias.change.after?.name !== ROOT_DROP_ALIAS_NAME) fail("pre-import Terraform plan does not match the exact root-drop creation contract");
+    || !same(policy, buildStageARootDropKeyPolicy()) || aliasAfter.name !== ROOT_DROP_ALIAS_NAME
+    || !aliasConfiguration || !same(targetReferences, [`${ROOT_DROP_KEY_ADDRESS}.key_id`]) || !aliasTargetIsComputed) fail("pre-import Terraform plan does not match the exact root-drop creation contract");
   return { valid: true, addresses: [ROOT_DROP_KEY_ADDRESS, ROOT_DROP_ALIAS_ADDRESS], actions: ["create", "create"] };
 }
 

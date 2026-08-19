@@ -27,7 +27,7 @@ import {
   STAGE_A_TERRAFORM_BACKEND,
   assertStageATerraformBackendMetadata,
 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
-import { assertNoAutoLoadedTerraformVariableFiles, runAdoption, runCensus, validateRootDropPlanPaths, STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS } from "../aws/recover-production-green-stage-a-root-drop-orphan.mjs";
+import { assertNoAutoLoadedTerraformVariableFiles, assertRootDropExecutionSource, formatRootDropRecoveryFailure, runAdoption, runCensus, validateRootDropPlanPaths, STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS } from "../aws/recover-production-green-stage-a-root-drop-orphan.mjs";
 import { buildRecoveryTerraformEnvironment } from "../aws/recover-stage-b-backend-task-definition.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
 
@@ -39,6 +39,15 @@ const state = productionStageAState({ serial: 46 });
 const absentState = { ...state, resources: state.resources.map((resource) => (resource.type === "aws_kms_key" && resource.name === "root_drop") || (resource.type === "aws_kms_alias" && resource.name === "root_drop") ? { ...resource, instances: [] } : resource) };
 const stateBytes = Buffer.from(JSON.stringify(absentState));
 const stateIdentity = buildStageAStateIdentity(absentState, { stateBytes });
+const cleanGit = (head = sourceSha, status = "", ignored = "", trackedModes = "") => (args) => {
+  if (args[0] === "rev-parse" && args[1] === "HEAD") return `${head}\n`;
+  if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return `${realpathSync(process.cwd())}\n`;
+  if (args[0] === "rev-parse" && args[1] === "--is-shallow-repository") return "false\n";
+  if (args[0] === "status" && args.includes("--ignored=matching")) return ignored;
+  if (args[0] === "status") return status;
+  if (args[0] === "ls-files") return trackedModes;
+  throw new Error(`unexpected git command: ${args.join(" ")}`);
+};
 const stageAVars = Object.freeze({
   TF_VAR_aws_region: STAGE_B.region,
   TF_VAR_vpc_id: "vpc-00000000",
@@ -80,8 +89,8 @@ const census = () => buildRootDropCensus({ sourceSha, transitionId, stageAStateI
 const noCandidateCensus = () => buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: stateIdentity, keyUniverse: [], candidates: [] });
 const exactCreatePlan = { resource_changes: [
   { address: ROOT_DROP_KEY_ADDRESS, type: "aws_kms_key", change: { before: null, actions: ["create"], after: { description: ROOT_DROP_KEY_DESCRIPTION, policy: JSON.stringify(buildStageARootDropKeyPolicy()), customer_master_key_spec: "RSA_3072", key_usage: "SIGN_VERIFY", deletion_window_in_days: 30, bypass_policy_lockout_safety_check: false, tags: { ...TEMPORARY_KMS_CAPABILITY.tags } } } },
-  { address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { before: null, actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME } } },
-] };
+  { address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { before: null, actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: null }, after_unknown: { target_key_id: true } } },
+], configuration: { root_module: { resources: [{ address: ROOT_DROP_ALIAS_ADDRESS, expressions: { name: { constant_value: ROOT_DROP_ALIAS_NAME }, target_key_id: { references: [`${ROOT_DROP_KEY_ADDRESS}.key_id`] } } }] } } };
 const aliasPlan = (changes = [{ address: ROOT_DROP_ALIAS_ADDRESS, change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: keyId } } }]) => ({ resource_changes: changes });
 const keyState = () => ({ ...absentState, resources: absentState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: keyArn, key_id: keyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) });
 const ownedState = () => ({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: keyId, target_key_arn: keyArn } }] } : resource) });
@@ -179,7 +188,7 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
     assert.equal(observedAws[0].env.AWS_CONFIG_FILE, "/tmp/config");
     assert.equal(observedAws[0].env.AWS_SHARED_CREDENTIALS_FILE, "/tmp/credentials");
     let adoptionCensusProfile;
-    const result = await runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--terraform-root", terraformRoot, "--plan-path", planPath, "--execute"], readRootDropCensus: ({ profile, adminProfile, releaseProfile }) => { adoptionCensusProfile = { profile, adminProfile, releaseProfile }; return suppliedCensus; }, readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }), execFile: (command, args, options) => {
+    const result = await runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--terraform-root", terraformRoot, "--plan-path", planPath, "--execute"], runGit: cleanGit(), readRootDropCensus: ({ profile, adminProfile, releaseProfile }) => { adoptionCensusProfile = { profile, adminProfile, releaseProfile }; return suppliedCensus; }, readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }), execFile: (command, args, options) => {
       observedTerraform.push({ command, args, env: options.env });
       if (args.includes("workspace") && args.includes("show")) return "default\n";
       if (args.includes("state") && args.includes("pull")) return JSON.stringify(currentState);
@@ -221,10 +230,35 @@ test("adoption rejects a non-canonical Terraform root before any Terraform subpr
     let terraformCalls = 0;
     await assert.rejects(() => runAdoption({
       argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--terraform-root", directory, "--plan-path", path.join(directory, "alias.plan"), "--execute"],
+      runGit: cleanGit(),
       readRootDropCensus: async () => census(),
       execFile: () => { terraformCalls += 1; throw new Error("Terraform must not run"); },
       write: () => {},
     }), /canonical production Stage-A Terraform root/);
+    assert.equal(terraformCalls, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("source checkout is bound to census.sourceSha and rejects execution-relevant drift before import", async () => {
+  assert.doesNotThrow(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit() }));
+  assert.throws(() => assertRootDropExecutionSource({ sourceSha: "0".repeat(40), runGit: cleanGit() }), /HEAD does not match/);
+  assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, " M infra/aws/terraform/production-green-stage-a/main.tf\n") }), /tracked modifications/);
+  assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, "M  infra/aws/terraform/production-green-stage-a/main.tf\n") }), /tracked modifications/);
+  assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, "?? infra/aws/terraform/production-green-stage-a/local.tf\n") }), /untracked file/);
+  assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, "", "!! infra/aws/terraform/production-green-stage-a/local.auto.tfvars\n") }), /ignored Terraform configuration/);
+  assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, "", "!! infra/aws/terraform/production-green-stage-a/override.tf\n") }), /ignored Terraform configuration/);
+  assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, "", "", "120000 abc\t infra/aws/terraform/production-green-stage-a/main.tf\n") }), /symlinked/);
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-source-boundary-"));
+  try {
+    const statePath = path.join(directory, "state.json");
+    const identityPath = path.join(directory, "identity.json");
+    const censusPath = path.join(directory, "census.json");
+    const planPath = path.join(directory, "adoption.plan");
+    writeFileSync(statePath, stateBytes, { mode: 0o600 });
+    writeFileSync(identityPath, `${JSON.stringify(stateIdentity)}\n`, { mode: 0o600 });
+    writeFileSync(censusPath, `${JSON.stringify(census())}\n`, { mode: 0o600 });
+    let terraformCalls = 0;
+    await assert.rejects(() => runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", planPath, "--execute"], runGit: cleanGit("0".repeat(40)), execFile: () => { terraformCalls += 1; throw new Error("Terraform must not run"); }, write: () => {} }), /HEAD does not match/);
     assert.equal(terraformCalls, 0);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -302,6 +336,7 @@ test("adoption rejects a non-default workspace before state access", async () =>
     let terraformCalls = 0;
     await assert.rejects(() => runAdoption({
       argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", path.join(directory, "alias.plan"), "--execute"],
+      runGit: cleanGit(),
       readRootDropCensus: async () => census(),
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: () => { terraformCalls += 1; return "wrong-workspace\n"; },
@@ -332,6 +367,7 @@ test("Stage-A recovery preserves only the reviewed required variables and perfor
     let currentState = absentState;
     const result = await runAdoption({
       argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", planPath, "--execute"],
+      runGit: cleanGit(),
       readRootDropCensus: async () => { sequence.push("census"); return census(); },
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args, options) => {
@@ -371,7 +407,7 @@ test("missing, malformed, or wrong-identity Stage-A variables fail before Terraf
       Object.assign(process.env, stageAVars);
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
       let terraformImports = 0;
-      await assert.rejects(() => runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", path.join(directory, `${key}.plan`)], readRootDropCensus: async () => census(), readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }), execFile: (command, args) => { if (args.includes("import")) terraformImports += 1; if (args.includes("plan")) throw new Error("Terraform must not run"); return "default\n"; }, write: () => {} }), expected);
+      await assert.rejects(() => runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", path.join(directory, `${key}.plan`)], runGit: cleanGit(), readRootDropCensus: async () => census(), readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }), execFile: (command, args) => { if (args.includes("import")) terraformImports += 1; if (args.includes("plan")) throw new Error("Terraform must not run"); return "default\n"; }, write: () => {} }), expected);
       assert.equal(terraformImports, 0);
     }
   } finally {
@@ -399,6 +435,7 @@ async function runPreImportReadinessCase(readinessPlan, { variables = stageAVars
     Object.assign(process.env, variables);
     const result = await runAdoption({
       argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", planPath, "--execute"],
+      runGit: cleanGit(),
       readRootDropCensus: async () => census(),
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args) => {
@@ -451,6 +488,24 @@ test("pre-import Terraform plan is saved, machine-classified, and exact before i
   const tampered = await runPreImportReadinessCase(exactCreatePlan, { mutateSavedPlan: true });
   assert.match(tampered.error?.message || "", /changed while it was being classified/);
   assert.deepEqual({ imports: tampered.imports, applies: tampered.applies }, { imports: 0, applies: 0 });
+});
+
+test("pre-import classifier binds the alias target expression to root_drop.key_id", () => {
+  const wrong = structuredClone(exactCreatePlan);
+  wrong.configuration.root_module.resources[0].expressions.target_key_id.references = ["aws_kms_key.other.key_id"];
+  assert.throws(() => assertRootDropPreImportPlan(wrong), /exact root-drop creation contract/);
+});
+
+test("CLI failure formatting preserves confirmed, ambiguous, and zero mutation accounting", () => {
+  const confirmed = new Error("post-import refresh failed");
+  confirmed.recoveryAccounting = { terraformImports: 1, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 };
+  assert.deepEqual(JSON.parse(formatRootDropRecoveryFailure(confirmed)), { status: "FAILED", error: confirmed.message, recoveryAccounting: confirmed.recoveryAccounting });
+  const ambiguous = new Error("import response lost");
+  ambiguous.mutationOutcome = "AMBIGUOUS";
+  ambiguous.recoveryAccounting = { terraformImports: 1, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 1, unclassifiedMutations: 0 };
+  assert.equal(JSON.parse(formatRootDropRecoveryFailure(ambiguous)).recoveryAccounting.unknownMutations, 1);
+  assert.equal(JSON.parse(formatRootDropRecoveryFailure(ambiguous)).mutationOutcome, "AMBIGUOUS");
+  assert.deepEqual(JSON.parse(formatRootDropRecoveryFailure(new Error("preflight failed"))).recoveryAccounting, { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 });
 });
 
 test("auto-loaded Terraform variable files are rejected before readiness", () => {

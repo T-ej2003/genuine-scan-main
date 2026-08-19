@@ -65,7 +65,11 @@ all other `TF_VAR_*` and Terraform redirect variables are rejected or removed.
 A non-mutating, no-refresh Terraform plan is saved, shown as JSON, and
 classified before import; only the exact root-drop key and alias create
 envelope is accepted. Auto-loaded `terraform.tfvars` and `*.auto.tfvars`
-files are rejected so the reviewed inputs remain authoritative.
+files are rejected so the reviewed inputs remain authoritative. The executing
+checkout must have a clean execution-relevant tree and its exact `HEAD` must
+equal the census `sourceSha`; the pre-import classifier also proves that the
+alias expression targets `aws_kms_key.root_drop.key_id`. Any failure after a
+mutation is emitted at the CLI boundary with deterministic recovery accounting.
 After an authorized import it refreshes state, proves the imported key
 ARN/spec/usage, and requires a plan containing only:
 

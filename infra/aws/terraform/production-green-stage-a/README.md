@@ -48,6 +48,10 @@ profile for every Terraform subprocess. Before import it compares the live
 state lineage, serial, and exact state-byte SHA-256 with the fresh census
 identity; any mismatch fails closed. Recovery imports only the authenticated
 root-drop key and may apply only the exact Terraform-managed alias plan. The
+census source SHA must equal the clean execution checkout HEAD, and the
+pre-import classifier proves the alias expression targets
+`aws_kms_key.root_drop.key_id`. Post-mutation failures expose deterministic
+recovery accounting at the CLI boundary. The
 census captures the complete paginated KMS key-ID universe before inspection
 and again afterward; any changed, incomplete, duplicated, or malformed
 enumeration fails closed instead of producing `NO_CANDIDATE`. This is a
