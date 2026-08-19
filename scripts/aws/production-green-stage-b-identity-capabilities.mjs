@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
-import { buildStageAStateIdentity, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { buildStageAStateIdentity, parseAuthenticatedStateBytes, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 import { RELEASE_CALLER_PATTERN } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
@@ -87,7 +87,7 @@ export function runReleaseReadPreflight({
         ensureStageBPrivateFile({ filePath: outputPath, repositoryRoot: root, normalize: true, label: `${probe.id} backup` });
         if (probe.id === "stage-a-state") {
           const stateBytes = fs.readFileSync(outputPath);
-          stageAStateIdentity = buildStageAStateIdentity(JSON.parse(stateBytes), { stateBytes });
+          stageAStateIdentity = buildStageAStateIdentity(parseAuthenticatedStateBytes(stateBytes), { stateBytes });
         }
       }
       responses.set(probe.id, response);

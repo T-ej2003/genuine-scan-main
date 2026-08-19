@@ -14,7 +14,7 @@ import { STAGE_B, STAGE_B_MODES, canonicalJson } from "./production-green-stage-
 import { resolveStageBRecoveryMode, STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { assertStageBBrokerPackageManifest } from "./package-production-green-stage-b-broker.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
-import { assertStageAStateIdentity, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateIdentity, parseAuthenticatedStateBytes, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber, assertVerifiedStageBRecovery } from "./stage-b-partial-apply-recovery-contract.mjs";
 
@@ -467,9 +467,9 @@ function assertStageAPrerequisiteBinding(report) {
   }
   const inputBytes = fs.readFileSync(report.stageAInputPath); const stateBytes = fs.readFileSync(report.stageAStateBackupPath);
   if (sha256(inputBytes) !== report.stageAInputSha256) throw new Error("Stage-A prerequisite input was modified after canonical generation.");
-  if (stageAStateSemanticSha256(JSON.parse(stateBytes)) !== report.stageAStateBackupSha256) throw new Error("Stage-A state backup was modified after canonical generation.");
+  if (stageAStateSemanticSha256(parseAuthenticatedStateBytes(stateBytes)) !== report.stageAStateBackupSha256) throw new Error("Stage-A state backup was modified after canonical generation.");
   const input = validateStageBStageAInput(JSON.parse(inputBytes), { toolingSha: report.toolingSha, toolingTreeSha256: report.toolingTreeSha256 });
-  const stageAState = JSON.parse(stateBytes);
+  const stageAState = parseAuthenticatedStateBytes(stateBytes);
   assertStageAInputMatchesStateBackup(input, stateBytes, stageAState, report);
 }
 
@@ -546,7 +546,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   if (recoveryOnly && path.resolve(brokerPackagePath) !== recoveryBindings.packagePath) throw new Error("Recovery-only broker package path must match the current Lambda state filename exactly.");
   if (recoveryOnly && base64Sha256(fs.readFileSync(brokerPackagePath)) !== recoveryBindings.sourceCodeHashBase64) throw new Error("Recovery-only broker package bytes do not match the current Lambda source_code_hash.");
   const stageAStateBytes = fs.readFileSync(stageAStateBackup);
-  const stageAState = JSON.parse(stageAStateBytes);
+  const stageAState = parseAuthenticatedStateBytes(stageAStateBytes);
   const stageAPrerequisiteInput = validateStageBStageAInput(readJson(stageAInput), { toolingSha, toolingTreeSha256 });
   const stageAStateSha256 = assertStageAInputMatchesStateBackup(stageAPrerequisiteInput, stageAStateBytes, stageAState);
   const contract = deriveContractDigests({ file: checksumsFile }); const brokerBytes = fs.readFileSync(brokerPackagePath);

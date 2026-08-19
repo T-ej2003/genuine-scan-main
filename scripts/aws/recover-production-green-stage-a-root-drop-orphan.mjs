@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildStageAStateIdentity, assertStageAStateIdentityBinding } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { buildStageAStateIdentity, assertStageAStateIdentityBinding, parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { buildRecoveryAwsEnvironment, buildRecoveryTerraformEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
@@ -155,7 +155,7 @@ export async function runCensus({ argv = process.argv.slice(2), run, execFile = 
   const identityPath = privatePath(option(argv, "--stage-a-state-identity"), "Stage-A state identity");
   const outputPath = option(argv, "--output");
   const stateBytes = readFileSync(statePath);
-  const state = JSON.parse(stateBytes);
+  const state = parseAuthenticatedStateBytes(stateBytes);
   const stageAStateIdentity = readJson(identityPath);
   assertStageAStateIdentityBinding(buildStageAStateIdentity(state, { stateBytes }), stageAStateIdentity);
   const { keyCount, aliasCount } = rootDropStateCounts(state);
@@ -188,7 +188,7 @@ async function runAdoptionInternal({ argv = process.argv.slice(2), runTerraform,
   const statePath = privatePath(option(argv, "--stage-a-state"), "Stage-A state");
   const identityPath = privatePath(option(argv, "--stage-a-state-identity"), "Stage-A state identity");
   const stateBytes = readFileSync(statePath);
-  const stageAState = JSON.parse(stateBytes);
+  const stageAState = parseAuthenticatedStateBytes(stateBytes);
   const stageAStateIdentity = readJson(identityPath);
   assertStageAStateIdentityBinding(buildStageAStateIdentity(stageAState, { stateBytes }), stageAStateIdentity);
   const legacyPolicyBound = census.status === "AUTHENTICATED_ORPHAN" && census.candidates?.[0]?.policyCompatibility === "LEGACY_BOUND_HISTORICAL";
@@ -220,7 +220,7 @@ async function runAdoptionInternal({ argv = process.argv.slice(2), runTerraform,
     ? (args) => runTerraform(args, env)
     : (args) => execFile("terraform", [`-chdir=${terraformRoot}`, ...args], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   if (tf(["workspace", "show"]).trim() !== "default") throw new Error("Stage-A root-drop adoption requires the canonical default Terraform workspace");
-  const readStateSnapshot = async () => { const stateBytes = Buffer.from(tf(["state", "pull"])); return { state: JSON.parse(stateBytes), stateBytes }; };
+  const readStateSnapshot = async () => { const stateBytes = Buffer.from(tf(["state", "pull"])); return { state: parseAuthenticatedStateBytes(stateBytes), stateBytes }; };
   const readState = async () => (await readStateSnapshot()).state;
   const execute = argv.includes("--execute");
   const importKey = async ({ address, id }) => { tf(["import", "-input=false", "-lock=true", address, id]); return { outcome: "CONFIRMED_SUCCESS" }; };

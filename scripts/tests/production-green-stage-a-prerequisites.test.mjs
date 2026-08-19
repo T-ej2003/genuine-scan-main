@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertStageAStateContract, assertStageAStateIdentity, assertStageAStateIdentityBinding, buildStageAStateIdentity, generateStageAPrerequisites, normalizeStageAStateForIdentity, resolveStageASubnetRouteTable, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateContract, assertStageAStateIdentity, assertStageAStateIdentityBinding, buildStageAStateIdentity, generateStageAPrerequisites, normalizeStageAStateForIdentity, parseAuthenticatedStateBytes, resolveStageASubnetRouteTable, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_A_CHECKER_ROLE_TRUST } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
@@ -146,6 +146,31 @@ test("Stage A identity version rejects legacy raw-byte identity evidence", () =>
   const identity = buildStageAStateIdentity(stage, { stateBytes: Buffer.from(JSON.stringify(stage)) });
   assert.throws(() => assertStageAStateIdentityBinding({ ...identity, stateIdentityVersion: 1 }, identity), /state identity binding/);
   assert.throws(() => assertStageAStateIdentityBinding(identity, { ...identity, stateIdentityVersion: 1 }), /state identity binding/);
+});
+
+const numericStateBytes = (literal, location = "attribute") => Buffer.from(`{"version":4,"serial":35,"lineage":"${STAGE_A_EXPECTED_STATE_LINEAGE}","resources":[{"type":"example","name":"value","instances":[{"attributes":{"value":${location === "attribute" ? literal : "0"}}}]}],"outputs":{"value":{"value":${location === "output" ? literal : "0"}}},"check_results":[{"object_kind":"var","config_addr":"var.value","status":"pass","value":${location === "check" ? literal : "0"}}]}`);
+const numericIdentity = (literal, location) => { const bytes = numericStateBytes(literal, location); const state = parseAuthenticatedStateBytes(bytes); return buildStageAStateIdentity(state, { stateBytes: bytes }); };
+
+test("Stage A rejects numeric literals that would collide after JSON.parse rounding", () => {
+  assert.doesNotThrow(() => numericIdentity("9007199254740992"));
+  assert.throws(() => numericIdentity("9007199254740993"), /lossy JSON number/);
+  assert.doesNotThrow(() => numericIdentity("-9007199254740992"));
+  assert.throws(() => numericIdentity("-9007199254740993"), /lossy JSON number/);
+  assert.doesNotThrow(() => numericIdentity("9007199254740991"));
+});
+
+test("Stage A preserves numeric identity for safe, fractional, exponent, nested, and equivalent values", () => {
+  assert.notEqual(numericIdentity("42").stateSha256, numericIdentity("43").stateSha256);
+  assert.notEqual(numericIdentity("1.25").stateSha256, numericIdentity("1.5").stateSha256);
+  assert.doesNotThrow(() => numericIdentity("1e20"));
+  assert.throws(() => numericIdentity("1.0000000000000001e20"), /lossy JSON number/);
+  assert.equal(numericIdentity("1").stateSha256, numericIdentity("1.0").stateSha256);
+  assert.equal(numericIdentity("1").stateSha256, numericIdentity("1e0").stateSha256);
+  assert.equal(numericIdentity("0").stateSha256, numericIdentity("-0").stateSha256);
+  for (const location of ["attribute", "output", "check"]) assert.throws(() => numericIdentity("9007199254740993", location), /lossy JSON number/);
+  assert.throws(() => parseAuthenticatedStateBytes(Buffer.from("{\"lineage\":")), /valid JSON state bytes/);
+  assert.throws(() => parseAuthenticatedStateBytes(Buffer.from(`{"value":NaN}`)), /valid JSON state bytes/);
+  assert.throws(() => parseAuthenticatedStateBytes(Buffer.from(`{"value":Infinity}`)), /valid JSON state bytes/);
 });
 
 const routeTable = (id, associations, routes = [{ DestinationCidrBlock: "0.0.0.0/0", NatGatewayId: "nat-12345678" }], vpcId = "vpc-0123456789abcdef0") => ({ RouteTableId: id, VpcId: vpcId, Associations: associations, Routes: routes });

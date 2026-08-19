@@ -1,16 +1,16 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
-import { assertStageAStateContract, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateContract, parseAuthenticatedStateBytes, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const read = (filePath, repositoryRoot, label) => { const checked = assertStageBPrivateFile({ filePath, repositoryRoot, label }); const bytes = readFileSync(checked.path); return { file: checked.path, bytes, value: JSON.parse(bytes.toString("utf8")) }; };
+const read = (filePath, repositoryRoot, label, parse = (bytes) => JSON.parse(bytes.toString("utf8"))) => { const checked = assertStageBPrivateFile({ filePath, repositoryRoot, label }); const bytes = readFileSync(checked.path); return { file: checked.path, bytes, value: parse(bytes) }; };
 
 export function readAuthenticatedStageARecoverySources({ stageAStatePath, stageAHandoffPath, stageBStatePath, repositoryRoot = process.cwd() } = {}) {
-  const stageAState = read(stageAStatePath, repositoryRoot, "Stage-A state");
+  const stageAState = read(stageAStatePath, repositoryRoot, "Stage-A state", parseAuthenticatedStateBytes);
   const stageAHandoff = read(stageAHandoffPath, repositoryRoot, "Stage-A handoff");
   const stageBState = read(stageBStatePath, repositoryRoot, "Stage-B state");
   return Object.freeze({ stageAState, stageAHandoff, stageBState });

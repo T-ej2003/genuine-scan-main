@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createProductionCommandRunner, describeStageAIngress } from "./production-cutover-production-adapters.mjs";
-import { assertStageAStateContract } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateContract, parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { producePostApplyStageAPlanRecovery } from "./production-stage-a-recovery-evidence.mjs";
@@ -20,7 +20,7 @@ const gitRun = (argv) => execFileSync("git", argv, { encoding: "utf8", stdio: ["
 const fresh = readFreshProtectedMainIdentity({ run: gitRun, expectedSourceSha: args.get("source-sha") });
 const run = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
 const stageAStatePath = assertStageBPrivateFile({ filePath: args.get("stage-a-state"), repositoryRoot: process.cwd(), label: "Stage-A state" }).path;
-const stageAState = JSON.parse(readFileSync(stageAStatePath, "utf8"));
+const stageAState = parseAuthenticatedStateBytes(readFileSync(stageAStatePath));
 const stageAContract = assertStageAStateContract(stageAState, { phase: "POST_APPLY" });
 const ingress = describeStageAIngress({ run, endpointSecurityGroupId: stageAContract.endpointSecurityGroupId, runtimeSecurityGroupId: stageAContract.executorSecurityGroupId });
 const evidence = producePostApplyStageAPlanRecovery({ sourceSha: fresh.headSha, stageAStatePath, stageAHandoffPath: args.get("stage-a-handoff"), stageBStatePath: args.get("stage-b-state"), ingress, outputPath: args.get("output"), repositoryRoot: process.cwd() });

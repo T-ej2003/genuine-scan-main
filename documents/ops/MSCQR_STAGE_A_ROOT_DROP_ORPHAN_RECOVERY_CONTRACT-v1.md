@@ -30,6 +30,15 @@ raw-byte identities are not silently reinterpreted. The historical failed-
 apply state hash in `ROOT_DROP_LEGACY_POLICY_BINDING` remains immutable
 provenance evidence and is not converted to the current identity format.
 
+Authenticated Stage-A state bytes are checked for numeric precision before
+JSON parsing. A numeric literal is accepted only when its normalized decimal
+value round-trips through the runtime number representation; literals that
+would collapse to a different value (for example `9007199254740993` after
+rounding to `9007199254740992`) fail closed. Equivalent spellings such as
+`1`, `1.0`, and `1e0` share one identity, as do `0` and `-0`. Every
+Stage-A state identity producer and consumer uses this parser; no ordinary
+lossy JSON parse is valid at the authenticated state boundary.
+
 For the single historical legacy-policy recovery, the census command also
 requires `--failed-apply-state-identity` pointing to the private, independently
 captured pre-apply Stage-A state identity. That lineage, serial, and state hash

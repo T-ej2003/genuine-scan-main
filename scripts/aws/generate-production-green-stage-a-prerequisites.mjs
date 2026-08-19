@@ -55,6 +55,40 @@ function canonicalStateJson(value) {
   return JSON.stringify(value);
 }
 
+function canonicalJsonNumber(literal) {
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(literal);
+  if (!match) throw new Error("Stage A state identity contains a malformed JSON number.");
+  const [, sign, integer, fraction = "", exponent = "0"] = match;
+  let digits = `${integer}${fraction}`.replace(/^0+/, "") || "0";
+  let scale = BigInt(fraction.length) - BigInt(exponent);
+  if (digits === "0") return "0";
+  while (digits.endsWith("0")) { digits = digits.slice(0, -1); scale -= 1n; }
+  return `${sign}${digits}e${-scale}`;
+}
+
+function assertJsonNumberPrecision(stateBytes) {
+  const source = Buffer.from(stateBytes).toString("utf8");
+  const numberPattern = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+  for (let index = 0; index < source.length;) {
+    if (source[index] === '"') {
+      index += 1;
+      while (index < source.length) {
+        if (source[index] === "\\") index += 2;
+        else if (source[index++] === '"') break;
+      }
+      continue;
+    }
+    if (source[index] !== "-" && (source[index] < "0" || source[index] > "9")) { index += 1; continue; }
+    numberPattern.lastIndex = index;
+    const match = numberPattern.exec(source);
+    if (!match) { index += 1; continue; }
+    const literal = match[0];
+    const parsed = Number(literal);
+    if (!Number.isFinite(parsed) || canonicalJsonNumber(literal) !== canonicalJsonNumber(String(parsed))) throw new Error(`Stage A state identity rejects lossy JSON number ${literal}.`);
+    index = numberPattern.lastIndex;
+  }
+}
+
 function checkResultKey(entry) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.object_kind !== "string" || !entry.object_kind || typeof entry.config_addr !== "string" || !entry.config_addr) {
     throw new Error("Stage A state identity check result has no unambiguous semantic key.");
@@ -78,8 +112,14 @@ export function stageAStateSemanticSha256(state) {
   return sha256(Buffer.from(canonicalStateJson(normalizeStageAStateForIdentity(state))));
 }
 
-function parseAuthenticatedStateBytes(stateBytes) {
-  try { return JSON.parse(Buffer.from(stateBytes).toString("utf8")); } catch { throw new Error("Stage A state identity requires valid JSON state bytes."); }
+export function parseAuthenticatedStateBytes(stateBytes) {
+  try {
+    assertJsonNumberPrecision(stateBytes);
+    return JSON.parse(Buffer.from(stateBytes).toString("utf8"));
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Stage A state identity rejects lossy JSON number")) throw error;
+    throw new Error("Stage A state identity requires valid JSON state bytes.");
+  }
 }
 
 export function assertStageAStateIdentity(state, { stateObject = STAGE_A_STATE_OBJECT } = {}) {
@@ -207,7 +247,7 @@ export function generateStageAPrerequisites({ stateBackup, stateObject, toolingS
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !/^[a-f0-9]{64}$/.test(toolingTreeSha256 || "")) throw new Error("Stage A prerequisite tooling identity is malformed.");
   if (fs.existsSync(outputPath)) throw new Error("Refusing to overwrite an existing Stage A prerequisite artifact.");
   const stateArtifact = assertStageBPrivateFile({ filePath: stateBackup, repositoryRoot: root, label: "Stage A state backup" });
-  const bytes = fs.readFileSync(stateArtifact.path); const state = JSON.parse(bytes); const { value, vpcId, subnetIds, databaseIdentifier } = assertStageAStateContract(state, { stateObject, phase });
+  const bytes = fs.readFileSync(stateArtifact.path); const state = parseAuthenticatedStateBytes(bytes); const { value, vpcId, subnetIds, databaseIdentifier } = assertStageAStateContract(state, { stateObject, phase });
   const network = liveEvidence({ vpcId, subnetIds, databaseIdentifier, run });
   const output = {
     schemaVersion: STAGE_A_PREREQUISITES_SCHEMA_VERSION, generator: STAGE_A_PREREQUISITES_GENERATOR, toolingSha, toolingTreeSha256,

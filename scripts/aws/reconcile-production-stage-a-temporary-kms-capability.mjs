@@ -22,7 +22,7 @@ import {
 } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
-import { assertStageAStateIdentityBinding, buildStageAStateIdentity } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateIdentityBinding, buildStageAStateIdentity, parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { buildRecoveryAwsEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
 import { assertRootDropCensus, assertRootDropCensusMatch, assertRootDropCreationInterlock, buildLegacyRootDropKeyPolicy, buildRootDropAwsReadAdapter, collectRootDropCensus, rootDropStateCounts, ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_LEGACY_POLICY_BINDING } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
@@ -296,7 +296,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     if (phase === "authorize" && requireStageAStateBinding) {
       if (!stageAStateFile || !stageAStateIdentity || !existsSync(stageAStateFile)) fail("authenticated Stage A state identity is required before temporary capability authorization");
       const stateBytes = readFileSync(validateStageAInput(stageAStateFile, "Stage-A state"));
-      const currentIdentity = buildStageAStateIdentity(JSON.parse(stateBytes), { stateBytes });
+      const currentIdentity = buildStageAStateIdentity(parseAuthenticatedStateBytes(stateBytes), { stateBytes });
       assertStageAStateIdentityBinding(currentIdentity, stageAStateIdentity);
     }
     const previousFile = existsSync(stateFile) ? ensureStageBPrivateFile({ filePath: stateFile, repositoryRoot: root, label: "Temporary Stage-A KMS capability evidence" }).path : null;
@@ -595,7 +595,7 @@ export function runCli(argv = process.argv.slice(2), { run: injectedRun, readRoo
     const stageAStateFile = stageAStateFileOption ? validateStageAInput(stageAStateFileOption, "Stage-A state") : null;
     const stageAStateIdentityPath = stageAStateIdentityFile ? validateStageAInput(stageAStateIdentityFile, "Stage-A state identity") : null;
     const stageAStateIdentity = stageAStateIdentityPath ? readJson(stageAStateIdentityPath) : null;
-    const rootDropState = stageAStateFile ? readJson(stageAStateFile) : null;
+    const rootDropState = stageAStateFile ? parseAuthenticatedStateBytes(readFileSync(validateStageAInput(stageAStateFile, "Stage-A state"))) : null;
     const rootDropCounts = rootDropState ? rootDropStateCounts(rootDropState) : null;
     const suppliedRootDropCensus = phase === "authorize" ? readJson(validateStageAInput(rootDropCensusFileOption, "Stage-A root-drop census")) : null;
     const freshRootDropCensus = phase === "authorize"
