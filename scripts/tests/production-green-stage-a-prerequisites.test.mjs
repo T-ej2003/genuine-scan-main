@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertStageAStateContract, assertStageAStateIdentity, assertStageAStateIdentityBinding, buildStageAStateIdentity, generateStageAPrerequisites, resolveStageASubnetRouteTable, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateContract, assertStageAStateIdentity, assertStageAStateIdentityBinding, buildStageAStateIdentity, generateStageAPrerequisites, normalizeStageAStateForIdentity, parseAuthenticatedStateBytes, resolveStageASubnetRouteTable, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_A_CHECKER_ROLE_TRUST } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
@@ -52,7 +52,7 @@ test("Stage A checker trust accepts the Terraform singleton principal array and 
 test("canonical Stage A handoff derives every identifier from state and read-only live evidence", () => {
   const outputPath = path.join(directory, "handoff.json");
   const output = generateStageAPrerequisites({ stateBackup: statePath, stateObject: STAGE_A_STATE_OBJECT, toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), outputPath, phase: "PRE_APPLY", run });
-  assert.equal(output.schemaVersion, 2); assert.equal(output.stageAStateObject, STAGE_A_STATE_OBJECT); assert.equal(output.stageAStateLineage, STAGE_A_EXPECTED_STATE_LINEAGE); assert.equal(output.stageAStateSerial, 43); assert.deepEqual(output.privateSubnetIds, [...STAGE_B.privateSubnetIds].sort()); assert.equal(output.networkEvidence.privateSubnets.length, 2); assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
+  assert.equal(output.schemaVersion, 3); assert.equal(output.stageAStateIdentityVersion, STAGE_A_STATE_IDENTITY_VERSION); assert.equal(output.stageAStateObject, STAGE_A_STATE_OBJECT); assert.equal(output.stageAStateLineage, STAGE_A_EXPECTED_STATE_LINEAGE); assert.equal(output.stageAStateSerial, 43); assert.deepEqual(output.privateSubnetIds, [...STAGE_B.privateSubnetIds].sort()); assert.equal(output.networkEvidence.privateSubnets.length, 2); assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
 });
 
 test("generator requires an explicit lifecycle phase and preserves post-apply handoff state binding", () => {
@@ -114,6 +114,95 @@ test("Stage A identity requires an exact lowercase SHA-256 binding", () => {
   assert.throws(() => assertStageAStateIdentityBinding({ ...identity, stateSha256: undefined }, identity), /identity binding/);
   assert.throws(() => assertStageAStateIdentityBinding(identity, { ...identity, stateSha256: "f".repeat(64) }), /identity binding/);
   assert.throws(() => assertStageAStateIdentityBinding(identity, { ...identity, stateSha256: undefined }), /identity binding/);
+});
+
+test("Stage A semantic identity ignores only check-result ordering and object-key serialization", () => {
+  const checkResults = [
+    { object_kind: "var", config_addr: "var.aws_region", status: "pass", objects: [{ object_addr: "var.aws_region", status: "pass" }] },
+    { object_kind: "var", config_addr: "var.s3_prefix_list_id", status: "pass", objects: [{ object_addr: "var.s3_prefix_list_id", status: "pass" }] },
+  ];
+  const stateA = { ...stage, check_results: checkResults };
+  const stateB = { serial: stage.serial, lineage: stage.lineage, resources: stage.resources, outputs: stage.outputs, version: stage.version, check_results: [checkResults[1], checkResults[0]] };
+  const identityA = buildStageAStateIdentity(stateA, { stateBytes: Buffer.from(JSON.stringify(stateA)) });
+  const identityB = buildStageAStateIdentity(stateB, { stateBytes: Buffer.from(JSON.stringify(stateB)) });
+  assert.equal(identityA.stateIdentityVersion, STAGE_A_STATE_IDENTITY_VERSION);
+  assert.equal(identityA.stateSha256, identityB.stateSha256);
+  assert.equal(stageAStateSemanticSha256(stateA), stageAStateSemanticSha256(stateB));
+  assert.deepEqual(normalizeStageAStateForIdentity(stateA).check_results, normalizeStageAStateForIdentity(stateB).check_results);
+});
+
+test("Stage A semantic identity preserves meaningful arrays and rejects ambiguous check results", () => {
+  const entryA = { object_kind: "var", config_addr: "var.aws_region", status: "pass", objects: [{ object_addr: "var.aws_region", status: "pass" }, { object_addr: "var.aws_region[0]", status: "pass" }] };
+  const entryB = { object_kind: "var", config_addr: "var.s3_prefix_list_id", status: "pass", objects: [{ object_addr: "var.s3_prefix_list_id", status: "pass" }] };
+  const base = { ...stage, check_results: [entryA, entryB] };
+  assert.notEqual(stageAStateSemanticSha256(base), stageAStateSemanticSha256({ ...base, check_results: [{ ...entryA, objects: [...entryA.objects].reverse() }, entryB] }));
+  assert.notEqual(stageAStateSemanticSha256(base), stageAStateSemanticSha256({ ...base, check_results: [{ ...entryA, status: "fail" }, entryB] }));
+  assert.throws(() => stageAStateSemanticSha256({ ...base, check_results: [entryA, entryA] }), /duplicate check result/);
+  assert.throws(() => stageAStateSemanticSha256({ ...base, check_results: [{ ...entryA, config_addr: undefined }, entryB] }), /unambiguous semantic key/);
+  assert.throws(() => stageAStateSemanticSha256({ ...base, check_results: "not-an-array" }), /check results are malformed/);
+});
+
+test("Stage A semantic identity preserves null, empty, and absent check results distinctly", () => {
+  const absent = structuredClone(stage);
+  delete absent.check_results;
+  const identities = [
+    stageAStateSemanticSha256({ ...stage, check_results: null }),
+    stageAStateSemanticSha256({ ...stage, check_results: [] }),
+    stageAStateSemanticSha256(absent),
+  ];
+  assert.equal(new Set(identities).size, 3);
+  for (const check_results of [{}, "value", 1]) assert.throws(() => stageAStateSemanticSha256({ ...stage, check_results }), /check results are malformed/);
+});
+
+test("Stage A identity version rejects legacy raw-byte identity evidence", () => {
+  const identity = buildStageAStateIdentity(stage, { stateBytes: Buffer.from(JSON.stringify(stage)) });
+  assert.throws(() => assertStageAStateIdentityBinding({ ...identity, stateIdentityVersion: 1 }, identity), /state identity binding/);
+  assert.throws(() => assertStageAStateIdentityBinding(identity, { ...identity, stateIdentityVersion: 1 }), /state identity binding/);
+});
+
+const numericStateBytes = (literal, location = "attribute") => Buffer.from(`{"version":4,"serial":35,"lineage":"${STAGE_A_EXPECTED_STATE_LINEAGE}","resources":[{"type":"example","name":"value","instances":[{"attributes":{"value":${location === "attribute" ? literal : "0"}}}]}],"outputs":{"value":{"value":${location === "output" ? literal : "0"}}},"check_results":[{"object_kind":"var","config_addr":"var.value","status":"pass","value":${location === "check" ? literal : "0"}}]}`);
+const numericIdentity = (literal, location) => { const bytes = numericStateBytes(literal, location); const state = parseAuthenticatedStateBytes(bytes); return buildStageAStateIdentity(state, { stateBytes: bytes }); };
+
+test("Stage A rejects numeric literals that would collide after JSON.parse rounding", () => {
+  assert.doesNotThrow(() => numericIdentity("9007199254740992"));
+  assert.throws(() => numericIdentity("9007199254740993"), /lossy JSON number/);
+  assert.doesNotThrow(() => numericIdentity("-9007199254740992"));
+  assert.throws(() => numericIdentity("-9007199254740993"), /lossy JSON number/);
+  assert.doesNotThrow(() => numericIdentity("9007199254740991"));
+});
+
+test("Stage A preserves numeric identity for safe, fractional, exponent, nested, and equivalent values", () => {
+  assert.notEqual(numericIdentity("42").stateSha256, numericIdentity("43").stateSha256);
+  assert.notEqual(numericIdentity("1.25").stateSha256, numericIdentity("1.5").stateSha256);
+  assert.doesNotThrow(() => numericIdentity("1e20"));
+  assert.throws(() => numericIdentity("1.0000000000000001e20"), /lossy JSON number/);
+  assert.equal(numericIdentity("1").stateSha256, numericIdentity("1.0").stateSha256);
+  assert.equal(numericIdentity("1").stateSha256, numericIdentity("1e0").stateSha256);
+  assert.equal(numericIdentity("0").stateSha256, numericIdentity("-0").stateSha256);
+  for (const location of ["attribute", "output", "check"]) assert.throws(() => numericIdentity("9007199254740993", location), /lossy JSON number/);
+  assert.throws(() => parseAuthenticatedStateBytes(Buffer.from("{\"lineage\":")), /valid JSON state bytes/);
+  assert.throws(() => parseAuthenticatedStateBytes(Buffer.from(`{"value":NaN}`)), /valid JSON state bytes/);
+  assert.throws(() => parseAuthenticatedStateBytes(Buffer.from(`{"value":Infinity}`)), /valid JSON state bytes/);
+});
+
+const utf8StateBytes = (valueBytes) => Buffer.concat([Buffer.from('{"value":"'), valueBytes, Buffer.from('"}')]);
+
+test("Stage A state decoding rejects malformed UTF-8 before identity hashing", () => {
+  assert.equal(parseAuthenticatedStateBytes(utf8StateBytes(Buffer.from("ascii"))).value, "ascii");
+  assert.equal(parseAuthenticatedStateBytes(utf8StateBytes(Buffer.from("café 日本"))).value, "café 日本");
+  assert.equal(parseAuthenticatedStateBytes(utf8StateBytes(Buffer.from("x�y"))).value, "x�y");
+  const invalidSequences = [
+    [0xff],
+    [0xfe],
+    [0xe2, 0x82],
+    [0xc2, 0x41],
+    [0xc0, 0xaf],
+  ];
+  for (const sequence of invalidSequences) assert.throws(() => parseAuthenticatedStateBytes(utf8StateBytes(Buffer.from(sequence))), /valid JSON state bytes/);
+  const invalid = utf8StateBytes(Buffer.from([0xff]));
+  const replacement = utf8StateBytes(Buffer.from("�"));
+  assert.throws(() => parseAuthenticatedStateBytes(invalid), /valid JSON state bytes/);
+  assert.doesNotThrow(() => parseAuthenticatedStateBytes(replacement));
 });
 
 const routeTable = (id, associations, routes = [{ DestinationCidrBlock: "0.0.0.0/0", NatGatewayId: "nat-12345678" }], vpcId = "vpc-0123456789abcdef0") => ({ RouteTableId: id, VpcId: vpcId, Associations: associations, Routes: routes });

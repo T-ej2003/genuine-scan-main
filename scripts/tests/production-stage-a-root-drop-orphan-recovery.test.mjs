@@ -247,13 +247,13 @@ test("production candidate snapshot shape authenticates and persists the exact h
     listAliases: () => snapshot.aliases,
     lookupCreateKeyEvents: () => snapshot.creationEvents,
   };
-  const census = collectRootDropCensus({ adapter, terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity, failedApplyEvidence: legacyFailedApplyEvidence });
+  const census = collectRootDropCensus({ adapter, terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: identityForState(absentState), failedApplyEvidence: legacyFailedApplyEvidence });
   assert.equal(census.status, "AUTHENTICATED_ORPHAN");
   assert.equal(Object.hasOwn(census.candidates[0], "arn"), false);
   assert.equal(census.candidates[0].metadata.Arn, legacyKeyArn);
   assert.equal(census.candidates[0].keyArn, legacyKeyArn);
   const persisted = JSON.parse(JSON.stringify(census));
-  assert.doesNotThrow(() => assertRootDropCensus(persisted, { sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity }));
+  assert.doesNotThrow(() => assertRootDropCensus(persisted, { sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: identityForState(absentState) }));
 });
 
 test("canonical census entry path supports the existing historical 1/0 topology", async () => {
@@ -1159,6 +1159,35 @@ test("historical policy adoption converges policy before reporting the alias rec
   assert.deepEqual({ imports, applies }, { imports: 1, applies: 1 });
   assert.equal(result.accounting.kmsWrites, 2);
   assert.doesNotThrow(() => assertRootDropStateIdentity(current, { keyId: legacyKeyId, requireCanonicalPolicy: true }));
+});
+
+test("post-import null check results retain exact identity through historical recovery replay", async () => {
+  const historicalCensus = buildRootDropCensus({ sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: stateIdentity, keyUniverse: [legacyKeyId], candidates: [{ ...legacyCandidate(), ...authenticateRootDropOrphan({ candidate: legacyCandidate(), terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }) }], failedApplyEvidence: legacyFailedApplyEvidence });
+  const postImportState = { ...legacyKeyState(buildLegacyRootDropKeyPolicy()), check_results: null };
+  const postImportIdentity = identityForState(postImportState);
+  const freshCensus = buildRootDropCensus({ sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: postImportIdentity, keyUniverse: [legacyKeyId], candidates: [{ ...legacyCandidate(), ...authenticateRootDropOrphan({ candidate: legacyCandidate(), terraformState: postImportState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence, allowKeyOnly: true }) }], failedApplyEvidence: legacyFailedApplyEvidence });
+  const finalState = { ...postImportState, resources: postImportState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(buildStageARootDropKeyPolicy()) } })) } : resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: legacyKeyId, target_key_arn: legacyKeyArn } }] } : resource) };
+  const changed = structuredClone(postImportState);
+  changed.resources.find(({ type, name }) => type === "aws_db_instance" && name === "green").instances[0].attributes.identifier = "same-serial-change";
+  assert.notEqual(postImportIdentity.stateSha256, identityForState(changed).stateSha256);
+  let current = postImportState;
+  let imports = 0;
+  let applies = 0;
+  const recovery = createRootDropRecoveryRunner({
+    execute: true,
+    readState: async () => current,
+    readStateSnapshot: async () => ({ state: current, stateBytes: Buffer.from(JSON.stringify(current)) }),
+    importKey: async () => { imports += 1; throw new Error("post-import replay must not import again"); },
+    refreshState: async () => current,
+    createPlan: async ({ zeroDrift }) => zeroDrift ? "zero-drift" : "legacy-alias",
+    readPlan: async (planPath) => planPath === "zero-drift" ? { resource_changes: [] } : legacyAliasPolicyPlan({ key: legacyKeyId }),
+    readPlanBytes: async (planPath) => Buffer.from(planPath),
+    applyPlan: async () => { applies += 1; current = finalState; return { outcome: "CONFIRMED_SUCCESS" }; },
+  });
+  const result = await recovery({ census: historicalCensus, freshCensus, terraformState: postImportState, stageAStateIdentity: postImportIdentity, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256 });
+  assert.equal(result.status, "RECOVERED");
+  assert.deepEqual({ imports, applies }, { imports: 0, applies: 1 });
+  assert.equal(result.accounting.kmsWrites, 2);
 });
 
 test("policy-first partial adoption can resume from a canonical-policy key-only state", async () => {

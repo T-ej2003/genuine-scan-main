@@ -66,15 +66,19 @@ function writePlanFile(directory, keyPolicy) {
 function legacyRootDropCensus({ source = ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transition = ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, plan = ROOT_DROP_LEGACY_POLICY_BINDING.planSha256, eventId = ROOT_DROP_LEGACY_POLICY_BINDING.creationEventId, keyArn = ROOT_DROP_LEGACY_POLICY_BINDING.keyArn } = {}) {
   const keyId = keyArn.split("/").at(-1);
   const failedApplyEvidence = { sourceSha: source, transitionId: transition, planSha256: plan, creationEventId: eventId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity, failedApplyWindow: { start: "2026-08-18T22:45:00.000Z", end: "2026-08-18T23:00:00.000Z" } };
+  const censusState = stateFixture();
+  const censusStateIdentity = buildStageAStateIdentity(censusState, { stateBytes: Buffer.from(JSON.stringify(censusState)) });
   return buildRootDropCensus({
     sourceSha: source,
     transitionId: transition,
-    stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity,
+    stageAStateIdentity: censusStateIdentity,
     keyUniverse: [keyId],
     failedApplyEvidence,
     candidates: [{ authenticated: true, keyId, keyArn, metadata: { KeyId: keyId, Arn: keyArn, AWSAccountId: TEMPORARY_KMS_CAPABILITY.accountId, KeyState: "Enabled", KeyManager: "CUSTOMER", Origin: "AWS_KMS", KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY", MultiRegion: false, Description: ROOT_DROP_KEY_DESCRIPTION }, policy: buildLegacyRootDropKeyPolicy(), policyCompatibility: "LEGACY_BOUND_HISTORICAL", sourceSha: source, transitionId: transition, planSha256: plan, creationEventId: eventId }],
   });
 }
+
+const censusIdentity = (value) => ({ stateIdentityVersion: value.stageAStateIdentityVersion, lineage: value.stageAStateLineage, serial: value.stageAStateSerial, stateSha256: value.stageAStateSha256 });
 
 function rootDropPlanChanges(keyPolicy = buildStageARootDropKeyPolicy()) {
   return [
@@ -92,7 +96,7 @@ function writeCliStageAInputs(directory) {
   const stageAStateIdentity = buildStageAStateIdentity(state, { stateBytes });
   writeFileSync(stageAStateIdentityFile, `${JSON.stringify(stageAStateIdentity)}\n`, { mode: 0o600 });
   const rootDropCensusFile = path.join(directory, "root-drop-census.json");
-  const census = { schemaVersion: ROOT_DROP_RECOVERY_SCHEMA_VERSION, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status: "NO_CANDIDATE", sourceSha, transitionId, actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, keyUniverse: [], keyUniverseSha256: rootDropRecoverySha256([]), candidateCount: 0, candidates: [], observedAt: new Date().toISOString() };
+  const census = { schemaVersion: ROOT_DROP_RECOVERY_SCHEMA_VERSION, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status: "NO_CANDIDATE", sourceSha, transitionId, actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS, stageAStateIdentityVersion: stageAStateIdentity.stateIdentityVersion, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, keyUniverse: [], keyUniverseSha256: rootDropRecoverySha256([]), candidateCount: 0, candidates: [], observedAt: new Date().toISOString() };
   writeFileSync(rootDropCensusFile, `${JSON.stringify({ ...census, censusSha256: rootDropRecoverySha256(census) })}\n`, { mode: 0o600 });
   return { stageAStateFile, stageAStateIdentityFile, rootDropCensusFile };
 }
@@ -319,7 +323,7 @@ test("legacy authorization treats the historical plan as provenance and replays 
   const identity = ROOT_DROP_LEGACY_POLICY_BINDING;
   try {
     const runner = createTemporaryKmsCapabilityRunner({ run: fake.run });
-    const input = { phase: "authorize", sourceSha: identity.sourceSha, transitionId: identity.transitionId, stateFile, planSha256: identity.planSha256, planJsonFile, stageAStateIdentity: identity.stageAStateIdentity, freshRootDropCensus: census };
+    const input = { phase: "authorize", sourceSha: identity.sourceSha, transitionId: identity.transitionId, stateFile, planSha256: identity.planSha256, planJsonFile, stageAStateIdentity: censusIdentity(census), freshRootDropCensus: census };
     const first = runner.runPhase(input);
     const replay = runner.runPhase(input);
     const temporary = fake.documents.get(first.evidence.temporaryVersionId);
@@ -345,7 +349,7 @@ test("legacy authorization rejects every historical binding mismatch before IAM"
     const census = legacyRootDropCensus(overrides);
     const fake = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) } });
     try {
-      assert.throws(() => createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha: census.sourceSha, transitionId: census.transitionId, stateFile, planSha256: census.failedApplyEvidence.planSha256, planJsonFile, stageAStateIdentity: census.failedApplyEvidence.stageAStateIdentity, freshRootDropCensus: census }), /historical|legacy|exact/, label);
+      assert.throws(() => createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha: census.sourceSha, transitionId: census.transitionId, stateFile, planSha256: census.failedApplyEvidence.planSha256, planJsonFile, stageAStateIdentity: censusIdentity(census), freshRootDropCensus: census }), /historical|legacy|exact/, label);
       assert.equal(fake.calls.includes("create-policy-version"), false, label);
     } finally { rmSync(directory, { recursive: true, force: true }); }
   }
@@ -796,7 +800,7 @@ test("unrecorded legacy authorization is recoverable without persisted evidence"
         transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId,
         stateFile,
         planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256,
-        stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity,
+        stageAStateIdentity: censusIdentity(census),
         rootDropCensusFile,
         freshRootDropCensus: census,
       });

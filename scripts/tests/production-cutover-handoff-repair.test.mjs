@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { assertRootDropEvidence, buildRootDropEvidence, buildRootDropPayload, canonicalRootDropPayload, ROOT_DROP_SIGNING_KEY_ARN } from "../aws/production-root-drop-evidence.mjs";
 import { assertPostApplyStageAPlanRecovery, producePostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "../aws/production-stage-a-recovery-evidence.mjs";
-import { assertStageAStateContract } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateContract, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { createInitialDualSlotSecretsManagerClient, generatePendingMaterial, INITIAL_DUAL_SLOT_NAMES, supersedeStalePendingRotation } from "../aws/production-initial-dual-slot-bootstrap.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { fixtureInput, sourceSha as rehearsalSourceSha } from "./production-cutover-rehearsal.test.mjs";
@@ -123,7 +123,7 @@ test("post-apply Stage-A recovery is distinct from and stricter than a historica
   const stageBPath = path.join(directory, "stage-b-state.json");
   const outputPath = path.join(directory, "recovery-evidence.json");
   writeFileSync(statePath, stateBytes, { mode: 0o600 });
-  writeFileSync(handoffPath, JSON.stringify({ toolingSha: sourceSha, stageAStateObject: STAGE_A_STATE_OBJECT, stageAStateLineage: STAGE_A_LINEAGE, stageAStateSerial: 42, stageAStateSha256: digest(stateBytes) }), { mode: 0o600 });
+  writeFileSync(handoffPath, JSON.stringify({ toolingSha: sourceSha, stageAStateIdentityVersion: STAGE_A_STATE_IDENTITY_VERSION, stageAStateObject: STAGE_A_STATE_OBJECT, stageAStateLineage: STAGE_A_LINEAGE, stageAStateSerial: 42, stageAStateSha256: stageAStateSemanticSha256(JSON.parse(stateBytes)) }), { mode: 0o600 });
   writeFileSync(stageBPath, JSON.stringify(convergedStageBState()), { mode: 0o600 });
   const evidence = producePostApplyStageAPlanRecovery({ sourceSha, stageAStatePath: statePath, stageAHandoffPath: handoffPath, stageBStatePath: stageBPath, ingress: productionStageAIngress(), outputPath, repositoryRoot: "/private/tmp/mscqr-post330-exec" });
   assert.equal(evidence.historicalPlanPresent, false);
@@ -208,7 +208,7 @@ test("serial-98 Stage-A recovery evidence traverses the real cutover spine witho
   const stageBPath = path.join(directory, "stage-b-state.json");
   const evidencePath = path.join(directory, "stage-a-recovery.json");
   writeFileSync(statePath, stateBytes, { mode: 0o600 });
-  writeFileSync(handoffPath, JSON.stringify({ toolingSha: rehearsalSourceSha, stageAStateObject: STAGE_A_STATE_OBJECT, stageAStateLineage: state.lineage, stageAStateSerial: state.serial, stageAStateSha256: digest(stateBytes) }), { mode: 0o600 });
+  writeFileSync(handoffPath, JSON.stringify({ toolingSha: rehearsalSourceSha, stageAStateIdentityVersion: STAGE_A_STATE_IDENTITY_VERSION, stageAStateObject: STAGE_A_STATE_OBJECT, stageAStateLineage: state.lineage, stageAStateSerial: state.serial, stageAStateSha256: stageAStateSemanticSha256(state) }), { mode: 0o600 });
   writeFileSync(stageBPath, JSON.stringify(convergedStageBState()), { mode: 0o600 });
   const recovery = producePostApplyStageAPlanRecovery({ sourceSha: rehearsalSourceSha, stageAStatePath: statePath, stageAHandoffPath: handoffPath, stageBStatePath: stageBPath, ingress: productionStageAIngress(), outputPath: evidencePath, repositoryRoot: "/private/tmp/mscqr-post330-exec" });
   const result = await runProductionCutoverControlPlane({ ...fixtureInput({ stageA: { recoveryEvidence: JSON.parse(readFileSync(evidencePath, "utf8")), revalidateRecovery: async () => ({ ...readAuthenticatedStageARecoverySources({ stageAStatePath: statePath, stageAHandoffPath: handoffPath, stageBStatePath: stageBPath, repositoryRoot: "/private/tmp/mscqr-post330-exec" }), ingress: productionStageAIngress() }) } }), sourceSha: rehearsalSourceSha });

@@ -9,7 +9,7 @@ import {
   readIdentityCapabilityMatrix,
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
-import { STAGE_A_EXPECTED_STATE_LINEAGE } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
@@ -115,7 +115,7 @@ test("complete release preflight is valid and has no skipped probes", () => {
   assert.deepEqual(report.skipped, []);
   assert.equal(report.caller, caller);
   assert.equal(report.stageAStateIdentityPath, path.join(directory, "stage-a-state-identity.json"));
-  assert.deepEqual(JSON.parse(fs.readFileSync(report.stageAStateIdentityPath, "utf8")), { stateObject: "mscqr/production/rls-green/stage-a/terraform.tfstate", lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: 35, stateSha256: crypto.createHash("sha256").update(stageAState).digest("hex"), account: "368992683803", region: "eu-west-2" });
+  assert.deepEqual(JSON.parse(fs.readFileSync(report.stageAStateIdentityPath, "utf8")), { stateIdentityVersion: STAGE_A_STATE_IDENTITY_VERSION, stateObject: "mscqr/production/rls-green/stage-a/terraform.tfstate", lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: 35, stateSha256: stageAStateSemanticSha256(JSON.parse(stageAState)), account: "368992683803", region: "eu-west-2" });
 });
 
 test("release preflight blocks when authenticated Stage-A state cannot produce an identity", () => {
