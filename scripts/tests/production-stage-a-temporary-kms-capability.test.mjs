@@ -515,15 +515,40 @@ test("private capability evidence is not replaceable through a symlink", () => {
   }
 });
 
-test("launch handoff resolves the canonical manifest path", () => {
+test("launch handoff makes historical authorization precede provider refresh", () => {
   const handoff = readFileSync("documents/ops/MSCQR_PRODUCTION_LAUNCH_HANDOFF-v1.md", "utf8");
   const manifestPath = "documents/ops/MSCQR_PRODUCTION_LAUNCH_HANDOFF_MANIFEST-v1.json";
-  assert.equal(JSON.parse(readFileSync(manifestPath, "utf8")).schemaVersion, 1);
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  assert.equal(manifest.schemaVersion, 1);
   assert.match(handoff, new RegExp(manifestPath.replaceAll(".", "\\.")));
   assert.doesNotMatch(handoff, /launch-handoff-manifest\.json/);
-  const node = JSON.parse(readFileSync(manifestPath, "utf8")).nodes.find(({ id }) => id === 8);
-  assert.match(node.canonicalCommandOrFunction, /--stage-a-state <fresh-stage-a-state>/);
-  assert.match(node.canonicalCommandOrFunction, /--stage-a-state-identity <fresh-stage-a-state-identity>/);
+  const nodes = new Map(manifest.nodes.map((node) => [node.id, node]));
+  const command = (id) => nodes.get(id).canonicalCommandOrFunction;
+  assert.equal(nodes.get(3).nextNode, 4);
+  assert.equal(nodes.get(4).nextNode, 5);
+  assert.equal(nodes.get(5).nextNode, 6);
+  assert.equal(nodes.get(6).nextNode, 7);
+  assert.equal(nodes.get(7).nextNode, 8);
+  assert.equal(nodes.get(8).nextNode, 9);
+  assert.match(command(6), /--phase authorize/);
+  assert.match(command(6), /<historical-failed-plan-sha>/);
+  assert.match(command(6), /<historical-plan-json>/);
+  assert.match(command(7), /Terraform init\/refresh/);
+  assert.match(command(8), /terraform plan -refresh=true/);
+  assert.match(command(8), /terraform show -json/);
+  assert.match(command(8), /apply the exact classified saved plan once/);
+  for (const id of [1, 2, 3, 4, 5, 6]) assert.doesNotMatch(command(id), /terraform (?:init\/)?refresh|terraform plan|-refresh=true/);
+  const execute = (steps) => {
+    let authorized = false;
+    for (const step of steps) {
+      if (step === "authorize") authorized = true;
+      if (step === "refresh" && !authorized) throw new Error("FAIL_GET_KEY_ROTATION_STATUS");
+    }
+  };
+  assert.throws(() => execute(["refresh", "authorize"]), /FAIL_GET_KEY_ROTATION_STATUS/);
+  assert.doesNotThrow(() => execute(["authorize", "refresh"]));
+  assert.match(command(6), /--stage-a-state <fresh-stage-a-state>/);
+  assert.match(command(6), /--stage-a-state-identity <fresh-stage-a-state-identity>/);
 });
 
 test("historical steady-state recognition is exact, repository-bound, and default-protected", () => {
