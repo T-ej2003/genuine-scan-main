@@ -58,6 +58,11 @@ state, source, transition, region, and policy/tag/alias identity; the fresh
 observation is also bounded in age. Only then does it import exactly
 `aws_kms_key.root_drop` using the locked AWS provider's documented key-ID
 identifier. Without `--execute`, an absent Terraform key is not imported.
+The adoption command consumes the same reviewed Stage-A variable environment as
+the normal production plan: only the nine required `TF_VAR_*` inputs declared
+by `infra/aws/terraform/production-green-stage-a/variables.tf` are accepted;
+all other `TF_VAR_*` and Terraform redirect variables are rejected or removed.
+A non-mutating, no-refresh Terraform plan validates those inputs before import.
 After an authorized import it refreshes state, proves the imported key
 ARN/spec/usage, and requires a plan containing only:
 

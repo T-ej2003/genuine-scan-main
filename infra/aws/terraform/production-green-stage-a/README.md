@@ -32,7 +32,15 @@ review. The checker must be distinct from the release deployer.
 
 The canonical orphan-recovery command is bound to this Terraform root, the
 initialized S3 backend coordinates above, and the `default` workspace. It
-removes inherited `TF_*` redirect variables and uses the release-deployer
+removes inherited Terraform redirect variables and uses only the exact
+production Stage-A `TF_VAR_*` inputs already supplied to the normal reviewed
+launch: `TF_VAR_aws_region`, `TF_VAR_vpc_id`, `TF_VAR_private_subnet_ids`,
+`TF_VAR_runtime_security_group_ids`, `TF_VAR_s3_prefix_list_id`,
+`TF_VAR_vpc_dns_resolver_cidr`, `TF_VAR_checker_principal_arns`,
+`TF_VAR_release_role_arn`, and `TF_VAR_receipt_bucket_arn`. The recovery
+command rejects every other `TF_VAR_*` key and does not fall back to a local
+`terraform.tfvars`. It validates the exact variable set with a non-mutating
+Terraform plan before import. It uses the release-deployer
 profile for every Terraform subprocess. Before import it compares the live
 state lineage, serial, and exact state-byte SHA-256 with the fresh census
 identity; any mismatch fails closed. Recovery imports only the authenticated

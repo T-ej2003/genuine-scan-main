@@ -24,9 +24,14 @@ export function buildRecoveryAwsEnvironment(profile, baseEnv = process.env) {
   return env;
 }
 
-export function buildRecoveryTerraformEnvironment(profile, baseEnv = process.env) {
+export function buildRecoveryTerraformEnvironment(profile, baseEnv = process.env, { allowedTerraformVariableKeys = [] } = {}) {
   const env = buildRecoveryAwsEnvironment(profile, baseEnv);
+  const allowed = new Set(allowedTerraformVariableKeys);
+  const ambientVariableKeys = Object.keys(baseEnv).filter((key) => key.startsWith("TF_VAR_"));
+  const unexpected = ambientVariableKeys.filter((key) => !allowed.has(key));
+  if (unexpected.length) throw new Error(`Terraform variable environment contains unreviewed keys: ${unexpected.sort().join(", ")}`);
   for (const key of Object.keys(env)) if (key.startsWith("TF_")) delete env[key];
+  for (const key of allowed) if (baseEnv[key] !== undefined) env[key] = baseEnv[key];
   return env;
 }
 

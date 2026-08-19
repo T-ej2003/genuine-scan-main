@@ -26,7 +26,8 @@ import {
   STAGE_A_TERRAFORM_BACKEND,
   assertStageATerraformBackendMetadata,
 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
-import { runAdoption, runCensus, validateRootDropPlanPaths } from "../aws/recover-production-green-stage-a-root-drop-orphan.mjs";
+import { runAdoption, runCensus, validateRootDropPlanPaths, STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS } from "../aws/recover-production-green-stage-a-root-drop-orphan.mjs";
+import { buildRecoveryTerraformEnvironment } from "../aws/recover-stage-b-backend-task-definition.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
 
 const sourceSha = "f03fb3266385486d25317b8c2b202c408ae8771f";
@@ -37,6 +38,17 @@ const state = productionStageAState({ serial: 46 });
 const absentState = { ...state, resources: state.resources.map((resource) => (resource.type === "aws_kms_key" && resource.name === "root_drop") || (resource.type === "aws_kms_alias" && resource.name === "root_drop") ? { ...resource, instances: [] } : resource) };
 const stateBytes = Buffer.from(JSON.stringify(absentState));
 const stateIdentity = buildStageAStateIdentity(absentState, { stateBytes });
+const stageAVars = Object.freeze({
+  TF_VAR_aws_region: STAGE_B.region,
+  TF_VAR_vpc_id: "vpc-00000000",
+  TF_VAR_private_subnet_ids: '["subnet-00000000"]',
+  TF_VAR_runtime_security_group_ids: '["sg-00000000"]',
+  TF_VAR_s3_prefix_list_id: "pl-00000000",
+  TF_VAR_vpc_dns_resolver_cidr: "10.0.0.2/32",
+  TF_VAR_checker_principal_arns: `["arn:aws:iam::${STAGE_B.account}:role/mscqr-production-independent-checker"]`,
+  TF_VAR_release_role_arn: `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-release-deployer`,
+  TF_VAR_receipt_bucket_arn: `arn:aws:s3:::mscqr-prod-euw2-artifacts-${STAGE_B.account}-${STAGE_B.region}-an`,
+});
 const failedApplyEvidence = { sourceSha, transitionId, planSha256: crypto.createHash("sha256").update("exact-plan").digest("hex"), creatorArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/launch", creationEventId: "event-root-drop-1", failedApplyWindow: { start: "2026-08-19T00:00:00.000Z", end: "2026-08-19T23:59:59.999Z" } };
 const event = { eventId: failedApplyEvidence.creationEventId, eventName: "CreateKey", eventSource: "kms.amazonaws.com", awsRegion: STAGE_B.region, recipientAccountId: STAGE_B.account, eventTime: "2026-08-19T12:00:00.000Z", userIdentity: { arn: failedApplyEvidence.creatorArn }, resources: [{ ARN: keyArn }] };
 const awsLookupEvent = { EventId: event.eventId, EventName: event.eventName, EventSource: event.eventSource, EventTime: event.eventTime, CloudTrailEvent: JSON.stringify({ eventID: event.eventId, eventName: event.eventName, eventSource: event.eventSource, awsRegion: event.awsRegion, recipientAccountId: event.recipientAccountId, eventTime: event.eventTime, userIdentity: event.userIdentity, resources: event.resources }) };
@@ -149,13 +161,13 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
   writeFileSync(identityPath, `${JSON.stringify(stateIdentity)}\n`, { mode: 0o600 });
   const suppliedCensus = census();
   writeFileSync(censusPath, `${JSON.stringify(suppliedCensus)}\n`, { mode: 0o600 });
-  const saved = Object.fromEntries(["AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "TF_DATA_DIR", "TF_WORKSPACE", "TF_CLI_CONFIG_FILE", "TF_CLI_ARGS", "TF_CLI_ARGS_init", "TF_CLI_ARGS_import", "TF_CLI_ARGS_plan", "TF_CLI_ARGS_apply", "TF_VAR_aws_region"].map((key) => [key, process.env[key]]));
+  const saved = Object.fromEntries(["AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "TF_DATA_DIR", "TF_WORKSPACE", "TF_CLI_CONFIG_FILE", "TF_CLI_ARGS", "TF_CLI_ARGS_init", "TF_CLI_ARGS_import", "TF_CLI_ARGS_plan", "TF_CLI_ARGS_apply", ...STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS].map((key) => [key, process.env[key]]));
   const restore = () => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } };
   const observedAws = [];
   const observedTerraform = [];
   let currentState = absentState;
   try {
-    Object.assign(process.env, { AWS_PROFILE: "administrator", AWS_ACCESS_KEY_ID: "ambient-key", AWS_SECRET_ACCESS_KEY: "ambient-secret", AWS_SESSION_TOKEN: "ambient-session", AWS_SECURITY_TOKEN: "ambient-security", AWS_DEFAULT_PROFILE: "ambient-default", AWS_REGION: "us-east-1", AWS_DEFAULT_REGION: "us-east-1", AWS_CONFIG_FILE: "/tmp/config", AWS_SHARED_CREDENTIALS_FILE: "/tmp/credentials", TF_DATA_DIR: "/tmp/hostile-data", TF_WORKSPACE: "wrong-workspace", TF_CLI_CONFIG_FILE: "/tmp/hostile-cli.tfrc", TF_CLI_ARGS: "-refresh=false", TF_CLI_ARGS_init: "-backend-config=/tmp/wrong-backend", TF_CLI_ARGS_import: "-state=/tmp/wrong.tfstate", TF_CLI_ARGS_plan: "-target=aws_kms_key.wrong", TF_CLI_ARGS_apply: "-auto-approve", TF_VAR_aws_region: "us-east-1" });
+    Object.assign(process.env, { ...stageAVars, AWS_PROFILE: "administrator", AWS_ACCESS_KEY_ID: "ambient-key", AWS_SECRET_ACCESS_KEY: "ambient-secret", AWS_SESSION_TOKEN: "ambient-session", AWS_SECURITY_TOKEN: "ambient-security", AWS_DEFAULT_PROFILE: "ambient-default", AWS_REGION: "us-east-1", AWS_DEFAULT_REGION: "us-east-1", AWS_CONFIG_FILE: "/tmp/config", AWS_SHARED_CREDENTIALS_FILE: "/tmp/credentials", TF_DATA_DIR: "/tmp/hostile-data", TF_WORKSPACE: "wrong-workspace", TF_CLI_CONFIG_FILE: "/tmp/hostile-cli.tfrc", TF_CLI_ARGS: "-refresh=false", TF_CLI_ARGS_init: "-backend-config=/tmp/wrong-backend", TF_CLI_ARGS_import: "-state=/tmp/wrong.tfstate", TF_CLI_ARGS_plan: "-target=aws_kms_key.wrong", TF_CLI_ARGS_apply: "-auto-approve" });
     await runCensus({ argv: ["--admin-profile", "administrator", "--release-profile", "release", "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--source-sha", sourceSha, "--transition-id", transitionId, "--plan-sha256", failedApplyEvidence.planSha256, "--failed-apply-start", failedApplyEvidence.failedApplyWindow.start, "--failed-apply-end", failedApplyEvidence.failedApplyWindow.end, "--output", outputPath], execFile: (command, args, options) => { observedAws.push({ command, args, env: options.env }); return JSON.stringify({ Keys: [] }); }, write: () => {} });
     assert.equal(observedAws[0].args[observedAws[0].args.indexOf("--profile") + 1], "administrator");
     assert.equal(observedAws[0].env.AWS_PROFILE, "release");
@@ -185,7 +197,8 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
       assert.equal(env.AWS_REGION, STAGE_B.region);
       assert.equal(env.AWS_DEFAULT_REGION, STAGE_B.region);
       for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(env[key], undefined);
-      for (const key of ["TF_DATA_DIR", "TF_WORKSPACE", "TF_CLI_CONFIG_FILE", "TF_CLI_ARGS", "TF_CLI_ARGS_init", "TF_CLI_ARGS_import", "TF_CLI_ARGS_plan", "TF_CLI_ARGS_apply", "TF_VAR_aws_region"]) assert.equal(env[key], undefined);
+      for (const key of ["TF_DATA_DIR", "TF_WORKSPACE", "TF_CLI_CONFIG_FILE", "TF_CLI_ARGS", "TF_CLI_ARGS_init", "TF_CLI_ARGS_import", "TF_CLI_ARGS_plan", "TF_CLI_ARGS_apply"]) assert.equal(env[key], undefined);
+      for (const key of STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS) assert.equal(env[key], stageAVars[key]);
       assert.equal(env.AWS_CONFIG_FILE, "/tmp/config");
       assert.equal(env.AWS_SHARED_CREDENTIALS_FILE, "/tmp/credentials");
     }
@@ -271,7 +284,9 @@ test("adoption rejects a non-default workspace before state access", async () =>
   const statePath = path.join(directory, "state.json");
   const identityPath = path.join(directory, "identity.json");
   const censusPath = path.join(directory, "census.json");
+  const saved = Object.fromEntries(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS.map((key) => [key, process.env[key]]));
   try {
+    Object.assign(process.env, stageAVars);
     writeFileSync(statePath, stateBytes, { mode: 0o600 });
     writeFileSync(identityPath, `${JSON.stringify(stateIdentity)}\n`, { mode: 0o600 });
     writeFileSync(censusPath, `${JSON.stringify(census())}\n`, { mode: 0o600 });
@@ -284,7 +299,75 @@ test("adoption rejects a non-default workspace before state access", async () =>
       write: () => {},
     }), /canonical default Terraform workspace/);
     assert.equal(terraformCalls, 1);
-  } finally { rmSync(directory, { recursive: true, force: true }); }
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Stage-A recovery preserves only the reviewed required variables and performs readiness before census/import", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-variable-contract-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  const planPath = path.join(directory, "alias.plan");
+  writeFileSync(statePath, stateBytes, { mode: 0o600 });
+  writeFileSync(identityPath, `${JSON.stringify(stateIdentity)}\n`, { mode: 0o600 });
+  writeFileSync(censusPath, `${JSON.stringify(census())}\n`, { mode: 0o600 });
+  const saved = Object.fromEntries([...STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS, "TF_VAR_unreviewed"].map((key) => [key, process.env[key]]));
+  const sequence = [];
+  try {
+    Object.assign(process.env, { ...stageAVars, TF_VAR_unreviewed: "must-not-pass" });
+    assert.throws(() => buildRecoveryTerraformEnvironment("release", process.env, { allowedTerraformVariableKeys: STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS }), /unreviewed/);
+    delete process.env.TF_VAR_unreviewed;
+    let currentState = absentState;
+    const result = await runAdoption({
+      argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", planPath, "--execute"],
+      readRootDropCensus: async () => { sequence.push("census"); return census(); },
+      readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
+      execFile: (command, args, options) => {
+        sequence.push(args.includes("plan") && args.includes("-refresh=false") ? "readiness" : args.includes("workspace") ? "workspace" : args.includes("state") ? "state" : args[0]);
+        assert.equal(options.env.AWS_PROFILE, "release");
+        for (const key of STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS) assert.equal(options.env[key], stageAVars[key]);
+        assert.equal(options.env.TF_VAR_unreviewed, undefined);
+        if (args.includes("workspace")) return "default\n";
+        if (args.includes("state")) return JSON.stringify(currentState);
+        if (args.includes("import")) { currentState = keyState(); return ""; }
+        if (args.includes("apply")) { currentState = ownedState(); return ""; }
+        if (args.includes("show")) return JSON.stringify(args.at(-1).endsWith("zero-drift") ? { resource_changes: [] } : aliasPlan());
+        return "";
+      },
+      write: () => {},
+    });
+    assert.equal(result.status, "RECOVERED");
+    assert.deepEqual(sequence.slice(0, 3), ["workspace", "readiness", "census"]);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("missing, malformed, or wrong-identity Stage-A variables fail before Terraform", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-variable-fail-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  writeFileSync(statePath, stateBytes, { mode: 0o600 });
+  writeFileSync(identityPath, `${JSON.stringify(stateIdentity)}\n`, { mode: 0o600 });
+  writeFileSync(censusPath, `${JSON.stringify(census())}\n`, { mode: 0o600 });
+  const saved = Object.fromEntries(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS.map((key) => [key, process.env[key]]));
+  try {
+    for (const [key, value, expected] of [["TF_VAR_vpc_id", undefined, /requires TF_VAR_vpc_id/], ["TF_VAR_private_subnet_ids", "not-hcl", /Terraform must not run/], ["TF_VAR_aws_region", "us-east-1", /outside the protected production Stage-A variable contract/]]) {
+      Object.assign(process.env, stageAVars);
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      let terraformImports = 0;
+      await assert.rejects(() => runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", path.join(directory, `${key}.plan`)], readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }), execFile: (command, args) => { if (args.includes("import")) terraformImports += 1; if (args.includes("plan")) throw new Error("Terraform must not run"); return "default\n"; }, write: () => {} }), expected);
+      assert.equal(terraformImports, 0);
+    }
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("root-drop census consumes every paginated KMS and CloudTrail page", () => {

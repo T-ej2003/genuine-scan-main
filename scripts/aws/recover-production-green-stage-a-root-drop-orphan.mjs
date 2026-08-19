@@ -18,6 +18,33 @@ import {
 } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+export const STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS = Object.freeze([
+  "TF_VAR_aws_region",
+  "TF_VAR_vpc_id",
+  "TF_VAR_private_subnet_ids",
+  "TF_VAR_runtime_security_group_ids",
+  "TF_VAR_s3_prefix_list_id",
+  "TF_VAR_vpc_dns_resolver_cidr",
+  "TF_VAR_checker_principal_arns",
+  "TF_VAR_release_role_arn",
+  "TF_VAR_receipt_bucket_arn",
+]);
+const STAGE_A_FIXED_TERRAFORM_VARIABLES = Object.freeze({
+  TF_VAR_aws_region: STAGE_B.region,
+  TF_VAR_checker_principal_arns: `["arn:aws:iam::${STAGE_B.account}:role/mscqr-production-independent-checker"]`,
+  TF_VAR_release_role_arn: `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-release-deployer`,
+  TF_VAR_receipt_bucket_arn: `arn:aws:s3:::mscqr-prod-euw2-artifacts-${STAGE_B.account}-${STAGE_B.region}-an`,
+});
+const assertStageATerraformVariables = (baseEnv = process.env) => {
+  const allowed = new Set(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS);
+  const unexpected = Object.keys(baseEnv).filter((key) => key.startsWith("TF_VAR_") && !allowed.has(key));
+  if (unexpected.length) throw new Error(`Stage-A recovery received unreviewed Terraform variables: ${unexpected.sort().join(", ")}`);
+  for (const key of STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS) {
+    if (typeof baseEnv[key] !== "string" || !baseEnv[key].trim()) throw new Error(`Stage-A recovery requires ${key} from the canonical production variable-input contract`);
+  }
+  for (const [key, expected] of Object.entries(STAGE_A_FIXED_TERRAFORM_VARIABLES)) if (baseEnv[key] !== expected) throw new Error(`${key} is outside the protected production Stage-A variable contract`);
+  return true;
+};
 const option = (argv, name, required = true) => {
   const index = argv.indexOf(name);
   const value = index >= 0 ? argv[index + 1] : undefined;
@@ -118,6 +145,13 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const planPath = option(argv, "--plan-path");
   const { planPath: validatedPlanPath, zeroDriftPlanPath } = validateRootDropPlanPaths({ planPath, reservedPaths: [censusPath, statePath, identityPath] });
   readTerraformBackendMetadata(terraformRoot);
+  assertStageATerraformVariables();
+  const env = buildRecoveryTerraformEnvironment(releaseProfile, process.env, { allowedTerraformVariableKeys: STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS });
+  const tf = runTerraform
+    ? (args) => runTerraform(args, env)
+    : (args) => execFile("terraform", [`-chdir=${terraformRoot}`, ...args], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  if (tf(["workspace", "show"]).trim() !== "default") throw new Error("Stage-A root-drop adoption requires the canonical default Terraform workspace");
+  tf(["plan", "-input=false", "-lock=false", "-refresh=false", "-no-color"]);
   const freshCensus = readRootDropCensus
     ? await readRootDropCensus({ census, stageAState, stageAStateIdentity, profile: releaseProfile, adminProfile, releaseProfile })
     : collectRootDropCensus({
@@ -127,11 +161,8 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
       transitionId: census.transitionId,
       stageAStateIdentity,
       failedApplyEvidence: census.failedApplyEvidence,
-    });
+  });
   const execute = argv.includes("--execute");
-  const env = buildRecoveryTerraformEnvironment(releaseProfile);
-  const tf = runTerraform || ((args) => execFile("terraform", [`-chdir=${terraformRoot}`, ...args], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-  if (tf(["workspace", "show"]).trim() !== "default") throw new Error("Stage-A root-drop adoption requires the canonical default Terraform workspace");
   const readStateSnapshot = async () => { const stateBytes = Buffer.from(tf(["state", "pull"])); return { state: JSON.parse(stateBytes), stateBytes }; };
   const readState = async () => (await readStateSnapshot()).state;
   const importKey = async ({ address, id }) => { tf(["import", "-input=false", "-lock=true", address, id]); return { outcome: "CONFIRMED_SUCCESS" }; };
