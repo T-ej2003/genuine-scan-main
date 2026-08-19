@@ -182,7 +182,15 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const stageAState = JSON.parse(stateBytes);
   const stageAStateIdentity = readJson(identityPath);
   assertStageAStateIdentityBinding(buildStageAStateIdentity(stageAState, { stateBytes }), stageAStateIdentity);
-  assertRootDropCensus(census, { sourceSha: census.sourceSha, transitionId: census.transitionId, stageAStateIdentity });
+  const legacyPolicyBound = census.status === "AUTHENTICATED_ORPHAN" && census.candidates?.[0]?.policyCompatibility === "LEGACY_BOUND_HISTORICAL";
+  const stageARootDropCounts = (value) => ({
+    keyCount: (value.resources || []).filter((resource) => resource?.type === "aws_kms_key" && resource?.name === "root_drop").flatMap((resource) => Array.isArray(resource.instances) ? resource.instances : []).length,
+    aliasCount: (value.resources || []).filter((resource) => resource?.type === "aws_kms_alias" && resource?.name === "root_drop").flatMap((resource) => Array.isArray(resource.instances) ? resource.instances : []).length,
+  });
+  const censusIdentity = { lineage: census.stageAStateLineage, serial: census.stageAStateSerial, stateSha256: census.stageAStateSha256 };
+  const currentStateCounts = stageARootDropCounts(stageAState);
+  if (legacyPolicyBound && currentStateCounts.keyCount === 1 && currentStateCounts.aliasCount === 0 && (censusIdentity.lineage !== stageAStateIdentity.lineage || censusIdentity.serial !== stageAStateIdentity.serial || censusIdentity.stateSha256 !== stageAStateIdentity.stateSha256)) assertRootDropCensus(census, { sourceSha: census.sourceSha, transitionId: census.transitionId, stageAStateIdentity: censusIdentity });
+  else assertRootDropCensus(census, { sourceSha: census.sourceSha, transitionId: census.transitionId, stageAStateIdentity });
   const adminProfile = option(argv, "--admin-profile");
   const releaseProfile = option(argv, "--release-profile");
   if (adminProfile === releaseProfile) throw new Error("Stage-A root-drop adoption requires distinct administrator and release profiles");
@@ -191,7 +199,6 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const region = suppliedRegion || STAGE_B.region;
   if (region !== STAGE_B.region) throw new Error("Stage-A root-drop adoption: region is outside the protected production boundary");
   const terraformRoot = assertCanonicalTerraformRoot(option(argv, "--terraform-root", false));
-  const legacyPolicyBound = census.status === "AUTHENTICATED_ORPHAN" && census.candidates?.[0]?.policyCompatibility === "LEGACY_BOUND_HISTORICAL";
   const executionSourceSha = legacyPolicyBound ? option(argv, "--execution-source-sha") : census.sourceSha;
   const planPath = option(argv, "--plan-path");
   const { planPath: validatedPlanPath, zeroDriftPlanPath, preImportPlanPath } = validateRootDropPlanPaths({ planPath, reservedPaths: [censusPath, statePath, identityPath] });
@@ -212,10 +219,7 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const createPlan = async ({ zeroDrift = false } = {}) => { const output = zeroDrift ? zeroDriftPlanPath : validatedPlanPath; tf(["plan", "-input=false", "-lock=true", "-out", output]); return output; };
   const readPlan = async (savedPath) => JSON.parse(tf(["show", "-json", savedPath]));
   const applyPlan = async (savedPath) => { if (!execute) throw new Error("alias apply requires explicit --execute"); tf(["apply", "-input=false", "-lock=true", savedPath]); return { outcome: "CONFIRMED_SUCCESS" }; };
-  const rootDropCounts = (value) => ({
-    keyCount: (value.resources || []).filter((resource) => resource?.type === "aws_kms_key" && resource?.name === "root_drop").flatMap((resource) => Array.isArray(resource.instances) ? resource.instances : []).length,
-    aliasCount: (value.resources || []).filter((resource) => resource?.type === "aws_kms_alias" && resource?.name === "root_drop").flatMap((resource) => Array.isArray(resource.instances) ? resource.instances : []).length,
-  });
+  const rootDropCounts = stageARootDropCounts;
   const initialSnapshot = await readStateSnapshot();
   const initialStateIdentity = buildStageAStateIdentity(initialSnapshot.state, { stateBytes: initialSnapshot.stateBytes });
   const initialCounts = rootDropCounts(initialSnapshot.state);
@@ -232,13 +236,12 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   let refreshedSnapshot = initialSnapshot;
   let currentStateIdentity = initialStateIdentity;
   let preImportPlanSha256;
+  let preImportPlan;
   if (initialCounts.aliasCount === 0) {
     tf(["plan", "-input=false", "-lock=false", "-refresh=true", "-out", preImportPlanPath, "-no-color"]);
     preImportPlanSha256 = rootDropRecoverySha256(readFileSync(preImportPlanPath));
-    const preImportPlan = JSON.parse(tf(["show", "-json", preImportPlanPath]));
+    preImportPlan = JSON.parse(tf(["show", "-json", preImportPlanPath]));
     if (rootDropRecoverySha256(readFileSync(preImportPlanPath)) !== preImportPlanSha256) throw new Error("Stage-A pre-import plan changed while it was being classified");
-    if (initialCounts.keyCount === 0) assertRootDropPreImportPlan(preImportPlan);
-    else assertRootDropAliasOnlyPlan(preImportPlan, { keyId: census.candidates[0].keyId, policyCompatibility: census.candidates[0].policyCompatibility });
     refreshedSnapshot = await readStateSnapshot();
     currentStateIdentity = buildStageAStateIdentity(refreshedSnapshot.state, { stateBytes: refreshedSnapshot.stateBytes });
     assertStageAStateIdentityBinding(currentStateIdentity, initialStateIdentity);
@@ -256,6 +259,10 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
       failedApplyEvidence: census.failedApplyEvidence,
       allowKeyOnly: initialCounts.keyCount === 1,
   });
+  if (initialCounts.aliasCount === 0) {
+    if (initialCounts.keyCount === 0) assertRootDropPreImportPlan(preImportPlan);
+    else assertRootDropAliasOnlyPlan(preImportPlan, { keyId: freshCensus?.candidates?.[0]?.keyId, policyCompatibility: freshCensus?.candidates?.[0]?.policyCompatibility });
+  }
   const runner = createRootDropRecoveryRunner({ execute, readState, readStateSnapshot, importKey, refreshState, createPlan, readPlan, readPlanBytes: async (savedPath) => readFileSync(savedPath), applyPlan });
   const result = await runner({ census, freshCensus, terraformState: refreshedSnapshot.state, stageAStateIdentity: currentStateIdentity, sourceSha: census.sourceSha, transitionId: census.transitionId, planSha256: census.failedApplyEvidence?.planSha256 });
   const report = { ...result, preImportPlanSha256 };

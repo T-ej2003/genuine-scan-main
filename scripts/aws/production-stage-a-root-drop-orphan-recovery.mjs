@@ -262,13 +262,26 @@ export function assertRootDropCensusAdoptionMatch(supplied, fresh, bindings) {
   };
   assertRootDropCensus(supplied, { ...bindings, stageAStateIdentity: suppliedIdentity });
   assertRootDropCensus(fresh, bindings);
+  const suppliedCandidate = supplied?.candidates?.[0];
+  const freshCandidate = fresh?.candidates?.[0];
+  if (suppliedCandidate?.policyCompatibility === "LEGACY_BOUND_HISTORICAL" && freshCandidate?.policyCompatibility === "CANONICAL") {
+    assertLegacyRootDropPolicyBinding({ candidate: suppliedCandidate, sourceSha: supplied.sourceSha, transitionId: supplied.transitionId, failedApplyEvidence: supplied.failedApplyEvidence });
+    if (!samePolicy(freshCandidate.policy, buildStageARootDropKeyPolicy()) || !Array.isArray(suppliedCandidate.aliases) || suppliedCandidate.aliases.length !== 0 || !Array.isArray(freshCandidate.aliases) || freshCandidate.aliases.length !== 0) fail("root-drop policy convergence changed the authenticated orphan or alias topology");
+    const candidateIdentity = (value) => {
+      const copy = { ...(value || {}) };
+      for (const field of ["policy", "policyCompatibility", "candidateSha256"]) delete copy[field];
+      return copy;
+    };
+    if (canonical(candidateIdentity(suppliedCandidate)) !== canonical(candidateIdentity(freshCandidate)) || canonical(supplied.failedApplyEvidence) !== canonical(fresh.failedApplyEvidence)) fail("root-drop policy convergence is not bound to the same authenticated orphan provenance");
+    return { valid: true, policyTransition: "LEGACY_TO_CANONICAL", policyCompatibility: "CANONICAL", keyId: freshCandidate.keyId };
+  }
   const comparable = (value) => {
     const copy = { ...(value || {}) };
     for (const field of ["observedAt", "censusSha256", "stageAStateLineage", "stageAStateSerial", "stageAStateSha256"]) delete copy[field];
     return copy;
   };
   if (canonical(comparable(supplied)) !== canonical(comparable(fresh))) fail("root-drop census candidate changed across the authenticated adoption state transition");
-  return true;
+  return { valid: true, policyCompatibility: freshCandidate?.policyCompatibility };
 }
 
 function actionable(plan) {
@@ -398,8 +411,9 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
         return { status: "ALREADY_RECOVERED", accounting, keyId: suppliedCandidate.keyId, zeroDrift: true, observedAt: now() };
       }
       if (!freshCensus) fail("orphan adoption requires a fresh authoritative census");
-      if (keyCount === 0) assertRootDropCensusMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity });
-      else assertRootDropCensusAdoptionMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity });
+      const censusMatch = keyCount === 0
+        ? assertRootDropCensusMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity })
+        : assertRootDropCensusAdoptionMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity });
       assertRootDropCensusFresh(freshCensus);
       if (freshCensus.status !== "AUTHENTICATED_ORPHAN") fail("orphan adoption requires exactly one authenticated candidate");
       if (!SHA256.test(planSha256 || "") || planSha256 !== freshCensus.failedApplyEvidence.planSha256) fail("orphan adoption is not bound to the failed Stage-A plan");
@@ -424,7 +438,7 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
       const plan = await createPlan({ keyId: candidate.keyId });
       const classifiedPlanSha256 = typeof readPlanBytes === "function" ? rootDropRecoverySha256(await readPlanBytes(plan)) : undefined;
       const planJson = await readPlan(plan);
-      const planClassification = assertRootDropAliasOnlyPlan(planJson, { keyId: candidate.keyId, policyCompatibility: candidate.policyCompatibility });
+      const planClassification = assertRootDropAliasOnlyPlan(planJson, { keyId: candidate.keyId, policyCompatibility: censusMatch?.policyCompatibility || candidate.policyCompatibility });
       if (!execute) return { status: "READY_FOR_ALIAS_ADOPTION", accounting, keyId: candidate.keyId, plan, planSha256, imported: true, observedAt: now() };
       const applyPlanSha256 = rootDropRecoverySha256(await readPlanBytes(plan));
       if (applyPlanSha256 !== classifiedPlanSha256) fail("alias Terraform plan changed after classification; refusing to apply substituted plan");
