@@ -10,6 +10,7 @@ import { STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS } from "./stage-b-evidence-fres
 import { ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 import { IMAGE_EVIDENCE_SIGNING_KEY_ARN } from "./production-green-stage-b-image-evidence.mjs";
+import { ROOT_DROP_SIGNING_KEY_ARN } from "./production-root-drop-evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -56,6 +57,7 @@ const PHASES = Object.freeze([
   ["stage-b-state-pull", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["stage-a-state-read", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["stage-a-handoff-generation", "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"],
+  ["root-drop-evidence-signing", "scripts/aws/produce-production-root-drop-evidence.mjs"],
   ["tfvars-generation", "scripts/aws/generate-production-green-stage-b-tfvars.mjs"],
   ["refresh-only", "scripts/refresh-production-green-stage-b.mjs"],
   ["saved-plan-generation", "scripts/plan-production-green-stage-b.mjs"],
@@ -89,6 +91,13 @@ const FIXED = Object.freeze([
   ["release-verify-signature", "release-direct-read-preflight", "RELEASE_DEPLOYER", "kms:Verify", "RELEASE_DIRECT_READ", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["release-identify", "release-direct-read-preflight", "RELEASE_DEPLOYER", "sts:GetCallerIdentity", "RELEASE_DIRECT_READ", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
 ]);
+
+const ROOT_DROP_SIGNING = Object.freeze({
+  id: "root-drop-sign-evidence", phase: "root-drop-evidence-signing", identity: "ROOT_OPERATOR", executor: "aws-cli",
+  sourceFile: "scripts/aws/produce-production-root-drop-evidence.mjs", sourceFunction: "produce-production-root-drop-evidence",
+  action: "kms:Sign", resources: [ROOT_DROP_SIGNING_KEY_ARN], context: { account: STAGE_B.account, region: STAGE_B.region },
+  classification: "ROOT_DROP_SIGN", probe: "structural", policy: { sourceFile: "scripts/aws/produce-production-root-drop-evidence.mjs", sid: "root-drop-signing-boundary", livePolicyArn: null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: true,
+});
 
 const RECOVERY_CAPABILITIES = Object.freeze([
   ["recovery-list-backend-revisions", "ecs:ListTaskDefinitions", ["*"]],
@@ -183,7 +192,10 @@ function discoverAwsCliActions() {
     for (const match of source.matchAll(pattern)) {
       const service = match[1] === "s3api" ? "s3" : match[1];
       const operation = match[2].split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("").replaceAll("Db", "DB").replaceAll("Vpc", "VPC").replaceAll("Url", "URL");
-      calls.push({ sourceFile, action: `${service}:${service === "lambda" && operation === "Invoke" ? "InvokeFunction" : operation}` });
+      const action = `${service}:${service === "lambda" && operation === "Invoke" ? "InvokeFunction" : operation}`;
+      calls.push(sourceFile === "scripts/aws/produce-production-root-drop-evidence.mjs" && action === "kms:Sign"
+        ? { sourceFile, sourceFunction: "produce-production-root-drop-evidence", phase: "root-drop-evidence-signing", identity: "ROOT_OPERATOR", action, resources: [ROOT_DROP_SIGNING_KEY_ARN], capabilityId: "root-drop-sign-evidence" }
+        : { sourceFile, action });
     }
   }
   return calls.filter((call, index) => calls.findIndex((candidate) => candidate.sourceFile === call.sourceFile && candidate.action === call.action) === index)
@@ -225,11 +237,11 @@ export function buildStageBDeploymentCapabilityGraph() {
     return { id, phase: "existing-revision-forward-recovery", identity: "RELEASE_DEPLOYER", executor: "terraform", sourceFile: "scripts/aws/forward-recover-stage-b-existing-revision.mjs", sourceFunction: id, action, resources, context: { account: "368992683803", region: "eu-west-2" }, classification: /^(?:s3:PutObject|s3:DeleteObject)$/.test(action) ? "FORWARD_RECOVERY_IMPORT_MUTATION" : "FORWARD_RECOVERY_READ", probe: "administrator-simulation", probeIds: [], policy: authority(entry, false, policies), required: true, mutation: /^(?:s3:PutObject|s3:DeleteObject)$/.test(action) };
   });
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: !/^(?:ecr:|kms:Verify|secretsmanager:Get|s3:Get)/.test(action) }));
-  const capabilities = [...fixed, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, ROOT_DROP_SIGNING, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
-    identities: ["GITHUB_IMAGE_PUBLISHER", "ADMINISTRATOR", "BOOTSTRAP_OPERATOR", "RELEASE_DEPLOYER", "INDEPENDENT_CHECKER", "ECS_EXEC_VERIFIER_OPERATOR", "SERVICE_RUNTIME"], capabilities,
+    identities: ["GITHUB_IMAGE_PUBLISHER", "ADMINISTRATOR", "ROOT_OPERATOR", "BOOTSTRAP_OPERATOR", "RELEASE_DEPLOYER", "INDEPENDENT_CHECKER", "ECS_EXEC_VERIFIER_OPERATOR", "SERVICE_RUNTIME"], capabilities,
     directProbes: RELEASE_READ_PROBES.map(({ id, action }) => ({ id, action })), sourceScan: discoverAwsCliActions(),
     artifactContracts: ["protected-checkout", "image-impact", "schema-v3-image-evidence", "stage-a-handoff", "tfvars-binding-report", "refresh-only", "saved-plan", "canonical-plan-json", "reference-audit", "plan-capability-manifest", "signed-permission-report"],
     stateContracts: ["stage-a-exact-object-lineage-minimum-serial-sha", "stage-b-direct-key-lineage-minimum-serial-sha", "stage-b-serial-stable-plan-to-apply"],
@@ -241,7 +253,7 @@ export function buildStageBDeploymentCapabilityGraph() {
 export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILITY_GRAPH_PATH)) {
   const expected = buildStageBDeploymentCapabilityGraph();
   if (canonicalizeJson(graph) !== canonicalizeJson(expected)) throw new Error("Stage B deployment capability graph is stale or incomplete.");
-  if (graph.phases.length !== 33 || new Set(graph.phases.map(({ id }) => id)).size !== 33) throw new Error("Stage B capability graph phase coverage is incomplete.");
+  if (graph.phases.length !== 34 || new Set(graph.phases.map(({ id }) => id)).size !== 34) throw new Error("Stage B capability graph phase coverage is incomplete.");
   if (new Set(graph.capabilities.map(({ id }) => id)).size !== graph.capabilities.length) throw new Error("Stage B capability IDs are not unique.");
   if (graph.capabilities.some(({ identity, action }) => !identity || !action)) throw new Error("Stage B capability identity is ambiguous.");
   for (const [phase, ids] of Object.entries(PHASE_CAPABILITY_REQUIREMENTS)) {
@@ -257,6 +269,8 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   if (graph.capabilities.some(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:GetSecretValue" && resources.includes(STAGE_B.approvalSecretArn))) throw new Error("Checker approval secret read authority is present.");
   if (graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "ecs:ExecuteCommand" && !graph.capabilities.some(({ id }) => id === "manifest-release-deployer-ecs-exec"))) throw new Error("Release-deployer ECS Exec boundary is not represented.");
   if (!graph.capabilities.some(({ identity, action, resources }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand" && resources.includes(`arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*`))) throw new Error("Dedicated ECS Exec operator capability is absent.");
+  const rootDropSigning = graph.capabilities.find(({ id }) => id === "root-drop-sign-evidence");
+  if (!rootDropSigning || rootDropSigning.phase !== "root-drop-evidence-signing" || rootDropSigning.identity !== "ROOT_OPERATOR" || rootDropSigning.sourceFile !== "scripts/aws/produce-production-root-drop-evidence.mjs" || rootDropSigning.action !== "kms:Sign" || JSON.stringify(rootDropSigning.resources) !== JSON.stringify([ROOT_DROP_SIGNING_KEY_ARN])) throw new Error("Root-drop signing capability is not exact.");
   const graphActions = new Set(graph.capabilities.map(({ action }) => action));
   for (const probe of RELEASE_READ_PROBES) if (!graphActions.has(probe.action)) throw new Error(`Release probe is absent from capability graph: ${probe.id}.`);
   assertStageBAwsCallCoverage(graph, graph.sourceScan);
@@ -265,7 +279,13 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
 
 export function assertStageBAwsCallCoverage(graph, calls) {
   const graphActions = new Set(graph.capabilities.map(({ action }) => action));
-  for (const call of calls) if (!graphActions.has(call.action)) throw new Error(`Production AWS CLI call is absent from capability graph: ${call.sourceFile} ${call.action}.`);
+  for (const call of calls) {
+    if (call.capabilityId) {
+      const capability = graph.capabilities.find(({ id }) => id === call.capabilityId);
+      if (!capability || capability.sourceFile !== call.sourceFile || capability.sourceFunction !== call.sourceFunction || capability.phase !== call.phase || capability.identity !== call.identity || capability.action !== call.action || JSON.stringify(capability.resources) !== JSON.stringify(call.resources)) throw new Error(`Production AWS call has no exact capability coverage: ${call.sourceFile} ${call.action}.`);
+    } else if (call.sourceFile === "scripts/aws/produce-production-root-drop-evidence.mjs" && call.action === "kms:Sign") throw new Error(`Production AWS root-drop signing call lacks exact capability coverage: ${call.sourceFile} ${call.action}.`);
+    else if (!graphActions.has(call.action)) throw new Error(`Production AWS CLI call is absent from capability graph: ${call.sourceFile} ${call.action}.`);
+  }
   return true;
 }
 

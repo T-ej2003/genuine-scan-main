@@ -41,13 +41,13 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
   const matrix = readIdentityCapabilityMatrix();
   assert(matrix.calls.some(({ identity, action }) => identity === "ADMINISTRATOR" && action === "iam:SimulatePrincipalPolicy"));
   assert(!matrix.calls.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy"));
-  assert.equal(matrix.phases.length, 33);
+  assert.equal(matrix.phases.length, 34);
 });
 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 33, capabilities: 259, uniqueActions: 125, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 34, capabilities: 260, uniqueActions: 125, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
@@ -61,6 +61,17 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   assert(forward.every(({ sourceFile, identity }) => sourceFile === "scripts/aws/forward-recover-stage-b-existing-revision.mjs" && identity === "RELEASE_DEPLOYER"));
   assert(forward.every(({ action }) => !["ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition", "ecs:UpdateService", "terraform:Apply"].includes(action)));
   assert(first.configurationContracts.includes("checker-user-mfa-live-trust-to-independent-role-chain"));
+  const rootDrop = first.capabilities.find(({ id }) => id === "root-drop-sign-evidence");
+  const rootCall = first.sourceScan.find(({ capabilityId }) => capabilityId === "root-drop-sign-evidence");
+  assert.equal(rootDrop.identity, "ROOT_OPERATOR");
+  assert.deepEqual(rootDrop.resources, ["arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-drop"]);
+  assert.doesNotThrow(() => assertStageBAwsCallCoverage(first, [rootCall]));
+  for (const mutation of [{ sourceFile: "wrong.mjs" }, { sourceFunction: "wrong-function" }, { identity: "ADMINISTRATOR" }, { resources: ["arn:aws:kms:eu-west-2:368992683803:key/unrelated"] }]) {
+    assert.throws(() => assertStageBAwsCallCoverage(first, [{ ...rootCall, ...mutation }]), /exact capability coverage/);
+  }
+  assert.throws(() => assertStageBAwsCallCoverage(first, [{ sourceFile: rootCall.sourceFile, action: rootCall.action }]), /lacks exact capability coverage/);
+  const withoutRoot = { ...first, capabilities: first.capabilities.filter(({ id }) => id !== "root-drop-sign-evidence") };
+  assert.throws(() => assertStageBAwsCallCoverage(withoutRoot, [rootCall]), /exact capability coverage/);
 });
 
 test("unknown, removed, or identity-reassigned capabilities fail graph verification", () => {
