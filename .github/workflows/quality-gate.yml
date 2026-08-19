@@ -374,6 +374,21 @@ jobs:
           E2E_START_BACKEND: "true"
         run: npm run verify:ci:frontend:e2e
 
+      - name: Upload frontend Playwright failure diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-playwright-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results/batch-reissue-recovery-*/test-failed-*.png
+            test-results/batch-reissue-recovery-*/error-context.md
+            test-results/client-pages.visual-*/client-mfa-setup-light-actual.png
+            test-results/client-pages.visual-*/client-mfa-setup-light-diff.png
+            test-results/client-pages.visual-*/test-failed-*.png
+            test-results/client-pages.visual-*/error-context.md
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Clean disposable enterprise E2E database
         if: >-
           always() &&
