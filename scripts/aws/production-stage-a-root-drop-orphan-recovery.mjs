@@ -266,7 +266,7 @@ export function buildRootDropAwsReadAdapter({ run, profile, discoveryProfile = p
   return Object.freeze({
     actorBindings,
     listKeys: () => readPages(["kms", "list-keys"], "Keys", "--starting-token", discoveryProfile),
-    describeKey: (keyId) => read(["kms", "describe-key", "--key-id", keyId]).KeyMetadata,
+    describeKey: (keyId) => read(["kms", "describe-key", "--key-id", keyId], discoveryProfile).KeyMetadata,
     listTags: (keyId) => read(["kms", "list-resource-tags", "--key-id", keyId]).Tags || [],
     getPolicy: (keyId) => JSON.parse(decodeURIComponent(read(["kms", "get-key-policy", "--key-id", keyId, "--policy-name", "default"]).Policy)),
     getPublicKey: (keyId) => read(["kms", "get-public-key", "--key-id", keyId]),
@@ -285,7 +285,14 @@ export function collectRootDropCensus({ adapter, terraformState, sourceSha, tran
   const candidates = [];
   for (const listed of adapter.listKeys()) {
     const metadata = adapter.describeKey(listed.KeyId);
-    if ((metadata?.KeySpec && metadata.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec) || (metadata?.KeyUsage && metadata.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage) || metadata?.KeyManager === "AWS" || metadata?.Origin === "AWS_CLOUDHSM") continue;
+    const provablyIrrelevant = (metadata?.AWSAccountId && metadata.AWSAccountId !== STAGE_B.account)
+      || (metadata?.Arn && !KEY_ARN.test(metadata.Arn))
+      || (metadata?.KeySpec && metadata.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec)
+      || (metadata?.KeyUsage && metadata.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage)
+      || (metadata?.KeyManager && metadata.KeyManager !== "CUSTOMER")
+      || (metadata?.Origin && metadata.Origin !== "AWS_KMS")
+      || metadata?.MultiRegion === true;
+    if (provablyIrrelevant) continue;
     const tags = rootDropTagsFromAws(adapter.listTags(metadata.KeyId));
     const policy = adapter.getPolicy(metadata.KeyId);
     const aliases = adapter.listAliases(metadata.KeyId);

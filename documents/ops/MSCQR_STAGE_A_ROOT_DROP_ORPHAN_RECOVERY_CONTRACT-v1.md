@@ -18,12 +18,19 @@ plan SHA, creator session, observation time, and census digest. Tags alone
 never authenticate a candidate.
 
 The census uses the approved split-actor boundary: administrator/root performs
-account-wide `kms:ListKeys` discovery and `cloudtrail:LookupEvents` provenance
-reads; `mscqr-production-release-deployer` performs the scoped per-key KMS
-reads and Terraform operations. The census records these actor-domain
-bindings; neither identity is substituted for the other. Existing STS
-preflight evidence authenticates the selected profiles; the census digest
-does not claim to be a digital signature.
+account-wide `kms:ListKeys` and coarse `kms:DescribeKey` discovery plus
+`cloudtrail:LookupEvents` provenance reads; `mscqr-production-release-deployer`
+performs only the scoped tags, key-policy, public-key, and alias reads for
+metadata that is not provably irrelevant, followed by Terraform operations.
+The census records these actor-domain bindings; neither identity is
+substituted for the other. Existing STS preflight evidence authenticates the
+selected profiles; the census digest does not claim to be a digital signature.
+
+Coarse metadata may exclude a key only when it proves that the key cannot be
+the exact customer-managed, single-region RSA_3072/SIGN_VERIFY AWS_KMS
+root-drop key (for example an AWS-managed key, a different key spec/usage, or
+an explicit account/region/origin mismatch). A release read failure on any
+remaining key fails closed; it is never converted into `NO_CANDIDATE`.
 
 The census is valid only as one of:
 

@@ -242,11 +242,57 @@ test("root-drop census adapter binds discovery and CloudTrail provenance to admi
   });
   adapter.listKeys();
   adapter.describeKey(keyId);
+  adapter.listTags(keyId);
   adapter.lookupCreateKeyEvents(keyArn);
   assert.equal(seen[0][seen[0].indexOf("--profile") + 1], "administrator");
-  assert.equal(seen[1][seen[1].indexOf("--profile") + 1], "release");
-  assert.equal(seen[2][seen[2].indexOf("--profile") + 1], "administrator");
+  assert.equal(seen[1][seen[1].indexOf("--profile") + 1], "administrator");
+  assert.equal(seen[2][seen[2].indexOf("--profile") + 1], "release");
+  assert.equal(seen[3][seen[3].indexOf("--profile") + 1], "administrator");
   assert.deepEqual(adapter.actorBindings, { discovery: "ADMINISTRATOR", resourceReads: "RELEASE_DEPLOYER", provenance: "ADMINISTRATOR" });
+});
+
+test("privileged coarse discovery excludes unrelated keys without hiding a later root-drop candidate", () => {
+  const unrelatedKeyId = "22222222-2222-2222-2222-222222222222";
+  const unrelatedArn = `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${unrelatedKeyId}`;
+  const calls = [];
+  const adapter = buildRootDropAwsReadAdapter({
+    profile: "release",
+    discoveryProfile: "administrator",
+    provenanceProfile: "administrator",
+    run: (args) => {
+      const profile = args[args.indexOf("--profile") + 1];
+      calls.push({ args, profile });
+      if (args[0] === "kms" && args[1] === "list-keys") return JSON.stringify({ Keys: [{ KeyId: unrelatedKeyId }, { KeyId: keyId }] });
+      if (args[0] === "kms" && args[1] === "describe-key" && args.includes(unrelatedKeyId)) return JSON.stringify({ KeyMetadata: { KeyId: unrelatedKeyId, Arn: unrelatedArn, AWSAccountId: STAGE_B.account, KeyManager: "AWS", KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT", Origin: "AWS_KMS", MultiRegion: false } });
+      if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: candidate().metadata });
+      if (args[0] === "kms" && args[1] === "list-resource-tags") return JSON.stringify({ Tags: Object.entries(candidate().tags).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) });
+      if (args[0] === "kms" && args[1] === "get-key-policy") return JSON.stringify({ Policy: encodeURIComponent(JSON.stringify(candidate().policy)) });
+      if (args[0] === "kms" && args[1] === "get-public-key") return JSON.stringify(candidate().publicKey);
+      if (args[0] === "kms" && args[1] === "list-aliases") return JSON.stringify({ Aliases: [] });
+      if (args[0] === "cloudtrail") return JSON.stringify({ Events: [awsLookupEvent] });
+      throw new Error(`unexpected read ${args.join(" ")}`);
+    },
+  });
+  const result = collectRootDropCensus({ adapter, terraformState: absentState, sourceSha, transitionId, stageAStateIdentity: stateIdentity, failedApplyEvidence });
+  assert.equal(result.status, "AUTHENTICATED_ORPHAN");
+  assert.equal(result.candidates[0].keyId, keyId);
+  assert.deepEqual(calls.filter(({ args }) => args.includes(unrelatedKeyId)).map(({ args, profile }) => ({ action: args.slice(0, 2).join(":"), profile })), [{ action: "kms:describe-key", profile: "administrator" }]);
+  assert(calls.some(({ args, profile }) => args[0] === "kms" && args[1] === "list-resource-tags" && profile === "release"));
+});
+
+test("release denial on a potentially relevant candidate fails closed instead of becoming NO_CANDIDATE", () => {
+  const adapter = buildRootDropAwsReadAdapter({
+    profile: "release",
+    discoveryProfile: "administrator",
+    provenanceProfile: "administrator",
+    run: (args) => {
+      if (args[0] === "kms" && args[1] === "list-keys") return JSON.stringify({ Keys: [{ KeyId: keyId }] });
+      if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: candidate().metadata });
+      if (args[0] === "kms" && args[1] === "list-resource-tags") throw new Error("AccessDenied: kms:ListResourceTags");
+      throw new Error(`unexpected read ${args.join(" ")}`);
+    },
+  });
+  assert.throws(() => collectRootDropCensus({ adapter, terraformState: absentState, sourceSha, transitionId, stageAStateIdentity: stateIdentity, failedApplyEvidence }), /AccessDenied/);
 });
 
 test("real LookupEvents wrapper/payload ID disagreement or missing IDs fails closed", () => {
