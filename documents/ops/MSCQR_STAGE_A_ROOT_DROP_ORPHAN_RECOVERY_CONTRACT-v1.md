@@ -112,15 +112,21 @@ key and alias create envelope is accepted. For the authenticated historical
 1/0 path, the provider boundary is different and explicit: after temporary
 authorization, `terraform plan -refresh-only -out <refresh-only-plan>` is
 saved, shown as JSON, classified as the exact root-drop computed-identity
-transition, byte-revalidated immediately before `terraform apply` of that
+transition plus, when present, only the exact provider-computed forward
+`aws_db_instance.green.latest_restorable_time` UTC timestamp transition,
+byte-revalidated immediately before `terraform apply` of that
 saved refresh-only plan, and then `terraform state pull` must observe the
 persisted result. This is `AWS_RESOURCE_MUTATIONS=0` but an expected
 `TERRAFORM_STATE_WRITES=1`; it is not an ordinary infrastructure apply.
 The refreshed state lineage, backend, workspace, exact key properties, 1/0
 topology, and unrelated state values are revalidated against the pre-refresh
-identity. The provider may advance serial/state bytes only while populating
-the exact root-drop ARN and key ID. The resulting post-refresh state identity
-is then bound to the new recovery plan and all subsequent checks.
+identity. The RDS exception is valid only for the exact managed green database,
+an update with no replacement or unknown values, strict forward RFC3339 UTC
+timestamps, and no other attribute difference; it never authorizes a
+configuration-driven `resource_changes` entry. The provider may advance
+serial/state bytes only while populating the exact root-drop ARN/key ID and,
+when observed, that exact RDS computed timestamp. The resulting post-refresh
+state identity is then bound to the new recovery plan and all subsequent checks.
 Auto-loaded `terraform.tfvars` and `*.auto.tfvars` files are rejected so the reviewed inputs remain authoritative. The executing
 checkout must have a clean execution-relevant tree and its exact `HEAD` must
 equal the census `sourceSha`; for the exact historical legacy-policy binding,

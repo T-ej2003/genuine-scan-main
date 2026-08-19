@@ -355,6 +355,32 @@ function assertRootDropComputedRefresh(before, after, keyId) {
   return expectedArn;
 }
 
+const RDS_GREEN_ADDRESS = "aws_db_instance.green";
+const RDS_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+function assertRdsLatestRestorableTimeRefresh(before, after) {
+  if (!before || typeof before !== "object" || Array.isArray(before) || !after || typeof after !== "object" || Array.isArray(after)) fail("refresh-only root-drop plan contains malformed RDS before/after state");
+  const parseTimestamp = (value) => {
+    const milliseconds = typeof value === "string" && RDS_UTC_TIMESTAMP.test(value) ? Date.parse(value) : NaN;
+    if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value.replace("Z", ".000Z")) fail("refresh-only root-drop plan contains a malformed RDS latest_restorable_time");
+    return milliseconds;
+  };
+  if (parseTimestamp(after.latest_restorable_time) <= parseTimestamp(before.latest_restorable_time)) fail("refresh-only root-drop plan contains a non-forward RDS latest_restorable_time");
+  const withoutTimestamp = (value) => Object.fromEntries(Object.entries(value).filter(([field]) => field !== "latest_restorable_time"));
+  if (!same(withoutTimestamp(before), withoutTimestamp(after))) fail("refresh-only root-drop plan changes RDS state outside latest_restorable_time");
+  return true;
+}
+
+function assertRdsLatestRestorableTimeDrift(entry) {
+  const change = entry?.change;
+  const emptyObject = (value) => value === undefined || value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
+  if (entry?.address !== RDS_GREEN_ADDRESS || entry.mode !== "managed" || entry.type !== "aws_db_instance" || entry.name !== "green"
+    || !change || !same(change.actions, ["update"]) || change.replace_paths !== undefined && (!Array.isArray(change.replace_paths) || change.replace_paths.length)
+    || !emptyObject(change.before_unknown) || !emptyObject(change.after_unknown)) fail("refresh-only root-drop plan contains uncontracted RDS drift");
+  assertRdsLatestRestorableTimeRefresh(change.before, change.after);
+  return true;
+}
+
 export function assertRootDropRefreshOnlyPlan(plan, { keyId, stateAlreadyConverged = false } = {}) {
   if (!plan || (plan.resource_changes !== undefined && !Array.isArray(plan.resource_changes)) || (plan.resource_drift !== undefined && !Array.isArray(plan.resource_drift))) fail("refresh-only root-drop plan is not machine-readable");
   if (plan.resource_changes && actionable(plan).length) fail("refresh-only root-drop plan contains configuration-driven resource changes");
@@ -365,14 +391,20 @@ export function assertRootDropRefreshOnlyPlan(plan, { keyId, stateAlreadyConverg
   if (plan.resource_drift.some((entry) => !entry || typeof entry !== "object" || !entry.change || typeof entry.change !== "object" || !Array.isArray(entry.change.actions))) fail("refresh-only root-drop plan contains malformed resource drift");
   const changes = plan.resource_drift;
   if (changes.length === 0 && stateAlreadyConverged) return { valid: true, stateConverged: true, address: ROOT_DROP_KEY_ADDRESS, actions: ["no-op"], keyId, arn: `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}` };
-  if (changes.length !== 1 || changes[0].address !== ROOT_DROP_KEY_ADDRESS || changes[0].mode !== "managed" || changes[0].type !== "aws_kms_key" || changes[0].name !== "root_drop") fail("refresh-only root-drop plan must contain only the root-drop key state convergence");
-  const change = changes[0].change || {};
+  const rootChanges = changes.filter(({ address }) => address === ROOT_DROP_KEY_ADDRESS);
+  const rdsChanges = changes.filter(({ address }) => address === RDS_GREEN_ADDRESS);
+  if (rootChanges.length > 1 || rdsChanges.length > 1 || rootChanges.length + rdsChanges.length !== changes.length || rootChanges.length === 0 && !stateAlreadyConverged) fail("refresh-only root-drop plan must contain only the contracted root-drop and RDS computed convergence");
+  if (rdsChanges.length) assertRdsLatestRestorableTimeDrift(rdsChanges[0]);
+  if (rootChanges.length === 0) return { valid: true, stateConverged: true, address: ROOT_DROP_KEY_ADDRESS, actions: ["no-op"], keyId, arn: `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}`, rdsLatestRestorableTimeRefreshed: true };
+  const root = rootChanges[0];
+  if (root.mode !== "managed" || root.type !== "aws_kms_key" || root.name !== "root_drop") fail("refresh-only root-drop plan contains an invalid root-drop resource identity");
+  const change = root.change || {};
   if (!same(change.actions, ["update"]) || change.replace_paths?.length || Object.keys(change.before_unknown || {}).length || Object.keys(change.after_unknown || {}).length) fail("refresh-only root-drop plan contains an unexpected action, replacement, or unknown value");
   const before = change.before;
   const after = change.after;
   if (!before || typeof before !== "object" || Array.isArray(before) || !after || typeof after !== "object" || Array.isArray(after)) fail("refresh-only root-drop plan contains malformed before/after state");
   const expectedArn = assertRootDropComputedRefresh(before, after, keyId);
-  return { valid: true, stateConverged: false, address: ROOT_DROP_KEY_ADDRESS, actions: ["update"], keyId, arn: expectedArn };
+  return { valid: true, stateConverged: false, address: ROOT_DROP_KEY_ADDRESS, actions: ["update"], keyId, arn: expectedArn, rdsLatestRestorableTimeRefreshed: rdsChanges.length === 1 };
 }
 
 export function assertRootDropPreImportPlan(plan) {
@@ -530,11 +562,17 @@ export function assertAuthorizedRootDropRefreshTransition({ beforeState, beforeS
   const afterIdentity = buildStageAStateIdentity(afterState, { stateBytes: afterStateBytes });
   if (beforeIdentity.stateObject !== afterIdentity.stateObject || beforeIdentity.lineage !== afterIdentity.lineage || beforeIdentity.account !== afterIdentity.account || beforeIdentity.region !== afterIdentity.region) fail("authorized root-drop refresh changed the state binding");
   if (afterIdentity.serial < beforeIdentity.serial || afterIdentity.stateSha256 === beforeIdentity.stateSha256 && afterIdentity.serial !== beforeIdentity.serial || afterIdentity.stateSha256 !== beforeIdentity.stateSha256 && afterIdentity.serial === beforeIdentity.serial) fail("authorized root-drop refresh has an invalid state identity transition");
+  const beforeDatabase = stateInstances(beforeState, "aws_db_instance", "green");
+  const afterDatabase = stateInstances(afterState, "aws_db_instance", "green");
+  if (beforeDatabase.length !== 1 || afterDatabase.length !== 1) fail("authorized root-drop refresh changed the exact green database identity");
+  const rdsTimestampChanged = beforeDatabase[0].attributes?.latest_restorable_time !== afterDatabase[0].attributes?.latest_restorable_time;
+  if (rdsTimestampChanged) assertRdsLatestRestorableTimeRefresh(beforeDatabase[0].attributes, afterDatabase[0].attributes);
   const comparable = (state) => {
     const copy = structuredClone(state);
     copy.serial = beforeState.serial;
     const key = stateInstances(copy, "aws_kms_key", "root_drop")[0];
     for (const field of ["arn", "key_id", "id", "custom_key_store_id", "multi_region", "rotation_period_in_days", "xks_key_id"]) key.attributes[field] = null;
+    if (rdsTimestampChanged) stateInstances(copy, "aws_db_instance", "green")[0].attributes.latest_restorable_time = null;
     return copy;
   };
   const beforeKey = stateInstances(beforeState, "aws_kms_key", "root_drop")[0].attributes || {};
