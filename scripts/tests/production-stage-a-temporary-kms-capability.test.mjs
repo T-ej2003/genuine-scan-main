@@ -661,6 +661,64 @@ test("an unrecorded post-write capability can be recovered only with exact faile
   }
 });
 
+test("unrecorded legacy authorization is recoverable without persisted evidence", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-unrecorded-legacy-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory, buildLegacyRootDropKeyPolicy());
+  const rootDropCensusFile = path.join(directory, "root-drop-census.json");
+  const census = legacyRootDropCensus();
+  writeFileSync(rootDropCensusFile, `${JSON.stringify(census)}\n`, { mode: 0o600 });
+  const fixture = createPolicyVersionRunner({ fixture: {
+    defaultVersionId: "v1",
+    documents: new Map([["v1", policy]]),
+    dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]),
+  } });
+  let failAuthorizationEvidenceWrite = true;
+  const persist = (filePath, value) => {
+    if (value.state === "AUTHORIZED_FOR_ROOT_DROP_CREATION" && failAuthorizationEvidenceWrite) {
+      failAuthorizationEvidenceWrite = false;
+      throw new Error("simulated evidence persistence interruption");
+    }
+    writeFileSync(filePath, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+  };
+  try {
+    let failure;
+    try {
+      createTemporaryKmsCapabilityRunner({ run: fixture.run, writeEvidence: persist }).runPhase({
+        phase: "authorize",
+        sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha,
+        transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId,
+        stateFile,
+        planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256,
+        planJsonFile,
+        stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity,
+        rootDropCensusFile,
+        freshRootDropCensus: census,
+      });
+    } catch (error) { failure = error; }
+    assert.match(failure?.message || "", /simulated evidence persistence interruption/);
+    assert.equal(failure?.mutationAccounting?.iamWrites, 1);
+    assert.equal(failure?.mutationAccounting?.unknownMutations, 0);
+    const recovered = createTemporaryKmsCapabilityRunner({ run: fixture.run, writeEvidence: persist }).runPhase({
+      phase: "abort",
+      sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha,
+      transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId,
+      stateFile,
+      planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256,
+      planJsonFile,
+      applyFailed: true,
+      partialOperationCensus: true,
+    });
+    assert.equal(recovered.evidence.state, "REVOKED");
+    assert.equal(recovered.evidence.legacyRootDropKeyArn, ROOT_DROP_LEGACY_POLICY_BINDING.keyArn);
+    assert.equal(recovered.writes, 2);
+    assert.equal(fixture.calls.filter((operation) => operation === "create-policy-version").length, 2);
+    assert.equal(fixture.calls.filter((operation) => operation === "delete-policy-version").length, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("abort recovery reconstructs completed aborts after temporary deletion without new IAM writes", () => {
   for (const lifecycle of ["AUTHORIZED_FOR_ROOT_DROP_CREATION", "STAGE_A_APPLY"]) {
     const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-abort-recovery-"));

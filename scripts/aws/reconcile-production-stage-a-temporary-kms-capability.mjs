@@ -276,12 +276,15 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     }
     const rootDropState = phase === "authorize" && stageAStateFile ? readJson(validateStageAInput(stageAStateFile, "Stage-A state")) : null;
     const legacyRecoveryAuthorization = phase === "authorize" && rootDropCensus?.status === "AUTHENTICATED_ORPHAN" && rootDropCensus.candidates[0]?.policyCompatibility === "LEGACY_BOUND_HISTORICAL";
+    let unrecordedLegacyAbort = false;
     const assertCreationPlan = (plan) => {
-      assertStageARootDropCreationPlan(plan, legacyRecoveryAuthorization ? { expectedKeyPolicy: buildLegacyRootDropKeyPolicy() } : undefined);
+      if (legacyRecoveryAuthorization || unrecordedLegacyAbort) assertStageARootDropCreationPlan(plan, { expectedKeyPolicy: buildLegacyRootDropKeyPolicy() });
+      else assertStageARootDropCreationPlan(plan);
       if (legacyRecoveryAuthorization) {
         assertRootDropCensus(rootDropCensus, { sourceSha, transitionId, stageAStateIdentity });
         if (sourceSha !== ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha || transitionId !== ROOT_DROP_LEGACY_POLICY_BINDING.transitionId || planSha256 !== ROOT_DROP_LEGACY_POLICY_BINDING.planSha256 || rootDropCensus.failedApplyEvidence?.planSha256 !== planSha256) fail("legacy root-drop authorization is not bound to the exact historical failed plan");
-      } else if (phase === "authorize" && rootDropCensus) assertRootDropCreationInterlock({ plan, terraformState: rootDropState, census: rootDropCensus, sourceSha, transitionId, stageAStateIdentity });
+      } else if (unrecordedLegacyAbort && (sourceSha !== ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha || transitionId !== ROOT_DROP_LEGACY_POLICY_BINDING.transitionId || planSha256 !== ROOT_DROP_LEGACY_POLICY_BINDING.planSha256)) fail("unrecorded legacy abort is not bound to the exact historical failed plan");
+      else if (phase === "authorize" && rootDropCensus) assertRootDropCreationInterlock({ plan, terraformState: rootDropState, census: rootDropCensus, sourceSha, transitionId, stageAStateIdentity });
     };
     if (phase === "authorize" && requireStageAStateBinding) {
       if (!stageAStateFile || !stageAStateIdentity || !existsSync(stageAStateFile)) fail("authenticated Stage A state identity is required before temporary capability authorization");
@@ -292,10 +295,19 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     const previousFile = existsSync(stateFile) ? ensureStageBPrivateFile({ filePath: stateFile, repositoryRoot: root, label: "Temporary Stage-A KMS capability evidence" }).path : null;
     let previous = previousFile ? readJson(previousFile) : null;
     let state = previous?.state || "ABSENT";
+    unrecordedLegacyAbort = phase === "abort" && !previous
+      && sourceSha === ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha
+      && transitionId === ROOT_DROP_LEGACY_POLICY_BINDING.transitionId
+      && planSha256 === ROOT_DROP_LEGACY_POLICY_BINDING.planSha256;
+    if (unrecordedLegacyAbort) {
+      if (!planJsonFile) fail("exact historical legacy Stage-A plan is required for unrecorded abort recovery");
+      const planFile = ensureStageBPrivateFile({ filePath: planJsonFile, repositoryRoot: root, label: "Classified Stage-A plan JSON" });
+      assertStageARootDropCreationPlan(readJson(planFile.path), { expectedKeyPolicy: buildLegacyRootDropKeyPolicy() });
+    }
     const censusLegacyRootDropKeyArn = rootDropCensus?.status === "AUTHENTICATED_ORPHAN" && rootDropCensus.candidates[0]?.policyCompatibility === "LEGACY_BOUND_HISTORICAL" ? rootDropCensus.candidates[0].keyArn : undefined;
     if (censusLegacyRootDropKeyArn && censusLegacyRootDropKeyArn !== ROOT_DROP_LEGACY_POLICY_BINDING.keyArn) fail("legacy root-drop capability is not bound to the authenticated historical orphan");
     if (censusLegacyRootDropKeyArn && previous?.legacyRootDropKeyArn && censusLegacyRootDropKeyArn !== previous.legacyRootDropKeyArn) fail("legacy root-drop capability evidence changed its exact key binding");
-    const legacyRootDropKeyArn = censusLegacyRootDropKeyArn || previous?.legacyRootDropKeyArn;
+    const legacyRootDropKeyArn = censusLegacyRootDropKeyArn || previous?.legacyRootDropKeyArn || (unrecordedLegacyAbort ? ROOT_DROP_LEGACY_POLICY_BINDING.keyArn : undefined);
     if (legacyRootDropKeyArn && legacyRootDropKeyArn !== ROOT_DROP_LEGACY_POLICY_BINDING.keyArn) fail("legacy root-drop capability evidence is not bound to the authenticated historical orphan");
     const legacyPolicyOptions = legacyRootDropKeyArn ? { legacyRootDropKeyArn } : {};
     const readState = ({ allowTemporaryVersionId } = {}) => readVersions({ allowTemporaryVersionId, sourceSha, transitionId, legacyRootDropKeyArn });
@@ -433,8 +445,12 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       }
       const evidence = buildEvidence({ state: "AUTHORIZED_FOR_ROOT_DROP_CREATION", sourceSha, transitionId, planSha256, stageAStateIdentity, defaultVersionId: readback.active.VersionId, temporaryVersionId: readback.active.VersionId, observedAt: now() });
       assertTemporaryPolicy(readback.active.document);
-      persistEvidence(stateFile, evidence);
-      return { evidence, writes: accounting.iamWrites, mutationAccounting: accounting };
+      try {
+        persistEvidence(stateFile, evidence);
+        return { evidence, writes: accounting.iamWrites, mutationAccounting: accounting };
+      } catch (error) {
+        throw attachMutationAccounting(error, accounting, { createdVersionIds: [version.VersionId] });
+      }
     }
     if (!previous) fail("a prior capability evidence file is required");
     if (phase === "mark-stage-a-apply") {

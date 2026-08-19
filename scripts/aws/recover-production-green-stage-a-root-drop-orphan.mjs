@@ -189,7 +189,7 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   });
   const censusIdentity = { lineage: census.stageAStateLineage, serial: census.stageAStateSerial, stateSha256: census.stageAStateSha256 };
   const currentStateCounts = stageARootDropCounts(stageAState);
-  if (legacyPolicyBound && currentStateCounts.keyCount === 1 && currentStateCounts.aliasCount === 0 && (censusIdentity.lineage !== stageAStateIdentity.lineage || censusIdentity.serial !== stageAStateIdentity.serial || censusIdentity.stateSha256 !== stageAStateIdentity.stateSha256)) assertRootDropCensus(census, { sourceSha: census.sourceSha, transitionId: census.transitionId, stageAStateIdentity: censusIdentity });
+  if (legacyPolicyBound && currentStateCounts.keyCount === 1 && (currentStateCounts.aliasCount === 0 || currentStateCounts.aliasCount === 1)) assertRootDropCensus(census, { sourceSha: census.sourceSha, transitionId: census.transitionId, stageAStateIdentity: censusIdentity });
   else assertRootDropCensus(census, { sourceSha: census.sourceSha, transitionId: census.transitionId, stageAStateIdentity });
   const adminProfile = option(argv, "--admin-profile");
   const releaseProfile = option(argv, "--release-profile");
@@ -229,7 +229,7 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   } else if (initialCounts.keyCount === 1 && initialCounts.aliasCount === 0) {
     assertRootDropKeyIdentity(initialSnapshot.state, census.candidates[0].keyId);
   } else if (initialCounts.keyCount === 1 && initialCounts.aliasCount === 1) {
-    assertRootDropStateIdentity(initialSnapshot.state, { keyId: census.candidates[0].keyId });
+    assertRootDropStateIdentity(initialSnapshot.state, { keyId: census.candidates[0].keyId, requireCanonicalPolicy: true });
   } else {
     throw new Error("Stage-A root-drop adoption encountered an unsupported Terraform state topology");
   }
