@@ -4,15 +4,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildStageAStateIdentity, assertStageAStateIdentityBinding } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import {
   ROOT_DROP_KEY_ADDRESS,
   ROOT_DROP_ALIAS_ADDRESS,
-  authenticateRootDropOrphan,
   buildRootDropAwsReadAdapter,
-  buildRootDropCensus,
+  collectRootDropCensus,
   createRootDropRecoveryRunner,
-  rootDropTagsFromAws,
 } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -38,7 +37,8 @@ function failedEvidence(argv) {
 
 export async function runCensus({ argv = process.argv.slice(2), run, write = (value) => process.stdout.write(value) } = {}) {
   const profile = option(argv, "--profile");
-  const region = option(argv, "--region", false) || "eu-west-2";
+  const region = option(argv, "--region", false) || STAGE_B.region;
+  if (region !== STAGE_B.region) throw new Error("Stage-A root-drop census: region is outside the protected production boundary");
   const statePath = privatePath(option(argv, "--stage-a-state"), "Stage-A state");
   const identityPath = privatePath(option(argv, "--stage-a-state-identity"), "Stage-A state identity");
   const outputPath = option(argv, "--output");
@@ -48,31 +48,7 @@ export async function runCensus({ argv = process.argv.slice(2), run, write = (va
   assertStageAStateIdentityBinding(buildStageAStateIdentity(state, { stateBytes }), stageAStateIdentity);
   const evidence = failedEvidence(argv);
   const adapter = buildRootDropAwsReadAdapter({ run: run || ((args) => execFileSync("aws", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })), profile, region });
-  const candidates = [];
-  for (const listed of adapter.listKeys()) {
-    const metadata = adapter.describeKey(listed.KeyId);
-    const events = adapter.lookupCreateKeyEvents(metadata.Arn).map((entry) => {
-      try { return JSON.parse(entry.CloudTrailEvent); } catch { return entry; }
-    });
-    const relevant = events.filter((event) => event.eventName === "CreateKey" && event.eventSource === "kms.amazonaws.com" && event.awsRegion === region && Date.parse(event.eventTime) >= Date.parse(evidence.failedApplyWindow.start) && Date.parse(event.eventTime) <= Date.parse(evidence.failedApplyWindow.end));
-    if (relevant.length === 0) continue;
-    candidates.push({
-      keyId: metadata.KeyId,
-      arn: metadata.Arn,
-      metadata,
-      tags: rootDropTagsFromAws(adapter.listTags(metadata.KeyId)),
-      policy: adapter.getPolicy(metadata.KeyId),
-      publicKey: adapter.getPublicKey(metadata.KeyId),
-      aliases: adapter.listAliases(metadata.KeyId),
-      creationEvents: relevant,
-    });
-  }
-  const authenticatedCandidates = [];
-  for (const candidate of candidates) {
-    try { authenticatedCandidates.push({ ...candidate, ...authenticateRootDropOrphan({ candidate, terraformState: state, sourceSha: evidence.sourceSha, transitionId: evidence.transitionId, failedApplyEvidence: evidence }) }); }
-    catch (error) { authenticatedCandidates.push({ keyId: candidate.keyId, arn: candidate.arn, authenticated: false, reason: error.message }); }
-  }
-  const census = buildRootDropCensus({ sourceSha: evidence.sourceSha, transitionId: evidence.transitionId, stageAStateIdentity, candidates: authenticatedCandidates, failedApplyEvidence: authenticatedCandidates.length === 1 && authenticatedCandidates[0].authenticated ? evidence : undefined });
+  const census = collectRootDropCensus({ adapter, terraformState: state, sourceSha: evidence.sourceSha, transitionId: evidence.transitionId, stageAStateIdentity, failedApplyEvidence: evidence });
   writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(census, null, 2)}\n`), repositoryRoot: root, label: "Stage-A root-drop census" });
   write(`${JSON.stringify({ status: census.status, candidateCount: census.candidateCount, output: outputPath }, null, 2)}\n`);
   return census;

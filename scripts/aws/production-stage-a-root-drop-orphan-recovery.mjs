@@ -101,13 +101,14 @@ export function buildRootDropCensus({ sourceSha, transitionId, stageAStateIdenti
   const authenticated = candidates.filter((candidate) => candidate?.authenticated === true);
   const status = candidates.length === 0 ? "NO_CANDIDATE" : candidates.length === 1 && authenticated.length === 1 ? "AUTHENTICATED_ORPHAN" : "AMBIGUOUS";
   if (status === "AUTHENTICATED_ORPHAN" && !failedApplyEvidence) fail("authenticated orphan census requires failed-apply evidence");
-  const value = { schemaVersion: ROOT_DROP_RECOVERY_SCHEMA_VERSION, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", status, sourceSha, transitionId, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, candidateCount: candidates.length, candidates, observedAt: new Date().toISOString(), ...(failedApplyEvidence ? { failedApplyEvidence } : {}) };
+  const value = { schemaVersion: ROOT_DROP_RECOVERY_SCHEMA_VERSION, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status, sourceSha, transitionId, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, candidateCount: candidates.length, candidates, observedAt: new Date().toISOString(), ...(failedApplyEvidence ? { failedApplyEvidence } : {}) };
   return { ...value, censusSha256: sha256(value) };
 }
 
 export function assertRootDropCensus(census, { sourceSha, transitionId, stageAStateIdentity } = {}) {
   const { censusSha256, ...unsigned } = census || {};
-  if (!census || !SHA256.test(censusSha256 || "") || sha256(unsigned) !== censusSha256 || census.schemaVersion !== ROOT_DROP_RECOVERY_SCHEMA_VERSION || census.kind !== "MSCQR_STAGE_A_ROOT_DROP_CENSUS" || !ROOT_DROP_RECOVERY_STATUSES.includes(census.status) || census.sourceSha !== sourceSha || census.transitionId !== transitionId || census.stageAStateLineage !== stageAStateIdentity?.lineage || census.stageAStateSerial !== stageAStateIdentity?.serial || census.stageAStateSha256 !== stageAStateIdentity?.stateSha256 || !Number.isSafeInteger(census.candidateCount) || !Array.isArray(census.candidates) || census.candidateCount !== census.candidates.length) fail("root-drop census is not bound to the exact transition and Stage-A state");
+  const observedAt = Date.parse(census?.observedAt || "");
+  if (!census || !SHA256.test(censusSha256 || "") || sha256(unsigned) !== censusSha256 || census.schemaVersion !== ROOT_DROP_RECOVERY_SCHEMA_VERSION || census.kind !== "MSCQR_STAGE_A_ROOT_DROP_CENSUS" || census.region !== STAGE_B.region || !Number.isFinite(observedAt) || observedAt > Date.now() + 5 * 60 * 1000 || !ROOT_DROP_RECOVERY_STATUSES.includes(census.status) || census.sourceSha !== sourceSha || census.transitionId !== transitionId || census.stageAStateLineage !== stageAStateIdentity?.lineage || census.stageAStateSerial !== stageAStateIdentity?.serial || census.stageAStateSha256 !== stageAStateIdentity?.stateSha256 || !Number.isSafeInteger(census.candidateCount) || !Array.isArray(census.candidates) || census.candidateCount !== census.candidates.length) fail("root-drop census is not current, regional, or bound to the exact transition and Stage-A state");
   if (census.status === "NO_CANDIDATE" && census.candidateCount !== 0) fail("root-drop census falsely declares no candidate");
   if (census.status === "AUTHENTICATED_ORPHAN" && (census.candidateCount !== 1 || census.candidates[0]?.authenticated !== true || !KEY_ID.test(census.candidates[0].keyId || "") || census.candidates[0].sourceSha !== sourceSha || census.candidates[0].transitionId !== transitionId || !SHA256.test(census.candidates[0].planSha256 || "") || !census.failedApplyEvidence || census.failedApplyEvidence.sourceSha !== sourceSha || census.failedApplyEvidence.transitionId !== transitionId || census.failedApplyEvidence.planSha256 !== census.candidates[0].planSha256 || !SHA256.test(census.failedApplyEvidence.planSha256 || "") || !census.failedApplyEvidence.failedApplyWindow)) fail("root-drop census does not contain exactly one source/transition/failed-apply-bound authenticated orphan");
   if (census.status === "AMBIGUOUS" && census.candidateCount < 1) fail("ambiguous root-drop census has no candidates");
@@ -213,6 +214,7 @@ function assertRootDropKeyIdentity(state, keyId) {
 
 export function buildRootDropAwsReadAdapter({ run, profile, region = STAGE_B.region } = {}) {
   if (typeof run !== "function" || !profile) throw new Error("Root-drop read adapter requires an explicit profile and command runner");
+  if (region !== STAGE_B.region) throw new Error("Stage-A root-drop census: region is outside the protected production boundary");
   const read = (args) => JSON.parse(run([...args, "--profile", profile, "--region", region, "--output", "json", "--no-cli-pager"]));
   return Object.freeze({
     listKeys: () => read(["kms", "list-keys"]).Keys || [],
@@ -226,3 +228,37 @@ export function buildRootDropAwsReadAdapter({ run, profile, region = STAGE_B.reg
 }
 
 export function rootDropTagsFromAws(Tags) { return Object.fromEntries((Tags || []).map(({ TagKey, TagValue }) => [TagKey, TagValue])); }
+
+export function collectRootDropCensus({ adapter, terraformState, sourceSha, transitionId, stageAStateIdentity, failedApplyEvidence, observedAfter } = {}) {
+  if (!adapter || typeof adapter.listKeys !== "function" || typeof adapter.describeKey !== "function" || typeof adapter.lookupCreateKeyEvents !== "function") fail("fresh root-drop census adapter is incomplete");
+  if (!failedApplyEvidence?.failedApplyWindow) fail("fresh root-drop census requires the failed-apply observation window");
+  assertStateShape(terraformState);
+  assertStateRootDropCounts(terraformState, { key: 0, alias: 0 });
+  const candidates = [];
+  for (const listed of adapter.listKeys()) {
+    const metadata = adapter.describeKey(listed.KeyId);
+    const createdAt = Date.parse(metadata?.CreationDate || "");
+    const observedAfterAt = Date.parse(observedAfter || "");
+    const events = adapter.lookupCreateKeyEvents(metadata.Arn).map((entry) => {
+      try { return JSON.parse(entry.CloudTrailEvent); } catch { return entry; }
+    });
+    const relevant = events.filter((event) => event.eventName === "CreateKey" && event.eventSource === "kms.amazonaws.com" && event.awsRegion === STAGE_B.region && ((Date.parse(event.eventTime) >= Date.parse(failedApplyEvidence.failedApplyWindow.start) && Date.parse(event.eventTime) <= Date.parse(failedApplyEvidence.failedApplyWindow.end)) || Number.isFinite(observedAfterAt) && (!Number.isFinite(createdAt) || createdAt >= observedAfterAt)));
+    if (relevant.length === 0) continue;
+    candidates.push({
+      keyId: metadata.KeyId,
+      arn: metadata.Arn,
+      metadata,
+      tags: rootDropTagsFromAws(adapter.listTags(metadata.KeyId)),
+      policy: adapter.getPolicy(metadata.KeyId),
+      publicKey: adapter.getPublicKey(metadata.KeyId),
+      aliases: adapter.listAliases(metadata.KeyId),
+      creationEvents: relevant,
+    });
+  }
+  const authenticatedCandidates = [];
+  for (const candidate of candidates) {
+    try { authenticatedCandidates.push({ ...candidate, ...authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence }) }); }
+    catch (error) { authenticatedCandidates.push({ keyId: candidate.keyId, arn: candidate.arn, authenticated: false, reason: error.message }); }
+  }
+  return buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates: authenticatedCandidates, failedApplyEvidence });
+}

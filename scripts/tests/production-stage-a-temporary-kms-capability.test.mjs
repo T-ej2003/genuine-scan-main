@@ -29,6 +29,7 @@ import {
 import { ensureStageBPrivateFile } from "../aws/stage-b-artifact-contract.mjs";
 import { AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES, classifyTemporaryKmsPolicyVersion, createTemporaryKmsCapabilityRunner, runCli } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { buildStageARootDropKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
 import { rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
 
@@ -75,7 +76,7 @@ function writeCliStageAInputs(directory) {
   const stageAStateIdentity = buildStageAStateIdentity(state, { stateBytes });
   writeFileSync(stageAStateIdentityFile, `${JSON.stringify(stageAStateIdentity)}\n`, { mode: 0o600 });
   const rootDropCensusFile = path.join(directory, "root-drop-census.json");
-  const census = { schemaVersion: 1, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", status: "NO_CANDIDATE", sourceSha, transitionId, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, candidateCount: 0, candidates: [], observedAt: new Date().toISOString() };
+  const census = { schemaVersion: 1, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status: "NO_CANDIDATE", sourceSha, transitionId, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, candidateCount: 0, candidates: [], observedAt: new Date().toISOString() };
   writeFileSync(rootDropCensusFile, `${JSON.stringify({ ...census, censusSha256: rootDropRecoverySha256(census) })}\n`, { mode: 0o600 });
   return { stageAStateFile, stageAStateIdentityFile, rootDropCensusFile };
 }
@@ -91,9 +92,11 @@ function cliArgs({ phase = "authorize", stateFile, planJsonFile, stageAStateFile
   ];
 }
 
-function runCliAndReadFailure(argv, run) {
+function runCliAndReadFailure(argv, run, injectedReadRootDropCensus) {
   let output = "";
-  assert.throws(() => runCli(argv, { run, write: (value) => { output += value; } }));
+  const censusPathIndex = argv.indexOf("--root-drop-census");
+  const readRootDropCensus = injectedReadRootDropCensus || (censusPathIndex >= 0 ? () => JSON.parse(readFileSync(argv[censusPathIndex + 1], "utf8")) : undefined);
+  assert.throws(() => runCli(argv, { run, readRootDropCensus, write: (value) => { output += value; } }));
   return JSON.parse(output);
 }
 
@@ -1431,12 +1434,29 @@ test("CLI success output remains compatible while enforcing valid Stage-A privat
   const fake = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) } });
   let output = "";
   try {
-    const result = runCli(cliArgs({ stateFile, planJsonFile, ...inputs }), { run: fake.run, write: (value) => { output += value; } });
+    const result = runCli(cliArgs({ stateFile, planJsonFile, ...inputs }), { run: fake.run, readRootDropCensus: () => JSON.parse(readFileSync(inputs.rootDropCensusFile, "utf8")), write: (value) => { output += value; } });
     const success = JSON.parse(output);
     assert.deepEqual(Object.keys(success).sort(), ["evidenceSha256", "mutationAccounting", "state", "writes"].sort());
     assert.equal(success.state, "AUTHORIZED_FOR_ROOT_DROP_CREATION");
     assert.equal(success.writes, result.writes);
     assert.equal(success.mutationAccounting.iamWrites, 1);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("authorization rejects a replayed NO_CANDIDATE census when the fresh boundary observes a candidate", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-census-replay-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const inputs = writeCliStageAInputs(directory);
+  const stale = JSON.parse(readFileSync(inputs.rootDropCensusFile, "utf8"));
+  const fresh = { ...stale, status: "AMBIGUOUS", candidateCount: 1, candidates: [{ authenticated: false, keyId: "11111111-1111-1111-1111-111111111111" }], observedAt: new Date().toISOString() };
+  delete fresh.censusSha256;
+  fresh.censusSha256 = rootDropRecoverySha256(fresh);
+  let awsCalls = 0;
+  try {
+    const failure = runCliAndReadFailure(cliArgs({ stateFile, planJsonFile, ...inputs }), () => { awsCalls += 1; throw new Error("AWS must not be called"); }, () => fresh);
+    assert.match(failure.failure.message, /changed before authorization/);
+    assert.equal(awsCalls, 0);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

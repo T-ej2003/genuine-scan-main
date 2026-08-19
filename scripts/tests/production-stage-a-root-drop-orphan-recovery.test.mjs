@@ -15,8 +15,12 @@ import {
   assertRootDropStateIdentity,
   authenticateRootDropOrphan,
   buildRootDropCensus,
+  buildRootDropAwsReadAdapter,
+  collectRootDropCensus,
+  rootDropRecoverySha256,
   createRootDropRecoveryRunner,
 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
+import { runCensus } from "../aws/recover-production-green-stage-a-root-drop-orphan.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
 
 const sourceSha = "f03fb3266385486d25317b8c2b202c408ae8771f";
@@ -76,6 +80,50 @@ test("partial, conflicting, and ambiguous state never authenticates an orphan", 
 test("zero-candidate pre-apply permits only the exact creation envelope", () => {
   assert.doesNotThrow(() => assertRootDropCreationInterlock({ plan: exactCreatePlan, terraformState: absentState, census: noCandidateCensus(), sourceSha, transitionId, stageAStateIdentity: stateIdentity }));
   for (const candidateCensus of [census(), buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: stateIdentity, candidates: [{ authenticated: false, keyId }] })]) assert.throws(() => assertRootDropCreationInterlock({ plan: exactCreatePlan, terraformState: absentState, census: candidateCensus, sourceSha, transitionId, stageAStateIdentity: stateIdentity }), /blocked/);
+});
+
+test("root-drop census is bound to eu-west-2 and rejects wrong regions before AWS", async () => {
+  let calls = 0;
+  for (const region of [undefined, STAGE_B.region]) {
+    const adapter = buildRootDropAwsReadAdapter({ run: (args) => { calls += 1; assert.equal(args.at(-5), "--region"); assert.equal(args.at(-4), STAGE_B.region); return JSON.stringify({ Keys: [] }); }, profile: "administrator", region });
+    assert.deepEqual(adapter.listKeys(), []);
+  }
+  calls = 0;
+  assert.throws(() => buildRootDropAwsReadAdapter({ run: () => { calls += 1; return "{}"; }, profile: "administrator", region: "us-east-1" }), /protected production boundary/);
+  assert.equal(calls, 0);
+  for (const region of ["us-east-1", "eu-west-1", "not-a-region"]) {
+    await assert.rejects(() => runCensus({ argv: ["--profile", "administrator", "--region", region], run: () => { calls += 1; return "{}"; } }), /protected production boundary/);
+  }
+  assert.equal(calls, 0);
+  for (const region of ["us-east-1", undefined]) {
+    const value = { ...noCandidateCensus(), ...(region === undefined ? { region: undefined } : { region }) };
+    const unsigned = { ...value };
+    delete unsigned.censusSha256;
+    value.censusSha256 = rootDropRecoverySha256(unsigned);
+    assert.throws(() => assertRootDropCensus(value, { sourceSha, transitionId, stageAStateIdentity: stateIdentity }), /regional|current/);
+  }
+});
+
+test("fresh census includes a key created after a replayed observation even outside its old failed window", () => {
+  const fresh = collectRootDropCensus({
+    adapter: {
+      listKeys: () => [{ KeyId: keyId }],
+      describeKey: () => ({ KeyId: keyId, Arn: keyArn, CreationDate: "2026-08-20T00:00:00.000Z" }),
+      lookupCreateKeyEvents: () => [{ eventName: "CreateKey", eventSource: "kms.amazonaws.com", awsRegion: STAGE_B.region, eventTime: "2026-08-20T00:00:01.000Z" }],
+      listTags: () => [],
+      getPolicy: () => ({}),
+      getPublicKey: () => ({}),
+      listAliases: () => [],
+    },
+    terraformState: absentState,
+    sourceSha,
+    transitionId,
+    stageAStateIdentity: stateIdentity,
+    failedApplyEvidence,
+    observedAfter: "2026-08-19T23:59:59.000Z",
+  });
+  assert.equal(fresh.status, "AMBIGUOUS");
+  assert.throws(() => assertRootDropCreationInterlock({ plan: exactCreatePlan, terraformState: absentState, census: fresh, sourceSha, transitionId, stageAStateIdentity: stateIdentity }), /blocked/);
 });
 
 test("an authenticated orphan blocks CreateKey and allows only adoption's alias-only boundary", () => {

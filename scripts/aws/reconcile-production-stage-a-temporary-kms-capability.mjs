@@ -23,7 +23,7 @@ import {
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageAStateIdentityBinding, buildStageAStateIdentity } from "./generate-production-green-stage-a-prerequisites.mjs";
-import { assertRootDropCreationInterlock } from "./production-stage-a-root-drop-orphan-recovery.mjs";
+import { assertRootDropCensus, assertRootDropCreationInterlock, buildRootDropAwsReadAdapter, canonicalRootDropRecoveryJson, collectRootDropCensus } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sourcePolicyPath = path.join(root, TEMPORARY_KMS_CAPABILITY.sourcePolicyPath);
@@ -263,11 +263,18 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     if (active.document.Statement?.some(isTemporaryTagResourceStatement)) return;
     if (canonical(active.document) !== canonical(sourcePolicy)) fail("live steady-state policy differs from protected source");
   };
-  const runPhase = ({ phase, sourceSha, transitionId, stateFile, planSha256, planJsonFile, terraformStateFile, stageAStateFile, stageAStateIdentity, rootDropCensusFile, applyFailed = false, partialOperationCensus = false } = {}) => {
+  const runPhase = ({ phase, sourceSha, transitionId, stateFile, planSha256, planJsonFile, terraformStateFile, stageAStateFile, stageAStateIdentity, rootDropCensusFile, freshRootDropCensus, applyFailed = false, partialOperationCensus = false } = {}) => {
     assertIdentity({ sourceSha, transitionId });
     const accounting = createMutationAccounting();
     const persistEvidence = (filePath, value) => writeEvidenceFn(filePath, value);
-    const rootDropCensus = phase === "authorize" && rootDropCensusFile ? readJson(validateStageAInput(rootDropCensusFile, "Stage-A root-drop census")) : null;
+    const suppliedRootDropCensus = phase === "authorize" && rootDropCensusFile ? readJson(validateStageAInput(rootDropCensusFile, "Stage-A root-drop census")) : null;
+    if (phase === "authorize" && rootDropCensusFile && !freshRootDropCensus) fail("fresh root-drop census is required at the authorization boundary");
+    const rootDropCensus = phase === "authorize" ? freshRootDropCensus || suppliedRootDropCensus : null;
+    if (phase === "authorize" && suppliedRootDropCensus) {
+      assertRootDropCensus(suppliedRootDropCensus, { sourceSha, transitionId, stageAStateIdentity });
+      assertRootDropCensus(rootDropCensus, { sourceSha, transitionId, stageAStateIdentity });
+      if (canonicalRootDropRecoveryJson({ ...suppliedRootDropCensus, observedAt: null, censusSha256: null }) !== canonicalRootDropRecoveryJson({ ...rootDropCensus, observedAt: null, censusSha256: null })) fail("root-drop census changed before authorization");
+    }
     const rootDropState = phase === "authorize" && stageAStateFile ? readJson(validateStageAInput(stageAStateFile, "Stage-A state")) : null;
     const assertCreationPlan = (plan) => {
       assertStageARootDropCreationPlan(plan);
@@ -524,7 +531,7 @@ function option(argv, name, required = true) {
   return value;
 }
 
-export function runCli(argv = process.argv.slice(2), { run: injectedRun, write = (value) => process.stdout.write(value) } = {}) {
+export function runCli(argv = process.argv.slice(2), { run: injectedRun, readRootDropCensus: injectedReadRootDropCensus, write = (value) => process.stdout.write(value) } = {}) {
   try {
     const profile = option(argv, "--admin-profile");
     const releaseProfile = option(argv, "--release-profile", false);
@@ -545,7 +552,22 @@ export function runCli(argv = process.argv.slice(2), { run: injectedRun, write =
     const stageAStateFile = stageAStateFileOption ? validateStageAInput(stageAStateFileOption, "Stage-A state") : null;
     const stageAStateIdentityPath = stageAStateIdentityFile ? validateStageAInput(stageAStateIdentityFile, "Stage-A state identity") : null;
     const stageAStateIdentity = stageAStateIdentityPath ? readJson(stageAStateIdentityPath) : null;
-    const result = createTemporaryKmsCapabilityRunner({ run, requireStageAStateBinding: Boolean(stageAStateFile) }).runPhase({ phase, sourceSha, transitionId, stateFile, planSha256: option(argv, "--plan-sha256", false), planJsonFile: option(argv, "--plan-json", false), terraformStateFile: option(argv, "--terraform-state", false), stageAStateFile, stageAStateIdentity, rootDropCensusFile: rootDropCensusFileOption, applyFailed: argv.includes("--apply-failed"), partialOperationCensus: argv.includes("--partial-operation-census-verified") });
+    const rootDropState = stageAStateFile ? readJson(stageAStateFile) : null;
+    const suppliedRootDropCensus = phase === "authorize" ? readJson(validateStageAInput(rootDropCensusFileOption, "Stage-A root-drop census")) : null;
+    const freshRootDropCensus = phase === "authorize"
+      ? injectedReadRootDropCensus
+        ? injectedReadRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, census: suppliedRootDropCensus })
+        : collectRootDropCensus({
+          adapter: buildRootDropAwsReadAdapter({ run: (args) => execFileSync("aws", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), profile, region }),
+          terraformState: rootDropState,
+          sourceSha,
+          transitionId,
+          stageAStateIdentity,
+          failedApplyEvidence: suppliedRootDropCensus.failedApplyEvidence,
+          observedAfter: suppliedRootDropCensus.observedAt,
+        })
+      : null;
+    const result = createTemporaryKmsCapabilityRunner({ run, requireStageAStateBinding: Boolean(stageAStateFile) }).runPhase({ phase, sourceSha, transitionId, stateFile, planSha256: option(argv, "--plan-sha256", false), planJsonFile: option(argv, "--plan-json", false), terraformStateFile: option(argv, "--terraform-state", false), stageAStateFile, stageAStateIdentity, rootDropCensusFile: rootDropCensusFileOption, freshRootDropCensus, applyFailed: argv.includes("--apply-failed"), partialOperationCensus: argv.includes("--partial-operation-census-verified") });
     write(`${JSON.stringify({ state: result.evidence.state, evidenceSha256: result.evidence.evidenceSha256, writes: result.writes, mutationAccounting: result.mutationAccounting || null })}\n`);
     return result;
   } catch (error) {

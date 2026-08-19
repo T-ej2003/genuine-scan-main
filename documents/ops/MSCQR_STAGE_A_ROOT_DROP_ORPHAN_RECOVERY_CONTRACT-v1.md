@@ -7,9 +7,11 @@ AWS but Terraform does not own it and `aws_kms_alias.root_drop` is absent.
 
 `npm run stage-a:root-drop:census` is the only producer. It reads the exact
 production key metadata, tags, key policy, public-key identity, aliases, and
-the CloudTrail `CreateKey` event. It binds the result to the fresh Stage-A
-state identity, source SHA, transition ID, failed-plan SHA, creator session,
-and failed-apply time window. Tags alone never authenticate a candidate.
+the CloudTrail `CreateKey` event. It is hard-bound to `eu-west-2`; any other
+region is rejected before an AWS query. It binds the result to the fresh
+Stage-A state identity, source SHA, transition ID, failed-plan SHA, creator
+session, failed-apply time window, observation time, and census digest. Tags
+alone never authenticate a candidate.
 
 The census is valid only as one of:
 
@@ -20,8 +22,13 @@ The census is valid only as one of:
 - `AMBIGUOUS`: creation is blocked.
 
 The temporary-capability authorization command must receive the fresh census.
-An authenticated or ambiguous candidate makes `CreateKey` fail closed before
-Terraform apply. A partial Terraform state also fails closed.
+At the authorization boundary it performs a new read-only census through the
+same producer and compares the candidate result with the supplied artifact.
+Thus a replayed `NO_CANDIDATE` census cannot authorize after a key appears;
+newly created candidates are included even when they fall outside the old
+failed-apply window. An authenticated or ambiguous candidate makes `CreateKey`
+fail closed before Terraform apply. A partial Terraform state also fails
+closed.
 
 ## Adoption
 
