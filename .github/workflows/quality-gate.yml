@@ -184,6 +184,13 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    container:
+      # Exact package-matched image supplies Chromium and Linux dependencies without runner apt mirrors.
+      image: mcr.microsoft.com/playwright:v1.60.0-noble
+      options: --init --ipc=host
     services:
       postgres:
         image: postgres:18.4
@@ -211,6 +218,16 @@ jobs:
       - name: Checkout repository
         id: checkout
         uses: actions/checkout@v6
+
+      - name: Install PostgreSQL client
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends postgresql-client
+          command -v psql
+          command -v pg_isready
 
       - uses: actions/setup-node@v6
         id: setup_node
@@ -293,7 +310,7 @@ jobs:
 
           E2E_DB_PROTOCOL=postgresql
           E2E_DB_USER=postgres
-          E2E_DB_HOST=127.0.0.1
+          E2E_DB_HOST=postgres
           E2E_DB_PORT=5432
           E2E_DB_NAME=mscqr_e2e_admin_test
 
@@ -307,7 +324,7 @@ jobs:
             echo "E2E_DB_NAME=${E2E_DB_NAME}"
             echo "P2_TEST_DATABASE_REQUIRED=true"
             echo "P2_TEST_DATABASE_ADMIN_URL=${E2E_DB_PROTOCOL}://${E2E_DB_USER}@${E2E_DB_HOST}:${E2E_DB_PORT}/${E2E_DB_NAME}"
-            echo "REDIS_URL=redis://127.0.0.1:6379/0"
+            echo "REDIS_URL=redis://redis:6379/0"
             echo "REDIS_TLS=false"
             echo "COOKIE_SECURE=false"
             echo "AUTH_LEGACY_TOKEN_RESPONSE_ENABLED=false"
@@ -349,14 +366,6 @@ jobs:
         run: |
           npm --prefix backend run test:e2e:seed
 
-      - name: Install Playwright browsers
-        shell: bash
-        run: |
-          set -euo pipefail
-          while IFS= read -r source_file; do
-            sudo mv "$source_file" "${source_file}.disabled"
-          done < <(sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \( -iname "*microsoft*" -o -iname "*azure-cli*" \) -print)
-          npx playwright install --with-deps chromium
       - name: Playwright smoke suite
         env:
           NODE_ENV: test
@@ -364,6 +373,21 @@ jobs:
           E2E_EXPOSE_CUSTOMER_OTP: "true"
           E2E_START_BACKEND: "true"
         run: npm run verify:ci:frontend:e2e
+
+      - name: Upload frontend Playwright failure diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-playwright-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results/batch-reissue-recovery-*/test-failed-*.png
+            test-results/batch-reissue-recovery-*/error-context.md
+            test-results/client-pages.visual-*/client-mfa-setup-light-actual.png
+            test-results/client-pages.visual-*/client-mfa-setup-light-diff.png
+            test-results/client-pages.visual-*/test-failed-*.png
+            test-results/client-pages.visual-*/error-context.md
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Clean disposable enterprise E2E database
         if: >-
@@ -400,6 +424,13 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 55
+    defaults:
+      run:
+        shell: bash
+    container:
+      # Keep integration on the same package-matched, prebuilt Chromium environment.
+      image: mcr.microsoft.com/playwright:v1.60.0-noble
+      options: --init --ipc=host
     services:
       postgres:
         image: postgres:18.4
@@ -427,13 +458,23 @@ jobs:
       P2_TEST_DATABASE_REQUIRED: "true"
       P2_TEST_DB_PROTOCOL: postgresql
       P2_TEST_DB_USER: postgres
-      P2_TEST_DB_HOST: 127.0.0.1
+      P2_TEST_DB_HOST: postgres
       P2_TEST_DB_PORT: "5432"
       P2_TEST_DB_NAME: mscqr_integration_admin_test
-      REDIS_URL: redis://127.0.0.1:6379/0
+      REDIS_URL: redis://redis:6379/0
       REDIS_TLS: "false"
     steps:
       - uses: actions/checkout@v6
+
+      - name: Install PostgreSQL client
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends postgresql-client
+          command -v psql
+          command -v pg_isready
 
       - uses: actions/setup-node@v6
         with:
@@ -451,15 +492,12 @@ jobs:
 
       - name: Production rotation inventory PostgreSQL contract
         env:
-          MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/mscqr_integration_admin_test
+          MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL: postgresql://postgres@postgres:5432/mscqr_integration_admin_test
         run: |
           set -euo pipefail
           test -n "$MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL"
           (cd backend && DATABASE_URL="$MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL" npx prisma migrate deploy --schema prisma/schema.prisma)
           node --test scripts/tests/production-rotation-inventory-postgres.integration.test.mjs
-
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
 
       - name: Disposable system integration suite
         run: |

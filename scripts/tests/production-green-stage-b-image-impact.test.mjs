@@ -156,6 +156,28 @@ test("Terraform classification stays bounded and runtime image behavior remains 
   assert.throws(() => imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ["frontend/src/App.tsx"] }), /unclassified/);
 });
 
+test("Playwright sources and snapshots are test-only without masking runtime assets", () => {
+  for (const file of [
+    "e2e/batch-reissue-recovery.spec.ts",
+    "e2e/nested/workflow.spec.ts",
+    "e2e/client-pages.visual.spec.ts-snapshots/client-mfa-setup-light.png",
+  ]) assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "testOnly", imageAffecting: false });
+
+  assert.equal(classifyStageBImageReusePath("e2evil/workflow.spec.ts").category, "unknown");
+  assert.equal(classifyStageBImageReusePath("snapshots/client-mfa-setup-light.png").category, "unknown");
+  assert.equal(classifyStageBImageReusePath("src/assets/logo.png").imageAffecting, true);
+  assert.equal(classifyStageBImageReusePath("backend/src/app.ts").imageAffecting, true);
+
+  const report = imageImpactReportFor({
+    imageReleaseSha,
+    toolingSha,
+    toolingInputTreeSha256,
+    changedFiles: ["e2e/batch-reissue-recovery.spec.ts", "e2e/client-pages.visual.spec.ts-snapshots/client-mfa-setup-light.png"],
+  });
+  assert.deepEqual(report.imageAffectingFiles, []);
+  assert.equal(report.imageReuseCompatible, true);
+});
+
 test("rotation evidence schema is canonical tooling-only input", () => {
   const file = ".security/rotation-evidence.schema.json";
   assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "toolingOnly", imageAffecting: false });

@@ -29,7 +29,9 @@ import {
 import { ensureStageBPrivateFile } from "../aws/stage-b-artifact-contract.mjs";
 import { AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES, classifyTemporaryKmsPolicyVersion, createTemporaryKmsCapabilityRunner, runCli } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { buildStageARootDropKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
+import { ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_RECOVERY_SCHEMA_VERSION, rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
@@ -71,23 +73,30 @@ function writeCliStageAInputs(directory) {
   const stageAStateFile = path.join(directory, "stage-a.tfstate");
   const stageAStateIdentityFile = path.join(directory, "stage-a-state-identity.json");
   writeFileSync(stageAStateFile, stateBytes, { mode: 0o600 });
-  writeFileSync(stageAStateIdentityFile, `${JSON.stringify(buildStageAStateIdentity(state, { stateBytes }))}\n`, { mode: 0o600 });
-  return { stageAStateFile, stageAStateIdentityFile };
+  const stageAStateIdentity = buildStageAStateIdentity(state, { stateBytes });
+  writeFileSync(stageAStateIdentityFile, `${JSON.stringify(stageAStateIdentity)}\n`, { mode: 0o600 });
+  const rootDropCensusFile = path.join(directory, "root-drop-census.json");
+  const census = { schemaVersion: ROOT_DROP_RECOVERY_SCHEMA_VERSION, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status: "NO_CANDIDATE", sourceSha, transitionId, actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, keyUniverse: [], keyUniverseSha256: rootDropRecoverySha256([]), candidateCount: 0, candidates: [], observedAt: new Date().toISOString() };
+  writeFileSync(rootDropCensusFile, `${JSON.stringify({ ...census, censusSha256: rootDropRecoverySha256(census) })}\n`, { mode: 0o600 });
+  return { stageAStateFile, stageAStateIdentityFile, rootDropCensusFile };
 }
 
-function cliArgs({ phase = "authorize", stateFile, planJsonFile, stageAStateFile, stageAStateIdentityFile }) {
+function cliArgs({ phase = "authorize", stateFile, planJsonFile, stageAStateFile, stageAStateIdentityFile, rootDropCensusFile }) {
   return [
     "--admin-profile", "administrator", "--release-profile", "release", "--phase", phase,
     "--source-sha", sourceSha, "--transition-id", transitionId, "--state-file", stateFile,
     ...(planJsonFile ? ["--plan-sha256", planSha256, "--plan-json", planJsonFile] : []),
     ...(stageAStateFile ? ["--stage-a-state", stageAStateFile] : []),
     ...(stageAStateIdentityFile ? ["--stage-a-state-identity", stageAStateIdentityFile] : []),
+    ...(rootDropCensusFile ? ["--root-drop-census", rootDropCensusFile] : []),
   ];
 }
 
-function runCliAndReadFailure(argv, run) {
+function runCliAndReadFailure(argv, run, injectedReadRootDropCensus) {
   let output = "";
-  assert.throws(() => runCli(argv, { run, write: (value) => { output += value; } }));
+  const censusPathIndex = argv.indexOf("--root-drop-census");
+  const readRootDropCensus = injectedReadRootDropCensus || (censusPathIndex >= 0 ? () => JSON.parse(readFileSync(argv[censusPathIndex + 1], "utf8")) : undefined);
+  assert.throws(() => runCli(argv, { run, readRootDropCensus, write: (value) => { output += value; } }));
   return JSON.parse(output);
 }
 
@@ -1336,6 +1345,34 @@ test("CLI authorization rejects state without an independently produced identity
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test("authorization uses the release profile for census and administrator profile for IAM mutations", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-split-actors-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const inputs = writeCliStageAInputs(directory);
+  const fixture = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) } });
+  const observedAdminEnvironments = [];
+    let observedCensusProfiles;
+  try {
+    runCli(cliArgs({ stateFile, planJsonFile, ...inputs }), {
+      execFile: (command, args, options) => { observedAdminEnvironments.push({ command, args, env: options.env }); return fixture.run(args); },
+      readRootDropCensus: ({ profile, adminProfile, releaseProfile }) => { observedCensusProfiles = { profile, adminProfile, releaseProfile }; return JSON.parse(readFileSync(inputs.rootDropCensusFile, "utf8")); },
+      write: () => {},
+    });
+    assert.deepEqual(observedCensusProfiles, { profile: "release", adminProfile: "administrator", releaseProfile: "release" });
+    assert(observedAdminEnvironments.length > 0);
+    for (const { command, env } of observedAdminEnvironments) {
+      assert.equal(command, "aws");
+      assert.equal(env.AWS_PROFILE, "administrator");
+      assert.equal(env.AWS_REGION, STAGE_B.region);
+      assert.equal(env.AWS_DEFAULT_REGION, STAGE_B.region);
+      for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(env[key], undefined);
+    }
+    const missingRelease = cliArgs({ stateFile, planJsonFile, ...inputs }).filter((value, index, values) => value !== "--release-profile" && values[index - 1] !== "--release-profile");
+    assert.throws(() => runCli(missingRelease, { run: fixture.run, readRootDropCensus: () => JSON.parse(readFileSync(inputs.rootDropCensusFile, "utf8")), write: () => {} }), /--release-profile is required/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("CLI emits a zero-mutation machine-readable failure before any IAM mutation", () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-cli-zero-failure-"));
   const stateFile = path.join(directory, "capability.json");
@@ -1425,12 +1462,29 @@ test("CLI success output remains compatible while enforcing valid Stage-A privat
   const fake = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) } });
   let output = "";
   try {
-    const result = runCli(cliArgs({ stateFile, planJsonFile, ...inputs }), { run: fake.run, write: (value) => { output += value; } });
+    const result = runCli(cliArgs({ stateFile, planJsonFile, ...inputs }), { run: fake.run, readRootDropCensus: () => JSON.parse(readFileSync(inputs.rootDropCensusFile, "utf8")), write: (value) => { output += value; } });
     const success = JSON.parse(output);
     assert.deepEqual(Object.keys(success).sort(), ["evidenceSha256", "mutationAccounting", "state", "writes"].sort());
     assert.equal(success.state, "AUTHORIZED_FOR_ROOT_DROP_CREATION");
     assert.equal(success.writes, result.writes);
     assert.equal(success.mutationAccounting.iamWrites, 1);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("authorization rejects a replayed NO_CANDIDATE census when the fresh boundary observes a candidate", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-census-replay-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const inputs = writeCliStageAInputs(directory);
+  const stale = JSON.parse(readFileSync(inputs.rootDropCensusFile, "utf8"));
+  const fresh = { ...stale, status: "AMBIGUOUS", keyUniverse: ["11111111-1111-1111-1111-111111111111"], keyUniverseSha256: rootDropRecoverySha256(["11111111-1111-1111-1111-111111111111"]), candidateCount: 1, candidates: [{ authenticated: false, keyId: "11111111-1111-1111-1111-111111111111" }], observedAt: new Date().toISOString() };
+  delete fresh.censusSha256;
+  fresh.censusSha256 = rootDropRecoverySha256(fresh);
+  let awsCalls = 0;
+  try {
+    const failure = runCliAndReadFailure(cliArgs({ stateFile, planJsonFile, ...inputs }), () => { awsCalls += 1; throw new Error("AWS must not be called"); }, () => fresh);
+    assert.match(failure.failure.message, /changed before the trust boundary/);
+    assert.equal(awsCalls, 0);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

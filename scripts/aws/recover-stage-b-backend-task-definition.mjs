@@ -20,7 +20,18 @@ const required = (argv, name) => { const value = option(argv, name); if (!value 
 const run = (command, args, env) => execFileSync(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 export function buildRecoveryAwsEnvironment(profile, baseEnv = process.env) {
   const env = { ...baseEnv, AWS_PROFILE: profile, AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2" };
-  for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN"]) delete env[key];
+  for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) delete env[key];
+  return env;
+}
+
+export function buildRecoveryTerraformEnvironment(profile, baseEnv = process.env, { allowedTerraformVariableKeys = [] } = {}) {
+  const env = buildRecoveryAwsEnvironment(profile, baseEnv);
+  const allowed = new Set(allowedTerraformVariableKeys);
+  const ambientVariableKeys = Object.keys(baseEnv).filter((key) => key.startsWith("TF_VAR_"));
+  const unexpected = ambientVariableKeys.filter((key) => !allowed.has(key));
+  if (unexpected.length) throw new Error(`Terraform variable environment contains unreviewed keys: ${unexpected.sort().join(", ")}`);
+  for (const key of Object.keys(env)) if (key.startsWith("TF_")) delete env[key];
+  for (const key of allowed) if (baseEnv[key] !== undefined) env[key] = baseEnv[key];
   return env;
 }
 
