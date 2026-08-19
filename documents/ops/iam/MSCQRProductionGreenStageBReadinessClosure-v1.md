@@ -59,7 +59,8 @@ Fresh-image partial-apply recovery may consume `REVIEWED_OUTPUT_RECONCILIATION` 
 when the refresh reports zero resource changes and its sole output change is the exact
 `bound_images` transition from authenticated state to the signed image evidence. Normal
 partial-apply recovery remains bound to `RESOURCE_DRIFT`; unrelated resources or outputs
-remain fail closed.
+remain fail closed. The producer, planner, apply gate, and closure gate share the same
+mode-exact recovery-status validator.
 
 ## Identity and freshness boundaries
 

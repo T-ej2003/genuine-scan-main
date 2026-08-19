@@ -29,6 +29,12 @@ export function resolveStageBRecoveryMode({ recoveryOnly = false, partialApplyRe
         : "NORMAL";
 }
 
+export function assertStageBRecoveryRefreshStatus({ status, recoveryMode } = {}) {
+  const recovery = ["RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(recoveryMode);
+  if ((recovery && status === "RESOURCE_DRIFT") || (status === "REVIEWED_OUTPUT_RECONCILIATION" && recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY")) return true;
+  throw new Error(`${recoveryMode} planning requires its exact reviewed refresh evidence.`);
+}
+
 export function stageBMutationInstanceIdentity(change) {
   const address = change?.address;
   const actions = change?.change?.actions ?? change?.actions;

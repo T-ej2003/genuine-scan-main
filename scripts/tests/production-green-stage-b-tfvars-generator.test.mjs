@@ -12,6 +12,7 @@ import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, deriveContr
 import { STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import { resolveStageBRecoveryMode, STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { readPlanningInputs } from "../plan-production-green-stage-b.mjs";
 
 const releaseSha = "7245a6036492f875654c414473737e33c1422f3c";
 const now = "2026-08-03T12:00:00.000Z";
@@ -115,7 +116,7 @@ test("partial-apply recovery is generated from the exact observation and refresh
   assert.throws(() => partial({ refreshReportSha256: "0".repeat(64) }), /caller-selected or stale/);
   const alteredRefreshPath = path.join(path.dirname(args.outputPath), "altered.refresh.json");
   fs.writeFileSync(alteredRefreshPath, `${JSON.stringify({ ...refresh, status: "NO_CHANGES" })}\n`, { mode: 0o600 });
-  assert.throws(() => partial({ refreshReportPath: alteredRefreshPath }), /not bound to the authenticated serial\/state residue/);
+  assert.throws(() => partial({ refreshReportPath: alteredRefreshPath }), /requires its exact reviewed refresh evidence/);
   fs.writeFileSync(alteredRefreshPath, `${JSON.stringify({ ...refresh, stageBStateSerial: 95 })}\n`, { mode: 0o600 });
   assert.throws(() => partial({ refreshReportPath: alteredRefreshPath }), /not bound to the authenticated serial\/state residue/);
   fs.writeFileSync(alteredRefreshPath, `${JSON.stringify({ ...refresh, stageBStateLineage: "0".repeat(36) })}\n`, { mode: 0o600 });
@@ -175,7 +176,19 @@ test("fresh-image recovery is reachable through the canonical tfvars producer", 
   assert.equal(result.bindingReport.recoveryMode, "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY");
   assert.equal(result.bindingReport.partialApplyRecovery, false);
   assert.equal(result.bindingReport.freshImagePartialApplyRecovery, true);
-  assert.throws(() => generateStageBTfvars({ ...args, imageEvidence: freshEvidencePath, imageEvidenceSignature: freshSignaturePath, partialApplyRecovery: true, outputPath: path.join(path.dirname(args.outputPath), "ordinary-partial.tfvars"), bindingReportPath: path.join(path.dirname(args.outputPath), "ordinary-partial.json"), recovery: { refreshReportPath: refreshPath, observationBindingPath: observationPath } }), /not bound to the authenticated serial\/state residue/);
+  const recoveryBindingSha256 = crypto.createHash("sha256").update(fs.readFileSync(result.bindingReportPath)).digest("hex");
+  const planningInputs = readPlanningInputs(result.outputPath, [
+    "--binding-report", result.bindingReportPath, "--binding-report-sha256", recoveryBindingSha256,
+    "--refresh-binding-report", observationPath, "--refresh-binding-report-sha256", refresh.bindingReportSha256,
+    "--tooling-tree-sha256", args.toolingTreeSha256, "--image-release-sha", args.imageReleaseSha,
+    "--refresh-report", refreshPath, "--refresh-report-sha256", result.bindingReport.recoveryRefreshReportSha256,
+    "--fresh-image-partial-apply-recovery", "--closure-mode", "production",
+  ], { currentHead: args.toolingSha }, {
+    assertRefresh: () => true,
+    backendMetadata: { backendMetadataSha256: "f".repeat(64), terraformDataDir: path.dirname(args.outputPath) },
+  });
+  assert.equal(planningInputs.recoveryMode, "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY");
+  assert.throws(() => generateStageBTfvars({ ...args, imageEvidence: freshEvidencePath, imageEvidenceSignature: freshSignaturePath, partialApplyRecovery: true, outputPath: path.join(path.dirname(args.outputPath), "ordinary-partial.tfvars"), bindingReportPath: path.join(path.dirname(args.outputPath), "ordinary-partial.json"), recovery: { refreshReportPath: refreshPath, observationBindingPath: observationPath } }), /requires its exact reviewed refresh evidence/);
   assert.throws(() => recover({ resourceChanges: { nonNoOp: 1, changes: [{ address: "aws_db_instance.green" }] } }), /output reconciliation is not exact/);
   assert.throws(() => recover({ outputChanges: [{ ...refresh.outputChanges[0], before: { ...beforeImages, backend: afterImages.backend } }] }), /output reconciliation is not exact/);
   assert.throws(() => recover({ outputChanges: [{ ...refresh.outputChanges[0], after: { ...afterImages, backend: beforeImages.backend } }] }), /output reconciliation is not exact/);

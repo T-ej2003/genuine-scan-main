@@ -11,7 +11,7 @@ import {
   STAGE_B_PLAN_IMAGE_BINDINGS,
 } from "./production-green-stage-b-image-evidence.mjs";
 import { STAGE_B, STAGE_B_MODES, canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { resolveStageBRecoveryMode, STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
+import { assertStageBRecoveryRefreshStatus, resolveStageBRecoveryMode, STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { assertStageBBrokerPackageManifest } from "./package-production-green-stage-b-broker.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageAStateIdentity, parseAuthenticatedStateBytes, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
@@ -340,8 +340,8 @@ function assertPartialApplyRecoveryEvidence({ recovery, state, toolingSha, tooli
   const refreshReportSha256 = sha256(refreshBytes); const observationBindingSha256 = sha256(observationBytes); const stateSha256 = sha256(fs.readFileSync(recovery.stateBackupPath || ""));
   if (recovery.refreshReportSha256 !== undefined && recovery.refreshReportSha256 !== refreshReportSha256) throw new Error("Partial recovery refresh report SHA256 is caller-selected or stale.");
   if (recovery.observationBindingSha256 !== undefined && recovery.observationBindingSha256 !== observationBindingSha256) throw new Error("Partial recovery observation binding SHA256 is caller-selected or stale.");
-  const acceptedStatus = refreshReport.status === "RESOURCE_DRIFT" || (freshImagePartialApplyRecovery && refreshReport.status === "REVIEWED_OUTPUT_RECONCILIATION");
-  if (observationBinding.recoveryOnly !== false || refreshReport.schemaVersion !== 1 || !acceptedStatus || refreshReport.deployablePlan !== false || refreshReport.bindingReportSha256 !== observationBindingSha256 || refreshReport.tfvarsSha256 !== observationBinding.tfvarsSha256 || refreshReport.stageBStateLineage !== state.lineage || refreshReport.stageBStateSerial !== state.serial || refreshReport.stageBStateSha256 !== stateSha256 || refreshReport.toolingSha !== toolingSha || refreshReport.toolingTreeSha256 !== toolingTreeSha256) throw new Error("Partial recovery observation or refresh evidence is not bound to the authenticated serial/state residue.");
+  assertStageBRecoveryRefreshStatus({ status: refreshReport.status, recoveryMode: freshImagePartialApplyRecovery ? "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" : "PARTIAL_APPLY_RECOVERY" });
+  if (observationBinding.recoveryOnly !== false || refreshReport.schemaVersion !== 1 || refreshReport.deployablePlan !== false || refreshReport.bindingReportSha256 !== observationBindingSha256 || refreshReport.tfvarsSha256 !== observationBinding.tfvarsSha256 || refreshReport.stageBStateLineage !== state.lineage || refreshReport.stageBStateSerial !== state.serial || refreshReport.stageBStateSha256 !== stateSha256 || refreshReport.toolingSha !== toolingSha || refreshReport.toolingTreeSha256 !== toolingTreeSha256) throw new Error("Partial recovery observation or refresh evidence is not bound to the authenticated serial/state residue.");
   if (refreshReport.status === "REVIEWED_OUTPUT_RECONCILIATION") assertFreshImageOutputReconciliation(refreshReport, observationBinding, state);
   return { refreshReportSha256, observationBindingSha256, stateSha256, stateLineage: state.lineage, stateSerial: state.serial };
 }
