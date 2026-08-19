@@ -14,7 +14,7 @@ import { STAGE_B, STAGE_B_MODES, canonicalJson } from "./production-green-stage-
 import { resolveStageBRecoveryMode, STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { assertStageBBrokerPackageManifest } from "./package-production-green-stage-b-broker.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
-import { assertStageAStateIdentity, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateIdentity, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber, assertVerifiedStageBRecovery } from "./stage-b-partial-apply-recovery-contract.mjs";
 
@@ -37,7 +37,7 @@ const candidateKeyPattern = /^([a-f0-9]{7,40})-(backend|worker|canary|read_only_
 const executorKeyPattern = /^([a-f0-9]{7,40})-(full-rls-(admin-bootstrap|admin-ownership|capability-preflight|role-provision|role-verify|rollback|runtime-policy|verification))$/;
 
 const stageAKeys = Object.freeze([
-  "schemaVersion", "generator", "toolingSha", "toolingTreeSha256", "stageAStateObject", "stageAStateLineage", "stageAStateSerial", "stageAStateSha256", "networkEvidence", "accountId", "region", "vpcId", "privateSubnetIds", "ecsClusterArn",
+  "schemaVersion", "generator", "toolingSha", "toolingTreeSha256", "stageAStateIdentityVersion", "stageAStateObject", "stageAStateLineage", "stageAStateSerial", "stageAStateSha256", "networkEvidence", "accountId", "region", "vpcId", "privateSubnetIds", "ecsClusterArn",
   "stageADatabaseSecurityGroupId", "stageAExecutorSecurityGroupId", "stageAExecutorTaskRoleArn",
   "stageABrokerRoleArn", "stageAExecutorLogGroupName", "stageAExecutorLogGroupArn",
   "stageABrokerLogGroupName", "stageABrokerLogGroupArn", "stageARuntimeSecretArns",
@@ -118,7 +118,7 @@ export function validateStageBStageAInput(input, { toolingSha, toolingTreeSha256
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Stage-A prerequisite input is malformed.");
   if (JSON.stringify(Object.keys(input).sort()) !== JSON.stringify([...stageAKeys].sort())) throw new Error("Stage-A prerequisite input fields do not match the reviewed contract.");
   if (input.schemaVersion !== STAGE_A_PREREQUISITES_SCHEMA_VERSION || input.generator !== STAGE_A_PREREQUISITES_GENERATOR || input.accountId !== STAGE_B.account || input.region !== STAGE_B.region) throw new Error("Stage-A prerequisite account, region, schema, or generator is wrong.");
-  if (!/^[a-f0-9]{40}$/.test(input.toolingSha || "") || !digestPattern.test(input.toolingTreeSha256 || "") || input.stageAStateObject !== STAGE_A_STATE_OBJECT || input.stageAStateLineage !== STAGE_A_EXPECTED_STATE_LINEAGE || !Number.isInteger(input.stageAStateSerial) || input.stageAStateSerial < STAGE_A_MINIMUM_STATE_SERIAL || !digestPattern.test(input.stageAStateSha256 || "")) throw new Error("Stage-A prerequisite provenance is malformed.");
+  if (!/^[a-f0-9]{40}$/.test(input.toolingSha || "") || !digestPattern.test(input.toolingTreeSha256 || "") || input.stageAStateIdentityVersion !== STAGE_A_STATE_IDENTITY_VERSION || input.stageAStateObject !== STAGE_A_STATE_OBJECT || input.stageAStateLineage !== STAGE_A_EXPECTED_STATE_LINEAGE || !Number.isInteger(input.stageAStateSerial) || input.stageAStateSerial < STAGE_A_MINIMUM_STATE_SERIAL || !digestPattern.test(input.stageAStateSha256 || "")) throw new Error("Stage-A prerequisite provenance is malformed.");
   if ((toolingSha !== undefined && input.toolingSha !== toolingSha) || (toolingTreeSha256 !== undefined && input.toolingTreeSha256 !== toolingTreeSha256)) throw new Error("Stage-A prerequisite tooling provenance does not match this deployment.");
   if (!/^vpc-[a-f0-9]+$/.test(input.vpcId)) throw new Error("Stage-A VPC ID is malformed.");
   if (!Array.isArray(input.privateSubnetIds)) throw new Error("Stage-A private subnets are malformed.");
@@ -446,7 +446,7 @@ function assertBrokerPackageBinding(tfvarsBytes, report) {
 }
 
 function assertStageAInputMatchesStateBackup(stageAInput, stageAStateBytes, stageAState, report) {
-  const stateSha256 = sha256(stageAStateBytes);
+  const stateSha256 = stageAStateSemanticSha256(stageAState);
   assertStageAStateIdentity(stageAState, { stateObject: stageAInput.stageAStateObject });
   if (stageAInput.stageAStateLineage !== stageAState.lineage) throw new Error("Stage-A prerequisite lineage does not match its source state backup.");
   if (stageAInput.stageAStateSerial !== stageAState.serial) throw new Error("Stage-A prerequisite serial does not match its source state backup.");
@@ -467,7 +467,7 @@ function assertStageAPrerequisiteBinding(report) {
   }
   const inputBytes = fs.readFileSync(report.stageAInputPath); const stateBytes = fs.readFileSync(report.stageAStateBackupPath);
   if (sha256(inputBytes) !== report.stageAInputSha256) throw new Error("Stage-A prerequisite input was modified after canonical generation.");
-  if (sha256(stateBytes) !== report.stageAStateBackupSha256) throw new Error("Stage-A state backup was modified after canonical generation.");
+  if (stageAStateSemanticSha256(JSON.parse(stateBytes)) !== report.stageAStateBackupSha256) throw new Error("Stage-A state backup was modified after canonical generation.");
   const input = validateStageBStageAInput(JSON.parse(inputBytes), { toolingSha: report.toolingSha, toolingTreeSha256: report.toolingTreeSha256 });
   const stageAState = JSON.parse(stateBytes);
   assertStageAInputMatchesStateBackup(input, stateBytes, stageAState, report);

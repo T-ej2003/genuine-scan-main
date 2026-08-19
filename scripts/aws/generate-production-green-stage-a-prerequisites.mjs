@@ -10,7 +10,8 @@ import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-re
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
 export const STAGE_A_PREREQUISITES_GENERATOR = "scripts/aws/generate-production-green-stage-a-prerequisites.mjs";
-export const STAGE_A_PREREQUISITES_SCHEMA_VERSION = 2;
+export const STAGE_A_PREREQUISITES_SCHEMA_VERSION = 3;
+export const STAGE_A_STATE_IDENTITY_VERSION = 2;
 export const STAGE_A_STATE_OBJECT = "mscqr/production/rls-green/stage-a/terraform.tfstate";
 export const STAGE_A_EXPECTED_STATE_LINEAGE = "02afb75a-f902-ab8a-f4c1-751d4aef7837";
 export const STAGE_A_MINIMUM_STATE_SERIAL = 35;
@@ -47,6 +48,40 @@ const assertExactPolicy = (actual, expected, label) => {
   if (JSON.stringify(stable(actual)) !== JSON.stringify(stable(expected))) throw new Error(`${label} policy semantics are not the reviewed contract.`);
 };
 
+function canonicalStateJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalStateJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalStateJson(value[key])}`).join(",")}}`;
+  if (value === undefined) throw new Error("Stage A state identity contains an unsupported undefined value.");
+  return JSON.stringify(value);
+}
+
+function checkResultKey(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.object_kind !== "string" || !entry.object_kind || typeof entry.config_addr !== "string" || !entry.config_addr) {
+    throw new Error("Stage A state identity check result has no unambiguous semantic key.");
+  }
+  return JSON.stringify([entry.object_kind, entry.config_addr]);
+}
+
+export function normalizeStageAStateForIdentity(state) {
+  if (!state || typeof state !== "object" || Array.isArray(state)) throw new Error("Stage A state identity input is malformed.");
+  const normalized = structuredClone(state);
+  if (Object.hasOwn(normalized, "check_results")) {
+    if (!Array.isArray(normalized.check_results)) throw new Error("Stage A state identity check results are malformed.");
+    const keyed = normalized.check_results.map((entry) => ({ key: checkResultKey(entry), entry }));
+    if (new Set(keyed.map(({ key }) => key)).size !== keyed.length) throw new Error("Stage A state identity has duplicate check result semantic keys.");
+    normalized.check_results = keyed.sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0).map(({ entry }) => entry);
+  }
+  return normalized;
+}
+
+export function stageAStateSemanticSha256(state) {
+  return sha256(Buffer.from(canonicalStateJson(normalizeStageAStateForIdentity(state))));
+}
+
+function parseAuthenticatedStateBytes(stateBytes) {
+  try { return JSON.parse(Buffer.from(stateBytes).toString("utf8")); } catch { throw new Error("Stage A state identity requires valid JSON state bytes."); }
+}
+
 export function assertStageAStateIdentity(state, { stateObject = STAGE_A_STATE_OBJECT } = {}) {
   if (stateObject !== STAGE_A_STATE_OBJECT) throw new Error(`Stage A state object is wrong: expected ${STAGE_A_STATE_OBJECT}, got ${stateObject}.`);
   if (!state || typeof state !== "object") throw new Error("Stage A state is malformed.");
@@ -59,11 +94,15 @@ export function assertStageAStateIdentity(state, { stateObject = STAGE_A_STATE_O
 export function buildStageAStateIdentity(state, { stateObject = STAGE_A_STATE_OBJECT, stateBytes } = {}) {
   assertStageAStateIdentity(state, { stateObject });
   if (!Buffer.isBuffer(stateBytes) && !(stateBytes instanceof Uint8Array)) throw new Error("Stage A state identity requires the exact authenticated state bytes.");
+  const parsedState = parseAuthenticatedStateBytes(stateBytes);
+  const stateSha256 = stageAStateSemanticSha256(state);
+  if (stateSha256 !== stageAStateSemanticSha256(parsedState)) throw new Error("Stage A state identity bytes do not match the supplied state.");
   return Object.freeze({
+    stateIdentityVersion: STAGE_A_STATE_IDENTITY_VERSION,
     stateObject,
     lineage: state.lineage,
     serial: state.serial,
-    stateSha256: sha256(stateBytes),
+    stateSha256,
     account: STAGE_B.account,
     region: STAGE_B.region,
   });
@@ -71,7 +110,7 @@ export function buildStageAStateIdentity(state, { stateObject = STAGE_A_STATE_OB
 
 export function assertStageAStateIdentityBinding(actual, expected) {
   const validSha256 = (value) => typeof value === "string" && SHA256.test(value);
-  if (!actual || !expected || !validSha256(actual.stateSha256) || !validSha256(expected.stateSha256) || actual.stateObject !== expected.stateObject || actual.lineage !== expected.lineage || actual.serial !== expected.serial || actual.account !== expected.account || actual.region !== expected.region || actual.stateSha256 !== expected.stateSha256) throw new Error("Stage A state identity binding is not exact.");
+  if (!actual || !expected || actual.stateIdentityVersion !== STAGE_A_STATE_IDENTITY_VERSION || expected.stateIdentityVersion !== STAGE_A_STATE_IDENTITY_VERSION || !validSha256(actual.stateSha256) || !validSha256(expected.stateSha256) || actual.stateObject !== expected.stateObject || actual.lineage !== expected.lineage || actual.serial !== expected.serial || actual.account !== expected.account || actual.region !== expected.region || actual.stateSha256 !== expected.stateSha256) throw new Error("Stage A state identity binding is not exact.");
   return true;
 }
 
@@ -172,7 +211,7 @@ export function generateStageAPrerequisites({ stateBackup, stateObject, toolingS
   const network = liveEvidence({ vpcId, subnetIds, databaseIdentifier, run });
   const output = {
     schemaVersion: STAGE_A_PREREQUISITES_SCHEMA_VERSION, generator: STAGE_A_PREREQUISITES_GENERATOR, toolingSha, toolingTreeSha256,
-    stageAStateObject: STAGE_A_STATE_OBJECT, stageAStateLineage: STAGE_A_EXPECTED_STATE_LINEAGE, stageAStateSerial: state.serial, stageAStateSha256: sha256(bytes), networkEvidence: network,
+    stageAStateIdentityVersion: STAGE_A_STATE_IDENTITY_VERSION, stageAStateObject: STAGE_A_STATE_OBJECT, stageAStateLineage: STAGE_A_EXPECTED_STATE_LINEAGE, stageAStateSerial: state.serial, stageAStateSha256: stageAStateSemanticSha256(state), networkEvidence: network,
     accountId: STAGE_B.account, region: STAGE_B.region, vpcId, privateSubnetIds: subnetIds, ecsClusterArn: STAGE_B.clusterArn,
     stageADatabaseSecurityGroupId: exact(value.database_security_group_id, STAGE_B.databaseSecurityGroupId, "Stage A database security group"), stageAExecutorSecurityGroupId: exact(value.executor_security_group_id, STAGE_B.executorSecurityGroupId, "Stage A executor security group"),
     stageAExecutorTaskRoleArn: exact(value.executor_role_arn, STAGE_B.executorRoleArn, "Stage A executor role"), stageABrokerRoleArn: exact(value.broker_role_arn, STAGE_B.brokerRoleArn, "Stage A broker role"),

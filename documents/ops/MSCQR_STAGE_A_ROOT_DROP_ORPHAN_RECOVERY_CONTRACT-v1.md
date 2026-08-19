@@ -5,7 +5,7 @@ partial-recovery `1/0` topology where Terraform already owns the exact
 `aws_kms_key.root_drop`, its alias is absent, and provider-computed ARN fields
 may still be unset before a successful refresh.
 
-## Read-only census (schema version 3)
+## Read-only census (schema version 4; Stage-A identity version 2)
 
 `npm run stage-a:root-drop:census` is the only producer. It paginates the
 current KMS key, alias, and CloudTrail result sets, then reads the exact
@@ -18,6 +18,17 @@ candidate with missing history, is ambiguous and blocks creation. The result
 binds to the fresh Stage-A state identity, source SHA, transition ID, failed-
 plan SHA, creator session, observation time, and census digest. Tags alone
 never authenticate a candidate.
+
+Current Stage-A state identity uses semantic canonicalization, not raw JSON
+serialization bytes. Object keys are serialized deterministically; only the
+top-level `check_results` collection is canonicalized as unordered, using the
+unique `(object_kind, config_addr)` key for each entry. Resource, instance,
+attribute, dependency, output, and nested-array order remains significant.
+Malformed or duplicate check-result keys fail closed. The identity version is
+bound into prerequisite, census, and downstream evidence artifacts, so older
+raw-byte identities are not silently reinterpreted. The historical failed-
+apply state hash in `ROOT_DROP_LEGACY_POLICY_BINDING` remains immutable
+provenance evidence and is not converted to the current identity format.
 
 For the single historical legacy-policy recovery, the census command also
 requires `--failed-apply-state-identity` pointing to the private, independently

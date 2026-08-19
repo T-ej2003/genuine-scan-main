@@ -196,7 +196,7 @@ async function runAdoptionInternal({ argv = process.argv.slice(2), runTerraform,
     keyCount: (value.resources || []).filter((resource) => resource?.type === "aws_kms_key" && resource?.name === "root_drop").flatMap((resource) => Array.isArray(resource.instances) ? resource.instances : []).length,
     aliasCount: (value.resources || []).filter((resource) => resource?.type === "aws_kms_alias" && resource?.name === "root_drop").flatMap((resource) => Array.isArray(resource.instances) ? resource.instances : []).length,
   });
-  const censusIdentity = { lineage: census.stageAStateLineage, serial: census.stageAStateSerial, stateSha256: census.stageAStateSha256 };
+  const censusIdentity = { stateIdentityVersion: census.stageAStateIdentityVersion, lineage: census.stageAStateLineage, serial: census.stageAStateSerial, stateSha256: census.stageAStateSha256 };
   const currentStateCounts = stageARootDropCounts(stageAState);
   if (legacyPolicyBound && currentStateCounts.keyCount === 1 && (currentStateCounts.aliasCount === 0 || currentStateCounts.aliasCount === 1)) assertRootDropCensus(census, { sourceSha: census.sourceSha, transitionId: census.transitionId, stageAStateIdentity: censusIdentity });
   else assertRootDropCensus(census, { sourceSha: census.sourceSha, transitionId: census.transitionId, stageAStateIdentity });

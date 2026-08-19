@@ -247,13 +247,13 @@ test("production candidate snapshot shape authenticates and persists the exact h
     listAliases: () => snapshot.aliases,
     lookupCreateKeyEvents: () => snapshot.creationEvents,
   };
-  const census = collectRootDropCensus({ adapter, terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity, failedApplyEvidence: legacyFailedApplyEvidence });
+  const census = collectRootDropCensus({ adapter, terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: identityForState(absentState), failedApplyEvidence: legacyFailedApplyEvidence });
   assert.equal(census.status, "AUTHENTICATED_ORPHAN");
   assert.equal(Object.hasOwn(census.candidates[0], "arn"), false);
   assert.equal(census.candidates[0].metadata.Arn, legacyKeyArn);
   assert.equal(census.candidates[0].keyArn, legacyKeyArn);
   const persisted = JSON.parse(JSON.stringify(census));
-  assert.doesNotThrow(() => assertRootDropCensus(persisted, { sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity }));
+  assert.doesNotThrow(() => assertRootDropCensus(persisted, { sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: identityForState(absentState) }));
 });
 
 test("canonical census entry path supports the existing historical 1/0 topology", async () => {

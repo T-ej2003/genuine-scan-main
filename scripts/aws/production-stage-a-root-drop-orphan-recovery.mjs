@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
-import { assertStageAStateIdentityBinding, buildStageAStateIdentity, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateIdentityBinding, buildStageAStateIdentity, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { buildStageARootDropKeyPolicy } from "./production-stage-a-control-plane.mjs";
 import { TEMPORARY_KMS_CAPABILITY } from "./production-stage-a-temporary-kms-capability.mjs";
 
@@ -9,7 +9,7 @@ export const ROOT_DROP_KEY_ADDRESS = "aws_kms_key.root_drop";
 export const ROOT_DROP_ALIAS_ADDRESS = "aws_kms_alias.root_drop";
 export const ROOT_DROP_ALIAS_NAME = "alias/mscqr-production-root-drop";
 export const ROOT_DROP_KEY_DESCRIPTION = "Root-only MSCQR production cutover evidence signing key";
-export const ROOT_DROP_RECOVERY_SCHEMA_VERSION = 3;
+export const ROOT_DROP_RECOVERY_SCHEMA_VERSION = 4;
 export const ROOT_DROP_RECOVERY_STATUSES = Object.freeze(["NO_CANDIDATE", "AUTHENTICATED_ORPHAN", "AMBIGUOUS"]);
 export const ROOT_DROP_EXPECTED_SIGNING_ALGORITHM = "RSASSA_PSS_SHA_256";
 export const ROOT_DROP_CENSUS_MAX_AGE_MS = 5 * 60 * 1000;
@@ -222,7 +222,7 @@ export function captureRootDropKeyUniverse(adapter) {
 }
 
 export function buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates = [], keyUniverse, failedApplyEvidence, actorBindings = ROOT_DROP_CENSUS_ACTOR_BINDINGS } = {}) {
-  if (!SHA40.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(transitionId || "") || !stageAStateIdentity?.lineage || !Number.isSafeInteger(stageAStateIdentity.serial) || !SHA256.test(stageAStateIdentity.stateSha256 || "")) fail("root-drop census is missing its source/state binding");
+  if (!SHA40.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(transitionId || "") || stageAStateIdentity?.stateIdentityVersion !== STAGE_A_STATE_IDENTITY_VERSION || !stageAStateIdentity?.lineage || !Number.isSafeInteger(stageAStateIdentity.serial) || !SHA256.test(stageAStateIdentity.stateSha256 || "")) fail("root-drop census is missing its source/state binding");
   if (!Array.isArray(candidates)) fail("root-drop census candidates are malformed");
   const stableKeyUniverse = canonicalKeyUniverse(keyUniverse);
   if (candidates.some((candidate) => candidate?.keyId && !stableKeyUniverse.includes(candidate.keyId))) fail("root-drop census candidate is outside the enumerated key universe");
@@ -230,7 +230,7 @@ export function buildRootDropCensus({ sourceSha, transitionId, stageAStateIdenti
   const status = candidates.length === 0 ? "NO_CANDIDATE" : candidates.length === 1 && authenticated.length === 1 ? "AUTHENTICATED_ORPHAN" : "AMBIGUOUS";
   if (status === "AUTHENTICATED_ORPHAN" && !failedApplyEvidence) fail("authenticated orphan census requires failed-apply evidence");
   if (!same(actorBindings, ROOT_DROP_CENSUS_ACTOR_BINDINGS)) fail("root-drop census actor bindings are outside the approved split-actor contract");
-  const value = { schemaVersion: ROOT_DROP_RECOVERY_SCHEMA_VERSION, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status, sourceSha, transitionId, actorBindings, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, keyUniverse: stableKeyUniverse, keyUniverseSha256: sha256(stableKeyUniverse), candidateCount: candidates.length, candidates, observedAt: new Date().toISOString(), ...(failedApplyEvidence ? { failedApplyEvidence } : {}) };
+  const value = { schemaVersion: ROOT_DROP_RECOVERY_SCHEMA_VERSION, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status, sourceSha, transitionId, actorBindings, stageAStateIdentityVersion: stageAStateIdentity.stateIdentityVersion, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, keyUniverse: stableKeyUniverse, keyUniverseSha256: sha256(stableKeyUniverse), candidateCount: candidates.length, candidates, observedAt: new Date().toISOString(), ...(failedApplyEvidence ? { failedApplyEvidence } : {}) };
   return { ...value, censusSha256: sha256(value) };
 }
 
@@ -239,7 +239,7 @@ export function assertRootDropCensus(census, { sourceSha, transitionId, stageASt
   const observedAt = Date.parse(census?.observedAt || "");
   let keyUniverse;
   try { keyUniverse = canonicalKeyUniverse(census?.keyUniverse); } catch { fail("root-drop census key universe is not a complete stable snapshot"); }
-  if (!census || !SHA256.test(censusSha256 || "") || sha256(unsigned) !== censusSha256 || census.schemaVersion !== ROOT_DROP_RECOVERY_SCHEMA_VERSION || census.kind !== "MSCQR_STAGE_A_ROOT_DROP_CENSUS" || census.region !== STAGE_B.region || !same(census.actorBindings, ROOT_DROP_CENSUS_ACTOR_BINDINGS) || !SHA256.test(census.keyUniverseSha256 || "") || sha256(keyUniverse) !== census.keyUniverseSha256 || !Number.isFinite(observedAt) || observedAt > Date.now() + 5 * 60 * 1000 || !ROOT_DROP_RECOVERY_STATUSES.includes(census.status) || census.sourceSha !== sourceSha || census.transitionId !== transitionId || census.stageAStateLineage !== stageAStateIdentity?.lineage || census.stageAStateSerial !== stageAStateIdentity?.serial || census.stageAStateSha256 !== stageAStateIdentity?.stateSha256 || !Number.isSafeInteger(census.candidateCount) || !Array.isArray(census.candidates) || census.candidateCount !== census.candidates.length || census.candidates.some((candidate) => candidate?.keyId && !keyUniverse.includes(candidate.keyId))) fail("root-drop census is not current, regional, actor-bound, or bound to the exact transition and Stage-A state");
+  if (!census || !SHA256.test(censusSha256 || "") || sha256(unsigned) !== censusSha256 || census.schemaVersion !== ROOT_DROP_RECOVERY_SCHEMA_VERSION || census.kind !== "MSCQR_STAGE_A_ROOT_DROP_CENSUS" || census.region !== STAGE_B.region || !same(census.actorBindings, ROOT_DROP_CENSUS_ACTOR_BINDINGS) || census.stageAStateIdentityVersion !== STAGE_A_STATE_IDENTITY_VERSION || census.stageAStateIdentityVersion !== stageAStateIdentity?.stateIdentityVersion || !SHA256.test(census.keyUniverseSha256 || "") || sha256(keyUniverse) !== census.keyUniverseSha256 || !Number.isFinite(observedAt) || observedAt > Date.now() + 5 * 60 * 1000 || !ROOT_DROP_RECOVERY_STATUSES.includes(census.status) || census.sourceSha !== sourceSha || census.transitionId !== transitionId || census.stageAStateLineage !== stageAStateIdentity?.lineage || census.stageAStateSerial !== stageAStateIdentity?.serial || census.stageAStateSha256 !== stageAStateIdentity?.stateSha256 || !Number.isSafeInteger(census.candidateCount) || !Array.isArray(census.candidates) || census.candidateCount !== census.candidates.length || census.candidates.some((candidate) => candidate?.keyId && !keyUniverse.includes(candidate.keyId))) fail("root-drop census is not current, regional, actor-bound, or bound to the exact transition and Stage-A state");
   if (census.status === "NO_CANDIDATE" && census.candidateCount !== 0) fail("root-drop census falsely declares no candidate");
   if (census.status === "AUTHENTICATED_ORPHAN" && (census.candidateCount !== 1 || census.candidates[0]?.authenticated !== true || !KEY_ID.test(census.candidates[0].keyId || "") || typeof census.candidates[0].creationEventId !== "string" || !census.candidates[0].creationEventId || census.candidates[0].sourceSha !== sourceSha || census.candidates[0].transitionId !== transitionId || !SHA256.test(census.candidates[0].planSha256 || "") || !census.failedApplyEvidence || census.failedApplyEvidence.sourceSha !== sourceSha || census.failedApplyEvidence.transitionId !== transitionId || census.failedApplyEvidence.planSha256 !== census.candidates[0].planSha256 || !SHA256.test(census.failedApplyEvidence.planSha256 || "") || !census.failedApplyEvidence.failedApplyWindow || !["CANONICAL", "LEGACY_BOUND_HISTORICAL"].includes(census.candidates[0].policyCompatibility))) fail("root-drop census does not contain exactly one source/transition/failed-apply-bound authenticated orphan");
   if (census.status === "AUTHENTICATED_ORPHAN" && census.candidates[0].policyCompatibility === "LEGACY_BOUND_HISTORICAL") assertLegacyRootDropPolicyBinding({ candidate: census.candidates[0], sourceSha, transitionId, failedApplyEvidence: census.failedApplyEvidence });
@@ -262,6 +262,7 @@ export function assertRootDropCensusMatch(supplied, fresh, bindings) {
 
 export function assertRootDropCensusAdoptionMatch(supplied, fresh, bindings) {
   const suppliedIdentity = {
+    stateIdentityVersion: supplied?.stageAStateIdentityVersion,
     lineage: supplied?.stageAStateLineage,
     serial: supplied?.stageAStateSerial,
     stateSha256: supplied?.stageAStateSha256,
@@ -410,6 +411,7 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
     const withAccounting = (error) => { const value = error instanceof Error ? error : new Error(String(error)); value.recoveryAccounting = { ...accounting }; return value; };
     try {
       const suppliedIdentity = {
+        stateIdentityVersion: census?.stageAStateIdentityVersion,
         lineage: census?.stageAStateLineage,
         serial: census?.stageAStateSerial,
         stateSha256: census?.stageAStateSha256,
