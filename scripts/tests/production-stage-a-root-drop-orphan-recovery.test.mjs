@@ -896,6 +896,33 @@ test("S2 replay validates ownership and zero drift without import or apply", asy
   assert.deepEqual(value.counts(), { imports: 0, applies: 0 });
 });
 
+test("stale S0 and S1 census evidence cannot authorize a mutation", async () => {
+  const staleS0 = census();
+  staleS0.observedAt = "2020-01-01T00:00:00.000Z";
+  staleS0.censusSha256 = rootDropRecoverySha256(Object.fromEntries(Object.entries(staleS0).filter(([key]) => key !== "censusSha256")));
+  const s0 = runner({ execute: true, injectFresh: false });
+  await assert.rejects(() => s0.run({ census: staleS0, terraformState: absentState, stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), /fresh authoritative census|stale/);
+  assert.deepEqual(s0.counts(), { imports: 0, applies: 0 });
+
+  const staleS1 = keyOnlyCensus();
+  staleS1.observedAt = "2020-01-01T00:00:00.000Z";
+  staleS1.censusSha256 = rootDropRecoverySha256(Object.fromEntries(Object.entries(staleS1).filter(([key]) => key !== "censusSha256")));
+  const s1 = runner({ execute: true, initial: keyState(), injectFresh: false });
+  await assert.rejects(() => s1.run({ census: staleS1, terraformState: keyState(), stageAStateIdentity: keyOnlyStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), /fresh authoritative census|stale/);
+  assert.deepEqual(s1.counts(), { imports: 0, applies: 0 });
+});
+
+test("expired S2 census replay is already recovered and remains mutation-free", async () => {
+  const staleS2 = keyOnlyCensus();
+  staleS2.observedAt = "2020-01-01T00:00:00.000Z";
+  staleS2.censusSha256 = rootDropRecoverySha256(Object.fromEntries(Object.entries(staleS2).filter(([key]) => key !== "censusSha256")));
+  const value = runner({ execute: true, initial: ownedState() });
+  const result = await value.run({ census: staleS2, terraformState: ownedState(), stageAStateIdentity: ownedStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
+  assert.equal(result.status, "ALREADY_RECOVERED");
+  assert.deepEqual(result.accounting, { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 });
+  assert.deepEqual(value.counts(), { imports: 0, applies: 0 });
+});
+
 test("S1 retry rejects changed candidate topology before mutation", async () => {
   const cases = [
     ["different key", buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: keyOnlyStateIdentity(), keyUniverse: [keyId, "22222222-2222-2222-2222-222222222222"], candidates: [{ ...candidate({ keyId: "22222222-2222-2222-2222-222222222222", arn: `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/22222222-2222-2222-2222-222222222222` }), authenticated: false, reason: "different" }, { ...candidate(), ...authenticated() }], failedApplyEvidence })],

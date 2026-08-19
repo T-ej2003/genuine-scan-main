@@ -332,7 +332,6 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
       if (census.status !== "AUTHENTICATED_ORPHAN") fail("orphan adoption requires exactly one authenticated candidate");
       const suppliedCandidate = census.candidates[0];
       if (keyCount === 1 && stateCounts.aliasCount === 1) {
-        assertRootDropCensusFresh(census);
         assertRootDropStateIdentity(state, { keyId: suppliedCandidate.keyId });
         const zeroDriftPlan = await createPlan({ keyId: suppliedCandidate.keyId, zeroDrift: true });
         const zeroDriftJson = await readPlan(zeroDriftPlan);
