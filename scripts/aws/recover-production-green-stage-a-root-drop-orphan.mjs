@@ -7,7 +7,7 @@ import { buildStageAStateIdentity, assertStageAStateIdentityBinding } from "./ge
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { buildRecoveryAwsEnvironment, buildRecoveryTerraformEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
-import { assertStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import {
   ROOT_DROP_KEY_ADDRESS,
   ROOT_DROP_ALIAS_ADDRESS,
@@ -89,21 +89,12 @@ export function assertRootDropExecutionSource({ sourceSha, repositoryRoot = root
   const repositoryRealpath = realpathSync(repositoryRoot);
   const terraformRealpath = realpathSync(terraformRoot);
   if (path.relative(repositoryRealpath, terraformRealpath).startsWith(`..${path.sep}`)) throw new Error("Stage-A root-drop adoption Terraform root is outside the authenticated repository");
-  const currentHead = String(runGit(["rev-parse", "HEAD"])).trim();
-  const status = String(runGit(["status", "--porcelain=v1", "--untracked-files=all"]));
-  const shallow = String(runGit(["rev-parse", "--is-shallow-repository"])).trim() === "true";
+  const protectedCheckout = readStageBProtectedMainCheckout({ cwd: repositoryRealpath, fetchOriginMain: true, run: runGit });
+  const currentHead = protectedCheckout.currentHead;
+  const status = protectedCheckout.porcelainStatus;
   const topLevel = realpathSync(String(runGit(["rev-parse", "--show-toplevel"])).trim());
   if (topLevel !== repositoryRealpath) throw new Error("Stage-A root-drop adoption is not running from the authenticated repository root");
-  if (currentHead !== sourceSha) throw new Error("Stage-A root-drop adoption checkout HEAD does not match census.sourceSha");
-  assertStageBProtectedMainCheckout({
-    mode: "review",
-    toolingSha: sourceSha,
-    currentHead,
-    originMainHead: undefined,
-    isAncestor: false,
-    porcelainStatus: status,
-    repositoryState: { remoteDefaultBranch: undefined, shallow, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false },
-  });
+  if (currentHead !== sourceSha) throw new Error("Stage-A root-drop adoption checkout HEAD does not match the freshly fetched protected main");
   const relativeTerraformRoot = path.relative(repositoryRealpath, terraformRealpath);
   const ignoredStatus = String(runGit(["status", "--porcelain=v1", "--ignored=matching", "--untracked-files=all", "--", relativeTerraformRoot]));
   const ignoredRelevant = ignoredStatus.split("\n").filter((line) => line.startsWith("!!") && isExecutionRelevantTerraformPath(line.slice(3).trim()));

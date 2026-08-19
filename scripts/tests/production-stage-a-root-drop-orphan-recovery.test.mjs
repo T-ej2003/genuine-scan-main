@@ -44,8 +44,12 @@ const state = productionStageAState({ serial: 46 });
 const absentState = { ...state, resources: state.resources.map((resource) => (resource.type === "aws_kms_key" && resource.name === "root_drop") || (resource.type === "aws_kms_alias" && resource.name === "root_drop") ? { ...resource, instances: [] } : resource) };
 const stateBytes = Buffer.from(JSON.stringify(absentState));
 const stateIdentity = buildStageAStateIdentity(absentState, { stateBytes });
-const cleanGit = (head = sourceSha, status = "", ignored = "", trackedModes = "") => (args) => {
+const cleanGit = (head = sourceSha, status = "", ignored = "", trackedModes = "", fetchedMain = head) => (args) => {
+  if (args[0] === "fetch" && args[1] === "--no-tags" && args[2] === "origin" && args[3] === "main") return "";
+  if (args[0] === "rev-parse" && args[1] === "FETCH_HEAD") return `${fetchedMain}\n`;
   if (args[0] === "rev-parse" && args[1] === "HEAD") return `${head}\n`;
+  if (args[0] === "symbolic-ref" && args[1] === "--quiet") return "refs/remotes/origin/main\n";
+  if (args[0] === "merge-base" && args[1] === "--is-ancestor") return "";
   if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return `${realpathSync(process.cwd())}\n`;
   if (args[0] === "rev-parse" && args[1] === "--is-shallow-repository") return "false\n";
   if (args[0] === "status" && args.includes("--ignored=matching")) return ignored;
@@ -399,6 +403,8 @@ test("adoption rejects a non-canonical Terraform root before any Terraform subpr
 test("source checkout is bound to census.sourceSha and rejects execution-relevant drift before import", async () => {
   assert.doesNotThrow(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit() }));
   assert.throws(() => assertRootDropExecutionSource({ sourceSha: "0".repeat(40), runGit: cleanGit() }), /HEAD does not match/);
+  assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, "", "", "", "1".repeat(40)) }), /origin\/main/);
+  assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: (args) => { if (args[0] === "fetch") throw new Error("network unavailable"); return cleanGit()(args); } }), /Fresh protected-main fetch failed/);
   assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, " M infra/aws/terraform/production-green-stage-a/main.tf\n") }), /tracked modifications/);
   assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, "M  infra/aws/terraform/production-green-stage-a/main.tf\n") }), /tracked modifications/);
   assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, "?? infra/aws/terraform/production-green-stage-a/local.tf\n") }), /untracked file/);
