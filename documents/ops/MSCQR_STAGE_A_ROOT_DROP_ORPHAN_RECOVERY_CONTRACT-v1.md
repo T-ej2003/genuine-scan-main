@@ -62,7 +62,10 @@ The adoption command consumes the same reviewed Stage-A variable environment as
 the normal production plan: only the nine required `TF_VAR_*` inputs declared
 by `infra/aws/terraform/production-green-stage-a/variables.tf` are accepted;
 all other `TF_VAR_*` and Terraform redirect variables are rejected or removed.
-A non-mutating, no-refresh Terraform plan validates those inputs before import.
+A non-mutating, no-refresh Terraform plan is saved, shown as JSON, and
+classified before import; only the exact root-drop key and alias create
+envelope is accepted. Auto-loaded `terraform.tfvars` and `*.auto.tfvars`
+files are rejected so the reviewed inputs remain authoritative.
 After an authorized import it refreshes state, proves the imported key
 ARN/spec/usage, and requires a plan containing only:
 

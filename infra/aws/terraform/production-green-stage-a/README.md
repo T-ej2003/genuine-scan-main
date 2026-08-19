@@ -40,7 +40,10 @@ launch: `TF_VAR_aws_region`, `TF_VAR_vpc_id`, `TF_VAR_private_subnet_ids`,
 `TF_VAR_release_role_arn`, and `TF_VAR_receipt_bucket_arn`. The recovery
 command rejects every other `TF_VAR_*` key and does not fall back to a local
 `terraform.tfvars`. It validates the exact variable set with a non-mutating
-Terraform plan before import. It uses the release-deployer
+Terraform plan saved to the reviewed private plan path, shows and machine-
+classifies those exact plan bytes, and requires only the root-drop key and
+alias creates before import. Any auto-loaded `terraform.tfvars` or
+`*.auto.tfvars` file is rejected. It uses the release-deployer
 profile for every Terraform subprocess. Before import it compares the live
 state lineage, serial, and exact state-byte SHA-256 with the fresh census
 identity; any mismatch fails closed. Recovery imports only the authenticated

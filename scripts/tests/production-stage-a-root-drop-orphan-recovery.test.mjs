@@ -16,6 +16,7 @@ import {
   assertRootDropAliasOnlyPlan,
   assertRootDropCensus,
   assertRootDropCreationInterlock,
+  assertRootDropPreImportPlan,
   assertRootDropStateIdentity,
   authenticateRootDropOrphan,
   buildRootDropCensus,
@@ -26,7 +27,7 @@ import {
   STAGE_A_TERRAFORM_BACKEND,
   assertStageATerraformBackendMetadata,
 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
-import { runAdoption, runCensus, validateRootDropPlanPaths, STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS } from "../aws/recover-production-green-stage-a-root-drop-orphan.mjs";
+import { assertNoAutoLoadedTerraformVariableFiles, runAdoption, runCensus, validateRootDropPlanPaths, STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS } from "../aws/recover-production-green-stage-a-root-drop-orphan.mjs";
 import { buildRecoveryTerraformEnvironment } from "../aws/recover-stage-b-backend-task-definition.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
 
@@ -78,8 +79,8 @@ const authenticated = () => authenticateRootDropOrphan({ candidate: candidate(),
 const census = () => buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: stateIdentity, keyUniverse: [keyId], candidates: [{ ...candidate(), ...authenticated() }], failedApplyEvidence });
 const noCandidateCensus = () => buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: stateIdentity, keyUniverse: [], candidates: [] });
 const exactCreatePlan = { resource_changes: [
-  { address: ROOT_DROP_KEY_ADDRESS, change: { actions: ["create"], after: { policy: JSON.stringify(buildStageARootDropKeyPolicy()), customer_master_key_spec: "RSA_3072", key_usage: "SIGN_VERIFY", bypass_policy_lockout_safety_check: false } } },
-  { address: ROOT_DROP_ALIAS_ADDRESS, change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME } } },
+  { address: ROOT_DROP_KEY_ADDRESS, type: "aws_kms_key", change: { before: null, actions: ["create"], after: { description: ROOT_DROP_KEY_DESCRIPTION, policy: JSON.stringify(buildStageARootDropKeyPolicy()), customer_master_key_spec: "RSA_3072", key_usage: "SIGN_VERIFY", deletion_window_in_days: 30, bypass_policy_lockout_safety_check: false, tags: { ...TEMPORARY_KMS_CAPABILITY.tags } } } },
+  { address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { before: null, actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME } } },
 ] };
 const aliasPlan = (changes = [{ address: ROOT_DROP_ALIAS_ADDRESS, change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: keyId } } }]) => ({ resource_changes: changes });
 const keyState = () => ({ ...absentState, resources: absentState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: keyArn, key_id: keyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) });
@@ -166,6 +167,7 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
   const observedAws = [];
   const observedTerraform = [];
   let currentState = absentState;
+  let showCount = 0;
   try {
     Object.assign(process.env, { ...stageAVars, AWS_PROFILE: "administrator", AWS_ACCESS_KEY_ID: "ambient-key", AWS_SECRET_ACCESS_KEY: "ambient-secret", AWS_SESSION_TOKEN: "ambient-session", AWS_SECURITY_TOKEN: "ambient-security", AWS_DEFAULT_PROFILE: "ambient-default", AWS_REGION: "us-east-1", AWS_DEFAULT_REGION: "us-east-1", AWS_CONFIG_FILE: "/tmp/config", AWS_SHARED_CREDENTIALS_FILE: "/tmp/credentials", TF_DATA_DIR: "/tmp/hostile-data", TF_WORKSPACE: "wrong-workspace", TF_CLI_CONFIG_FILE: "/tmp/hostile-cli.tfrc", TF_CLI_ARGS: "-refresh=false", TF_CLI_ARGS_init: "-backend-config=/tmp/wrong-backend", TF_CLI_ARGS_import: "-state=/tmp/wrong.tfstate", TF_CLI_ARGS_plan: "-target=aws_kms_key.wrong", TF_CLI_ARGS_apply: "-auto-approve" });
     await runCensus({ argv: ["--admin-profile", "administrator", "--release-profile", "release", "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--source-sha", sourceSha, "--transition-id", transitionId, "--plan-sha256", failedApplyEvidence.planSha256, "--failed-apply-start", failedApplyEvidence.failedApplyWindow.start, "--failed-apply-end", failedApplyEvidence.failedApplyWindow.end, "--output", outputPath], execFile: (command, args, options) => { observedAws.push({ command, args, env: options.env }); return JSON.stringify({ Keys: [] }); }, write: () => {} });
@@ -183,7 +185,8 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
       if (args.includes("state") && args.includes("pull")) return JSON.stringify(currentState);
       if (args.includes("import")) { currentState = keyState(); return ""; }
       if (args.includes("apply")) { currentState = ownedState(); return ""; }
-      if (args.includes("show")) return JSON.stringify(args.at(-1).endsWith("zero-drift") ? { resource_changes: [] } : aliasPlan());
+      if (args.includes("plan") && args.includes("-out")) { writeFileSync(args[args.indexOf("-out") + 1], "saved-plan"); return ""; }
+      if (args.includes("show")) { showCount += 1; return JSON.stringify(showCount === 1 ? exactCreatePlan : (args.at(-1).endsWith("zero-drift") ? { resource_changes: [] } : aliasPlan())); }
       return "";
     }, write: () => {} });
     assert.equal(result.status, "RECOVERED");
@@ -246,8 +249,10 @@ test("adoption validates both new private plan outputs before any Terraform impo
     const canonicalValid = path.join(realpathSync(directory), "valid.plan");
     assert.equal(validated.planPath, canonicalValid);
     assert.equal(validated.zeroDriftPlanPath, `${canonicalValid}.zero-drift`);
+    assert.equal(validated.preImportPlanPath, `${canonicalValid}.pre-import`);
     assert.equal(existsSync(canonicalValid), false);
     assert.equal(existsSync(validated.zeroDriftPlanPath), false);
+    assert.equal(existsSync(validated.preImportPlanPath), false);
 
     await assertRejectedBeforeTerraform("relative.plan", /absolute path/);
     await assertRejectedBeforeTerraform(path.join(process.cwd(), "repository.plan"), /outside the repository/);
@@ -265,6 +270,10 @@ test("adoption validates both new private plan outputs before any Terraform impo
     const zeroDriftCollision = path.join(directory, "collision.plan");
     writeFileSync(`${zeroDriftCollision}.zero-drift`, "occupied", { mode: 0o600 });
     await assertRejectedBeforeTerraform(zeroDriftCollision, /new absolute private output path/);
+
+    const preImportCollision = path.join(directory, "pre-import-collision.plan");
+    writeFileSync(`${preImportCollision}.pre-import`, "occupied", { mode: 0o600 });
+    await assertRejectedBeforeTerraform(preImportCollision, /new absolute private output path/);
 
     chmodSync(directory, 0o755);
     await assertRejectedBeforeTerraform(path.join(directory, "permissive.plan"), /mode 0700/);
@@ -334,13 +343,14 @@ test("Stage-A recovery preserves only the reviewed required variables and perfor
         if (args.includes("state")) return JSON.stringify(currentState);
         if (args.includes("import")) { currentState = keyState(); return ""; }
         if (args.includes("apply")) { currentState = ownedState(); return ""; }
-        if (args.includes("show")) return JSON.stringify(args.at(-1).endsWith("zero-drift") ? { resource_changes: [] } : aliasPlan());
+        if (args.includes("plan") && args.includes("-out")) { writeFileSync(args[args.indexOf("-out") + 1], "saved-plan"); return ""; }
+        if (args.includes("show")) return JSON.stringify(sequence.includes("pre-import-plan-shown") ? (args.at(-1).endsWith("zero-drift") ? { resource_changes: [] } : aliasPlan()) : (sequence.push("pre-import-plan-shown"), exactCreatePlan));
         return "";
       },
       write: () => {},
     });
     assert.equal(result.status, "RECOVERED");
-    assert.deepEqual(sequence.slice(0, 3), ["workspace", "readiness", "census"]);
+    assert.deepEqual(sequence.slice(0, 3), ["workspace", "census", "readiness"]);
   } finally {
     for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     rmSync(directory, { recursive: true, force: true });
@@ -361,13 +371,94 @@ test("missing, malformed, or wrong-identity Stage-A variables fail before Terraf
       Object.assign(process.env, stageAVars);
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
       let terraformImports = 0;
-      await assert.rejects(() => runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", path.join(directory, `${key}.plan`)], readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }), execFile: (command, args) => { if (args.includes("import")) terraformImports += 1; if (args.includes("plan")) throw new Error("Terraform must not run"); return "default\n"; }, write: () => {} }), expected);
+      await assert.rejects(() => runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", path.join(directory, `${key}.plan`)], readRootDropCensus: async () => census(), readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }), execFile: (command, args) => { if (args.includes("import")) terraformImports += 1; if (args.includes("plan")) throw new Error("Terraform must not run"); return "default\n"; }, write: () => {} }), expected);
       assert.equal(terraformImports, 0);
     }
   } finally {
     for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+async function runPreImportReadinessCase(readinessPlan, { variables = stageAVars, mutateSavedPlan = false } = {}) {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-pre-import-plan-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  const planPath = path.join(directory, "adoption.plan");
+  writeFileSync(statePath, stateBytes, { mode: 0o600 });
+  writeFileSync(identityPath, `${JSON.stringify(stateIdentity)}\n`, { mode: 0o600 });
+  writeFileSync(censusPath, `${JSON.stringify(census())}\n`, { mode: 0o600 });
+  const saved = Object.fromEntries(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS.map((key) => [key, process.env[key]]));
+  let currentState = absentState;
+  let imports = 0;
+  let applies = 0;
+  let planCalls = 0;
+  let showCalls = 0;
+  try {
+    Object.assign(process.env, variables);
+    const result = await runAdoption({
+      argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", planPath, "--execute"],
+      readRootDropCensus: async () => census(),
+      readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
+      execFile: (command, args) => {
+        if (args.includes("workspace")) return "default\n";
+        if (args.includes("state")) return JSON.stringify(currentState);
+        if (args.includes("import")) { imports += 1; currentState = keyState(); return ""; }
+        if (args.includes("apply")) { applies += 1; currentState = ownedState(); return ""; }
+        if (args.includes("plan") && args.includes("-out")) { planCalls += 1; writeFileSync(args[args.indexOf("-out") + 1], `saved-plan-${planCalls}`); return ""; }
+        if (args.includes("show")) {
+          showCalls += 1;
+          if (showCalls === 1) {
+            if (mutateSavedPlan) writeFileSync(args.at(-1), "tampered-plan");
+            return JSON.stringify(readinessPlan);
+          }
+          return JSON.stringify(showCalls === 2 ? aliasPlan() : { resource_changes: [] });
+        }
+        throw new Error(`unexpected Terraform command: ${args.join(" ")}`);
+      },
+      write: () => {},
+    });
+    return { result, imports, applies };
+  } catch (error) {
+    return { error, imports, applies };
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test("pre-import Terraform plan is saved, machine-classified, and exact before import", async () => {
+  assert.deepEqual(assertRootDropPreImportPlan(exactCreatePlan).addresses, [ROOT_DROP_KEY_ADDRESS, ROOT_DROP_ALIAS_ADDRESS]);
+  const valid = await runPreImportReadinessCase(exactCreatePlan);
+  assert.equal(valid.result.status, "RECOVERED");
+  assert.equal(valid.result.preImportPlanSha256.length, 64);
+  assert.deepEqual({ imports: valid.imports, applies: valid.applies }, { imports: 1, applies: 1 });
+  const invalidPlans = [
+    ["unrelated update", { ...exactCreatePlan, resource_changes: [...exactCreatePlan.resource_changes, { address: "aws_vpc.other", type: "aws_vpc", change: { before: {}, actions: ["update"], after: {} } }] }],
+    ["replacement", { ...exactCreatePlan, resource_changes: exactCreatePlan.resource_changes.map((entry) => entry.address === ROOT_DROP_KEY_ADDRESS ? { ...entry, change: { ...entry.change, actions: ["create", "delete"] } } : entry) }],
+    ["delete", { ...exactCreatePlan, resource_changes: [...exactCreatePlan.resource_changes, { address: "aws_vpc.other", type: "aws_vpc", change: { before: {}, actions: ["delete"], after: null } }] }],
+    ["unexpected create", { ...exactCreatePlan, resource_changes: [...exactCreatePlan.resource_changes, { address: "aws_vpc.other", type: "aws_vpc", change: { before: null, actions: ["create"], after: {} } }] }],
+    ["unknown action", { ...exactCreatePlan, resource_changes: exactCreatePlan.resource_changes.map((entry) => entry.address === ROOT_DROP_ALIAS_ADDRESS ? { ...entry, change: { ...entry.change, actions: ["migrate"] } } : entry) }],
+  ];
+  for (const [label, plan] of invalidPlans) {
+    const invalid = await runPreImportReadinessCase(plan);
+    assert.match(invalid.error?.message || "", /pre-import|unexpected|replacement|action|contract/, label);
+    assert.deepEqual({ imports: invalid.imports, applies: invalid.applies }, { imports: 0, applies: 0 }, label);
+  }
+  const staleVariables = await runPreImportReadinessCase(invalidPlans[0][1], { variables: { ...stageAVars, TF_VAR_vpc_id: "vpc-stale" } });
+  assert.equal(staleVariables.imports, 0);
+  const tampered = await runPreImportReadinessCase(exactCreatePlan, { mutateSavedPlan: true });
+  assert.match(tampered.error?.message || "", /changed while it was being classified/);
+  assert.deepEqual({ imports: tampered.imports, applies: tampered.applies }, { imports: 0, applies: 0 });
+});
+
+test("auto-loaded Terraform variable files are rejected before readiness", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-auto-tfvars-"));
+  try {
+    writeFileSync(path.join(directory, "terraform.tfvars"), "vpc_id = \"unreviewed\"\n");
+    assert.throws(() => assertNoAutoLoadedTerraformVariableFiles(directory), /auto-loaded/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("root-drop census consumes every paginated KMS and CloudTrail page", () => {

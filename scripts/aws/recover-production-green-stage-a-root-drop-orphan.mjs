@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildStageAStateIdentity, assertStageAStateIdentityBinding } from "./generate-production-green-stage-a-prerequisites.mjs";
@@ -15,6 +15,8 @@ import {
   buildRootDropAwsReadAdapter,
   collectRootDropCensus,
   createRootDropRecoveryRunner,
+  assertRootDropPreImportPlan,
+  rootDropRecoverySha256,
 } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -67,6 +69,11 @@ const readCanonicalTerraformBackend = (terraformRoot) => {
   assertStageATerraformBackendMetadata(metadata);
   return metadata.backend || metadata;
 };
+export function assertNoAutoLoadedTerraformVariableFiles(terraformRoot) {
+  const autoLoaded = readdirSync(terraformRoot).filter((name) => name === "terraform.tfvars" || name === "terraform.tfvars.json" || /.+\.auto\.tfvars(?:\.json)?$/.test(name));
+  if (autoLoaded.length) throw new Error(`Stage-A recovery rejects auto-loaded Terraform variable files: ${autoLoaded.sort().join(", ")}`);
+  return true;
+}
 
 export function validateRootDropPlanPaths({ planPath, repositoryRoot = root, reservedPaths = [] } = {}) {
   const repositoryRealpath = realpathSync(repositoryRoot);
@@ -83,8 +90,9 @@ export function validateRootDropPlanPaths({ planPath, repositoryRoot = root, res
   };
   const plan = validate(planPath, "Stage-A adoption plan");
   const zeroDrift = validate(`${plan}.zero-drift`, "Stage-A zero-drift plan");
-  if (plan === zeroDrift) throw new Error("Stage-A adoption plan and zero-drift plan must be distinct.");
-  return { planPath: plan, zeroDriftPlanPath: zeroDrift };
+  const preImport = validate(`${plan}.pre-import`, "Stage-A pre-import plan");
+  if (new Set([plan, zeroDrift, preImport]).size !== 3) throw new Error("Stage-A recovery plan outputs must be distinct.");
+  return { planPath: plan, zeroDriftPlanPath: zeroDrift, preImportPlanPath: preImport };
 }
 
 function failedEvidence(argv) {
@@ -143,7 +151,8 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   if (region !== STAGE_B.region) throw new Error("Stage-A root-drop adoption: region is outside the protected production boundary");
   const terraformRoot = assertCanonicalTerraformRoot(option(argv, "--terraform-root", false));
   const planPath = option(argv, "--plan-path");
-  const { planPath: validatedPlanPath, zeroDriftPlanPath } = validateRootDropPlanPaths({ planPath, reservedPaths: [censusPath, statePath, identityPath] });
+  const { planPath: validatedPlanPath, zeroDriftPlanPath, preImportPlanPath } = validateRootDropPlanPaths({ planPath, reservedPaths: [censusPath, statePath, identityPath] });
+  assertNoAutoLoadedTerraformVariableFiles(terraformRoot);
   readTerraformBackendMetadata(terraformRoot);
   assertStageATerraformVariables();
   const env = buildRecoveryTerraformEnvironment(releaseProfile, process.env, { allowedTerraformVariableKeys: STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS });
@@ -151,7 +160,6 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
     ? (args) => runTerraform(args, env)
     : (args) => execFile("terraform", [`-chdir=${terraformRoot}`, ...args], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   if (tf(["workspace", "show"]).trim() !== "default") throw new Error("Stage-A root-drop adoption requires the canonical default Terraform workspace");
-  tf(["plan", "-input=false", "-lock=false", "-refresh=false", "-no-color"]);
   const freshCensus = readRootDropCensus
     ? await readRootDropCensus({ census, stageAState, stageAStateIdentity, profile: releaseProfile, adminProfile, releaseProfile })
     : collectRootDropCensus({
@@ -162,6 +170,11 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
       stageAStateIdentity,
       failedApplyEvidence: census.failedApplyEvidence,
   });
+  tf(["plan", "-input=false", "-lock=false", "-refresh=false", "-out", preImportPlanPath, "-no-color"]);
+  const preImportPlanSha256 = rootDropRecoverySha256(readFileSync(preImportPlanPath));
+  const preImportPlan = JSON.parse(tf(["show", "-json", preImportPlanPath]));
+  if (rootDropRecoverySha256(readFileSync(preImportPlanPath)) !== preImportPlanSha256) throw new Error("Stage-A pre-import plan changed while it was being classified");
+  assertRootDropPreImportPlan(preImportPlan);
   const execute = argv.includes("--execute");
   const readStateSnapshot = async () => { const stateBytes = Buffer.from(tf(["state", "pull"])); return { state: JSON.parse(stateBytes), stateBytes }; };
   const readState = async () => (await readStateSnapshot()).state;
@@ -172,8 +185,9 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const applyPlan = async (savedPath) => { if (!execute) throw new Error("alias apply requires explicit --execute"); tf(["apply", "-input=false", "-lock=true", savedPath]); return { outcome: "CONFIRMED_SUCCESS" }; };
   const runner = createRootDropRecoveryRunner({ execute, readState, readStateSnapshot, importKey, refreshState, createPlan, readPlan, applyPlan });
   const result = await runner({ census, freshCensus, terraformState: stageAState, stageAStateIdentity, sourceSha: census.sourceSha, transitionId: census.transitionId, planSha256: census.failedApplyEvidence?.planSha256 });
-  write(`${JSON.stringify(result, null, 2)}\n`);
-  return result;
+  const report = { ...result, preImportPlanSha256 };
+  write(`${JSON.stringify(report, null, 2)}\n`);
+  return report;
 }
 
 export async function runCli(argv = process.argv.slice(2), dependencies = {}) {

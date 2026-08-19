@@ -192,6 +192,26 @@ export function assertRootDropAliasOnlyPlan(plan, { keyId } = {}) {
   return { valid: true, address: ROOT_DROP_ALIAS_ADDRESS, actions: ["create"], keyId };
 }
 
+export function assertRootDropPreImportPlan(plan) {
+  if (!plan || !Array.isArray(plan.resource_changes)) fail("pre-import Terraform plan is not machine-readable");
+  const changes = actionable(plan);
+  if (changes.length !== 2) fail("pre-import Terraform plan must contain exactly the root-drop key and alias creates");
+  const key = changes.find(({ address }) => address === ROOT_DROP_KEY_ADDRESS);
+  const alias = changes.find(({ address }) => address === ROOT_DROP_ALIAS_ADDRESS);
+  if (!key || !alias || changes.some(({ address }) => ![ROOT_DROP_KEY_ADDRESS, ROOT_DROP_ALIAS_ADDRESS].includes(address))) fail("pre-import Terraform plan contains an unexpected resource address");
+  if (key.type !== "aws_kms_key" || alias.type !== "aws_kms_alias" || key.change.before !== null || alias.change.before !== null
+    || !same(key.change.actions, ["create"]) || !same(alias.change.actions, ["create"])
+    || key.change.replace_paths?.length || alias.change.replace_paths?.length) fail("pre-import Terraform plan contains an unexpected action or replacement");
+  const keyAfter = key.change.after || {};
+  let policy = keyAfter.policy;
+  if (typeof policy === "string") { try { policy = JSON.parse(policy); } catch { fail("pre-import root-drop key policy is malformed"); } }
+  if (keyAfter.description !== ROOT_DROP_KEY_DESCRIPTION || keyAfter.key_usage !== TEMPORARY_KMS_CAPABILITY.keyUsage
+    || keyAfter.customer_master_key_spec !== TEMPORARY_KMS_CAPABILITY.keySpec || keyAfter.deletion_window_in_days !== 30
+    || keyAfter.bypass_policy_lockout_safety_check !== false || !same(keyAfter.tags, EXPECTED_TAGS)
+    || !same(policy, buildStageARootDropKeyPolicy()) || alias.change.after?.name !== ROOT_DROP_ALIAS_NAME) fail("pre-import Terraform plan does not match the exact root-drop creation contract");
+  return { valid: true, addresses: [ROOT_DROP_KEY_ADDRESS, ROOT_DROP_ALIAS_ADDRESS], actions: ["create", "create"] };
+}
+
 export function assertRootDropStateIdentity(state, { keyId, aliasArn = STAGE_B.rootDropKmsKeyArn } = {}) {
   assertStateShape(state);
   const counts = assertStateRootDropCounts(state, { key: 1, alias: 1 });
