@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { buildStageAStateIdentity, assertStageAStateIdentityBinding } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { buildRecoveryAwsEnvironment, buildRecoveryTerraformEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
-import { ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import {
   ROOT_DROP_KEY_ADDRESS,
   ROOT_DROP_ALIAS_ADDRESS,
@@ -40,6 +40,25 @@ const readCanonicalTerraformBackend = (terraformRoot) => {
   assertStageATerraformBackendMetadata(metadata);
   return metadata.backend || metadata;
 };
+
+export function validateRootDropPlanPaths({ planPath, repositoryRoot = root, reservedPaths = [] } = {}) {
+  const repositoryRealpath = realpathSync(repositoryRoot);
+  const reserved = new Set(reservedPaths.map((filePath) => realpathSync(filePath)));
+  const validate = (filePath, label) => {
+    const resolved = assertStageBArtifactPath({ artifactPath: filePath, repositoryRoot, label, allowExisting: false });
+    const parent = path.dirname(resolved);
+    ensureStageBPrivateDirectory({ directory: parent, repositoryRoot, create: false, label: `${label} parent directory` });
+    const parentRealpath = realpathSync(parent);
+    if (parentRealpath === repositoryRealpath || parentRealpath.startsWith(`${repositoryRealpath}${path.sep}`)) throw new Error(`${label} must be outside the repository.`);
+    const canonical = path.join(parentRealpath, path.basename(resolved));
+    if (reserved.has(canonical)) throw new Error(`${label} must not alias another recovery artifact.`);
+    return canonical;
+  };
+  const plan = validate(planPath, "Stage-A adoption plan");
+  const zeroDrift = validate(`${plan}.zero-drift`, "Stage-A zero-drift plan");
+  if (plan === zeroDrift) throw new Error("Stage-A adoption plan and zero-drift plan must be distinct.");
+  return { planPath: plan, zeroDriftPlanPath: zeroDrift };
+}
 
 function failedEvidence(argv) {
   const evidence = {
@@ -96,6 +115,8 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const region = suppliedRegion || STAGE_B.region;
   if (region !== STAGE_B.region) throw new Error("Stage-A root-drop adoption: region is outside the protected production boundary");
   const terraformRoot = assertCanonicalTerraformRoot(option(argv, "--terraform-root", false));
+  const planPath = option(argv, "--plan-path");
+  const { planPath: validatedPlanPath, zeroDriftPlanPath } = validateRootDropPlanPaths({ planPath, reservedPaths: [censusPath, statePath, identityPath] });
   readTerraformBackendMetadata(terraformRoot);
   const freshCensus = readRootDropCensus
     ? await readRootDropCensus({ census, stageAState, stageAStateIdentity, profile: releaseProfile, adminProfile, releaseProfile })
@@ -107,7 +128,6 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
       stageAStateIdentity,
       failedApplyEvidence: census.failedApplyEvidence,
     });
-  const planPath = option(argv, "--plan-path");
   const execute = argv.includes("--execute");
   const env = buildRecoveryTerraformEnvironment(releaseProfile);
   const tf = runTerraform || ((args) => execFile("terraform", [`-chdir=${terraformRoot}`, ...args], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
@@ -116,7 +136,7 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const readState = async () => (await readStateSnapshot()).state;
   const importKey = async ({ address, id }) => { tf(["import", "-input=false", "-lock=true", address, id]); return { outcome: "CONFIRMED_SUCCESS" }; };
   const refreshState = async () => readState();
-  const createPlan = async ({ zeroDrift = false } = {}) => { const output = zeroDrift ? `${planPath}.zero-drift` : planPath; tf(["plan", "-input=false", "-lock=true", "-out", output]); return output; };
+  const createPlan = async ({ zeroDrift = false } = {}) => { const output = zeroDrift ? zeroDriftPlanPath : validatedPlanPath; tf(["plan", "-input=false", "-lock=true", "-out", output]); return output; };
   const readPlan = async (savedPath) => JSON.parse(tf(["show", "-json", savedPath]));
   const applyPlan = async (savedPath) => { if (!execute) throw new Error("alias apply requires explicit --execute"); tf(["apply", "-input=false", "-lock=true", savedPath]); return { outcome: "CONFIRMED_SUCCESS" }; };
   const runner = createRootDropRecoveryRunner({ execute, readState, readStateSnapshot, importKey, refreshState, createPlan, readPlan, applyPlan });

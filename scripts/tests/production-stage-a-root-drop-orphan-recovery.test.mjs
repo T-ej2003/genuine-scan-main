@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -26,7 +26,7 @@ import {
   STAGE_A_TERRAFORM_BACKEND,
   assertStageATerraformBackendMetadata,
 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
-import { runAdoption, runCensus } from "../aws/recover-production-green-stage-a-root-drop-orphan.mjs";
+import { runAdoption, runCensus, validateRootDropPlanPaths } from "../aws/recover-production-green-stage-a-root-drop-orphan.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
 
 const sourceSha = "f03fb3266385486d25317b8c2b202c408ae8771f";
@@ -211,6 +211,53 @@ test("adoption rejects a non-canonical Terraform root before any Terraform subpr
     }), /canonical production Stage-A Terraform root/);
     assert.equal(terraformCalls, 0);
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("adoption validates both new private plan outputs before any Terraform import", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-plan-path-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  writeFileSync(statePath, stateBytes, { mode: 0o600 });
+  writeFileSync(identityPath, `${JSON.stringify(stateIdentity)}\n`, { mode: 0o600 });
+  writeFileSync(censusPath, `${JSON.stringify(census())}\n`, { mode: 0o600 });
+  const args = (planPath) => ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", planPath, "--execute"];
+  const assertRejectedBeforeTerraform = async (planPath, expected) => {
+    let terraformCalls = 0;
+    await assert.rejects(() => runAdoption({ argv: args(planPath), execFile: () => { terraformCalls += 1; throw new Error("Terraform must not run"); }, write: () => {} }), expected);
+    assert.equal(terraformCalls, 0);
+  };
+  try {
+    const valid = path.join(directory, "valid.plan");
+    const validated = validateRootDropPlanPaths({ planPath: valid, reservedPaths: [censusPath, statePath, identityPath] });
+    const canonicalValid = path.join(realpathSync(directory), "valid.plan");
+    assert.equal(validated.planPath, canonicalValid);
+    assert.equal(validated.zeroDriftPlanPath, `${canonicalValid}.zero-drift`);
+    assert.equal(existsSync(canonicalValid), false);
+    assert.equal(existsSync(validated.zeroDriftPlanPath), false);
+
+    await assertRejectedBeforeTerraform("relative.plan", /absolute path/);
+    await assertRejectedBeforeTerraform(path.join(process.cwd(), "repository.plan"), /outside the repository/);
+
+    const existing = path.join(directory, "existing.plan");
+    writeFileSync(existing, "occupied", { mode: 0o600 });
+    await assertRejectedBeforeTerraform(existing, /new absolute private output path/);
+
+    const symlinkTarget = path.join(directory, "symlink-target.plan");
+    const symlinkPath = path.join(directory, "symlink.plan");
+    writeFileSync(symlinkTarget, "target", { mode: 0o600 });
+    symlinkSync(symlinkTarget, symlinkPath);
+    await assertRejectedBeforeTerraform(symlinkPath, /must not be a symlink/);
+
+    const zeroDriftCollision = path.join(directory, "collision.plan");
+    writeFileSync(`${zeroDriftCollision}.zero-drift`, "occupied", { mode: 0o600 });
+    await assertRejectedBeforeTerraform(zeroDriftCollision, /new absolute private output path/);
+
+    chmodSync(directory, 0o755);
+    await assertRejectedBeforeTerraform(path.join(directory, "permissive.plan"), /mode 0700/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("Stage-A backend metadata is exact and rejects a redirected state target", () => {

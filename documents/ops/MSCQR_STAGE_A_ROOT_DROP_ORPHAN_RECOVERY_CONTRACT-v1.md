@@ -3,7 +3,7 @@
 This contract covers the partial apply where `aws_kms_key.root_drop` exists in
 AWS but Terraform does not own it and `aws_kms_alias.root_drop` is absent.
 
-## Read-only census (schema version 2)
+## Read-only census (schema version 3)
 
 `npm run stage-a:root-drop:census` is the only producer. It paginates the
 current KMS key, alias, and CloudTrail result sets, then reads the exact
