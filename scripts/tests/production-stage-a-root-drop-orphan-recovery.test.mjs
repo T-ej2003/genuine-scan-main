@@ -116,9 +116,10 @@ const legacyAliasPolicyPlan = ({ key = legacyKeyId, beforePolicy = buildLegacyRo
   { address: ROOT_DROP_KEY_ADDRESS, type: "aws_kms_key", change: { before: { policy: JSON.stringify(beforePolicy) }, actions: ["update"], after: { policy: JSON.stringify(afterPolicy) }, replace_paths: [] } },
   { address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: key }, replace_paths: [] } },
 ] });
-const refreshOnlyIdentityPlan = ({ key = legacyKeyId, beforeArn = null, beforeKeyId = null, beforeId = null, afterArn = legacyKeyArn, afterKeyId = key, afterId = key } = {}) => ({ resource_changes: [
-  { address: ROOT_DROP_KEY_ADDRESS, type: "aws_kms_key", change: { before: { arn: beforeArn, key_id: beforeKeyId, id: beforeId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, actions: ["update"], after: { arn: afterArn, key_id: afterKeyId, id: afterId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, replace_paths: [] } },
+const refreshOnlyIdentityPlan = ({ key = legacyKeyId, beforeArn = null, beforeKeyId = null, beforeId = null, afterArn = legacyKeyArn, afterKeyId = key, afterId = key } = {}) => ({ resource_drift: [
+  { address: ROOT_DROP_KEY_ADDRESS, mode: "managed", type: "aws_kms_key", name: "root_drop", change: { before: { arn: beforeArn, custom_key_store_id: null, key_id: beforeKeyId, id: beforeId, multi_region: null, rotation_period_in_days: null, xks_key_id: null, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, actions: ["update"], after: { arn: afterArn, custom_key_store_id: "", key_id: afterKeyId, id: afterId, multi_region: false, rotation_period_in_days: 0, xks_key_id: "", key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, replace_paths: [] } },
 ] });
+const rdsRefreshDrift = { address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", change: { actions: ["update"], before: { latest_restorable_time: "2026-08-18T22:41:17Z" }, after: { latest_restorable_time: "2026-08-19T19:26:15Z" }, replace_paths: [] } };
 const keyState = () => ({ ...absentState, resources: absentState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: keyArn, key_id: keyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) });
 const ownedState = () => ({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(buildStageARootDropKeyPolicy()) } })) } : resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: keyId, target_key_arn: keyArn } }] } : resource) });
 const stateWithRootDropPolicy = (value, policy) => ({ ...value, resources: value.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(policy) } })) } : resource) });
@@ -159,10 +160,15 @@ test("key-only census accepts the exact imported key when computed ARN is unset"
 test("authorized legacy refresh binds the exact 1/0 pre/post state transition", () => {
   const before = historicalKeyOnlyState();
   before.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.id = null;
+  before.check_results = [
+    { object_kind: "resource", config_addr: "aws_kms_key.root_drop", status: "pass" },
+    { object_kind: "output", config_addr: "stage_b_prerequisites", status: "pass" },
+  ];
   const after = structuredClone(before);
   after.serial += 1;
+  after.check_results = [...after.check_results].reverse();
   after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = legacyKeyArn;
-  after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.key_id = legacyKeyId;
+  Object.assign(after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes, { key_id: legacyKeyId, custom_key_store_id: "", multi_region: false, rotation_period_in_days: 0, xks_key_id: "" });
   const transition = () => assertAuthorizedRootDropRefreshTransition({ beforeState: before, beforeStateBytes: Buffer.from(JSON.stringify(before)), afterState: after, afterStateBytes: Buffer.from(JSON.stringify(after)), keyId: legacyKeyId });
   assert.equal(transition().serial, after.serial);
 
@@ -185,21 +191,43 @@ test("authorized legacy refresh binds the exact 1/0 pre/post state transition", 
 
 test("refresh-only classification permits only exact computed identity convergence", () => {
   assert.equal(assertRootDropRefreshOnlyPlan(refreshOnlyIdentityPlan(), { keyId: legacyKeyId }).valid, true);
-  assert.equal(assertRootDropRefreshOnlyPlan({ resource_changes: [] }, { keyId: legacyKeyId, stateAlreadyConverged: true }).stateConverged, true);
+  assert.equal(assertRootDropRefreshOnlyPlan(refreshOnlyIdentityPlan({ beforeKeyId: legacyKeyId }), { keyId: legacyKeyId }).valid, true);
+  assert.equal(assertRootDropRefreshOnlyPlan(refreshOnlyIdentityPlan({ beforeArn: legacyKeyArn }), { keyId: legacyKeyId }).valid, true);
+  assert.equal(assertRootDropRefreshOnlyPlan({}, { keyId: legacyKeyId, stateAlreadyConverged: true }).stateConverged, true);
+  assert.equal(assertRootDropRefreshOnlyPlan({ resource_drift: [] }, { keyId: legacyKeyId, stateAlreadyConverged: true }).stateConverged, true);
   for (const [label, mutate] of [
-    ["null ARN", (value) => { value.resource_changes[0].change.after.arn = null; }],
-    ["null key ID", (value) => { value.resource_changes[0].change.after.key_id = null; }],
-    ["wrong ARN", (value) => { value.resource_changes[0].change.after.arn = `${legacyKeyArn}-wrong`; }],
-    ["wrong key ID", (value) => { value.resource_changes[0].change.after.key_id = keyId; }],
-    ["alias", (value) => { value.resource_changes.push({ address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { actions: ["create"] } }); }],
-    ["policy", (value) => { value.resource_changes[0].change.after.policy = "changed"; }],
-    ["unrelated", (value) => { value.resource_changes.push({ address: "aws_vpc.other", type: "aws_vpc", change: { actions: ["update"] } }); }],
+    ["null ARN", (value) => { value.resource_drift[0].change.after.arn = null; }],
+    ["null key ID", (value) => { value.resource_drift[0].change.after.key_id = null; }],
+    ["wrong ARN", (value) => { value.resource_drift[0].change.after.arn = `${legacyKeyArn}-wrong`; }],
+    ["wrong key ID", (value) => { value.resource_drift[0].change.after.key_id = keyId; }],
+    ["other KMS key", (value) => { value.resource_drift[0].address = "aws_kms_key.other"; value.resource_drift[0].name = "other"; }],
+    ["policy", (value) => { value.resource_drift[0].change.after.policy = "changed"; }],
+    ["security attribute", (value) => { value.resource_drift[0].change.after.key_usage = "ENCRYPT_DECRYPT"; }],
+    ["rotation default", (value) => { value.resource_drift[0].change.after.rotation_period_in_days = 90; }],
+    ["replacement", (value) => { value.resource_drift[0].change.actions = ["delete", "create"]; }],
+    ["delete", (value) => { value.resource_drift[0].change.actions = ["delete"]; }],
+    ["create", (value) => { value.resource_drift[0].change.actions = ["create"]; }],
+    ["unknown attribute", (value) => { value.resource_drift[0].change.after.unreviewed = true; }],
+    ["RDS drift", (value) => { value.resource_drift.push(structuredClone(rdsRefreshDrift)); }],
+    ["unrelated", (value) => { value.resource_drift.push({ address: "aws_vpc.other", mode: "managed", type: "aws_vpc", name: "other", change: { actions: ["update"], before: {}, after: { changed: true } } }); }],
+    ["unknown action", (value) => { value.resource_drift[0].change.actions = ["forget"]; }],
+    ["actionable resource_changes", (value) => { value.resource_changes = [{ address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { actions: ["create"] } }]; }],
   ]) {
     const invalid = refreshOnlyIdentityPlan();
     mutate(invalid);
     assert.throws(() => assertRootDropRefreshOnlyPlan(invalid, { keyId: legacyKeyId }), /refresh-only root-drop plan/, label);
   }
-  assert.throws(() => assertRootDropRefreshOnlyPlan({ resource_changes: [] }, { keyId: legacyKeyId }), /refresh-only root-drop plan/);
+  assert.throws(() => assertRootDropRefreshOnlyPlan({}, { keyId: legacyKeyId }), /refresh-only root-drop plan/);
+  assert.throws(() => assertRootDropRefreshOnlyPlan({ resource_drift: {} }, { keyId: legacyKeyId }), /refresh-only root-drop plan/);
+  assert.throws(() => assertRootDropRefreshOnlyPlan({ resource_drift: [null] }, { keyId: legacyKeyId }), /refresh-only root-drop plan/);
+});
+
+test("Terraform 1.15.8 refresh drift accepts only the captured root-drop convergence", () => {
+  const rootDropOnly = refreshOnlyIdentityPlan();
+  assert.equal(assertRootDropRefreshOnlyPlan(rootDropOnly, { keyId: legacyKeyId }).valid, true);
+  const productionShape = structuredClone(rootDropOnly);
+  productionShape.resource_drift.unshift(structuredClone(rdsRefreshDrift));
+  assert.throws(() => assertRootDropRefreshOnlyPlan(productionShape, { keyId: legacyKeyId }), /must contain only the root-drop key state convergence/);
 });
 
 test("exact orphan authentication requires account, region, metadata, tags, policy, no alias, and CloudTrail creator/window", () => {
@@ -477,7 +505,7 @@ test("runAdoption resumes legacy policy convergence from a canonical key-only st
         if (args.includes("import")) { imports += 1; throw new Error("policy-first retry must not import"); }
         if (args.includes("apply")) { applies += 1; currentState = canonicalOwnedState; return ""; }
         if (args.includes("plan") && args.includes("-out")) { writeFileSync(args[args.indexOf("-out") + 1], "policy-first-plan"); return ""; }
-        if (args.includes("show")) return JSON.stringify(args.at(-1).includes("zero-drift") ? { resource_changes: [] } : showCount++ === 0 ? { resource_changes: [] } : aliasPlan([{ address: ROOT_DROP_ALIAS_ADDRESS, change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: legacyKeyId } } }]));
+        if (args.includes("show")) return JSON.stringify(args.at(-1).includes("zero-drift") ? { resource_changes: [] } : showCount++ === 0 ? { resource_drift: [] } : aliasPlan([{ address: ROOT_DROP_ALIAS_ADDRESS, change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: legacyKeyId } } }]));
         throw new Error(`unexpected Terraform command: ${args.join(" ")}`);
       },
       write: () => {},
@@ -1216,7 +1244,7 @@ test("runAdoption accepts the authenticated legacy 1/0 ARN-populating refresh", 
   const after = structuredClone(before);
   after.serial += 1;
   after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = legacyKeyArn;
-  after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.key_id = legacyKeyId;
+  Object.assign(after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes, { key_id: legacyKeyId, custom_key_store_id: "", multi_region: false, rotation_period_in_days: 0, xks_key_id: "" });
   const beforeIdentity = identityForState(before);
   const afterIdentity = identityForState(after);
   const finalState = { ...after, resources: after.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop"
