@@ -75,7 +75,10 @@ envelope is accepted. The refreshed state lineage, serial, and exact state
 bytes are revalidated against the census before the fresh census is accepted.
 Auto-loaded `terraform.tfvars` and `*.auto.tfvars` files are rejected so the reviewed inputs remain authoritative. The executing
 checkout must have a clean execution-relevant tree and its exact `HEAD` must
-equal the census `sourceSha`; the pre-import classifier also proves that the
+equal the census `sourceSha`; for the exact historical legacy-policy binding,
+the command additionally requires `--execution-source-sha` and binds the
+clean execution checkout to that current source while retaining the historical
+census source binding. The pre-import classifier also proves that the
 alias expression targets `aws_kms_key.root_drop.key_id`. Any failure after a
 mutation is emitted at the CLI boundary with deterministic recovery accounting.
 After an authorized import it refreshes state, proves the imported key
@@ -84,6 +87,18 @@ ARN/spec/usage, and requires a plan containing only:
 ```text
 + aws_kms_alias.root_drop
 ```
+
+The one historically authenticated Stage-A failed apply bound to the merged
+source, transition, plan, CreateKey event, key ARN, and pre-apply state
+identity may contain the predecessor root-drop policy that lacks only
+`kms:GetKeyRotationStatus`. That exact legacy policy is not accepted as a
+steady-state result: the adoption plan must contain only its update to the
+current canonical policy plus the exact root-drop alias create, and the
+post-apply state must contain the canonical policy before recovery is
+reported complete. Any other policy difference, binding, address, or action
+fails closed. The existing temporary Stage-A capability's bounded
+`kms:PutKeyPolicy` and `kms:CreateAlias` permissions are the only approved
+mutation path for this convergence.
 
 The alias is created only by the exact saved Terraform plan and must target the
 authenticated key. Key creation, replacement, destroy, unrelated actions,

@@ -189,10 +189,12 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const region = suppliedRegion || STAGE_B.region;
   if (region !== STAGE_B.region) throw new Error("Stage-A root-drop adoption: region is outside the protected production boundary");
   const terraformRoot = assertCanonicalTerraformRoot(option(argv, "--terraform-root", false));
+  const legacyPolicyBound = census.status === "AUTHENTICATED_ORPHAN" && census.candidates?.[0]?.policyCompatibility === "LEGACY_BOUND_HISTORICAL";
+  const executionSourceSha = legacyPolicyBound ? option(argv, "--execution-source-sha") : census.sourceSha;
   const planPath = option(argv, "--plan-path");
   const { planPath: validatedPlanPath, zeroDriftPlanPath, preImportPlanPath } = validateRootDropPlanPaths({ planPath, reservedPaths: [censusPath, statePath, identityPath] });
   assertNoAutoLoadedTerraformVariableFiles(terraformRoot);
-  assertRootDropExecutionSource({ sourceSha: census.sourceSha, terraformRoot, runGit: runGit || ((args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })) });
+  assertRootDropExecutionSource({ sourceSha: executionSourceSha, terraformRoot, runGit: runGit || ((args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })) });
   readTerraformBackendMetadata(terraformRoot);
   assertStageATerraformVariables();
   const env = buildRecoveryTerraformEnvironment(releaseProfile, process.env, { allowedTerraformVariableKeys: STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS });
@@ -234,7 +236,7 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
     const preImportPlan = JSON.parse(tf(["show", "-json", preImportPlanPath]));
     if (rootDropRecoverySha256(readFileSync(preImportPlanPath)) !== preImportPlanSha256) throw new Error("Stage-A pre-import plan changed while it was being classified");
     if (initialCounts.keyCount === 0) assertRootDropPreImportPlan(preImportPlan);
-    else assertRootDropAliasOnlyPlan(preImportPlan, { keyId: census.candidates[0].keyId });
+    else assertRootDropAliasOnlyPlan(preImportPlan, { keyId: census.candidates[0].keyId, policyCompatibility: census.candidates[0].policyCompatibility });
     refreshedSnapshot = await readStateSnapshot();
     currentStateIdentity = buildStageAStateIdentity(refreshedSnapshot.state, { stateBytes: refreshedSnapshot.stateBytes });
     assertStageAStateIdentityBinding(currentStateIdentity, initialStateIdentity);
