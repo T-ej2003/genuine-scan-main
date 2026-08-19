@@ -122,6 +122,54 @@ function canonicalKeyUniverse(keyUniverse) {
   return normalized;
 }
 
+function canonicalCandidateSnapshot(snapshot) {
+  if (snapshot?.provablyIrrelevant) return { keyId: snapshot.keyId, metadata: snapshot.metadata, provablyIrrelevant: true };
+  const sortEntries = (entries, keys) => [...(entries || [])].sort((left, right) => keys.map((key) => String(left?.[key] ?? "")).join("\u0000").localeCompare(keys.map((key) => String(right?.[key] ?? "")).join("\u0000")));
+  return {
+    keyId: snapshot.keyId,
+    metadata: snapshot.metadata,
+    tags: snapshot.tags,
+    policy: snapshot.policy,
+    publicKey: snapshot.publicKey ? { ...snapshot.publicKey, SigningAlgorithms: [...(snapshot.publicKey.SigningAlgorithms || [])].sort() } : snapshot.publicKey,
+    aliases: sortEntries(snapshot.aliases, ["AliasName", "TargetKeyId"]),
+    creationEvents: sortEntries(snapshot.creationEvents, ["eventId", "eventTime"]),
+    provablyIrrelevant: false,
+  };
+}
+
+function candidateSnapshot(adapter, keyId) {
+  const metadata = adapter.describeKey(keyId);
+  const provablyIrrelevant = (metadata?.AWSAccountId && metadata.AWSAccountId !== STAGE_B.account)
+    || (metadata?.Arn && !KEY_ARN.test(metadata.Arn))
+    || (metadata?.KeySpec && metadata.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec)
+    || (metadata?.KeyUsage && metadata.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage)
+    || (metadata?.KeyManager && metadata.KeyManager !== "CUSTOMER")
+    || (metadata?.Origin && metadata.Origin !== "AWS_KMS")
+    || metadata?.MultiRegion === true;
+  if (provablyIrrelevant) return { keyId, metadata, provablyIrrelevant: true };
+  const tags = rootDropTagsFromAws(adapter.listTags(metadata.KeyId));
+  const policy = adapter.getPolicy(metadata.KeyId);
+  const aliases = adapter.listAliases(metadata.KeyId);
+  const events = adapter.lookupCreateKeyEvents(metadata.Arn);
+  return {
+    keyId,
+    metadata,
+    tags,
+    policy,
+    publicKey: adapter.getPublicKey(metadata.KeyId),
+    aliases,
+    creationEvents: events.filter((event) => event.eventName === "CreateKey"),
+    provablyIrrelevant: false,
+  };
+}
+
+function candidateFromSnapshot(snapshot) {
+  if (snapshot.provablyIrrelevant) return undefined;
+  const knownUnrelatedAlias = snapshot.aliases.some(({ AliasName }) => ["alias/mscqr-production-rls-green-storage", "alias/mscqr-production-rls-approval"].includes(AliasName));
+  if (knownUnrelatedAlias && !same(snapshot.policy, buildStageARootDropKeyPolicy())) return undefined;
+  return snapshot;
+}
+
 export function captureRootDropKeyUniverse(adapter) {
   const listed = adapter?.listKeys?.();
   if (!Array.isArray(listed)) fail("root-drop key universe enumeration is incomplete");
@@ -350,40 +398,16 @@ export function collectRootDropCensus({ adapter, terraformState, sourceSha, tran
   assertStateShape(terraformState);
   assertStateRootDropCounts(terraformState, { key: 0, alias: 0 });
   const startUniverse = captureRootDropKeyUniverse(adapter);
-  const candidates = [];
-  for (const keyId of startUniverse) {
-    const metadata = adapter.describeKey(keyId);
-    const provablyIrrelevant = (metadata?.AWSAccountId && metadata.AWSAccountId !== STAGE_B.account)
-      || (metadata?.Arn && !KEY_ARN.test(metadata.Arn))
-      || (metadata?.KeySpec && metadata.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec)
-      || (metadata?.KeyUsage && metadata.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage)
-      || (metadata?.KeyManager && metadata.KeyManager !== "CUSTOMER")
-      || (metadata?.Origin && metadata.Origin !== "AWS_KMS")
-      || metadata?.MultiRegion === true;
-    if (provablyIrrelevant) continue;
-    const tags = rootDropTagsFromAws(adapter.listTags(metadata.KeyId));
-    const policy = adapter.getPolicy(metadata.KeyId);
-    const aliases = adapter.listAliases(metadata.KeyId);
-    const knownUnrelatedAlias = aliases.some(({ AliasName }) => ["alias/mscqr-production-rls-green-storage", "alias/mscqr-production-rls-approval"].includes(AliasName));
-    if (knownUnrelatedAlias && !same(policy, buildStageARootDropKeyPolicy())) continue;
-    const events = adapter.lookupCreateKeyEvents(metadata.Arn);
-    candidates.push({
-      keyId: metadata.KeyId,
-      arn: metadata.Arn,
-      metadata,
-      tags,
-      policy,
-      publicKey: adapter.getPublicKey(metadata.KeyId),
-      aliases,
-      creationEvents: events.filter((event) => event.eventName === "CreateKey"),
-    });
-  }
+  const firstSnapshots = new Map(startUniverse.map((keyId) => [keyId, candidateSnapshot(adapter, keyId)]));
+  const secondSnapshots = new Map(startUniverse.map((keyId) => [keyId, candidateSnapshot(adapter, keyId)]));
+  const endUniverse = captureRootDropKeyUniverse(adapter);
+  if (!same(startUniverse, endUniverse)) fail("CENSUS_UNSTABLE: KMS key universe changed during root-drop observation; collect a new census");
+  for (const keyId of startUniverse) if (!same(canonicalCandidateSnapshot(firstSnapshots.get(keyId)), canonicalCandidateSnapshot(secondSnapshots.get(keyId)))) fail("CENSUS_UNSTABLE: root-drop candidate security attributes changed during observation; collect a new census");
+  const candidates = startUniverse.map((keyId) => candidateFromSnapshot(secondSnapshots.get(keyId))).filter(Boolean);
   const authenticatedCandidates = [];
   for (const candidate of candidates) {
     try { authenticatedCandidates.push({ ...candidate, ...authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence }) }); }
     catch (error) { authenticatedCandidates.push({ keyId: candidate.keyId, arn: candidate.arn, authenticated: false, reason: error.message }); }
   }
-  const endUniverse = captureRootDropKeyUniverse(adapter);
-  if (!same(startUniverse, endUniverse)) fail("CENSUS_UNSTABLE: KMS key universe changed during root-drop observation; collect a new census");
   return buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates: authenticatedCandidates, keyUniverse: startUniverse, failedApplyEvidence, actorBindings: adapter.actorBindings });
 }

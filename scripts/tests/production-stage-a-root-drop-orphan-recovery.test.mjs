@@ -371,7 +371,7 @@ test("Stage-A recovery preserves only the reviewed required variables and perfor
       readRootDropCensus: async () => { sequence.push("census"); return census(); },
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args, options) => {
-        sequence.push(args.includes("plan") && args.includes("-refresh=false") ? "readiness" : args.includes("workspace") ? "workspace" : args.includes("state") ? "state" : args[0]);
+        sequence.push(args.includes("plan") && args.includes("-refresh=true") ? "readiness" : args.includes("workspace") ? "workspace" : args.includes("state") ? "state" : args[0]);
         assert.equal(options.env.AWS_PROFILE, "release");
         for (const key of STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS) assert.equal(options.env[key], stageAVars[key]);
         assert.equal(options.env.TF_VAR_unreviewed, undefined);
@@ -386,7 +386,9 @@ test("Stage-A recovery preserves only the reviewed required variables and perfor
       write: () => {},
     });
     assert.equal(result.status, "RECOVERED");
-    assert.deepEqual(sequence.slice(0, 3), ["workspace", "census", "readiness"]);
+    assert.deepEqual(sequence.slice(0, 2), ["workspace", "readiness"]);
+    assert(sequence.indexOf("state") > sequence.indexOf("readiness"));
+    assert(sequence.indexOf("census") > sequence.indexOf("state"));
   } finally {
     for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     rmSync(directory, { recursive: true, force: true });
@@ -416,7 +418,7 @@ test("missing, malformed, or wrong-identity Stage-A variables fail before Terraf
   }
 });
 
-async function runPreImportReadinessCase(readinessPlan, { variables = stageAVars, mutateSavedPlan = false } = {}) {
+async function runPreImportReadinessCase(readinessPlan, { variables = stageAVars, mutateSavedPlan = false, stateAfterReadiness } = {}) {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-pre-import-plan-"));
   const statePath = path.join(directory, "state.json");
   const identityPath = path.join(directory, "identity.json");
@@ -431,6 +433,8 @@ async function runPreImportReadinessCase(readinessPlan, { variables = stageAVars
   let applies = 0;
   let planCalls = 0;
   let showCalls = 0;
+  let statePulls = 0;
+  const terraformArgs = [];
   try {
     Object.assign(process.env, variables);
     const result = await runAdoption({
@@ -439,8 +443,9 @@ async function runPreImportReadinessCase(readinessPlan, { variables = stageAVars
       readRootDropCensus: async () => census(),
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args) => {
+        terraformArgs.push(args);
         if (args.includes("workspace")) return "default\n";
-        if (args.includes("state")) return JSON.stringify(currentState);
+        if (args.includes("state")) { statePulls += 1; return JSON.stringify(stateAfterReadiness && statePulls === 1 ? stateAfterReadiness : currentState); }
         if (args.includes("import")) { imports += 1; currentState = keyState(); return ""; }
         if (args.includes("apply")) { applies += 1; currentState = ownedState(); return ""; }
         if (args.includes("plan") && args.includes("-out")) { planCalls += 1; writeFileSync(args[args.indexOf("-out") + 1], `saved-plan-${planCalls}`); return ""; }
@@ -456,9 +461,9 @@ async function runPreImportReadinessCase(readinessPlan, { variables = stageAVars
       },
       write: () => {},
     });
-    return { result, imports, applies };
+    return { result, imports, applies, terraformArgs };
   } catch (error) {
-    return { error, imports, applies };
+    return { error, imports, applies, terraformArgs };
   } finally {
     for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     rmSync(directory, { recursive: true, force: true });
@@ -471,6 +476,7 @@ test("pre-import Terraform plan is saved, machine-classified, and exact before i
   assert.equal(valid.result.status, "RECOVERED");
   assert.equal(valid.result.preImportPlanSha256.length, 64);
   assert.deepEqual({ imports: valid.imports, applies: valid.applies }, { imports: 1, applies: 1 });
+  assert(valid.terraformArgs.some((args) => args.includes("plan") && args.includes("-refresh=true")));
   const invalidPlans = [
     ["unrelated update", { ...exactCreatePlan, resource_changes: [...exactCreatePlan.resource_changes, { address: "aws_vpc.other", type: "aws_vpc", change: { before: {}, actions: ["update"], after: {} } }] }],
     ["replacement", { ...exactCreatePlan, resource_changes: exactCreatePlan.resource_changes.map((entry) => entry.address === ROOT_DROP_KEY_ADDRESS ? { ...entry, change: { ...entry.change, actions: ["create", "delete"] } } : entry) }],
@@ -488,6 +494,10 @@ test("pre-import Terraform plan is saved, machine-classified, and exact before i
   const tampered = await runPreImportReadinessCase(exactCreatePlan, { mutateSavedPlan: true });
   assert.match(tampered.error?.message || "", /changed while it was being classified/);
   assert.deepEqual({ imports: tampered.imports, applies: tampered.applies }, { imports: 0, applies: 0 });
+  const changedState = { ...absentState, serial: absentState.serial + 1 };
+  const refreshedIdentityMismatch = await runPreImportReadinessCase(exactCreatePlan, { stateAfterReadiness: changedState });
+  assert.match(refreshedIdentityMismatch.error?.message || "", /identity|binding/);
+  assert.deepEqual({ imports: refreshedIdentityMismatch.imports, applies: refreshedIdentityMismatch.applies }, { imports: 0, applies: 0 });
 });
 
 test("pre-import classifier binds the alias target expression to root_drop.key_id", () => {
@@ -612,6 +622,23 @@ test("root-drop census requires a stable complete key universe across both enume
   for (const universes of [[keys([keyId]), keys([keyId, secondKeyId])], [keys([keyId, secondKeyId]), keys([keyId])]]) assert.throws(() => collect(universes), /CENSUS_UNSTABLE/);
 });
 
+test("root-drop census revalidates candidate attributes at the final observation boundary", () => {
+  for (const changed of ["aliases-added", "aliases-removed", "tags", "policy", "metadata"]) {
+    const reads = Object.fromEntries(["aliases", "tags", "policy", "metadata", "publicKey", "events"].map((name) => [name, 0]));
+    const adapter = {
+      listKeys: () => [{ KeyId: keyId }],
+      describeKey: () => { reads.metadata += 1; return changed === "metadata" && reads.metadata === 2 ? { ...candidate().metadata, Description: "changed" } : candidate().metadata; },
+      listTags: () => { reads.tags += 1; return Object.entries(changed === "tags" && reads.tags === 2 ? { ...candidate().tags, Component: "changed" } : candidate().tags).map(([TagKey, TagValue]) => ({ TagKey, TagValue })); },
+      getPolicy: () => { reads.policy += 1; return changed === "policy" && reads.policy === 2 ? { Version: "2012-10-17", Statement: [] } : candidate().policy; },
+      getPublicKey: () => { reads.publicKey += 1; return candidate().publicKey; },
+      listAliases: () => { reads.aliases += 1; return changed === "aliases-added" && reads.aliases === 2 || changed === "aliases-removed" && reads.aliases === 1 ? [{ AliasName: "alias/unrelated", TargetKeyId: keyId }] : []; },
+      lookupCreateKeyEvents: () => { reads.events += 1; return [event]; },
+    };
+    assert.throws(() => collectRootDropCensus({ adapter, terraformState: absentState, sourceSha, transitionId, stageAStateIdentity: stateIdentity, failedApplyEvidence }), /CENSUS_UNSTABLE/);
+  }
+  assert.equal(realAwsCensus().status, "AUTHENTICATED_ORPHAN");
+});
+
 test("key-universe enumeration errors and malformed identities fail closed", () => {
   for (const listKeys of [
     () => { throw new Error("AccessDenied: kms:ListKeys"); },
@@ -648,7 +675,7 @@ test("privileged coarse discovery excludes unrelated keys without hiding a later
   const result = collectRootDropCensus({ adapter, terraformState: absentState, sourceSha, transitionId, stageAStateIdentity: stateIdentity, failedApplyEvidence });
   assert.equal(result.status, "AUTHENTICATED_ORPHAN");
   assert.equal(result.candidates[0].keyId, keyId);
-  assert.deepEqual(calls.filter(({ args }) => args.includes(unrelatedKeyId)).map(({ args, profile }) => ({ action: args.slice(0, 2).join(":"), profile })), [{ action: "kms:describe-key", profile: "administrator" }]);
+  assert.deepEqual(calls.filter(({ args }) => args.includes(unrelatedKeyId)).map(({ args, profile }) => ({ action: args.slice(0, 2).join(":"), profile })), [{ action: "kms:describe-key", profile: "administrator" }, { action: "kms:describe-key", profile: "administrator" }]);
   assert(calls.some(({ args, profile }) => args[0] === "kms" && args[1] === "list-resource-tags" && profile === "release"));
 });
 

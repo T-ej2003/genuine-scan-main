@@ -40,6 +40,13 @@ The census is valid only as one of:
   check and is eligible for adoption;
 - `AMBIGUOUS`: creation is blocked.
 
+The census captures each potentially relevant key's complete security snapshot
+twice, including metadata, tags, policy, public-key identity, aliases, and
+provenance. Any snapshot change fails closed as `CENSUS_UNSTABLE`; key-ID
+universe equality alone is insufficient. The two universe enumerations and
+the two candidate snapshots are bounded consistency checks, not a claim that
+AWS eventual consistency is transactional.
+
 The temporary-capability authorization command must receive the fresh census.
 At the authorization boundary it performs a new read-only census through the
 same producer and compares the candidate result with the supplied artifact.
@@ -62,10 +69,11 @@ The adoption command consumes the same reviewed Stage-A variable environment as
 the normal production plan: only the nine required `TF_VAR_*` inputs declared
 by `infra/aws/terraform/production-green-stage-a/variables.tf` are accepted;
 all other `TF_VAR_*` and Terraform redirect variables are rejected or removed.
-A non-mutating, no-refresh Terraform plan is saved, shown as JSON, and
+The refresh-enabled, non-mutating Terraform plan is saved, shown as JSON, and
 classified before import; only the exact root-drop key and alias create
-envelope is accepted. Auto-loaded `terraform.tfvars` and `*.auto.tfvars`
-files are rejected so the reviewed inputs remain authoritative. The executing
+envelope is accepted. The refreshed state lineage, serial, and exact state
+bytes are revalidated against the census before the fresh census is accepted.
+Auto-loaded `terraform.tfvars` and `*.auto.tfvars` files are rejected so the reviewed inputs remain authoritative. The executing
 checkout must have a clean execution-relevant tree and its exact `HEAD` must
 equal the census `sourceSha`; the pre-import classifier also proves that the
 alias expression targets `aws_kms_key.root_drop.key_id`. Any failure after a

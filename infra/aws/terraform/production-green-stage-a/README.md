@@ -39,10 +39,10 @@ launch: `TF_VAR_aws_region`, `TF_VAR_vpc_id`, `TF_VAR_private_subnet_ids`,
 `TF_VAR_vpc_dns_resolver_cidr`, `TF_VAR_checker_principal_arns`,
 `TF_VAR_release_role_arn`, and `TF_VAR_receipt_bucket_arn`. The recovery
 command rejects every other `TF_VAR_*` key and does not fall back to a local
-`terraform.tfvars`. It validates the exact variable set with a non-mutating
-Terraform plan saved to the reviewed private plan path, shows and machine-
-classifies those exact plan bytes, and requires only the root-drop key and
-alias creates before import. Any auto-loaded `terraform.tfvars` or
+`terraform.tfvars`. It validates the exact variable set with a refresh-enabled,
+non-mutating Terraform plan saved to the reviewed private plan path, shows and
+machine-classifies those exact plan bytes, and requires only the root-drop key
+and alias creates before import. Any auto-loaded `terraform.tfvars` or
 `*.auto.tfvars` file is rejected. It uses the release-deployer
 profile for every Terraform subprocess. Before import it compares the live
 state lineage, serial, and exact state-byte SHA-256 with the fresh census
@@ -53,10 +53,11 @@ pre-import classifier proves the alias expression targets
 `aws_kms_key.root_drop.key_id`. Post-mutation failures expose deterministic
 recovery accounting at the CLI boundary. The
 census captures the complete paginated KMS key-ID universe before inspection
-and again afterward; any changed, incomplete, duplicated, or malformed
-enumeration fails closed instead of producing `NO_CANDIDATE`. This is a
-bounded consistency check, not a claim that AWS eventual consistency is a
-transactional snapshot. The adoption contract also requires the exact
+and again afterward, and re-reads every potentially relevant candidate's
+complete security snapshot before finalization; any changed, incomplete,
+duplicated, or malformed enumeration or snapshot fails closed instead of
+producing `NO_CANDIDATE`. These are bounded consistency checks, not a claim
+that AWS eventual consistency is a transactional snapshot. The adoption contract also requires the exact
 `root_drop` description (`Root-only MSCQR production cutover evidence signing
 key`) before an orphan can be authenticated.
 
