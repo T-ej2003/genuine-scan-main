@@ -19,6 +19,7 @@ import {
   buildRootDropAwsReadAdapter,
   collectRootDropCensus,
   rootDropStateCounts,
+  assertAuthorizedRootDropRefreshTransition,
   createRootDropRecoveryRunner,
   assertRootDropAliasOnlyPlan,
   assertRootDropPreImportPlan,
@@ -220,6 +221,7 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   if (initialCounts.keyCount === 0 && initialCounts.aliasCount === 0) {
     assertStageAStateIdentityBinding(initialStateIdentity, stageAStateIdentity);
   } else if (initialCounts.keyCount === 1 && initialCounts.aliasCount === 0) {
+    if (legacyPolicyBound) assertStageAStateIdentityBinding(initialStateIdentity, stageAStateIdentity);
     assertRootDropKeyIdentity(initialSnapshot.state, census.candidates[0].keyId, { allowMissingArn: legacyPolicyBound });
   } else if (initialCounts.keyCount === 1 && initialCounts.aliasCount === 1) {
     assertRootDropStateIdentity(initialSnapshot.state, { keyId: census.candidates[0].keyId, requireCanonicalPolicy: true });
@@ -237,7 +239,15 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
     if (rootDropRecoverySha256(readFileSync(preImportPlanPath)) !== preImportPlanSha256) throw new Error("Stage-A pre-import plan changed while it was being classified");
     refreshedSnapshot = await readStateSnapshot();
     currentStateIdentity = buildStageAStateIdentity(refreshedSnapshot.state, { stateBytes: refreshedSnapshot.stateBytes });
-    assertStageAStateIdentityBinding(currentStateIdentity, initialStateIdentity);
+    if (legacyPolicyBound && initialCounts.keyCount === 1 && initialCounts.aliasCount === 0) {
+      currentStateIdentity = assertAuthorizedRootDropRefreshTransition({
+        beforeState: initialSnapshot.state,
+        beforeStateBytes: initialSnapshot.stateBytes,
+        afterState: refreshedSnapshot.state,
+        afterStateBytes: refreshedSnapshot.stateBytes,
+        keyId: census.candidates[0].keyId,
+      });
+    } else assertStageAStateIdentityBinding(currentStateIdentity, initialStateIdentity);
     const refreshedCounts = rootDropCounts(refreshedSnapshot.state);
     if (refreshedCounts.keyCount !== initialCounts.keyCount || refreshedCounts.aliasCount !== initialCounts.aliasCount) throw new Error("Stage-A refresh changed root-drop state before adoption");
     if (initialCounts.keyCount === 1) assertRootDropKeyIdentity(refreshedSnapshot.state, census.candidates[0].keyId);

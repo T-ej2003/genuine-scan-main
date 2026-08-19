@@ -535,6 +535,10 @@ test("launch handoff makes historical authorization precede provider refresh", (
   assert.doesNotMatch(command(6), /<historical-plan-json>/);
   assert.match(command(6), /recorded historical plan SHA is provenance only/);
   assert.match(command(7), /Terraform init\/refresh/);
+  assert.match(nodes.get(7).outputs.join(" "), /post-refresh state identity/);
+  assert.match(nodes.get(7).retrySemantics, /may advance serial\/state SHA only/);
+  assert.match(nodes.get(7).failClosedCondition, /lineage\/identity binding changed/);
+  assert.doesNotMatch(nodes.get(7).failClosedCondition, /changed state identity$/);
   assert.match(command(8), /terraform plan -refresh=true/);
   assert.match(command(8), /terraform show -json/);
   assert.match(command(8), /apply the exact classified saved plan once/);

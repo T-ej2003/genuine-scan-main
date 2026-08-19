@@ -481,6 +481,27 @@ export function assertRootDropKeyIdentity(state, keyId, { allowMissingArn = fals
   return { keyId, arn: attributes.arn };
 }
 
+export function assertAuthorizedRootDropRefreshTransition({ beforeState, beforeStateBytes, afterState, afterStateBytes, keyId } = {}) {
+  const beforeCounts = rootDropStateCounts(beforeState);
+  const afterCounts = rootDropStateCounts(afterState);
+  if (beforeCounts.keyCount !== 1 || beforeCounts.aliasCount !== 0 || afterCounts.keyCount !== 1 || afterCounts.aliasCount !== 0) fail("authorized root-drop refresh must preserve the exact 1/0 topology");
+  assertRootDropKeyIdentity(beforeState, keyId, { allowMissingArn: true });
+  assertRootDropKeyIdentity(afterState, keyId);
+  const beforeIdentity = buildStageAStateIdentity(beforeState, { stateBytes: beforeStateBytes });
+  const afterIdentity = buildStageAStateIdentity(afterState, { stateBytes: afterStateBytes });
+  if (beforeIdentity.stateObject !== afterIdentity.stateObject || beforeIdentity.lineage !== afterIdentity.lineage || beforeIdentity.account !== afterIdentity.account || beforeIdentity.region !== afterIdentity.region) fail("authorized root-drop refresh changed the state binding");
+  if (afterIdentity.serial < beforeIdentity.serial || afterIdentity.stateSha256 === beforeIdentity.stateSha256 && afterIdentity.serial !== beforeIdentity.serial || afterIdentity.stateSha256 !== beforeIdentity.stateSha256 && afterIdentity.serial === beforeIdentity.serial) fail("authorized root-drop refresh has an invalid state identity transition");
+  const comparable = (state) => {
+    const copy = structuredClone(state);
+    copy.serial = beforeState.serial;
+    const key = stateInstances(copy, "aws_kms_key", "root_drop")[0];
+    key.attributes.arn = null;
+    return copy;
+  };
+  if (!same(comparable(beforeState), comparable(afterState))) fail("authorized root-drop refresh changed Terraform state outside the expected computed ARN");
+  return afterIdentity;
+}
+
 export function buildRootDropAwsReadAdapter({ run, profile, discoveryProfile = profile, provenanceProfile = profile, actorBindings = ROOT_DROP_CENSUS_ACTOR_BINDINGS, region = STAGE_B.region } = {}) {
   if (typeof run !== "function" || !profile || !discoveryProfile || !provenanceProfile) throw new Error("Root-drop read adapter requires explicit actor profiles and command runner");
   if (region !== STAGE_B.region) throw new Error("Stage-A root-drop census: region is outside the protected production boundary");

@@ -20,6 +20,7 @@ import {
   assertRootDropCensus,
   assertRootDropCreationInterlock,
   assertRootDropKeyIdentity,
+  assertAuthorizedRootDropRefreshTransition,
   assertRootDropPreImportPlan,
   assertRootDropStateIdentity,
   authenticateRootDropOrphan,
@@ -149,6 +150,31 @@ test("key-only census accepts the exact imported key when computed ARN is unset"
   const wrongArn = structuredClone(keyOnly);
   wrongArn.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = `${legacyKeyArn}-wrong`;
   assert.throws(() => assertRootDropKeyIdentity(wrongArn, legacyKeyId), /different or non-conforming/);
+});
+
+test("authorized legacy refresh binds the exact 1/0 pre/post state transition", () => {
+  const before = historicalKeyOnlyState();
+  const after = structuredClone(before);
+  after.serial += 1;
+  after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = legacyKeyArn;
+  const transition = () => assertAuthorizedRootDropRefreshTransition({ beforeState: before, beforeStateBytes: Buffer.from(JSON.stringify(before)), afterState: after, afterStateBytes: Buffer.from(JSON.stringify(after)), keyId: legacyKeyId });
+  assert.equal(transition().serial, after.serial);
+
+  const invalid = [
+    ["lineage", (value) => { value.lineage = "4e438e59-8b8b-194d-030c-5ede0c26344a"; }],
+    ["key id", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.id = keyId; }],
+    ["wrong ARN", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = `${legacyKeyArn}-wrong`; }],
+    ["missing key", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances = []; }],
+    ["second key", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances.push(structuredClone(value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0])); }],
+    ["unexpected alias", (value) => { value.resources.find(({ type, name }) => type === "aws_kms_alias" && name === "root_drop").instances = [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: legacyKeyId, target_key_arn: legacyKeyArn } }]; }],
+    ["unrelated resource", (value) => { value.resources.find(({ type, name }) => type === "aws_db_instance" && name === "green").instances[0].attributes.identifier = "unrelated"; }],
+    ["non-refresh state change", (value) => { value.serial = before.serial; }],
+  ];
+  for (const [label, mutate] of invalid) {
+    const candidateState = structuredClone(after);
+    mutate(candidateState);
+    assert.throws(() => assertAuthorizedRootDropRefreshTransition({ beforeState: before, beforeStateBytes: Buffer.from(JSON.stringify(before)), afterState: candidateState, afterStateBytes: Buffer.from(JSON.stringify(candidateState)), keyId: legacyKeyId }), /authorized root-drop refresh|different or non-conforming|state lineage|state identity|topology|outside/, label);
+  }
 });
 
 test("exact orphan authentication requires account, region, metadata, tags, policy, no alias, and CloudTrail creator/window", () => {
@@ -1119,6 +1145,57 @@ test("policy-first partial adoption can resume from a canonical-policy key-only 
   assert.equal(result.accounting.terraformImports, 0);
   assert.equal(result.accounting.terraformApplies, 1);
   assert.equal(result.accounting.kmsWrites, 1);
+});
+
+test("runAdoption accepts the authenticated legacy 1/0 ARN-populating refresh", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-arn-refresh-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  const planPath = path.join(directory, "alias.plan");
+  const before = historicalKeyOnlyState();
+  const after = structuredClone(before);
+  after.serial += 1;
+  after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = legacyKeyArn;
+  const beforeIdentity = identityForState(before);
+  const afterIdentity = identityForState(after);
+  const makeCensus = (stageAState, stageAStateIdentity) => buildRootDropCensus({
+    sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha,
+    transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId,
+    stageAStateIdentity,
+    keyUniverse: [legacyKeyId],
+    candidates: [{ ...legacyCandidate(), ...authenticateRootDropOrphan({ candidate: legacyCandidate(), terraformState: stageAState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence, allowKeyOnly: true, allowMissingArn: stageAState === before }) }],
+    failedApplyEvidence: legacyFailedApplyEvidence,
+  });
+  const historicalCensus = makeCensus(before, beforeIdentity);
+  const freshCensus = makeCensus(after, afterIdentity);
+  writeFileSync(statePath, JSON.stringify(before), { mode: 0o600 });
+  writeFileSync(identityPath, `${JSON.stringify(beforeIdentity)}\n`, { mode: 0o600 });
+  writeFileSync(censusPath, `${JSON.stringify(historicalCensus)}\n`, { mode: 0o600 });
+  let statePulls = 0;
+  const savedVariables = Object.fromEntries(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS.map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, stageAVars);
+    const result = await runAdoption({
+      argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--execution-source-sha", ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, "--terraform-root", path.join(process.cwd(), "infra/aws/terraform/production-green-stage-a"), "--plan-path", planPath],
+      runGit: cleanGit(ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha),
+      readRootDropCensus: async () => freshCensus,
+      readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
+      execFile: (command, args) => {
+        if (args.includes("workspace")) return "default\n";
+        if (args.includes("state") && args.includes("pull")) return JSON.stringify(statePulls++ === 0 ? before : after);
+        if (args.includes("plan") && args.includes("-out")) { writeFileSync(args[args.indexOf("-out") + 1], "arn-populating-refresh-plan"); return ""; }
+        if (args.includes("show")) return JSON.stringify(legacyAliasPolicyPlan({ key: legacyKeyId }));
+        throw new Error(`unexpected Terraform command: ${args.join(" ")}`);
+      },
+      write: () => {},
+    });
+    assert.equal(result.status, "READY_FOR_ALIAS_ADOPTION");
+    assert.equal(statePulls >= 3, true);
+  } finally {
+    for (const [key, value] of Object.entries(savedVariables)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("completed legacy adoption replay reconciles the historical census identity", async () => {

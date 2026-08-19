@@ -86,7 +86,12 @@ all other `TF_VAR_*` and Terraform redirect variables are rejected or removed.
 The refresh-enabled, non-mutating Terraform plan is saved, shown as JSON, and
 classified before import; only the exact root-drop key and alias create
 envelope is accepted. The refreshed state lineage, serial, and exact state
-bytes are revalidated against the census before the fresh census is accepted.
+bytes are revalidated against the pre-refresh identity before the fresh census
+is accepted. For the authenticated historical 1/0 path, the provider may
+advance serial/state bytes only while populating the exact root-drop ARN;
+lineage, backend, workspace, exact key ID/properties, 1/0 topology, and every
+unrelated state value must remain unchanged. The resulting post-refresh state
+identity is then bound to the new plan and all subsequent checks.
 Auto-loaded `terraform.tfvars` and `*.auto.tfvars` files are rejected so the reviewed inputs remain authoritative. The executing
 checkout must have a clean execution-relevant tree and its exact `HEAD` must
 equal the census `sourceSha`; for the exact historical legacy-policy binding,
