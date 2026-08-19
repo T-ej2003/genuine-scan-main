@@ -24,7 +24,7 @@ import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageAStateIdentityBinding, buildStageAStateIdentity } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { buildRecoveryAwsEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
-import { assertRootDropCensusMatch, assertRootDropCreationInterlock, buildRootDropAwsReadAdapter, collectRootDropCensus } from "./production-stage-a-root-drop-orphan-recovery.mjs";
+import { assertRootDropCensusMatch, assertRootDropCreationInterlock, buildRootDropAwsReadAdapter, collectRootDropCensus, ROOT_DROP_CENSUS_ACTOR_BINDINGS } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sourcePolicyPath = path.join(root, TEMPORARY_KMS_CAPABILITY.sourcePolicyPath);
@@ -557,9 +557,9 @@ export function runCli(argv = process.argv.slice(2), { run: injectedRun, readRoo
     const suppliedRootDropCensus = phase === "authorize" ? readJson(validateStageAInput(rootDropCensusFileOption, "Stage-A root-drop census")) : null;
     const freshRootDropCensus = phase === "authorize"
       ? injectedReadRootDropCensus
-        ? injectedReadRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, census: suppliedRootDropCensus, profile: releaseProfile })
+        ? injectedReadRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, census: suppliedRootDropCensus, profile: releaseProfile, adminProfile: profile, releaseProfile })
         : collectRootDropCensus({
-          adapter: buildRootDropAwsReadAdapter({ run: (args) => execFile("aws", args, { cwd: root, env: buildRecoveryAwsEnvironment(releaseProfile), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), profile: releaseProfile, region }),
+          adapter: buildRootDropAwsReadAdapter({ run: (args) => execFile("aws", args, { cwd: root, env: buildRecoveryAwsEnvironment(profile), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), profile: releaseProfile, discoveryProfile: profile, provenanceProfile: profile, actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS, region }),
           terraformState: rootDropState,
           sourceSha,
           transitionId,

@@ -107,7 +107,7 @@ test("root-drop census is bound to eu-west-2 and rejects wrong regions before AW
   assert.throws(() => buildRootDropAwsReadAdapter({ run: () => { calls += 1; return "{}"; }, profile: "administrator", region: "us-east-1" }), /protected production boundary/);
   assert.equal(calls, 0);
   for (const region of ["us-east-1", "eu-west-1", "not-a-region"]) {
-    await assert.rejects(() => runCensus({ argv: ["--profile", "administrator", "--region", region], run: () => { calls += 1; return "{}"; } }), /protected production boundary/);
+    await assert.rejects(() => runCensus({ argv: ["--admin-profile", "administrator", "--release-profile", "release", "--region", region], run: () => { calls += 1; return "{}"; } }), /protected production boundary/);
   }
   assert.equal(calls, 0);
   for (const region of ["us-east-1", undefined]) {
@@ -121,7 +121,7 @@ test("root-drop census is bound to eu-west-2 and rejects wrong regions before AW
 
 test("root-drop census rejects a missing explicit region before AWS", async () => {
   let calls = 0;
-  await assert.rejects(() => runCensus({ argv: ["--profile", "administrator", "--region"], run: () => { calls += 1; return "{}"; } }), /--region requires a value/);
+  await assert.rejects(() => runCensus({ argv: ["--admin-profile", "administrator", "--release-profile", "release", "--region"], run: () => { calls += 1; return "{}"; } }), /--region requires a value/);
   assert.equal(calls, 0);
 });
 
@@ -145,7 +145,8 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
   let currentState = absentState;
   try {
     Object.assign(process.env, { AWS_PROFILE: "administrator", AWS_ACCESS_KEY_ID: "ambient-key", AWS_SECRET_ACCESS_KEY: "ambient-secret", AWS_SESSION_TOKEN: "ambient-session", AWS_SECURITY_TOKEN: "ambient-security", AWS_DEFAULT_PROFILE: "ambient-default", AWS_REGION: "us-east-1", AWS_DEFAULT_REGION: "us-east-1", AWS_CONFIG_FILE: "/tmp/config", AWS_SHARED_CREDENTIALS_FILE: "/tmp/credentials" });
-    await runCensus({ argv: ["--profile", "release", "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--source-sha", sourceSha, "--transition-id", transitionId, "--plan-sha256", failedApplyEvidence.planSha256, "--failed-apply-start", failedApplyEvidence.failedApplyWindow.start, "--failed-apply-end", failedApplyEvidence.failedApplyWindow.end, "--output", outputPath], execFile: (command, args, options) => { observedAws.push({ command, args, env: options.env }); return JSON.stringify({ Keys: [] }); }, write: () => {} });
+    await runCensus({ argv: ["--admin-profile", "administrator", "--release-profile", "release", "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--source-sha", sourceSha, "--transition-id", transitionId, "--plan-sha256", failedApplyEvidence.planSha256, "--failed-apply-start", failedApplyEvidence.failedApplyWindow.start, "--failed-apply-end", failedApplyEvidence.failedApplyWindow.end, "--output", outputPath], execFile: (command, args, options) => { observedAws.push({ command, args, env: options.env }); return JSON.stringify({ Keys: [] }); }, write: () => {} });
+    assert.equal(observedAws[0].args[observedAws[0].args.indexOf("--profile") + 1], "administrator");
     assert.equal(observedAws[0].env.AWS_PROFILE, "release");
     assert.equal(observedAws[0].env.AWS_REGION, STAGE_B.region);
     assert.equal(observedAws[0].env.AWS_DEFAULT_REGION, STAGE_B.region);
@@ -153,7 +154,7 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
     assert.equal(observedAws[0].env.AWS_CONFIG_FILE, "/tmp/config");
     assert.equal(observedAws[0].env.AWS_SHARED_CREDENTIALS_FILE, "/tmp/credentials");
     let adoptionCensusProfile;
-    const result = await runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--profile", "release", "--terraform-root", terraformRoot, "--plan-path", planPath, "--execute"], readRootDropCensus: ({ profile }) => { adoptionCensusProfile = profile; return suppliedCensus; }, execFile: (command, args, options) => {
+    const result = await runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--terraform-root", terraformRoot, "--plan-path", planPath, "--execute"], readRootDropCensus: ({ profile, adminProfile, releaseProfile }) => { adoptionCensusProfile = { profile, adminProfile, releaseProfile }; return suppliedCensus; }, execFile: (command, args, options) => {
       observedTerraform.push({ command, args, env: options.env });
       if (args.includes("state") && args.includes("pull")) return JSON.stringify(currentState);
       if (args.includes("import")) { currentState = keyState(); return ""; }
@@ -162,7 +163,7 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
       return "";
     }, write: () => {} });
     assert.equal(result.status, "RECOVERED");
-    assert.equal(adoptionCensusProfile, "release");
+    assert.deepEqual(adoptionCensusProfile, { profile: "release", adminProfile: "administrator", releaseProfile: "release" });
     assert(observedTerraform.some(({ args }) => args.includes("state")));
     assert(observedTerraform.some(({ args }) => args.includes("import")));
     assert(observedTerraform.some(({ args }) => args.includes("plan")));
@@ -213,6 +214,39 @@ test("real LookupEvents IDs normalize once and survive census JSON round-trip", 
   const persisted = JSON.parse(JSON.stringify(value));
   assert.equal(persisted.censusSha256, rootDropRecoverySha256(Object.fromEntries(Object.entries(persisted).filter(([key]) => key !== "censusSha256"))));
   assert.doesNotThrow(() => assertRootDropCensus(persisted, { sourceSha, transitionId, stageAStateIdentity: stateIdentity }));
+});
+
+test("optional failed-apply evidence fields preserve the census digest across JSON persistence", () => {
+  for (const omitted of [[], ["creatorArn"], ["creationEventId"], ["creatorArn", "creationEventId"]]) {
+    const evidence = { ...failedApplyEvidence };
+    for (const field of omitted) delete evidence[field];
+    const value = buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: stateIdentity, candidates: [], failedApplyEvidence: evidence });
+    const persisted = JSON.parse(JSON.stringify(value));
+    const unsigned = Object.fromEntries(Object.entries(persisted).filter(([key]) => key !== "censusSha256"));
+    assert.equal(value.censusSha256, rootDropRecoverySha256(unsigned), `digest changed for omitted fields: ${omitted.join(",") || "none"}`);
+    assert.doesNotThrow(() => assertRootDropCensus(persisted, { sourceSha, transitionId, stageAStateIdentity: stateIdentity }));
+  }
+});
+
+test("root-drop census adapter binds discovery and CloudTrail provenance to administrator while scoped reads use release", () => {
+  const seen = [];
+  const adapter = buildRootDropAwsReadAdapter({
+    profile: "release",
+    discoveryProfile: "administrator",
+    provenanceProfile: "administrator",
+    run: (args) => {
+      seen.push(args);
+      if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: {} });
+      return args[0] === "cloudtrail" ? JSON.stringify({ Events: [] }) : JSON.stringify({ Keys: [] });
+    },
+  });
+  adapter.listKeys();
+  adapter.describeKey(keyId);
+  adapter.lookupCreateKeyEvents(keyArn);
+  assert.equal(seen[0][seen[0].indexOf("--profile") + 1], "administrator");
+  assert.equal(seen[1][seen[1].indexOf("--profile") + 1], "release");
+  assert.equal(seen[2][seen[2].indexOf("--profile") + 1], "administrator");
+  assert.deepEqual(adapter.actorBindings, { discovery: "ADMINISTRATOR", resourceReads: "RELEASE_DEPLOYER", provenance: "ADMINISTRATOR" });
 });
 
 test("real LookupEvents wrapper/payload ID disagreement or missing IDs fails closed", () => {
@@ -348,6 +382,58 @@ test("successful import replay never imports again", async () => {
   const result = await value.run({ census: census(), terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
   assert.equal(result.accounting.terraformImports, 0);
   assert.deepEqual(value.counts(), { imports: 0, applies: 0 });
+});
+
+test("every post-mutation recovery failure preserves the accumulated accounting", async () => {
+  const cases = [
+    {
+      name: "import refresh",
+      terraformState: absentState,
+      build: () => createRootDropRecoveryRunner({
+        execute: true,
+        readState: async () => absentState,
+        importKey: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
+        refreshState: async () => { throw new Error("refresh failed after import"); },
+        createPlan: async () => "alias",
+        readPlan: async () => aliasPlan(),
+        applyPlan: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
+      }),
+    },
+    {
+      name: "post-import plan",
+      terraformState: absentState,
+      build: () => createRootDropRecoveryRunner({
+        execute: true,
+        readState: async () => absentState,
+        importKey: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
+        refreshState: async () => keyState(),
+        createPlan: async () => { throw new Error("plan failed after import"); },
+        readPlan: async () => aliasPlan(),
+        applyPlan: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
+      }),
+    },
+    {
+      name: "post-apply readback",
+      terraformState: keyState(),
+      build: () => createRootDropRecoveryRunner({
+        execute: true,
+        readState: async () => keyState(),
+        importKey: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
+        refreshState: async () => { throw new Error("readback failed after alias apply"); },
+        createPlan: async () => "alias",
+        readPlan: async () => aliasPlan(),
+        applyPlan: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
+      }),
+    },
+  ];
+  for (const { name, terraformState, build } of cases) {
+    await assert.rejects(
+      () => build()({ census: census(), freshCensus: census(), terraformState, stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }),
+      (error) => error.recoveryAccounting.terraformImports === (name === "post-apply readback" ? 0 : 1)
+        && error.recoveryAccounting.terraformApplies === (name === "post-apply readback" ? 1 : 0)
+        && error.recoveryAccounting.unknownMutations === 0,
+    );
+  }
 });
 
 test("definite and ambiguous import failures are never retried and are distinguished", async () => {

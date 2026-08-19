@@ -31,7 +31,7 @@ import { AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES, classifyTemporary
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { buildStageARootDropKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
-import { rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
+import { ROOT_DROP_CENSUS_ACTOR_BINDINGS, rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
@@ -76,7 +76,7 @@ function writeCliStageAInputs(directory) {
   const stageAStateIdentity = buildStageAStateIdentity(state, { stateBytes });
   writeFileSync(stageAStateIdentityFile, `${JSON.stringify(stageAStateIdentity)}\n`, { mode: 0o600 });
   const rootDropCensusFile = path.join(directory, "root-drop-census.json");
-  const census = { schemaVersion: 1, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status: "NO_CANDIDATE", sourceSha, transitionId, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, candidateCount: 0, candidates: [], observedAt: new Date().toISOString() };
+  const census = { schemaVersion: 2, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status: "NO_CANDIDATE", sourceSha, transitionId, actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, candidateCount: 0, candidates: [], observedAt: new Date().toISOString() };
   writeFileSync(rootDropCensusFile, `${JSON.stringify({ ...census, censusSha256: rootDropRecoverySha256(census) })}\n`, { mode: 0o600 });
   return { stageAStateFile, stageAStateIdentityFile, rootDropCensusFile };
 }
@@ -1352,14 +1352,14 @@ test("authorization uses the release profile for census and administrator profil
   const inputs = writeCliStageAInputs(directory);
   const fixture = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) } });
   const observedAdminEnvironments = [];
-  let observedCensusProfile;
+    let observedCensusProfiles;
   try {
     runCli(cliArgs({ stateFile, planJsonFile, ...inputs }), {
       execFile: (command, args, options) => { observedAdminEnvironments.push({ command, args, env: options.env }); return fixture.run(args); },
-      readRootDropCensus: ({ profile }) => { observedCensusProfile = profile; return JSON.parse(readFileSync(inputs.rootDropCensusFile, "utf8")); },
+      readRootDropCensus: ({ profile, adminProfile, releaseProfile }) => { observedCensusProfiles = { profile, adminProfile, releaseProfile }; return JSON.parse(readFileSync(inputs.rootDropCensusFile, "utf8")); },
       write: () => {},
     });
-    assert.equal(observedCensusProfile, "release");
+    assert.deepEqual(observedCensusProfiles, { profile: "release", adminProfile: "administrator", releaseProfile: "release" });
     assert(observedAdminEnvironments.length > 0);
     for (const { command, env } of observedAdminEnvironments) {
       assert.equal(command, "aws");

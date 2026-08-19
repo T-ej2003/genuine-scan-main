@@ -6,10 +6,11 @@ import { TEMPORARY_KMS_CAPABILITY } from "./production-stage-a-temporary-kms-cap
 export const ROOT_DROP_KEY_ADDRESS = "aws_kms_key.root_drop";
 export const ROOT_DROP_ALIAS_ADDRESS = "aws_kms_alias.root_drop";
 export const ROOT_DROP_ALIAS_NAME = "alias/mscqr-production-root-drop";
-export const ROOT_DROP_RECOVERY_SCHEMA_VERSION = 1;
+export const ROOT_DROP_RECOVERY_SCHEMA_VERSION = 2;
 export const ROOT_DROP_RECOVERY_STATUSES = Object.freeze(["NO_CANDIDATE", "AUTHENTICATED_ORPHAN", "AMBIGUOUS"]);
 export const ROOT_DROP_EXPECTED_SIGNING_ALGORITHM = "RSASSA_PSS_SHA_256";
 export const ROOT_DROP_CENSUS_MAX_AGE_MS = 5 * 60 * 1000;
+export const ROOT_DROP_CENSUS_ACTOR_BINDINGS = Object.freeze({ discovery: "ADMINISTRATOR", resourceReads: "RELEASE_DEPLOYER", provenance: "ADMINISTRATOR" });
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -19,9 +20,9 @@ const RELEASE_ROLE = "arn:aws:iam::368992683803:role/mscqr-production-release-de
 const RELEASE_SESSION = new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-release-deployer/[^/]+$`);
 const EXPECTED_TAGS = Object.freeze({ ...TEMPORARY_KMS_CAPABILITY.tags });
 const canonical = (value) => Array.isArray(value)
-  ? `[${value.map(canonical).join(",")}]`
+  ? `[${value.map((item) => canonical(item === undefined ? null : item)).join(",")}]`
   : value && typeof value === "object"
-    ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
+    ? `{${Object.keys(value).filter((key) => value[key] !== undefined).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
     : JSON.stringify(value);
 const sha256 = (value) => crypto.createHash("sha256").update(typeof value === "string" || Buffer.isBuffer(value) ? value : canonical(value)).digest("hex");
 const fail = (message) => { throw new Error(`Stage-A root-drop orphan recovery: ${message}`); };
@@ -107,20 +108,21 @@ export function authenticateRootDropOrphan({ candidate, terraformState, sourceSh
   return Object.freeze({ authenticated: true, keyId, keyArn: arn, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256, creationEventId: events[0].eventId, candidateSha256: sha256(candidate) });
 }
 
-export function buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates = [], failedApplyEvidence } = {}) {
+export function buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates = [], failedApplyEvidence, actorBindings = ROOT_DROP_CENSUS_ACTOR_BINDINGS } = {}) {
   if (!SHA40.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(transitionId || "") || !stageAStateIdentity?.lineage || !Number.isSafeInteger(stageAStateIdentity.serial) || !SHA256.test(stageAStateIdentity.stateSha256 || "")) fail("root-drop census is missing its source/state binding");
   if (!Array.isArray(candidates)) fail("root-drop census candidates are malformed");
   const authenticated = candidates.filter((candidate) => candidate?.authenticated === true);
   const status = candidates.length === 0 ? "NO_CANDIDATE" : candidates.length === 1 && authenticated.length === 1 ? "AUTHENTICATED_ORPHAN" : "AMBIGUOUS";
   if (status === "AUTHENTICATED_ORPHAN" && !failedApplyEvidence) fail("authenticated orphan census requires failed-apply evidence");
-  const value = { schemaVersion: ROOT_DROP_RECOVERY_SCHEMA_VERSION, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status, sourceSha, transitionId, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, candidateCount: candidates.length, candidates, observedAt: new Date().toISOString(), ...(failedApplyEvidence ? { failedApplyEvidence } : {}) };
+  if (!same(actorBindings, ROOT_DROP_CENSUS_ACTOR_BINDINGS)) fail("root-drop census actor bindings are outside the approved split-actor contract");
+  const value = { schemaVersion: ROOT_DROP_RECOVERY_SCHEMA_VERSION, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status, sourceSha, transitionId, actorBindings, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, candidateCount: candidates.length, candidates, observedAt: new Date().toISOString(), ...(failedApplyEvidence ? { failedApplyEvidence } : {}) };
   return { ...value, censusSha256: sha256(value) };
 }
 
 export function assertRootDropCensus(census, { sourceSha, transitionId, stageAStateIdentity } = {}) {
   const { censusSha256, ...unsigned } = census || {};
   const observedAt = Date.parse(census?.observedAt || "");
-  if (!census || !SHA256.test(censusSha256 || "") || sha256(unsigned) !== censusSha256 || census.schemaVersion !== ROOT_DROP_RECOVERY_SCHEMA_VERSION || census.kind !== "MSCQR_STAGE_A_ROOT_DROP_CENSUS" || census.region !== STAGE_B.region || !Number.isFinite(observedAt) || observedAt > Date.now() + 5 * 60 * 1000 || !ROOT_DROP_RECOVERY_STATUSES.includes(census.status) || census.sourceSha !== sourceSha || census.transitionId !== transitionId || census.stageAStateLineage !== stageAStateIdentity?.lineage || census.stageAStateSerial !== stageAStateIdentity?.serial || census.stageAStateSha256 !== stageAStateIdentity?.stateSha256 || !Number.isSafeInteger(census.candidateCount) || !Array.isArray(census.candidates) || census.candidateCount !== census.candidates.length) fail("root-drop census is not current, regional, or bound to the exact transition and Stage-A state");
+  if (!census || !SHA256.test(censusSha256 || "") || sha256(unsigned) !== censusSha256 || census.schemaVersion !== ROOT_DROP_RECOVERY_SCHEMA_VERSION || census.kind !== "MSCQR_STAGE_A_ROOT_DROP_CENSUS" || census.region !== STAGE_B.region || !same(census.actorBindings, ROOT_DROP_CENSUS_ACTOR_BINDINGS) || !Number.isFinite(observedAt) || observedAt > Date.now() + 5 * 60 * 1000 || !ROOT_DROP_RECOVERY_STATUSES.includes(census.status) || census.sourceSha !== sourceSha || census.transitionId !== transitionId || census.stageAStateLineage !== stageAStateIdentity?.lineage || census.stageAStateSerial !== stageAStateIdentity?.serial || census.stageAStateSha256 !== stageAStateIdentity?.stateSha256 || !Number.isSafeInteger(census.candidateCount) || !Array.isArray(census.candidates) || census.candidateCount !== census.candidates.length) fail("root-drop census is not current, regional, actor-bound, or bound to the exact transition and Stage-A state");
   if (census.status === "NO_CANDIDATE" && census.candidateCount !== 0) fail("root-drop census falsely declares no candidate");
   if (census.status === "AUTHENTICATED_ORPHAN" && (census.candidateCount !== 1 || census.candidates[0]?.authenticated !== true || !KEY_ID.test(census.candidates[0].keyId || "") || typeof census.candidates[0].creationEventId !== "string" || !census.candidates[0].creationEventId || census.candidates[0].sourceSha !== sourceSha || census.candidates[0].transitionId !== transitionId || !SHA256.test(census.candidates[0].planSha256 || "") || !census.failedApplyEvidence || census.failedApplyEvidence.sourceSha !== sourceSha || census.failedApplyEvidence.transitionId !== transitionId || census.failedApplyEvidence.planSha256 !== census.candidates[0].planSha256 || !SHA256.test(census.failedApplyEvidence.planSha256 || "") || !census.failedApplyEvidence.failedApplyWindow)) fail("root-drop census does not contain exactly one source/transition/failed-apply-bound authenticated orphan");
   if (census.status === "AMBIGUOUS" && census.candidateCount < 1) fail("ambiguous root-drop census has no candidates");
@@ -187,46 +189,51 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
     const candidate = freshCensus.candidates[0];
     const counts = assertStateRootDropCounts(terraformState, { allowKeyOnly: true });
     const accounting = { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 };
-    const withAccounting = (error) => { error.recoveryAccounting = { ...accounting }; return error; };
-    let state = await readState();
-    const stateCounts = { keyCount: stateInstances(state, "aws_kms_key", "root_drop").length, aliasCount: stateInstances(state, "aws_kms_alias", "root_drop").length };
-    if (stateCounts.keyCount > 1 || stateCounts.aliasCount > 1 || stateCounts.aliasCount === 1 && stateCounts.keyCount === 0) fail("Terraform refresh returned an invalid root-drop state");
-    const keyCount = stateCounts.keyCount;
-    if (keyCount === 0) {
-      if (counts.keyCount !== 0 || counts.aliasCount !== 0) fail("pre-import Terraform state changed from the authenticated snapshot");
-      if (!allowImport) fail("Terraform import requires explicit recovery execution authorization");
-      accounting.terraformImports += 1;
-      let importResult;
-      try { importResult = await importKey({ address: ROOT_DROP_KEY_ADDRESS, id: candidate.keyId }); } catch (error) {
+    const withAccounting = (error) => { const value = error instanceof Error ? error : new Error(String(error)); value.recoveryAccounting = { ...accounting }; return value; };
+    try {
+      let state = await readState();
+      const stateCounts = { keyCount: stateInstances(state, "aws_kms_key", "root_drop").length, aliasCount: stateInstances(state, "aws_kms_alias", "root_drop").length };
+      if (stateCounts.keyCount > 1 || stateCounts.aliasCount > 1 || stateCounts.aliasCount === 1 && stateCounts.keyCount === 0) fail("Terraform refresh returned an invalid root-drop state");
+      const keyCount = stateCounts.keyCount;
+      if (keyCount === 0) {
+        if (counts.keyCount !== 0 || counts.aliasCount !== 0) fail("pre-import Terraform state changed from the authenticated snapshot");
+        if (!allowImport) fail("Terraform import requires explicit recovery execution authorization");
+        accounting.terraformImports += 1;
+        let importResult;
+        try { importResult = await importKey({ address: ROOT_DROP_KEY_ADDRESS, id: candidate.keyId }); } catch (error) {
+          if (error?.mutationOutcome !== "DEFINITE_FAILURE") accounting.unknownMutations += 1;
+          throw withAccounting(error);
+        }
+        if (importResult?.outcome === "AMBIGUOUS") { accounting.unknownMutations += 1; throw withAccounting(new Error("Terraform import outcome is ambiguous; read current state before any retry")); }
+        if (importResult?.outcome === "DEFINITE_FAILURE") throw withAccounting(new Error("Terraform import definitely failed"));
+        state = await refreshState();
+      } else {
+        assertRootDropKeyIdentity(state, candidate.keyId);
+      }
+      const imported = assertRootDropKeyIdentity(state, candidate.keyId);
+      const plan = await createPlan({ keyId: candidate.keyId });
+      const planJson = await readPlan(plan);
+      assertRootDropAliasOnlyPlan(planJson, { keyId: candidate.keyId });
+      if (!execute) return { status: "READY_FOR_ALIAS_ADOPTION", accounting, keyId: candidate.keyId, plan, planSha256, imported: true, observedAt: now() };
+      accounting.terraformApplies += 1;
+      let applyResult;
+      try { applyResult = await applyPlan(plan); } catch (error) {
         if (error?.mutationOutcome !== "DEFINITE_FAILURE") accounting.unknownMutations += 1;
         throw withAccounting(error);
       }
-      if (importResult?.outcome === "AMBIGUOUS") { accounting.unknownMutations += 1; throw withAccounting(new Error("Terraform import outcome is ambiguous; read current state before any retry")); }
-      if (importResult?.outcome === "DEFINITE_FAILURE") throw withAccounting(new Error("Terraform import definitely failed"));
+      if (applyResult?.outcome === "AMBIGUOUS") { accounting.unknownMutations += 1; throw withAccounting(new Error("alias Terraform apply outcome is ambiguous; read current state before any retry")); }
+      if (applyResult?.outcome === "DEFINITE_FAILURE") throw withAccounting(new Error("alias Terraform apply definitely failed"));
       state = await refreshState();
-    } else {
-      assertRootDropKeyIdentity(state, candidate.keyId);
+      assertRootDropStateIdentity(state, { keyId: candidate.keyId, aliasArn: STAGE_B.rootDropKmsKeyArn });
+      accounting.kmsWrites = 1;
+      const zeroDriftPlan = await createPlan({ keyId: candidate.keyId, zeroDrift: true });
+      const zeroDriftJson = await readPlan(zeroDriftPlan);
+      if (actionable(zeroDriftJson).length !== 0) fail("post-recovery Terraform plan is not zero drift");
+      return { status: "RECOVERED", accounting, keyId: candidate.keyId, imported, zeroDrift: true, observedAt: now() };
+    } catch (error) {
+      if (accounting.terraformImports || accounting.terraformApplies || accounting.kmsWrites || accounting.iamWrites || accounting.unknownMutations) throw withAccounting(error);
+      throw error;
     }
-    const imported = assertRootDropKeyIdentity(state, candidate.keyId);
-    const plan = await createPlan({ keyId: candidate.keyId });
-    const planJson = await readPlan(plan);
-    assertRootDropAliasOnlyPlan(planJson, { keyId: candidate.keyId });
-    if (!execute) return { status: "READY_FOR_ALIAS_ADOPTION", accounting, keyId: candidate.keyId, plan, planSha256, imported: true, observedAt: now() };
-    accounting.terraformApplies += 1;
-    let applyResult;
-    try { applyResult = await applyPlan(plan); } catch (error) {
-      if (error?.mutationOutcome !== "DEFINITE_FAILURE") accounting.unknownMutations += 1;
-      throw withAccounting(error);
-    }
-    if (applyResult?.outcome === "AMBIGUOUS") { accounting.unknownMutations += 1; throw withAccounting(new Error("alias Terraform apply outcome is ambiguous; read current state before any retry")); }
-    if (applyResult?.outcome === "DEFINITE_FAILURE") throw withAccounting(new Error("alias Terraform apply definitely failed"));
-    state = await refreshState();
-    assertRootDropStateIdentity(state, { keyId: candidate.keyId, aliasArn: STAGE_B.rootDropKmsKeyArn });
-    accounting.kmsWrites = 1;
-    const zeroDriftPlan = await createPlan({ keyId: candidate.keyId, zeroDrift: true });
-    const zeroDriftJson = await readPlan(zeroDriftPlan);
-    if (actionable(zeroDriftJson).length !== 0) fail("post-recovery Terraform plan is not zero drift");
-    return { status: "RECOVERED", accounting, keyId: candidate.keyId, imported, zeroDrift: true, observedAt: now() };
   };
 }
 
@@ -239,14 +246,15 @@ function assertRootDropKeyIdentity(state, keyId) {
   return { keyId, arn: attributes.arn };
 }
 
-export function buildRootDropAwsReadAdapter({ run, profile, region = STAGE_B.region } = {}) {
-  if (typeof run !== "function" || !profile) throw new Error("Root-drop read adapter requires an explicit profile and command runner");
+export function buildRootDropAwsReadAdapter({ run, profile, discoveryProfile = profile, provenanceProfile = profile, actorBindings = ROOT_DROP_CENSUS_ACTOR_BINDINGS, region = STAGE_B.region } = {}) {
+  if (typeof run !== "function" || !profile || !discoveryProfile || !provenanceProfile) throw new Error("Root-drop read adapter requires explicit actor profiles and command runner");
   if (region !== STAGE_B.region) throw new Error("Stage-A root-drop census: region is outside the protected production boundary");
-  const read = (args) => JSON.parse(run([...args, "--profile", profile, "--region", region, "--output", "json", "--no-cli-pager"]));
-  const readPages = (args, field, tokenFlag) => {
+  if (!same(actorBindings, ROOT_DROP_CENSUS_ACTOR_BINDINGS)) throw new Error("Root-drop read adapter actor bindings are outside the approved split-actor contract");
+  const read = (args, selectedProfile = profile) => JSON.parse(run([...args, "--profile", selectedProfile, "--region", region, "--output", "json", "--no-cli-pager"]));
+  const readPages = (args, field, tokenFlag, selectedProfile = profile) => {
     const values = []; const seen = new Set(); let token;
     do {
-      const response = read(token ? [...args, tokenFlag, token] : args);
+      const response = read(token ? [...args, tokenFlag, token] : args, selectedProfile);
       if (!Array.isArray(response[field])) fail(`root-drop AWS response is missing ${field}`);
       values.push(...response[field]);
       token = response.NextToken || response.NextMarker || null;
@@ -256,13 +264,14 @@ export function buildRootDropAwsReadAdapter({ run, profile, region = STAGE_B.reg
     return values;
   };
   return Object.freeze({
-    listKeys: () => readPages(["kms", "list-keys"], "Keys", "--starting-token"),
+    actorBindings,
+    listKeys: () => readPages(["kms", "list-keys"], "Keys", "--starting-token", discoveryProfile),
     describeKey: (keyId) => read(["kms", "describe-key", "--key-id", keyId]).KeyMetadata,
     listTags: (keyId) => read(["kms", "list-resource-tags", "--key-id", keyId]).Tags || [],
     getPolicy: (keyId) => JSON.parse(decodeURIComponent(read(["kms", "get-key-policy", "--key-id", keyId, "--policy-name", "default"]).Policy)),
     getPublicKey: (keyId) => read(["kms", "get-public-key", "--key-id", keyId]),
     listAliases: (keyId) => readPages(["kms", "list-aliases", "--key-id", keyId], "Aliases", "--starting-token"),
-    lookupCreateKeyEvents: (keyArn) => readPages(["cloudtrail", "lookup-events", "--lookup-attributes", `AttributeKey=ResourceName,AttributeValue=${keyArn}`], "Events", "--next-token").map(normalizeCloudTrailLookupEvent),
+    lookupCreateKeyEvents: (keyArn) => readPages(["cloudtrail", "lookup-events", "--lookup-attributes", `AttributeKey=ResourceName,AttributeValue=${keyArn}`], "Events", "--next-token", provenanceProfile).map(normalizeCloudTrailLookupEvent),
   });
 }
 
@@ -299,5 +308,5 @@ export function collectRootDropCensus({ adapter, terraformState, sourceSha, tran
     try { authenticatedCandidates.push({ ...candidate, ...authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence }) }); }
     catch (error) { authenticatedCandidates.push({ keyId: candidate.keyId, arn: candidate.arn, authenticated: false, reason: error.message }); }
   }
-  return buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates: authenticatedCandidates, failedApplyEvidence });
+  return buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates: authenticatedCandidates, failedApplyEvidence, actorBindings: adapter.actorBindings });
 }

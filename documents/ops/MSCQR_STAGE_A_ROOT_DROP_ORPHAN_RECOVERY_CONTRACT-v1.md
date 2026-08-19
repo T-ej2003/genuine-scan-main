@@ -3,7 +3,7 @@
 This contract covers the partial apply where `aws_kms_key.root_drop` exists in
 AWS but Terraform does not own it and `aws_kms_alias.root_drop` is absent.
 
-## Read-only census
+## Read-only census (schema version 2)
 
 `npm run stage-a:root-drop:census` is the only producer. It paginates the
 current KMS key, alias, and CloudTrail result sets, then reads the exact
@@ -16,6 +16,14 @@ candidate with missing history, is ambiguous and blocks creation. The result
 binds to the fresh Stage-A state identity, source SHA, transition ID, failed-
 plan SHA, creator session, observation time, and census digest. Tags alone
 never authenticate a candidate.
+
+The census uses the approved split-actor boundary: administrator/root performs
+account-wide `kms:ListKeys` discovery and `cloudtrail:LookupEvents` provenance
+reads; `mscqr-production-release-deployer` performs the scoped per-key KMS
+reads and Terraform operations. The census records these actor-domain
+bindings; neither identity is substituted for the other. Existing STS
+preflight evidence authenticates the selected profiles; the census digest
+does not claim to be a digital signature.
 
 The census is valid only as one of:
 

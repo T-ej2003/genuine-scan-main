@@ -10,6 +10,7 @@ import { ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b
 import {
   ROOT_DROP_KEY_ADDRESS,
   ROOT_DROP_ALIAS_ADDRESS,
+  ROOT_DROP_CENSUS_ACTOR_BINDINGS,
   buildRootDropAwsReadAdapter,
   collectRootDropCensus,
   createRootDropRecoveryRunner,
@@ -26,18 +27,23 @@ const readJson = (filePath) => JSON.parse(readFileSync(filePath, "utf8"));
 const privatePath = (filePath, label) => ensureStageBPrivateFile({ filePath, repositoryRoot: root, label }).path;
 
 function failedEvidence(argv) {
-  return {
+  const evidence = {
     sourceSha: option(argv, "--source-sha"),
     transitionId: option(argv, "--transition-id"),
     planSha256: option(argv, "--plan-sha256"),
-    creatorArn: option(argv, "--creator-arn", false),
-    creationEventId: option(argv, "--creation-event-id", false),
     failedApplyWindow: { start: option(argv, "--failed-apply-start"), end: option(argv, "--failed-apply-end") },
   };
+  for (const [key, flag] of [["creatorArn", "--creator-arn"], ["creationEventId", "--creation-event-id"]]) {
+    const value = option(argv, flag, false);
+    if (value !== undefined) evidence[key] = value;
+  }
+  return evidence;
 }
 
 export async function runCensus({ argv = process.argv.slice(2), run, execFile = execFileSync, write = (value) => process.stdout.write(value) } = {}) {
-  const profile = option(argv, "--profile");
+  const adminProfile = option(argv, "--admin-profile");
+  const releaseProfile = option(argv, "--release-profile");
+  if (adminProfile === releaseProfile) throw new Error("Stage-A root-drop census requires distinct administrator and release profiles");
   const suppliedRegion = option(argv, "--region", false);
   if (argv.includes("--region") && !suppliedRegion) throw new Error("Stage-A root-drop census: --region requires a value");
   const region = suppliedRegion || STAGE_B.region;
@@ -50,8 +56,8 @@ export async function runCensus({ argv = process.argv.slice(2), run, execFile = 
   const stageAStateIdentity = readJson(identityPath);
   assertStageAStateIdentityBinding(buildStageAStateIdentity(state, { stateBytes }), stageAStateIdentity);
   const evidence = failedEvidence(argv);
-  const env = buildRecoveryAwsEnvironment(profile);
-  const adapter = buildRootDropAwsReadAdapter({ run: run || ((args) => execFile("aws", args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })), profile, region });
+  const env = buildRecoveryAwsEnvironment(releaseProfile);
+  const adapter = buildRootDropAwsReadAdapter({ run: run || ((args) => execFile("aws", args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })), profile: releaseProfile, discoveryProfile: adminProfile, provenanceProfile: adminProfile, actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS, region });
   const census = collectRootDropCensus({ adapter, terraformState: state, sourceSha: evidence.sourceSha, transitionId: evidence.transitionId, stageAStateIdentity, failedApplyEvidence: evidence });
   writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(census, null, 2)}\n`), repositoryRoot: root, label: "Stage-A root-drop census" });
   write(`${JSON.stringify({ status: census.status, candidateCount: census.candidateCount, output: outputPath }, null, 2)}\n`);
@@ -67,15 +73,17 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const stageAState = JSON.parse(stateBytes);
   const stageAStateIdentity = readJson(identityPath);
   assertStageAStateIdentityBinding(buildStageAStateIdentity(stageAState, { stateBytes }), stageAStateIdentity);
-  const profile = option(argv, "--profile");
+  const adminProfile = option(argv, "--admin-profile");
+  const releaseProfile = option(argv, "--release-profile");
+  if (adminProfile === releaseProfile) throw new Error("Stage-A root-drop adoption requires distinct administrator and release profiles");
   const suppliedRegion = option(argv, "--region", false);
   if (argv.includes("--region") && !suppliedRegion) throw new Error("Stage-A root-drop adoption: --region requires a value");
   const region = suppliedRegion || STAGE_B.region;
   if (region !== STAGE_B.region) throw new Error("Stage-A root-drop adoption: region is outside the protected production boundary");
   const freshCensus = readRootDropCensus
-    ? await readRootDropCensus({ census, stageAState, stageAStateIdentity, profile })
+    ? await readRootDropCensus({ census, stageAState, stageAStateIdentity, profile: releaseProfile, adminProfile, releaseProfile })
     : collectRootDropCensus({
-      adapter: buildRootDropAwsReadAdapter({ run: (args) => execFile("aws", args, { cwd: root, env: buildRecoveryAwsEnvironment(profile), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), profile, region }),
+      adapter: buildRootDropAwsReadAdapter({ run: (args) => execFile("aws", args, { cwd: root, env: buildRecoveryAwsEnvironment(releaseProfile), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), profile: releaseProfile, discoveryProfile: adminProfile, provenanceProfile: adminProfile, actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS, region }),
       terraformState: stageAState,
       sourceSha: census.sourceSha,
       transitionId: census.transitionId,
@@ -85,7 +93,7 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const terraformRoot = option(argv, "--terraform-root");
   const planPath = option(argv, "--plan-path");
   const execute = argv.includes("--execute");
-  const env = buildRecoveryAwsEnvironment(profile);
+  const env = buildRecoveryAwsEnvironment(releaseProfile);
   const tf = runTerraform || ((args) => execFile("terraform", [`-chdir=${terraformRoot}`, ...args], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   const readState = async () => JSON.parse(tf(["state", "pull"]));
   const importKey = async ({ address, id }) => { tf(["import", "-input=false", "-lock=true", address, id]); return { outcome: "CONFIRMED_SUCCESS" }; };
