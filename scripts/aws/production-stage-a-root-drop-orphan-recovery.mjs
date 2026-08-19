@@ -598,6 +598,29 @@ export function assertAuthorizedRootDropRefreshTransition({ beforeState, beforeS
   return afterIdentity;
 }
 
+export function assertAuthorizedRootDropUntaintTransition({ beforeState, beforeStateBytes, afterState, afterStateBytes, keyId } = {}) {
+  const beforeCounts = rootDropStateCounts(beforeState);
+  const afterCounts = rootDropStateCounts(afterState);
+  if (beforeCounts.keyCount !== 1 || beforeCounts.aliasCount !== 0 || afterCounts.keyCount !== 1 || afterCounts.aliasCount !== 0) fail("authorized root-drop untaint must preserve the exact 1/0 topology");
+  assertRootDropKeyIdentity(beforeState, keyId);
+  assertRootDropKeyIdentity(afterState, keyId);
+  const beforeKey = stateInstances(beforeState, "aws_kms_key", "root_drop")[0];
+  const afterKey = stateInstances(afterState, "aws_kms_key", "root_drop")[0];
+  if (beforeKey.status !== "tainted" || afterKey.status !== undefined) fail("authorized root-drop untaint has an invalid taint transition");
+  const beforeIdentity = buildStageAStateIdentity(beforeState, { stateBytes: beforeStateBytes });
+  const afterIdentity = buildStageAStateIdentity(afterState, { stateBytes: afterStateBytes });
+  if (beforeIdentity.stateObject !== afterIdentity.stateObject || beforeIdentity.lineage !== afterIdentity.lineage || beforeIdentity.account !== afterIdentity.account || beforeIdentity.region !== afterIdentity.region) fail("authorized root-drop untaint changed the state binding");
+  if (afterIdentity.serial !== beforeIdentity.serial + 1 || afterIdentity.stateSha256 === beforeIdentity.stateSha256) fail("authorized root-drop untaint has an invalid state identity transition");
+  const comparable = (state) => {
+    const copy = structuredClone(state);
+    copy.serial = beforeState.serial;
+    delete stateInstances(copy, "aws_kms_key", "root_drop")[0].status;
+    return normalizeStageAStateForIdentity(copy);
+  };
+  if (!same(comparable(beforeState), comparable(afterState))) fail("authorized root-drop untaint changed Terraform state outside the exact taint marker");
+  return afterIdentity;
+}
+
 export function buildRootDropAwsReadAdapter({ run, profile, discoveryProfile = profile, provenanceProfile = profile, actorBindings = ROOT_DROP_CENSUS_ACTOR_BINDINGS, region = STAGE_B.region } = {}) {
   if (typeof run !== "function" || !profile || !discoveryProfile || !provenanceProfile) throw new Error("Root-drop read adapter requires explicit actor profiles and command runner");
   if (region !== STAGE_B.region) throw new Error("Stage-A root-drop census: region is outside the protected production boundary");
