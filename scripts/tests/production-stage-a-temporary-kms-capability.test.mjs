@@ -31,7 +31,7 @@ import { AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES, classifyTemporary
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { buildStageARootDropKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
-import { ROOT_DROP_CENSUS_ACTOR_BINDINGS, rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
+import { ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_RECOVERY_SCHEMA_VERSION, rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
@@ -76,7 +76,7 @@ function writeCliStageAInputs(directory) {
   const stageAStateIdentity = buildStageAStateIdentity(state, { stateBytes });
   writeFileSync(stageAStateIdentityFile, `${JSON.stringify(stageAStateIdentity)}\n`, { mode: 0o600 });
   const rootDropCensusFile = path.join(directory, "root-drop-census.json");
-  const census = { schemaVersion: 2, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status: "NO_CANDIDATE", sourceSha, transitionId, actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, candidateCount: 0, candidates: [], observedAt: new Date().toISOString() };
+  const census = { schemaVersion: ROOT_DROP_RECOVERY_SCHEMA_VERSION, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status: "NO_CANDIDATE", sourceSha, transitionId, actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, keyUniverse: [], keyUniverseSha256: rootDropRecoverySha256([]), candidateCount: 0, candidates: [], observedAt: new Date().toISOString() };
   writeFileSync(rootDropCensusFile, `${JSON.stringify({ ...census, censusSha256: rootDropRecoverySha256(census) })}\n`, { mode: 0o600 });
   return { stageAStateFile, stageAStateIdentityFile, rootDropCensusFile };
 }
@@ -1477,7 +1477,7 @@ test("authorization rejects a replayed NO_CANDIDATE census when the fresh bounda
   const planJsonFile = writePlanFile(directory);
   const inputs = writeCliStageAInputs(directory);
   const stale = JSON.parse(readFileSync(inputs.rootDropCensusFile, "utf8"));
-  const fresh = { ...stale, status: "AMBIGUOUS", candidateCount: 1, candidates: [{ authenticated: false, keyId: "11111111-1111-1111-1111-111111111111" }], observedAt: new Date().toISOString() };
+  const fresh = { ...stale, status: "AMBIGUOUS", keyUniverse: ["11111111-1111-1111-1111-111111111111"], keyUniverseSha256: rootDropRecoverySha256(["11111111-1111-1111-1111-111111111111"]), candidateCount: 1, candidates: [{ authenticated: false, keyId: "11111111-1111-1111-1111-111111111111" }], observedAt: new Date().toISOString() };
   delete fresh.censusSha256;
   fresh.censusSha256 = rootDropRecoverySha256(fresh);
   let awsCalls = 0;

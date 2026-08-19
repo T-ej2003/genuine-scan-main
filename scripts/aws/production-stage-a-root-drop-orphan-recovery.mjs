@@ -8,7 +8,8 @@ import { TEMPORARY_KMS_CAPABILITY } from "./production-stage-a-temporary-kms-cap
 export const ROOT_DROP_KEY_ADDRESS = "aws_kms_key.root_drop";
 export const ROOT_DROP_ALIAS_ADDRESS = "aws_kms_alias.root_drop";
 export const ROOT_DROP_ALIAS_NAME = "alias/mscqr-production-root-drop";
-export const ROOT_DROP_RECOVERY_SCHEMA_VERSION = 2;
+export const ROOT_DROP_KEY_DESCRIPTION = "Root-only MSCQR production cutover evidence signing key";
+export const ROOT_DROP_RECOVERY_SCHEMA_VERSION = 3;
 export const ROOT_DROP_RECOVERY_STATUSES = Object.freeze(["NO_CANDIDATE", "AUTHENTICATED_ORPHAN", "AMBIGUOUS"]);
 export const ROOT_DROP_EXPECTED_SIGNING_ALGORITHM = "RSASSA_PSS_SHA_256";
 export const ROOT_DROP_CENSUS_MAX_AGE_MS = 5 * 60 * 1000;
@@ -70,7 +71,7 @@ function assertKeyIdentity(candidate) {
   const arn = String(metadata.Arn || candidate.arn || "");
   const arnMatch = KEY_ARN.exec(arn);
   if (!KEY_ID.test(keyId) || !arnMatch || arnMatch[1] !== keyId || metadata.AWSAccountId !== STAGE_B.account) fail("orphan key identity is outside the production account/region contract");
-  if (metadata.KeyState !== "Enabled" || metadata.KeyManager !== "CUSTOMER" || metadata.Origin !== "AWS_KMS" || metadata.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec || metadata.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage || metadata.MultiRegion !== false) fail("orphan key metadata does not match the exact root-drop contract");
+  if (metadata.Description !== ROOT_DROP_KEY_DESCRIPTION || metadata.KeyState !== "Enabled" || metadata.KeyManager !== "CUSTOMER" || metadata.Origin !== "AWS_KMS" || metadata.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec || metadata.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage || metadata.MultiRegion !== false) fail("orphan key metadata does not match the exact root-drop contract");
   return { keyId, arn };
 }
 
@@ -111,21 +112,41 @@ export function authenticateRootDropOrphan({ candidate, terraformState, sourceSh
   return Object.freeze({ authenticated: true, keyId, keyArn: arn, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256, creationEventId: events[0].eventId, candidateSha256: sha256(candidate) });
 }
 
-export function buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates = [], failedApplyEvidence, actorBindings = ROOT_DROP_CENSUS_ACTOR_BINDINGS } = {}) {
+function canonicalKeyUniverse(keyUniverse) {
+  if (!Array.isArray(keyUniverse)) fail("root-drop census key universe is malformed");
+  const normalized = keyUniverse.map((keyId) => {
+    if (typeof keyId !== "string" || !KEY_ID.test(keyId)) fail("root-drop census key universe contains an invalid key identity");
+    return keyId;
+  }).sort();
+  if (new Set(normalized).size !== normalized.length) fail("root-drop census key universe contains duplicate key identities");
+  return normalized;
+}
+
+export function captureRootDropKeyUniverse(adapter) {
+  const listed = adapter?.listKeys?.();
+  if (!Array.isArray(listed)) fail("root-drop key universe enumeration is incomplete");
+  return canonicalKeyUniverse(listed.map((entry) => entry?.KeyId));
+}
+
+export function buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates = [], keyUniverse, failedApplyEvidence, actorBindings = ROOT_DROP_CENSUS_ACTOR_BINDINGS } = {}) {
   if (!SHA40.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(transitionId || "") || !stageAStateIdentity?.lineage || !Number.isSafeInteger(stageAStateIdentity.serial) || !SHA256.test(stageAStateIdentity.stateSha256 || "")) fail("root-drop census is missing its source/state binding");
   if (!Array.isArray(candidates)) fail("root-drop census candidates are malformed");
+  const stableKeyUniverse = canonicalKeyUniverse(keyUniverse);
+  if (candidates.some((candidate) => candidate?.keyId && !stableKeyUniverse.includes(candidate.keyId))) fail("root-drop census candidate is outside the enumerated key universe");
   const authenticated = candidates.filter((candidate) => candidate?.authenticated === true);
   const status = candidates.length === 0 ? "NO_CANDIDATE" : candidates.length === 1 && authenticated.length === 1 ? "AUTHENTICATED_ORPHAN" : "AMBIGUOUS";
   if (status === "AUTHENTICATED_ORPHAN" && !failedApplyEvidence) fail("authenticated orphan census requires failed-apply evidence");
   if (!same(actorBindings, ROOT_DROP_CENSUS_ACTOR_BINDINGS)) fail("root-drop census actor bindings are outside the approved split-actor contract");
-  const value = { schemaVersion: ROOT_DROP_RECOVERY_SCHEMA_VERSION, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status, sourceSha, transitionId, actorBindings, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, candidateCount: candidates.length, candidates, observedAt: new Date().toISOString(), ...(failedApplyEvidence ? { failedApplyEvidence } : {}) };
+  const value = { schemaVersion: ROOT_DROP_RECOVERY_SCHEMA_VERSION, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", region: STAGE_B.region, status, sourceSha, transitionId, actorBindings, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, keyUniverse: stableKeyUniverse, keyUniverseSha256: sha256(stableKeyUniverse), candidateCount: candidates.length, candidates, observedAt: new Date().toISOString(), ...(failedApplyEvidence ? { failedApplyEvidence } : {}) };
   return { ...value, censusSha256: sha256(value) };
 }
 
 export function assertRootDropCensus(census, { sourceSha, transitionId, stageAStateIdentity } = {}) {
   const { censusSha256, ...unsigned } = census || {};
   const observedAt = Date.parse(census?.observedAt || "");
-  if (!census || !SHA256.test(censusSha256 || "") || sha256(unsigned) !== censusSha256 || census.schemaVersion !== ROOT_DROP_RECOVERY_SCHEMA_VERSION || census.kind !== "MSCQR_STAGE_A_ROOT_DROP_CENSUS" || census.region !== STAGE_B.region || !same(census.actorBindings, ROOT_DROP_CENSUS_ACTOR_BINDINGS) || !Number.isFinite(observedAt) || observedAt > Date.now() + 5 * 60 * 1000 || !ROOT_DROP_RECOVERY_STATUSES.includes(census.status) || census.sourceSha !== sourceSha || census.transitionId !== transitionId || census.stageAStateLineage !== stageAStateIdentity?.lineage || census.stageAStateSerial !== stageAStateIdentity?.serial || census.stageAStateSha256 !== stageAStateIdentity?.stateSha256 || !Number.isSafeInteger(census.candidateCount) || !Array.isArray(census.candidates) || census.candidateCount !== census.candidates.length) fail("root-drop census is not current, regional, actor-bound, or bound to the exact transition and Stage-A state");
+  let keyUniverse;
+  try { keyUniverse = canonicalKeyUniverse(census?.keyUniverse); } catch { fail("root-drop census key universe is not a complete stable snapshot"); }
+  if (!census || !SHA256.test(censusSha256 || "") || sha256(unsigned) !== censusSha256 || census.schemaVersion !== ROOT_DROP_RECOVERY_SCHEMA_VERSION || census.kind !== "MSCQR_STAGE_A_ROOT_DROP_CENSUS" || census.region !== STAGE_B.region || !same(census.actorBindings, ROOT_DROP_CENSUS_ACTOR_BINDINGS) || !SHA256.test(census.keyUniverseSha256 || "") || sha256(keyUniverse) !== census.keyUniverseSha256 || !Number.isFinite(observedAt) || observedAt > Date.now() + 5 * 60 * 1000 || !ROOT_DROP_RECOVERY_STATUSES.includes(census.status) || census.sourceSha !== sourceSha || census.transitionId !== transitionId || census.stageAStateLineage !== stageAStateIdentity?.lineage || census.stageAStateSerial !== stageAStateIdentity?.serial || census.stageAStateSha256 !== stageAStateIdentity?.stateSha256 || !Number.isSafeInteger(census.candidateCount) || !Array.isArray(census.candidates) || census.candidateCount !== census.candidates.length || census.candidates.some((candidate) => candidate?.keyId && !keyUniverse.includes(candidate.keyId))) fail("root-drop census is not current, regional, actor-bound, or bound to the exact transition and Stage-A state");
   if (census.status === "NO_CANDIDATE" && census.candidateCount !== 0) fail("root-drop census falsely declares no candidate");
   if (census.status === "AUTHENTICATED_ORPHAN" && (census.candidateCount !== 1 || census.candidates[0]?.authenticated !== true || !KEY_ID.test(census.candidates[0].keyId || "") || typeof census.candidates[0].creationEventId !== "string" || !census.candidates[0].creationEventId || census.candidates[0].sourceSha !== sourceSha || census.candidates[0].transitionId !== transitionId || !SHA256.test(census.candidates[0].planSha256 || "") || !census.failedApplyEvidence || census.failedApplyEvidence.sourceSha !== sourceSha || census.failedApplyEvidence.transitionId !== transitionId || census.failedApplyEvidence.planSha256 !== census.candidates[0].planSha256 || !SHA256.test(census.failedApplyEvidence.planSha256 || "") || !census.failedApplyEvidence.failedApplyWindow)) fail("root-drop census does not contain exactly one source/transition/failed-apply-bound authenticated orphan");
   if (census.status === "AMBIGUOUS" && census.candidateCount < 1) fail("ambiguous root-drop census has no candidates");
@@ -298,9 +319,10 @@ export function collectRootDropCensus({ adapter, terraformState, sourceSha, tran
   if (!failedApplyEvidence?.failedApplyWindow) fail("fresh root-drop census requires the failed-apply observation window");
   assertStateShape(terraformState);
   assertStateRootDropCounts(terraformState, { key: 0, alias: 0 });
+  const startUniverse = captureRootDropKeyUniverse(adapter);
   const candidates = [];
-  for (const listed of adapter.listKeys()) {
-    const metadata = adapter.describeKey(listed.KeyId);
+  for (const keyId of startUniverse) {
+    const metadata = adapter.describeKey(keyId);
     const provablyIrrelevant = (metadata?.AWSAccountId && metadata.AWSAccountId !== STAGE_B.account)
       || (metadata?.Arn && !KEY_ARN.test(metadata.Arn))
       || (metadata?.KeySpec && metadata.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec)
@@ -331,5 +353,7 @@ export function collectRootDropCensus({ adapter, terraformState, sourceSha, tran
     try { authenticatedCandidates.push({ ...candidate, ...authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence }) }); }
     catch (error) { authenticatedCandidates.push({ keyId: candidate.keyId, arn: candidate.arn, authenticated: false, reason: error.message }); }
   }
-  return buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates: authenticatedCandidates, failedApplyEvidence, actorBindings: adapter.actorBindings });
+  const endUniverse = captureRootDropKeyUniverse(adapter);
+  if (!same(startUniverse, endUniverse)) fail("CENSUS_UNSTABLE: KMS key universe changed during root-drop observation; collect a new census");
+  return buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates: authenticatedCandidates, keyUniverse: startUniverse, failedApplyEvidence, actorBindings: adapter.actorBindings });
 }

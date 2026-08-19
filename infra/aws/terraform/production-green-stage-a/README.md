@@ -36,7 +36,14 @@ removes inherited `TF_*` redirect variables and uses the release-deployer
 profile for every Terraform subprocess. Before import it compares the live
 state lineage, serial, and exact state-byte SHA-256 with the fresh census
 identity; any mismatch fails closed. Recovery imports only the authenticated
-root-drop key and may apply only the exact Terraform-managed alias plan.
+root-drop key and may apply only the exact Terraform-managed alias plan. The
+census captures the complete paginated KMS key-ID universe before inspection
+and again afterward; any changed, incomplete, duplicated, or malformed
+enumeration fails closed instead of producing `NO_CANDIDATE`. This is a
+bounded consistency check, not a claim that AWS eventual consistency is a
+transactional snapshot. The adoption contract also requires the exact
+`root_drop` description (`Root-only MSCQR production cutover evidence signing
+key`) before an orphan can be authenticated.
 
 Stage A also manages the one exact inline role-chain policy on the existing
 `mscqr-production-independent-checker` role that permits only
