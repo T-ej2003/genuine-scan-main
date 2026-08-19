@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
-import { assertStageAStateIdentityBinding, buildStageAStateIdentity, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageAStateIdentityBinding, buildStageAStateIdentity, normalizeStageAStateForIdentity, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { buildStageARootDropKeyPolicy } from "./production-stage-a-control-plane.mjs";
 import { TEMPORARY_KMS_CAPABILITY } from "./production-stage-a-temporary-kms-capability.mjs";
 
@@ -340,20 +340,38 @@ export function assertRootDropAliasOnlyPlan(plan, { keyId, policyCompatibility =
   return { valid: true, address: ROOT_DROP_ALIAS_ADDRESS, actions: ["update", "create"], keyId, policyConverged: true };
 }
 
-export function assertRootDropRefreshOnlyPlan(plan, { keyId, stateAlreadyConverged = false } = {}) {
-  const changes = actionable(plan);
-  if (changes.length === 0 && stateAlreadyConverged) return { valid: true, stateConverged: true, address: ROOT_DROP_KEY_ADDRESS, actions: ["no-op"], keyId, arn: `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}` };
-  if (changes.length !== 1 || changes[0].address !== ROOT_DROP_KEY_ADDRESS || changes[0].type !== "aws_kms_key") fail("refresh-only root-drop plan must contain only the root-drop key state convergence");
-  const change = changes[0].change || {};
-  if (!same(change.actions, ["update"]) || change.replace_paths?.length) fail("refresh-only root-drop plan contains an unexpected action or replacement");
-  const before = change.before || {};
-  const after = change.after || {};
+function assertRootDropComputedRefresh(before, after, keyId) {
   const expectedArn = `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}`;
-  const matchesPreIdentity = (value) => (value === null || value === undefined || value === keyId);
-  if (!KEY_ID.test(keyId || "") || !matchesPreIdentity(before.key_id) || !matchesPreIdentity(before.id) || (before.arn !== null && before.arn !== undefined && before.arn !== expectedArn)
-    || after.key_id !== keyId || after.arn !== expectedArn || after.id !== null && after.id !== undefined && after.id !== keyId) fail("refresh-only root-drop plan does not populate the exact authenticated key identity");
-  const comparable = (value) => { const copy = structuredClone(value); for (const field of ["arn", "key_id", "id"]) delete copy[field]; return copy; };
+  const preIdentity = (value, expected) => value === null || value === undefined || value === expected;
+  const providerDefault = (from, to, expected) => preIdentity(from, expected) && to === expected;
+  if (!KEY_ID.test(keyId || "") || !preIdentity(before.key_id, keyId) || !preIdentity(before.id, keyId) || !preIdentity(before.arn, expectedArn)
+    || after.key_id !== keyId || after.arn !== expectedArn || !preIdentity(after.id, keyId)
+    || !providerDefault(before.custom_key_store_id, after.custom_key_store_id, "")
+    || !providerDefault(before.multi_region, after.multi_region, false)
+    || !providerDefault(before.rotation_period_in_days, after.rotation_period_in_days, 0)
+    || !providerDefault(before.xks_key_id, after.xks_key_id, "")) fail("refresh-only root-drop plan does not populate the exact authenticated key identity");
+  const comparable = (value) => Object.fromEntries(Object.entries(value).filter(([field]) => !["arn", "key_id", "id", "custom_key_store_id", "multi_region", "rotation_period_in_days", "xks_key_id"].includes(field)));
   if (!same(comparable(before), comparable(after))) fail("refresh-only root-drop plan changes state outside the computed root-drop identity");
+  return expectedArn;
+}
+
+export function assertRootDropRefreshOnlyPlan(plan, { keyId, stateAlreadyConverged = false } = {}) {
+  if (!plan || (plan.resource_changes !== undefined && !Array.isArray(plan.resource_changes)) || (plan.resource_drift !== undefined && !Array.isArray(plan.resource_drift))) fail("refresh-only root-drop plan is not machine-readable");
+  if (plan.resource_changes && actionable(plan).length) fail("refresh-only root-drop plan contains configuration-driven resource changes");
+  if (plan.resource_drift === undefined) {
+    if (stateAlreadyConverged) return { valid: true, stateConverged: true, address: ROOT_DROP_KEY_ADDRESS, actions: ["no-op"], keyId, arn: `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}` };
+    fail("refresh-only root-drop plan is missing the required resource drift");
+  }
+  if (plan.resource_drift.some((entry) => !entry || typeof entry !== "object" || !entry.change || typeof entry.change !== "object" || !Array.isArray(entry.change.actions))) fail("refresh-only root-drop plan contains malformed resource drift");
+  const changes = plan.resource_drift;
+  if (changes.length === 0 && stateAlreadyConverged) return { valid: true, stateConverged: true, address: ROOT_DROP_KEY_ADDRESS, actions: ["no-op"], keyId, arn: `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}` };
+  if (changes.length !== 1 || changes[0].address !== ROOT_DROP_KEY_ADDRESS || changes[0].mode !== "managed" || changes[0].type !== "aws_kms_key" || changes[0].name !== "root_drop") fail("refresh-only root-drop plan must contain only the root-drop key state convergence");
+  const change = changes[0].change || {};
+  if (!same(change.actions, ["update"]) || change.replace_paths?.length || Object.keys(change.before_unknown || {}).length || Object.keys(change.after_unknown || {}).length) fail("refresh-only root-drop plan contains an unexpected action, replacement, or unknown value");
+  const before = change.before;
+  const after = change.after;
+  if (!before || typeof before !== "object" || Array.isArray(before) || !after || typeof after !== "object" || Array.isArray(after)) fail("refresh-only root-drop plan contains malformed before/after state");
+  const expectedArn = assertRootDropComputedRefresh(before, after, keyId);
   return { valid: true, stateConverged: false, address: ROOT_DROP_KEY_ADDRESS, actions: ["update"], keyId, arn: expectedArn };
 }
 
@@ -516,10 +534,13 @@ export function assertAuthorizedRootDropRefreshTransition({ beforeState, beforeS
     const copy = structuredClone(state);
     copy.serial = beforeState.serial;
     const key = stateInstances(copy, "aws_kms_key", "root_drop")[0];
-    for (const field of ["arn", "key_id", "id"]) key.attributes[field] = null;
+    for (const field of ["arn", "key_id", "id", "custom_key_store_id", "multi_region", "rotation_period_in_days", "xks_key_id"]) key.attributes[field] = null;
     return copy;
   };
-  if (!same(comparable(beforeState), comparable(afterState))) fail("authorized root-drop refresh changed Terraform state outside the expected computed ARN/key_id identity");
+  const beforeKey = stateInstances(beforeState, "aws_kms_key", "root_drop")[0].attributes || {};
+  const afterKey = stateInstances(afterState, "aws_kms_key", "root_drop")[0].attributes || {};
+  assertRootDropComputedRefresh(beforeKey, afterKey, keyId);
+  if (!same(normalizeStageAStateForIdentity(comparable(beforeState)), normalizeStageAStateForIdentity(comparable(afterState)))) fail("authorized root-drop refresh changed Terraform state outside the expected computed ARN/key_id identity");
   return afterIdentity;
 }
 
