@@ -184,6 +184,10 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    container:
+      # Exact package-matched image supplies Chromium and Linux dependencies without runner apt mirrors.
+      image: mcr.microsoft.com/playwright:v1.60.0-noble
+      options: --init --ipc=host
     services:
       postgres:
         image: postgres:18.4
@@ -293,7 +297,7 @@ jobs:
 
           E2E_DB_PROTOCOL=postgresql
           E2E_DB_USER=postgres
-          E2E_DB_HOST=127.0.0.1
+          E2E_DB_HOST=postgres
           E2E_DB_PORT=5432
           E2E_DB_NAME=mscqr_e2e_admin_test
 
@@ -307,7 +311,7 @@ jobs:
             echo "E2E_DB_NAME=${E2E_DB_NAME}"
             echo "P2_TEST_DATABASE_REQUIRED=true"
             echo "P2_TEST_DATABASE_ADMIN_URL=${E2E_DB_PROTOCOL}://${E2E_DB_USER}@${E2E_DB_HOST}:${E2E_DB_PORT}/${E2E_DB_NAME}"
-            echo "REDIS_URL=redis://127.0.0.1:6379/0"
+            echo "REDIS_URL=redis://redis:6379/0"
             echo "REDIS_TLS=false"
             echo "COOKIE_SECURE=false"
             echo "AUTH_LEGACY_TOKEN_RESPONSE_ENABLED=false"
@@ -349,40 +353,6 @@ jobs:
         run: |
           npm --prefix backend run test:e2e:seed
 
-      - name: Install Playwright Chromium (bounded)
-        shell: bash
-        timeout-minutes: 12
-        run: |
-          set -euo pipefail
-          started_at=$(date +%s)
-          install_timeout_seconds=600
-          while IFS= read -r source_file; do
-            sudo mv "$source_file" "${source_file}.disabled"
-          done < <(sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \( -iname "*microsoft*" -o -iname "*azure-cli*" \) -print)
-          apt_status=0
-          set +e
-          timeout --signal=TERM --kill-after=30s "$install_timeout_seconds" npx --no-install playwright install-deps chromium
-          apt_status=$?
-          set -e
-          if (( apt_status == 0 )); then apt_result=PASS; else apt_result="FAIL:${apt_status}"; fi
-          echo "APT_DEPENDENCY_RESULT=${apt_result}"
-          if (( apt_status != 0 )); then
-            echo "BROWSER_DOWNLOAD_RESULT=NOT_RUN"
-            echo "PLAYWRIGHT_INSTALL_RESULT=FAIL"
-            echo "INSTALL_DURATION=$(( $(date +%s) - started_at ))s"
-            exit "$apt_status"
-          fi
-          browser_status=0
-          set +e
-          timeout --signal=TERM --kill-after=30s "$install_timeout_seconds" npx --no-install playwright install chromium
-          browser_status=$?
-          set -e
-          if (( browser_status == 0 )); then browser_result=PASS; else browser_result="FAIL:${browser_status}"; fi
-          echo "BROWSER_DOWNLOAD_RESULT=${browser_result}"
-          if (( browser_status == 0 )); then playwright_result=PASS; else playwright_result=FAIL; fi
-          echo "PLAYWRIGHT_INSTALL_RESULT=${playwright_result}"
-          echo "INSTALL_DURATION=$(( $(date +%s) - started_at ))s"
-          exit "$browser_status"
       - name: Playwright smoke suite
         env:
           NODE_ENV: test
@@ -426,6 +396,10 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 55
+    container:
+      # Keep integration on the same package-matched, prebuilt Chromium environment.
+      image: mcr.microsoft.com/playwright:v1.60.0-noble
+      options: --init --ipc=host
     services:
       postgres:
         image: postgres:18.4
@@ -453,10 +427,10 @@ jobs:
       P2_TEST_DATABASE_REQUIRED: "true"
       P2_TEST_DB_PROTOCOL: postgresql
       P2_TEST_DB_USER: postgres
-      P2_TEST_DB_HOST: 127.0.0.1
+      P2_TEST_DB_HOST: postgres
       P2_TEST_DB_PORT: "5432"
       P2_TEST_DB_NAME: mscqr_integration_admin_test
-      REDIS_URL: redis://127.0.0.1:6379/0
+      REDIS_URL: redis://redis:6379/0
       REDIS_TLS: "false"
     steps:
       - uses: actions/checkout@v6
@@ -477,47 +451,12 @@ jobs:
 
       - name: Production rotation inventory PostgreSQL contract
         env:
-          MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/mscqr_integration_admin_test
+          MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL: postgresql://postgres@postgres:5432/mscqr_integration_admin_test
         run: |
           set -euo pipefail
           test -n "$MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL"
           (cd backend && DATABASE_URL="$MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL" npx prisma migrate deploy --schema prisma/schema.prisma)
           node --test scripts/tests/production-rotation-inventory-postgres.integration.test.mjs
-
-      - name: Install Playwright Chromium (bounded)
-        shell: bash
-        timeout-minutes: 12
-        run: |
-          set -euo pipefail
-          started_at=$(date +%s)
-          install_timeout_seconds=600
-          while IFS= read -r source_file; do
-            sudo mv "$source_file" "${source_file}.disabled"
-          done < <(sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \( -iname "*microsoft*" -o -iname "*azure-cli*" \) -print)
-          apt_status=0
-          set +e
-          timeout --signal=TERM --kill-after=30s "$install_timeout_seconds" npx --no-install playwright install-deps chromium
-          apt_status=$?
-          set -e
-          if (( apt_status == 0 )); then apt_result=PASS; else apt_result="FAIL:${apt_status}"; fi
-          echo "APT_DEPENDENCY_RESULT=${apt_result}"
-          if (( apt_status != 0 )); then
-            echo "BROWSER_DOWNLOAD_RESULT=NOT_RUN"
-            echo "PLAYWRIGHT_INSTALL_RESULT=FAIL"
-            echo "INSTALL_DURATION=$(( $(date +%s) - started_at ))s"
-            exit "$apt_status"
-          fi
-          browser_status=0
-          set +e
-          timeout --signal=TERM --kill-after=30s "$install_timeout_seconds" npx --no-install playwright install chromium
-          browser_status=$?
-          set -e
-          if (( browser_status == 0 )); then browser_result=PASS; else browser_result="FAIL:${browser_status}"; fi
-          echo "BROWSER_DOWNLOAD_RESULT=${browser_result}"
-          if (( browser_status == 0 )); then playwright_result=PASS; else playwright_result=FAIL; fi
-          echo "PLAYWRIGHT_INSTALL_RESULT=${playwright_result}"
-          echo "INSTALL_DURATION=$(( $(date +%s) - started_at ))s"
-          exit "$browser_status"
 
       - name: Disposable system integration suite
         run: |
