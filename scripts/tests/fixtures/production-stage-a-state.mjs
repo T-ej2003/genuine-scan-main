@@ -40,7 +40,7 @@ export function productionStageAState({ serial = 42, endpointSecurityGroupId = "
       resource("aws_kms_key", "root_drop", { arn: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111", key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072", policy: policy({ Version: "2012-10-17", Statement: [
         { Sid: "AccountAdministration", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:root" }, Action: "kms:*", Resource: "*" },
         { Sid: "DenyNonRootRootDropSigning", Effect: "Deny", Principal: "*", Action: ["kms:Sign", "kms:Verify"], Resource: "*", Condition: { StringNotEquals: { "aws:PrincipalArn": "arn:aws:iam::368992683803:root" } } },
-        { Sid: "ReleaseReadsRootDropKey", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer" }, Action: ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetPublicKey", "kms:ListResourceTags"], Resource: "*" },
+        { Sid: "ReleaseReadsRootDropKey", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer" }, Action: ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetKeyRotationStatus", "kms:GetPublicKey", "kms:ListResourceTags"], Resource: "*" },
       ] }) }),
       resource("aws_kms_alias", "root_drop", { arn: STAGE_B.rootDropKmsKeyArn, target_key_arn: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111" }),
       resource("aws_secretsmanager_secret", "approval", { arn: STAGE_B.approvalSecretArn }),

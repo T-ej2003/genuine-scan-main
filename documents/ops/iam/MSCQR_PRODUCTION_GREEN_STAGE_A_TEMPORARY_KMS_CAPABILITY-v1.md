@@ -47,6 +47,14 @@ document, and removes only the exact temporary version. `verify-absent` must
 then observe the steady-state policy and no temporary version. The cutover
 runtime consumes that `ABSENCE_VERIFIED` evidence and rejects every other state.
 
+The locked AWS provider (`hashicorp/aws` `6.56.0`) also reads a created
+`aws_kms_key.root_drop` with `kms:DescribeKey`, `kms:GetKeyPolicy`,
+`kms:GetKeyRotationStatus`, and `kms:ListResourceTags`. Those read permissions
+are steady-state, read-only authority in `MSCQRProductionGreenStageBProviderReadOnly`;
+the root-drop key policy exposes the same readback set to the release role.
+The administrator preflight simulates all four actions before any Stage-A
+mutation.
+
 The administrator profile is used only for the IAM policy-version transition;
 the release profile is used for the exact production apply and readback. No
 credential, token, MFA value, or secret is stored in the evidence.

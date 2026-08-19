@@ -228,7 +228,7 @@ resource "aws_kms_key" "root_drop" {
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Sid = "AccountAdministration", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:root" }, Action = "kms:*", Resource = "*" },
     { Sid = "DenyNonRootRootDropSigning", Effect = "Deny", Principal = "*", Action = ["kms:Sign", "kms:Verify"], Resource = "*", Condition = { StringNotEquals = { "aws:PrincipalArn" = "arn:aws:iam::368992683803:root" } } },
-    { Sid = "ReleaseReadsRootDropKey", Effect = "Allow", Principal = { AWS = var.release_role_arn }, Action = ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetPublicKey", "kms:ListResourceTags"], Resource = "*" }
+    { Sid = "ReleaseReadsRootDropKey", Effect = "Allow", Principal = { AWS = var.release_role_arn }, Action = ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetKeyRotationStatus", "kms:GetPublicKey", "kms:ListResourceTags"], Resource = "*" }
   ] })
   tags = local.tags
 }

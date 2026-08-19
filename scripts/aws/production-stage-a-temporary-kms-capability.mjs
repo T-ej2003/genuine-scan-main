@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { assertStageARootDropKeyPolicyDocument } from "./production-stage-a-control-plane.mjs";
 
 export const TEMPORARY_KMS_CAPABILITY_STATES = Object.freeze([
   "ABSENT",
@@ -266,6 +267,13 @@ export function assertStageARootDropCreationPlan(plan) {
   const actionable = changes.filter(({ change }) => JSON.stringify(change?.actions || []) !== JSON.stringify(["no-op"]));
   const expected = new Set(["aws_kms_key.root_drop", "aws_kms_alias.root_drop"]);
   if (actionable.length !== 2 || new Set(actionable.map(({ address }) => address)).size !== 2 || actionable.some(({ address, change }) => !expected.has(address) || JSON.stringify(change?.actions || []) !== JSON.stringify(["create"]))) fail("Stage-A plan is not the exact two-resource root-drop creation envelope");
+  const key = actionable.find(({ address }) => address === "aws_kms_key.root_drop");
+  const alias = actionable.find(({ address }) => address === "aws_kms_alias.root_drop");
+  let keyPolicy;
+  try { keyPolicy = JSON.parse(key.change.after?.policy); } catch { fail("Stage-A root-drop key policy is missing or malformed"); }
+  assertStageARootDropKeyPolicyDocument(keyPolicy);
+  if (key.change.after?.customer_master_key_spec !== TEMPORARY_KMS_CAPABILITY.keySpec || key.change.after?.key_usage !== TEMPORARY_KMS_CAPABILITY.keyUsage || key.change.after?.bypass_policy_lockout_safety_check !== false) fail("Stage-A root-drop key creation attributes are not exact");
+  if (alias.change.after?.name !== "alias/mscqr-production-root-drop") fail("Stage-A root-drop alias creation attributes are not exact");
   return true;
 }
 

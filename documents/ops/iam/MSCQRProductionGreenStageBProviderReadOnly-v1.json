@@ -5,9 +5,10 @@
       "Sid": "ReadExactStageBRoles",
       "Effect": "Allow",
       "Action": [
-        "iam:GetRole",
-        "iam:GetRolePolicy",
-        "iam:ListRolePolicies",
+      "iam:GetRole",
+      "iam:GetRolePolicy",
+      "iam:ListAttachedRolePolicies",
+      "iam:ListRolePolicies",
         "iam:ListRoleTags"
       ],
       "Resource": [
@@ -31,8 +32,10 @@
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:*",
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary",
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary:*",
-        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker",
-        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*"
+      "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker",
+      "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*",
+      "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary",
+      "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary:*"
       ],
       "Condition": {
         "StringEquals": {
@@ -71,8 +74,9 @@
       "Sid": "ReadExactStageBBrokerFunction",
       "Effect": "Allow",
       "Action": [
-        "lambda:GetFunction",
-        "lambda:GetFunctionConfiguration",
+      "lambda:GetFunction",
+      "lambda:GetFunctionCodeSigningConfig",
+      "lambda:GetFunctionConfiguration",
         "lambda:ListVersionsByFunction"
       ],
       "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
@@ -96,6 +100,26 @@
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactStageARootDropProviderKey",
+      "Effect": "Allow",
+      "Action": [
+      "kms:DescribeKey",
+      "kms:GetKeyPolicy",
+      "kms:GetKeyRotationStatus",
+      "kms:GetPublicKey",
+      "kms:ListResourceTags"
+      ],
+      "Resource": "arn:aws:kms:eu-west-2:368992683803:key/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "aws:ResourceTag/Environment": "production",
+          "aws:ResourceTag/ManagedBy": "Terraform",
+          "aws:ResourceTag/Component": "full-rls-green-stage-a"
         }
       }
     }

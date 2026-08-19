@@ -102,6 +102,7 @@ const taskDefinitionTagContext = (context) => context
   .filter(({ key }) => !["ecs:task-cpu", "ecs:task-memory", "aws:RequestTag/MSCQRExecTarget"].includes(key))
   .map((entry) => entry.key === "aws:TagKeys" ? { ...entry, values: Object.keys(TASK_DEFINITION_TAGS) } : entry);
 const stageBRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const STAGE_A_PROVIDER_REFRESH_CONTRACT_PATH = "documents/ops/iam/MSCQRProductionGreenStageAProviderRefreshContract-v1.json";
 const arnPattern = /^(?:arn:aws:[^:]+:[^:]*:368992683803:.+|arn:aws:s3:::[^/]+(?:\/.*)?)$/;
 
 export const RELEASE_POLICY_SOURCES = Object.freeze([
@@ -563,6 +564,28 @@ function assertNoDuplicateOrOverlap(requiredEntries, forbiddenEntries) {
   }
 }
 
+function assertStageAProviderRefreshManifestCoverage(manifest, region) {
+  const contract = JSON.parse(fs.readFileSync(path.join(stageBRoot, STAGE_A_PROVIDER_REFRESH_CONTRACT_PATH), "utf8"));
+  const requiredEntries = manifest.required;
+  for (const resourceType of contract.resourceTypes || []) {
+    for (const readAction of resourceType.readActions || []) {
+      for (const resource of readAction.resources || []) {
+        const matches = requiredEntries.filter((entry) => entry.action === readAction.action && entry.resources.includes(resource));
+        if (matches.length === 0) throw new Error(`Stage A provider refresh contract is not covered by the permission manifest: ${resourceType.type} ${readAction.action} ${resource}.`);
+        if (readAction.region && !matches.some((entry) => entry.context.some(({ key, type, values }) => key === "aws:RequestedRegion" && type === "string" && values.length === 1 && values[0] === region))) {
+          throw new Error(`Stage A provider refresh region binding is not covered by the permission manifest: ${resourceType.type} ${readAction.action} ${resource}.`);
+        }
+        for (const [key, value] of Object.entries(readAction.conditions || {})) {
+          if (!matches.some((entry) => entry.context.some((context) => context.key === key && context.values.includes(value)))) {
+            throw new Error(`Stage A provider refresh condition binding is not covered by the permission manifest: ${resourceType.type} ${readAction.action} ${key}.`);
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
 export function validateManifest(manifest, { account = ACCOUNT, region = REGION, conditionKeyOrigins = sourcePolicyConditionKeyOrigins(), contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY } = {}) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) throw new Error("Permission manifest is required.");
   if (manifest?.schemaVersion !== PERMISSION_PREFLIGHT_SCHEMA_VERSION) throw new Error("Permission manifest schema version is unsupported.");
@@ -576,6 +599,7 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
       throw new Error(`Stage A live-evidence permission mapping is not exact: ${id}.`);
     }
   }
+  assertStageAProviderRefreshManifestCoverage(manifest, region);
   const ids = new Set();
   for (const [entry, forbidden] of [...manifest.required.map((entry) => [entry, false]), ...manifest.forbidden.map((entry) => [entry, true])]) {
     if (!entry.id || ids.has(entry.id) || !/^[-a-z0-9]+$/.test(entry.id)) throw new Error(`Permission manifest entry id is invalid: ${entry.id || "missing"}.`);

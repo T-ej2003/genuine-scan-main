@@ -371,6 +371,16 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0 && !values.includes("*")));
 });
 
+test("locked Stage A provider refresh contract is preflighted before any apply", () => {
+  assert.doesNotThrow(() => validateManifest(manifest));
+  const providerReads = deriveRequiredEvaluations(plan, manifest).required.filter(({ manifestId }) => manifestId.startsWith("refresh-stage-a-") || manifestId === "reference-audit-stage-a-root-drop-public-key");
+  assert.ok(providerReads.some(({ action }) => action === "kms:GetKeyRotationStatus"));
+  assert.ok(providerReads.some(({ action }) => action === "kms:GetPublicKey"));
+  const missingRotation = structuredClone(manifest);
+  missingRotation.required = missingRotation.required.filter((entry) => entry.id !== "refresh-stage-a-root-drop-key-rotation-status");
+  assert.throws(() => validateManifest(missingRotation), /Stage A provider refresh contract is not covered.*kms:GetKeyRotationStatus/);
+});
+
 test("permission manifest declares the exact normal and recovery mutation matrix", () => {
   const profilesFor = (id) => manifest.required.find((entry) => entry.id === id)?.profiles;
   assert.deepEqual(profilesFor("update-broker-managed-policy"), ["NORMAL_STAGE_B_RELEASE", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"]);
@@ -845,7 +855,7 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 156);
+  assert.equal(report.requiredEvaluations.length, 227);
   assert.equal(report.forbiddenEvaluations.length, 37);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
