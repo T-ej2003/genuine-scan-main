@@ -14,6 +14,13 @@ production-tagged `RSA_3072`/`SIGN_VERIFY` key family. The only permitted except
 administrator-controlled managed-policy version window described by
 `MSCQRProductionGreenStageATemporaryRootDropCreation-v1.json`.
 
+For the exact authenticated legacy root-drop orphan only, the same temporary
+policy version may additionally grant `kms:GetKeyRotationStatus` on that
+single key ARN. The legacy ARN, source SHA, transition, failed-apply plan, and
+creation evidence are bound by the recovery census; this exception is absent
+from canonical/new-key authorization and is removed by the existing revoke
+and absence-verification lifecycle.
+
 The administrator must use the canonical producer:
 
 The authenticated release-read preflight writes both the fresh Stage-A state

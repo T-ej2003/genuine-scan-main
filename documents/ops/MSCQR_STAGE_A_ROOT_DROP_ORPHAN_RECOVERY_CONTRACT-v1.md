@@ -17,6 +17,12 @@ binds to the fresh Stage-A state identity, source SHA, transition ID, failed-
 plan SHA, creator session, observation time, and census digest. Tags alone
 never authenticate a candidate.
 
+For the single historical legacy-policy recovery, the census command also
+requires `--failed-apply-state-identity` pointing to the private, independently
+captured pre-apply Stage-A state identity. That lineage, serial, and state hash
+must exactly match the historical binding; the current live state identity is
+validated separately and cannot substitute for it.
+
 The census uses the approved split-actor boundary: administrator/root performs
 account-wide `kms:ListKeys` and coarse `kms:DescribeKey` discovery plus
 `cloudtrail:LookupEvents` provenance reads; `mscqr-production-release-deployer`
@@ -75,7 +81,10 @@ envelope is accepted. The refreshed state lineage, serial, and exact state
 bytes are revalidated against the census before the fresh census is accepted.
 Auto-loaded `terraform.tfvars` and `*.auto.tfvars` files are rejected so the reviewed inputs remain authoritative. The executing
 checkout must have a clean execution-relevant tree and its exact `HEAD` must
-equal the census `sourceSha`; the pre-import classifier also proves that the
+equal the census `sourceSha`; for the exact historical legacy-policy binding,
+the command additionally requires `--execution-source-sha` and binds the
+clean execution checkout to that current source while retaining the historical
+census source binding. The pre-import classifier also proves that the
 alias expression targets `aws_kms_key.root_drop.key_id`. Any failure after a
 mutation is emitted at the CLI boundary with deterministic recovery accounting.
 After an authorized import it refreshes state, proves the imported key
@@ -84,6 +93,20 @@ ARN/spec/usage, and requires a plan containing only:
 ```text
 + aws_kms_alias.root_drop
 ```
+
+The one historically authenticated Stage-A failed apply bound to the merged
+source, transition, plan, CreateKey event, key ARN, and pre-apply state
+identity may contain the predecessor root-drop policy that lacks only
+`kms:GetKeyRotationStatus`. That exact legacy policy is not accepted as a
+steady-state result: the adoption plan must contain only its update to the
+current canonical policy plus the exact root-drop alias create, and the
+post-apply state must contain the canonical policy before recovery is
+reported complete. Any other policy difference, binding, address, or action
+fails closed. The historical two-create plan is provenance only and never
+authorizes another `kms:CreateKey`. The existing temporary Stage-A capability
+grants only `kms:GetKeyRotationStatus`, `kms:PutKeyPolicy`, and
+`kms:CreateAlias` for the exact authenticated orphan key (plus the exact alias
+resource), and is the only approved mutation path for this convergence.
 
 The alias is created only by the exact saved Terraform plan and must target the
 authenticated key. Key creation, replacement, destroy, unrelated actions,

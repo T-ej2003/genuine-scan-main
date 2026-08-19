@@ -13,7 +13,9 @@ import {
   ROOT_DROP_ALIAS_ADDRESS,
   ROOT_DROP_KEY_ADDRESS,
   ROOT_DROP_KEY_DESCRIPTION,
+  ROOT_DROP_LEGACY_POLICY_BINDING,
   assertRootDropAliasOnlyPlan,
+  assertLegacyRootDropPolicyBinding,
   assertRootDropCensus,
   assertRootDropCreationInterlock,
   assertRootDropPreImportPlan,
@@ -21,6 +23,7 @@ import {
   authenticateRootDropOrphan,
   buildRootDropCensus,
   buildRootDropAwsReadAdapter,
+  buildLegacyRootDropKeyPolicy,
   collectRootDropCensus,
   rootDropRecoverySha256,
   createRootDropRecoveryRunner,
@@ -35,12 +38,18 @@ const sourceSha = "f03fb3266385486d25317b8c2b202c408ae8771f";
 const transitionId = "stage-a-root-drop-orphan-recovery-20260819";
 const keyId = "11111111-1111-1111-1111-111111111111";
 const keyArn = `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}`;
+const legacyKeyId = ROOT_DROP_LEGACY_POLICY_BINDING.keyArn.split("/").at(-1);
+const legacyKeyArn = ROOT_DROP_LEGACY_POLICY_BINDING.keyArn;
 const state = productionStageAState({ serial: 46 });
 const absentState = { ...state, resources: state.resources.map((resource) => (resource.type === "aws_kms_key" && resource.name === "root_drop") || (resource.type === "aws_kms_alias" && resource.name === "root_drop") ? { ...resource, instances: [] } : resource) };
 const stateBytes = Buffer.from(JSON.stringify(absentState));
 const stateIdentity = buildStageAStateIdentity(absentState, { stateBytes });
-const cleanGit = (head = sourceSha, status = "", ignored = "", trackedModes = "") => (args) => {
+const cleanGit = (head = sourceSha, status = "", ignored = "", trackedModes = "", fetchedMain = head) => (args) => {
+  if (args[0] === "fetch" && args[1] === "--no-tags" && args[2] === "origin" && args[3] === "main") return "";
+  if (args[0] === "rev-parse" && args[1] === "FETCH_HEAD") return `${fetchedMain}\n`;
   if (args[0] === "rev-parse" && args[1] === "HEAD") return `${head}\n`;
+  if (args[0] === "symbolic-ref" && args[1] === "--quiet") return "refs/remotes/origin/main\n";
+  if (args[0] === "merge-base" && args[1] === "--is-ancestor") return "";
   if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return `${realpathSync(process.cwd())}\n`;
   if (args[0] === "rev-parse" && args[1] === "--is-shallow-repository") return "false\n";
   if (args[0] === "status" && args.includes("--ignored=matching")) return ignored;
@@ -60,17 +69,24 @@ const stageAVars = Object.freeze({
   TF_VAR_receipt_bucket_arn: `arn:aws:s3:::mscqr-prod-euw2-artifacts-${STAGE_B.account}-${STAGE_B.region}-an`,
 });
 const failedApplyEvidence = { sourceSha, transitionId, planSha256: crypto.createHash("sha256").update("exact-plan").digest("hex"), creatorArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/launch", creationEventId: "event-root-drop-1", failedApplyWindow: { start: "2026-08-19T00:00:00.000Z", end: "2026-08-19T23:59:59.999Z" } };
+const legacyFailedApplyEvidence = { ...failedApplyEvidence, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256, creationEventId: ROOT_DROP_LEGACY_POLICY_BINDING.creationEventId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity };
 const event = { eventId: failedApplyEvidence.creationEventId, eventName: "CreateKey", eventSource: "kms.amazonaws.com", awsRegion: STAGE_B.region, recipientAccountId: STAGE_B.account, eventTime: "2026-08-19T12:00:00.000Z", userIdentity: { arn: failedApplyEvidence.creatorArn }, resources: [{ ARN: keyArn }] };
 const awsLookupEvent = { EventId: event.eventId, EventName: event.eventName, EventSource: event.eventSource, EventTime: event.eventTime, CloudTrailEvent: JSON.stringify({ eventID: event.eventId, eventName: event.eventName, eventSource: event.eventSource, awsRegion: event.awsRegion, recipientAccountId: event.recipientAccountId, eventTime: event.eventTime, userIdentity: event.userIdentity, resources: event.resources }) };
 const candidate = (overrides = {}) => ({
   keyId,
-  arn: keyArn,
   metadata: { KeyId: keyId, Arn: keyArn, AWSAccountId: STAGE_B.account, KeyState: "Enabled", KeyManager: "CUSTOMER", Origin: "AWS_KMS", KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY", MultiRegion: false, Description: ROOT_DROP_KEY_DESCRIPTION },
   tags: { ...TEMPORARY_KMS_CAPABILITY.tags },
   policy: buildStageARootDropKeyPolicy(),
   publicKey: { KeyId: keyId, KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY", SigningAlgorithms: ["RSASSA_PSS_SHA_256"] },
   aliases: [],
   creationEvents: [event],
+  ...overrides,
+});
+const legacyCandidate = (overrides = {}) => candidate({
+  keyId: legacyKeyId,
+  metadata: { ...candidate().metadata, KeyId: legacyKeyId, Arn: legacyKeyArn },
+  policy: buildLegacyRootDropKeyPolicy(),
+  creationEvents: [{ ...event, eventId: ROOT_DROP_LEGACY_POLICY_BINDING.creationEventId, resources: [{ ARN: legacyKeyArn }] }],
   ...overrides,
 });
 const realAwsAdapter = () => buildRootDropAwsReadAdapter({ profile: "administrator", run: (args) => {
@@ -92,9 +108,15 @@ const exactCreatePlan = { resource_changes: [
   { address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { before: null, actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: null }, after_unknown: { target_key_id: true } } },
 ], configuration: { root_module: { resources: [{ address: ROOT_DROP_ALIAS_ADDRESS, expressions: { name: { constant_value: ROOT_DROP_ALIAS_NAME }, target_key_id: { references: [`${ROOT_DROP_KEY_ADDRESS}.key_id`] } } }] } } };
 const aliasPlan = (changes = [{ address: ROOT_DROP_ALIAS_ADDRESS, change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: keyId } } }]) => ({ resource_changes: changes });
+const legacyAliasPolicyPlan = ({ key = legacyKeyId, beforePolicy = buildLegacyRootDropKeyPolicy(), afterPolicy = buildStageARootDropKeyPolicy() } = {}) => ({ resource_changes: [
+  { address: ROOT_DROP_KEY_ADDRESS, type: "aws_kms_key", change: { before: { policy: JSON.stringify(beforePolicy) }, actions: ["update"], after: { policy: JSON.stringify(afterPolicy) }, replace_paths: [] } },
+  { address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: key }, replace_paths: [] } },
+] });
 const keyState = () => ({ ...absentState, resources: absentState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: keyArn, key_id: keyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) });
-const ownedState = () => ({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: keyId, target_key_arn: keyArn } }] } : resource) });
+const ownedState = () => ({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(buildStageARootDropKeyPolicy()) } })) } : resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: keyId, target_key_arn: keyArn } }] } : resource) });
+const stateWithRootDropPolicy = (value, policy) => ({ ...value, resources: value.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(policy) } })) } : resource) });
 const identityForState = (value) => buildStageAStateIdentity(value, { stateBytes: Buffer.from(JSON.stringify(value)) });
+const legacyKeyState = (policy) => stateWithRootDropPolicy({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: legacyKeyArn, key_id: legacyKeyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) }, policy);
 const keyOnlyStateIdentity = () => identityForState(keyState());
 const ownedStateIdentity = () => identityForState(ownedState());
 const keyOnlyCensus = () => buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: keyOnlyStateIdentity(), keyUniverse: [keyId], candidates: [{ ...candidate(), ...authenticated() }], failedApplyEvidence });
@@ -112,6 +134,52 @@ test("exact orphan authentication requires account, region, metadata, tags, poli
     ["unexpected alias", { aliases: [{ AliasName: ROOT_DROP_ALIAS_NAME, TargetKeyId: keyId }] }],
     ["CloudTrail mismatch", { creationEvents: [{ ...event, eventTime: "2025-01-01T00:00:00.000Z" }] }],
   ]) assert.throws(() => authenticateRootDropOrphan({ candidate: candidate(overrides), terraformState: absentState, sourceSha, transitionId, failedApplyEvidence }), new RegExp(label === "CloudTrail mismatch" ? "outside" : "orphan|candidate|policy|metadata|tags|alias"));
+});
+
+test("historical root-drop policy is accepted only for the exact failed apply binding", () => {
+  assert.equal(authenticateRootDropOrphan({ candidate: legacyCandidate(), terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }).policyCompatibility, "LEGACY_BOUND_HISTORICAL");
+  assert.doesNotThrow(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(), sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }));
+  for (const [label, overrides] of [
+    ["wrong key", { keyId, metadata: candidate().metadata }],
+    ["ARN/key ID mismatch", { metadata: { ...legacyCandidate().metadata, KeyId: keyId } }],
+    ["wrong account", { metadata: { ...legacyCandidate().metadata, AWSAccountId: "000000000000" } }],
+    ["wrong region", { metadata: { ...legacyCandidate().metadata, Arn: `arn:aws:kms:us-east-1:${STAGE_B.account}:key/${legacyKeyId}` } }],
+    ["wrong policy", { policy: { ...buildLegacyRootDropKeyPolicy(), Statement: buildLegacyRootDropKeyPolicy().Statement.map((statement) => statement.Sid === "ReleaseReadsRootDropKey" ? { ...statement, Action: [...statement.Action, "kms:ListAliases"] } : statement) } }],
+  ]) assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(overrides), sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }), /legacy root-drop policy|orphan key identity/, label);
+  for (const [label, field, value] of [["wrong source", "sourceSha", sourceSha], ["wrong transition", "transitionId", transitionId], ["wrong plan", "planSha256", failedApplyEvidence.planSha256], ["wrong event", "creationEventId", failedApplyEvidence.creationEventId]]) {
+    const evidence = { ...legacyFailedApplyEvidence, [field]: value };
+    assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(), sourceSha: evidence.sourceSha, transitionId: evidence.transitionId, failedApplyEvidence: evidence }), /legacy root-drop policy/, label);
+  }
+  assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(), sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: { ...legacyFailedApplyEvidence, stageAStateIdentity: { ...ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity, serial: 46 } } }), /legacy root-drop policy/);
+  assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(), sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: { ...legacyFailedApplyEvidence, stageAStateIdentity: undefined } }), /legacy root-drop policy/);
+  assert.equal(authenticated().policyCompatibility, "CANONICAL");
+});
+
+test("production candidate snapshot shape authenticates and persists the exact historical orphan", () => {
+  const snapshot = legacyCandidate();
+  const adapter = {
+    listKeys: () => [{ KeyId: legacyKeyId }],
+    describeKey: () => snapshot.metadata,
+    listTags: () => Object.entries(snapshot.tags).map(([TagKey, TagValue]) => ({ TagKey, TagValue })),
+    getPolicy: () => snapshot.policy,
+    getPublicKey: () => snapshot.publicKey,
+    listAliases: () => snapshot.aliases,
+    lookupCreateKeyEvents: () => snapshot.creationEvents,
+  };
+  const census = collectRootDropCensus({ adapter, terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity, failedApplyEvidence: legacyFailedApplyEvidence });
+  assert.equal(census.status, "AUTHENTICATED_ORPHAN");
+  assert.equal(Object.hasOwn(census.candidates[0], "arn"), false);
+  assert.equal(census.candidates[0].metadata.Arn, legacyKeyArn);
+  assert.equal(census.candidates[0].keyArn, legacyKeyArn);
+  const persisted = JSON.parse(JSON.stringify(census));
+  assert.doesNotThrow(() => assertRootDropCensus(persisted, { sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity }));
+});
+
+test("legacy policy convergence requires the exact update plus alias plan", () => {
+  assert.equal(assertRootDropAliasOnlyPlan(legacyAliasPolicyPlan(), { keyId: legacyKeyId, policyCompatibility: "LEGACY_BOUND_HISTORICAL" }).policyConverged, true);
+  assert.throws(() => assertRootDropAliasOnlyPlan(legacyAliasPolicyPlan(), { keyId: legacyKeyId }), /canonical root-drop recovery/);
+  assert.throws(() => assertRootDropAliasOnlyPlan(legacyAliasPolicyPlan({ afterPolicy: buildLegacyRootDropKeyPolicy() }), { keyId: legacyKeyId, policyCompatibility: "LEGACY_BOUND_HISTORICAL" }), /exact legacy policy convergence/);
+  assert.throws(() => assertRootDropAliasOnlyPlan({ resource_changes: [...legacyAliasPolicyPlan().resource_changes, { address: "aws_vpc.other", change: { actions: ["update"], before: {}, after: {} } }] }, { keyId: legacyKeyId, policyCompatibility: "LEGACY_BOUND_HISTORICAL" }), /unexpected changes/);
 });
 
 test("root-drop description contract matches the canonical Terraform resource", () => {
@@ -265,6 +333,52 @@ test("runAdoption resumes S1 key-only state without reimporting", async () => {
   }
 });
 
+test("runAdoption resumes legacy policy convergence from a canonical key-only state", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-policy-first-retry-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  const planPath = path.join(directory, "alias.plan");
+  const canonicalKeyOnlyState = legacyKeyState(buildStageARootDropKeyPolicy());
+  const canonicalKeyOnlyIdentity = identityForState(canonicalKeyOnlyState);
+  const canonicalCandidate = legacyCandidate({ policy: buildStageARootDropKeyPolicy() });
+  const canonicalCensus = buildRootDropCensus({ sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: canonicalKeyOnlyIdentity, keyUniverse: [legacyKeyId], candidates: [{ ...canonicalCandidate, ...authenticateRootDropOrphan({ candidate: canonicalCandidate, terraformState: canonicalKeyOnlyState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence, allowKeyOnly: true }) }], failedApplyEvidence: legacyFailedApplyEvidence });
+  const legacyCensus = buildRootDropCensus({ sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: stateIdentity, keyUniverse: [legacyKeyId], candidates: [{ ...legacyCandidate(), ...authenticateRootDropOrphan({ candidate: legacyCandidate(), terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }) }], failedApplyEvidence: legacyFailedApplyEvidence });
+  const canonicalOwnedState = { ...canonicalKeyOnlyState, resources: canonicalKeyOnlyState.resources.map((resource) => resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: legacyKeyId, target_key_arn: legacyKeyArn } }] } : resource) };
+  writeFileSync(statePath, JSON.stringify(canonicalKeyOnlyState), { mode: 0o600 });
+  writeFileSync(identityPath, `${JSON.stringify(canonicalKeyOnlyIdentity)}\n`, { mode: 0o600 });
+  writeFileSync(censusPath, `${JSON.stringify(legacyCensus)}\n`, { mode: 0o600 });
+  const saved = Object.fromEntries(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS.map((key) => [key, process.env[key]]));
+  let currentState = canonicalKeyOnlyState;
+  let imports = 0;
+  let applies = 0;
+  try {
+    Object.assign(process.env, stageAVars);
+    const result = await runAdoption({
+      argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--execution-source-sha", ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, "--plan-path", planPath, "--execute"],
+      runGit: cleanGit(ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha),
+      readRootDropCensus: async () => canonicalCensus,
+      readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
+      execFile: (command, args) => {
+        if (args.includes("workspace")) return "default\n";
+        if (args.includes("state")) return JSON.stringify(currentState);
+        if (args.includes("import")) { imports += 1; throw new Error("policy-first retry must not import"); }
+        if (args.includes("apply")) { applies += 1; currentState = canonicalOwnedState; return ""; }
+        if (args.includes("plan") && args.includes("-out")) { writeFileSync(args[args.indexOf("-out") + 1], "policy-first-plan"); return ""; }
+        if (args.includes("show")) return JSON.stringify(args.at(-1).includes("zero-drift") ? { resource_changes: [] } : aliasPlan([{ address: ROOT_DROP_ALIAS_ADDRESS, change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: legacyKeyId } } }]));
+        throw new Error(`unexpected Terraform command: ${args.join(" ")}`);
+      },
+      write: () => {},
+    });
+    assert.equal(result.status, "RECOVERED");
+    assert.deepEqual({ imports, applies }, { imports: 0, applies: 1 });
+    assert.equal(result.accounting.kmsWrites, 1);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("adoption rejects a non-canonical Terraform root before any Terraform subprocess", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-root-pin-"));
   const statePath = path.join(directory, "state.json");
@@ -289,6 +403,8 @@ test("adoption rejects a non-canonical Terraform root before any Terraform subpr
 test("source checkout is bound to census.sourceSha and rejects execution-relevant drift before import", async () => {
   assert.doesNotThrow(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit() }));
   assert.throws(() => assertRootDropExecutionSource({ sourceSha: "0".repeat(40), runGit: cleanGit() }), /HEAD does not match/);
+  assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, "", "", "", "1".repeat(40)) }), /origin\/main/);
+  assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: (args) => { if (args[0] === "fetch") throw new Error("network unavailable"); return cleanGit()(args); } }), /Fresh protected-main fetch failed/);
   assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, " M infra/aws/terraform/production-green-stage-a/main.tf\n") }), /tracked modifications/);
   assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, "M  infra/aws/terraform/production-green-stage-a/main.tf\n") }), /tracked modifications/);
   assert.throws(() => assertRootDropExecutionSource({ sourceSha, runGit: cleanGit(sourceSha, "?? infra/aws/terraform/production-green-stage-a/local.tf\n") }), /untracked file/);
@@ -584,7 +700,7 @@ test("root-drop census consumes every paginated KMS and CloudTrail page", () => 
     if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: { KeyId: keyId, Arn: keyArn, KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY" } });
     if (args[0] === "kms" && args[1] === "list-resource-tags") return JSON.stringify({ Tags: [] });
     if (args[0] === "kms" && args[1] === "get-key-policy") return JSON.stringify({ Policy: encodeURIComponent(JSON.stringify({})) });
-    if (args[0] === "kms" && args[1] === "get-public-key") return JSON.stringify({});
+    if (args[0] === "kms" && args[1] === "get-public-key") return JSON.stringify(candidate().publicKey);
     throw new Error(`unexpected read ${args.join(" ")}`);
   }});
   assert.deepEqual(adapter.listKeys(), [{ KeyId: keyId }]);
@@ -633,18 +749,23 @@ test("root-drop census adapter binds discovery and CloudTrail provenance to admi
     provenanceProfile: "administrator",
     run: (args) => {
       seen.push(args);
+      if (args[0] === "kms" && args[1] === "get-public-key" && args[args.indexOf("--profile") + 1] !== "release") throw new Error("discovery identity must not perform GetPublicKey");
       if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: {} });
       return args[0] === "cloudtrail" ? JSON.stringify({ Events: [] }) : JSON.stringify({ Keys: [] });
     },
   });
   adapter.listKeys();
   adapter.describeKey(keyId);
+  adapter.discoveryPublicKey(keyId);
   adapter.listTags(keyId);
+  adapter.getPublicKey(keyId);
   adapter.lookupCreateKeyEvents(keyArn);
   assert.equal(seen[0][seen[0].indexOf("--profile") + 1], "administrator");
   assert.equal(seen[1][seen[1].indexOf("--profile") + 1], "administrator");
   assert.equal(seen[2][seen[2].indexOf("--profile") + 1], "release");
-  assert.equal(seen[3][seen[3].indexOf("--profile") + 1], "administrator");
+  assert.equal(seen[3][seen[3].indexOf("--profile") + 1], "release");
+  assert.equal(seen[4][seen[4].indexOf("--profile") + 1], "release");
+  assert.equal(seen[5][seen[5].indexOf("--profile") + 1], "administrator");
   assert.deepEqual(adapter.actorBindings, { discovery: "ADMINISTRATOR", resourceReads: "RELEASE_DEPLOYER", provenance: "ADMINISTRATOR" });
 });
 
@@ -727,6 +848,33 @@ test("privileged coarse discovery excludes unrelated keys without hiding a later
   assert(calls.some(({ args, profile }) => args[0] === "kms" && args[1] === "list-resource-tags" && profile === "release"));
 });
 
+test("administrator description classification excludes an inaccessible unrelated RSA signing key", () => {
+  const unrelatedKeyId = "22222222-2222-2222-2222-222222222222";
+  const calls = [];
+  const adapter = buildRootDropAwsReadAdapter({
+    profile: "release",
+    discoveryProfile: "administrator",
+    provenanceProfile: "administrator",
+    run: (args) => {
+      const profile = args[args.indexOf("--profile") + 1];
+      calls.push({ args, profile });
+      if (args[0] === "kms" && args[1] === "list-keys") return JSON.stringify({ Keys: [{ KeyId: unrelatedKeyId }, { KeyId: keyId }] });
+      if (args[0] === "kms" && args[1] === "describe-key" && args.includes(unrelatedKeyId)) return JSON.stringify({ KeyMetadata: { KeyId: unrelatedKeyId, Arn: `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${unrelatedKeyId}`, AWSAccountId: STAGE_B.account, KeyState: "Enabled", KeyManager: "CUSTOMER", Origin: "AWS_KMS", KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY", MultiRegion: false, Description: "Independent production RLS approval signing key" } });
+      if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: candidate().metadata });
+      if (args[0] === "kms" && args[1] === "list-resource-tags") return JSON.stringify({ Tags: Object.entries(candidate().tags).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) });
+      if (args[0] === "kms" && args[1] === "get-key-policy") return JSON.stringify({ Policy: encodeURIComponent(JSON.stringify(candidate().policy)) });
+      if (args[0] === "kms" && args[1] === "get-public-key" && args.includes(unrelatedKeyId)) throw new Error("release must not inspect unrelated key public key");
+      if (args[0] === "kms" && args[1] === "get-public-key") return JSON.stringify(candidate().publicKey);
+      if (args[0] === "kms" && args[1] === "list-aliases") return JSON.stringify({ Aliases: [] });
+      if (args[0] === "cloudtrail") return JSON.stringify({ Events: [awsLookupEvent] });
+      throw new Error(`unexpected read ${args.join(" ")}`);
+    },
+  });
+  const result = collectRootDropCensus({ adapter, terraformState: absentState, sourceSha, transitionId, stageAStateIdentity: stateIdentity, failedApplyEvidence });
+  assert.equal(result.status, "AUTHENTICATED_ORPHAN");
+  assert.deepEqual(calls.filter(({ args }) => args.includes(unrelatedKeyId)).map(({ args, profile }) => ({ action: args.slice(0, 2).join(":"), profile })), [{ action: "kms:describe-key", profile: "administrator" }, { action: "kms:describe-key", profile: "administrator" }]);
+});
+
 test("release denial on a potentially relevant candidate fails closed instead of becoming NO_CANDIDATE", () => {
   const adapter = buildRootDropAwsReadAdapter({
     profile: "release",
@@ -735,6 +883,7 @@ test("release denial on a potentially relevant candidate fails closed instead of
     run: (args) => {
       if (args[0] === "kms" && args[1] === "list-keys") return JSON.stringify({ Keys: [{ KeyId: keyId }] });
       if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: candidate().metadata });
+      if (args[0] === "kms" && args[1] === "get-public-key") throw new Error("AccessDenied: kms:GetPublicKey");
       if (args[0] === "kms" && args[1] === "list-resource-tags") throw new Error("AccessDenied: kms:ListResourceTags");
       throw new Error(`unexpected read ${args.join(" ")}`);
     },
@@ -831,11 +980,11 @@ test("alias-only recovery plan rejects key creation, replacement, destroy, unrel
   ]) assert.throws(() => assertRootDropAliasOnlyPlan(plan, { keyId }), /only one|target|alias/);
 });
 
-function runner({ execute = false, initial = absentState, importOutcome, applyOutcome, plan = aliasPlan(), zeroDrift = { resource_changes: [] }, injectFresh = true } = {}) {
+function runner({ execute = false, initial = absentState, importOutcome, applyOutcome, plan = aliasPlan(), zeroDrift = { resource_changes: [] }, finalState = ownedState(), injectFresh = true } = {}) {
   let current = initial;
   let imports = 0;
   let applies = 0;
-  const recovery = createRootDropRecoveryRunner({ execute, readState: async () => current, readStateSnapshot: async () => ({ state: current, stateBytes: Buffer.from(JSON.stringify(current)) }), importKey: async () => { imports += 1; if (importOutcome) { const error = new Error(importOutcome); error.mutationOutcome = importOutcome; throw error; } current = keyState(); }, refreshState: async () => current, createPlan: async ({ zeroDrift: requested }) => requested ? "zero" : "alias", readPlan: async (path) => path === "zero" ? zeroDrift : plan, readPlanBytes: async (path) => Buffer.from(path), applyPlan: async () => { applies += 1; if (applyOutcome) { const error = new Error(applyOutcome); error.mutationOutcome = applyOutcome; throw error; } current = ownedState(); }, });
+  const recovery = createRootDropRecoveryRunner({ execute, readState: async () => current, readStateSnapshot: async () => ({ state: current, stateBytes: Buffer.from(JSON.stringify(current)) }), importKey: async () => { imports += 1; if (importOutcome) { const error = new Error(importOutcome); error.mutationOutcome = importOutcome; throw error; } current = keyState(); }, refreshState: async () => current, createPlan: async ({ zeroDrift: requested }) => requested ? "zero" : "alias", readPlan: async (path) => path === "zero" ? zeroDrift : plan, readPlanBytes: async (path) => Buffer.from(path), applyPlan: async () => { applies += 1; if (applyOutcome) { const error = new Error(applyOutcome); error.mutationOutcome = applyOutcome; throw error; } current = finalState; }, });
   return {
     counts: () => ({ imports, applies }),
     run: (input) => injectFresh ? recovery({ ...input, freshCensus: input.freshCensus || input.census }) : recovery(input),
@@ -870,6 +1019,84 @@ test("successful adoption imports exactly once, creates only the alias, verifies
   assert.equal(result.status, "RECOVERED");
   assert.deepEqual(result.accounting, { terraformImports: 1, terraformApplies: 1, kmsWrites: 1, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 });
   assert.deepEqual(value.counts(), { imports: 1, applies: 1 });
+});
+
+test("historical policy adoption converges policy before reporting the alias recovered", async () => {
+  const legacyCensus = buildRootDropCensus({ sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: stateIdentity, keyUniverse: [legacyKeyId], candidates: [{ ...legacyCandidate(), ...authenticateRootDropOrphan({ candidate: legacyCandidate(), terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }) }], failedApplyEvidence: legacyFailedApplyEvidence });
+  const legacyState = stateWithRootDropPolicy({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: legacyKeyArn, key_id: legacyKeyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) }, buildLegacyRootDropKeyPolicy());
+  const canonicalOwnedState = stateWithRootDropPolicy({ ...ownedState(), resources: ownedState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: legacyKeyArn, key_id: legacyKeyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: legacyKeyId, target_key_arn: legacyKeyArn } }] } : resource) }, buildStageARootDropKeyPolicy());
+  let current = absentState;
+  let imports = 0;
+  let applies = 0;
+  const recovery = createRootDropRecoveryRunner({
+    execute: true,
+    readState: async () => current,
+    readStateSnapshot: async () => ({ state: current, stateBytes: Buffer.from(JSON.stringify(current)) }),
+    importKey: async () => { imports += 1; current = legacyState; return { outcome: "CONFIRMED_SUCCESS" }; },
+    refreshState: async () => current,
+    createPlan: async ({ zeroDrift }) => zeroDrift ? "zero-drift" : "legacy-alias",
+    readPlan: async (path) => path === "zero-drift" ? { resource_changes: [] } : legacyAliasPolicyPlan({ key: legacyKeyId }),
+    readPlanBytes: async (path) => Buffer.from(path),
+    applyPlan: async () => { applies += 1; current = canonicalOwnedState; return { outcome: "CONFIRMED_SUCCESS" }; },
+  });
+  const result = await recovery({ census: legacyCensus, freshCensus: legacyCensus, terraformState: absentState, stageAStateIdentity: stateIdentity, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256 });
+  assert.equal(result.status, "RECOVERED");
+  assert.deepEqual({ imports, applies }, { imports: 1, applies: 1 });
+  assert.equal(result.accounting.kmsWrites, 2);
+  assert.doesNotThrow(() => assertRootDropStateIdentity(current, { keyId: legacyKeyId, requireCanonicalPolicy: true }));
+});
+
+test("policy-first partial adoption can resume from a canonical-policy key-only state", async () => {
+  const legacyCensus = buildRootDropCensus({ sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: stateIdentity, keyUniverse: [legacyKeyId], candidates: [{ ...legacyCandidate(), ...authenticateRootDropOrphan({ candidate: legacyCandidate(), terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }) }], failedApplyEvidence: legacyFailedApplyEvidence });
+  const canonicalKeyOnlyState = legacyKeyState(buildStageARootDropKeyPolicy());
+  const canonicalKeyOnlyIdentity = identityForState(canonicalKeyOnlyState);
+  const canonicalCandidate = legacyCandidate({ policy: buildStageARootDropKeyPolicy() });
+  const canonicalCensus = buildRootDropCensus({ sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: canonicalKeyOnlyIdentity, keyUniverse: [legacyKeyId], candidates: [{ ...canonicalCandidate, ...authenticateRootDropOrphan({ candidate: canonicalCandidate, terraformState: canonicalKeyOnlyState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence, allowKeyOnly: true }) }], failedApplyEvidence: legacyFailedApplyEvidence });
+  const canonicalOwnedState = { ...canonicalKeyOnlyState, resources: canonicalKeyOnlyState.resources.map((resource) => resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: legacyKeyId, target_key_arn: legacyKeyArn } }] } : resource) };
+  const value = runner({ execute: true, initial: canonicalKeyOnlyState, finalState: canonicalOwnedState, plan: aliasPlan([{ address: ROOT_DROP_ALIAS_ADDRESS, change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: legacyKeyId } } }]) });
+  const result = await value.run({ census: legacyCensus, freshCensus: canonicalCensus, terraformState: canonicalKeyOnlyState, stageAStateIdentity: canonicalKeyOnlyIdentity, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256 });
+  assert.equal(result.status, "RECOVERED");
+  assert.equal(result.accounting.terraformImports, 0);
+  assert.equal(result.accounting.terraformApplies, 1);
+  assert.equal(result.accounting.kmsWrites, 1);
+});
+
+test("completed legacy adoption replay reconciles the historical census identity", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-completed-legacy-replay-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  const planPath = path.join(directory, "alias.plan");
+  const historicalCensus = buildRootDropCensus({ sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: stateIdentity, keyUniverse: [legacyKeyId], candidates: [{ ...legacyCandidate(), ...authenticateRootDropOrphan({ candidate: legacyCandidate(), terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }) }], failedApplyEvidence: legacyFailedApplyEvidence });
+  const completedState = { ...legacyKeyState(buildStageARootDropKeyPolicy()), resources: legacyKeyState(buildStageARootDropKeyPolicy()).resources.map((resource) => resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: legacyKeyId, target_key_arn: legacyKeyArn } }] } : resource) };
+  const completedIdentity = identityForState(completedState);
+  writeFileSync(statePath, JSON.stringify(completedState), { mode: 0o600 });
+  writeFileSync(identityPath, `${JSON.stringify(completedIdentity)}\n`, { mode: 0o600 });
+  writeFileSync(censusPath, `${JSON.stringify(historicalCensus)}\n`, { mode: 0o600 });
+  const saved = Object.fromEntries(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS.map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, stageAVars);
+    const result = await runAdoption({
+      argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--execution-source-sha", ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, "--plan-path", planPath],
+      runGit: cleanGit(ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha),
+      readRootDropCensus: async () => { throw new Error("fresh census must not be required for the completed replay"); },
+      readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
+      execFile: (command, args) => {
+        if (args.includes("workspace")) return "default\n";
+        if (args.includes("state")) return JSON.stringify(completedState);
+        if (args.includes("plan") && args.includes("-out")) { writeFileSync(args[args.indexOf("-out") + 1], "zero-drift"); return ""; }
+        if (args.includes("show")) return JSON.stringify({ resource_changes: [] });
+        throw new Error(`unexpected Terraform command: ${args.join(" ")}`);
+      },
+      write: () => {},
+    });
+    assert.equal(result.status, "ALREADY_RECOVERED");
+    assert.equal(result.zeroDrift, true);
+    assert.deepEqual(result.accounting, { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 });
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("successful import replay never imports again", async () => {

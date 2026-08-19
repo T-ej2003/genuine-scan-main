@@ -15,6 +15,14 @@ export const ROOT_DROP_EXPECTED_SIGNING_ALGORITHM = "RSASSA_PSS_SHA_256";
 export const ROOT_DROP_CENSUS_MAX_AGE_MS = 5 * 60 * 1000;
 export const ROOT_DROP_CENSUS_ACTOR_BINDINGS = Object.freeze({ discovery: "ADMINISTRATOR", resourceReads: "RELEASE_DEPLOYER", provenance: "ADMINISTRATOR" });
 export const STAGE_A_TERRAFORM_BACKEND = Object.freeze({ type: "s3", bucket: STAGE_B_TERRAFORM_BACKEND.bucketName, key: STAGE_A_STATE_OBJECT, region: STAGE_B.region, encrypt: true, use_lockfile: true });
+export const ROOT_DROP_LEGACY_POLICY_BINDING = Object.freeze({
+  sourceSha: "e75520d1656920cdee503fbb055d5a1f72b9e3cc",
+  transitionId: "stage-a-root-drop-20260818224752-39a2e8e518aa",
+  planSha256: "8883d47d62af001b9c86d4d8e809c35b6183216e01ed66b29fe179242038f7f9",
+  creationEventId: "a86b949c-6e42-465f-a480-8f8ae3a6e5a6",
+  keyArn: "arn:aws:kms:eu-west-2:368992683803:key/da1edc2f-ca06-47c8-b84d-f5181313e2e7",
+  stageAStateIdentity: Object.freeze({ lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 45, stateSha256: "a835e3f595842dd8281761533806ff9b80c6eadc5f94a20f0cb7d5546b601556" }),
+});
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -31,6 +39,30 @@ const canonical = (value) => Array.isArray(value)
 const sha256 = (value) => crypto.createHash("sha256").update(typeof value === "string" || Buffer.isBuffer(value) ? value : canonical(value)).digest("hex");
 const fail = (message) => { throw new Error(`Stage-A root-drop orphan recovery: ${message}`); };
 const same = (left, right) => canonical(left) === canonical(right);
+const policyCanonical = (value) => Array.isArray(value)
+  ? `[${value.map((item) => policyCanonical(item)).sort().join(",")}]`
+  : value && typeof value === "object"
+    ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${policyCanonical(value[key])}`).join(",")}}`
+    : JSON.stringify(value);
+const samePolicy = (left, right) => policyCanonical(left) === policyCanonical(right);
+
+export function buildLegacyRootDropKeyPolicy() {
+  const policy = structuredClone(buildStageARootDropKeyPolicy());
+  const statement = policy.Statement.find(({ Sid }) => Sid === "ReleaseReadsRootDropKey");
+  statement.Action = statement.Action.filter((action) => action !== "kms:GetKeyRotationStatus");
+  return policy;
+}
+
+export function assertLegacyRootDropPolicyBinding({ candidate, sourceSha, transitionId, failedApplyEvidence } = {}) {
+  const metadata = candidate?.metadata;
+  const { arn } = assertKeyIdentity(candidate);
+  const binding = ROOT_DROP_LEGACY_POLICY_BINDING;
+  if (!samePolicy(candidate?.policy, buildLegacyRootDropKeyPolicy())
+    || sourceSha !== binding.sourceSha || transitionId !== binding.transitionId || failedApplyEvidence?.planSha256 !== binding.planSha256
+    || failedApplyEvidence?.creationEventId !== binding.creationEventId || arn !== binding.keyArn
+    || metadata?.AWSAccountId !== STAGE_B.account || !same(failedApplyEvidence?.stageAStateIdentity, binding.stageAStateIdentity)) fail("legacy root-drop policy is not bound to the exact historical failed apply");
+  return true;
+}
 
 function normalizeCloudTrailLookupEvent(entry) {
   if (!entry || typeof entry.CloudTrailEvent !== "string") fail("CloudTrail LookupEvents entry is missing its authoritative CloudTrailEvent payload");
@@ -67,10 +99,10 @@ function assertStateRootDropCounts(state, { key, alias, allowKeyOnly = false } =
 function assertKeyIdentity(candidate) {
   const metadata = candidate?.metadata;
   if (!metadata || typeof metadata !== "object") fail("orphan key metadata is missing");
-  const keyId = String(metadata.KeyId || candidate.keyId || "");
-  const arn = String(metadata.Arn || candidate.arn || "");
+  const keyId = String(metadata.KeyId || "");
+  const arn = String(metadata.Arn || "");
   const arnMatch = KEY_ARN.exec(arn);
-  if (!KEY_ID.test(keyId) || !arnMatch || arnMatch[1] !== keyId || metadata.AWSAccountId !== STAGE_B.account) fail("orphan key identity is outside the production account/region contract");
+  if (!KEY_ID.test(candidate?.keyId || "") || candidate.keyId !== keyId || !arnMatch || arnMatch[1] !== keyId || metadata.AWSAccountId !== STAGE_B.account) fail("orphan key identity is outside the production account/region contract");
   if (metadata.Description !== ROOT_DROP_KEY_DESCRIPTION || metadata.KeyState !== "Enabled" || metadata.KeyManager !== "CUSTOMER" || metadata.Origin !== "AWS_KMS" || metadata.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec || metadata.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage || metadata.MultiRegion !== false) fail("orphan key metadata does not match the exact root-drop contract");
   return { keyId, arn };
 }
@@ -105,12 +137,12 @@ export function authenticateRootDropOrphan({ candidate, terraformState, sourceSh
   if (allowKeyOnly) assertRootDropKeyIdentity(terraformState, keyId);
   assertExactTags(candidate.tags);
   if (!Array.isArray(candidate.aliases) || candidate.aliases.length !== 0) fail("orphan candidate has an unexpected alias");
-  if (!same(candidate.policy, buildStageARootDropKeyPolicy())) fail("orphan key policy is not the exact reviewed root-drop policy");
+  const policyCompatibility = samePolicy(candidate.policy, buildStageARootDropKeyPolicy()) ? "CANONICAL" : (assertLegacyRootDropPolicyBinding({ candidate, sourceSha, transitionId, failedApplyEvidence }), "LEGACY_BOUND_HISTORICAL");
   if (!candidate.publicKey || candidate.publicKey.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec || candidate.publicKey.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage || !Array.isArray(candidate.publicKey.SigningAlgorithms) || !candidate.publicKey.SigningAlgorithms.includes(ROOT_DROP_EXPECTED_SIGNING_ALGORITHM)) fail("orphan public-key identity is not the exact signing contract");
   const events = Array.isArray(candidate.creationEvents) ? candidate.creationEvents.filter((event) => event.eventName === "CreateKey") : [];
   if (events.length !== 1) fail("orphan candidate does not have exactly one authenticated CreateKey event");
   assertCreationEvent(events[0], { creatorArn: failedApplyEvidence.creatorArn, failedApplyWindow: failedApplyEvidence.failedApplyWindow, keyArn: arn, eventId: failedApplyEvidence.creationEventId });
-  return Object.freeze({ authenticated: true, keyId, keyArn: arn, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256, creationEventId: events[0].eventId, candidateSha256: sha256(candidate) });
+  return Object.freeze({ authenticated: true, keyId, keyArn: arn, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256, creationEventId: events[0].eventId, policyCompatibility, candidateSha256: sha256(candidate) });
 }
 
 function canonicalKeyUniverse(keyUniverse) {
@@ -146,8 +178,14 @@ function candidateSnapshot(adapter, keyId) {
     || (metadata?.KeyUsage && metadata.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage)
     || (metadata?.KeyManager && metadata.KeyManager !== "CUSTOMER")
     || (metadata?.Origin && metadata.Origin !== "AWS_KMS")
-    || metadata?.MultiRegion === true;
+    || metadata?.MultiRegion === true
+    || (metadata?.Description && metadata.Description !== ROOT_DROP_KEY_DESCRIPTION);
   if (provablyIrrelevant) return { keyId, metadata, provablyIrrelevant: true };
+  const discoveryPublicKey = adapter.discoveryPublicKey?.(metadata.KeyId);
+  if (discoveryPublicKey && (discoveryPublicKey.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec
+    || discoveryPublicKey.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage
+    || !Array.isArray(discoveryPublicKey.SigningAlgorithms)
+    || !discoveryPublicKey.SigningAlgorithms.includes(ROOT_DROP_EXPECTED_SIGNING_ALGORITHM))) return { keyId, metadata, provablyIrrelevant: true };
   const tags = rootDropTagsFromAws(adapter.listTags(metadata.KeyId));
   const policy = adapter.getPolicy(metadata.KeyId);
   const aliases = adapter.listAliases(metadata.KeyId);
@@ -167,7 +205,7 @@ function candidateSnapshot(adapter, keyId) {
 function candidateFromSnapshot(snapshot) {
   if (snapshot.provablyIrrelevant) return undefined;
   const knownUnrelatedAlias = snapshot.aliases.some(({ AliasName }) => ["alias/mscqr-production-rls-green-storage", "alias/mscqr-production-rls-approval"].includes(AliasName));
-  if (knownUnrelatedAlias && !same(snapshot.policy, buildStageARootDropKeyPolicy())) return undefined;
+  if (knownUnrelatedAlias && !samePolicy(snapshot.policy, buildStageARootDropKeyPolicy())) return undefined;
   return snapshot;
 }
 
@@ -197,7 +235,8 @@ export function assertRootDropCensus(census, { sourceSha, transitionId, stageASt
   try { keyUniverse = canonicalKeyUniverse(census?.keyUniverse); } catch { fail("root-drop census key universe is not a complete stable snapshot"); }
   if (!census || !SHA256.test(censusSha256 || "") || sha256(unsigned) !== censusSha256 || census.schemaVersion !== ROOT_DROP_RECOVERY_SCHEMA_VERSION || census.kind !== "MSCQR_STAGE_A_ROOT_DROP_CENSUS" || census.region !== STAGE_B.region || !same(census.actorBindings, ROOT_DROP_CENSUS_ACTOR_BINDINGS) || !SHA256.test(census.keyUniverseSha256 || "") || sha256(keyUniverse) !== census.keyUniverseSha256 || !Number.isFinite(observedAt) || observedAt > Date.now() + 5 * 60 * 1000 || !ROOT_DROP_RECOVERY_STATUSES.includes(census.status) || census.sourceSha !== sourceSha || census.transitionId !== transitionId || census.stageAStateLineage !== stageAStateIdentity?.lineage || census.stageAStateSerial !== stageAStateIdentity?.serial || census.stageAStateSha256 !== stageAStateIdentity?.stateSha256 || !Number.isSafeInteger(census.candidateCount) || !Array.isArray(census.candidates) || census.candidateCount !== census.candidates.length || census.candidates.some((candidate) => candidate?.keyId && !keyUniverse.includes(candidate.keyId))) fail("root-drop census is not current, regional, actor-bound, or bound to the exact transition and Stage-A state");
   if (census.status === "NO_CANDIDATE" && census.candidateCount !== 0) fail("root-drop census falsely declares no candidate");
-  if (census.status === "AUTHENTICATED_ORPHAN" && (census.candidateCount !== 1 || census.candidates[0]?.authenticated !== true || !KEY_ID.test(census.candidates[0].keyId || "") || typeof census.candidates[0].creationEventId !== "string" || !census.candidates[0].creationEventId || census.candidates[0].sourceSha !== sourceSha || census.candidates[0].transitionId !== transitionId || !SHA256.test(census.candidates[0].planSha256 || "") || !census.failedApplyEvidence || census.failedApplyEvidence.sourceSha !== sourceSha || census.failedApplyEvidence.transitionId !== transitionId || census.failedApplyEvidence.planSha256 !== census.candidates[0].planSha256 || !SHA256.test(census.failedApplyEvidence.planSha256 || "") || !census.failedApplyEvidence.failedApplyWindow)) fail("root-drop census does not contain exactly one source/transition/failed-apply-bound authenticated orphan");
+  if (census.status === "AUTHENTICATED_ORPHAN" && (census.candidateCount !== 1 || census.candidates[0]?.authenticated !== true || !KEY_ID.test(census.candidates[0].keyId || "") || typeof census.candidates[0].creationEventId !== "string" || !census.candidates[0].creationEventId || census.candidates[0].sourceSha !== sourceSha || census.candidates[0].transitionId !== transitionId || !SHA256.test(census.candidates[0].planSha256 || "") || !census.failedApplyEvidence || census.failedApplyEvidence.sourceSha !== sourceSha || census.failedApplyEvidence.transitionId !== transitionId || census.failedApplyEvidence.planSha256 !== census.candidates[0].planSha256 || !SHA256.test(census.failedApplyEvidence.planSha256 || "") || !census.failedApplyEvidence.failedApplyWindow || !["CANONICAL", "LEGACY_BOUND_HISTORICAL"].includes(census.candidates[0].policyCompatibility))) fail("root-drop census does not contain exactly one source/transition/failed-apply-bound authenticated orphan");
+  if (census.status === "AUTHENTICATED_ORPHAN" && census.candidates[0].policyCompatibility === "LEGACY_BOUND_HISTORICAL") assertLegacyRootDropPolicyBinding({ candidate: census.candidates[0], sourceSha, transitionId, failedApplyEvidence: census.failedApplyEvidence });
   if (census.status === "AMBIGUOUS" && census.candidateCount < 1) fail("ambiguous root-drop census has no candidates");
   return true;
 }
@@ -223,13 +262,26 @@ export function assertRootDropCensusAdoptionMatch(supplied, fresh, bindings) {
   };
   assertRootDropCensus(supplied, { ...bindings, stageAStateIdentity: suppliedIdentity });
   assertRootDropCensus(fresh, bindings);
+  const suppliedCandidate = supplied?.candidates?.[0];
+  const freshCandidate = fresh?.candidates?.[0];
+  if (suppliedCandidate?.policyCompatibility === "LEGACY_BOUND_HISTORICAL" && freshCandidate?.policyCompatibility === "CANONICAL") {
+    assertLegacyRootDropPolicyBinding({ candidate: suppliedCandidate, sourceSha: supplied.sourceSha, transitionId: supplied.transitionId, failedApplyEvidence: supplied.failedApplyEvidence });
+    if (!samePolicy(freshCandidate.policy, buildStageARootDropKeyPolicy()) || !Array.isArray(suppliedCandidate.aliases) || suppliedCandidate.aliases.length !== 0 || !Array.isArray(freshCandidate.aliases) || freshCandidate.aliases.length !== 0) fail("root-drop policy convergence changed the authenticated orphan or alias topology");
+    const candidateIdentity = (value) => {
+      const copy = { ...(value || {}) };
+      for (const field of ["policy", "policyCompatibility", "candidateSha256"]) delete copy[field];
+      return copy;
+    };
+    if (canonical(candidateIdentity(suppliedCandidate)) !== canonical(candidateIdentity(freshCandidate)) || canonical(supplied.failedApplyEvidence) !== canonical(fresh.failedApplyEvidence)) fail("root-drop policy convergence is not bound to the same authenticated orphan provenance");
+    return { valid: true, policyTransition: "LEGACY_TO_CANONICAL", policyCompatibility: "CANONICAL", keyId: freshCandidate.keyId };
+  }
   const comparable = (value) => {
     const copy = { ...(value || {}) };
     for (const field of ["observedAt", "censusSha256", "stageAStateLineage", "stageAStateSerial", "stageAStateSha256"]) delete copy[field];
     return copy;
   };
   if (canonical(comparable(supplied)) !== canonical(comparable(fresh))) fail("root-drop census candidate changed across the authenticated adoption state transition");
-  return true;
+  return { valid: true, policyCompatibility: freshCandidate?.policyCompatibility };
 }
 
 function actionable(plan) {
@@ -255,12 +307,30 @@ export function assertRootDropCreationInterlock({ plan, terraformState, census, 
   return { valid: true, keyCreate, state: counts, censusStatus: census.status };
 }
 
-export function assertRootDropAliasOnlyPlan(plan, { keyId } = {}) {
+export function assertRootDropAliasOnlyPlan(plan, { keyId, policyCompatibility = "CANONICAL" } = {}) {
   const changes = actionable(plan);
-  if (changes.length !== 1 || changes[0].address !== ROOT_DROP_ALIAS_ADDRESS || !same(changes[0].change?.actions, ["create"]) || changes[0].change?.replace_paths?.length) fail("recovery plan must contain only one non-replacing root-drop alias create");
-  const after = changes[0].change.after || {};
+  const alias = changes.find(({ address }) => address === ROOT_DROP_ALIAS_ADDRESS);
+  if (!alias || !same(alias.change?.actions, ["create"]) || alias.change?.replace_paths?.length) fail("recovery plan must contain a non-replacing root-drop alias create");
+  const after = alias.change.after || {};
   if (after.name !== ROOT_DROP_ALIAS_NAME || after.target_key_id !== keyId) fail("recovery alias plan does not target the authenticated root-drop key");
-  return { valid: true, address: ROOT_DROP_ALIAS_ADDRESS, actions: ["create"], keyId };
+  if (changes.length === 1) {
+    if (policyCompatibility !== "CANONICAL") fail("legacy root-drop recovery must converge its policy before alias adoption");
+    return { valid: true, address: ROOT_DROP_ALIAS_ADDRESS, actions: ["create"], keyId, policyConverged: false };
+  }
+  if (policyCompatibility !== "LEGACY_BOUND_HISTORICAL") fail("canonical root-drop recovery cannot accept a key-policy update");
+  if (changes.length !== 2) fail("recovery plan contains unexpected changes");
+  const key = changes.find(({ address }) => address === ROOT_DROP_KEY_ADDRESS);
+  const before = key?.change?.before || {};
+  const keyAfter = key?.change?.after || {};
+  let beforePolicy = before.policy;
+  let afterPolicy = keyAfter.policy;
+  try { if (typeof beforePolicy === "string") beforePolicy = JSON.parse(beforePolicy); if (typeof afterPolicy === "string") afterPolicy = JSON.parse(afterPolicy); } catch { fail("legacy root-drop policy convergence plan is malformed"); }
+  const withoutPolicy = (value) => Object.fromEntries(Object.entries(value).filter(([name]) => name !== "policy"));
+  const beforeWithoutPolicy = withoutPolicy(before);
+  const afterWithoutPolicy = withoutPolicy(keyAfter);
+  if (!key || key.type !== "aws_kms_key" || !same(key.change.actions, ["update"]) || key.change.replace_paths?.length
+    || !samePolicy(beforePolicy, buildLegacyRootDropKeyPolicy()) || !samePolicy(afterPolicy, buildStageARootDropKeyPolicy()) || !same(beforeWithoutPolicy, afterWithoutPolicy)) fail("recovery plan must contain only the exact legacy policy convergence and root-drop alias create");
+  return { valid: true, address: ROOT_DROP_ALIAS_ADDRESS, actions: ["update", "create"], keyId, policyConverged: true };
 }
 
 export function assertRootDropPreImportPlan(plan) {
@@ -283,18 +353,20 @@ export function assertRootDropPreImportPlan(plan) {
   if (keyAfter.description !== ROOT_DROP_KEY_DESCRIPTION || keyAfter.key_usage !== TEMPORARY_KMS_CAPABILITY.keyUsage
     || keyAfter.customer_master_key_spec !== TEMPORARY_KMS_CAPABILITY.keySpec || keyAfter.deletion_window_in_days !== 30
     || keyAfter.bypass_policy_lockout_safety_check !== false || !same(keyAfter.tags, EXPECTED_TAGS)
-    || !same(policy, buildStageARootDropKeyPolicy()) || aliasAfter.name !== ROOT_DROP_ALIAS_NAME
+    || !samePolicy(policy, buildStageARootDropKeyPolicy()) || aliasAfter.name !== ROOT_DROP_ALIAS_NAME
     || !aliasConfiguration || !same(targetReferences, [`${ROOT_DROP_KEY_ADDRESS}.key_id`]) || !aliasTargetIsComputed) fail("pre-import Terraform plan does not match the exact root-drop creation contract");
   return { valid: true, addresses: [ROOT_DROP_KEY_ADDRESS, ROOT_DROP_ALIAS_ADDRESS], actions: ["create", "create"] };
 }
 
-export function assertRootDropStateIdentity(state, { keyId, aliasArn = STAGE_B.rootDropKmsKeyArn } = {}) {
+export function assertRootDropStateIdentity(state, { keyId, aliasArn = STAGE_B.rootDropKmsKeyArn, requireCanonicalPolicy = false } = {}) {
   assertStateShape(state);
   const counts = assertStateRootDropCounts(state, { key: 1, alias: 1 });
   const key = stateInstances(state, "aws_kms_key", "root_drop")[0].attributes || {};
   const alias = stateInstances(state, "aws_kms_alias", "root_drop")[0].attributes || {};
   const stateKeyId = String(key.key_id || key.id || key.arn || "").split("/").at(-1);
-  if (!KEY_ID.test(keyId || "") || stateKeyId !== keyId || key.arn !== `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}` || alias.arn !== aliasArn || alias.target_key_id !== keyId && alias.target_key_arn !== key.arn) fail("Terraform state does not own the authenticated root-drop key and exact alias");
+  let policy = key.policy;
+  try { if (typeof policy === "string") policy = JSON.parse(policy); } catch { fail("Terraform state root-drop policy is malformed"); }
+  if (!KEY_ID.test(keyId || "") || stateKeyId !== keyId || key.arn !== `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}` || alias.arn !== aliasArn || alias.target_key_id !== keyId && alias.target_key_arn !== key.arn || requireCanonicalPolicy && !samePolicy(policy, buildStageARootDropKeyPolicy())) fail("Terraform state does not own the authenticated root-drop key and exact alias");
   return { valid: true, ...counts, keyId };
 }
 
@@ -332,15 +404,16 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
       if (census.status !== "AUTHENTICATED_ORPHAN") fail("orphan adoption requires exactly one authenticated candidate");
       const suppliedCandidate = census.candidates[0];
       if (keyCount === 1 && stateCounts.aliasCount === 1) {
-        assertRootDropStateIdentity(state, { keyId: suppliedCandidate.keyId });
+        assertRootDropStateIdentity(state, { keyId: suppliedCandidate.keyId, requireCanonicalPolicy: true });
         const zeroDriftPlan = await createPlan({ keyId: suppliedCandidate.keyId, zeroDrift: true });
         const zeroDriftJson = await readPlan(zeroDriftPlan);
         if (actionable(zeroDriftJson).length !== 0) fail("completed root-drop recovery is not zero drift");
         return { status: "ALREADY_RECOVERED", accounting, keyId: suppliedCandidate.keyId, zeroDrift: true, observedAt: now() };
       }
       if (!freshCensus) fail("orphan adoption requires a fresh authoritative census");
-      if (keyCount === 0) assertRootDropCensusMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity });
-      else assertRootDropCensusAdoptionMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity });
+      const censusMatch = keyCount === 0
+        ? assertRootDropCensusMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity })
+        : assertRootDropCensusAdoptionMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity });
       assertRootDropCensusFresh(freshCensus);
       if (freshCensus.status !== "AUTHENTICATED_ORPHAN") fail("orphan adoption requires exactly one authenticated candidate");
       if (!SHA256.test(planSha256 || "") || planSha256 !== freshCensus.failedApplyEvidence.planSha256) fail("orphan adoption is not bound to the failed Stage-A plan");
@@ -365,7 +438,7 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
       const plan = await createPlan({ keyId: candidate.keyId });
       const classifiedPlanSha256 = typeof readPlanBytes === "function" ? rootDropRecoverySha256(await readPlanBytes(plan)) : undefined;
       const planJson = await readPlan(plan);
-      assertRootDropAliasOnlyPlan(planJson, { keyId: candidate.keyId });
+      const planClassification = assertRootDropAliasOnlyPlan(planJson, { keyId: candidate.keyId, policyCompatibility: censusMatch?.policyCompatibility || candidate.policyCompatibility });
       if (!execute) return { status: "READY_FOR_ALIAS_ADOPTION", accounting, keyId: candidate.keyId, plan, planSha256, imported: true, observedAt: now() };
       const applyPlanSha256 = rootDropRecoverySha256(await readPlanBytes(plan));
       if (applyPlanSha256 !== classifiedPlanSha256) fail("alias Terraform plan changed after classification; refusing to apply substituted plan");
@@ -378,8 +451,8 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
       if (applyResult?.outcome === "AMBIGUOUS") { accounting.unknownMutations += 1; throw withAccounting(new Error("alias Terraform apply outcome is ambiguous; read current state before any retry")); }
       if (applyResult?.outcome === "DEFINITE_FAILURE") throw withAccounting(new Error("alias Terraform apply definitely failed"));
       state = await refreshState();
-      assertRootDropStateIdentity(state, { keyId: candidate.keyId, aliasArn: STAGE_B.rootDropKmsKeyArn });
-      accounting.kmsWrites = 1;
+      assertRootDropStateIdentity(state, { keyId: candidate.keyId, aliasArn: STAGE_B.rootDropKmsKeyArn, requireCanonicalPolicy: planClassification.policyConverged });
+      accounting.kmsWrites = planClassification.policyConverged ? 2 : 1;
       const zeroDriftPlan = await createPlan({ keyId: candidate.keyId, zeroDrift: true });
       const zeroDriftJson = await readPlan(zeroDriftPlan);
       if (actionable(zeroDriftJson).length !== 0) fail("post-recovery Terraform plan is not zero drift");
@@ -421,6 +494,7 @@ export function buildRootDropAwsReadAdapter({ run, profile, discoveryProfile = p
     actorBindings,
     listKeys: () => readPages(["kms", "list-keys"], "Keys", "--starting-token", discoveryProfile),
     describeKey: (keyId) => read(["kms", "describe-key", "--key-id", keyId], discoveryProfile).KeyMetadata,
+    discoveryPublicKey: (keyId) => read(["kms", "get-public-key", "--key-id", keyId]),
     listTags: (keyId) => read(["kms", "list-resource-tags", "--key-id", keyId]).Tags || [],
     getPolicy: (keyId) => JSON.parse(decodeURIComponent(read(["kms", "get-key-policy", "--key-id", keyId, "--policy-name", "default"]).Policy)),
     getPublicKey: (keyId) => read(["kms", "get-public-key", "--key-id", keyId]),
@@ -446,7 +520,7 @@ export function collectRootDropCensus({ adapter, terraformState, sourceSha, tran
   const authenticatedCandidates = [];
   for (const candidate of candidates) {
     try { authenticatedCandidates.push({ ...candidate, ...authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence, allowKeyOnly }) }); }
-    catch (error) { authenticatedCandidates.push({ keyId: candidate.keyId, arn: candidate.arn, authenticated: false, reason: error.message }); }
+    catch (error) { authenticatedCandidates.push({ keyId: candidate.keyId, keyArn: candidate.metadata?.Arn, authenticated: false, reason: error.message }); }
   }
   return buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates: authenticatedCandidates, keyUniverse: startUniverse, failedApplyEvidence, actorBindings: adapter.actorBindings });
 }

@@ -23,15 +23,18 @@ import {
   buildTemporaryCapabilityEvidence,
   buildTemporaryReleasePolicy,
   canonicalTemporaryKmsStatementSid,
+  isCurrentTemporaryReleasePolicy,
   isTemporaryTagResourceStatement,
+  temporaryKmsCapabilityAliasKeyStatement,
   temporaryKmsCapabilityStatement,
+  temporaryKmsLegacyRotationStatusStatement,
 } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 import { ensureStageBPrivateFile } from "../aws/stage-b-artifact-contract.mjs";
 import { AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES, classifyTemporaryKmsPolicyVersion, createTemporaryKmsCapabilityRunner, runCli } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { buildStageARootDropKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
-import { ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_RECOVERY_SCHEMA_VERSION, rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
+import { ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_KEY_DESCRIPTION, ROOT_DROP_LEGACY_POLICY_BINDING, ROOT_DROP_RECOVERY_SCHEMA_VERSION, buildLegacyRootDropKeyPolicy, buildRootDropCensus, rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
@@ -54,15 +57,28 @@ function stateFixture() {
   };
 }
 
-function writePlanFile(directory) {
+function writePlanFile(directory, keyPolicy) {
   const planJsonFile = path.join(directory, "plan.json");
-  writeFileSync(planJsonFile, JSON.stringify({ resource_changes: rootDropPlanChanges() }), { mode: 0o600 });
+  writeFileSync(planJsonFile, JSON.stringify({ resource_changes: rootDropPlanChanges(keyPolicy) }), { mode: 0o600 });
   return planJsonFile;
 }
 
-function rootDropPlanChanges() {
+function legacyRootDropCensus({ source = ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transition = ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, plan = ROOT_DROP_LEGACY_POLICY_BINDING.planSha256, eventId = ROOT_DROP_LEGACY_POLICY_BINDING.creationEventId, keyArn = ROOT_DROP_LEGACY_POLICY_BINDING.keyArn } = {}) {
+  const keyId = keyArn.split("/").at(-1);
+  const failedApplyEvidence = { sourceSha: source, transitionId: transition, planSha256: plan, creationEventId: eventId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity, failedApplyWindow: { start: "2026-08-18T22:45:00.000Z", end: "2026-08-18T23:00:00.000Z" } };
+  return buildRootDropCensus({
+    sourceSha: source,
+    transitionId: transition,
+    stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity,
+    keyUniverse: [keyId],
+    failedApplyEvidence,
+    candidates: [{ authenticated: true, keyId, keyArn, metadata: { KeyId: keyId, Arn: keyArn, AWSAccountId: TEMPORARY_KMS_CAPABILITY.accountId, KeyState: "Enabled", KeyManager: "CUSTOMER", Origin: "AWS_KMS", KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY", MultiRegion: false, Description: ROOT_DROP_KEY_DESCRIPTION }, policy: buildLegacyRootDropKeyPolicy(), policyCompatibility: "LEGACY_BOUND_HISTORICAL", sourceSha: source, transitionId: transition, planSha256: plan, creationEventId: eventId }],
+  });
+}
+
+function rootDropPlanChanges(keyPolicy = buildStageARootDropKeyPolicy()) {
   return [
-    { address: "aws_kms_key.root_drop", change: { actions: ["create"], after: { policy: JSON.stringify(buildStageARootDropKeyPolicy()), customer_master_key_spec: "RSA_3072", key_usage: "SIGN_VERIFY", bypass_policy_lockout_safety_check: false } } },
+    { address: "aws_kms_key.root_drop", change: { actions: ["create"], after: { policy: JSON.stringify(keyPolicy), customer_master_key_spec: "RSA_3072", key_usage: "SIGN_VERIFY", bypass_policy_lockout_safety_check: false } } },
     { address: "aws_kms_alias.root_drop", change: { actions: ["create"], after: { name: "alias/mscqr-production-root-drop", region: "eu-west-2" } } },
   ];
 }
@@ -213,6 +229,97 @@ test("temporary capability is exact-purpose, source-bound, and non-signing", () 
   assert.deepEqual(evidence.actions, ["kms:CreateKey", "kms:TagResource", "kms:PutKeyPolicy", "kms:CreateAlias"]);
   assert.throws(() => assertTemporaryReleasePolicy(buildTemporaryReleasePolicy(policy, { sourceSha, transitionId: "different-transition" }), { steadyStatePolicy: policy, sourceSha, transitionId }), /not exact/);
   assert.throws(() => assertTemporaryReleasePolicy({ ...temporary, Statement: [...temporary.Statement, { Effect: "Allow", Action: "kms:TagResource", Resource: "*" }] }, { steadyStatePolicy: policy, sourceSha, transitionId }), /changes more/);
+});
+
+test("legacy recovery adds rotation status only for the authenticated orphan ARN", () => {
+  const legacyRootDropKeyArn = ROOT_DROP_LEGACY_POLICY_BINDING.keyArn;
+  const temporary = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId, legacyRootDropKeyArn });
+  const rotation = temporary.Statement.find(({ Action }) => Action === "kms:GetKeyRotationStatus");
+  assert.deepEqual(rotation, temporaryKmsLegacyRotationStatusStatement({ sourceSha, transitionId, keyArn: legacyRootDropKeyArn }));
+  assert.equal(rotation.Resource, legacyRootDropKeyArn);
+  assert.deepEqual(temporary.Statement.find(({ Action }) => Array.isArray(Action) && Action.includes("kms:PutKeyPolicy")), temporaryKmsCapabilityAliasKeyStatement({ keyArn: legacyRootDropKeyArn }));
+  assert.equal(temporary.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("kms:CreateKey")), false);
+  assert.doesNotThrow(() => assertTemporaryReleasePolicy(temporary, { steadyStatePolicy: policy, sourceSha, transitionId, legacyRootDropKeyArn }));
+  assert.throws(() => assertTemporaryReleasePolicy(temporary, { steadyStatePolicy: policy, sourceSha, transitionId, legacyRootDropKeyArn: `${legacyRootDropKeyArn}-wrong` }), /outside|not exact/);
+  assert.equal(buildTemporaryReleasePolicy(policy, { sourceSha, transitionId }).Statement.some(({ Action }) => Action === "kms:GetKeyRotationStatus"), false);
+  const evidence = buildTemporaryCapabilityEvidence({ state: "AUTHORIZED_FOR_ROOT_DROP_CREATION", sourceSha, transitionId, planSha256, legacyRootDropKeyArn, defaultVersionId: "v2", temporaryVersionId: "v2", observedAt: "2026-08-18T12:00:00.000Z" });
+  assert(evidence.actions.includes("kms:GetKeyRotationStatus"));
+  assert.equal(evidence.legacyRootDropKeyArn, legacyRootDropKeyArn);
+  assert.doesNotThrow(() => assertTemporaryCapabilityEvidence(evidence, { sourceSha, state: "AUTHORIZED_FOR_ROOT_DROP_CREATION" }));
+});
+
+test("legacy authorization treats the historical plan as provenance and replays without another IAM write", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-legacy-authorize-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory, buildLegacyRootDropKeyPolicy());
+  const census = legacyRootDropCensus();
+  const fixture = { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) };
+  const fake = createPolicyVersionRunner({ fixture });
+  const identity = ROOT_DROP_LEGACY_POLICY_BINDING;
+  try {
+    const runner = createTemporaryKmsCapabilityRunner({ run: fake.run });
+    const input = { phase: "authorize", sourceSha: identity.sourceSha, transitionId: identity.transitionId, stateFile, planSha256: identity.planSha256, planJsonFile, stageAStateIdentity: identity.stageAStateIdentity, freshRootDropCensus: census };
+    const first = runner.runPhase(input);
+    const replay = runner.runPhase(input);
+    const temporary = fake.documents.get(first.evidence.temporaryVersionId);
+    assert.equal(first.writes, 1);
+    assert.equal(replay.writes, 0);
+    assert.equal(fake.calls.filter((operation) => operation === "create-policy-version").length, 1);
+    assert.equal(isCurrentTemporaryReleasePolicy(temporary, { steadyStatePolicy: policy, sourceSha: identity.sourceSha, transitionId: identity.transitionId, legacyRootDropKeyArn: identity.keyArn }), true);
+    assert.deepEqual(replay.evidence.actions, ["kms:PutKeyPolicy", "kms:CreateAlias", "kms:GetKeyRotationStatus"]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("legacy authorization rejects every historical binding mismatch before IAM", () => {
+  for (const [label, overrides] of [
+    ["wrong key", { keyArn: ROOT_DROP_LEGACY_POLICY_BINDING.keyArn.replace(/.$/, "0") }],
+    ["wrong source", { source: sourceSha }],
+    ["wrong transition", { transition: transitionId }],
+    ["wrong plan", { plan: planSha256 }],
+    ["wrong event", { eventId: "wrong-event" }],
+  ]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-legacy-reject-"));
+    const stateFile = path.join(directory, "capability.json");
+    const planJsonFile = writePlanFile(directory, buildLegacyRootDropKeyPolicy());
+    const census = legacyRootDropCensus(overrides);
+    const fake = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) } });
+    try {
+      assert.throws(() => createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "authorize", sourceSha: census.sourceSha, transitionId: census.transitionId, stateFile, planSha256: census.failedApplyEvidence.planSha256, planJsonFile, stageAStateIdentity: census.failedApplyEvidence.stageAStateIdentity, freshRootDropCensus: census }), /historical|legacy|exact/, label);
+      assert.equal(fake.calls.includes("create-policy-version"), false, label);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
+test("legacy rotation status capability remains exact-purpose and revocation-classified", () => {
+  const legacyRootDropKeyArn = ROOT_DROP_LEGACY_POLICY_BINDING.keyArn;
+  const statement = temporaryKmsLegacyRotationStatusStatement({ sourceSha, transitionId, keyArn: legacyRootDropKeyArn });
+  assert.equal(statement.Action, "kms:GetKeyRotationStatus");
+  assert.equal(statement.Resource, legacyRootDropKeyArn);
+  assert.equal(isTemporaryTagResourceStatement(statement), true);
+  assert.equal(isTemporaryTagResourceStatement({ ...statement, Resource: TEMPORARY_KMS_CAPABILITY.keyResource }), false);
+  assert.equal(isTemporaryTagResourceStatement({ ...statement, Action: "kms:DescribeKey" }), false);
+  assert.equal(buildTemporaryReleasePolicy(policy, { sourceSha, transitionId }).Statement.some(({ Action }) => Action === "kms:GetKeyRotationStatus"), false);
+});
+
+test("existing revoke lifecycle removes the legacy rotation-status exception", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-legacy-revoke-"));
+  const stateFile = path.join(directory, "capability.json");
+  const legacyRootDropKeyArn = ROOT_DROP_LEGACY_POLICY_BINDING.keyArn;
+  const legacyTemporary = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId, legacyRootDropKeyArn });
+  const fake = createPolicyVersionRunner({ fixture: {
+    defaultVersionId: "v2",
+    documents: new Map([["v1", policy], ["v2", legacyTemporary]]),
+    dates: new Map([["v1", "2026-01-01T00:00:00.000Z"], ["v2", "2026-01-02T00:00:00.000Z"]]),
+  } });
+  const ownership = { keyOwned: true, aliasOwned: true, aliasResolves: true };
+  const evidence = buildTemporaryCapabilityEvidence({ state: "ROOT_DROP_OWNERSHIP_VERIFIED", sourceSha, transitionId, planSha256, legacyRootDropKeyArn, defaultVersionId: "v2", temporaryVersionId: "v2", ownership, observedAt: "2026-08-18T12:00:00.000Z" });
+  writeFileSync(stateFile, `${JSON.stringify(evidence)}\n`, { mode: 0o600 });
+  try {
+    const result = createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "revoke", sourceSha, transitionId, stateFile });
+    assert.equal(result.evidence.state, "REVOKED");
+    assert.equal(fake.documents.get("v2"), undefined);
+    assert.equal([...fake.documents.values()].some((document) => document.Statement.some(isTemporaryTagResourceStatement)), false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("temporary capability SID is AWS-compatible, deterministic, bounded, and collision-resistant", () => {
@@ -549,6 +656,64 @@ test("an unrecorded post-write capability can be recovered only with exact faile
     assert.equal(recovered.evidence.state, "REVOKED");
     assert.equal(recovered.writes, 2);
     assert.throws(() => runner.runPhase({ phase: "abort", sourceSha, transitionId, stateFile, applyFailed: true, partialOperationCensus: true }), /apply failure.*partial-operation census/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("unrecorded legacy authorization is recoverable without persisted evidence", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-unrecorded-legacy-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory, buildLegacyRootDropKeyPolicy());
+  const rootDropCensusFile = path.join(directory, "root-drop-census.json");
+  const census = legacyRootDropCensus();
+  writeFileSync(rootDropCensusFile, `${JSON.stringify(census)}\n`, { mode: 0o600 });
+  const fixture = createPolicyVersionRunner({ fixture: {
+    defaultVersionId: "v1",
+    documents: new Map([["v1", policy]]),
+    dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]),
+  } });
+  let failAuthorizationEvidenceWrite = true;
+  const persist = (filePath, value) => {
+    if (value.state === "AUTHORIZED_FOR_ROOT_DROP_CREATION" && failAuthorizationEvidenceWrite) {
+      failAuthorizationEvidenceWrite = false;
+      throw new Error("simulated evidence persistence interruption");
+    }
+    writeFileSync(filePath, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+  };
+  try {
+    let failure;
+    try {
+      createTemporaryKmsCapabilityRunner({ run: fixture.run, writeEvidence: persist }).runPhase({
+        phase: "authorize",
+        sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha,
+        transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId,
+        stateFile,
+        planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256,
+        planJsonFile,
+        stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity,
+        rootDropCensusFile,
+        freshRootDropCensus: census,
+      });
+    } catch (error) { failure = error; }
+    assert.match(failure?.message || "", /simulated evidence persistence interruption/);
+    assert.equal(failure?.mutationAccounting?.iamWrites, 1);
+    assert.equal(failure?.mutationAccounting?.unknownMutations, 0);
+    const recovered = createTemporaryKmsCapabilityRunner({ run: fixture.run, writeEvidence: persist }).runPhase({
+      phase: "abort",
+      sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha,
+      transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId,
+      stateFile,
+      planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256,
+      planJsonFile,
+      applyFailed: true,
+      partialOperationCensus: true,
+    });
+    assert.equal(recovered.evidence.state, "REVOKED");
+    assert.equal(recovered.evidence.legacyRootDropKeyArn, ROOT_DROP_LEGACY_POLICY_BINDING.keyArn);
+    assert.equal(recovered.writes, 2);
+    assert.equal(fixture.calls.filter((operation) => operation === "create-policy-version").length, 2);
+    assert.equal(fixture.calls.filter((operation) => operation === "delete-policy-version").length, 1);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
