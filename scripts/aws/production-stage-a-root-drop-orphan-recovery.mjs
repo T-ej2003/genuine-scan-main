@@ -9,6 +9,7 @@ export const ROOT_DROP_ALIAS_NAME = "alias/mscqr-production-root-drop";
 export const ROOT_DROP_RECOVERY_SCHEMA_VERSION = 1;
 export const ROOT_DROP_RECOVERY_STATUSES = Object.freeze(["NO_CANDIDATE", "AUTHENTICATED_ORPHAN", "AMBIGUOUS"]);
 export const ROOT_DROP_EXPECTED_SIGNING_ALGORITHM = "RSASSA_PSS_SHA_256";
+export const ROOT_DROP_CENSUS_MAX_AGE_MS = 5 * 60 * 1000;
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -115,6 +116,19 @@ export function assertRootDropCensus(census, { sourceSha, transitionId, stageASt
   return true;
 }
 
+export function assertRootDropCensusFresh(census, { now = Date.now(), maxAgeMs = ROOT_DROP_CENSUS_MAX_AGE_MS } = {}) {
+  const observedAt = Date.parse(census?.observedAt || "");
+  if (!Number.isFinite(observedAt) || observedAt > now + 5 * 60 * 1000 || now - observedAt > maxAgeMs) fail("root-drop census observation is stale or from the future");
+  return true;
+}
+
+export function assertRootDropCensusMatch(supplied, fresh, bindings) {
+  assertRootDropCensus(supplied, bindings);
+  assertRootDropCensus(fresh, bindings);
+  if (canonical({ ...supplied, observedAt: null, censusSha256: null }) !== canonical({ ...fresh, observedAt: null, censusSha256: null })) fail("root-drop census changed before the trust boundary");
+  return true;
+}
+
 function actionable(plan) {
   if (!Array.isArray(plan?.resource_changes)) fail("machine-readable Terraform plan is required");
   return plan.resource_changes.filter(({ change }) => JSON.stringify(change?.actions || []) !== JSON.stringify(["no-op"]) && JSON.stringify(change?.actions || []) !== JSON.stringify(["read"]));
@@ -153,11 +167,13 @@ export function assertRootDropStateIdentity(state, { keyId, aliasArn = STAGE_B.r
 
 export function createRootDropRecoveryRunner({ execute = false, allowImport = execute, readState, importKey, refreshState, createPlan, readPlan, applyPlan, now = () => new Date().toISOString() } = {}) {
   if (typeof readState !== "function" || typeof importKey !== "function" || typeof refreshState !== "function" || typeof createPlan !== "function" || typeof readPlan !== "function" || typeof applyPlan !== "function") throw new Error("Root-drop recovery runner dependencies are incomplete");
-  return async function run({ census, terraformState, stageAStateIdentity, sourceSha, transitionId, planSha256 } = {}) {
-    assertRootDropCensus(census, { sourceSha, transitionId, stageAStateIdentity });
-    if (census.status !== "AUTHENTICATED_ORPHAN") fail("orphan adoption requires exactly one authenticated candidate");
-    if (!SHA256.test(planSha256 || "") || planSha256 !== census.failedApplyEvidence.planSha256) fail("orphan adoption is not bound to the failed Stage-A plan");
-    const candidate = census.candidates[0];
+  return async function run({ census, freshCensus, terraformState, stageAStateIdentity, sourceSha, transitionId, planSha256 } = {}) {
+    if (!freshCensus) fail("orphan adoption requires a fresh authoritative census");
+    assertRootDropCensusMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity });
+    assertRootDropCensusFresh(freshCensus);
+    if (freshCensus.status !== "AUTHENTICATED_ORPHAN") fail("orphan adoption requires exactly one authenticated candidate");
+    if (!SHA256.test(planSha256 || "") || planSha256 !== freshCensus.failedApplyEvidence.planSha256) fail("orphan adoption is not bound to the failed Stage-A plan");
+    const candidate = freshCensus.candidates[0];
     const counts = assertStateRootDropCounts(terraformState, { allowKeyOnly: true });
     const accounting = { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 };
     const withAccounting = (error) => { error.recoveryAccounting = { ...accounting }; return error; };
@@ -216,43 +232,57 @@ export function buildRootDropAwsReadAdapter({ run, profile, region = STAGE_B.reg
   if (typeof run !== "function" || !profile) throw new Error("Root-drop read adapter requires an explicit profile and command runner");
   if (region !== STAGE_B.region) throw new Error("Stage-A root-drop census: region is outside the protected production boundary");
   const read = (args) => JSON.parse(run([...args, "--profile", profile, "--region", region, "--output", "json", "--no-cli-pager"]));
+  const readPages = (args, field, tokenFlag) => {
+    const values = []; const seen = new Set(); let token;
+    do {
+      const response = read(token ? [...args, tokenFlag, token] : args);
+      if (!Array.isArray(response[field])) fail(`root-drop AWS response is missing ${field}`);
+      values.push(...response[field]);
+      token = response.NextToken || response.NextMarker || null;
+      if (token && seen.has(token)) fail("root-drop AWS pagination token repeated");
+      if (token) seen.add(token);
+    } while (token);
+    return values;
+  };
   return Object.freeze({
-    listKeys: () => read(["kms", "list-keys"]).Keys || [],
+    listKeys: () => readPages(["kms", "list-keys"], "Keys", "--starting-token"),
     describeKey: (keyId) => read(["kms", "describe-key", "--key-id", keyId]).KeyMetadata,
     listTags: (keyId) => read(["kms", "list-resource-tags", "--key-id", keyId]).Tags || [],
     getPolicy: (keyId) => JSON.parse(decodeURIComponent(read(["kms", "get-key-policy", "--key-id", keyId, "--policy-name", "default"]).Policy)),
     getPublicKey: (keyId) => read(["kms", "get-public-key", "--key-id", keyId]),
-    listAliases: (keyId) => read(["kms", "list-aliases", "--key-id", keyId]).Aliases || [],
-    lookupCreateKeyEvents: (keyArn) => read(["cloudtrail", "lookup-events", "--lookup-attributes", `AttributeKey=ResourceName,AttributeValue=${keyArn}`]).Events || [],
+    listAliases: (keyId) => readPages(["kms", "list-aliases", "--key-id", keyId], "Aliases", "--starting-token"),
+    lookupCreateKeyEvents: (keyArn) => readPages(["cloudtrail", "lookup-events", "--lookup-attributes", `AttributeKey=ResourceName,AttributeValue=${keyArn}`], "Events", "--next-token"),
   });
 }
 
 export function rootDropTagsFromAws(Tags) { return Object.fromEntries((Tags || []).map(({ TagKey, TagValue }) => [TagKey, TagValue])); }
 
-export function collectRootDropCensus({ adapter, terraformState, sourceSha, transitionId, stageAStateIdentity, failedApplyEvidence, observedAfter } = {}) {
-  if (!adapter || typeof adapter.listKeys !== "function" || typeof adapter.describeKey !== "function" || typeof adapter.lookupCreateKeyEvents !== "function") fail("fresh root-drop census adapter is incomplete");
+export function collectRootDropCensus({ adapter, terraformState, sourceSha, transitionId, stageAStateIdentity, failedApplyEvidence } = {}) {
+  if (!adapter || typeof adapter.listKeys !== "function" || typeof adapter.describeKey !== "function" || typeof adapter.listTags !== "function" || typeof adapter.getPolicy !== "function" || typeof adapter.getPublicKey !== "function" || typeof adapter.listAliases !== "function" || typeof adapter.lookupCreateKeyEvents !== "function") fail("fresh root-drop census adapter is incomplete");
   if (!failedApplyEvidence?.failedApplyWindow) fail("fresh root-drop census requires the failed-apply observation window");
   assertStateShape(terraformState);
   assertStateRootDropCounts(terraformState, { key: 0, alias: 0 });
   const candidates = [];
   for (const listed of adapter.listKeys()) {
     const metadata = adapter.describeKey(listed.KeyId);
-    const createdAt = Date.parse(metadata?.CreationDate || "");
-    const observedAfterAt = Date.parse(observedAfter || "");
+    if ((metadata?.KeySpec && metadata.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec) || (metadata?.KeyUsage && metadata.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage) || metadata?.KeyManager === "AWS" || metadata?.Origin === "AWS_CLOUDHSM") continue;
+    const tags = rootDropTagsFromAws(adapter.listTags(metadata.KeyId));
+    const policy = adapter.getPolicy(metadata.KeyId);
+    const aliases = adapter.listAliases(metadata.KeyId);
+    const knownUnrelatedAlias = aliases.some(({ AliasName }) => ["alias/mscqr-production-rls-green-storage", "alias/mscqr-production-rls-approval"].includes(AliasName));
+    if (knownUnrelatedAlias && !same(policy, buildStageARootDropKeyPolicy())) continue;
     const events = adapter.lookupCreateKeyEvents(metadata.Arn).map((entry) => {
       try { return JSON.parse(entry.CloudTrailEvent); } catch { return entry; }
     });
-    const relevant = events.filter((event) => event.eventName === "CreateKey" && event.eventSource === "kms.amazonaws.com" && event.awsRegion === STAGE_B.region && ((Date.parse(event.eventTime) >= Date.parse(failedApplyEvidence.failedApplyWindow.start) && Date.parse(event.eventTime) <= Date.parse(failedApplyEvidence.failedApplyWindow.end)) || Number.isFinite(observedAfterAt) && (!Number.isFinite(createdAt) || createdAt >= observedAfterAt)));
-    if (relevant.length === 0) continue;
     candidates.push({
       keyId: metadata.KeyId,
       arn: metadata.Arn,
       metadata,
-      tags: rootDropTagsFromAws(adapter.listTags(metadata.KeyId)),
-      policy: adapter.getPolicy(metadata.KeyId),
+      tags,
+      policy,
       publicKey: adapter.getPublicKey(metadata.KeyId),
-      aliases: adapter.listAliases(metadata.KeyId),
-      creationEvents: relevant,
+      aliases,
+      creationEvents: events.filter((event) => event.eventName === "CreateKey"),
     });
   }
   const authenticatedCandidates = [];

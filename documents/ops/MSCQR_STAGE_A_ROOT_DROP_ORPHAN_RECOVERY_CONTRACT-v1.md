@@ -5,13 +5,17 @@ AWS but Terraform does not own it and `aws_kms_alias.root_drop` is absent.
 
 ## Read-only census
 
-`npm run stage-a:root-drop:census` is the only producer. It reads the exact
+`npm run stage-a:root-drop:census` is the only producer. It paginates the
+current KMS key, alias, and CloudTrail result sets, then reads the exact
 production key metadata, tags, key policy, public-key identity, aliases, and
 the CloudTrail `CreateKey` event. It is hard-bound to `eu-west-2`; any other
-region is rejected before an AWS query. It binds the result to the fresh
-Stage-A state identity, source SHA, transition ID, failed-plan SHA, creator
-session, failed-apply time window, observation time, and census digest. Tags
-alone never authenticate a candidate.
+region is rejected before an AWS query. Current KMS state determines the
+candidate universe; the failed-apply window authenticates provenance but never
+filters an older potentially relevant key out of the census. Such a key, or a
+candidate with missing history, is ambiguous and blocks creation. The result
+binds to the fresh Stage-A state identity, source SHA, transition ID, failed-
+plan SHA, creator session, observation time, and census digest. Tags alone
+never authenticate a candidate.
 
 The census is valid only as one of:
 
@@ -33,10 +37,14 @@ closed.
 ## Adoption
 
 `npm run stage-a:root-drop:adopt` with explicit `--execute` authorization
-imports exactly `aws_kms_key.root_drop` using the locked AWS provider's
-documented key-ID identifier. Without `--execute`, an absent Terraform key is
-not imported. After an authorized import it refreshes state, proves the
-imported key ARN/spec/usage, and requires a plan containing only:
+performs a fresh read-only census through the same producer immediately before
+any import. The supplied census and fresh observation must match on candidate,
+state, source, transition, region, and policy/tag/alias identity; the fresh
+observation is also bounded in age. Only then does it import exactly
+`aws_kms_key.root_drop` using the locked AWS provider's documented key-ID
+identifier. Without `--execute`, an absent Terraform key is not imported.
+After an authorized import it refreshes state, proves the imported key
+ARN/spec/usage, and requires a plan containing only:
 
 ```text
 + aws_kms_alias.root_drop

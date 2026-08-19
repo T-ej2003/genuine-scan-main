@@ -1455,7 +1455,7 @@ test("authorization rejects a replayed NO_CANDIDATE census when the fresh bounda
   let awsCalls = 0;
   try {
     const failure = runCliAndReadFailure(cliArgs({ stateFile, planJsonFile, ...inputs }), () => { awsCalls += 1; throw new Error("AWS must not be called"); }, () => fresh);
-    assert.match(failure.failure.message, /changed before authorization/);
+    assert.match(failure.failure.message, /changed before the trust boundary/);
     assert.equal(awsCalls, 0);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

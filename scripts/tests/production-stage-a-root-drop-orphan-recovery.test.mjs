@@ -104,6 +104,32 @@ test("root-drop census is bound to eu-west-2 and rejects wrong regions before AW
   }
 });
 
+test("root-drop census rejects a missing explicit region before AWS", async () => {
+  let calls = 0;
+  await assert.rejects(() => runCensus({ argv: ["--profile", "administrator", "--region"], run: () => { calls += 1; return "{}"; } }), /--region requires a value/);
+  assert.equal(calls, 0);
+});
+
+test("root-drop census consumes every paginated KMS and CloudTrail page", () => {
+  const seen = [];
+  const adapter = buildRootDropAwsReadAdapter({ profile: "administrator", run: (args) => {
+    seen.push(args);
+    if (args[0] === "kms" && args[1] === "list-keys") return args.includes("page-2") ? JSON.stringify({ Keys: [{ KeyId: keyId }] }) : JSON.stringify({ Keys: [], NextToken: "page-2" });
+    if (args[0] === "kms" && args[1] === "list-aliases") return args.includes("page-2") ? JSON.stringify({ Aliases: [] }) : JSON.stringify({ Aliases: [], NextToken: "page-2" });
+    if (args[0] === "cloudtrail") return args.includes("page-2") ? JSON.stringify({ Events: [event] }) : JSON.stringify({ Events: [], NextToken: "page-2" });
+    if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: { KeyId: keyId, Arn: keyArn, KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY" } });
+    if (args[0] === "kms" && args[1] === "list-resource-tags") return JSON.stringify({ Tags: [] });
+    if (args[0] === "kms" && args[1] === "get-key-policy") return JSON.stringify({ Policy: encodeURIComponent(JSON.stringify({})) });
+    if (args[0] === "kms" && args[1] === "get-public-key") return JSON.stringify({});
+    throw new Error(`unexpected read ${args.join(" ")}`);
+  }});
+  assert.deepEqual(adapter.listKeys(), [{ KeyId: keyId }]);
+  assert.deepEqual(adapter.listAliases(keyId), []);
+  assert.deepEqual(adapter.lookupCreateKeyEvents(keyArn), [event]);
+  assert(seen.some((args) => args.includes("--starting-token") && args.includes("page-2")));
+  assert(seen.some((args) => args.includes("--next-token") && args.includes("page-2")));
+});
+
 test("fresh census includes a key created after a replayed observation even outside its old failed window", () => {
   const fresh = collectRootDropCensus({
     adapter: {
@@ -120,10 +146,36 @@ test("fresh census includes a key created after a replayed observation even outs
     transitionId,
     stageAStateIdentity: stateIdentity,
     failedApplyEvidence,
-    observedAfter: "2026-08-19T23:59:59.000Z",
   });
   assert.equal(fresh.status, "AMBIGUOUS");
   assert.throws(() => assertRootDropCreationInterlock({ plan: exactCreatePlan, terraformState: absentState, census: fresh, sourceSha, transitionId, stageAStateIdentity: stateIdentity }), /blocked/);
+});
+
+test("older potentially relevant keys never disappear into NO_CANDIDATE", () => {
+  const adapter = {
+    listKeys: () => [{ KeyId: keyId }],
+    describeKey: () => ({ KeyId: keyId, Arn: keyArn, KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY", KeyManager: "CUSTOMER", Origin: "AWS_KMS", MultiRegion: false }),
+    listTags: () => Object.entries(TEMPORARY_KMS_CAPABILITY.tags).map(([TagKey, TagValue]) => ({ TagKey, TagValue })),
+    getPolicy: () => buildStageARootDropKeyPolicy(),
+    getPublicKey: () => ({ KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY", SigningAlgorithms: ["RSASSA_PSS_SHA_256"] }),
+    listAliases: () => [],
+    lookupCreateKeyEvents: () => [{ ...event, eventTime: "2025-01-01T00:00:00.000Z" }],
+  };
+  const old = collectRootDropCensus({ adapter, terraformState: absentState, sourceSha, transitionId, stageAStateIdentity: stateIdentity, failedApplyEvidence });
+  assert.equal(old.status, "AMBIGUOUS");
+  assert.throws(() => assertRootDropCreationInterlock({ plan: exactCreatePlan, terraformState: absentState, census: old, sourceSha, transitionId, stageAStateIdentity: stateIdentity }), /blocked/);
+  const unrelated = collectRootDropCensus({ adapter: { ...adapter, describeKey: () => ({ KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT" }) }, terraformState: absentState, sourceSha, transitionId, stageAStateIdentity: stateIdentity, failedApplyEvidence });
+  assert.equal(unrelated.status, "NO_CANDIDATE");
+});
+
+test("missing CloudTrail history for a potentially relevant key fails closed", () => {
+  const current = collectRootDropCensus({
+    adapter: {
+      listKeys: () => [{ KeyId: keyId }], describeKey: () => ({ KeyId: keyId, Arn: keyArn, KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY" }),
+      listTags: () => [], getPolicy: () => ({}), getPublicKey: () => ({}), listAliases: () => [], lookupCreateKeyEvents: () => [],
+    }, terraformState: absentState, sourceSha, transitionId, stageAStateIdentity: stateIdentity, failedApplyEvidence,
+  });
+  assert.equal(current.status, "AMBIGUOUS");
 });
 
 test("an authenticated orphan blocks CreateKey and allows only adoption's alias-only boundary", () => {
@@ -144,13 +196,14 @@ test("alias-only recovery plan rejects key creation, replacement, destroy, unrel
   ]) assert.throws(() => assertRootDropAliasOnlyPlan(plan, { keyId }), /only one|target|alias/);
 });
 
-function runner({ execute = false, initial = absentState, importOutcome, applyOutcome, plan = aliasPlan(), zeroDrift = { resource_changes: [] } } = {}) {
+function runner({ execute = false, initial = absentState, importOutcome, applyOutcome, plan = aliasPlan(), zeroDrift = { resource_changes: [] }, injectFresh = true } = {}) {
   let current = initial;
   let imports = 0;
   let applies = 0;
+  const recovery = createRootDropRecoveryRunner({ execute, readState: async () => current, importKey: async () => { imports += 1; if (importOutcome) { const error = new Error(importOutcome); error.mutationOutcome = importOutcome; throw error; } current = keyState(); }, refreshState: async () => current, createPlan: async ({ zeroDrift: requested }) => requested ? "zero" : "alias", readPlan: async (path) => path === "zero" ? zeroDrift : plan, applyPlan: async () => { applies += 1; if (applyOutcome) { const error = new Error(applyOutcome); error.mutationOutcome = applyOutcome; throw error; } current = ownedState(); }, });
   return {
     counts: () => ({ imports, applies }),
-    run: createRootDropRecoveryRunner({ execute, readState: async () => current, importKey: async () => { imports += 1; if (importOutcome) { const error = new Error(importOutcome); error.mutationOutcome = importOutcome; throw error; } current = keyState(); }, refreshState: async () => current, createPlan: async ({ zeroDrift: requested }) => requested ? "zero" : "alias", readPlan: async (path) => path === "zero" ? zeroDrift : plan, applyPlan: async () => { applies += 1; if (applyOutcome) { const error = new Error(applyOutcome); error.mutationOutcome = applyOutcome; throw error; } current = ownedState(); }, }),
+    run: (input) => injectFresh ? recovery({ ...input, freshCensus: input.freshCensus || input.census }) : recovery(input),
   };
 }
 
@@ -167,7 +220,7 @@ test("dry-run cannot import an absent key; replay dry-run remains mutation-free"
 
 test("successful adoption imports exactly once, creates only the alias, verifies ownership, and proves zero drift", async () => {
   const value = runner({ execute: true });
-  const result = await value.run({ census: census(), terraformState: absentState, stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
+  const result = await value.run({ census: census(), freshCensus: census(), terraformState: absentState, stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
   assert.equal(result.status, "RECOVERED");
   assert.deepEqual(result.accounting, { terraformImports: 1, terraformApplies: 1, kmsWrites: 1, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 });
   assert.deepEqual(value.counts(), { imports: 1, applies: 1 });
@@ -191,11 +244,28 @@ test("definite and ambiguous import failures are never retried and are distingui
 test("refresh denial, wrong imported key, alias failure, ambiguous alias apply, and non-zero drift fail closed", async () => {
   const wrongState = { ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ attributes: { arn: `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/22222222-22222222-2222-2222-222222222222`, key_id: "22222222-2222-2222-2222-222222222222", key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) };
   const wrong = createRootDropRecoveryRunner({ execute: true, readState: async () => wrongState, importKey: async () => {}, refreshState: async () => wrongState, createPlan: async () => "alias", readPlan: async () => aliasPlan(), applyPlan: async () => {} });
-  await assert.rejects(() => wrong({ census: census(), terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }));
+  await assert.rejects(() => wrong({ census: census(), freshCensus: census(), terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }));
   for (const [label, options] of [["alias failure", { execute: true, applyOutcome: "DEFINITE_FAILURE" }], ["ambiguous alias", { execute: true, applyOutcome: "AMBIGUOUS" }], ["drift", { execute: true, zeroDrift: aliasPlan() }]]) {
     const value = runner(options);
     await assert.rejects(() => value.run({ census: census(), terraformState: absentState, stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), new RegExp(label === "drift" ? "zero drift" : "DEFINITE_FAILURE|ambiguous|alias", "i"));
   }
+});
+
+test("adoption rejects a supplied census when fresh re-census finds a changed alias", async () => {
+  const value = runner({ execute: true });
+  const changed = buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: stateIdentity, candidates: [{ ...candidate(), aliases: [{ AliasName: "alias/unrelated", TargetKeyId: keyId }] }], failedApplyEvidence });
+  await assert.rejects(() => value.run({ census: census(), freshCensus: changed, terraformState: absentState, stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), /changed|trust boundary/);
+  assert.deepEqual(value.counts(), { imports: 0, applies: 0 });
+});
+
+test("adoption requires fresh census evidence and accepts only a fresh replacement for stale supplied evidence", async () => {
+  const value = runner({ initial: keyState() });
+  const supplied = census(); supplied.observedAt = "2020-01-01T00:00:00.000Z"; delete supplied.censusSha256; supplied.censusSha256 = rootDropRecoverySha256(Object.fromEntries(Object.entries(supplied).filter(([key]) => key !== "censusSha256")));
+  const fresh = census();
+  const result = await value.run({ census: supplied, freshCensus: fresh, terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
+  assert.equal(result.status, "READY_FOR_ALIAS_ADOPTION");
+  const noFresh = runner({ initial: keyState(), injectFresh: false });
+  await assert.rejects(() => noFresh.run({ census: fresh, terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), /fresh authoritative census/);
 });
 
 test("multiple candidates, wrong default/state conflict, and no candidate are fail closed at the workflow boundary", async () => {

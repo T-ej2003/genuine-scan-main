@@ -37,7 +37,9 @@ function failedEvidence(argv) {
 
 export async function runCensus({ argv = process.argv.slice(2), run, write = (value) => process.stdout.write(value) } = {}) {
   const profile = option(argv, "--profile");
-  const region = option(argv, "--region", false) || STAGE_B.region;
+  const suppliedRegion = option(argv, "--region", false);
+  if (argv.includes("--region") && !suppliedRegion) throw new Error("Stage-A root-drop census: --region requires a value");
+  const region = suppliedRegion || STAGE_B.region;
   if (region !== STAGE_B.region) throw new Error("Stage-A root-drop census: region is outside the protected production boundary");
   const statePath = privatePath(option(argv, "--stage-a-state"), "Stage-A state");
   const identityPath = privatePath(option(argv, "--stage-a-state-identity"), "Stage-A state identity");
@@ -54,7 +56,7 @@ export async function runCensus({ argv = process.argv.slice(2), run, write = (va
   return census;
 }
 
-export async function runAdoption({ argv = process.argv.slice(2), runTerraform, write = (value) => process.stdout.write(value) } = {}) {
+export async function runAdoption({ argv = process.argv.slice(2), runTerraform, readRootDropCensus, write = (value) => process.stdout.write(value) } = {}) {
   const censusPath = privatePath(option(argv, "--census"), "Stage-A root-drop census");
   const census = readJson(censusPath);
   const statePath = privatePath(option(argv, "--stage-a-state"), "Stage-A state");
@@ -63,6 +65,21 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const stageAState = JSON.parse(stateBytes);
   const stageAStateIdentity = readJson(identityPath);
   assertStageAStateIdentityBinding(buildStageAStateIdentity(stageAState, { stateBytes }), stageAStateIdentity);
+  const profile = option(argv, "--profile");
+  const suppliedRegion = option(argv, "--region", false);
+  if (argv.includes("--region") && !suppliedRegion) throw new Error("Stage-A root-drop adoption: --region requires a value");
+  const region = suppliedRegion || STAGE_B.region;
+  if (region !== STAGE_B.region) throw new Error("Stage-A root-drop adoption: region is outside the protected production boundary");
+  const freshCensus = readRootDropCensus
+    ? await readRootDropCensus({ census, stageAState, stageAStateIdentity })
+    : collectRootDropCensus({
+      adapter: buildRootDropAwsReadAdapter({ run: (args) => execFileSync("aws", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), profile, region }),
+      terraformState: stageAState,
+      sourceSha: census.sourceSha,
+      transitionId: census.transitionId,
+      stageAStateIdentity,
+      failedApplyEvidence: census.failedApplyEvidence,
+    });
   const terraformRoot = option(argv, "--terraform-root");
   const planPath = option(argv, "--plan-path");
   const execute = argv.includes("--execute");
@@ -74,7 +91,7 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const readPlan = async (savedPath) => JSON.parse(tf(["show", "-json", savedPath]));
   const applyPlan = async (savedPath) => { if (!execute) throw new Error("alias apply requires explicit --execute"); tf(["apply", "-input=false", "-lock=true", savedPath]); return { outcome: "CONFIRMED_SUCCESS" }; };
   const runner = createRootDropRecoveryRunner({ execute, readState, importKey, refreshState, createPlan, readPlan, applyPlan });
-  const result = await runner({ census, terraformState: stageAState, stageAStateIdentity, sourceSha: census.sourceSha, transitionId: census.transitionId, planSha256: census.failedApplyEvidence?.planSha256 });
+  const result = await runner({ census, freshCensus, terraformState: stageAState, stageAStateIdentity, sourceSha: census.sourceSha, transitionId: census.transitionId, planSha256: census.failedApplyEvidence?.planSha256 });
   write(`${JSON.stringify(result, null, 2)}\n`);
   return result;
 }
