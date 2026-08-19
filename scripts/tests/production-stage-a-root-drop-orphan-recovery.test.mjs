@@ -749,6 +749,7 @@ test("root-drop census adapter binds discovery and CloudTrail provenance to admi
     provenanceProfile: "administrator",
     run: (args) => {
       seen.push(args);
+      if (args[0] === "kms" && args[1] === "get-public-key" && args[args.indexOf("--profile") + 1] !== "release") throw new Error("discovery identity must not perform GetPublicKey");
       if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: {} });
       return args[0] === "cloudtrail" ? JSON.stringify({ Events: [] }) : JSON.stringify({ Keys: [] });
     },
@@ -757,12 +758,14 @@ test("root-drop census adapter binds discovery and CloudTrail provenance to admi
   adapter.describeKey(keyId);
   adapter.discoveryPublicKey(keyId);
   adapter.listTags(keyId);
+  adapter.getPublicKey(keyId);
   adapter.lookupCreateKeyEvents(keyArn);
   assert.equal(seen[0][seen[0].indexOf("--profile") + 1], "administrator");
   assert.equal(seen[1][seen[1].indexOf("--profile") + 1], "administrator");
-  assert.equal(seen[2][seen[2].indexOf("--profile") + 1], "administrator");
+  assert.equal(seen[2][seen[2].indexOf("--profile") + 1], "release");
   assert.equal(seen[3][seen[3].indexOf("--profile") + 1], "release");
-  assert.equal(seen[4][seen[4].indexOf("--profile") + 1], "administrator");
+  assert.equal(seen[4][seen[4].indexOf("--profile") + 1], "release");
+  assert.equal(seen[5][seen[5].indexOf("--profile") + 1], "administrator");
   assert.deepEqual(adapter.actorBindings, { discovery: "ADMINISTRATOR", resourceReads: "RELEASE_DEPLOYER", provenance: "ADMINISTRATOR" });
 });
 
@@ -880,7 +883,7 @@ test("release denial on a potentially relevant candidate fails closed instead of
     run: (args) => {
       if (args[0] === "kms" && args[1] === "list-keys") return JSON.stringify({ Keys: [{ KeyId: keyId }] });
       if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: candidate().metadata });
-      if (args[0] === "kms" && args[1] === "get-public-key" && args.includes("--profile") && args[args.indexOf("--profile") + 1] === "administrator") return JSON.stringify(candidate().publicKey);
+      if (args[0] === "kms" && args[1] === "get-public-key") throw new Error("AccessDenied: kms:GetPublicKey");
       if (args[0] === "kms" && args[1] === "list-resource-tags") throw new Error("AccessDenied: kms:ListResourceTags");
       throw new Error(`unexpected read ${args.join(" ")}`);
     },

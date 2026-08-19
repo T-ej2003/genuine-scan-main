@@ -494,7 +494,7 @@ export function buildRootDropAwsReadAdapter({ run, profile, discoveryProfile = p
     actorBindings,
     listKeys: () => readPages(["kms", "list-keys"], "Keys", "--starting-token", discoveryProfile),
     describeKey: (keyId) => read(["kms", "describe-key", "--key-id", keyId], discoveryProfile).KeyMetadata,
-    discoveryPublicKey: (keyId) => read(["kms", "get-public-key", "--key-id", keyId], discoveryProfile),
+    discoveryPublicKey: (keyId) => read(["kms", "get-public-key", "--key-id", keyId]),
     listTags: (keyId) => read(["kms", "list-resource-tags", "--key-id", keyId]).Tags || [],
     getPolicy: (keyId) => JSON.parse(decodeURIComponent(read(["kms", "get-key-policy", "--key-id", keyId, "--policy-name", "default"]).Policy)),
     getPublicKey: (keyId) => read(["kms", "get-public-key", "--key-id", keyId]),
