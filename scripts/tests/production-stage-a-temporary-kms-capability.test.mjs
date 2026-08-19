@@ -292,7 +292,7 @@ test("canonical authorization reaches the legacy capability before provider refr
     throw new Error(`unexpected AWS read ${args.join(" ")}`);
   };
   const adapter = buildRootDropAwsReadAdapter({ run: awsRead, profile: "release", discoveryProfile: "administrator", provenanceProfile: "administrator", actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS });
-  const census = collectRootDropCensus({ adapter, terraformState: stageAState, sourceSha: failedApplyEvidence.sourceSha, transitionId: failedApplyEvidence.transitionId, stageAStateIdentity, failedApplyEvidence, allowKeyOnly: true });
+  const census = collectRootDropCensus({ adapter, terraformState: stageAState, sourceSha: failedApplyEvidence.sourceSha, transitionId: failedApplyEvidence.transitionId, stageAStateIdentity, failedApplyEvidence, allowKeyOnly: true, allowMissingArn: true });
   assert.equal(census.status, "AUTHENTICATED_ORPHAN", JSON.stringify(census.candidates));
   assert.equal(census.candidates[0].policyCompatibility, "LEGACY_BOUND_HISTORICAL");
   writeFileSync(stageAStateFile, stateBytes, { mode: 0o600 });
@@ -532,7 +532,8 @@ test("launch handoff makes historical authorization precede provider refresh", (
   assert.equal(nodes.get(8).nextNode, 9);
   assert.match(command(6), /--phase authorize/);
   assert.match(command(6), /<historical-failed-plan-sha>/);
-  assert.match(command(6), /<historical-plan-json>/);
+  assert.doesNotMatch(command(6), /<historical-plan-json>/);
+  assert.match(command(6), /recorded historical plan SHA is provenance only/);
   assert.match(command(7), /Terraform init\/refresh/);
   assert.match(command(8), /terraform plan -refresh=true/);
   assert.match(command(8), /terraform show -json/);
@@ -654,6 +655,17 @@ test("canonical producer replays authorization and safely aborts a failed apply"
   }
 });
 
+test("normal 0/0 authorization still requires classified plan JSON", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-normal-plan-"));
+  const stateFile = path.join(directory, "capability.json");
+  try {
+    const runner = createTemporaryKmsCapabilityRunner({ run: createPolicyVersionRunner().run });
+    assert.throws(() => runner.runPhase({ phase: "authorize", sourceSha, transitionId, stateFile, planSha256 }), /exact classified Stage-A plan JSON is required for normal authorization/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("revoke recovery cannot reconstruct REVOKED before root-drop ownership verification", () => {
   for (const phase of ["authorized", "stage-a-apply"]) {
     const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-revoke-state-"));
@@ -750,7 +762,6 @@ test("an unrecorded post-write capability can be recovered only with exact faile
 test("unrecorded legacy authorization is recoverable without persisted evidence", () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-unrecorded-legacy-"));
   const stateFile = path.join(directory, "capability.json");
-  const planJsonFile = writePlanFile(directory, buildLegacyRootDropKeyPolicy());
   const rootDropCensusFile = path.join(directory, "root-drop-census.json");
   const census = legacyRootDropCensus();
   writeFileSync(rootDropCensusFile, `${JSON.stringify(census)}\n`, { mode: 0o600 });
@@ -776,7 +787,6 @@ test("unrecorded legacy authorization is recoverable without persisted evidence"
         transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId,
         stateFile,
         planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256,
-        planJsonFile,
         stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity,
         rootDropCensusFile,
         freshRootDropCensus: census,
@@ -791,7 +801,6 @@ test("unrecorded legacy authorization is recoverable without persisted evidence"
       transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId,
       stateFile,
       planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256,
-      planJsonFile,
       applyFailed: true,
       partialOperationCensus: true,
     });

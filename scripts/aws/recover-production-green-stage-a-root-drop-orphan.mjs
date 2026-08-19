@@ -160,7 +160,7 @@ export async function runCensus({ argv = process.argv.slice(2), run, execFile = 
   const evidence = failedEvidence(argv);
   const env = buildRecoveryAwsEnvironment(releaseProfile);
   const adapter = buildRootDropAwsReadAdapter({ run: run || ((args) => execFile("aws", args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })), profile: releaseProfile, discoveryProfile: adminProfile, provenanceProfile: adminProfile, actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS, region });
-  const census = collectRootDropCensus({ adapter, terraformState: state, sourceSha: evidence.sourceSha, transitionId: evidence.transitionId, stageAStateIdentity, failedApplyEvidence: evidence, allowKeyOnly: keyCount === 1 && aliasCount === 0 });
+  const census = collectRootDropCensus({ adapter, terraformState: state, sourceSha: evidence.sourceSha, transitionId: evidence.transitionId, stageAStateIdentity, failedApplyEvidence: evidence, allowKeyOnly: keyCount === 1 && aliasCount === 0, allowMissingArn: keyCount === 1 && aliasCount === 0 });
   writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(census, null, 2)}\n`), repositoryRoot: root, label: "Stage-A root-drop census" });
   write(`${JSON.stringify({ status: census.status, candidateCount: census.candidateCount, output: outputPath }, null, 2)}\n`);
   return census;
@@ -220,7 +220,7 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   if (initialCounts.keyCount === 0 && initialCounts.aliasCount === 0) {
     assertStageAStateIdentityBinding(initialStateIdentity, stageAStateIdentity);
   } else if (initialCounts.keyCount === 1 && initialCounts.aliasCount === 0) {
-    assertRootDropKeyIdentity(initialSnapshot.state, census.candidates[0].keyId);
+    assertRootDropKeyIdentity(initialSnapshot.state, census.candidates[0].keyId, { allowMissingArn: legacyPolicyBound });
   } else if (initialCounts.keyCount === 1 && initialCounts.aliasCount === 1) {
     assertRootDropStateIdentity(initialSnapshot.state, { keyId: census.candidates[0].keyId, requireCanonicalPolicy: true });
   } else {
@@ -240,9 +240,10 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
     assertStageAStateIdentityBinding(currentStateIdentity, initialStateIdentity);
     const refreshedCounts = rootDropCounts(refreshedSnapshot.state);
     if (refreshedCounts.keyCount !== initialCounts.keyCount || refreshedCounts.aliasCount !== initialCounts.aliasCount) throw new Error("Stage-A refresh changed root-drop state before adoption");
+    if (initialCounts.keyCount === 1) assertRootDropKeyIdentity(refreshedSnapshot.state, census.candidates[0].keyId);
   }
   const freshCensus = initialCounts.aliasCount === 1 ? undefined : readRootDropCensus
-    ? await readRootDropCensus({ census, stageAState: refreshedSnapshot.state, stageAStateIdentity: currentStateIdentity, profile: releaseProfile, adminProfile, releaseProfile, allowKeyOnly: initialCounts.keyCount === 1 })
+    ? await readRootDropCensus({ census, stageAState: refreshedSnapshot.state, stageAStateIdentity: currentStateIdentity, profile: releaseProfile, adminProfile, releaseProfile, allowKeyOnly: initialCounts.keyCount === 1, allowMissingArn: false })
     : collectRootDropCensus({
       adapter: buildRootDropAwsReadAdapter({ run: (args) => execFile("aws", args, { cwd: root, env: buildRecoveryAwsEnvironment(releaseProfile), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), profile: releaseProfile, discoveryProfile: adminProfile, provenanceProfile: adminProfile, actorBindings: ROOT_DROP_CENSUS_ACTOR_BINDINGS, region }),
       terraformState: refreshedSnapshot.state,
@@ -251,6 +252,7 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
       stageAStateIdentity: currentStateIdentity,
       failedApplyEvidence: census.failedApplyEvidence,
       allowKeyOnly: initialCounts.keyCount === 1,
+      allowMissingArn: false,
   });
   if (initialCounts.aliasCount === 0) {
     if (initialCounts.keyCount === 0) assertRootDropPreImportPlan(preImportPlan);

@@ -103,15 +103,20 @@ ARN/spec/usage, and requires a plan containing only:
 ```
 
 The one historically authenticated Stage-A failed apply bound to the merged
-source, transition, plan, CreateKey event, key ARN, and pre-apply state
-identity may contain the predecessor root-drop policy that lacks only
+source, transition, recorded plan SHA, CreateKey event, key ARN, and pre-apply
+state identity may contain the predecessor root-drop policy that lacks only
 `kms:GetKeyRotationStatus`. That exact legacy policy is not accepted as a
 steady-state result: the adoption plan must contain only its update to the
 current canonical policy plus the exact root-drop alias create, and the
 post-apply state must contain the canonical policy before recovery is
 reported complete. Any other policy difference, binding, address, or action
-fails closed. The historical two-create plan is provenance only and never
-authorizes another `kms:CreateKey`. The existing temporary Stage-A capability
+fails closed. The historical two-create binary plan is stale, non-executable,
+and never applied; its recorded SHA is provenance only. Historical plan JSON
+is not required for this exact legacy 1/0 authorization because the current
+candidate, state, policy, metadata, stable census, CloudTrail, and failed-apply
+bindings authenticate the existing partial mutation independently. The fresh
+post-authorization recovery plan is the only plan eligible for classification
+or apply. The existing temporary Stage-A capability
 grants only `kms:GetKeyRotationStatus`, `kms:PutKeyPolicy`, and
 `kms:CreateAlias` for the exact authenticated orphan key (plus the exact alias
 resource), and is the only approved mutation path for this convergence.

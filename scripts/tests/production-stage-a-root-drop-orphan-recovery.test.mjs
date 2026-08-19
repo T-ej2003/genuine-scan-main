@@ -143,7 +143,9 @@ test("key-only census accepts the exact imported key when computed ARN is unset"
   const keyOnly = historicalKeyOnlyState();
   assert.equal(keyOnly.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn, null);
   assert.equal(keyOnly.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.id, legacyKeyId);
-  assert.equal(collectRootDropCensus({ adapter: legacyAwsAdapter(), terraformState: keyOnly, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: identityForState(keyOnly), failedApplyEvidence: legacyFailedApplyEvidence, allowKeyOnly: true }).status, "AUTHENTICATED_ORPHAN");
+  assert.equal(collectRootDropCensus({ adapter: legacyAwsAdapter(), terraformState: keyOnly, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: identityForState(keyOnly), failedApplyEvidence: legacyFailedApplyEvidence, allowKeyOnly: true, allowMissingArn: true }).status, "AUTHENTICATED_ORPHAN");
+  assert.doesNotThrow(() => assertRootDropKeyIdentity(keyOnly, legacyKeyId, { allowMissingArn: true }));
+  assert.throws(() => assertRootDropKeyIdentity(keyOnly, legacyKeyId), /different or non-conforming/);
   const wrongArn = structuredClone(keyOnly);
   wrongArn.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = `${legacyKeyArn}-wrong`;
   assert.throws(() => assertRootDropKeyIdentity(wrongArn, legacyKeyId), /different or non-conforming/);

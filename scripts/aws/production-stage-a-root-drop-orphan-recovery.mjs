@@ -134,16 +134,16 @@ function assertCreationEvent(event, { creatorArn, failedApplyWindow, keyArn, eve
   return true;
 }
 
-export function authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence, allowKeyOnly = false } = {}) {
+export function authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence, allowKeyOnly = false, allowMissingArn = false } = {}) {
   if (!SHA40.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(transitionId || "")) fail("source SHA and transition ID are required");
   assertStateShape(terraformState);
   assertStateRootDropCounts(terraformState, allowKeyOnly ? { allowKeyOnly: true } : { key: 0, alias: 0 });
   if (!failedApplyEvidence || failedApplyEvidence.sourceSha !== sourceSha || failedApplyEvidence.transitionId !== transitionId || !SHA256.test(failedApplyEvidence.planSha256 || "") || !failedApplyEvidence.failedApplyWindow) fail("failed Stage-A apply evidence is missing or not source/transition/plan bound");
   const { keyId, arn } = assertKeyIdentity(candidate);
-  if (allowKeyOnly) assertRootDropKeyIdentity(terraformState, keyId);
   assertExactTags(candidate.tags);
   if (!Array.isArray(candidate.aliases) || candidate.aliases.length !== 0) fail("orphan candidate has an unexpected alias");
   const policyCompatibility = samePolicy(candidate.policy, buildStageARootDropKeyPolicy()) ? "CANONICAL" : (assertLegacyRootDropPolicyBinding({ candidate, sourceSha, transitionId, failedApplyEvidence }), "LEGACY_BOUND_HISTORICAL");
+  if (allowKeyOnly) assertRootDropKeyIdentity(terraformState, keyId, { allowMissingArn: allowMissingArn && policyCompatibility === "LEGACY_BOUND_HISTORICAL" });
   if (!candidate.publicKey || candidate.publicKey.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec || candidate.publicKey.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage || !Array.isArray(candidate.publicKey.SigningAlgorithms) || !candidate.publicKey.SigningAlgorithms.includes(ROOT_DROP_EXPECTED_SIGNING_ALGORITHM)) fail("orphan public-key identity is not the exact signing contract");
   const events = Array.isArray(candidate.creationEvents) ? candidate.creationEvents.filter((event) => event.eventName === "CreateKey") : [];
   if (events.length !== 1) fail("orphan candidate does not have exactly one authenticated CreateKey event");
@@ -470,13 +470,14 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
   };
 }
 
-export function assertRootDropKeyIdentity(state, keyId) {
+export function assertRootDropKeyIdentity(state, keyId, { allowMissingArn = false } = {}) {
   const key = stateInstances(state, "aws_kms_key", "root_drop");
   if (key.length !== 1) fail("Terraform refresh did not return exactly one imported root-drop key");
   const attributes = key[0].attributes || {};
   const actual = String(attributes.key_id || attributes.id || attributes.arn || "").split("/").at(-1);
   const expectedArn = `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/${keyId}`;
-  if (actual !== keyId || (attributes.arn !== null && attributes.arn !== undefined && attributes.arn !== expectedArn) || attributes.key_usage !== TEMPORARY_KMS_CAPABILITY.keyUsage || attributes.customer_master_key_spec !== TEMPORARY_KMS_CAPABILITY.keySpec) fail("Terraform refresh returned a different or non-conforming root-drop key");
+  const missingArn = attributes.arn === null || attributes.arn === undefined;
+  if (actual !== keyId || missingArn && !allowMissingArn || !missingArn && attributes.arn !== expectedArn || attributes.key_usage !== TEMPORARY_KMS_CAPABILITY.keyUsage || attributes.customer_master_key_spec !== TEMPORARY_KMS_CAPABILITY.keySpec) fail("Terraform refresh returned a different or non-conforming root-drop key");
   return { keyId, arn: attributes.arn };
 }
 
@@ -512,7 +513,7 @@ export function buildRootDropAwsReadAdapter({ run, profile, discoveryProfile = p
 
 export function rootDropTagsFromAws(Tags) { return Object.fromEntries((Tags || []).map(({ TagKey, TagValue }) => [TagKey, TagValue])); }
 
-export function collectRootDropCensus({ adapter, terraformState, sourceSha, transitionId, stageAStateIdentity, failedApplyEvidence, allowKeyOnly = false } = {}) {
+export function collectRootDropCensus({ adapter, terraformState, sourceSha, transitionId, stageAStateIdentity, failedApplyEvidence, allowKeyOnly = false, allowMissingArn = false } = {}) {
   if (!adapter || typeof adapter.listKeys !== "function" || typeof adapter.describeKey !== "function" || typeof adapter.listTags !== "function" || typeof adapter.getPolicy !== "function" || typeof adapter.getPublicKey !== "function" || typeof adapter.listAliases !== "function" || typeof adapter.lookupCreateKeyEvents !== "function") fail("fresh root-drop census adapter is incomplete");
   if (!failedApplyEvidence?.failedApplyWindow) fail("fresh root-drop census requires the failed-apply observation window");
   assertStateShape(terraformState);
@@ -526,7 +527,7 @@ export function collectRootDropCensus({ adapter, terraformState, sourceSha, tran
   const candidates = startUniverse.map((keyId) => candidateFromSnapshot(secondSnapshots.get(keyId))).filter(Boolean);
   const authenticatedCandidates = [];
   for (const candidate of candidates) {
-    try { authenticatedCandidates.push({ ...candidate, ...authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence, allowKeyOnly }) }); }
+    try { authenticatedCandidates.push({ ...candidate, ...authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence, allowKeyOnly, allowMissingArn }) }); }
     catch (error) { authenticatedCandidates.push({ keyId: candidate.keyId, keyArn: candidate.metadata?.Arn, authenticated: false, reason: error.message }); }
   }
   return buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates: authenticatedCandidates, keyUniverse: startUniverse, failedApplyEvidence, actorBindings: adapter.actorBindings });
