@@ -111,61 +111,66 @@
     },
     {
       "order": 22,
+      "id": "root-drop-evidence-signing",
+      "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs"
+    },
+    {
+      "order": 23,
       "id": "tfvars-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-tfvars.mjs"
     },
     {
-      "order": 23,
+      "order": 24,
       "id": "refresh-only",
       "sourceFile": "scripts/refresh-production-green-stage-b.mjs"
     },
     {
-      "order": 24,
+      "order": 25,
       "id": "saved-plan-generation",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 25,
+      "order": 26,
       "id": "plan-json-canonicalization",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 26,
+      "order": 27,
       "id": "reference-audit",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs"
     },
     {
-      "order": 27,
+      "order": 28,
       "id": "plan-bound-permission-report",
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs"
     },
     {
-      "order": 28,
+      "order": 29,
       "id": "production-closure",
       "sourceFile": "scripts/aws/validate-stage-b-deployment-closure.mjs"
     },
     {
-      "order": 29,
+      "order": 30,
       "id": "validator",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 30,
+      "order": 31,
       "id": "wrapper-verify-only",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 31,
+      "order": 32,
       "id": "wrapper-apply",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 32,
+      "order": 33,
       "id": "post-apply-verification",
       "sourceFile": "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs"
     },
     {
-      "order": 33,
+      "order": 34,
       "id": "runtime-activation-boundary",
       "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs"
     }
@@ -173,6 +178,7 @@
   "identities": [
     "GITHUB_IMAGE_PUBLISHER",
     "ADMINISTRATOR",
+    "ROOT_OPERATOR",
     "BOOTSTRAP_OPERATOR",
     "RELEASE_DEPLOYER",
     "INDEPENDENT_CHECKER",
@@ -7937,6 +7943,33 @@
       "mutation": false
     },
     {
+      "id": "root-drop-sign-evidence",
+      "phase": "root-drop-evidence-signing",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs",
+      "sourceFunction": "produce-production-root-drop-evidence",
+      "action": "kms:Sign",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-drop"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ROOT_DROP_SIGN",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs",
+        "sid": "root-drop-signing-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "runtime-dynamodb-deleteitem",
       "phase": "runtime-activation-boundary",
       "identity": "SERVICE_RUNTIME",
@@ -8766,7 +8799,14 @@
     },
     {
       "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs",
-      "action": "kms:Sign"
+      "sourceFunction": "produce-production-root-drop-evidence",
+      "phase": "root-drop-evidence-signing",
+      "identity": "ROOT_OPERATOR",
+      "action": "kms:Sign",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-drop"
+      ],
+      "capabilityId": "root-drop-sign-evidence"
     },
     {
       "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs",

@@ -10,11 +10,11 @@
     "deployment": { "const": "production-green-stage-b" },
     "account": { "const": "368992683803" },
     "region": { "const": "eu-west-2" },
-    "phases": { "type": "array", "minItems": 31, "maxItems": 31, "items": { "$ref": "#/$defs/phase" } },
+    "phases": { "type": "array", "minItems": 34, "maxItems": 34, "items": { "$ref": "#/$defs/phase" } },
     "identities": { "type": "array", "minItems": 5, "uniqueItems": true, "items": { "type": "string" } },
     "capabilities": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/capability" } },
     "directProbes": { "type": "array", "minItems": 1, "items": { "type": "object", "additionalProperties": false, "required": ["id", "action"], "properties": { "id": { "type": "string" }, "action": { "type": "string", "pattern": "^[a-z0-9-]+:[A-Za-z*]+$" } } } },
-    "sourceScan": { "type": "array", "minItems": 1, "items": { "type": "object", "additionalProperties": false, "required": ["sourceFile", "action"], "properties": { "sourceFile": { "type": "string" }, "action": { "type": "string", "pattern": "^[a-z0-9-]+:[A-Za-z*]+$" } } } },
+    "sourceScan": { "type": "array", "minItems": 1, "items": { "type": "object", "additionalProperties": false, "required": ["sourceFile", "action"], "properties": { "sourceFile": { "type": "string" }, "sourceFunction": { "type": "string" }, "phase": { "type": "string" }, "identity": { "type": "string" }, "action": { "type": "string", "pattern": "^[a-z0-9-]+:[A-Za-z*]+$" }, "resources": { "type": "array", "items": { "type": "string" } }, "capabilityId": { "type": "string" } } } },
     "artifactContracts": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
     "stateContracts": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
     "freshnessContracts": { "type": "array", "minItems": 1, "items": { "type": "object" } },
@@ -35,7 +35,7 @@
         "id": { "type": "string" }, "phase": { "type": "string" }, "identity": { "type": "string" }, "executor": { "type": "string" },
         "sourceFile": { "type": "string" }, "sourceFunction": { "type": "string" }, "action": { "type": "string", "pattern": "^[a-z0-9-]+:[A-Za-z*]+$" },
         "resources": { "type": "array", "minItems": 1, "items": { "type": "string" } }, "context": {},
-        "classification": { "enum": ["ADMIN_DIRECT_READ", "ADMIN_SIMULATION", "ADMIN_SIGN", "BOOTSTRAP_SESSION", "RELEASE_DIRECT_READ", "TERRAFORM_REFRESH_READ", "TERRAFORM_PLAN_READ", "TERRAFORM_APPLY_MUTATION", "POST_APPLY_READ", "GITHUB_IMAGE_MUTATION", "SERVICE_RUNTIME_ACTION", "FORBIDDEN"] },
+        "classification": { "enum": ["ADMIN_DIRECT_READ", "ADMIN_SIMULATION", "ADMIN_SIGN", "ROOT_DROP_SIGN", "BOOTSTRAP_SESSION", "RELEASE_DIRECT_READ", "TERRAFORM_REFRESH_READ", "TERRAFORM_PLAN_READ", "TERRAFORM_APPLY_MUTATION", "POST_APPLY_READ", "GITHUB_IMAGE_MUTATION", "SERVICE_RUNTIME_ACTION", "FORBIDDEN"] },
         "probe": { "enum": ["direct", "administrator-simulation", "plan-derived-simulation", "structural"] },
         "probeIds": { "type": "array", "items": { "type": "string" } }, "policy": { "type": "object" }, "required": { "type": "boolean" }, "mutation": { "type": "boolean" }
       }
