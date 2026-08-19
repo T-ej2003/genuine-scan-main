@@ -24,7 +24,7 @@ import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageAStateIdentityBinding, buildStageAStateIdentity } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { buildRecoveryAwsEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
-import { assertRootDropCensusMatch, assertRootDropCreationInterlock, buildRootDropAwsReadAdapter, collectRootDropCensus, ROOT_DROP_CENSUS_ACTOR_BINDINGS } from "./production-stage-a-root-drop-orphan-recovery.mjs";
+import { assertRootDropCensusMatch, assertRootDropCreationInterlock, buildRootDropAwsReadAdapter, collectRootDropCensus, ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_LEGACY_POLICY_BINDING } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sourcePolicyPath = path.join(root, TEMPORARY_KMS_CAPABILITY.sourcePolicyPath);
@@ -55,7 +55,7 @@ const fail = (message) => { throw new Error(`Temporary Stage-A KMS capability: $
 const policyDocumentFingerprint = (document) => sha256(canonical(document));
 const validCreateDate = (value) => typeof value === "string" && Number.isFinite(Date.parse(value));
 
-export function classifyTemporaryKmsPolicyVersion(version, { steadyStatePolicy, sourceSha, transitionId } = {}) {
+export function classifyTemporaryKmsPolicyVersion(version, { steadyStatePolicy, sourceSha, transitionId, legacyRootDropKeyArn } = {}) {
   if (!version || typeof version !== "object" || !VERSION.test(version.VersionId || "") || typeof version.IsDefaultVersion !== "boolean" || !version.document) return "UNKNOWN";
   const temporary = version.document.Statement?.some(isTemporaryTagResourceStatement) === true;
   const versionPolicySha256 = policyDocumentFingerprint(version.document);
@@ -63,7 +63,7 @@ export function classifyTemporaryKmsPolicyVersion(version, { steadyStatePolicy, 
   const recognizedSteadyState = versionPolicySha256 === currentSteadyStatePolicySha256
     || AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES.some(({ policySha256 }) => policySha256 === versionPolicySha256);
   const expectedTemporary = temporary && SHA40.test(sourceSha || "") && /^[A-Za-z0-9._-]{8,128}$/.test(transitionId || "")
-    ? (() => { try { assertTemporaryReleasePolicy(version.document, { steadyStatePolicy, sourceSha, transitionId }); return true; } catch { return false; } })()
+    ? (() => { try { assertTemporaryReleasePolicy(version.document, { steadyStatePolicy, sourceSha, transitionId, legacyRootDropKeyArn }); return true; } catch { return false; } })()
     : false;
   if (version.IsDefaultVersion) {
     if (temporary) return expectedTemporary ? "CURRENT_ACTIVE_TEMPORARY" : "AMBIGUOUS";
@@ -146,7 +146,7 @@ function writeEvidence(filePath, value, repositoryRoot = root) {
 
 export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJson(sourcePolicyPath), now = () => new Date().toISOString(), writeEvidence: writeEvidenceFn = writeEvidence, requireStageAStateBinding = false } = {}) {
   if (typeof run !== "function") throw new Error("An explicit AWS command runner is required.");
-  const readVersions = ({ allowTemporaryVersionId, sourceSha, transitionId } = {}) => {
+  const readVersions = ({ allowTemporaryVersionId, sourceSha, transitionId, legacyRootDropKeyArn } = {}) => {
     const policy = JSON.parse(run(["iam", "get-policy", "--policy-arn", TEMPORARY_KMS_CAPABILITY.policyArn]));
     const rawVersions = JSON.parse(run(["iam", "list-policy-versions", "--policy-arn", TEMPORARY_KMS_CAPABILITY.policyArn])).Versions || [];
     if (!Array.isArray(rawVersions) || rawVersions.length === 0 || rawVersions.length > AWS_MANAGED_POLICY_VERSION_LIMIT) fail("managed-policy version topology is outside AWS limits");
@@ -157,7 +157,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       document: normalizeIamPolicyDocument(JSON.parse(run(["iam", "get-policy-version", "--policy-arn", TEMPORARY_KMS_CAPABILITY.policyArn, "--version-id", version.VersionId])).PolicyVersion?.Document, "IAM policy version document"),
     }));
     if (documents.filter(({ IsDefaultVersion }) => IsDefaultVersion).length !== 1 || documents.filter(({ IsDefaultVersion }) => IsDefaultVersion)[0]?.VersionId !== policy.Policy?.DefaultVersionId) fail("managed-policy default-version topology is ambiguous");
-    const classifications = new Map(documents.map((version) => [version.VersionId, classifyTemporaryKmsPolicyVersion(version, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId })]));
+    const classifications = new Map(documents.map((version) => [version.VersionId, classifyTemporaryKmsPolicyVersion(version, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId, legacyRootDropKeyArn })]));
     if ([...classifications.values()].some((classification) => classification === "UNKNOWN" || classification === "AMBIGUOUS")) fail("managed-policy version topology contains an unknown or ambiguous version");
     const active = documents.find(({ VersionId }) => VersionId === policy.Policy?.DefaultVersionId);
     if (!active || !VERSION.test(active.VersionId)) fail("default managed-policy version is unreadable");
@@ -288,7 +288,16 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     const previousFile = existsSync(stateFile) ? ensureStageBPrivateFile({ filePath: stateFile, repositoryRoot: root, label: "Temporary Stage-A KMS capability evidence" }).path : null;
     let previous = previousFile ? readJson(previousFile) : null;
     let state = previous?.state || "ABSENT";
-    const readState = ({ allowTemporaryVersionId } = {}) => readVersions({ allowTemporaryVersionId, sourceSha, transitionId });
+    const censusLegacyRootDropKeyArn = rootDropCensus?.status === "AUTHENTICATED_ORPHAN" && rootDropCensus.candidates[0]?.policyCompatibility === "LEGACY_BOUND_HISTORICAL" ? rootDropCensus.candidates[0].keyArn : undefined;
+    if (censusLegacyRootDropKeyArn && censusLegacyRootDropKeyArn !== ROOT_DROP_LEGACY_POLICY_BINDING.keyArn) fail("legacy root-drop capability is not bound to the authenticated historical orphan");
+    if (censusLegacyRootDropKeyArn && previous?.legacyRootDropKeyArn && censusLegacyRootDropKeyArn !== previous.legacyRootDropKeyArn) fail("legacy root-drop capability evidence changed its exact key binding");
+    const legacyRootDropKeyArn = censusLegacyRootDropKeyArn || previous?.legacyRootDropKeyArn;
+    const legacyPolicyOptions = legacyRootDropKeyArn ? { legacyRootDropKeyArn } : {};
+    const readState = ({ allowTemporaryVersionId } = {}) => readVersions({ allowTemporaryVersionId, sourceSha, transitionId, legacyRootDropKeyArn });
+    const buildTemporaryDocument = () => buildTemporaryReleasePolicy(sourcePolicy, { sourceSha, transitionId, ...legacyPolicyOptions });
+    const assertTemporaryPolicy = (document, identityTransitionId = previous?.transitionId || transitionId) => assertTemporaryReleasePolicy(document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId: identityTransitionId, ...legacyPolicyOptions });
+    const isCurrentTemporary = (document) => isCurrentTemporaryReleasePolicy(document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId, ...legacyPolicyOptions });
+    const buildEvidence = (fields) => buildTemporaryCapabilityEvidence({ ...fields, ...legacyPolicyOptions });
     const current = readState({ allowTemporaryVersionId: previous?.temporaryVersionId });
     const activeTemporary = current.active.document.Statement?.some(isTemporaryTagResourceStatement);
     const authorizationReplay = phase === "authorize" && state === "AUTHORIZED_FOR_ROOT_DROP_CREATION" && activeTemporary;
@@ -296,8 +305,8 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       if (!applyFailed || !partialOperationCensus || !SHA256.test(planSha256 || "") || !planJsonFile) fail("authenticated recovery inputs are required for an unrecorded temporary capability");
       const planFile = ensureStageBPrivateFile({ filePath: planJsonFile, repositoryRoot: root, label: "Classified Stage-A plan JSON" });
       assertCreationPlan(readJson(planFile.path));
-      assertTemporaryReleasePolicy(current.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId });
-      previous = buildTemporaryCapabilityEvidence({ state: "AUTHORIZED_FOR_ROOT_DROP_CREATION", sourceSha, transitionId, planSha256, defaultVersionId: current.active.VersionId, temporaryVersionId: current.active.VersionId, observedAt: now() });
+      assertTemporaryPolicy(current.active.document);
+      previous = buildEvidence({ state: "AUTHORIZED_FOR_ROOT_DROP_CREATION", sourceSha, transitionId, planSha256, defaultVersionId: current.active.VersionId, temporaryVersionId: current.active.VersionId, observedAt: now() });
       persistEvidence(stateFile, previous);
       state = previous.state;
     }
@@ -311,7 +320,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       if (completedAbort) {
         assertTemporaryCapabilityEvidence(previous, { sourceSha, state });
         assertSource(current.active);
-        const evidence = buildTemporaryCapabilityEvidence({ ...previous, state: "REVOKED", temporaryVersionId: null, defaultVersionId: current.active.VersionId, ownership: null, observedAt: now() });
+        const evidence = buildEvidence({ ...previous, state: "REVOKED", temporaryVersionId: null, defaultVersionId: current.active.VersionId, ownership: null, observedAt: now() });
         assertTemporaryCapabilityEvidence(evidence, { sourceSha, state: "REVOKED" });
         assertTemporaryCapabilityTransition(state, evidence.state, { sourceSha });
         persistEvidence(stateFile, evidence);
@@ -326,14 +335,14 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
         assertTemporaryCapabilityEvidence(previous, { sourceSha, state });
         if (previous.transitionId !== transitionId || !SHA256.test(previous.planSha256 || "")) fail("already-revoked recovery identity is incomplete");
         assertSource(current.active);
-        const evidence = buildTemporaryCapabilityEvidence({ ...previous, state: "REVOKED", temporaryVersionId: null, defaultVersionId: current.active.VersionId, observedAt: now() });
+        const evidence = buildEvidence({ ...previous, state: "REVOKED", temporaryVersionId: null, defaultVersionId: current.active.VersionId, observedAt: now() });
         assertTemporaryCapabilityEvidence(evidence, { sourceSha, state: "REVOKED" });
         assertTemporaryCapabilityTransition(state, evidence.state, { sourceSha });
         persistEvidence(stateFile, evidence);
         return { evidence, writes: 0, recovery: "AUTHENTICATED_ALREADY_REVOKED", mutationAccounting: accounting };
       }
       if (!alreadySteadyAfterWrite && (!activeTemporary || current.active.VersionId !== previous.temporaryVersionId)) fail("authenticated temporary capability is not the live default version");
-      assertTemporaryReleasePolicy((alreadySteadyAfterWrite ? persistedTemporary : current.active).document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId: previous.transitionId });
+      assertTemporaryPolicy((alreadySteadyAfterWrite ? persistedTemporary : current.active).document, previous.transitionId);
     }
     if (phase === "authorize") {
       if (authorizationReplay) {
@@ -343,8 +352,8 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
         if (!planJsonFile) fail("exact classified Stage-A plan JSON is required for replay");
         const planFile = ensureStageBPrivateFile({ filePath: planJsonFile, repositoryRoot: root, label: "Classified Stage-A plan JSON" });
         assertCreationPlan(readJson(planFile.path));
-        const temporaryDocument = buildTemporaryReleasePolicy(sourcePolicy, { sourceSha, transitionId });
-        const currentIsCanonical = isCurrentTemporaryReleasePolicy(current.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId });
+        const temporaryDocument = buildTemporaryDocument();
+        const currentIsCanonical = isCurrentTemporary(current.active.document);
         if (currentIsCanonical) {
           const persistedTemporary = current.versions.find(({ VersionId }) => VersionId === previous.temporaryVersionId);
           let persistedTemporaryDeleted = false;
@@ -355,25 +364,25 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
               persistedTemporaryDeleted = true;
             }
             finalRead = readState();
-            if (finalRead.active.VersionId !== current.active.VersionId || !isCurrentTemporaryReleasePolicy(finalRead.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId }) || finalRead.versions.some(({ document, VersionId }) => VersionId !== finalRead.active.VersionId && document.Statement?.some(isTemporaryTagResourceStatement))) fail("authorization replay did not converge to the current temporary policy only");
+            if (finalRead.active.VersionId !== current.active.VersionId || !isCurrentTemporary(finalRead.active.document) || finalRead.versions.some(({ document, VersionId }) => VersionId !== finalRead.active.VersionId && document.Statement?.some(isTemporaryTagResourceStatement))) fail("authorization replay did not converge to the current temporary policy only");
           } catch (error) {
             if (persistedTemporaryDeleted) throw attachMutationAccounting(error, accounting, { deletedVersionIds: [previous.temporaryVersionId] });
             throw error;
           }
-          const evidence = buildTemporaryCapabilityEvidence({ ...previous, state, defaultVersionId: finalRead.active.VersionId, temporaryVersionId: finalRead.active.VersionId, observedAt: now() });
+          const evidence = buildEvidence({ ...previous, state, defaultVersionId: finalRead.active.VersionId, temporaryVersionId: finalRead.active.VersionId, observedAt: now() });
           assertTemporaryCapabilityEvidence(evidence, { sourceSha, state });
           persistEvidence(stateFile, evidence);
           return { evidence, writes: accounting.iamWrites, mutationAccounting: accounting };
         }
         const activeActions = current.active.document.Statement?.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]) || [];
         if (current.active.VersionId !== previous.temporaryVersionId || !activeActions.includes(TEMPORARY_KMS_CAPABILITY.keyActions[0])) fail("legacy temporary policy cannot authorize root-drop creation");
-        assertTemporaryReleasePolicy(current.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId });
+        assertTemporaryPolicy(current.active.document);
         const capacityState = ensurePolicyVersionCapacity({ current, readState, allowTemporaryVersionId: previous.temporaryVersionId, accounting });
         let version;
         try {
           version = writePolicyVersion(temporaryDocument, { accounting, expectedState: capacityState, readState, allowTemporaryVersionId: previous.temporaryVersionId });
           const readback = readState({ allowTemporaryVersionId: previous.temporaryVersionId });
-          if (readback.versions.length !== capacityState.versions.length + 1 || readback.policy.DefaultVersionId !== version.VersionId || !isCurrentTemporaryReleasePolicy(readback.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId })) fail("temporary authorization replay replacement is not exact");
+          if (readback.versions.length !== capacityState.versions.length + 1 || readback.policy.DefaultVersionId !== version.VersionId || !isCurrentTemporary(readback.active.document)) fail("temporary authorization replay replacement is not exact");
           for (const existing of capacityState.versions) assertSameVersion(capacityState, readback, existing.VersionId);
         } catch (error) {
           throw attachMutationAccounting(error, accounting, { deletedVersionIds: capacityState.capacityDeletedVersionId ? [capacityState.capacityDeletedVersionId] : [], createdVersionIds: version?.VersionId ? [version.VersionId] : [] });
@@ -383,8 +392,8 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
           deletePolicyVersion(previous.temporaryVersionId, accounting, readState, previous.temporaryVersionId);
           persistedTemporaryDeleted = true;
           const finalRead = readState();
-          if (finalRead.active.VersionId !== version.VersionId || !isCurrentTemporaryReleasePolicy(finalRead.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId }) || finalRead.versions.some(({ document, VersionId }) => VersionId !== finalRead.active.VersionId && document.Statement?.some(isTemporaryTagResourceStatement))) fail("temporary authorization replay retained an obsolete temporary policy");
-          const evidence = buildTemporaryCapabilityEvidence({ ...previous, state, defaultVersionId: finalRead.active.VersionId, temporaryVersionId: finalRead.active.VersionId, observedAt: now() });
+          if (finalRead.active.VersionId !== version.VersionId || !isCurrentTemporary(finalRead.active.document) || finalRead.versions.some(({ document, VersionId }) => VersionId !== finalRead.active.VersionId && document.Statement?.some(isTemporaryTagResourceStatement))) fail("temporary authorization replay retained an obsolete temporary policy");
+          const evidence = buildEvidence({ ...previous, state, defaultVersionId: finalRead.active.VersionId, temporaryVersionId: finalRead.active.VersionId, observedAt: now() });
           assertTemporaryCapabilityEvidence(evidence, { sourceSha, state });
           persistEvidence(stateFile, evidence);
           return { evidence, writes: accounting.iamWrites, mutationAccounting: accounting };
@@ -402,7 +411,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       if (!SHA256.test(planSha256 || "") || !planJsonFile) fail("exact classified Stage-A plan binding is required before authorization");
       const planFile = ensureStageBPrivateFile({ filePath: planJsonFile, repositoryRoot: root, label: "Classified Stage-A plan JSON" });
       assertCreationPlan(readJson(planFile.path));
-      const temporaryDocument = buildTemporaryReleasePolicy(sourcePolicy, { sourceSha, transitionId });
+      const temporaryDocument = buildTemporaryDocument();
       const capacityState = ensurePolicyVersionCapacity({ current, readState, allowTemporaryVersionId: previous?.temporaryVersionId, accounting });
       let version;
       let readback;
@@ -417,8 +426,8 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       } catch (error) {
         throw attachMutationAccounting(error, accounting, { deletedVersionIds: capacityState.capacityDeletedVersionId ? [capacityState.capacityDeletedVersionId] : [], createdVersionIds: version?.VersionId ? [version.VersionId] : [] });
       }
-      const evidence = buildTemporaryCapabilityEvidence({ state: "AUTHORIZED_FOR_ROOT_DROP_CREATION", sourceSha, transitionId, planSha256, stageAStateIdentity, defaultVersionId: readback.active.VersionId, temporaryVersionId: readback.active.VersionId, observedAt: now() });
-      assertTemporaryReleasePolicy(readback.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId });
+      const evidence = buildEvidence({ state: "AUTHORIZED_FOR_ROOT_DROP_CREATION", sourceSha, transitionId, planSha256, stageAStateIdentity, defaultVersionId: readback.active.VersionId, temporaryVersionId: readback.active.VersionId, observedAt: now() });
+      assertTemporaryPolicy(readback.active.document);
       persistEvidence(stateFile, evidence);
       return { evidence, writes: accounting.iamWrites, mutationAccounting: accounting };
     }
@@ -426,7 +435,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     if (phase === "mark-stage-a-apply") {
       assertTemporaryCapabilityEvidence(previous, { sourceSha, state: "AUTHORIZED_FOR_ROOT_DROP_CREATION" });
       if (!SHA256.test(planSha256 || "")) fail("Stage-A plan SHA is required");
-      const evidence = buildTemporaryCapabilityEvidence({ ...previous, state: "STAGE_A_APPLY", planSha256, observedAt: now() });
+      const evidence = buildEvidence({ ...previous, state: "STAGE_A_APPLY", planSha256, observedAt: now() });
       assertTemporaryCapabilityTransition(previous.state, evidence.state, { sourceSha });
       persistEvidence(stateFile, evidence);
       return { evidence, writes: 0 };
@@ -436,7 +445,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       if (!terraformStateFile || !existsSync(terraformStateFile)) fail("fresh canonical Stage-A state is required");
       const ownership = buildRootDropOwnershipEvidence({ terraformState: readJson(terraformStateFile), sourceSha, transitionId, planSha256: previous.planSha256, observedAt: now() });
       assertRootDropOwnershipEvidence(ownership, { sourceSha, planSha256: previous.planSha256 });
-      const evidence = buildTemporaryCapabilityEvidence({ ...previous, state: "ROOT_DROP_OWNERSHIP_VERIFIED", ownership, observedAt: now() });
+      const evidence = buildEvidence({ ...previous, state: "ROOT_DROP_OWNERSHIP_VERIFIED", ownership, observedAt: now() });
       assertTemporaryCapabilityTransition(previous.state, evidence.state, { sourceSha });
       persistEvidence(stateFile, evidence);
       return { evidence, writes: 0 };
@@ -461,7 +470,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       if (state !== "REVOKED") fail("revocation evidence is required before absence verification");
       assertSource(current.active);
       if (current.versions.some(({ document }) => document.Statement?.some(isTemporaryTagResourceStatement))) fail("temporary capability version remains present");
-      const evidence = buildTemporaryCapabilityEvidence({ ...previous, state: "ABSENCE_VERIFIED", temporaryVersionId: null, defaultVersionId: current.active.VersionId, observedAt: now() });
+      const evidence = buildEvidence({ ...previous, state: "ABSENCE_VERIFIED", temporaryVersionId: null, defaultVersionId: current.active.VersionId, observedAt: now() });
       assertTemporaryCapabilityEvidence(evidence, { sourceSha, state: "ABSENCE_VERIFIED" });
       assertTemporaryCapabilityTransition(previous.state, evidence.state, { sourceSha, evidence });
       persistEvidence(stateFile, evidence);
@@ -511,7 +520,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     }
     try {
       if (finalRead.versions.some(({ document }) => document.Statement?.some(isTemporaryTagResourceStatement))) fail("temporary policy version remains after revocation");
-      const evidence = buildTemporaryCapabilityEvidence({ ...previous, state: "REVOKED", temporaryVersionId: null, defaultVersionId: finalRead.active.VersionId, ownership: state === "ROOT_DROP_OWNERSHIP_VERIFIED" ? previous.ownership : null, observedAt: now() });
+      const evidence = buildEvidence({ ...previous, state: "REVOKED", temporaryVersionId: null, defaultVersionId: finalRead.active.VersionId, ownership: state === "ROOT_DROP_OWNERSHIP_VERIFIED" ? previous.ownership : null, observedAt: now() });
       assertTemporaryCapabilityEvidence(evidence, { sourceSha, state: "REVOKED" });
       assertTemporaryCapabilityTransition(previous.state, evidence.state, { sourceSha });
       persistEvidence(stateFile, evidence);

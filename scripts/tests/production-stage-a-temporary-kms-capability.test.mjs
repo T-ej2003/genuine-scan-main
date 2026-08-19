@@ -25,13 +25,14 @@ import {
   canonicalTemporaryKmsStatementSid,
   isTemporaryTagResourceStatement,
   temporaryKmsCapabilityStatement,
+  temporaryKmsLegacyRotationStatusStatement,
 } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 import { ensureStageBPrivateFile } from "../aws/stage-b-artifact-contract.mjs";
 import { AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES, classifyTemporaryKmsPolicyVersion, createTemporaryKmsCapabilityRunner, runCli } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { buildStageARootDropKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
-import { ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_RECOVERY_SCHEMA_VERSION, rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
+import { ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_LEGACY_POLICY_BINDING, ROOT_DROP_RECOVERY_SCHEMA_VERSION, rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
@@ -213,6 +214,53 @@ test("temporary capability is exact-purpose, source-bound, and non-signing", () 
   assert.deepEqual(evidence.actions, ["kms:CreateKey", "kms:TagResource", "kms:PutKeyPolicy", "kms:CreateAlias"]);
   assert.throws(() => assertTemporaryReleasePolicy(buildTemporaryReleasePolicy(policy, { sourceSha, transitionId: "different-transition" }), { steadyStatePolicy: policy, sourceSha, transitionId }), /not exact/);
   assert.throws(() => assertTemporaryReleasePolicy({ ...temporary, Statement: [...temporary.Statement, { Effect: "Allow", Action: "kms:TagResource", Resource: "*" }] }, { steadyStatePolicy: policy, sourceSha, transitionId }), /changes more/);
+});
+
+test("legacy recovery adds rotation status only for the authenticated orphan ARN", () => {
+  const legacyRootDropKeyArn = ROOT_DROP_LEGACY_POLICY_BINDING.keyArn;
+  const temporary = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId, legacyRootDropKeyArn });
+  const rotation = temporary.Statement.find(({ Action }) => Action === "kms:GetKeyRotationStatus");
+  assert.deepEqual(rotation, temporaryKmsLegacyRotationStatusStatement({ sourceSha, transitionId, keyArn: legacyRootDropKeyArn }));
+  assert.equal(rotation.Resource, legacyRootDropKeyArn);
+  assert.doesNotThrow(() => assertTemporaryReleasePolicy(temporary, { steadyStatePolicy: policy, sourceSha, transitionId, legacyRootDropKeyArn }));
+  assert.throws(() => assertTemporaryReleasePolicy(temporary, { steadyStatePolicy: policy, sourceSha, transitionId, legacyRootDropKeyArn: `${legacyRootDropKeyArn}-wrong` }), /outside|not exact/);
+  assert.equal(buildTemporaryReleasePolicy(policy, { sourceSha, transitionId }).Statement.some(({ Action }) => Action === "kms:GetKeyRotationStatus"), false);
+  const evidence = buildTemporaryCapabilityEvidence({ state: "AUTHORIZED_FOR_ROOT_DROP_CREATION", sourceSha, transitionId, planSha256, legacyRootDropKeyArn, defaultVersionId: "v2", temporaryVersionId: "v2", observedAt: "2026-08-18T12:00:00.000Z" });
+  assert(evidence.actions.includes("kms:GetKeyRotationStatus"));
+  assert.equal(evidence.legacyRootDropKeyArn, legacyRootDropKeyArn);
+  assert.doesNotThrow(() => assertTemporaryCapabilityEvidence(evidence, { sourceSha, state: "AUTHORIZED_FOR_ROOT_DROP_CREATION" }));
+});
+
+test("legacy rotation status capability remains exact-purpose and revocation-classified", () => {
+  const legacyRootDropKeyArn = ROOT_DROP_LEGACY_POLICY_BINDING.keyArn;
+  const statement = temporaryKmsLegacyRotationStatusStatement({ sourceSha, transitionId, keyArn: legacyRootDropKeyArn });
+  assert.equal(statement.Action, "kms:GetKeyRotationStatus");
+  assert.equal(statement.Resource, legacyRootDropKeyArn);
+  assert.equal(isTemporaryTagResourceStatement(statement), true);
+  assert.equal(isTemporaryTagResourceStatement({ ...statement, Resource: TEMPORARY_KMS_CAPABILITY.keyResource }), false);
+  assert.equal(isTemporaryTagResourceStatement({ ...statement, Action: "kms:DescribeKey" }), false);
+  assert.equal(buildTemporaryReleasePolicy(policy, { sourceSha, transitionId }).Statement.some(({ Action }) => Action === "kms:GetKeyRotationStatus"), false);
+});
+
+test("existing revoke lifecycle removes the legacy rotation-status exception", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-legacy-revoke-"));
+  const stateFile = path.join(directory, "capability.json");
+  const legacyRootDropKeyArn = ROOT_DROP_LEGACY_POLICY_BINDING.keyArn;
+  const legacyTemporary = buildTemporaryReleasePolicy(policy, { sourceSha, transitionId, legacyRootDropKeyArn });
+  const fake = createPolicyVersionRunner({ fixture: {
+    defaultVersionId: "v2",
+    documents: new Map([["v1", policy], ["v2", legacyTemporary]]),
+    dates: new Map([["v1", "2026-01-01T00:00:00.000Z"], ["v2", "2026-01-02T00:00:00.000Z"]]),
+  } });
+  const ownership = { keyOwned: true, aliasOwned: true, aliasResolves: true };
+  const evidence = buildTemporaryCapabilityEvidence({ state: "ROOT_DROP_OWNERSHIP_VERIFIED", sourceSha, transitionId, planSha256, legacyRootDropKeyArn, defaultVersionId: "v2", temporaryVersionId: "v2", ownership, observedAt: "2026-08-18T12:00:00.000Z" });
+  writeFileSync(stateFile, `${JSON.stringify(evidence)}\n`, { mode: 0o600 });
+  try {
+    const result = createTemporaryKmsCapabilityRunner({ run: fake.run }).runPhase({ phase: "revoke", sourceSha, transitionId, stateFile });
+    assert.equal(result.evidence.state, "REVOKED");
+    assert.equal(fake.documents.get("v2"), undefined);
+    assert.equal([...fake.documents.values()].some((document) => document.Statement.some(isTemporaryTagResourceStatement)), false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("temporary capability SID is AWS-compatible, deterministic, bounded, and collision-resistant", () => {

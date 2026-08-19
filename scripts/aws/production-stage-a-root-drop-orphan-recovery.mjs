@@ -180,6 +180,11 @@ function candidateSnapshot(adapter, keyId) {
     || metadata?.MultiRegion === true
     || (metadata?.Description && metadata.Description !== ROOT_DROP_KEY_DESCRIPTION);
   if (provablyIrrelevant) return { keyId, metadata, provablyIrrelevant: true };
+  const discoveryPublicKey = adapter.discoveryPublicKey?.(metadata.KeyId);
+  if (discoveryPublicKey && (discoveryPublicKey.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec
+    || discoveryPublicKey.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage
+    || !Array.isArray(discoveryPublicKey.SigningAlgorithms)
+    || !discoveryPublicKey.SigningAlgorithms.includes(ROOT_DROP_EXPECTED_SIGNING_ALGORITHM))) return { keyId, metadata, provablyIrrelevant: true };
   const tags = rootDropTagsFromAws(adapter.listTags(metadata.KeyId));
   const policy = adapter.getPolicy(metadata.KeyId);
   const aliases = adapter.listAliases(metadata.KeyId);
@@ -474,6 +479,7 @@ export function buildRootDropAwsReadAdapter({ run, profile, discoveryProfile = p
     actorBindings,
     listKeys: () => readPages(["kms", "list-keys"], "Keys", "--starting-token", discoveryProfile),
     describeKey: (keyId) => read(["kms", "describe-key", "--key-id", keyId], discoveryProfile).KeyMetadata,
+    discoveryPublicKey: (keyId) => read(["kms", "get-public-key", "--key-id", keyId], discoveryProfile),
     listTags: (keyId) => read(["kms", "list-resource-tags", "--key-id", keyId]).Tags || [],
     getPolicy: (keyId) => JSON.parse(decodeURIComponent(read(["kms", "get-key-policy", "--key-id", keyId, "--policy-name", "default"]).Policy)),
     getPublicKey: (keyId) => read(["kms", "get-public-key", "--key-id", keyId]),
