@@ -264,7 +264,7 @@ test("canonical authorization reaches the legacy capability before provider refr
   const stageAState = {
     ...stateFixture(),
     resources: stateFixture().resources.map((resource) => resource.type === "aws_kms_key" && resource.address === "aws_kms_key.root_drop"
-      ? { ...resource, name: "root_drop", instances: [{ attributes: { id: keyId, arn: null, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] }
+      ? { ...resource, name: "root_drop", instances: [{ identity_schema_version: 0, identity: null, attributes: { id: keyId, arn: null, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] }
       : resource.type === "aws_kms_alias" && resource.address === "aws_kms_alias.root_drop" ? { ...resource, name: "root_drop", instances: [] } : resource),
   };
   const stateBytes = Buffer.from(JSON.stringify(stageAState));
@@ -540,7 +540,7 @@ test("launch handoff makes historical authorization precede provider refresh", (
   assert.match(command(6), /recorded historical plan SHA is provenance only/);
   assert.match(command(7), /persisted post-refresh state/);
   assert.match(nodes.get(7).outputs.join(" "), /post-refresh state identity/);
-  assert.match(nodes.get(7).retrySemantics, /may persist only the exact ARN\/key_id population/);
+  assert.match(nodes.get(7).retrySemantics, /may persist only the exact ARN\/key_id and root-drop provider instance identity population/);
   assert.match(nodes.get(7).failClosedCondition, /lineage\/identity binding changed/);
   assert.doesNotMatch(nodes.get(7).failClosedCondition, /changed state identity$/);
   assert.match(command(7), /terraform plan -refresh-only/);
