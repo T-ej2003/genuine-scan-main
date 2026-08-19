@@ -23,6 +23,7 @@ import {
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageAStateIdentityBinding, buildStageAStateIdentity } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { buildRecoveryAwsEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
 import { assertRootDropCensusMatch, assertRootDropCreationInterlock, buildRootDropAwsReadAdapter, collectRootDropCensus } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -529,17 +530,19 @@ function option(argv, name, required = true) {
   return value;
 }
 
-export function runCli(argv = process.argv.slice(2), { run: injectedRun, readRootDropCensus: injectedReadRootDropCensus, write = (value) => process.stdout.write(value) } = {}) {
+export function runCli(argv = process.argv.slice(2), { run: injectedRun, readRootDropCensus: injectedReadRootDropCensus, execFile = execFileSync, write = (value) => process.stdout.write(value) } = {}) {
   try {
     const profile = option(argv, "--admin-profile");
     const releaseProfile = option(argv, "--release-profile", false);
     const region = option(argv, "--region", false) || TEMPORARY_KMS_CAPABILITY.region;
     if (region !== TEMPORARY_KMS_CAPABILITY.region) fail("region is outside the protected production boundary");
     const phase = option(argv, "--phase");
+    if (phase === "authorize" && !releaseProfile) fail("--release-profile is required before temporary capability authorization");
     const sourceSha = option(argv, "--source-sha");
     const transitionId = option(argv, "--transition-id");
     const stateFile = option(argv, "--state-file");
-    const run = injectedRun || ((args) => execFileSync("aws", [...args, "--region", region, "--profile", profile, "--output", "json", "--no-cli-pager"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+    const adminEnv = buildRecoveryAwsEnvironment(profile);
+    const run = injectedRun || ((args) => execFile("aws", [...args, "--region", region, "--profile", profile, "--output", "json", "--no-cli-pager"], { cwd: root, env: adminEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
     if (releaseProfile && releaseProfile === profile) fail("administrator and release profiles must be distinct");
     const stageAStateFileOption = option(argv, "--stage-a-state", false);
     if (phase === "authorize" && !stageAStateFileOption) fail("--stage-a-state is required before temporary capability authorization");
@@ -554,9 +557,9 @@ export function runCli(argv = process.argv.slice(2), { run: injectedRun, readRoo
     const suppliedRootDropCensus = phase === "authorize" ? readJson(validateStageAInput(rootDropCensusFileOption, "Stage-A root-drop census")) : null;
     const freshRootDropCensus = phase === "authorize"
       ? injectedReadRootDropCensus
-        ? injectedReadRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, census: suppliedRootDropCensus })
+        ? injectedReadRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, census: suppliedRootDropCensus, profile: releaseProfile })
         : collectRootDropCensus({
-          adapter: buildRootDropAwsReadAdapter({ run: (args) => execFileSync("aws", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), profile, region }),
+          adapter: buildRootDropAwsReadAdapter({ run: (args) => execFile("aws", args, { cwd: root, env: buildRecoveryAwsEnvironment(releaseProfile), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), profile: releaseProfile, region }),
           terraformState: rootDropState,
           sourceSha,
           transitionId,

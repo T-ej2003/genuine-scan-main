@@ -1345,6 +1345,34 @@ test("CLI authorization rejects state without an independently produced identity
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test("authorization uses the release profile for census and administrator profile for IAM mutations", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-split-actors-"));
+  const stateFile = path.join(directory, "capability.json");
+  const planJsonFile = writePlanFile(directory);
+  const inputs = writeCliStageAInputs(directory);
+  const fixture = createPolicyVersionRunner({ fixture: { defaultVersionId: "v1", documents: new Map([["v1", policy]]), dates: new Map([["v1", "2026-01-01T00:00:00.000Z"]]) } });
+  const observedAdminEnvironments = [];
+  let observedCensusProfile;
+  try {
+    runCli(cliArgs({ stateFile, planJsonFile, ...inputs }), {
+      execFile: (command, args, options) => { observedAdminEnvironments.push({ command, args, env: options.env }); return fixture.run(args); },
+      readRootDropCensus: ({ profile }) => { observedCensusProfile = profile; return JSON.parse(readFileSync(inputs.rootDropCensusFile, "utf8")); },
+      write: () => {},
+    });
+    assert.equal(observedCensusProfile, "release");
+    assert(observedAdminEnvironments.length > 0);
+    for (const { command, env } of observedAdminEnvironments) {
+      assert.equal(command, "aws");
+      assert.equal(env.AWS_PROFILE, "administrator");
+      assert.equal(env.AWS_REGION, STAGE_B.region);
+      assert.equal(env.AWS_DEFAULT_REGION, STAGE_B.region);
+      for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(env[key], undefined);
+    }
+    const missingRelease = cliArgs({ stateFile, planJsonFile, ...inputs }).filter((value, index, values) => value !== "--release-profile" && values[index - 1] !== "--release-profile");
+    assert.throws(() => runCli(missingRelease, { run: fixture.run, readRootDropCensus: () => JSON.parse(readFileSync(inputs.rootDropCensusFile, "utf8")), write: () => {} }), /--release-profile is required/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("CLI emits a zero-mutation machine-readable failure before any IAM mutation", () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-temp-kms-cli-zero-failure-"));
   const stateFile = path.join(directory, "capability.json");

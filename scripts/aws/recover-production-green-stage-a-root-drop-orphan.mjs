@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildStageAStateIdentity, assertStageAStateIdentityBinding } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { buildRecoveryAwsEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
 import { ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import {
   ROOT_DROP_KEY_ADDRESS,
@@ -35,7 +36,7 @@ function failedEvidence(argv) {
   };
 }
 
-export async function runCensus({ argv = process.argv.slice(2), run, write = (value) => process.stdout.write(value) } = {}) {
+export async function runCensus({ argv = process.argv.slice(2), run, execFile = execFileSync, write = (value) => process.stdout.write(value) } = {}) {
   const profile = option(argv, "--profile");
   const suppliedRegion = option(argv, "--region", false);
   if (argv.includes("--region") && !suppliedRegion) throw new Error("Stage-A root-drop census: --region requires a value");
@@ -49,14 +50,15 @@ export async function runCensus({ argv = process.argv.slice(2), run, write = (va
   const stageAStateIdentity = readJson(identityPath);
   assertStageAStateIdentityBinding(buildStageAStateIdentity(state, { stateBytes }), stageAStateIdentity);
   const evidence = failedEvidence(argv);
-  const adapter = buildRootDropAwsReadAdapter({ run: run || ((args) => execFileSync("aws", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })), profile, region });
+  const env = buildRecoveryAwsEnvironment(profile);
+  const adapter = buildRootDropAwsReadAdapter({ run: run || ((args) => execFile("aws", args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })), profile, region });
   const census = collectRootDropCensus({ adapter, terraformState: state, sourceSha: evidence.sourceSha, transitionId: evidence.transitionId, stageAStateIdentity, failedApplyEvidence: evidence });
   writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(census, null, 2)}\n`), repositoryRoot: root, label: "Stage-A root-drop census" });
   write(`${JSON.stringify({ status: census.status, candidateCount: census.candidateCount, output: outputPath }, null, 2)}\n`);
   return census;
 }
 
-export async function runAdoption({ argv = process.argv.slice(2), runTerraform, readRootDropCensus, write = (value) => process.stdout.write(value) } = {}) {
+export async function runAdoption({ argv = process.argv.slice(2), runTerraform, readRootDropCensus, execFile = execFileSync, write = (value) => process.stdout.write(value) } = {}) {
   const censusPath = privatePath(option(argv, "--census"), "Stage-A root-drop census");
   const census = readJson(censusPath);
   const statePath = privatePath(option(argv, "--stage-a-state"), "Stage-A state");
@@ -71,9 +73,9 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const region = suppliedRegion || STAGE_B.region;
   if (region !== STAGE_B.region) throw new Error("Stage-A root-drop adoption: region is outside the protected production boundary");
   const freshCensus = readRootDropCensus
-    ? await readRootDropCensus({ census, stageAState, stageAStateIdentity })
+    ? await readRootDropCensus({ census, stageAState, stageAStateIdentity, profile })
     : collectRootDropCensus({
-      adapter: buildRootDropAwsReadAdapter({ run: (args) => execFileSync("aws", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), profile, region }),
+      adapter: buildRootDropAwsReadAdapter({ run: (args) => execFile("aws", args, { cwd: root, env: buildRecoveryAwsEnvironment(profile), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), profile, region }),
       terraformState: stageAState,
       sourceSha: census.sourceSha,
       transitionId: census.transitionId,
@@ -83,7 +85,8 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   const terraformRoot = option(argv, "--terraform-root");
   const planPath = option(argv, "--plan-path");
   const execute = argv.includes("--execute");
-  const tf = runTerraform || ((args) => execFileSync("terraform", [`-chdir=${terraformRoot}`, ...args], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+  const env = buildRecoveryAwsEnvironment(profile);
+  const tf = runTerraform || ((args) => execFile("terraform", [`-chdir=${terraformRoot}`, ...args], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   const readState = async () => JSON.parse(tf(["state", "pull"]));
   const importKey = async ({ address, id }) => { tf(["import", "-input=false", "-lock=true", address, id]); return { outcome: "CONFIRMED_SUCCESS" }; };
   const refreshState = async () => readState();

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
@@ -20,7 +23,7 @@ import {
   rootDropRecoverySha256,
   createRootDropRecoveryRunner,
 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
-import { runCensus } from "../aws/recover-production-green-stage-a-root-drop-orphan.mjs";
+import { runAdoption, runCensus } from "../aws/recover-production-green-stage-a-root-drop-orphan.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
 
 const sourceSha = "f03fb3266385486d25317b8c2b202c408ae8771f";
@@ -120,6 +123,60 @@ test("root-drop census rejects a missing explicit region before AWS", async () =
   let calls = 0;
   await assert.rejects(() => runCensus({ argv: ["--profile", "administrator", "--region"], run: () => { calls += 1; return "{}"; } }), /--region requires a value/);
   assert.equal(calls, 0);
+});
+
+test("orphan AWS reads and every Terraform subprocess use the selected release environment", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-credential-boundary-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  const outputPath = path.join(directory, "output.json");
+  const planPath = path.join(directory, "alias.plan");
+  const terraformRoot = path.join(directory, "terraform");
+  const stateBytes = Buffer.from(JSON.stringify(absentState));
+  writeFileSync(statePath, stateBytes, { mode: 0o600 });
+  writeFileSync(identityPath, `${JSON.stringify(stateIdentity)}\n`, { mode: 0o600 });
+  const suppliedCensus = census();
+  writeFileSync(censusPath, `${JSON.stringify(suppliedCensus)}\n`, { mode: 0o600 });
+  const saved = Object.fromEntries(["AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE"].map((key) => [key, process.env[key]]));
+  const restore = () => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } };
+  const observedAws = [];
+  const observedTerraform = [];
+  let currentState = absentState;
+  try {
+    Object.assign(process.env, { AWS_PROFILE: "administrator", AWS_ACCESS_KEY_ID: "ambient-key", AWS_SECRET_ACCESS_KEY: "ambient-secret", AWS_SESSION_TOKEN: "ambient-session", AWS_SECURITY_TOKEN: "ambient-security", AWS_DEFAULT_PROFILE: "ambient-default", AWS_REGION: "us-east-1", AWS_DEFAULT_REGION: "us-east-1", AWS_CONFIG_FILE: "/tmp/config", AWS_SHARED_CREDENTIALS_FILE: "/tmp/credentials" });
+    await runCensus({ argv: ["--profile", "release", "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--source-sha", sourceSha, "--transition-id", transitionId, "--plan-sha256", failedApplyEvidence.planSha256, "--failed-apply-start", failedApplyEvidence.failedApplyWindow.start, "--failed-apply-end", failedApplyEvidence.failedApplyWindow.end, "--output", outputPath], execFile: (command, args, options) => { observedAws.push({ command, args, env: options.env }); return JSON.stringify({ Keys: [] }); }, write: () => {} });
+    assert.equal(observedAws[0].env.AWS_PROFILE, "release");
+    assert.equal(observedAws[0].env.AWS_REGION, STAGE_B.region);
+    assert.equal(observedAws[0].env.AWS_DEFAULT_REGION, STAGE_B.region);
+    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(observedAws[0].env[key], undefined);
+    assert.equal(observedAws[0].env.AWS_CONFIG_FILE, "/tmp/config");
+    assert.equal(observedAws[0].env.AWS_SHARED_CREDENTIALS_FILE, "/tmp/credentials");
+    let adoptionCensusProfile;
+    const result = await runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--profile", "release", "--terraform-root", terraformRoot, "--plan-path", planPath, "--execute"], readRootDropCensus: ({ profile }) => { adoptionCensusProfile = profile; return suppliedCensus; }, execFile: (command, args, options) => {
+      observedTerraform.push({ command, args, env: options.env });
+      if (args.includes("state") && args.includes("pull")) return JSON.stringify(currentState);
+      if (args.includes("import")) { currentState = keyState(); return ""; }
+      if (args.includes("apply")) { currentState = ownedState(); return ""; }
+      if (args.includes("show")) return JSON.stringify(args.at(-1).endsWith("zero-drift") ? { resource_changes: [] } : aliasPlan());
+      return "";
+    }, write: () => {} });
+    assert.equal(result.status, "RECOVERED");
+    assert.equal(adoptionCensusProfile, "release");
+    assert(observedTerraform.some(({ args }) => args.includes("state")));
+    assert(observedTerraform.some(({ args }) => args.includes("import")));
+    assert(observedTerraform.some(({ args }) => args.includes("plan")));
+    assert(observedTerraform.some(({ args }) => args.includes("apply")));
+    for (const { env } of observedTerraform) {
+      assert.equal(env.AWS_PROFILE, "release");
+      assert.equal(env.AWS_REGION, STAGE_B.region);
+      assert.equal(env.AWS_DEFAULT_REGION, STAGE_B.region);
+      for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(env[key], undefined);
+      assert.equal(env.AWS_CONFIG_FILE, "/tmp/config");
+      assert.equal(env.AWS_SHARED_CREDENTIALS_FILE, "/tmp/credentials");
+    }
+    assert.deepEqual({ AWS_PROFILE: process.env.AWS_PROFILE, AWS_REGION: process.env.AWS_REGION, AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION }, { AWS_PROFILE: "administrator", AWS_REGION: "us-east-1", AWS_DEFAULT_REGION: "us-east-1" });
+  } finally { restore(); rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("root-drop census consumes every paginated KMS and CloudTrail page", () => {
