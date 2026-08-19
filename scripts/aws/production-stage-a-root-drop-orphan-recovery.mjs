@@ -55,10 +55,11 @@ export function buildLegacyRootDropKeyPolicy() {
 
 export function assertLegacyRootDropPolicyBinding({ candidate, sourceSha, transitionId, failedApplyEvidence } = {}) {
   const metadata = candidate?.metadata;
+  const { arn } = assertKeyIdentity(candidate);
   const binding = ROOT_DROP_LEGACY_POLICY_BINDING;
   if (!samePolicy(candidate?.policy, buildLegacyRootDropKeyPolicy())
     || sourceSha !== binding.sourceSha || transitionId !== binding.transitionId || failedApplyEvidence?.planSha256 !== binding.planSha256
-    || failedApplyEvidence?.creationEventId !== binding.creationEventId || candidate?.arn !== binding.keyArn || metadata?.Arn !== binding.keyArn
+    || failedApplyEvidence?.creationEventId !== binding.creationEventId || arn !== binding.keyArn
     || metadata?.AWSAccountId !== STAGE_B.account || !same(failedApplyEvidence?.stageAStateIdentity, binding.stageAStateIdentity)) fail("legacy root-drop policy is not bound to the exact historical failed apply");
   return true;
 }
@@ -98,10 +99,10 @@ function assertStateRootDropCounts(state, { key, alias, allowKeyOnly = false } =
 function assertKeyIdentity(candidate) {
   const metadata = candidate?.metadata;
   if (!metadata || typeof metadata !== "object") fail("orphan key metadata is missing");
-  const keyId = String(metadata.KeyId || candidate.keyId || "");
-  const arn = String(metadata.Arn || candidate.arn || "");
+  const keyId = String(metadata.KeyId || "");
+  const arn = String(metadata.Arn || "");
   const arnMatch = KEY_ARN.exec(arn);
-  if (!KEY_ID.test(keyId) || !arnMatch || arnMatch[1] !== keyId || metadata.AWSAccountId !== STAGE_B.account) fail("orphan key identity is outside the production account/region contract");
+  if (!KEY_ID.test(candidate?.keyId || "") || candidate.keyId !== keyId || !arnMatch || arnMatch[1] !== keyId || metadata.AWSAccountId !== STAGE_B.account) fail("orphan key identity is outside the production account/region contract");
   if (metadata.Description !== ROOT_DROP_KEY_DESCRIPTION || metadata.KeyState !== "Enabled" || metadata.KeyManager !== "CUSTOMER" || metadata.Origin !== "AWS_KMS" || metadata.KeySpec !== TEMPORARY_KMS_CAPABILITY.keySpec || metadata.KeyUsage !== TEMPORARY_KMS_CAPABILITY.keyUsage || metadata.MultiRegion !== false) fail("orphan key metadata does not match the exact root-drop contract");
   return { keyId, arn };
 }
@@ -505,7 +506,7 @@ export function collectRootDropCensus({ adapter, terraformState, sourceSha, tran
   const authenticatedCandidates = [];
   for (const candidate of candidates) {
     try { authenticatedCandidates.push({ ...candidate, ...authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence, allowKeyOnly }) }); }
-    catch (error) { authenticatedCandidates.push({ keyId: candidate.keyId, arn: candidate.arn, authenticated: false, reason: error.message }); }
+    catch (error) { authenticatedCandidates.push({ keyId: candidate.keyId, keyArn: candidate.metadata?.Arn, authenticated: false, reason: error.message }); }
   }
   return buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates: authenticatedCandidates, keyUniverse: startUniverse, failedApplyEvidence, actorBindings: adapter.actorBindings });
 }

@@ -34,7 +34,7 @@ import { AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES, classifyTemporary
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { buildStageARootDropKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
-import { ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_LEGACY_POLICY_BINDING, ROOT_DROP_RECOVERY_SCHEMA_VERSION, buildLegacyRootDropKeyPolicy, buildRootDropCensus, rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
+import { ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_KEY_DESCRIPTION, ROOT_DROP_LEGACY_POLICY_BINDING, ROOT_DROP_RECOVERY_SCHEMA_VERSION, buildLegacyRootDropKeyPolicy, buildRootDropCensus, rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
@@ -72,7 +72,7 @@ function legacyRootDropCensus({ source = ROOT_DROP_LEGACY_POLICY_BINDING.sourceS
     stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity,
     keyUniverse: [keyId],
     failedApplyEvidence,
-    candidates: [{ authenticated: true, keyId, keyArn, arn: keyArn, metadata: { KeyId: keyId, Arn: keyArn, AWSAccountId: TEMPORARY_KMS_CAPABILITY.accountId }, policy: buildLegacyRootDropKeyPolicy(), policyCompatibility: "LEGACY_BOUND_HISTORICAL", sourceSha: source, transitionId: transition, planSha256: plan, creationEventId: eventId }],
+    candidates: [{ authenticated: true, keyId, keyArn, metadata: { KeyId: keyId, Arn: keyArn, AWSAccountId: TEMPORARY_KMS_CAPABILITY.accountId, KeyState: "Enabled", KeyManager: "CUSTOMER", Origin: "AWS_KMS", KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY", MultiRegion: false, Description: ROOT_DROP_KEY_DESCRIPTION }, policy: buildLegacyRootDropKeyPolicy(), policyCompatibility: "LEGACY_BOUND_HISTORICAL", sourceSha: source, transitionId: transition, planSha256: plan, creationEventId: eventId }],
   });
 }
 

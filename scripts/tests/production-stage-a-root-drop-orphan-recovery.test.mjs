@@ -70,7 +70,6 @@ const event = { eventId: failedApplyEvidence.creationEventId, eventName: "Create
 const awsLookupEvent = { EventId: event.eventId, EventName: event.eventName, EventSource: event.eventSource, EventTime: event.eventTime, CloudTrailEvent: JSON.stringify({ eventID: event.eventId, eventName: event.eventName, eventSource: event.eventSource, awsRegion: event.awsRegion, recipientAccountId: event.recipientAccountId, eventTime: event.eventTime, userIdentity: event.userIdentity, resources: event.resources }) };
 const candidate = (overrides = {}) => ({
   keyId,
-  arn: keyArn,
   metadata: { KeyId: keyId, Arn: keyArn, AWSAccountId: STAGE_B.account, KeyState: "Enabled", KeyManager: "CUSTOMER", Origin: "AWS_KMS", KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY", MultiRegion: false, Description: ROOT_DROP_KEY_DESCRIPTION },
   tags: { ...TEMPORARY_KMS_CAPABILITY.tags },
   policy: buildStageARootDropKeyPolicy(),
@@ -81,7 +80,6 @@ const candidate = (overrides = {}) => ({
 });
 const legacyCandidate = (overrides = {}) => candidate({
   keyId: legacyKeyId,
-  arn: legacyKeyArn,
   metadata: { ...candidate().metadata, KeyId: legacyKeyId, Arn: legacyKeyArn },
   policy: buildLegacyRootDropKeyPolicy(),
   creationEvents: [{ ...event, eventId: ROOT_DROP_LEGACY_POLICY_BINDING.creationEventId, resources: [{ ARN: legacyKeyArn }] }],
@@ -137,16 +135,39 @@ test("historical root-drop policy is accepted only for the exact failed apply bi
   assert.equal(authenticateRootDropOrphan({ candidate: legacyCandidate(), terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }).policyCompatibility, "LEGACY_BOUND_HISTORICAL");
   assert.doesNotThrow(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(), sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }));
   for (const [label, overrides] of [
-    ["wrong key", { arn: `${legacyKeyArn}-wrong`, metadata: { ...legacyCandidate().metadata, Arn: `${legacyKeyArn}-wrong` } }],
+    ["wrong key", { keyId, metadata: candidate().metadata }],
+    ["ARN/key ID mismatch", { metadata: { ...legacyCandidate().metadata, KeyId: keyId } }],
+    ["wrong account", { metadata: { ...legacyCandidate().metadata, AWSAccountId: "000000000000" } }],
+    ["wrong region", { metadata: { ...legacyCandidate().metadata, Arn: `arn:aws:kms:us-east-1:${STAGE_B.account}:key/${legacyKeyId}` } }],
     ["wrong policy", { policy: { ...buildLegacyRootDropKeyPolicy(), Statement: buildLegacyRootDropKeyPolicy().Statement.map((statement) => statement.Sid === "ReleaseReadsRootDropKey" ? { ...statement, Action: [...statement.Action, "kms:ListAliases"] } : statement) } }],
-  ]) assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(overrides), sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }), /legacy root-drop policy/, label);
-  for (const [label, field, value] of [["wrong source", "sourceSha", sourceSha], ["wrong transition", "transitionId", transitionId], ["wrong plan", "planSha256", failedApplyEvidence.planSha256]]) {
+  ]) assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(overrides), sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence }), /legacy root-drop policy|orphan key identity/, label);
+  for (const [label, field, value] of [["wrong source", "sourceSha", sourceSha], ["wrong transition", "transitionId", transitionId], ["wrong plan", "planSha256", failedApplyEvidence.planSha256], ["wrong event", "creationEventId", failedApplyEvidence.creationEventId]]) {
     const evidence = { ...legacyFailedApplyEvidence, [field]: value };
     assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(), sourceSha: evidence.sourceSha, transitionId: evidence.transitionId, failedApplyEvidence: evidence }), /legacy root-drop policy/, label);
   }
   assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(), sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: { ...legacyFailedApplyEvidence, stageAStateIdentity: { ...ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity, serial: 46 } } }), /legacy root-drop policy/);
   assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(), sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: { ...legacyFailedApplyEvidence, stageAStateIdentity: undefined } }), /legacy root-drop policy/);
   assert.equal(authenticated().policyCompatibility, "CANONICAL");
+});
+
+test("production candidate snapshot shape authenticates and persists the exact historical orphan", () => {
+  const snapshot = legacyCandidate();
+  const adapter = {
+    listKeys: () => [{ KeyId: legacyKeyId }],
+    describeKey: () => snapshot.metadata,
+    listTags: () => Object.entries(snapshot.tags).map(([TagKey, TagValue]) => ({ TagKey, TagValue })),
+    getPolicy: () => snapshot.policy,
+    getPublicKey: () => snapshot.publicKey,
+    listAliases: () => snapshot.aliases,
+    lookupCreateKeyEvents: () => snapshot.creationEvents,
+  };
+  const census = collectRootDropCensus({ adapter, terraformState: absentState, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity, failedApplyEvidence: legacyFailedApplyEvidence });
+  assert.equal(census.status, "AUTHENTICATED_ORPHAN");
+  assert.equal(Object.hasOwn(census.candidates[0], "arn"), false);
+  assert.equal(census.candidates[0].metadata.Arn, legacyKeyArn);
+  assert.equal(census.candidates[0].keyArn, legacyKeyArn);
+  const persisted = JSON.parse(JSON.stringify(census));
+  assert.doesNotThrow(() => assertRootDropCensus(persisted, { sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity }));
 });
 
 test("legacy policy convergence requires the exact update plus alias plan", () => {
