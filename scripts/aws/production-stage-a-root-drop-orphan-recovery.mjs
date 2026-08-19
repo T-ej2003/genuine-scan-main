@@ -27,6 +27,17 @@ const sha256 = (value) => crypto.createHash("sha256").update(typeof value === "s
 const fail = (message) => { throw new Error(`Stage-A root-drop orphan recovery: ${message}`); };
 const same = (left, right) => canonical(left) === canonical(right);
 
+function normalizeCloudTrailLookupEvent(entry) {
+  if (!entry || typeof entry.CloudTrailEvent !== "string") fail("CloudTrail LookupEvents entry is missing its authoritative CloudTrailEvent payload");
+  let payload;
+  try { payload = JSON.parse(entry.CloudTrailEvent); } catch { fail("CloudTrail LookupEvents entry has malformed CloudTrailEvent JSON"); }
+  if (typeof entry.EventId !== "string" || !entry.EventId || typeof payload.eventID !== "string" || !payload.eventID) fail("CloudTrail LookupEvents entry is missing its event ID");
+  if (entry.EventId !== payload.eventID) fail("CloudTrail LookupEvents wrapper and payload event IDs disagree");
+  const normalized = { ...payload };
+  delete normalized.eventID;
+  return { ...normalized, eventId: entry.EventId };
+}
+
 export const canonicalRootDropRecoveryJson = canonical;
 export const rootDropRecoverySha256 = sha256;
 
@@ -69,7 +80,7 @@ function assertCreator(value) {
 }
 
 function assertCreationEvent(event, { creatorArn, failedApplyWindow, keyArn, eventId } = {}) {
-  if (!event || event.eventName !== "CreateKey" || event.eventSource !== "kms.amazonaws.com" || event.awsRegion !== STAGE_B.region || String(event.recipientAccountId || event.accountId) !== STAGE_B.account) fail("orphan creation event is not an exact production KMS CreateKey event");
+  if (!event || typeof event.eventId !== "string" || !event.eventId || event.eventName !== "CreateKey" || event.eventSource !== "kms.amazonaws.com" || event.awsRegion !== STAGE_B.region || String(event.recipientAccountId || event.accountId) !== STAGE_B.account) fail("orphan creation event is not an exact production KMS CreateKey event");
   if (eventId && event.eventId !== eventId) fail("orphan creation event ID does not match failed-apply evidence");
   if (!Array.isArray(event.resources) || !event.resources.some((resource) => resource.ARN === keyArn || resource.resourceName === keyArn || resource.resourceName === keyArn.split("/").at(-1))) fail("orphan creation event is not bound to the candidate key");
   const creator = event.userIdentity?.arn || event.creatorArn;
@@ -111,7 +122,7 @@ export function assertRootDropCensus(census, { sourceSha, transitionId, stageASt
   const observedAt = Date.parse(census?.observedAt || "");
   if (!census || !SHA256.test(censusSha256 || "") || sha256(unsigned) !== censusSha256 || census.schemaVersion !== ROOT_DROP_RECOVERY_SCHEMA_VERSION || census.kind !== "MSCQR_STAGE_A_ROOT_DROP_CENSUS" || census.region !== STAGE_B.region || !Number.isFinite(observedAt) || observedAt > Date.now() + 5 * 60 * 1000 || !ROOT_DROP_RECOVERY_STATUSES.includes(census.status) || census.sourceSha !== sourceSha || census.transitionId !== transitionId || census.stageAStateLineage !== stageAStateIdentity?.lineage || census.stageAStateSerial !== stageAStateIdentity?.serial || census.stageAStateSha256 !== stageAStateIdentity?.stateSha256 || !Number.isSafeInteger(census.candidateCount) || !Array.isArray(census.candidates) || census.candidateCount !== census.candidates.length) fail("root-drop census is not current, regional, or bound to the exact transition and Stage-A state");
   if (census.status === "NO_CANDIDATE" && census.candidateCount !== 0) fail("root-drop census falsely declares no candidate");
-  if (census.status === "AUTHENTICATED_ORPHAN" && (census.candidateCount !== 1 || census.candidates[0]?.authenticated !== true || !KEY_ID.test(census.candidates[0].keyId || "") || census.candidates[0].sourceSha !== sourceSha || census.candidates[0].transitionId !== transitionId || !SHA256.test(census.candidates[0].planSha256 || "") || !census.failedApplyEvidence || census.failedApplyEvidence.sourceSha !== sourceSha || census.failedApplyEvidence.transitionId !== transitionId || census.failedApplyEvidence.planSha256 !== census.candidates[0].planSha256 || !SHA256.test(census.failedApplyEvidence.planSha256 || "") || !census.failedApplyEvidence.failedApplyWindow)) fail("root-drop census does not contain exactly one source/transition/failed-apply-bound authenticated orphan");
+  if (census.status === "AUTHENTICATED_ORPHAN" && (census.candidateCount !== 1 || census.candidates[0]?.authenticated !== true || !KEY_ID.test(census.candidates[0].keyId || "") || typeof census.candidates[0].creationEventId !== "string" || !census.candidates[0].creationEventId || census.candidates[0].sourceSha !== sourceSha || census.candidates[0].transitionId !== transitionId || !SHA256.test(census.candidates[0].planSha256 || "") || !census.failedApplyEvidence || census.failedApplyEvidence.sourceSha !== sourceSha || census.failedApplyEvidence.transitionId !== transitionId || census.failedApplyEvidence.planSha256 !== census.candidates[0].planSha256 || !SHA256.test(census.failedApplyEvidence.planSha256 || "") || !census.failedApplyEvidence.failedApplyWindow)) fail("root-drop census does not contain exactly one source/transition/failed-apply-bound authenticated orphan");
   if (census.status === "AMBIGUOUS" && census.candidateCount < 1) fail("ambiguous root-drop census has no candidates");
   return true;
 }
@@ -251,7 +262,7 @@ export function buildRootDropAwsReadAdapter({ run, profile, region = STAGE_B.reg
     getPolicy: (keyId) => JSON.parse(decodeURIComponent(read(["kms", "get-key-policy", "--key-id", keyId, "--policy-name", "default"]).Policy)),
     getPublicKey: (keyId) => read(["kms", "get-public-key", "--key-id", keyId]),
     listAliases: (keyId) => readPages(["kms", "list-aliases", "--key-id", keyId], "Aliases", "--starting-token"),
-    lookupCreateKeyEvents: (keyArn) => readPages(["cloudtrail", "lookup-events", "--lookup-attributes", `AttributeKey=ResourceName,AttributeValue=${keyArn}`], "Events", "--next-token"),
+    lookupCreateKeyEvents: (keyArn) => readPages(["cloudtrail", "lookup-events", "--lookup-attributes", `AttributeKey=ResourceName,AttributeValue=${keyArn}`], "Events", "--next-token").map(normalizeCloudTrailLookupEvent),
   });
 }
 
@@ -271,9 +282,7 @@ export function collectRootDropCensus({ adapter, terraformState, sourceSha, tran
     const aliases = adapter.listAliases(metadata.KeyId);
     const knownUnrelatedAlias = aliases.some(({ AliasName }) => ["alias/mscqr-production-rls-green-storage", "alias/mscqr-production-rls-approval"].includes(AliasName));
     if (knownUnrelatedAlias && !same(policy, buildStageARootDropKeyPolicy())) continue;
-    const events = adapter.lookupCreateKeyEvents(metadata.Arn).map((entry) => {
-      try { return JSON.parse(entry.CloudTrailEvent); } catch { return entry; }
-    });
+    const events = adapter.lookupCreateKeyEvents(metadata.Arn);
     candidates.push({
       keyId: metadata.KeyId,
       arn: metadata.Arn,

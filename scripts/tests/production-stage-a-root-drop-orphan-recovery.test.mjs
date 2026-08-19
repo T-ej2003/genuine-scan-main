@@ -33,6 +33,7 @@ const stateBytes = Buffer.from(JSON.stringify(absentState));
 const stateIdentity = buildStageAStateIdentity(absentState, { stateBytes });
 const failedApplyEvidence = { sourceSha, transitionId, planSha256: crypto.createHash("sha256").update("exact-plan").digest("hex"), creatorArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/launch", creationEventId: "event-root-drop-1", failedApplyWindow: { start: "2026-08-19T00:00:00.000Z", end: "2026-08-19T23:59:59.999Z" } };
 const event = { eventId: failedApplyEvidence.creationEventId, eventName: "CreateKey", eventSource: "kms.amazonaws.com", awsRegion: STAGE_B.region, recipientAccountId: STAGE_B.account, eventTime: "2026-08-19T12:00:00.000Z", userIdentity: { arn: failedApplyEvidence.creatorArn }, resources: [{ ARN: keyArn }] };
+const awsLookupEvent = { EventId: event.eventId, EventName: event.eventName, EventSource: event.eventSource, EventTime: event.eventTime, CloudTrailEvent: JSON.stringify({ eventID: event.eventId, eventName: event.eventName, eventSource: event.eventSource, awsRegion: event.awsRegion, recipientAccountId: event.recipientAccountId, eventTime: event.eventTime, userIdentity: event.userIdentity, resources: event.resources }) };
 const candidate = (overrides = {}) => ({
   keyId,
   arn: keyArn,
@@ -44,6 +45,17 @@ const candidate = (overrides = {}) => ({
   creationEvents: [event],
   ...overrides,
 });
+const realAwsAdapter = () => buildRootDropAwsReadAdapter({ profile: "administrator", run: (args) => {
+  if (args[0] === "kms" && args[1] === "list-keys") return JSON.stringify({ Keys: [{ KeyId: keyId }] });
+  if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: candidate().metadata });
+  if (args[0] === "kms" && args[1] === "list-resource-tags") return JSON.stringify({ Tags: Object.entries(candidate().tags).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) });
+  if (args[0] === "kms" && args[1] === "get-key-policy") return JSON.stringify({ Policy: encodeURIComponent(JSON.stringify(candidate().policy)) });
+  if (args[0] === "kms" && args[1] === "get-public-key") return JSON.stringify(candidate().publicKey);
+  if (args[0] === "kms" && args[1] === "list-aliases") return JSON.stringify({ Aliases: [] });
+  if (args[0] === "cloudtrail") return JSON.stringify({ Events: [awsLookupEvent] });
+  throw new Error(`unexpected read ${args.join(" ")}`);
+}});
+const realAwsCensus = () => collectRootDropCensus({ adapter: realAwsAdapter(), terraformState: absentState, sourceSha, transitionId, stageAStateIdentity: stateIdentity, failedApplyEvidence });
 const authenticated = () => authenticateRootDropOrphan({ candidate: candidate(), terraformState: absentState, sourceSha, transitionId, failedApplyEvidence });
 const census = () => buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: stateIdentity, candidates: [{ ...candidate(), ...authenticated() }], failedApplyEvidence });
 const noCandidateCensus = () => buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: stateIdentity, candidates: [] });
@@ -116,7 +128,7 @@ test("root-drop census consumes every paginated KMS and CloudTrail page", () => 
     seen.push(args);
     if (args[0] === "kms" && args[1] === "list-keys") return args.includes("page-2") ? JSON.stringify({ Keys: [{ KeyId: keyId }] }) : JSON.stringify({ Keys: [], NextToken: "page-2" });
     if (args[0] === "kms" && args[1] === "list-aliases") return args.includes("page-2") ? JSON.stringify({ Aliases: [] }) : JSON.stringify({ Aliases: [], NextToken: "page-2" });
-    if (args[0] === "cloudtrail") return args.includes("page-2") ? JSON.stringify({ Events: [event] }) : JSON.stringify({ Events: [], NextToken: "page-2" });
+    if (args[0] === "cloudtrail") return args.includes("page-2") ? JSON.stringify({ Events: [awsLookupEvent] }) : JSON.stringify({ Events: [], NextToken: "page-2" });
     if (args[0] === "kms" && args[1] === "describe-key") return JSON.stringify({ KeyMetadata: { KeyId: keyId, Arn: keyArn, KeySpec: "RSA_3072", KeyUsage: "SIGN_VERIFY" } });
     if (args[0] === "kms" && args[1] === "list-resource-tags") return JSON.stringify({ Tags: [] });
     if (args[0] === "kms" && args[1] === "get-key-policy") return JSON.stringify({ Policy: encodeURIComponent(JSON.stringify({})) });
@@ -128,6 +140,45 @@ test("root-drop census consumes every paginated KMS and CloudTrail page", () => 
   assert.deepEqual(adapter.lookupCreateKeyEvents(keyArn), [event]);
   assert(seen.some((args) => args.includes("--starting-token") && args.includes("page-2")));
   assert(seen.some((args) => args.includes("--next-token") && args.includes("page-2")));
+});
+
+test("real LookupEvents IDs normalize once and survive census JSON round-trip", () => {
+  const adapter = realAwsAdapter();
+  assert.deepEqual(adapter.lookupCreateKeyEvents(keyArn), [event]);
+  const value = realAwsCensus();
+  assert.equal(value.status, "AUTHENTICATED_ORPHAN");
+  assert.equal(value.candidates[0].creationEventId, failedApplyEvidence.creationEventId);
+  const withoutExplicitEventId = { ...failedApplyEvidence };
+  delete withoutExplicitEventId.creationEventId;
+  const withoutExplicitEvidence = collectRootDropCensus({ adapter: realAwsAdapter(), terraformState: absentState, sourceSha, transitionId, stageAStateIdentity: stateIdentity, failedApplyEvidence: withoutExplicitEventId });
+  assert.equal(withoutExplicitEvidence.status, "AUTHENTICATED_ORPHAN");
+  assert.equal(withoutExplicitEvidence.candidates[0].creationEventId, event.eventId);
+  const persisted = JSON.parse(JSON.stringify(value));
+  assert.equal(persisted.censusSha256, rootDropRecoverySha256(Object.fromEntries(Object.entries(persisted).filter(([key]) => key !== "censusSha256"))));
+  assert.doesNotThrow(() => assertRootDropCensus(persisted, { sourceSha, transitionId, stageAStateIdentity: stateIdentity }));
+});
+
+test("real LookupEvents wrapper/payload ID disagreement or missing IDs fails closed", () => {
+  const entries = [
+    { ...awsLookupEvent, EventId: "different-event-id" },
+    { ...awsLookupEvent, EventId: undefined },
+    { ...awsLookupEvent, CloudTrailEvent: JSON.stringify({ eventName: "CreateKey" }) },
+    { EventName: "CreateKey", CloudTrailEvent: JSON.stringify({ eventName: "CreateKey" }) },
+    { ...awsLookupEvent, CloudTrailEvent: "not-json" },
+  ];
+  for (const entry of entries) {
+    const adapter = buildRootDropAwsReadAdapter({ profile: "administrator", run: (args) => args[0] === "cloudtrail" ? JSON.stringify({ Events: [entry] }) : JSON.stringify({ Events: [] }) });
+    assert.throws(() => adapter.lookupCreateKeyEvents(keyArn), /event ID|malformed/);
+  }
+});
+
+test("wrong explicit creation-event-id and duplicate CreateKey IDs remain fail closed", () => {
+  assert.throws(() => authenticateRootDropOrphan({ candidate: candidate({ creationEvents: [{ ...event, eventId: "different-event-id" }] }), terraformState: absentState, sourceSha, transitionId, failedApplyEvidence }), /event ID/);
+  const duplicate = collectRootDropCensus({
+    adapter: { listKeys: () => [{ KeyId: keyId }], describeKey: () => candidate().metadata, listTags: () => [], getPolicy: () => ({}), getPublicKey: () => ({}), listAliases: () => [], lookupCreateKeyEvents: () => [{ ...event, eventId: "event-a" }, { ...event, eventId: "event-b" }] },
+    terraformState: absentState, sourceSha, transitionId, stageAStateIdentity: stateIdentity, failedApplyEvidence,
+  });
+  assert.equal(duplicate.status, "AMBIGUOUS");
 });
 
 test("fresh census includes a key created after a replayed observation even outside its old failed window", () => {
@@ -216,6 +267,15 @@ test("dry-run cannot import an absent key; replay dry-run remains mutation-free"
   assert.equal(result.status, "READY_FOR_ALIAS_ADOPTION");
   assert.deepEqual(result.accounting, { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 });
   assert.deepEqual(replay.counts(), { imports: 0, applies: 0 });
+});
+
+test("adoption reaches its read-only boundary with normalized real AWS event evidence", async () => {
+  const value = runner({ initial: keyState() });
+  const real = realAwsCensus();
+  const persisted = JSON.parse(JSON.stringify(real));
+  const result = await value.run({ census: persisted, freshCensus: persisted, terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
+  assert.equal(result.status, "READY_FOR_ALIAS_ADOPTION");
+  assert.deepEqual(value.counts(), { imports: 0, applies: 0 });
 });
 
 test("successful adoption imports exactly once, creates only the alias, verifies ownership, and proves zero drift", async () => {
