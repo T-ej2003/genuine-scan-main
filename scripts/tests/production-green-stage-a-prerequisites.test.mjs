@@ -142,6 +142,18 @@ test("Stage A semantic identity preserves meaningful arrays and rejects ambiguou
   assert.throws(() => stageAStateSemanticSha256({ ...base, check_results: "not-an-array" }), /check results are malformed/);
 });
 
+test("Stage A semantic identity preserves null, empty, and absent check results distinctly", () => {
+  const absent = structuredClone(stage);
+  delete absent.check_results;
+  const identities = [
+    stageAStateSemanticSha256({ ...stage, check_results: null }),
+    stageAStateSemanticSha256({ ...stage, check_results: [] }),
+    stageAStateSemanticSha256(absent),
+  ];
+  assert.equal(new Set(identities).size, 3);
+  for (const check_results of [{}, "value", 1]) assert.throws(() => stageAStateSemanticSha256({ ...stage, check_results }), /check results are malformed/);
+});
+
 test("Stage A identity version rejects legacy raw-byte identity evidence", () => {
   const identity = buildStageAStateIdentity(stage, { stateBytes: Buffer.from(JSON.stringify(stage)) });
   assert.throws(() => assertStageAStateIdentityBinding({ ...identity, stateIdentityVersion: 1 }, identity), /state identity binding/);

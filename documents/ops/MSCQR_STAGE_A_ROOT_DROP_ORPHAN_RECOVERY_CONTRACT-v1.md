@@ -24,8 +24,10 @@ serialization bytes. Object keys are serialized deterministically; only the
 top-level `check_results` collection is canonicalized as unordered, using the
 unique `(object_kind, config_addr)` key for each entry. Resource, instance,
 attribute, dependency, output, and nested-array order remains significant.
-Malformed or duplicate check-result keys fail closed. The identity version is
-bound into prerequisite, census, and downstream evidence artifacts, so older
+An absent `check_results`, `check_results: null`, and `check_results: []` are
+preserved as three distinct states; only array entries are sorted. Malformed
+types and malformed or duplicate check-result keys fail closed. The identity
+version is bound into prerequisite, census, and downstream evidence artifacts, so older
 raw-byte identities are not silently reinterpreted. The historical failed-
 apply state hash in `ROOT_DROP_LEGACY_POLICY_BINDING` remains immutable
 provenance evidence and is not converted to the current identity format.

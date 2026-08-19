@@ -99,7 +99,7 @@ function checkResultKey(entry) {
 export function normalizeStageAStateForIdentity(state) {
   if (!state || typeof state !== "object" || Array.isArray(state)) throw new Error("Stage A state identity input is malformed.");
   const normalized = structuredClone(state);
-  if (Object.hasOwn(normalized, "check_results")) {
+  if (Object.hasOwn(normalized, "check_results") && normalized.check_results !== null) {
     if (!Array.isArray(normalized.check_results)) throw new Error("Stage A state identity check results are malformed.");
     const keyed = normalized.check_results.map((entry) => ({ key: checkResultKey(entry), entry }));
     if (new Set(keyed.map(({ key }) => key)).size !== keyed.length) throw new Error("Stage A state identity has duplicate check result semantic keys.");
