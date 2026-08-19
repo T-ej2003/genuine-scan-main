@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 import { STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
+import { assertStageBRecoveryRefreshStatus } from "./stage-b-deployment-contract.mjs";
 import { isTerraformDeposedInstance, validateCurrentTaskDefinitionState } from "./generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 
@@ -627,6 +628,7 @@ export function assertStageBRecoveryProvenance({ refreshReport, refreshReportSha
   requireObject(recoveryBindingReport, "Stage B recovery binding report");
   if (observationBindingReport.recoveryOnly !== false) throw new Error("Stage B refresh evidence requires the original non-recovery observation binding.");
   if (!["RECOVERY_ALIAS_ONLY", "PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(recoveryMode)) throw new Error(`Stage B recovery mode is unsupported: ${recoveryMode}`);
+  assertStageBRecoveryRefreshStatus({ status: refreshReport.status, recoveryMode });
   if (["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(recoveryMode) && (recoveryClassificationSha256 !== undefined || recoveryAttestationSha256 !== undefined)) throw new Error(`${recoveryMode} cannot use RECOVERY_ALIAS_ONLY evidence.`);
   const expectedRecoveryOnly = recoveryMode === "RECOVERY_ALIAS_ONLY";
   if (recoveryBindingReport.recoveryOnly !== expectedRecoveryOnly || recoveryBindingReport.recoveryMode !== recoveryMode) throw new Error(`Stage B ${recoveryMode} planning requires the matching recovery binding report.`);

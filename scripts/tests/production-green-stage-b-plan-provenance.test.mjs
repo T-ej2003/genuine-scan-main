@@ -6,9 +6,19 @@ import path from "node:path";
 import test from "node:test";
 import { readPlanningInputs, runStageBTerraformPlanCommand } from "../plan-production-green-stage-b.mjs";
 import { assertStageBRecoveryProvenance } from "../aws/stage-b-refresh-contract.mjs";
+import { assertStageBRecoveryRefreshStatus } from "../aws/stage-b-deployment-contract.mjs";
 
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const digest = (character) => character.repeat(64);
+
+test("recovery refresh status is mode-exact", () => {
+  assert.equal(assertStageBRecoveryRefreshStatus({ status: "RESOURCE_DRIFT", recoveryMode: "PARTIAL_APPLY_RECOVERY" }), true);
+  assert.equal(assertStageBRecoveryRefreshStatus({ status: "RESOURCE_DRIFT", recoveryMode: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" }), true);
+  assert.equal(assertStageBRecoveryRefreshStatus({ status: "REVIEWED_OUTPUT_RECONCILIATION", recoveryMode: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" }), true);
+  assert.throws(() => assertStageBRecoveryRefreshStatus({ status: "RESOURCE_DRIFT", recoveryMode: "NORMAL" }), /exact reviewed refresh evidence/);
+  for (const recoveryMode of ["PARTIAL_APPLY_RECOVERY", "RECOVERY_ALIAS_ONLY", "NORMAL"]) assert.throws(() => assertStageBRecoveryRefreshStatus({ status: "REVIEWED_OUTPUT_RECONCILIATION", recoveryMode }), /exact reviewed refresh evidence/);
+  for (const status of ["NO_CHANGES", "OUTPUT_DRIFT", undefined]) assert.throws(() => assertStageBRecoveryRefreshStatus({ status, recoveryMode: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" }), /exact reviewed refresh evidence/);
+});
 
 test("recovery planning validates refresh against observation binding before reaching the plan seam", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-provenance-"));
