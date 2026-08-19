@@ -51,8 +51,8 @@ function stateFixture() {
     serial: 44,
     lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837",
     resources: [
-      { address: "aws_kms_key.root_drop", type: "aws_kms_key", instances: [{ attributes: { id: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111" } }] },
-      { address: "aws_kms_alias.root_drop", type: "aws_kms_alias", instances: [{ attributes: { target_key_id: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111" } }] },
+      { address: "aws_kms_key.root_drop", mode: "managed", type: "aws_kms_key", name: "root_drop", instances: [{ attributes: { id: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111" } }] },
+      { address: "aws_kms_alias.root_drop", mode: "managed", type: "aws_kms_alias", name: "root_drop", instances: [{ attributes: { target_key_id: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111" } }] },
     ],
   };
 }
@@ -482,9 +482,12 @@ test("capability lifecycle rejects residue and requires ownership before revocat
 });
 
 test("root-drop ownership is exact and both Terraform resources are required", () => {
-  const ownership = buildRootDropOwnershipEvidence({ terraformState: stateFixture(), sourceSha, transitionId, planSha256, observedAt: "2026-08-18T12:00:00.000Z" });
+  const rawState = structuredClone(stateFixture());
+  for (const resource of rawState.resources) delete resource.address;
+  const ownership = buildRootDropOwnershipEvidence({ terraformState: rawState, sourceSha, transitionId, planSha256, observedAt: "2026-08-18T12:00:00.000Z" });
   assert.doesNotThrow(() => assertRootDropOwnershipEvidence(ownership, { sourceSha, planSha256 }));
-  assert.throws(() => buildRootDropOwnershipEvidence({ terraformState: { resources: stateFixture().resources.slice(0, 1) }, sourceSha, transitionId, planSha256, observedAt: "2026-08-18T12:00:00.000Z" }), /key and alias/);
+  assert.throws(() => buildRootDropOwnershipEvidence({ terraformState: { resources: rawState.resources.slice(0, 1) }, sourceSha, transitionId, planSha256, observedAt: "2026-08-18T12:00:00.000Z" }), /key and alias/);
+  assert.throws(() => buildRootDropOwnershipEvidence({ terraformState: { resources: [...rawState.resources, structuredClone(rawState.resources[0])] }, sourceSha, transitionId, planSha256, observedAt: "2026-08-18T12:00:00.000Z" }), /key and alias/);
   assert.throws(() => assertRootDropOwnershipEvidence({ ...ownership, aliasResolves: false }, { sourceSha, planSha256 }), /not exact/);
 });
 
