@@ -154,14 +154,32 @@ test("fresh-image recovery is reachable through the canonical tfvars producer", 
   const freshSignaturePath = path.join(path.dirname(args.outputPath), "fresh-signature.json");
   fs.writeFileSync(freshEvidencePath, `${JSON.stringify(freshEvidence)}\n`, { mode: 0o600 });
   fs.writeFileSync(freshSignaturePath, `${JSON.stringify(signImageEvidence(freshEvidence, { now, sign: () => "AQ==" }))}\n`, { mode: 0o600 });
+  const state = JSON.parse(fs.readFileSync(args.stateBackup));
+  const beforeImages = Object.fromEntries(["backend", "canary", "executor", "read_only_canary", "worker"].map((name, index) => [name, `${STAGE_B.account}.dkr.ecr.${STAGE_B.region}.amazonaws.com/${name === "worker" ? "mscqr-worker" : "mscqr-backend"}@${digest(index + 5)}`]));
+  state.outputs = { bound_images: { value: beforeImages } };
+  fs.writeFileSync(args.stateBackup, `${JSON.stringify(state)}\n`, { mode: 0o600 });
   const observation = generateStageBTfvars({ ...args, imageEvidence: freshEvidencePath, imageEvidenceSignature: freshSignaturePath, outputPath: path.join(path.dirname(args.outputPath), "fresh-observation.tfvars"), bindingReportPath: path.join(path.dirname(args.outputPath), "fresh-observation.json") });
   const observationPath = path.join(path.dirname(args.outputPath), "fresh-observation.json");
   const refreshPath = path.join(path.dirname(args.outputPath), "fresh.refresh.json");
-  fs.writeFileSync(refreshPath, `${JSON.stringify({ schemaVersion: 1, status: "RESOURCE_DRIFT", deployablePlan: false, bindingReportSha256: crypto.createHash("sha256").update(fs.readFileSync(observationPath)).digest("hex"), tfvarsSha256: observation.bindingReport.tfvarsSha256, stageBStateLineage: observation.bindingReport.stateLineage, stageBStateSerial: observation.bindingReport.stateSerial, stageBStateSha256: observation.bindingReport.stateBackupSha256, toolingSha: args.toolingSha, toolingTreeSha256: args.toolingTreeSha256 })}\n`, { mode: 0o600 });
-  const result = generateStageBTfvars({ ...args, imageEvidence: freshEvidencePath, imageEvidenceSignature: freshSignaturePath, freshImagePartialApplyRecovery: true, outputPath: path.join(path.dirname(args.outputPath), "fresh-recovery.tfvars"), bindingReportPath: path.join(path.dirname(args.outputPath), "fresh-recovery.json"), recovery: { refreshReportPath: refreshPath, observationBindingPath: observationPath } });
+  const imageReference = (service) => { const image = freshEvidence.images.find((candidate) => candidate.service === service); return `${STAGE_B.account}.dkr.ecr.${STAGE_B.region}.amazonaws.com/${image.repository}@${image.digest}`; };
+  const afterImages = { backend: imageReference("backend"), canary: imageReference("rls-canary"), executor: imageReference("rls-executor"), read_only_canary: imageReference("rls-canary"), worker: imageReference("worker") };
+  const refresh = { schemaVersion: 1, status: "REVIEWED_OUTPUT_RECONCILIATION", deployablePlan: false, bindingReportSha256: crypto.createHash("sha256").update(fs.readFileSync(observationPath)).digest("hex"), tfvarsSha256: observation.bindingReport.tfvarsSha256, stageBStateLineage: observation.bindingReport.stateLineage, stageBStateSerial: observation.bindingReport.stateSerial, stageBStateSha256: observation.bindingReport.stateBackupSha256, toolingSha: args.toolingSha, toolingTreeSha256: args.toolingTreeSha256, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [{ name: "bound_images", classification: "reviewed", matchesEvidence: true, actions: ["update"], before: beforeImages, after: afterImages }] };
+  fs.writeFileSync(refreshPath, `${JSON.stringify(refresh)}\n`, { mode: 0o600 });
+  let attempt = 0;
+  const recover = (refreshOverride = {}) => {
+    fs.writeFileSync(refreshPath, `${JSON.stringify({ ...refresh, ...refreshOverride })}\n`, { mode: 0o600 });
+    const suffix = attempt++;
+    return generateStageBTfvars({ ...args, imageEvidence: freshEvidencePath, imageEvidenceSignature: freshSignaturePath, freshImagePartialApplyRecovery: true, outputPath: path.join(path.dirname(args.outputPath), `fresh-recovery-${suffix}.tfvars`), bindingReportPath: path.join(path.dirname(args.outputPath), `fresh-recovery-${suffix}.json`), recovery: { refreshReportPath: refreshPath, observationBindingPath: observationPath } });
+  };
+  const result = recover();
   assert.equal(result.bindingReport.recoveryMode, "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY");
   assert.equal(result.bindingReport.partialApplyRecovery, false);
   assert.equal(result.bindingReport.freshImagePartialApplyRecovery, true);
+  assert.throws(() => generateStageBTfvars({ ...args, imageEvidence: freshEvidencePath, imageEvidenceSignature: freshSignaturePath, partialApplyRecovery: true, outputPath: path.join(path.dirname(args.outputPath), "ordinary-partial.tfvars"), bindingReportPath: path.join(path.dirname(args.outputPath), "ordinary-partial.json"), recovery: { refreshReportPath: refreshPath, observationBindingPath: observationPath } }), /not bound to the authenticated serial\/state residue/);
+  assert.throws(() => recover({ resourceChanges: { nonNoOp: 1, changes: [{ address: "aws_db_instance.green" }] } }), /output reconciliation is not exact/);
+  assert.throws(() => recover({ outputChanges: [{ ...refresh.outputChanges[0], before: { ...beforeImages, backend: afterImages.backend } }] }), /output reconciliation is not exact/);
+  assert.throws(() => recover({ outputChanges: [{ ...refresh.outputChanges[0], after: { ...afterImages, backend: beforeImages.backend } }] }), /output reconciliation is not exact/);
+  assert.throws(() => recover({ outputChanges: [...refresh.outputChanges, { name: "unexpected" }] }), /output reconciliation is not exact/);
 });
 
 test("canonical tfvars rejects JSON and ambiguous filenames before output", () => {

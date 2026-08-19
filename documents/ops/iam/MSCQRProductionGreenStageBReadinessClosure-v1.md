@@ -33,7 +33,7 @@ SOURCE
   -> release preflight and producer-owned backend config
   -> state lineage/serial/tfvars binding
   -> exactly one refresh-only observation
-  -> CLEAN_REFRESH or immutable RESOURCE_DRIFT result
+  -> CLEAN_REFRESH, exact REVIEWED_OUTPUT_RECONCILIATION, or immutable RESOURCE_DRIFT result
   -> ROOT identity only when exact recovery residue is present
   -> signed present-time recovery attestation
   -> RELEASE_DEPLOYER identity
@@ -54,6 +54,12 @@ There is no hidden retry or generic recovery mode. A failed one-shot producer is
 terminal until an operator explicitly starts a new valid lifecycle. The credential
 transitions are deliberate boundaries: the repository does not persist credentials or
 pretend that one process can safely own ROOT and MFA-backed release-deployer sessions.
+
+Fresh-image partial-apply recovery may consume `REVIEWED_OUTPUT_RECONCILIATION` only
+when the refresh reports zero resource changes and its sole output change is the exact
+`bound_images` transition from authenticated state to the signed image evidence. Normal
+partial-apply recovery remains bound to `RESOURCE_DRIFT`; unrelated resources or outputs
+remain fail closed.
 
 ## Identity and freshness boundaries
 
