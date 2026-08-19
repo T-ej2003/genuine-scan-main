@@ -144,6 +144,8 @@ function failedEvidence(argv) {
     const value = option(argv, flag, false);
     if (value !== undefined) evidence[key] = value;
   }
+  const historicalStateIdentityPath = option(argv, "--failed-apply-state-identity", false);
+  if (historicalStateIdentityPath) evidence.stageAStateIdentity = readJson(privatePath(historicalStateIdentityPath, "Failed-apply Stage-A state identity"));
   return evidence;
 }
 

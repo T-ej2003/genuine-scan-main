@@ -24,7 +24,7 @@ import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageAStateIdentityBinding, buildStageAStateIdentity } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { buildRecoveryAwsEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
-import { assertRootDropCensusMatch, assertRootDropCreationInterlock, buildRootDropAwsReadAdapter, collectRootDropCensus, ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_LEGACY_POLICY_BINDING } from "./production-stage-a-root-drop-orphan-recovery.mjs";
+import { assertRootDropCensus, assertRootDropCensusMatch, assertRootDropCreationInterlock, buildLegacyRootDropKeyPolicy, buildRootDropAwsReadAdapter, collectRootDropCensus, ROOT_DROP_CENSUS_ACTOR_BINDINGS, ROOT_DROP_LEGACY_POLICY_BINDING } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sourcePolicyPath = path.join(root, TEMPORARY_KMS_CAPABILITY.sourcePolicyPath);
@@ -275,9 +275,13 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       assertRootDropCensusMatch(suppliedRootDropCensus, rootDropCensus, { sourceSha, transitionId, stageAStateIdentity });
     }
     const rootDropState = phase === "authorize" && stageAStateFile ? readJson(validateStageAInput(stageAStateFile, "Stage-A state")) : null;
+    const legacyRecoveryAuthorization = phase === "authorize" && rootDropCensus?.status === "AUTHENTICATED_ORPHAN" && rootDropCensus.candidates[0]?.policyCompatibility === "LEGACY_BOUND_HISTORICAL";
     const assertCreationPlan = (plan) => {
-      assertStageARootDropCreationPlan(plan);
-      if (phase === "authorize" && rootDropCensus) assertRootDropCreationInterlock({ plan, terraformState: rootDropState, census: rootDropCensus, sourceSha, transitionId, stageAStateIdentity });
+      assertStageARootDropCreationPlan(plan, legacyRecoveryAuthorization ? { expectedKeyPolicy: buildLegacyRootDropKeyPolicy() } : undefined);
+      if (legacyRecoveryAuthorization) {
+        assertRootDropCensus(rootDropCensus, { sourceSha, transitionId, stageAStateIdentity });
+        if (sourceSha !== ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha || transitionId !== ROOT_DROP_LEGACY_POLICY_BINDING.transitionId || planSha256 !== ROOT_DROP_LEGACY_POLICY_BINDING.planSha256 || rootDropCensus.failedApplyEvidence?.planSha256 !== planSha256) fail("legacy root-drop authorization is not bound to the exact historical failed plan");
+      } else if (phase === "authorize" && rootDropCensus) assertRootDropCreationInterlock({ plan, terraformState: rootDropState, census: rootDropCensus, sourceSha, transitionId, stageAStateIdentity });
     };
     if (phase === "authorize" && requireStageAStateBinding) {
       if (!stageAStateFile || !stageAStateIdentity || !existsSync(stageAStateFile)) fail("authenticated Stage A state identity is required before temporary capability authorization");
@@ -292,6 +296,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     if (censusLegacyRootDropKeyArn && censusLegacyRootDropKeyArn !== ROOT_DROP_LEGACY_POLICY_BINDING.keyArn) fail("legacy root-drop capability is not bound to the authenticated historical orphan");
     if (censusLegacyRootDropKeyArn && previous?.legacyRootDropKeyArn && censusLegacyRootDropKeyArn !== previous.legacyRootDropKeyArn) fail("legacy root-drop capability evidence changed its exact key binding");
     const legacyRootDropKeyArn = censusLegacyRootDropKeyArn || previous?.legacyRootDropKeyArn;
+    if (legacyRootDropKeyArn && legacyRootDropKeyArn !== ROOT_DROP_LEGACY_POLICY_BINDING.keyArn) fail("legacy root-drop capability evidence is not bound to the authenticated historical orphan");
     const legacyPolicyOptions = legacyRootDropKeyArn ? { legacyRootDropKeyArn } : {};
     const readState = ({ allowTemporaryVersionId } = {}) => readVersions({ allowTemporaryVersionId, sourceSha, transitionId, legacyRootDropKeyArn });
     const buildTemporaryDocument = () => buildTemporaryReleasePolicy(sourcePolicy, { sourceSha, transitionId, ...legacyPolicyOptions });

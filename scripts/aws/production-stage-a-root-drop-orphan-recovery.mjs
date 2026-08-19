@@ -53,13 +53,13 @@ export function buildLegacyRootDropKeyPolicy() {
   return policy;
 }
 
-export function assertLegacyRootDropPolicyBinding({ candidate, sourceSha, transitionId, failedApplyEvidence, historicalStateIdentity = ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity } = {}) {
+export function assertLegacyRootDropPolicyBinding({ candidate, sourceSha, transitionId, failedApplyEvidence } = {}) {
   const metadata = candidate?.metadata;
   const binding = ROOT_DROP_LEGACY_POLICY_BINDING;
   if (!samePolicy(candidate?.policy, buildLegacyRootDropKeyPolicy())
     || sourceSha !== binding.sourceSha || transitionId !== binding.transitionId || failedApplyEvidence?.planSha256 !== binding.planSha256
     || failedApplyEvidence?.creationEventId !== binding.creationEventId || candidate?.arn !== binding.keyArn || metadata?.Arn !== binding.keyArn
-    || metadata?.AWSAccountId !== STAGE_B.account || !same(historicalStateIdentity, binding.stageAStateIdentity)) fail("legacy root-drop policy is not bound to the exact historical failed apply");
+    || metadata?.AWSAccountId !== STAGE_B.account || !same(failedApplyEvidence?.stageAStateIdentity, binding.stageAStateIdentity)) fail("legacy root-drop policy is not bound to the exact historical failed apply");
   return true;
 }
 

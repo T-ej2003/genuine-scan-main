@@ -17,6 +17,12 @@ binds to the fresh Stage-A state identity, source SHA, transition ID, failed-
 plan SHA, creator session, observation time, and census digest. Tags alone
 never authenticate a candidate.
 
+For the single historical legacy-policy recovery, the census command also
+requires `--failed-apply-state-identity` pointing to the private, independently
+captured pre-apply Stage-A state identity. That lineage, serial, and state hash
+must exactly match the historical binding; the current live state identity is
+validated separately and cannot substitute for it.
+
 The census uses the approved split-actor boundary: administrator/root performs
 account-wide `kms:ListKeys` and coarse `kms:DescribeKey` discovery plus
 `cloudtrail:LookupEvents` provenance reads; `mscqr-production-release-deployer`
@@ -96,9 +102,11 @@ steady-state result: the adoption plan must contain only its update to the
 current canonical policy plus the exact root-drop alias create, and the
 post-apply state must contain the canonical policy before recovery is
 reported complete. Any other policy difference, binding, address, or action
-fails closed. The existing temporary Stage-A capability's bounded
-`kms:PutKeyPolicy` and `kms:CreateAlias` permissions are the only approved
-mutation path for this convergence.
+fails closed. The historical two-create plan is provenance only and never
+authorizes another `kms:CreateKey`. The existing temporary Stage-A capability
+grants only `kms:GetKeyRotationStatus`, `kms:PutKeyPolicy`, and
+`kms:CreateAlias` for the exact authenticated orphan key (plus the exact alias
+resource), and is the only approved mutation path for this convergence.
 
 The alias is created only by the exact saved Terraform plan and must target the
 authenticated key. Key creation, replacement, destroy, unrelated actions,

@@ -117,11 +117,11 @@ export function temporaryKmsCapabilityAliasStatement({ sourceSha, transitionId }
   };
 }
 
-export function temporaryKmsCapabilityAliasKeyStatement() {
+export function temporaryKmsCapabilityAliasKeyStatement({ keyArn } = {}) {
   return {
     Effect: "Allow",
     Action: [TEMPORARY_KMS_CAPABILITY.aliasAction, TEMPORARY_KMS_CAPABILITY.administrationAction],
-    Resource: TEMPORARY_KMS_CAPABILITY.keyResource,
+    Resource: keyArn ? assertLegacyRootDropKeyArn(keyArn) : TEMPORARY_KMS_CAPABILITY.keyResource,
     Condition: {
       StringEquals: {
         "aws:ResourceTag/Environment": TEMPORARY_KMS_CAPABILITY.tags.Environment,
@@ -163,7 +163,7 @@ export function buildTemporaryReleasePolicy(steadyStatePolicy, identity = {}) {
   const compactSteadyState = withoutStatementIds(structuredClone(steadyStatePolicy));
   const legacyRotationStatus = identity.legacyRootDropKeyArn ? temporaryKmsLegacyRotationStatusStatement({ ...identity, keyArn: identity.legacyRootDropKeyArn }) : null;
   const creation = identity.legacyRootDropKeyArn ? [] : [temporaryKmsCapabilityStatement(identity)];
-  const policy = { ...compactSteadyState, Statement: [...compactSteadyState.Statement, ...creation, temporaryKmsCapabilityAliasStatement(identity), temporaryKmsCapabilityAliasKeyStatement(), ...(legacyRotationStatus ? [legacyRotationStatus] : [])] };
+  const policy = { ...compactSteadyState, Statement: [...compactSteadyState.Statement, ...creation, temporaryKmsCapabilityAliasStatement(identity), temporaryKmsCapabilityAliasKeyStatement({ keyArn: identity.legacyRootDropKeyArn }), ...(legacyRotationStatus ? [legacyRotationStatus] : [])] };
   assertManagedPolicyDocumentSize(policy, { label: "Temporary Stage-A KMS policy" });
   return policy;
 }
@@ -172,7 +172,7 @@ export function assertTemporaryReleasePolicy(policy, { steadyStatePolicy, source
   if (!steadyStatePolicy) fail("steady-state source policy is required");
   assertSteadyStateReleasePolicy(steadyStatePolicy);
   const temporary = statements(policy).filter(isTemporaryTagResourceStatement);
-  const expected = [...(legacyRootDropKeyArn ? [] : [temporaryKmsCapabilityStatement({ sourceSha, transitionId })]), temporaryKmsCapabilityAliasStatement({ sourceSha, transitionId }), temporaryKmsCapabilityAliasKeyStatement(), ...(legacyRootDropKeyArn ? [temporaryKmsLegacyRotationStatusStatement({ sourceSha, transitionId, keyArn: legacyRootDropKeyArn })] : [])];
+  const expected = [...(legacyRootDropKeyArn ? [] : [temporaryKmsCapabilityStatement({ sourceSha, transitionId })]), temporaryKmsCapabilityAliasStatement({ sourceSha, transitionId }), temporaryKmsCapabilityAliasKeyStatement({ keyArn: legacyRootDropKeyArn }), ...(legacyRootDropKeyArn ? [temporaryKmsLegacyRotationStatusStatement({ sourceSha, transitionId, keyArn: legacyRootDropKeyArn })] : [])];
   const legacyKey = { ...expected[0], Sid: legacyTemporaryKmsStatementSid({ sourceSha, transitionId }) };
   const legacyTag = { ...legacyKey, Action: TEMPORARY_KMS_CAPABILITY.action };
   const exactCurrent = temporary.length === expected.length
@@ -193,9 +193,9 @@ export function assertTemporaryReleasePolicy(policy, { steadyStatePolicy, source
   return true;
 }
 
-export function isCurrentTemporaryReleasePolicy(policy, { steadyStatePolicy, sourceSha, transitionId } = {}) {
+export function isCurrentTemporaryReleasePolicy(policy, { steadyStatePolicy, sourceSha, transitionId, legacyRootDropKeyArn } = {}) {
   try {
-    assertTemporaryReleasePolicy(policy, { steadyStatePolicy, sourceSha, transitionId, allowLegacyTemporary: false });
+    assertTemporaryReleasePolicy(policy, { steadyStatePolicy, sourceSha, transitionId, legacyRootDropKeyArn, allowLegacyTemporary: false });
     return true;
   } catch {
     return false;
@@ -294,7 +294,7 @@ export function assertRootDropOwnershipEvidence(value, { sourceSha, planSha256 }
   return true;
 }
 
-export function assertStageARootDropCreationPlan(plan) {
+export function assertStageARootDropCreationPlan(plan, { expectedKeyPolicy } = {}) {
   const changes = plan?.resource_changes;
   if (!Array.isArray(changes)) fail("machine-readable Stage-A plan is required");
   const actionable = changes.filter(({ change }) => JSON.stringify(change?.actions || []) !== JSON.stringify(["no-op"]));
@@ -304,7 +304,9 @@ export function assertStageARootDropCreationPlan(plan) {
   const alias = actionable.find(({ address }) => address === "aws_kms_alias.root_drop");
   let keyPolicy;
   try { keyPolicy = JSON.parse(key.change.after?.policy); } catch { fail("Stage-A root-drop key policy is missing or malformed"); }
-  assertStageARootDropKeyPolicyDocument(keyPolicy);
+  if (expectedKeyPolicy) {
+    if (!equal(keyPolicy, expectedKeyPolicy)) fail("Stage-A root-drop key policy does not match the authenticated historical plan");
+  } else assertStageARootDropKeyPolicyDocument(keyPolicy);
   if (key.change.after?.customer_master_key_spec !== TEMPORARY_KMS_CAPABILITY.keySpec || key.change.after?.key_usage !== TEMPORARY_KMS_CAPABILITY.keyUsage || key.change.after?.bypass_policy_lockout_safety_check !== false) fail("Stage-A root-drop key creation attributes are not exact");
   if (alias.change.after?.name !== "alias/mscqr-production-root-drop") fail("Stage-A root-drop alias creation attributes are not exact");
   return true;
@@ -319,6 +321,7 @@ export const isTemporaryTagResourceStatement = (statement) => {
   if (typeof statement?.Sid === "string" && statement.Sid.startsWith(TEMPORARY_KMS_STATEMENT_SID_PREFIX)) return equal(statement.Action, TEMPORARY_KMS_CAPABILITY.keyActions) || exactLegacyTagAction(statement.Action);
   if (typeof statement?.Sid === "string" && statement.Sid.startsWith(TEMPORARY_LEGACY_ROTATION_STATUS_SID_PREFIX)) return statement.Action === "kms:GetKeyRotationStatus" && typeof statement.Resource === "string" && statement.Resource.startsWith(KEY_ARN_PREFIX) && KEY_ID.test(statement.Resource.slice(KEY_ARN_PREFIX.length)) && equal(statement.Condition, { StringEquals: { "aws:RequestedRegion": TEMPORARY_KMS_CAPABILITY.region } });
   const actions = Array.isArray(statement?.Action) ? statement.Action : [statement?.Action];
+  const exactKeyResource = typeof statement?.Resource === "string" && statement.Resource.startsWith(KEY_ARN_PREFIX) && KEY_ID.test(statement.Resource.slice(KEY_ARN_PREFIX.length));
   return (actions.includes(TEMPORARY_KMS_CAPABILITY.aliasAction) || actions.includes(TEMPORARY_KMS_CAPABILITY.administrationAction))
-    && (statement.Resource === TEMPORARY_KMS_CAPABILITY.aliasResource || statement.Resource === TEMPORARY_KMS_CAPABILITY.keyResource);
+    && (statement.Resource === TEMPORARY_KMS_CAPABILITY.aliasResource || statement.Resource === TEMPORARY_KMS_CAPABILITY.keyResource || exactKeyResource);
 };

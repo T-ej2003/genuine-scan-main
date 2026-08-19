@@ -65,7 +65,7 @@ const stageAVars = Object.freeze({
   TF_VAR_receipt_bucket_arn: `arn:aws:s3:::mscqr-prod-euw2-artifacts-${STAGE_B.account}-${STAGE_B.region}-an`,
 });
 const failedApplyEvidence = { sourceSha, transitionId, planSha256: crypto.createHash("sha256").update("exact-plan").digest("hex"), creatorArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/launch", creationEventId: "event-root-drop-1", failedApplyWindow: { start: "2026-08-19T00:00:00.000Z", end: "2026-08-19T23:59:59.999Z" } };
-const legacyFailedApplyEvidence = { ...failedApplyEvidence, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256, creationEventId: ROOT_DROP_LEGACY_POLICY_BINDING.creationEventId };
+const legacyFailedApplyEvidence = { ...failedApplyEvidence, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, planSha256: ROOT_DROP_LEGACY_POLICY_BINDING.planSha256, creationEventId: ROOT_DROP_LEGACY_POLICY_BINDING.creationEventId, stageAStateIdentity: ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity };
 const event = { eventId: failedApplyEvidence.creationEventId, eventName: "CreateKey", eventSource: "kms.amazonaws.com", awsRegion: STAGE_B.region, recipientAccountId: STAGE_B.account, eventTime: "2026-08-19T12:00:00.000Z", userIdentity: { arn: failedApplyEvidence.creatorArn }, resources: [{ ARN: keyArn }] };
 const awsLookupEvent = { EventId: event.eventId, EventName: event.eventName, EventSource: event.eventSource, EventTime: event.eventTime, CloudTrailEvent: JSON.stringify({ eventID: event.eventId, eventName: event.eventName, eventSource: event.eventSource, awsRegion: event.awsRegion, recipientAccountId: event.recipientAccountId, eventTime: event.eventTime, userIdentity: event.userIdentity, resources: event.resources }) };
 const candidate = (overrides = {}) => ({
@@ -144,7 +144,8 @@ test("historical root-drop policy is accepted only for the exact failed apply bi
     const evidence = { ...legacyFailedApplyEvidence, [field]: value };
     assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(), sourceSha: evidence.sourceSha, transitionId: evidence.transitionId, failedApplyEvidence: evidence }), /legacy root-drop policy/, label);
   }
-  assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(), sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence, historicalStateIdentity: { ...ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity, serial: 46 } }), /legacy root-drop policy/);
+  assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(), sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: { ...legacyFailedApplyEvidence, stageAStateIdentity: { ...ROOT_DROP_LEGACY_POLICY_BINDING.stageAStateIdentity, serial: 46 } } }), /legacy root-drop policy/);
+  assert.throws(() => assertLegacyRootDropPolicyBinding({ candidate: legacyCandidate(), sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: { ...legacyFailedApplyEvidence, stageAStateIdentity: undefined } }), /legacy root-drop policy/);
   assert.equal(authenticated().policyCompatibility, "CANONICAL");
 });
 
