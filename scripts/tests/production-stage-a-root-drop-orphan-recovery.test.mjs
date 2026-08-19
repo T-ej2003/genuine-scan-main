@@ -94,6 +94,10 @@ const exactCreatePlan = { resource_changes: [
 const aliasPlan = (changes = [{ address: ROOT_DROP_ALIAS_ADDRESS, change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: keyId } } }]) => ({ resource_changes: changes });
 const keyState = () => ({ ...absentState, resources: absentState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: keyArn, key_id: keyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) });
 const ownedState = () => ({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: keyId, target_key_arn: keyArn } }] } : resource) });
+const identityForState = (value) => buildStageAStateIdentity(value, { stateBytes: Buffer.from(JSON.stringify(value)) });
+const keyOnlyStateIdentity = () => identityForState(keyState());
+const ownedStateIdentity = () => identityForState(ownedState());
+const keyOnlyCensus = () => buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: keyOnlyStateIdentity(), keyUniverse: [keyId], candidates: [{ ...candidate(), ...authenticated() }], failedApplyEvidence });
 
 test("exact orphan authentication requires account, region, metadata, tags, policy, no alias, and CloudTrail creator/window", () => {
   assert.equal(authenticated().authenticated, true);
@@ -216,6 +220,49 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
     }
     assert.deepEqual({ AWS_PROFILE: process.env.AWS_PROFILE, AWS_REGION: process.env.AWS_REGION, AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION }, { AWS_PROFILE: "administrator", AWS_REGION: "us-east-1", AWS_DEFAULT_REGION: "us-east-1" });
   } finally { restore(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("runAdoption resumes S1 key-only state without reimporting", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-s1-retry-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  const planPath = path.join(directory, "alias.plan");
+  const currentKeyState = keyState();
+  const currentCensus = keyOnlyCensus();
+  writeFileSync(statePath, JSON.stringify(currentKeyState), { mode: 0o600 });
+  writeFileSync(identityPath, `${JSON.stringify(keyOnlyStateIdentity())}\n`, { mode: 0o600 });
+  writeFileSync(censusPath, `${JSON.stringify(currentCensus)}\n`, { mode: 0o600 });
+  let currentState = currentKeyState;
+  let imports = 0;
+  let applies = 0;
+  let showCount = 0;
+  const savedVariables = Object.fromEntries(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS.map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, stageAVars);
+    const result = await runAdoption({
+      argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", planPath, "--execute"],
+      runGit: cleanGit(),
+      readRootDropCensus: async () => currentCensus,
+      readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
+      execFile: (command, args) => {
+        if (args.includes("workspace") && args.includes("show")) return "default\n";
+        if (args.includes("state") && args.includes("pull")) return JSON.stringify(currentState);
+        if (args.includes("import")) { imports += 1; throw new Error("S1 retry must not import"); }
+        if (args.includes("apply")) { applies += 1; currentState = ownedState(); return ""; }
+        if (args.includes("plan") && args.includes("-out")) { writeFileSync(args[args.indexOf("-out") + 1], "alias-plan"); return ""; }
+        if (args.includes("show")) { showCount += 1; return JSON.stringify(args.at(-1).endsWith("zero-drift") ? { resource_changes: [] } : aliasPlan()); }
+        throw new Error(`unexpected Terraform command: ${args.join(" ")}`);
+      },
+      write: () => {},
+    });
+    assert.equal(result.status, "RECOVERED");
+    assert.deepEqual({ imports, applies }, { imports: 0, applies: 1 });
+    assert.equal(showCount, 3);
+  } finally {
+    for (const [key, value] of Object.entries(savedVariables)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("adoption rejects a non-canonical Terraform root before any Terraform subprocess", async () => {
@@ -386,8 +433,9 @@ test("Stage-A recovery preserves only the reviewed required variables and perfor
       write: () => {},
     });
     assert.equal(result.status, "RECOVERED");
-    assert.deepEqual(sequence.slice(0, 2), ["workspace", "readiness"]);
-    assert(sequence.indexOf("state") > sequence.indexOf("readiness"));
+    assert.deepEqual(sequence.slice(0, 3), ["workspace", "state", "readiness"]);
+    assert(sequence.indexOf("state") < sequence.indexOf("readiness"));
+    assert(sequence.lastIndexOf("state") > sequence.indexOf("readiness"));
     assert(sequence.indexOf("census") > sequence.indexOf("state"));
   } finally {
     for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
@@ -409,7 +457,7 @@ test("missing, malformed, or wrong-identity Stage-A variables fail before Terraf
       Object.assign(process.env, stageAVars);
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
       let terraformImports = 0;
-      await assert.rejects(() => runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", path.join(directory, `${key}.plan`)], runGit: cleanGit(), readRootDropCensus: async () => census(), readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }), execFile: (command, args) => { if (args.includes("import")) terraformImports += 1; if (args.includes("plan")) throw new Error("Terraform must not run"); return "default\n"; }, write: () => {} }), expected);
+      await assert.rejects(() => runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--plan-path", path.join(directory, `${key}.plan`)], runGit: cleanGit(), readRootDropCensus: async () => census(), readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }), execFile: (command, args) => { if (args.includes("import")) terraformImports += 1; if (args.includes("state")) return JSON.stringify(absentState); if (args.includes("plan")) throw new Error("Terraform must not run"); return "default\n"; }, write: () => {} }), expected);
       assert.equal(terraformImports, 0);
     }
   } finally {
@@ -787,7 +835,7 @@ function runner({ execute = false, initial = absentState, importOutcome, applyOu
   let current = initial;
   let imports = 0;
   let applies = 0;
-  const recovery = createRootDropRecoveryRunner({ execute, readState: async () => current, readStateSnapshot: async () => ({ state: current, stateBytes: Buffer.from(JSON.stringify(current)) }), importKey: async () => { imports += 1; if (importOutcome) { const error = new Error(importOutcome); error.mutationOutcome = importOutcome; throw error; } current = keyState(); }, refreshState: async () => current, createPlan: async ({ zeroDrift: requested }) => requested ? "zero" : "alias", readPlan: async (path) => path === "zero" ? zeroDrift : plan, applyPlan: async () => { applies += 1; if (applyOutcome) { const error = new Error(applyOutcome); error.mutationOutcome = applyOutcome; throw error; } current = ownedState(); }, });
+  const recovery = createRootDropRecoveryRunner({ execute, readState: async () => current, readStateSnapshot: async () => ({ state: current, stateBytes: Buffer.from(JSON.stringify(current)) }), importKey: async () => { imports += 1; if (importOutcome) { const error = new Error(importOutcome); error.mutationOutcome = importOutcome; throw error; } current = keyState(); }, refreshState: async () => current, createPlan: async ({ zeroDrift: requested }) => requested ? "zero" : "alias", readPlan: async (path) => path === "zero" ? zeroDrift : plan, readPlanBytes: async (path) => Buffer.from(path), applyPlan: async () => { applies += 1; if (applyOutcome) { const error = new Error(applyOutcome); error.mutationOutcome = applyOutcome; throw error; } current = ownedState(); }, });
   return {
     counts: () => ({ imports, applies }),
     run: (input) => injectFresh ? recovery({ ...input, freshCensus: input.freshCensus || input.census }) : recovery(input),
@@ -799,7 +847,7 @@ test("dry-run cannot import an absent key; replay dry-run remains mutation-free"
   await assert.rejects(() => value.run({ census: census(), terraformState: absentState, stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), /explicit recovery execution authorization/);
   assert.deepEqual(value.counts(), { imports: 0, applies: 0 });
   const replay = runner({ initial: keyState() });
-  const result = await replay.run({ census: census(), terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
+  const result = await replay.run({ census: keyOnlyCensus(), terraformState: keyState(), stageAStateIdentity: keyOnlyStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
   assert.equal(result.status, "READY_FOR_ALIAS_ADOPTION");
   assert.deepEqual(result.accounting, { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 });
   assert.deepEqual(replay.counts(), { imports: 0, applies: 0 });
@@ -809,7 +857,9 @@ test("adoption reaches its read-only boundary with normalized real AWS event evi
   const value = runner({ initial: keyState() });
   const real = realAwsCensus();
   const persisted = JSON.parse(JSON.stringify(real));
-  const result = await value.run({ census: persisted, freshCensus: persisted, terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
+  const keyOnly = buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: keyOnlyStateIdentity(), keyUniverse: [keyId], candidates: [{ ...candidate(), ...authenticated() }], failedApplyEvidence });
+  const persistedKeyOnly = JSON.parse(JSON.stringify(keyOnly));
+  const result = await value.run({ census: persistedKeyOnly, freshCensus: persistedKeyOnly, terraformState: keyState(), stageAStateIdentity: keyOnlyStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
   assert.equal(result.status, "READY_FOR_ALIAS_ADOPTION");
   assert.deepEqual(value.counts(), { imports: 0, applies: 0 });
 });
@@ -824,9 +874,56 @@ test("successful adoption imports exactly once, creates only the alias, verifies
 
 test("successful import replay never imports again", async () => {
   const value = runner({ initial: keyState() });
-  const result = await value.run({ census: census(), terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
+  const result = await value.run({ census: keyOnlyCensus(), terraformState: keyState(), stageAStateIdentity: keyOnlyStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
   assert.equal(result.accounting.terraformImports, 0);
   assert.deepEqual(value.counts(), { imports: 0, applies: 0 });
+});
+
+test("S1 key-only retry accepts only the alias plan and never reimports", async () => {
+  const value = runner({ execute: true, initial: keyState() });
+  const result = await value.run({ census: keyOnlyCensus(), freshCensus: keyOnlyCensus(), terraformState: keyState(), stageAStateIdentity: keyOnlyStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
+  assert.equal(result.status, "RECOVERED");
+  assert.equal(result.accounting.terraformImports, 0);
+  assert.equal(result.accounting.terraformApplies, 1);
+  assert.deepEqual(value.counts(), { imports: 0, applies: 1 });
+});
+
+test("S2 replay validates ownership and zero drift without import or apply", async () => {
+  const value = runner({ execute: true, initial: ownedState() });
+  const result = await value.run({ census: keyOnlyCensus(), terraformState: ownedState(), stageAStateIdentity: ownedStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
+  assert.equal(result.status, "ALREADY_RECOVERED");
+  assert.deepEqual(result.accounting, { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 });
+  assert.deepEqual(value.counts(), { imports: 0, applies: 0 });
+});
+
+test("S1 retry rejects changed candidate topology before mutation", async () => {
+  const cases = [
+    ["different key", buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: keyOnlyStateIdentity(), keyUniverse: [keyId, "22222222-2222-2222-2222-222222222222"], candidates: [{ ...candidate({ keyId: "22222222-2222-2222-2222-222222222222", arn: `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/22222222-2222-2222-2222-222222222222` }), authenticated: false, reason: "different" }, { ...candidate(), ...authenticated() }], failedApplyEvidence })],
+    ["unexpected alias", buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: keyOnlyStateIdentity(), keyUniverse: [keyId], candidates: [{ ...candidate(), ...authenticated(), aliases: [{ AliasName: "alias/unrelated", TargetKeyId: keyId }] }], failedApplyEvidence })],
+  ];
+  for (const [label, changed] of cases) {
+    const value = runner({ execute: true, initial: keyState() });
+    await assert.rejects(() => value.run({ census: keyOnlyCensus(), freshCensus: changed, terraformState: keyState(), stageAStateIdentity: keyOnlyStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), /changed|candidate|trust boundary|authenticated/ , label);
+    assert.deepEqual(value.counts(), { imports: 0, applies: 0 }, label);
+  }
+});
+
+test("alias saved-plan bytes are revalidated immediately before apply", async () => {
+  let reads = 0;
+  let applies = 0;
+  const recovery = createRootDropRecoveryRunner({
+    execute: true,
+    readState: async () => keyState(),
+    readStateSnapshot: async () => ({ state: keyState(), stateBytes: Buffer.from(JSON.stringify(keyState())) }),
+    importKey: async () => { throw new Error("reimport must not occur"); },
+    refreshState: async () => keyState(),
+    createPlan: async () => "alias",
+    readPlan: async () => aliasPlan(),
+    readPlanBytes: async () => Buffer.from(reads++ === 0 ? "classified-plan" : "replaced-plan"),
+    applyPlan: async () => { applies += 1; },
+  });
+  await assert.rejects(() => recovery({ census: keyOnlyCensus(), freshCensus: keyOnlyCensus(), terraformState: keyState(), stageAStateIdentity: keyOnlyStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), /changed after classification/);
+  assert.equal(applies, 0);
 });
 
 test("state identity changes with unchanged root-drop counts block import", async () => {
@@ -841,6 +938,7 @@ test("state identity changes with unchanged root-drop counts block import", asyn
     refreshState: async () => keyState(),
     createPlan: async () => "alias",
     readPlan: async () => aliasPlan(),
+    readPlanBytes: async () => Buffer.from("alias-plan"),
     applyPlan: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
   });
   await assert.rejects(() => recovery({ census: census(), freshCensus: census(), terraformState: absentState, stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), /state identity|authenticated snapshot/);
@@ -860,6 +958,7 @@ test("every post-mutation recovery failure preserves the accumulated accounting"
         refreshState: async () => { throw new Error("refresh failed after import"); },
         createPlan: async () => "alias",
         readPlan: async () => aliasPlan(),
+        readPlanBytes: async () => Buffer.from("alias-plan"),
         applyPlan: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
       }),
     },
@@ -874,6 +973,7 @@ test("every post-mutation recovery failure preserves the accumulated accounting"
         refreshState: async () => keyState(),
         createPlan: async () => { throw new Error("plan failed after import"); },
         readPlan: async () => aliasPlan(),
+        readPlanBytes: async () => Buffer.from("alias-plan"),
         applyPlan: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
       }),
     },
@@ -888,13 +988,16 @@ test("every post-mutation recovery failure preserves the accumulated accounting"
         refreshState: async () => { throw new Error("readback failed after alias apply"); },
         createPlan: async () => "alias",
         readPlan: async () => aliasPlan(),
+        readPlanBytes: async () => Buffer.from("alias-plan"),
         applyPlan: async () => ({ outcome: "CONFIRMED_SUCCESS" }),
       }),
     },
   ];
   for (const { name, terraformState, build } of cases) {
+    const inputCensus = name === "post-apply readback" ? keyOnlyCensus() : census();
+    const inputIdentity = name === "post-apply readback" ? keyOnlyStateIdentity() : stateIdentity;
     await assert.rejects(
-      () => build()({ census: census(), freshCensus: census(), terraformState, stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }),
+      () => build()({ census: inputCensus, freshCensus: inputCensus, terraformState, stageAStateIdentity: inputIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }),
       (error) => error.recoveryAccounting.terraformImports === (name === "post-apply readback" ? 0 : 1)
         && error.recoveryAccounting.terraformApplies === (name === "post-apply readback" ? 1 : 0)
         && error.recoveryAccounting.unknownMutations === 0,
@@ -912,8 +1015,8 @@ test("definite and ambiguous import failures are never retried and are distingui
 
 test("refresh denial, wrong imported key, alias failure, ambiguous alias apply, and non-zero drift fail closed", async () => {
   const wrongState = { ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ attributes: { arn: `arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/22222222-22222222-2222-2222-222222222222`, key_id: "22222222-2222-2222-2222-222222222222", key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) };
-  const wrong = createRootDropRecoveryRunner({ execute: true, readState: async () => wrongState, readStateSnapshot: async () => ({ state: wrongState, stateBytes: Buffer.from(JSON.stringify(wrongState)) }), importKey: async () => {}, refreshState: async () => wrongState, createPlan: async () => "alias", readPlan: async () => aliasPlan(), applyPlan: async () => {} });
-  await assert.rejects(() => wrong({ census: census(), freshCensus: census(), terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }));
+  const wrong = createRootDropRecoveryRunner({ execute: true, readState: async () => wrongState, readStateSnapshot: async () => ({ state: wrongState, stateBytes: Buffer.from(JSON.stringify(wrongState)) }), importKey: async () => {}, refreshState: async () => wrongState, createPlan: async () => "alias", readPlan: async () => aliasPlan(), readPlanBytes: async () => Buffer.from("alias-plan"), applyPlan: async () => {} });
+  await assert.rejects(() => wrong({ census: keyOnlyCensus(), freshCensus: keyOnlyCensus(), terraformState: keyState(), stageAStateIdentity: keyOnlyStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }));
   for (const [label, options] of [["alias failure", { execute: true, applyOutcome: "DEFINITE_FAILURE" }], ["ambiguous alias", { execute: true, applyOutcome: "AMBIGUOUS" }], ["drift", { execute: true, zeroDrift: aliasPlan() }]]) {
     const value = runner(options);
     await assert.rejects(() => value.run({ census: census(), terraformState: absentState, stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), new RegExp(label === "drift" ? "zero drift" : "DEFINITE_FAILURE|ambiguous|alias", "i"));
@@ -930,11 +1033,11 @@ test("adoption rejects a supplied census when fresh re-census finds a changed al
 test("adoption requires fresh census evidence and accepts only a fresh replacement for stale supplied evidence", async () => {
   const value = runner({ initial: keyState() });
   const supplied = census(); supplied.observedAt = "2020-01-01T00:00:00.000Z"; delete supplied.censusSha256; supplied.censusSha256 = rootDropRecoverySha256(Object.fromEntries(Object.entries(supplied).filter(([key]) => key !== "censusSha256")));
-  const fresh = census();
-  const result = await value.run({ census: supplied, freshCensus: fresh, terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
+  const fresh = keyOnlyCensus();
+  const result = await value.run({ census: supplied, freshCensus: fresh, terraformState: keyState(), stageAStateIdentity: keyOnlyStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 });
   assert.equal(result.status, "READY_FOR_ALIAS_ADOPTION");
   const noFresh = runner({ initial: keyState(), injectFresh: false });
-  await assert.rejects(() => noFresh.run({ census: fresh, terraformState: keyState(), stageAStateIdentity: stateIdentity, sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), /fresh authoritative census/);
+  await assert.rejects(() => noFresh.run({ census: fresh, terraformState: keyState(), stageAStateIdentity: keyOnlyStateIdentity(), sourceSha, transitionId, planSha256: failedApplyEvidence.planSha256 }), /fresh authoritative census/);
 });
 
 test("multiple candidates, wrong default/state conflict, and no candidate are fail closed at the workflow boundary", async () => {

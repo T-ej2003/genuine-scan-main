@@ -349,14 +349,40 @@ jobs:
         run: |
           npm --prefix backend run test:e2e:seed
 
-      - name: Install Playwright browsers
+      - name: Install Playwright Chromium (bounded)
         shell: bash
+        timeout-minutes: 12
         run: |
           set -euo pipefail
+          started_at=$(date +%s)
+          install_timeout_seconds=600
           while IFS= read -r source_file; do
             sudo mv "$source_file" "${source_file}.disabled"
           done < <(sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \( -iname "*microsoft*" -o -iname "*azure-cli*" \) -print)
-          npx playwright install --with-deps chromium
+          apt_status=0
+          set +e
+          timeout --signal=TERM --kill-after=30s "$install_timeout_seconds" npx --no-install playwright install-deps chromium
+          apt_status=$?
+          set -e
+          if (( apt_status == 0 )); then apt_result=PASS; else apt_result="FAIL:${apt_status}"; fi
+          echo "APT_DEPENDENCY_RESULT=${apt_result}"
+          if (( apt_status != 0 )); then
+            echo "BROWSER_DOWNLOAD_RESULT=NOT_RUN"
+            echo "PLAYWRIGHT_INSTALL_RESULT=FAIL"
+            echo "INSTALL_DURATION=$(( $(date +%s) - started_at ))s"
+            exit "$apt_status"
+          fi
+          browser_status=0
+          set +e
+          timeout --signal=TERM --kill-after=30s "$install_timeout_seconds" npx --no-install playwright install chromium
+          browser_status=$?
+          set -e
+          if (( browser_status == 0 )); then browser_result=PASS; else browser_result="FAIL:${browser_status}"; fi
+          echo "BROWSER_DOWNLOAD_RESULT=${browser_result}"
+          if (( browser_status == 0 )); then playwright_result=PASS; else playwright_result=FAIL; fi
+          echo "PLAYWRIGHT_INSTALL_RESULT=${playwright_result}"
+          echo "INSTALL_DURATION=$(( $(date +%s) - started_at ))s"
+          exit "$browser_status"
       - name: Playwright smoke suite
         env:
           NODE_ENV: test
@@ -458,8 +484,40 @@ jobs:
           (cd backend && DATABASE_URL="$MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL" npx prisma migrate deploy --schema prisma/schema.prisma)
           node --test scripts/tests/production-rotation-inventory-postgres.integration.test.mjs
 
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright Chromium (bounded)
+        shell: bash
+        timeout-minutes: 12
+        run: |
+          set -euo pipefail
+          started_at=$(date +%s)
+          install_timeout_seconds=600
+          while IFS= read -r source_file; do
+            sudo mv "$source_file" "${source_file}.disabled"
+          done < <(sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \( -iname "*microsoft*" -o -iname "*azure-cli*" \) -print)
+          apt_status=0
+          set +e
+          timeout --signal=TERM --kill-after=30s "$install_timeout_seconds" npx --no-install playwright install-deps chromium
+          apt_status=$?
+          set -e
+          if (( apt_status == 0 )); then apt_result=PASS; else apt_result="FAIL:${apt_status}"; fi
+          echo "APT_DEPENDENCY_RESULT=${apt_result}"
+          if (( apt_status != 0 )); then
+            echo "BROWSER_DOWNLOAD_RESULT=NOT_RUN"
+            echo "PLAYWRIGHT_INSTALL_RESULT=FAIL"
+            echo "INSTALL_DURATION=$(( $(date +%s) - started_at ))s"
+            exit "$apt_status"
+          fi
+          browser_status=0
+          set +e
+          timeout --signal=TERM --kill-after=30s "$install_timeout_seconds" npx --no-install playwright install chromium
+          browser_status=$?
+          set -e
+          if (( browser_status == 0 )); then browser_result=PASS; else browser_result="FAIL:${browser_status}"; fi
+          echo "BROWSER_DOWNLOAD_RESULT=${browser_result}"
+          if (( browser_status == 0 )); then playwright_result=PASS; else playwright_result=FAIL; fi
+          echo "PLAYWRIGHT_INSTALL_RESULT=${playwright_result}"
+          echo "INSTALL_DURATION=$(( $(date +%s) - started_at ))s"
+          exit "$browser_status"
 
       - name: Disposable system integration suite
         run: |

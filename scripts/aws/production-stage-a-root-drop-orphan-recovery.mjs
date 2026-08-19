@@ -96,12 +96,13 @@ function assertCreationEvent(event, { creatorArn, failedApplyWindow, keyArn, eve
   return true;
 }
 
-export function authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence } = {}) {
+export function authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence, allowKeyOnly = false } = {}) {
   if (!SHA40.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(transitionId || "")) fail("source SHA and transition ID are required");
   assertStateShape(terraformState);
-  assertStateRootDropCounts(terraformState, { key: 0, alias: 0 });
+  assertStateRootDropCounts(terraformState, allowKeyOnly ? { allowKeyOnly: true } : { key: 0, alias: 0 });
   if (!failedApplyEvidence || failedApplyEvidence.sourceSha !== sourceSha || failedApplyEvidence.transitionId !== transitionId || !SHA256.test(failedApplyEvidence.planSha256 || "") || !failedApplyEvidence.failedApplyWindow) fail("failed Stage-A apply evidence is missing or not source/transition/plan bound");
   const { keyId, arn } = assertKeyIdentity(candidate);
+  if (allowKeyOnly) assertRootDropKeyIdentity(terraformState, keyId);
   assertExactTags(candidate.tags);
   if (!Array.isArray(candidate.aliases) || candidate.aliases.length !== 0) fail("orphan candidate has an unexpected alias");
   if (!same(candidate.policy, buildStageARootDropKeyPolicy())) fail("orphan key policy is not the exact reviewed root-drop policy");
@@ -214,6 +215,23 @@ export function assertRootDropCensusMatch(supplied, fresh, bindings) {
   return true;
 }
 
+export function assertRootDropCensusAdoptionMatch(supplied, fresh, bindings) {
+  const suppliedIdentity = {
+    lineage: supplied?.stageAStateLineage,
+    serial: supplied?.stageAStateSerial,
+    stateSha256: supplied?.stageAStateSha256,
+  };
+  assertRootDropCensus(supplied, { ...bindings, stageAStateIdentity: suppliedIdentity });
+  assertRootDropCensus(fresh, bindings);
+  const comparable = (value) => {
+    const copy = { ...(value || {}) };
+    for (const field of ["observedAt", "censusSha256", "stageAStateLineage", "stageAStateSerial", "stageAStateSha256"]) delete copy[field];
+    return copy;
+  };
+  if (canonical(comparable(supplied)) !== canonical(comparable(fresh))) fail("root-drop census candidate changed across the authenticated adoption state transition");
+  return true;
+}
+
 function actionable(plan) {
   if (!Array.isArray(plan?.resource_changes)) fail("machine-readable Terraform plan is required");
   return plan.resource_changes.filter(({ change }) => JSON.stringify(change?.actions || []) !== JSON.stringify(["no-op"]) && JSON.stringify(change?.actions || []) !== JSON.stringify(["read"]));
@@ -289,27 +307,46 @@ export function assertStageATerraformBackendMetadata(metadata) {
   return true;
 }
 
-export function createRootDropRecoveryRunner({ execute = false, allowImport = execute, readState, readStateSnapshot, importKey, refreshState, createPlan, readPlan, applyPlan, now = () => new Date().toISOString() } = {}) {
+export function createRootDropRecoveryRunner({ execute = false, allowImport = execute, readState, readStateSnapshot, importKey, refreshState, createPlan, readPlan, readPlanBytes, applyPlan, now = () => new Date().toISOString() } = {}) {
   if (typeof readState !== "function" || typeof readStateSnapshot !== "function" || typeof importKey !== "function" || typeof refreshState !== "function" || typeof createPlan !== "function" || typeof readPlan !== "function" || typeof applyPlan !== "function") throw new Error("Root-drop recovery runner dependencies are incomplete");
+  if (execute && typeof readPlanBytes !== "function") throw new Error("Root-drop recovery runner requires saved-plan byte access before apply");
   return async function run({ census, freshCensus, terraformState, stageAStateIdentity, sourceSha, transitionId, planSha256 } = {}) {
-    if (!freshCensus) fail("orphan adoption requires a fresh authoritative census");
-    assertRootDropCensusMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity });
-    assertRootDropCensusFresh(freshCensus);
-    if (freshCensus.status !== "AUTHENTICATED_ORPHAN") fail("orphan adoption requires exactly one authenticated candidate");
-    if (!SHA256.test(planSha256 || "") || planSha256 !== freshCensus.failedApplyEvidence.planSha256) fail("orphan adoption is not bound to the failed Stage-A plan");
-    const candidate = freshCensus.candidates[0];
-    const counts = assertStateRootDropCounts(terraformState, { allowKeyOnly: true });
     const accounting = { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 };
     const withAccounting = (error) => { const value = error instanceof Error ? error : new Error(String(error)); value.recoveryAccounting = { ...accounting }; return value; };
     try {
+      const suppliedIdentity = {
+        lineage: census?.stageAStateLineage,
+        serial: census?.stageAStateSerial,
+        stateSha256: census?.stageAStateSha256,
+      };
+      assertRootDropCensus(census, { sourceSha, transitionId, stageAStateIdentity: suppliedIdentity });
       const initialSnapshot = await readStateSnapshot();
       if (!initialSnapshot || !initialSnapshot.state || !Buffer.isBuffer(initialSnapshot.stateBytes) && !(initialSnapshot.stateBytes instanceof Uint8Array)) fail("pre-import Terraform state snapshot is incomplete");
       let state = initialSnapshot.state;
+      const expectedCounts = assertStateRootDropCounts(terraformState, { allowKeyOnly: true });
       const stateCounts = { keyCount: stateInstances(state, "aws_kms_key", "root_drop").length, aliasCount: stateInstances(state, "aws_kms_alias", "root_drop").length };
       if (stateCounts.keyCount > 1 || stateCounts.aliasCount > 1 || stateCounts.aliasCount === 1 && stateCounts.keyCount === 0) fail("Terraform refresh returned an invalid root-drop state");
+      if (stateCounts.keyCount !== expectedCounts.keyCount || stateCounts.aliasCount !== expectedCounts.aliasCount) fail("Terraform state changed from the authenticated recovery snapshot");
+      assertStageAStateIdentityBinding(buildStageAStateIdentity(state, { stateBytes: initialSnapshot.stateBytes }), stageAStateIdentity);
       const keyCount = stateCounts.keyCount;
+      if (census.status !== "AUTHENTICATED_ORPHAN") fail("orphan adoption requires exactly one authenticated candidate");
+      const suppliedCandidate = census.candidates[0];
+      if (keyCount === 1 && stateCounts.aliasCount === 1) {
+        assertRootDropCensusFresh(census);
+        assertRootDropStateIdentity(state, { keyId: suppliedCandidate.keyId });
+        const zeroDriftPlan = await createPlan({ keyId: suppliedCandidate.keyId, zeroDrift: true });
+        const zeroDriftJson = await readPlan(zeroDriftPlan);
+        if (actionable(zeroDriftJson).length !== 0) fail("completed root-drop recovery is not zero drift");
+        return { status: "ALREADY_RECOVERED", accounting, keyId: suppliedCandidate.keyId, zeroDrift: true, observedAt: now() };
+      }
+      if (!freshCensus) fail("orphan adoption requires a fresh authoritative census");
+      if (keyCount === 0) assertRootDropCensusMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity });
+      else assertRootDropCensusAdoptionMatch(census, freshCensus, { sourceSha, transitionId, stageAStateIdentity });
+      assertRootDropCensusFresh(freshCensus);
+      if (freshCensus.status !== "AUTHENTICATED_ORPHAN") fail("orphan adoption requires exactly one authenticated candidate");
+      if (!SHA256.test(planSha256 || "") || planSha256 !== freshCensus.failedApplyEvidence.planSha256) fail("orphan adoption is not bound to the failed Stage-A plan");
+      const candidate = freshCensus.candidates[0];
       if (keyCount === 0) {
-        if (counts.keyCount !== 0 || counts.aliasCount !== 0) fail("pre-import Terraform state changed from the authenticated snapshot");
         assertStageAStateIdentityBinding(buildStageAStateIdentity(initialSnapshot.state, { stateBytes: initialSnapshot.stateBytes }), stageAStateIdentity);
         assertStateRootDropCounts(initialSnapshot.state, { key: 0, alias: 0 });
         if (!allowImport) fail("Terraform import requires explicit recovery execution authorization");
@@ -327,9 +364,12 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
       }
       const imported = assertRootDropKeyIdentity(state, candidate.keyId);
       const plan = await createPlan({ keyId: candidate.keyId });
+      const classifiedPlanSha256 = typeof readPlanBytes === "function" ? rootDropRecoverySha256(await readPlanBytes(plan)) : undefined;
       const planJson = await readPlan(plan);
       assertRootDropAliasOnlyPlan(planJson, { keyId: candidate.keyId });
       if (!execute) return { status: "READY_FOR_ALIAS_ADOPTION", accounting, keyId: candidate.keyId, plan, planSha256, imported: true, observedAt: now() };
+      const applyPlanSha256 = rootDropRecoverySha256(await readPlanBytes(plan));
+      if (applyPlanSha256 !== classifiedPlanSha256) fail("alias Terraform plan changed after classification; refusing to apply substituted plan");
       accounting.terraformApplies += 1;
       let applyResult;
       try { applyResult = await applyPlan(plan); } catch (error) {
@@ -352,7 +392,7 @@ export function createRootDropRecoveryRunner({ execute = false, allowImport = ex
   };
 }
 
-function assertRootDropKeyIdentity(state, keyId) {
+export function assertRootDropKeyIdentity(state, keyId) {
   const key = stateInstances(state, "aws_kms_key", "root_drop");
   if (key.length !== 1) fail("Terraform refresh did not return exactly one imported root-drop key");
   const attributes = key[0].attributes || {};
@@ -392,11 +432,11 @@ export function buildRootDropAwsReadAdapter({ run, profile, discoveryProfile = p
 
 export function rootDropTagsFromAws(Tags) { return Object.fromEntries((Tags || []).map(({ TagKey, TagValue }) => [TagKey, TagValue])); }
 
-export function collectRootDropCensus({ adapter, terraformState, sourceSha, transitionId, stageAStateIdentity, failedApplyEvidence } = {}) {
+export function collectRootDropCensus({ adapter, terraformState, sourceSha, transitionId, stageAStateIdentity, failedApplyEvidence, allowKeyOnly = false } = {}) {
   if (!adapter || typeof adapter.listKeys !== "function" || typeof adapter.describeKey !== "function" || typeof adapter.listTags !== "function" || typeof adapter.getPolicy !== "function" || typeof adapter.getPublicKey !== "function" || typeof adapter.listAliases !== "function" || typeof adapter.lookupCreateKeyEvents !== "function") fail("fresh root-drop census adapter is incomplete");
   if (!failedApplyEvidence?.failedApplyWindow) fail("fresh root-drop census requires the failed-apply observation window");
   assertStateShape(terraformState);
-  assertStateRootDropCounts(terraformState, { key: 0, alias: 0 });
+  assertStateRootDropCounts(terraformState, allowKeyOnly ? { allowKeyOnly: true } : { key: 0, alias: 0 });
   const startUniverse = captureRootDropKeyUniverse(adapter);
   const firstSnapshots = new Map(startUniverse.map((keyId) => [keyId, candidateSnapshot(adapter, keyId)]));
   const secondSnapshots = new Map(startUniverse.map((keyId) => [keyId, candidateSnapshot(adapter, keyId)]));
@@ -406,7 +446,7 @@ export function collectRootDropCensus({ adapter, terraformState, sourceSha, tran
   const candidates = startUniverse.map((keyId) => candidateFromSnapshot(secondSnapshots.get(keyId))).filter(Boolean);
   const authenticatedCandidates = [];
   for (const candidate of candidates) {
-    try { authenticatedCandidates.push({ ...candidate, ...authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence }) }); }
+    try { authenticatedCandidates.push({ ...candidate, ...authenticateRootDropOrphan({ candidate, terraformState, sourceSha, transitionId, failedApplyEvidence, allowKeyOnly }) }); }
     catch (error) { authenticatedCandidates.push({ keyId: candidate.keyId, arn: candidate.arn, authenticated: false, reason: error.message }); }
   }
   return buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity, candidates: authenticatedCandidates, keyUniverse: startUniverse, failedApplyEvidence, actorBindings: adapter.actorBindings });
