@@ -263,8 +263,12 @@ export function assertTemporaryCapabilityTransition(previous, next, { sourceSha,
 export function buildRootDropOwnershipEvidence({ terraformState, sourceSha, transitionId, planSha256, observedAt } = {}) {
   const resources = terraformState?.resources;
   if (!Array.isArray(resources)) fail("Terraform state resources are required for root-drop ownership evidence");
-  const key = resources.find(({ address }) => address === "aws_kms_key.root_drop");
-  const alias = resources.find(({ address }) => address === "aws_kms_alias.root_drop");
+  const rootResources = (type, name) => resources.filter((resource) => resource?.module === undefined && resource?.mode === "managed" && resource?.type === type && resource?.name === name);
+  const keys = rootResources("aws_kms_key", "root_drop");
+  const aliases = rootResources("aws_kms_alias", "root_drop");
+  if (keys.length !== 1 || aliases.length !== 1) fail("exact Terraform-owned root-drop key and alias instances are required");
+  const [key] = keys;
+  const [alias] = aliases;
   if (key?.type !== "aws_kms_key" || !Array.isArray(key.instances) || key.instances.length !== 1 || alias?.type !== "aws_kms_alias" || !Array.isArray(alias.instances) || alias.instances.length !== 1) fail("exact Terraform-owned root-drop key and alias instances are required");
   const keyId = key.instances[0]?.attributes?.id;
   const aliasTarget = alias.instances[0]?.attributes?.target_key_id;
