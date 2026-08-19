@@ -23,6 +23,7 @@ import {
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageAStateIdentityBinding, buildStageAStateIdentity } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertRootDropCreationInterlock } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sourcePolicyPath = path.join(root, TEMPORARY_KMS_CAPABILITY.sourcePolicyPath);
@@ -262,10 +263,16 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     if (active.document.Statement?.some(isTemporaryTagResourceStatement)) return;
     if (canonical(active.document) !== canonical(sourcePolicy)) fail("live steady-state policy differs from protected source");
   };
-  const runPhase = ({ phase, sourceSha, transitionId, stateFile, planSha256, planJsonFile, terraformStateFile, stageAStateFile, stageAStateIdentity, applyFailed = false, partialOperationCensus = false } = {}) => {
+  const runPhase = ({ phase, sourceSha, transitionId, stateFile, planSha256, planJsonFile, terraformStateFile, stageAStateFile, stageAStateIdentity, rootDropCensusFile, applyFailed = false, partialOperationCensus = false } = {}) => {
     assertIdentity({ sourceSha, transitionId });
     const accounting = createMutationAccounting();
     const persistEvidence = (filePath, value) => writeEvidenceFn(filePath, value);
+    const rootDropCensus = phase === "authorize" && rootDropCensusFile ? readJson(validateStageAInput(rootDropCensusFile, "Stage-A root-drop census")) : null;
+    const rootDropState = phase === "authorize" && stageAStateFile ? readJson(validateStageAInput(stageAStateFile, "Stage-A state")) : null;
+    const assertCreationPlan = (plan) => {
+      assertStageARootDropCreationPlan(plan);
+      if (phase === "authorize" && rootDropCensus) assertRootDropCreationInterlock({ plan, terraformState: rootDropState, census: rootDropCensus, sourceSha, transitionId, stageAStateIdentity });
+    };
     if (phase === "authorize" && requireStageAStateBinding) {
       if (!stageAStateFile || !stageAStateIdentity || !existsSync(stageAStateFile)) fail("authenticated Stage A state identity is required before temporary capability authorization");
       const stateBytes = readFileSync(validateStageAInput(stageAStateFile, "Stage-A state"));
@@ -282,7 +289,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     if (!previous && phase === "abort" && activeTemporary) {
       if (!applyFailed || !partialOperationCensus || !SHA256.test(planSha256 || "") || !planJsonFile) fail("authenticated recovery inputs are required for an unrecorded temporary capability");
       const planFile = ensureStageBPrivateFile({ filePath: planJsonFile, repositoryRoot: root, label: "Classified Stage-A plan JSON" });
-      assertStageARootDropCreationPlan(readJson(planFile.path));
+      assertCreationPlan(readJson(planFile.path));
       assertTemporaryReleasePolicy(current.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId });
       previous = buildTemporaryCapabilityEvidence({ state: "AUTHORIZED_FOR_ROOT_DROP_CREATION", sourceSha, transitionId, planSha256, defaultVersionId: current.active.VersionId, temporaryVersionId: current.active.VersionId, observedAt: now() });
       persistEvidence(stateFile, previous);
@@ -291,7 +298,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
     if (phase === "abort") {
       if (!applyFailed || !partialOperationCensus || !SHA256.test(planSha256 || "") || !planJsonFile || !existsSync(planJsonFile) || !["AUTHORIZED_FOR_ROOT_DROP_CREATION", "STAGE_A_APPLY"].includes(state)) fail("apply failure, authenticated partial-operation census, and exact Stage-A plan bindings are required");
       const planFile = ensureStageBPrivateFile({ filePath: planJsonFile, repositoryRoot: root, label: "Classified Stage-A plan JSON" });
-      assertStageARootDropCreationPlan(readJson(planFile.path));
+      assertCreationPlan(readJson(planFile.path));
       if (previous && (previous.transitionId !== transitionId || previous.planSha256 !== planSha256)) fail("abort recovery belongs to a different transition or plan");
       const persistedTemporary = current.versions.find(({ VersionId }) => VersionId === previous?.temporaryVersionId);
       const completedAbort = previous && !activeTemporary && !persistedTemporary && current.active.VersionId !== previous.temporaryVersionId && !current.versions.some(({ document }) => document.Statement?.some(isTemporaryTagResourceStatement));
@@ -329,7 +336,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
         if (previous.transitionId !== transitionId || !VERSION.test(previous.temporaryVersionId || "") || previous.planSha256 !== planSha256) fail("existing authorization belongs to a different transition or plan");
         if (!planJsonFile) fail("exact classified Stage-A plan JSON is required for replay");
         const planFile = ensureStageBPrivateFile({ filePath: planJsonFile, repositoryRoot: root, label: "Classified Stage-A plan JSON" });
-        assertStageARootDropCreationPlan(readJson(planFile.path));
+        assertCreationPlan(readJson(planFile.path));
         const temporaryDocument = buildTemporaryReleasePolicy(sourcePolicy, { sourceSha, transitionId });
         const currentIsCanonical = isCurrentTemporaryReleasePolicy(current.active.document, { steadyStatePolicy: sourcePolicy, sourceSha, transitionId });
         if (currentIsCanonical) {
@@ -388,7 +395,7 @@ export function createTemporaryKmsCapabilityRunner({ run, sourcePolicy = readJso
       assertSource(current.active);
       if (!SHA256.test(planSha256 || "") || !planJsonFile) fail("exact classified Stage-A plan binding is required before authorization");
       const planFile = ensureStageBPrivateFile({ filePath: planJsonFile, repositoryRoot: root, label: "Classified Stage-A plan JSON" });
-      assertStageARootDropCreationPlan(readJson(planFile.path));
+      assertCreationPlan(readJson(planFile.path));
       const temporaryDocument = buildTemporaryReleasePolicy(sourcePolicy, { sourceSha, transitionId });
       const capacityState = ensurePolicyVersionCapacity({ current, readState, allowTemporaryVersionId: previous?.temporaryVersionId, accounting });
       let version;
@@ -533,10 +540,12 @@ export function runCli(argv = process.argv.slice(2), { run: injectedRun, write =
     if (phase === "authorize" && !stageAStateFileOption) fail("--stage-a-state is required before temporary capability authorization");
     const stageAStateIdentityFile = option(argv, "--stage-a-state-identity", false);
     if (phase === "authorize" && !stageAStateIdentityFile) fail("--stage-a-state-identity is required before temporary capability authorization");
+    const rootDropCensusFileOption = option(argv, "--root-drop-census", false);
+    if (phase === "authorize" && !rootDropCensusFileOption) fail("--root-drop-census is required before temporary capability authorization");
     const stageAStateFile = stageAStateFileOption ? validateStageAInput(stageAStateFileOption, "Stage-A state") : null;
     const stageAStateIdentityPath = stageAStateIdentityFile ? validateStageAInput(stageAStateIdentityFile, "Stage-A state identity") : null;
     const stageAStateIdentity = stageAStateIdentityPath ? readJson(stageAStateIdentityPath) : null;
-    const result = createTemporaryKmsCapabilityRunner({ run, requireStageAStateBinding: Boolean(stageAStateFile) }).runPhase({ phase, sourceSha, transitionId, stateFile, planSha256: option(argv, "--plan-sha256", false), planJsonFile: option(argv, "--plan-json", false), terraformStateFile: option(argv, "--terraform-state", false), stageAStateFile, stageAStateIdentity, applyFailed: argv.includes("--apply-failed"), partialOperationCensus: argv.includes("--partial-operation-census-verified") });
+    const result = createTemporaryKmsCapabilityRunner({ run, requireStageAStateBinding: Boolean(stageAStateFile) }).runPhase({ phase, sourceSha, transitionId, stateFile, planSha256: option(argv, "--plan-sha256", false), planJsonFile: option(argv, "--plan-json", false), terraformStateFile: option(argv, "--terraform-state", false), stageAStateFile, stageAStateIdentity, rootDropCensusFile: rootDropCensusFileOption, applyFailed: argv.includes("--apply-failed"), partialOperationCensus: argv.includes("--partial-operation-census-verified") });
     write(`${JSON.stringify({ state: result.evidence.state, evidenceSha256: result.evidence.evidenceSha256, writes: result.writes, mutationAccounting: result.mutationAccounting || null })}\n`);
     return result;
   } catch (error) {

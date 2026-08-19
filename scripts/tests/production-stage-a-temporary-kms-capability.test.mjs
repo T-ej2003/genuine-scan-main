@@ -30,6 +30,7 @@ import { ensureStageBPrivateFile } from "../aws/stage-b-artifact-contract.mjs";
 import { AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES, classifyTemporaryKmsPolicyVersion, createTemporaryKmsCapabilityRunner, runCli } from "../aws/reconcile-production-stage-a-temporary-kms-capability.mjs";
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { buildStageARootDropKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
+import { rootDropRecoverySha256 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
 
 const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
@@ -71,17 +72,22 @@ function writeCliStageAInputs(directory) {
   const stageAStateFile = path.join(directory, "stage-a.tfstate");
   const stageAStateIdentityFile = path.join(directory, "stage-a-state-identity.json");
   writeFileSync(stageAStateFile, stateBytes, { mode: 0o600 });
-  writeFileSync(stageAStateIdentityFile, `${JSON.stringify(buildStageAStateIdentity(state, { stateBytes }))}\n`, { mode: 0o600 });
-  return { stageAStateFile, stageAStateIdentityFile };
+  const stageAStateIdentity = buildStageAStateIdentity(state, { stateBytes });
+  writeFileSync(stageAStateIdentityFile, `${JSON.stringify(stageAStateIdentity)}\n`, { mode: 0o600 });
+  const rootDropCensusFile = path.join(directory, "root-drop-census.json");
+  const census = { schemaVersion: 1, kind: "MSCQR_STAGE_A_ROOT_DROP_CENSUS", status: "NO_CANDIDATE", sourceSha, transitionId, stageAStateLineage: stageAStateIdentity.lineage, stageAStateSerial: stageAStateIdentity.serial, stageAStateSha256: stageAStateIdentity.stateSha256, candidateCount: 0, candidates: [], observedAt: new Date().toISOString() };
+  writeFileSync(rootDropCensusFile, `${JSON.stringify({ ...census, censusSha256: rootDropRecoverySha256(census) })}\n`, { mode: 0o600 });
+  return { stageAStateFile, stageAStateIdentityFile, rootDropCensusFile };
 }
 
-function cliArgs({ phase = "authorize", stateFile, planJsonFile, stageAStateFile, stageAStateIdentityFile }) {
+function cliArgs({ phase = "authorize", stateFile, planJsonFile, stageAStateFile, stageAStateIdentityFile, rootDropCensusFile }) {
   return [
     "--admin-profile", "administrator", "--release-profile", "release", "--phase", phase,
     "--source-sha", sourceSha, "--transition-id", transitionId, "--state-file", stateFile,
     ...(planJsonFile ? ["--plan-sha256", planSha256, "--plan-json", planJsonFile] : []),
     ...(stageAStateFile ? ["--stage-a-state", stageAStateFile] : []),
     ...(stageAStateIdentityFile ? ["--stage-a-state-identity", stageAStateIdentityFile] : []),
+    ...(rootDropCensusFile ? ["--root-drop-census", rootDropCensusFile] : []),
   ];
 }
 
