@@ -83,15 +83,21 @@ The adoption command consumes the same reviewed Stage-A variable environment as
 the normal production plan: only the nine required `TF_VAR_*` inputs declared
 by `infra/aws/terraform/production-green-stage-a/variables.tf` are accepted;
 all other `TF_VAR_*` and Terraform redirect variables are rejected or removed.
-The refresh-enabled, non-mutating Terraform plan is saved, shown as JSON, and
-classified before import; only the exact root-drop key and alias create
-envelope is accepted. The refreshed state lineage, serial, and exact state
-bytes are revalidated against the pre-refresh identity before the fresh census
-is accepted. For the authenticated historical 1/0 path, the provider may
-advance serial/state bytes only while populating the exact root-drop ARN;
-lineage, backend, workspace, exact key ID/properties, 1/0 topology, and every
-unrelated state value must remain unchanged. The resulting post-refresh state
-identity is then bound to the new plan and all subsequent checks.
+For the normal 0/0 path, the refresh-enabled, non-mutating Terraform plan is
+saved, shown as JSON, and classified before import; only the exact root-drop
+key and alias create envelope is accepted. For the authenticated historical
+1/0 path, the provider boundary is different and explicit: after temporary
+authorization, `terraform plan -refresh-only -out <refresh-only-plan>` is
+saved, shown as JSON, classified as the exact root-drop computed-identity
+transition, byte-revalidated immediately before `terraform apply` of that
+saved refresh-only plan, and then `terraform state pull` must observe the
+persisted result. This is `AWS_RESOURCE_MUTATIONS=0` but an expected
+`TERRAFORM_STATE_WRITES=1`; it is not an ordinary infrastructure apply.
+The refreshed state lineage, backend, workspace, exact key properties, 1/0
+topology, and unrelated state values are revalidated against the pre-refresh
+identity. The provider may advance serial/state bytes only while populating
+the exact root-drop ARN and key ID. The resulting post-refresh state identity
+is then bound to the new recovery plan and all subsequent checks.
 Auto-loaded `terraform.tfvars` and `*.auto.tfvars` files are rejected so the reviewed inputs remain authoritative. The executing
 checkout must have a clean execution-relevant tree and its exact `HEAD` must
 equal the census `sourceSha`; for the exact historical legacy-policy binding,
@@ -133,10 +139,12 @@ closed. The command requires `--execute` before the alias-only apply; this
 repair never runs that command against production.
 
 Import replay reads current state first and never retries an ambiguous import.
-Recovery accounting records Terraform imports, Terraform applies, KMS writes,
-IAM writes, unknown mutations, and unclassified mutations. No destructive KMS
-action, permanent release-role administration, lockout bypass, or manual alias
-operation is part of recovery.
+Recovery accounting records Terraform imports, ordinary Terraform applies,
+refresh-only Terraform applies/state writes, KMS writes, IAM writes, unknown
+mutations, and unclassified mutations. The refresh-only state write is not an
+AWS resource mutation and is never counted as a KMS/IAM write. No destructive
+KMS action, permanent release-role administration, lockout bypass, or manual
+alias operation is part of recovery.
 
 The provider contract was verified against AWS provider v6.56.0: the key import
 identifier is the KMS key ID, and the alias import identifier would be

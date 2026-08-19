@@ -23,6 +23,7 @@ import {
   createRootDropRecoveryRunner,
   assertRootDropAliasOnlyPlan,
   assertRootDropPreImportPlan,
+  assertRootDropRefreshOnlyPlan,
   rootDropRecoverySha256,
 } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
@@ -167,7 +168,21 @@ export async function runCensus({ argv = process.argv.slice(2), run, execFile = 
   return census;
 }
 
-export async function runAdoption({ argv = process.argv.slice(2), runTerraform, readRootDropCensus, readTerraformBackendMetadata = readCanonicalTerraformBackend, execFile = execFileSync, runGit, write = (value) => process.stdout.write(value) } = {}) {
+export async function runAdoption(options = {}) {
+  const refreshAccounting = { terraformRefreshOnlyApplies: 0, terraformStateWrites: 0 };
+  try {
+    return await runAdoptionInternal({ ...options, refreshAccounting });
+  } catch (error) {
+    if (refreshAccounting.terraformRefreshOnlyApplies || refreshAccounting.terraformStateWrites) {
+      const value = error instanceof Error ? error : new Error(String(error));
+      value.recoveryAccounting = { ...(value.recoveryAccounting || {}), ...refreshAccounting };
+      throw value;
+    }
+    throw error;
+  }
+}
+
+async function runAdoptionInternal({ argv = process.argv.slice(2), runTerraform, readRootDropCensus, readTerraformBackendMetadata = readCanonicalTerraformBackend, execFile = execFileSync, runGit, write = (value) => process.stdout.write(value), refreshAccounting } = {}) {
   const censusPath = privatePath(option(argv, "--census"), "Stage-A root-drop census");
   const census = readJson(censusPath);
   const statePath = privatePath(option(argv, "--stage-a-state"), "Stage-A state");
@@ -222,7 +237,7 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
     assertStageAStateIdentityBinding(initialStateIdentity, stageAStateIdentity);
   } else if (initialCounts.keyCount === 1 && initialCounts.aliasCount === 0) {
     if (legacyPolicyBound) assertStageAStateIdentityBinding(initialStateIdentity, stageAStateIdentity);
-    assertRootDropKeyIdentity(initialSnapshot.state, census.candidates[0].keyId, { allowMissingArn: legacyPolicyBound });
+    assertRootDropKeyIdentity(initialSnapshot.state, census.candidates[0].keyId, { allowMissingComputedIdentity: legacyPolicyBound });
   } else if (initialCounts.keyCount === 1 && initialCounts.aliasCount === 1) {
     assertRootDropStateIdentity(initialSnapshot.state, { keyId: census.candidates[0].keyId, requireCanonicalPolicy: true });
   } else {
@@ -232,22 +247,54 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   let currentStateIdentity = initialStateIdentity;
   let preImportPlanSha256;
   let preImportPlan;
+  let refreshOnlyPlanSha256;
   if (initialCounts.aliasCount === 0) {
-    tf(["plan", "-input=false", "-lock=false", "-refresh=true", "-out", preImportPlanPath, "-no-color"]);
-    preImportPlanSha256 = rootDropRecoverySha256(readFileSync(preImportPlanPath));
-    preImportPlan = JSON.parse(tf(["show", "-json", preImportPlanPath]));
-    if (rootDropRecoverySha256(readFileSync(preImportPlanPath)) !== preImportPlanSha256) throw new Error("Stage-A pre-import plan changed while it was being classified");
-    refreshedSnapshot = await readStateSnapshot();
-    currentStateIdentity = buildStageAStateIdentity(refreshedSnapshot.state, { stateBytes: refreshedSnapshot.stateBytes });
-    if (legacyPolicyBound && initialCounts.keyCount === 1 && initialCounts.aliasCount === 0) {
-      currentStateIdentity = assertAuthorizedRootDropRefreshTransition({
-        beforeState: initialSnapshot.state,
-        beforeStateBytes: initialSnapshot.stateBytes,
-        afterState: refreshedSnapshot.state,
-        afterStateBytes: refreshedSnapshot.stateBytes,
-        keyId: census.candidates[0].keyId,
-      });
-    } else assertStageAStateIdentityBinding(currentStateIdentity, initialStateIdentity);
+    if (legacyPolicyBound && initialCounts.keyCount === 1) {
+      const keyId = census.candidates[0].keyId;
+      const preIdentity = assertRootDropKeyIdentity(initialSnapshot.state, keyId, { allowMissingComputedIdentity: true });
+      tf(["plan", "-refresh-only", "-input=false", "-lock=true", "-out", preImportPlanPath, "-no-color"]);
+      refreshOnlyPlanSha256 = rootDropRecoverySha256(readFileSync(preImportPlanPath));
+      preImportPlan = JSON.parse(tf(["show", "-json", preImportPlanPath]));
+      if (rootDropRecoverySha256(readFileSync(preImportPlanPath)) !== refreshOnlyPlanSha256) throw new Error("Stage-A refresh-only plan changed while it was being classified");
+      const refreshClassification = assertRootDropRefreshOnlyPlan(preImportPlan, { keyId, stateAlreadyConverged: preIdentity.computedIdentityComplete });
+      if (!refreshClassification.stateConverged) {
+        if (!execute) throw new Error("Stage-A historical 1/0 recovery requires --execute to persist the authenticated refresh-only state transition");
+        if (rootDropRecoverySha256(readFileSync(preImportPlanPath)) !== refreshOnlyPlanSha256) throw new Error("Stage-A refresh-only plan changed immediately before state persistence");
+        refreshAccounting.terraformRefreshOnlyApplies += 1;
+        try {
+          tf(["apply", "-input=false", "-lock=true", preImportPlanPath]);
+          refreshAccounting.terraformStateWrites += 1;
+        } catch (error) {
+          let observed;
+          try { observed = await readStateSnapshot(); } catch (readError) { error.mutationOutcome = "AMBIGUOUS"; error.recoveryAccounting = { unknownMutations: 1 }; throw error; }
+          try {
+            assertAuthorizedRootDropRefreshTransition({ beforeState: initialSnapshot.state, beforeStateBytes: initialSnapshot.stateBytes, afterState: observed.state, afterStateBytes: observed.stateBytes, keyId });
+            refreshedSnapshot = observed;
+            refreshAccounting.terraformStateWrites += 1;
+          } catch {
+            if (rootDropRecoverySha256(observed.stateBytes) === rootDropRecoverySha256(initialSnapshot.stateBytes)) {
+              error.mutationOutcome = "DEFINITE_FAILURE";
+            } else {
+              error.mutationOutcome = "AMBIGUOUS";
+              error.recoveryAccounting = { unknownMutations: 1 };
+            }
+            throw error;
+          }
+        }
+        if (refreshedSnapshot === initialSnapshot) refreshedSnapshot = await readStateSnapshot();
+      } else refreshedSnapshot = initialSnapshot;
+      currentStateIdentity = buildStageAStateIdentity(refreshedSnapshot.state, { stateBytes: refreshedSnapshot.stateBytes });
+      if (!refreshClassification.stateConverged) currentStateIdentity = assertAuthorizedRootDropRefreshTransition({ beforeState: initialSnapshot.state, beforeStateBytes: initialSnapshot.stateBytes, afterState: refreshedSnapshot.state, afterStateBytes: refreshedSnapshot.stateBytes, keyId });
+      else assertRootDropKeyIdentity(refreshedSnapshot.state, keyId);
+    } else {
+      tf(["plan", "-input=false", "-lock=false", "-refresh=true", "-out", preImportPlanPath, "-no-color"]);
+      preImportPlanSha256 = rootDropRecoverySha256(readFileSync(preImportPlanPath));
+      preImportPlan = JSON.parse(tf(["show", "-json", preImportPlanPath]));
+      if (rootDropRecoverySha256(readFileSync(preImportPlanPath)) !== preImportPlanSha256) throw new Error("Stage-A pre-import plan changed while it was being classified");
+      refreshedSnapshot = await readStateSnapshot();
+      currentStateIdentity = buildStageAStateIdentity(refreshedSnapshot.state, { stateBytes: refreshedSnapshot.stateBytes });
+      assertStageAStateIdentityBinding(currentStateIdentity, initialStateIdentity);
+    }
     const refreshedCounts = rootDropCounts(refreshedSnapshot.state);
     if (refreshedCounts.keyCount !== initialCounts.keyCount || refreshedCounts.aliasCount !== initialCounts.aliasCount) throw new Error("Stage-A refresh changed root-drop state before adoption");
     if (initialCounts.keyCount === 1) assertRootDropKeyIdentity(refreshedSnapshot.state, census.candidates[0].keyId);
@@ -266,11 +313,11 @@ export async function runAdoption({ argv = process.argv.slice(2), runTerraform, 
   });
   if (initialCounts.aliasCount === 0) {
     if (initialCounts.keyCount === 0) assertRootDropPreImportPlan(preImportPlan);
-    else assertRootDropAliasOnlyPlan(preImportPlan, { keyId: freshCensus?.candidates?.[0]?.keyId, policyCompatibility: freshCensus?.candidates?.[0]?.policyCompatibility });
+    else if (!legacyPolicyBound) assertRootDropAliasOnlyPlan(preImportPlan, { keyId: freshCensus?.candidates?.[0]?.keyId, policyCompatibility: freshCensus?.candidates?.[0]?.policyCompatibility });
   }
   const runner = createRootDropRecoveryRunner({ execute, readState, readStateSnapshot, importKey, refreshState, createPlan, readPlan, readPlanBytes: async (savedPath) => readFileSync(savedPath), applyPlan });
   const result = await runner({ census, freshCensus, terraformState: refreshedSnapshot.state, stageAStateIdentity: currentStateIdentity, sourceSha: census.sourceSha, transitionId: census.transitionId, planSha256: census.failedApplyEvidence?.planSha256 });
-  const report = { ...result, preImportPlanSha256 };
+  const report = { ...result, preImportPlanSha256, terraformRefreshOnlyApplies: refreshAccounting.terraformRefreshOnlyApplies, terraformStateWrites: refreshAccounting.terraformStateWrites, ...(refreshOnlyPlanSha256 ? { refreshOnlyPlanSha256 } : {}) };
   write(`${JSON.stringify(report, null, 2)}\n`);
   return report;
 }

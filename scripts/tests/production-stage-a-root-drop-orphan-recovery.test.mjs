@@ -16,6 +16,7 @@ import {
   ROOT_DROP_CENSUS_ACTOR_BINDINGS,
   ROOT_DROP_LEGACY_POLICY_BINDING,
   assertRootDropAliasOnlyPlan,
+  assertRootDropRefreshOnlyPlan,
   assertLegacyRootDropPolicyBinding,
   assertRootDropCensus,
   assertRootDropCreationInterlock,
@@ -115,6 +116,9 @@ const legacyAliasPolicyPlan = ({ key = legacyKeyId, beforePolicy = buildLegacyRo
   { address: ROOT_DROP_KEY_ADDRESS, type: "aws_kms_key", change: { before: { policy: JSON.stringify(beforePolicy) }, actions: ["update"], after: { policy: JSON.stringify(afterPolicy) }, replace_paths: [] } },
   { address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: key }, replace_paths: [] } },
 ] });
+const refreshOnlyIdentityPlan = ({ key = legacyKeyId, beforeArn = null, beforeKeyId = null, beforeId = null, afterArn = legacyKeyArn, afterKeyId = key, afterId = key } = {}) => ({ resource_changes: [
+  { address: ROOT_DROP_KEY_ADDRESS, type: "aws_kms_key", change: { before: { arn: beforeArn, key_id: beforeKeyId, id: beforeId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, actions: ["update"], after: { arn: afterArn, key_id: afterKeyId, id: afterId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, replace_paths: [] } },
+] });
 const keyState = () => ({ ...absentState, resources: absentState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: keyArn, key_id: keyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) });
 const ownedState = () => ({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(buildStageARootDropKeyPolicy()) } })) } : resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: keyId, target_key_arn: keyArn } }] } : resource) });
 const stateWithRootDropPolicy = (value, policy) => ({ ...value, resources: value.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(policy) } })) } : resource) });
@@ -145,7 +149,7 @@ test("key-only census accepts the exact imported key when computed ARN is unset"
   assert.equal(keyOnly.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn, null);
   assert.equal(keyOnly.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.id, legacyKeyId);
   assert.equal(collectRootDropCensus({ adapter: legacyAwsAdapter(), terraformState: keyOnly, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, stageAStateIdentity: identityForState(keyOnly), failedApplyEvidence: legacyFailedApplyEvidence, allowKeyOnly: true, allowMissingArn: true }).status, "AUTHENTICATED_ORPHAN");
-  assert.doesNotThrow(() => assertRootDropKeyIdentity(keyOnly, legacyKeyId, { allowMissingArn: true }));
+  assert.doesNotThrow(() => assertRootDropKeyIdentity(keyOnly, legacyKeyId, { allowMissingComputedIdentity: true }));
   assert.throws(() => assertRootDropKeyIdentity(keyOnly, legacyKeyId), /different or non-conforming/);
   const wrongArn = structuredClone(keyOnly);
   wrongArn.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = `${legacyKeyArn}-wrong`;
@@ -154,9 +158,11 @@ test("key-only census accepts the exact imported key when computed ARN is unset"
 
 test("authorized legacy refresh binds the exact 1/0 pre/post state transition", () => {
   const before = historicalKeyOnlyState();
+  before.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.id = null;
   const after = structuredClone(before);
   after.serial += 1;
   after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = legacyKeyArn;
+  after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.key_id = legacyKeyId;
   const transition = () => assertAuthorizedRootDropRefreshTransition({ beforeState: before, beforeStateBytes: Buffer.from(JSON.stringify(before)), afterState: after, afterStateBytes: Buffer.from(JSON.stringify(after)), keyId: legacyKeyId });
   assert.equal(transition().serial, after.serial);
 
@@ -175,6 +181,25 @@ test("authorized legacy refresh binds the exact 1/0 pre/post state transition", 
     mutate(candidateState);
     assert.throws(() => assertAuthorizedRootDropRefreshTransition({ beforeState: before, beforeStateBytes: Buffer.from(JSON.stringify(before)), afterState: candidateState, afterStateBytes: Buffer.from(JSON.stringify(candidateState)), keyId: legacyKeyId }), /authorized root-drop refresh|different or non-conforming|state lineage|state identity|topology|outside/, label);
   }
+});
+
+test("refresh-only classification permits only exact computed identity convergence", () => {
+  assert.equal(assertRootDropRefreshOnlyPlan(refreshOnlyIdentityPlan(), { keyId: legacyKeyId }).valid, true);
+  assert.equal(assertRootDropRefreshOnlyPlan({ resource_changes: [] }, { keyId: legacyKeyId, stateAlreadyConverged: true }).stateConverged, true);
+  for (const [label, mutate] of [
+    ["null ARN", (value) => { value.resource_changes[0].change.after.arn = null; }],
+    ["null key ID", (value) => { value.resource_changes[0].change.after.key_id = null; }],
+    ["wrong ARN", (value) => { value.resource_changes[0].change.after.arn = `${legacyKeyArn}-wrong`; }],
+    ["wrong key ID", (value) => { value.resource_changes[0].change.after.key_id = keyId; }],
+    ["alias", (value) => { value.resource_changes.push({ address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { actions: ["create"] } }); }],
+    ["policy", (value) => { value.resource_changes[0].change.after.policy = "changed"; }],
+    ["unrelated", (value) => { value.resource_changes.push({ address: "aws_vpc.other", type: "aws_vpc", change: { actions: ["update"] } }); }],
+  ]) {
+    const invalid = refreshOnlyIdentityPlan();
+    mutate(invalid);
+    assert.throws(() => assertRootDropRefreshOnlyPlan(invalid, { keyId: legacyKeyId }), /refresh-only root-drop plan/, label);
+  }
+  assert.throws(() => assertRootDropRefreshOnlyPlan({ resource_changes: [] }, { keyId: legacyKeyId }), /refresh-only root-drop plan/);
 });
 
 test("exact orphan authentication requires account, region, metadata, tags, policy, no alias, and CloudTrail creator/window", () => {
@@ -438,6 +463,7 @@ test("runAdoption resumes legacy policy convergence from a canonical key-only st
   let currentState = canonicalKeyOnlyState;
   let imports = 0;
   let applies = 0;
+  let showCount = 0;
   try {
     Object.assign(process.env, stageAVars);
     const result = await runAdoption({
@@ -451,7 +477,7 @@ test("runAdoption resumes legacy policy convergence from a canonical key-only st
         if (args.includes("import")) { imports += 1; throw new Error("policy-first retry must not import"); }
         if (args.includes("apply")) { applies += 1; currentState = canonicalOwnedState; return ""; }
         if (args.includes("plan") && args.includes("-out")) { writeFileSync(args[args.indexOf("-out") + 1], "policy-first-plan"); return ""; }
-        if (args.includes("show")) return JSON.stringify(args.at(-1).includes("zero-drift") ? { resource_changes: [] } : aliasPlan([{ address: ROOT_DROP_ALIAS_ADDRESS, change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: legacyKeyId } } }]));
+        if (args.includes("show")) return JSON.stringify(args.at(-1).includes("zero-drift") ? { resource_changes: [] } : showCount++ === 0 ? { resource_changes: [] } : aliasPlan([{ address: ROOT_DROP_ALIAS_ADDRESS, change: { actions: ["create"], after: { name: ROOT_DROP_ALIAS_NAME, target_key_id: legacyKeyId } } }]));
         throw new Error(`unexpected Terraform command: ${args.join(" ")}`);
       },
       write: () => {},
@@ -765,6 +791,9 @@ test("CLI failure formatting preserves confirmed, ambiguous, and zero mutation a
   ambiguous.recoveryAccounting = { terraformImports: 1, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 1, unclassifiedMutations: 0 };
   assert.equal(JSON.parse(formatRootDropRecoveryFailure(ambiguous)).recoveryAccounting.unknownMutations, 1);
   assert.equal(JSON.parse(formatRootDropRecoveryFailure(ambiguous)).mutationOutcome, "AMBIGUOUS");
+  const refreshPersisted = new Error("post-refresh plan failed");
+  refreshPersisted.recoveryAccounting = { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0, terraformRefreshOnlyApplies: 1, terraformStateWrites: 1 };
+  assert.deepEqual(JSON.parse(formatRootDropRecoveryFailure(refreshPersisted)).recoveryAccounting, refreshPersisted.recoveryAccounting);
   assert.deepEqual(JSON.parse(formatRootDropRecoveryFailure(new Error("preflight failed"))).recoveryAccounting, { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 });
 });
 
@@ -1154,11 +1183,18 @@ test("runAdoption accepts the authenticated legacy 1/0 ARN-populating refresh", 
   const censusPath = path.join(directory, "census.json");
   const planPath = path.join(directory, "alias.plan");
   const before = historicalKeyOnlyState();
+  before.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.id = null;
   const after = structuredClone(before);
   after.serial += 1;
   after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.arn = legacyKeyArn;
+  after.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].attributes.key_id = legacyKeyId;
   const beforeIdentity = identityForState(before);
   const afterIdentity = identityForState(after);
+  const finalState = { ...after, resources: after.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop"
+    ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(buildStageARootDropKeyPolicy()) } })) }
+    : resource.type === "aws_kms_alias" && resource.name === "root_drop"
+      ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: legacyKeyId, target_key_arn: legacyKeyArn } }] }
+      : resource) };
   const makeCensus = (stageAState, stageAStateIdentity) => buildRootDropCensus({
     sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha,
     transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId,
@@ -1172,25 +1208,34 @@ test("runAdoption accepts the authenticated legacy 1/0 ARN-populating refresh", 
   writeFileSync(statePath, JSON.stringify(before), { mode: 0o600 });
   writeFileSync(identityPath, `${JSON.stringify(beforeIdentity)}\n`, { mode: 0o600 });
   writeFileSync(censusPath, `${JSON.stringify(historicalCensus)}\n`, { mode: 0o600 });
+  let currentState = before;
   let statePulls = 0;
+  let refreshResponseLost = false;
   const savedVariables = Object.fromEntries(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS.map((key) => [key, process.env[key]]));
   try {
     Object.assign(process.env, stageAVars);
     const result = await runAdoption({
-      argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--execution-source-sha", ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, "--terraform-root", path.join(process.cwd(), "infra/aws/terraform/production-green-stage-a"), "--plan-path", planPath],
+      argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--execution-source-sha", ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, "--terraform-root", path.join(process.cwd(), "infra/aws/terraform/production-green-stage-a"), "--plan-path", planPath, "--execute"],
       runGit: cleanGit(ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha),
       readRootDropCensus: async () => freshCensus,
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args) => {
         if (args.includes("workspace")) return "default\n";
-        if (args.includes("state") && args.includes("pull")) return JSON.stringify(statePulls++ === 0 ? before : after);
+        if (args.includes("state") && args.includes("pull")) { statePulls += 1; return JSON.stringify(currentState); }
+        if (args.includes("apply")) {
+          currentState = currentState === before ? after : finalState;
+          if (currentState === after && !refreshResponseLost) { refreshResponseLost = true; throw new Error("refresh-only apply response lost after state persistence"); }
+          return "";
+        }
         if (args.includes("plan") && args.includes("-out")) { writeFileSync(args[args.indexOf("-out") + 1], "arn-populating-refresh-plan"); return ""; }
-        if (args.includes("show")) return JSON.stringify(legacyAliasPolicyPlan({ key: legacyKeyId }));
+        if (args.includes("show")) return JSON.stringify(args.at(-1).includes("zero-drift") ? { resource_changes: [] } : statePulls === 1 ? refreshOnlyIdentityPlan({ key: legacyKeyId }) : legacyAliasPolicyPlan({ key: legacyKeyId }));
         throw new Error(`unexpected Terraform command: ${args.join(" ")}`);
       },
       write: () => {},
     });
-    assert.equal(result.status, "READY_FOR_ALIAS_ADOPTION");
+    assert.equal(result.status, "RECOVERED");
+    assert.equal(result.terraformRefreshOnlyApplies, 1);
+    assert.equal(result.terraformStateWrites, 1);
     assert.equal(statePulls >= 3, true);
   } finally {
     for (const [key, value] of Object.entries(savedVariables)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
