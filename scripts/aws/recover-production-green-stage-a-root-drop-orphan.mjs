@@ -249,6 +249,7 @@ async function runAdoptionInternal({ argv = process.argv.slice(2), runTerraform,
     const keyId = census.candidates[0].keyId;
     const status = rootDropKeyInstance(initialSnapshot.state)?.status;
     if (status === "tainted") {
+      assertRootDropKeyIdentity(initialSnapshot.state, keyId);
       if (!execute) throw new Error("Stage-A historical 1/0 recovery requires --execute to clear the authenticated root-drop taint marker");
       let observed;
       let commandConfirmed = false;

@@ -1467,6 +1467,68 @@ test("runAdoption reconciles an interrupted exact root-drop untaint before recov
   }
 });
 
+test("runAdoption authenticates complete computed identity before untaint", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-pre-untaint-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  const valid = legacyKeyState(buildLegacyRootDropKeyPolicy());
+  valid.serial = 47;
+  valid.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0].status = "tainted";
+  const validCensus = buildRootDropCensus({
+    sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha,
+    transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId,
+    stageAStateIdentity: identityForState(valid),
+    keyUniverse: [legacyKeyId],
+    candidates: [{ ...legacyCandidate(), ...authenticateRootDropOrphan({ candidate: legacyCandidate(), terraformState: valid, sourceSha: ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, transitionId: ROOT_DROP_LEGACY_POLICY_BINDING.transitionId, failedApplyEvidence: legacyFailedApplyEvidence, allowKeyOnly: true }) }],
+    failedApplyEvidence: legacyFailedApplyEvidence,
+  });
+  writeFileSync(censusPath, `${JSON.stringify(validCensus)}\n`, { mode: 0o600 });
+  const cases = [
+    ["null ARN", (instance) => { instance.attributes.arn = null; }],
+    ["null key ID", (instance) => { instance.attributes.key_id = null; }],
+    ["missing provider identity", (instance) => { instance.identity = null; }],
+    ["wrong ARN", (instance) => { instance.attributes.arn = `${legacyKeyArn}-wrong`; }],
+    ["wrong key ID", (instance) => { instance.attributes.key_id = keyId; }],
+    ["wrong provider key", (instance) => { instance.identity.id = keyId; }],
+    ["wrong provider account", (instance) => { instance.identity.account_id = "000000000000"; }],
+    ["wrong provider region", (instance) => { instance.identity.region = "us-east-1"; }],
+    ["wrong resource", (instance, value) => { value.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").name = "other"; }],
+  ];
+  const saved = Object.fromEntries(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS.map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, stageAVars);
+    for (const [label, mutate] of cases) {
+      const candidateState = structuredClone(valid);
+      mutate(candidateState.resources.find(({ type, name }) => type === "aws_kms_key" && name === "root_drop").instances[0], candidateState);
+      writeFileSync(statePath, JSON.stringify(candidateState), { mode: 0o600 });
+      writeFileSync(identityPath, `${JSON.stringify(identityForState(candidateState))}\n`, { mode: 0o600 });
+      let untaintCalls = 0;
+      let failure;
+      try {
+        await runAdoption({
+          argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--execution-source-sha", ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha, "--terraform-root", path.join(process.cwd(), "infra/aws/terraform/production-green-stage-a"), "--plan-path", path.join(directory, `${label.replaceAll(" ", "-")}.plan`), "--execute"],
+          runGit: cleanGit(ROOT_DROP_LEGACY_POLICY_BINDING.sourceSha),
+          readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
+          execFile: (command, args) => {
+            if (args.includes("workspace")) return "default\n";
+            if (args.includes("state") && args.includes("pull")) return JSON.stringify(candidateState);
+            if (args.includes("untaint")) untaintCalls += 1;
+            throw new Error(`Terraform mutation reached for ${label}`);
+          },
+          write: () => {},
+        });
+      } catch (error) { failure = error; }
+      assert.ok(failure, label);
+      assert.equal(untaintCalls, 0, label);
+      assert.equal(failure.recoveryAccounting?.terraformStateWrites || 0, 0, label);
+    }
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("completed legacy adoption replay reconciles the historical census identity", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-orphan-completed-legacy-replay-"));
   const statePath = path.join(directory, "state.json");
