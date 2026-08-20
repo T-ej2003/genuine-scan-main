@@ -139,6 +139,21 @@ and, when observed, that exact RDS computed timestamp. Missing, substituted,
 or extended root-drop identity metadata fails closed. The resulting
 post-refresh state identity is then bound to the new recovery plan and all
 subsequent checks.
+
+The same saved refresh-only boundary handles one completed `1/1` post-apply
+representation: after Terraform already owns
+`aws_vpc_security_group_ingress_rule.runtime_endpoints_https[<runtime-sg>]`,
+the AWS provider may add its exact TCP/443 SG-source representation to the
+computed `ingress` set on `aws_security_group.executor_endpoints`. The operator
+must supply `--endpoint-security-group-id` and `--runtime-security-group-id`.
+The classifier authenticates those IDs against the raw Stage-A state, the
+standalone rule ID/provider identity, account, region, and the parent SG's
+pre-refresh attributes. It then permits only the single matching ingress-set
+addition, with no CIDR, IPv6, prefix-list, self, egress, tag, description,
+VPC, replacement, resource action, or unrelated drift. The saved resource
+plan is never replayed; only the separately generated and byte-revalidated
+refresh-only plan can advance the state serial once.
+
 Auto-loaded `terraform.tfvars` and `*.auto.tfvars` files are rejected so the reviewed inputs remain authoritative. The executing
 checkout must have a clean execution-relevant tree and its exact `HEAD` must
 equal the census `sourceSha`; for the exact historical legacy-policy binding,

@@ -1,10 +1,39 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 const REQUIRED_LOGICAL_ADDRESS = "aws_vpc_security_group_ingress_rule.runtime_endpoints_https";
 const SHA256 = /^[a-f0-9]{64}$/;
+const RDS_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const exact = (value, expected, message) => { if (value !== expected) throw new Error(message); };
+
+export function assertStageARdsLatestRestorableTimeRefresh(before, after) {
+  if (!before || typeof before !== "object" || Array.isArray(before) || !after || typeof after !== "object" || Array.isArray(after)) throw new Error("Stage A plan contains malformed RDS before/after state.");
+  const parseTimestamp = (value) => {
+    const milliseconds = typeof value === "string" && RDS_UTC_TIMESTAMP.test(value) ? Date.parse(value) : NaN;
+    if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value.replace("Z", ".000Z")) throw new Error("Stage A plan contains a malformed RDS latest_restorable_time.");
+    return milliseconds;
+  };
+  if (parseTimestamp(after.latest_restorable_time) <= parseTimestamp(before.latest_restorable_time)) throw new Error("Stage A plan contains a non-forward RDS latest_restorable_time.");
+  const withoutTimestamp = (value) => Object.fromEntries(Object.entries(value).filter(([field]) => field !== "latest_restorable_time"));
+  if (!isDeepStrictEqual(withoutTimestamp(before), withoutTimestamp(after))) throw new Error("Stage A plan changes RDS state outside latest_restorable_time.");
+  return true;
+}
+
+export function assertStageAResourceDrift(plan) {
+  if (plan?.resource_drift === undefined) return true;
+  if (!Array.isArray(plan.resource_drift) || plan.resource_drift.length > 1) throw new Error("Stage A plan contains uncontracted provider drift.");
+  if (plan.resource_drift.length === 0) return true;
+  const [entry] = plan.resource_drift;
+  const change = entry?.change;
+  const emptyObject = (value) => value === undefined || value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
+  if (entry?.address !== "aws_db_instance.green" || entry.mode !== "managed" || entry.type !== "aws_db_instance" || entry.name !== "green"
+    || !change || !isDeepStrictEqual(change.actions, ["update"])
+    || change.replace_paths !== undefined && (!Array.isArray(change.replace_paths) || change.replace_paths.length)
+    || !emptyObject(change.before_unknown) || !emptyObject(change.after_unknown)) throw new Error("Stage A plan contains uncontracted provider drift.");
+  return assertStageARdsLatestRestorableTimeRefresh(change.before, change.after);
+}
 export const STAGE_A_CHECKER_POLICY = Object.freeze({
   address: "aws_iam_role_policy.checker_assume_target",
   type: "aws_iam_role_policy",
@@ -203,6 +232,7 @@ function readAndVerifyPlanSha256(planPath, expectedSha256) {
 
 export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurityGroupId } = {}) {
   if (!plan || !Array.isArray(plan.resource_changes) || !endpointSecurityGroupId || !runtimeSecurityGroupId) throw new Error("Stage A plan inputs are incomplete.");
+  assertStageAResourceDrift(plan);
   const expectedAddress = `${REQUIRED_LOGICAL_ADDRESS}[${JSON.stringify(runtimeSecurityGroupId)}]`;
   const changes = plan.resource_changes.map((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.address !== "string" || !entry.address.trim()) throw new Error("Stage A plan contains a malformed resource entry.");
