@@ -55,8 +55,11 @@ const parseArgs = (argv) => {
   return { mode: modes[0], values };
 };
 
-const loadConfig = (file) => {
-  const config = JSON.parse(readFileSync(file, "utf8"));
+const loadConfig = (file, expectedSha256) => {
+  if (!/^[a-f0-9]{64}$/.test(expectedSha256 || "")) throw new Error("--config-sha256 must be an exact SHA-256");
+  const bytes = readFileSync(file);
+  if (sha256(bytes) !== expectedSha256) throw new Error("rotation config changed after approval");
+  const config = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   required(config.region, "config.region");
   required(config.expectedRoleArn, "config.expectedRoleArn");
   required(config.rotationId, "config.rotationId");
@@ -600,7 +603,7 @@ const status = async ({ config, sm, values, identity }) => {
 
 const main = async () => {
   const { mode, values } = parseArgs(process.argv.slice(2));
-  const config = loadConfig(path.resolve(required(values.get("config"), "--config")));
+  const config = loadConfig(path.resolve(required(values.get("config"), "--config")), required(values.get("config-sha256"), "--config-sha256"));
   const identity = assertIdentity(config);
   const sm = client(config);
   const inventoryFile = values.get("inventory-evidence-file");

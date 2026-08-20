@@ -10,6 +10,7 @@ export const STRICT_ONBOARDING_CHECKS = Object.freeze([
 ]);
 
 const SHA40 = /^[a-f0-9]{40}$/;
+const SHA256 = /^[a-f0-9]{64}$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const SENSITIVE = /database_url|postgres(?:ql)?:\/\/|password|secret|token|private.?key|qr.?payload|mfa.?seed|authorization|cookie|bearer/i;
 
@@ -35,6 +36,7 @@ export function buildOnboardingEvidenceFingerprint(evidence) {
     taskDefinitionArn: evidence.taskDefinitionArn,
     taskArn: evidence.taskArn,
     rotationId: evidence.rotationId,
+    rotationStateSha256: evidence.rotationStateSha256,
     rotationPhase: evidence.rotationPhase,
     checks: Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, evidence.checks[name]])),
   };
@@ -43,7 +45,7 @@ export function buildOnboardingEvidenceFingerprint(evidence) {
 /** The only strict onboarding producer. Missing probe functions are failures, never skips. */
 export async function runStrictOnboardingProbes({ probes, expected } = {}) {
   if (!probes || typeof probes !== "object") throw new Error("Strict onboarding probes are required.");
-  if (!SHA40.test(expected?.sourceSha || "") || !DIGEST.test(expected?.imageDigest || "") || typeof expected.taskDefinitionArn !== "string" || typeof expected.taskArn !== "string" || typeof expected.rotationId !== "string") throw new Error("Strict onboarding identity is incomplete.");
+  if (!SHA40.test(expected?.sourceSha || "") || !DIGEST.test(expected?.imageDigest || "") || typeof expected.taskDefinitionArn !== "string" || typeof expected.taskArn !== "string" || typeof expected.rotationId !== "string" || !SHA256.test(expected.rotationStateSha256 || "")) throw new Error("Strict onboarding identity is incomplete.");
   const checks = {};
   for (const name of STRICT_ONBOARDING_CHECKS) {
     if (typeof probes[name] !== "function") throw new Error(`Mandatory onboarding probe is unavailable: ${name}.`);
@@ -55,6 +57,7 @@ export async function runStrictOnboardingProbes({ probes, expected } = {}) {
     taskDefinitionArn: expected.taskDefinitionArn,
     taskArn: expected.taskArn,
     rotationId: expected.rotationId,
+    rotationStateSha256: expected.rotationStateSha256,
     rotationPhase: "overlap-ready",
     serviceStable: checks.serviceStable,
     targetTaskDefinitionMatch: checks.taskDefinition,

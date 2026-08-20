@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { lstatSync, readFileSync } from "node:fs";
+import { lstatSync, rmSync } from "node:fs";
 import path from "node:path";
-import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, readStageBPrivateFileBytes, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { loadApprovedArtifactSigningBindings } from "./production-artifact-signing-secrets-adapter.mjs";
 import { buildOverlapTaskDefinition } from "./production-overlap-task-definition.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
@@ -10,9 +10,10 @@ import { RELEASE_ROLE_ARN } from "./production-identity-adapters.mjs";
 import { assertImageAuthorization, authorizedBackendDigest, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertOnboardingPaths, PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
-import { assertPostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
+import { assertAuthenticatedCurrentStageBState, assertPostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
 import { assertRootDropEvidence } from "./production-root-drop-evidence.mjs";
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
+import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -25,7 +26,6 @@ const REQUIRED_SECRET_BINDINGS = Object.freeze([
   "qr.privateCurrentSecretId", "qr.privatePendingSecretId", "qr.publicCurrentSecretId",
   "qr.publicPreviousSecretId", "qr.publicPendingSecretId", "qr.currentKeyVersionSecretId", "qr.previousKeyVersionSecretId", "qr.previousKeyVersion",
 ]);
-const json = (filePath) => JSON.parse(readFileSync(filePath, "utf8"));
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const canonical = (value) => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
 const canonicalHash = (value) => hash(canonical(value));
@@ -66,11 +66,11 @@ function assertBindings(bindings = {}) {
   return Object.freeze({ ...checked, ecs: Object.freeze(ecs) });
 }
 
-function readInputFile(filePath, repositoryRoot, label) {
-  const resolved = ensureStageBPrivateFile({ filePath, repositoryRoot, label });
-  const value = json(resolved.path);
+function readInputFile(filePath, repositoryRoot, label, parse = (bytes) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))) {
+  const captured = readStageBPrivateFileBytes({ filePath, repositoryRoot, label });
+  const value = parse(captured.bytes);
   assertNoSecretMaterial(value, label);
-  return { path: resolved.path, value, sha256: hash(readFileSync(resolved.path)) };
+  return { path: captured.path, value, sha256: captured.sha256 };
 }
 
 export function deriveRuntimeMetadata(taskDefinition) {
@@ -156,7 +156,9 @@ export function prepareProductionCutoverRuntime({
   stageAStatePath,
   stageAHandoffPath,
   stageBStatePath,
+  currentStageBStatePath,
   currentTaskDefinition,
+  loadCurrentTaskDefinition,
   inventoryApprovalId,
   onboardingPaths,
   stageBTfvarsPath,
@@ -180,45 +182,68 @@ export function prepareProductionCutoverRuntime({
   } catch (error) { blockers.push(error.message); }
   let config;
   let staticBindings;
+  let configBytes;
+  let runtimeConfigSha256;
+  let onboardingPathsBytes;
+  let onboardingPathsFile;
+  let rotationTerraformInputBytes;
+  let rotationTerraformInputFile;
   try {
     if (!protectedSha || !SHA40.test(protectedSha)) throw new Error("protected-main source SHA is unresolved.");
     if (!rotationBindings) throw new Error("rotation secret binding manifest is required; current/previous/pending JWT/QR bindings are not derivable from the legacy live task.");
     const rotationId = requestedRotationId || `rotation-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
     if (!ROTATION_ID.test(rotationId)) throw new Error("Requested rotation ID is invalid.");
-    if (!imageAuthorization) throw new Error("image authorization evidence is required.");
-    assertImageAuthorization(imageAuthorization, protectedSha, imageAuthorizationValidation);
-    const backendImageDigest = authorizedBackendDigest(imageAuthorization);
+    if (!imageAuthorization?.filePath) throw new Error("image authorization evidence file is required.");
+    const preparedImageAuthorization = readInputFile(imageAuthorization.filePath, repositoryRoot, "Image authorization evidence");
+    const suppliedImageAuthorization = { ...imageAuthorization }; delete suppliedImageAuthorization.filePath;
+    if (canonicalHash(suppliedImageAuthorization) !== canonicalHash(preparedImageAuthorization.value)) throw new Error("Image authorization input differs from its authenticated file.");
+    assertImageAuthorization(preparedImageAuthorization.value, protectedSha, imageAuthorizationValidation);
+    const backendImageDigest = authorizedBackendDigest(preparedImageAuthorization.value);
     if (!backendImageDigest) throw new Error("Authorized backend image digest is missing.");
-    if (!iamEvidence || iamEvidence.status !== "valid" || iamEvidence.iamEvaluationCensus?.executed !== iamEvidence.iamEvaluationCensus?.total || iamEvidence.iamEvaluationCensus?.invalid !== 0) throw new Error("IAM evidence is incomplete.");
-    if (!temporaryKmsCapabilityFile) throw new Error("Temporary Stage-A KMS capability absence evidence is required.");
-    const temporaryKmsCapability = readInputFile(temporaryKmsCapabilityFile, repositoryRoot, "Temporary Stage-A KMS capability evidence");
-    assertPreCutoverTemporaryCapabilityAbsent(temporaryKmsCapability.value, { sourceSha: protectedSha });
+    if (!iamEvidence?.filePath) throw new Error("IAM evidence file is required.");
+    const preparedIamEvidence = readInputFile(iamEvidence.filePath, repositoryRoot, "IAM evidence");
+    const suppliedIamEvidence = { ...iamEvidence }; delete suppliedIamEvidence.filePath;
+    if (canonicalHash(suppliedIamEvidence) !== canonicalHash(preparedIamEvidence.value)) throw new Error("IAM evidence input differs from its authenticated file.");
+    if (preparedIamEvidence.value.status !== "valid" || preparedIamEvidence.value.iamEvaluationCensus?.executed !== preparedIamEvidence.value.iamEvaluationCensus?.total || preparedIamEvidence.value.iamEvaluationCensus?.invalid !== 0) throw new Error("IAM evidence is incomplete.");
+    assertPreCutoverTemporaryCapabilityAbsent(preparedIamEvidence.value.temporaryKmsCapability, { sourceSha: protectedSha });
+    const temporaryKmsCapability = temporaryKmsCapabilityFile ? readInputFile(temporaryKmsCapabilityFile, repositoryRoot, "Temporary Stage-A KMS capability evidence") : null;
+    if (temporaryKmsCapability) {
+      assertPreCutoverTemporaryCapabilityAbsent(temporaryKmsCapability.value, { sourceSha: protectedSha });
+      if (canonicalHash(temporaryKmsCapability.value) !== canonicalHash(preparedIamEvidence.value.temporaryKmsCapability)) throw new Error("Standalone temporary capability evidence diverges from canonical IAM evidence.");
+    }
     if (!artifactBindingFile) throw new Error("Existing artifact-signing runtime binding file is required.");
-    const artifactBindings = loadApprovedArtifactSigningBindings(artifactBindingFile);
+    const artifactBinding = readStageBPrivateFileBytes({ filePath: artifactBindingFile, repositoryRoot, label: "Artifact-signing runtime binding" });
+    const artifactBindings = loadApprovedArtifactSigningBindings(artifactBinding.path, { expectedSourceSha: protectedSha, expectedSha256: artifactBinding.sha256, repositoryRoot });
     if (!rootDropEvidenceFile) throw new Error("Root-drop evidence file is required.");
     const rootDrop = readInputFile(rootDropEvidenceFile, repositoryRoot, "Root-drop evidence");
     assertRootDropEvidence(rootDrop.value, { sourceSha: protectedSha, ...(verifyRootDropSignature ? { verifySignature: verifyRootDropSignature } : {}) });
     if ((stageAPlanPath && stageARecoveryEvidenceFile) || (!stageAPlanPath && !stageARecoveryEvidenceFile)) throw new Error("Exactly one of preserved Stage-A saved plan or post-apply Stage-A recovery evidence is required.");
     const stageARecovery = stageARecoveryEvidenceFile ? readInputFile(stageARecoveryEvidenceFile, repositoryRoot, "Stage-A recovery evidence") : null;
-    if (stageARecovery && (!stageAStatePath || !stageAHandoffPath || !stageBStatePath)) throw new Error("Stage-A recovery requires the independently authenticated Stage-A and converged Stage-B state artifacts.");
-    for (const [filePath, label] of [[stageAStatePath, "Stage-A state"], [stageAHandoffPath, "Stage-A handoff"], [stageBStatePath, "Stage-B state"]]) if (stageARecovery) ensureStageBPrivateFile({ filePath, repositoryRoot, label });
+    if (stageARecovery && (!stageAStatePath || !stageAHandoffPath || !stageBStatePath || !currentStageBStatePath)) throw new Error("Stage-A recovery requires historical provenance and the authenticated current Stage-B state.");
+    for (const [filePath, label] of [[stageAStatePath, "Stage-A state"], [stageAHandoffPath, "Stage-A handoff"], [stageBStatePath, "Historical Stage-B state"], [currentStageBStatePath, "Current Stage-B state"]]) if (stageARecovery) ensureStageBPrivateFile({ filePath, repositoryRoot, label });
     if (stageARecovery) assertPostApplyStageAPlanRecovery(stageARecovery.value, { sourceSha: protectedSha, expectedStageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", expectedStageBSerial: 98, authenticated: { ...readAuthenticatedStageARecoverySources({ stageAStatePath, stageAHandoffPath, stageBStatePath, repositoryRoot }), ingress: stageARecovery.value.ingress } });
-    if (stageAPlanPath) ensureStageBPrivateFile({ filePath: stageAPlanPath, repositoryRoot, label: "Preserved Stage-A saved plan" });
-    const taskDefinition = currentTaskDefinition?.taskDefinition || currentTaskDefinition;
-    const { baseUrl, currentKeyVersion } = deriveRuntimeMetadata(taskDefinition);
-    const approvalConfig = buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, liveCurrentKeyVersion: currentKeyVersion });
+    const stageAPlan = stageAPlanPath ? readStageBPrivateFileBytes({ filePath: stageAPlanPath, repositoryRoot, label: "Preserved Stage-A saved plan" }) : null;
     const reviewedOnboardingPaths = assertOnboardingPaths(onboardingPaths || PRODUCTION_ONBOARDING_PATHS);
-    const onboardingPathsArtifact = writeStageBPrivateFileAtomic({
-      filePath: path.join(directory, "onboarding-paths.json"),
-      bytes: Buffer.from(`${JSON.stringify(reviewedOnboardingPaths, null, 2)}\n`),
-      repositoryRoot,
-      label: "Canonical onboarding path manifest",
-    });
+    onboardingPathsFile = path.join(directory, "onboarding-paths.json");
+    onboardingPathsBytes = Buffer.from(`${JSON.stringify(reviewedOnboardingPaths, null, 2)}\n`);
     if (!inventoryApprovalId || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(inventoryApprovalId)) throw new Error("Inventory approval ID is required.");
     if (!stageBTfvarsPath || !stageBTfvarsBindingReportPath || !SHA256.test(stageBTfvarsBindingReportSha256 || "") || !stageBTerraformDataDir) throw new Error("Canonical Stage B tfvars and Terraform data directory are required for rotation infrastructure convergence.");
     ensureStageBPrivateFile({ filePath: stageBTfvarsPath, repositoryRoot, label: "Canonical Stage B tfvars" });
-    ensureStageBPrivateFile({ filePath: stageBTfvarsBindingReportPath, repositoryRoot, label: "Canonical Stage B tfvars binding report" });
+    const stageBTfvarsBinding = readInputFile(stageBTfvarsBindingReportPath, repositoryRoot, "Canonical Stage B tfvars binding report");
+    if (stageBTfvarsBinding.sha256 !== stageBTfvarsBindingReportSha256) throw new Error("Canonical Stage B tfvars binding report hash does not match its authenticated input.");
     ensureStageBPrivateDirectory({ directory: stageBTerraformDataDir, repositoryRoot, create: false, normalize: true, label: "Canonical Stage B Terraform data directory" });
+    let currentStageBStateSha256 = null;
+    if (stageARecovery) {
+      const checkedCurrentStageB = readStageBPrivateFileBytes({ filePath: currentStageBStatePath, repositoryRoot, label: "Current Stage-B state" });
+      const currentStageB = { path: checkedCurrentStageB.path, value: parseAuthenticatedStateBytes(checkedCurrentStageB.bytes), sha256: checkedCurrentStageB.sha256 };
+      if (currentStageB.sha256 !== stageBTfvarsBinding.value.stateBackupSha256 || currentStageB.value.lineage !== stageBTfvarsBinding.value.stateLineage || currentStageB.value.serial !== stageBTfvarsBinding.value.stateSerial) throw new Error("Current Stage-B state is not bound to canonical Stage-B tfvars evidence.");
+      assertAuthenticatedCurrentStageBState(currentStageB.value, currentStageB.value, { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a" });
+      currentStageBStateSha256 = currentStageB.sha256;
+    }
+    const loadedTaskDefinition = typeof loadCurrentTaskDefinition === "function" ? loadCurrentTaskDefinition() : currentTaskDefinition;
+    const taskDefinition = loadedTaskDefinition?.taskDefinition || loadedTaskDefinition;
+    const { baseUrl, currentKeyVersion } = deriveRuntimeMetadata(taskDefinition);
+    const approvalConfig = buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, liveCurrentKeyVersion: currentKeyVersion });
     const overlapTaskInput = buildOverlapTaskDefinition({
       backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${backendImageDigest}`,
       releaseSha: protectedSha,
@@ -234,32 +259,34 @@ export function prepareProductionCutoverRuntime({
       rotationId: approvalConfig.rotationId,
       secretBindings: { ...rotationBindingsToPostPrepareTaskBindings(rotationBindings), ...artifactBindings },
     });
-    const rotationTerraformInputFile = path.join(directory, "rotation-infrastructure.tfvars");
+    rotationTerraformInputFile = path.join(directory, "rotation-infrastructure.tfvars");
     const existingRotationInput = lstatSync(rotationTerraformInputFile, { throwIfNoEntry: false });
     if (existingRotationInput) throw new Error("rotationTerraformInputFile must not already exist.");
-    const writtenRotationInput = writeStageBPrivateFileAtomic({ filePath: rotationTerraformInputFile, bytes: Buffer.from(renderRotationTerraformInput(rotationTerraformInputs)), repositoryRoot, label: "Rotation Terraform input" });
+    rotationTerraformInputBytes = Buffer.from(renderRotationTerraformInput(rotationTerraformInputs));
     staticBindings = {
       ...approvalConfig,
       artifactBindingFile: path.resolve(artifactBindingFile),
-      imageAuthorizationFile: imageAuthorization.filePath || null,
-      iamEvidenceFile: iamEvidence.filePath || null,
-      iamEvidenceSha256: iamEvidence.evidence?.evidenceSha256 || iamEvidence.evidenceSha256 || null,
+      imageAuthorizationFile: preparedImageAuthorization.path,
+      iamEvidenceFile: preparedIamEvidence.path,
+      iamEvidenceSha256: preparedIamEvidence.value.evidence?.evidenceSha256 || preparedIamEvidence.value.evidenceSha256 || null,
       rootDropEvidenceFile: rootDrop.path,
       rootDropEvidenceSha256: rootDrop.sha256,
-      temporaryKmsCapabilityFile: temporaryKmsCapability.path,
-      temporaryKmsCapabilitySha256: temporaryKmsCapability.sha256,
+      temporaryKmsCapabilityFile: temporaryKmsCapability?.path || null,
+      temporaryKmsCapabilitySha256: temporaryKmsCapability?.sha256 || null,
       stageARoot: path.resolve("infra/aws/terraform/production-green-stage-a"),
       stageAPlanPath: stageAPlanPath ? path.resolve(stageAPlanPath) : null,
-      stageAPlanSha256: stageAPlanPath ? ensureStageBPrivateFile({ filePath: stageAPlanPath, repositoryRoot, label: "Preserved Stage-A saved plan" }).sha256 : null,
+      stageAPlanSha256: stageAPlan?.sha256 || null,
       stageARecoveryEvidenceFile: stageARecovery?.path || null,
       stageARecoveryEvidenceSha256: stageARecovery?.sha256 || null,
       stageARecoveryMode: stageARecovery?.value?.mode || null,
       stageAStatePath: stageARecovery ? path.resolve(stageAStatePath) : null,
       stageAHandoffPath: stageARecovery ? path.resolve(stageAHandoffPath) : null,
       stageBStatePath: stageARecovery ? path.resolve(stageBStatePath) : null,
-      artifactBindingSha256: hash(readFileSync(artifactBindingFile)),
-      imageAuthorizationSha256: imageAuthorization.filePath ? ensureStageBPrivateFile({ filePath: imageAuthorization.filePath, repositoryRoot, label: "Image authorization evidence" }).sha256 : null,
-      iamEvidenceFileSha256: iamEvidence.filePath ? ensureStageBPrivateFile({ filePath: iamEvidence.filePath, repositoryRoot, label: "IAM evidence" }).sha256 : null,
+      currentStageBStatePath: stageARecovery ? path.resolve(currentStageBStatePath) : null,
+      currentStageBStateSha256,
+      artifactBindingSha256: artifactBinding.sha256,
+      imageAuthorizationSha256: preparedImageAuthorization.sha256,
+      iamEvidenceFileSha256: preparedIamEvidence.sha256,
       backendImageDigest,
       expectedCurrentTaskDefinitionArn: taskDefinition?.taskDefinitionArn,
       inventoryApprovalId,
@@ -274,12 +301,12 @@ export function prepareProductionCutoverRuntime({
       stageBTfvarsBindingReportPath: path.resolve(stageBTfvarsBindingReportPath),
       stageBTfvarsBindingReportSha256,
       stageBTerraformDataDir: path.resolve(stageBTerraformDataDir),
-      rotationTerraformInputFile: writtenRotationInput.path,
-      rotationTerraformInputSha256: writtenRotationInput.sha256,
+      rotationTerraformInputFile,
+      rotationTerraformInputSha256: hash(rotationTerraformInputBytes),
       onboardingBaseUrl: baseUrl,
       onboardingPaths: reviewedOnboardingPaths,
-      onboardingPathsFile: onboardingPathsArtifact.path,
-      onboardingPathsSha256: onboardingPathsArtifact.sha256,
+      onboardingPathsFile,
+      onboardingPathsSha256: hash(onboardingPathsBytes),
       rotationHealthUrl: `${baseUrl}/api/health`,
       rotationDeploymentSha: protectedSha,
       runtimeInvocationRef: approvalConfig.verificationRef,
@@ -287,24 +314,44 @@ export function prepareProductionCutoverRuntime({
       verifierProfile: "mscqr-production-ecs-exec-verifier",
     };
     assertNoSecretMaterial(staticBindings, "Generated cutover runtime config");
-    if (typeof constructAdapters === "function") constructAdapters({ config: staticBindings, sourceSha: protectedSha, rotationId: approvalConfig.rotationId });
+    configBytes = Buffer.from(`${JSON.stringify(staticBindings, null, 2)}\n`);
+    runtimeConfigSha256 = hash(configBytes);
   } catch (error) { blockers.push(error.message); }
   const manifest = {
     schemaVersion: 1,
     generatedBy: "scripts/aws/prepare-production-cutover-runtime.mjs",
     protectedMainSha: protectedSha || null,
     staticBindingSha256: staticBindings ? canonicalHash(staticBindings) : null,
+    runtimeConfigSha256,
     phaseArtifacts: { rotationState: paths.rotationStateFile, rotationFixture: paths.rotationFixtureFile, readinessEvidence: paths.readinessEvidenceFile, rotationTerraformInput: paths.rotationTerraformInputFile },
     blockers: [...new Set(blockers)],
     readyToConsumeMfa: blockers.length === 0,
   };
   const manifestPath = path.join(directory, "cutover-runtime-manifest.json");
-  writeStageBPrivateFileAtomic({ filePath: manifestPath, bytes: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`), repositoryRoot, label: "Cutover runtime manifest" });
-  if (blockers.length) return { readyToConsumeMfa: false, blockers: manifest.blockers, runtimeDirectory: directory, manifestPath, phasePaths: paths, protectedMainSha: protectedSha || null };
+  const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
+  if (blockers.length) {
+    writeStageBPrivateFileAtomic({ filePath: manifestPath, bytes: manifestBytes, repositoryRoot, label: "Cutover runtime manifest" });
+    return { readyToConsumeMfa: false, blockers: manifest.blockers, runtimeDirectory: directory, manifestPath, phasePaths: paths, protectedMainSha: protectedSha || null };
+  }
   const configPath = paths.rotationConfigFile;
-  writeStageBPrivateFileAtomic({ filePath: configPath, bytes: Buffer.from(`${JSON.stringify(staticBindings, null, 2)}\n`), repositoryRoot, label: "Generated rotation config" });
-  const command = `node scripts/aws/run-production-cutover.mjs --mode production --config ${shellQuote(configPath)} --source-sha ${staticBindings.sourceSha} --rotation-id ${staticBindings.rotationId}`;
-  return { readyToConsumeMfa: true, runtimeDirectory: directory, configPath, manifestPath, staticBindingSha256: manifest.staticBindingSha256, protectedMainSha: protectedSha, nextCommand: command, config: staticBindings, phasePaths: paths };
+  writeStageBPrivateFilesAtomic({ files: [
+    { filePath: onboardingPathsFile, bytes: onboardingPathsBytes, label: "Canonical onboarding path manifest" },
+    { filePath: rotationTerraformInputFile, bytes: rotationTerraformInputBytes, label: "Rotation Terraform input" },
+    { filePath: manifestPath, bytes: manifestBytes, label: "Cutover runtime manifest" },
+    { filePath: configPath, bytes: configBytes, label: "Generated rotation config" },
+  ], repositoryRoot });
+  if (typeof constructAdapters === "function") {
+    try {
+      constructAdapters({ config: staticBindings, sourceSha: protectedSha, rotationId: staticBindings.rotationId, runtimeConfigSha256 });
+    } catch (error) {
+      for (const filePath of [onboardingPathsFile, rotationTerraformInputFile, manifestPath, configPath]) rmSync(filePath, { force: true });
+      const failedManifest = { ...manifest, blockers: [error.message], readyToConsumeMfa: false };
+      writeStageBPrivateFileAtomic({ filePath: manifestPath, bytes: Buffer.from(`${JSON.stringify(failedManifest, null, 2)}\n`), repositoryRoot, label: "Cutover runtime manifest" });
+      return { readyToConsumeMfa: false, blockers: failedManifest.blockers, runtimeDirectory: directory, manifestPath, phasePaths: paths, protectedMainSha: protectedSha };
+    }
+  }
+  const command = `node scripts/aws/run-production-cutover.mjs --mode production --config ${shellQuote(configPath)} --config-sha256 ${runtimeConfigSha256} --source-sha ${staticBindings.sourceSha} --rotation-id ${staticBindings.rotationId}`;
+  return { readyToConsumeMfa: true, runtimeDirectory: directory, configPath, runtimeConfigSha256, manifestPath, staticBindingSha256: manifest.staticBindingSha256, protectedMainSha: protectedSha, nextCommand: command, config: staticBindings, phasePaths: paths };
 }
 
 function envelopeEcsValueFrom(secretId, name) {
@@ -341,7 +388,7 @@ export function parseBootstrapArgs(argv) {
   const supported = new Set([
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
     "minimum-grace-seconds", "rotation-bindings", "image-authorization", "iam-evidence",
-    "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "inventory-approval-id", "onboarding-paths",
+    "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "onboarding-paths",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir",
   ]);
   const values = new Map();

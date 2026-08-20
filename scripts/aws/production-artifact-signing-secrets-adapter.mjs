@@ -1,18 +1,25 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { provisionArtifactSigningDomain, verifyArtifactSigningDomain, ARTIFACT_SIGNING_BINDINGS } from "./production-artifact-signing-domain.mjs";
-import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, ARTIFACT_SIGNING_INITIAL_KEY_VERSION, ARTIFACT_SIGNING_RUNTIME_BINDING_PATH, bootstrapArtifactSigningBindings } from "./production-artifact-signing-bootstrap.mjs";
+import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, ARTIFACT_SIGNING_INITIAL_KEY_VERSION, artifactSigningRuntimeBindingPath, bootstrapArtifactSigningBindings } from "./production-artifact-signing-bootstrap.mjs";
+import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 
 const ARN = /^arn:aws:secretsmanager:eu-west-2:368992683803:secret:[A-Za-z0-9/_+=.@-]+(?::[A-Za-z0-9_-]+::)?$/;
-const REVIEWED_BINDING_DIR = path.resolve("documents/ops/iam");
-export function loadApprovedArtifactSigningBindings(filePath) {
-  if (typeof filePath !== "string" || !filePath) throw new Error("Reviewed artifact-signing binding file is required.");
+const SHA40 = /^[a-f0-9]{40}$/;
+export function loadApprovedArtifactSigningBindings(filePath, { expectedSourceSha, expectedSha256, repositoryRoot = process.cwd() } = {}) {
+  if (typeof filePath !== "string" || !filePath || !SHA40.test(expectedSourceSha || "")) throw new Error("Source-bound artifact-signing binding file is required.");
+  const expectedPath = artifactSigningRuntimeBindingPath(expectedSourceSha);
+  if (path.resolve(filePath) !== expectedPath) throw new Error("Artifact-signing bindings must use the canonical external runtime path.");
+  if (!/^[a-f0-9]{64}$/.test(expectedSha256 || "")) throw new Error("Artifact-signing runtime binding SHA-256 is required.");
+  const checked = readStageBPrivateFileBytes({ filePath, repositoryRoot, label: "Artifact-signing runtime binding" });
+  if (checked.sha256 !== expectedSha256) throw new Error("Artifact-signing runtime binding changed after runtime preparation.");
   let resolved;
-  try { resolved = realpathSync(filePath); } catch { throw new Error("Artifact-signing bindings must come from the repository-reviewed IAM configuration directory."); }
-  if (path.dirname(resolved) !== REVIEWED_BINDING_DIR) throw new Error("Artifact-signing bindings must come from the repository-reviewed IAM configuration directory.");
-  const parsed = JSON.parse(readFileSync(resolved, "utf8"));
-  const bindings = parsed?.bindings || parsed;
+  try { resolved = realpathSync(checked.path); } catch { throw new Error("Artifact-signing runtime binding is unavailable."); }
+  if (resolved !== expectedPath) throw new Error("Artifact-signing runtime binding must not traverse a symlink.");
+  const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(checked.bytes));
+  if (parsed?.schemaVersion !== 2 || parsed.generatedBy !== "scripts/aws/production-artifact-signing-bootstrap.mjs" || parsed.sourceSha !== expectedSourceSha) throw new Error("Artifact-signing runtime binding source identity is invalid.");
+  const bindings = parsed.bindings;
   if (!bindings || typeof bindings !== "object" || Object.keys(bindings).sort().join(",") !== [...ARTIFACT_SIGNING_BINDINGS].sort().join(",")) throw new Error("Reviewed artifact-signing binding set is incomplete.");
   const values = Object.fromEntries(ARTIFACT_SIGNING_BINDINGS.map((name) => [name, bindings[name]]));
   if (Object.values(values).some((value) => typeof value !== "string" || !ARN.test(value))) throw new Error("Reviewed artifact-signing binding is not an exact eu-west-2 production Secrets Manager reference.");
@@ -20,9 +27,9 @@ export function loadApprovedArtifactSigningBindings(filePath) {
   return Object.freeze(values);
 }
 
-export function createAwsArtifactSigningAdapter({ run, approvedBindings, bootstrapContractFile = ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, bindingOutputFile = ARTIFACT_SIGNING_RUNTIME_BINDING_PATH, activeKeyVersion = ARTIFACT_SIGNING_INITIAL_KEY_VERSION } = {}) {
-  if (typeof run !== "function") throw new Error("AWS Secrets Manager runner is required.");
-  let bindings = approvedBindings ? loadApprovedArtifactSigningBindings(approvedBindings) : null;
+export function createAwsArtifactSigningAdapter({ run, sourceSha, repositoryRoot = process.cwd(), approvedBindings, approvedBindingsSha256, bootstrapContractFile = ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, bindingOutputFile = artifactSigningRuntimeBindingPath(sourceSha), activeKeyVersion = ARTIFACT_SIGNING_INITIAL_KEY_VERSION } = {}) {
+  if (typeof run !== "function" || !SHA40.test(sourceSha || "")) throw new Error("AWS Secrets Manager runner and protected-main SHA are required.");
+  let bindings = approvedBindings ? loadApprovedArtifactSigningBindings(approvedBindings, { expectedSourceSha: sourceSha, expectedSha256: approvedBindingsSha256, repositoryRoot }) : null;
   let uninitializedSecretRefs = new Set();
   const currentBindings = () => {
     if (!bindings) throw new Error("Artifact signing bindings have not been bootstrapped.");
@@ -52,8 +59,8 @@ export function createAwsArtifactSigningAdapter({ run, approvedBindings, bootstr
   return {
     get bindings() { return currentBindings(); },
     bootstrap: async () => {
-      const result = await bootstrapArtifactSigningBindings({ run, contractFile: bootstrapContractFile, outputFile: bindingOutputFile });
-      bindings = loadApprovedArtifactSigningBindings(result.bindingFile);
+      const result = await bootstrapArtifactSigningBindings({ run, sourceSha, repositoryRoot, contractFile: bootstrapContractFile, outputFile: bindingOutputFile });
+      bindings = loadApprovedArtifactSigningBindings(result.bindingFile, { expectedSourceSha: sourceSha, expectedSha256: result.evidenceSha256, repositoryRoot });
       uninitializedSecretRefs = new Set(result.uninitializedSecretRefs);
       return { mutationCount: result.createSecretCount, ...result };
     },

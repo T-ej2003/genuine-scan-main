@@ -258,8 +258,8 @@ export async function runProductionCutoverControlPlane(input = {}) {
 
   assertImageAuthorization(imageAuthorization, sourceSha, imageAuthorizationValidation);
 
-  if (typeof iam?.reconcile === "function") recordMutation(mutations, "M1_IAM_RECONCILIATION", await iam.reconcile());
   assertIamReport(iamReport, sourceSha);
+  if (typeof iam?.reconcile === "function") recordMutation(mutations, "M1_IAM_RECONCILIATION", await iam.reconcile());
   results.iamPreflight = { ...iamReport, sourceSha, evidenceSha256: (iamReport.evidence || iamReport).evidenceSha256 };
 
   if (typeof checkerChain?.verifySourceTrust !== "function" || typeof checkerChain?.verifyComplete !== "function") throw new Error("Live checker-chain trust assertion is required before Stage A convergence.");
@@ -320,8 +320,9 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.runtimeInventory = results.preDeploymentInventory;
 
   const rotation = await rotationPrepare.run({ inventory: inventoryResult, rotationId });
-  if (rotation?.prepared !== true || rotation.rotationId !== rotationId || !SHA256.test(rotation.rotationStateSha256 || "") || (expectedRotationStateSha256 !== undefined && rotation.rotationStateSha256 !== expectedRotationStateSha256)) throw new Error("Rotation preparation is not bound to the persisted state.");
+  if (rotation?.prepared !== true || rotation.rotationId !== rotationId || !SHA256.test(rotation.rotationStateSha256 || "") || !SHA256.test(rotation.rotationFixtureSha256 || "") || (expectedRotationStateSha256 !== undefined && rotation.rotationStateSha256 !== expectedRotationStateSha256)) throw new Error("Rotation preparation is not bound to the persisted state and fixture.");
   const rotationStateSha256 = rotation.rotationStateSha256;
+  const rotationFixtureSha256 = rotation.rotationFixtureSha256;
   recordMutation(mutations, "M5_ROTATION_STATE_PERSISTENCE", rotation);
   results.rotationPrepare = { ...rotation, sourceSha, rotationPrepared: rotation.prepared === true, inventory: inventoryResult.inventory };
 
@@ -377,13 +378,13 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.postDeploy = { ...deployed, sourceSha, rotationId, selectedTaskArn: deployed.taskArn, propagateTags: deployment.propagateTags, updateServiceCount: deployment.updateServiceCount };
 
   let execProof = { valid: true, evidenceRef: "ecs-exec:rehearsal", evidenceSha256: sha({ taskArn: deployed.taskArn }) };
-  if (ecsExec?.run) execProof = await ecsExec.run({ taskArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, sourceSha, rotationId, verifierSession });
+  if (ecsExec?.run) execProof = await ecsExec.run({ taskArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, sourceSha, rotationId, rotationFixtureSha256, verifierSession });
   if (execProof?.valid !== true) throw new Error("ECS Exec runtime proof is invalid.");
   results.ecsExec = { ...execProof, sourceSha, rotationId, taskArn: deployed.taskArn, selectedTaskArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, taskTag: "MSCQRExecTarget=production-backend", targetTaskArn: deployed.taskArn, revalidatedArn: deployed.taskArn, runtimeProof: true };
   results.ecsExecSelection = { valid: true, evidenceRef: execProof.evidenceRef, evidenceSha256: execProof.evidenceSha256, sourceSha, rotationId, taskArn: deployed.taskArn, selectedTaskArn: deployed.taskArn, targetTaskArn: deployed.taskArn, revalidatedArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, taskTag: "MSCQRExecTarget=production-backend", runtimeProof: true };
   results.ecsExecRuntime = { ...results.ecsExecSelection };
 
-  const onboardingResult = await produceOnboardingEvidence({ runStrictProbes: onboarding?.run, expectedSourceSha: sourceSha, expectedImageDigest: deployed.imageDigest, expectedTaskDefinitionArn: task.taskDefinitionArn, expectedTaskArn: deployed.taskArn, expectedRotationId: rotationId });
+  const onboardingResult = await produceOnboardingEvidence({ runStrictProbes: onboarding?.run, expectedSourceSha: sourceSha, expectedImageDigest: deployed.imageDigest, expectedTaskDefinitionArn: task.taskDefinitionArn, expectedTaskArn: deployed.taskArn, expectedRotationId: rotationId, expectedRotationStateSha256: rotationStateSha256, expectedRotationFixtureSha256: rotationFixtureSha256 });
   validateOnboardingContract(onboardingResult.evidence);
   results.onboarding = { ...onboardingResult, runtimeProof: true, taskArn: deployed.taskArn, sourceSha, checks: onboardingResult.evidence?.checks };
   results.strictOnboarding = results.onboarding;

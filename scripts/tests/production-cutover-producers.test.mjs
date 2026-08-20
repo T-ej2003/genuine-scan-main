@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -46,26 +46,33 @@ test("artifact signing rejects mismatched pair and never accepts sensitive evide
 });
 
 test("artifact secret bindings are loaded only from reviewed IAM configuration", () => {
-  assert.throws(() => loadApprovedArtifactSigningBindings("/tmp/unreviewed-artifact-bindings.json"), /repository-reviewed IAM configuration/);
+  assert.throws(() => loadApprovedArtifactSigningBindings("/tmp/unreviewed-artifact-bindings.json", { expectedSourceSha: "a".repeat(40) }), /canonical external runtime path/);
 });
 
 test("production AWS command runner executes service operations through aws", () => {
+  const previous = Object.fromEntries(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"].map((name) => [name, process.env[name]]));
+  Object.assign(process.env, { AWS_ACCESS_KEY_ID: "ambient", AWS_SECRET_ACCESS_KEY: "ambient", AWS_SESSION_TOKEN: "ambient", AWS_DEFAULT_PROFILE: "ambient" });
   const calls = [];
-  const run = createProductionCommandRunner({ profile: "mscqr-test", region: "eu-west-2", exec: (file, args, options) => {
-    calls.push({ file, args, options });
-    return "{}";
-  } });
-  run(["secretsmanager", "get-secret-value", "--secret-id", "reviewed"]);
-  run(["ecs", "describe-services", "--cluster", "cluster", "--region", "eu-west-2"]);
-  run(["aws", "iam", "get-role", "--role-name", "role"]);
-  run(["node", "fixture.mjs"]);
-  assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", "node"]);
-  assert.equal(calls[0].args.at(-1), "eu-west-2");
-  assert.equal(calls[1].args.filter((arg) => arg === "--region").length, 1);
-  assert.equal(calls[2].args[0], "iam");
-  assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-test");
-  assert.equal(calls[0].options.env.AWS_DEFAULT_REGION, "eu-west-2");
-  assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
+  try {
+    const run = createProductionCommandRunner({ profile: "mscqr-test", region: "eu-west-2", exec: (file, args, options) => {
+      calls.push({ file, args, options });
+      return "{}";
+    } });
+    run(["secretsmanager", "get-secret-value", "--secret-id", "reviewed"]);
+    run(["ecs", "describe-services", "--cluster", "cluster", "--region", "eu-west-2"]);
+    run(["aws", "iam", "get-role", "--role-name", "role"]);
+    run(["node", "fixture.mjs"]);
+    assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", "node"]);
+    assert.equal(calls[0].args.at(-1), "eu-west-2");
+    assert.equal(calls[1].args.filter((arg) => arg === "--region").length, 1);
+    assert.equal(calls[2].args[0], "iam");
+    assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-test");
+    assert.equal(calls[0].options.env.AWS_DEFAULT_REGION, "eu-west-2");
+    for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(calls[0].options.env[name], undefined);
+    assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
+  } finally {
+    for (const [name, value] of Object.entries(previous)) value === undefined ? delete process.env[name] : process.env[name] = value;
+  }
 });
 
 test("production inventory targets the stable backend, not the pending overlap revision", () => {
@@ -90,9 +97,12 @@ test("production overlap adapter invokes the governed deploy wrapper with exact 
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-overlap-adapter-test-"));
   const readinessFile = path.join(directory, "readiness.json");
   const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
+  const previous = Object.fromEntries(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"].map((name) => [name, process.env[name]]));
+  Object.assign(process.env, { AWS_ACCESS_KEY_ID: "ambient", AWS_SECRET_ACCESS_KEY: "ambient", AWS_SESSION_TOKEN: "ambient", AWS_DEFAULT_PROFILE: "ambient" });
   let invocation;
   try {
     const adapter = createProductionOverlapDeploymentAdapter({
+      profile: "mscqr-production-release-deployer",
       deployScript: path.join(directory, "deploy-ecs-service.sh"),
       readinessFile,
       sourceSha: "a".repeat(40),
@@ -114,10 +124,21 @@ test("production overlap adapter invokes the governed deploy wrapper with exact 
     assert.equal(invocation.env.EXISTING_TASK_DEFINITION_ARN, taskDefinitionArn);
     assert.equal(invocation.env.OVERLAP_READINESS_EVIDENCE_SHA256, "d".repeat(64));
     assert.equal(invocation.env.ROTATION_STATE_SHA256, "c".repeat(64));
+    assert.equal(invocation.env.AWS_PROFILE, "mscqr-production-release-deployer");
+    for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(invocation.env[name], undefined);
     assert.equal(result.rotationStateSha256, "c".repeat(64));
   } finally {
+    for (const [name, value] of Object.entries(previous)) value === undefined ? delete process.env[name] : process.env[name] = value;
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("production overlap adapter rejects an omitted or wrong AWS profile before deployment", () => {
+  let calls = 0;
+  for (const profile of [undefined, "administrator"]) {
+    assert.throws(() => createProductionOverlapDeploymentAdapter({ profile, runScript: () => { calls += 1; } }), /exact release profile/);
+  }
+  assert.equal(calls, 0);
 });
 
 test("production inventory executes the corrected SQL through the psql boundary", () => {
@@ -171,7 +192,9 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
   const proof = { jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true, artifactCurrentRuntimeVerify: true, artifactHistoricalRuntimeVerify: true };
   const response = (status, payload, setCookie = []) => ({ status, ok: status >= 200 && status < 300, headers: { getSetCookie: () => setCookie }, json: async () => payload });
   const rotationFixtureFile = path.join(os.tmpdir(), `mscqr-onboarding-qr-fixture-${process.pid}.json`);
-  fs.writeFileSync(rotationFixtureFile, JSON.stringify({ token: "synthetic-qr-fixture-token" }));
+  const rotationFixtureBytes = Buffer.from(JSON.stringify({ token: "synthetic-qr-fixture-token" }));
+  const rotationFixtureSha256 = createHash("sha256").update(rotationFixtureBytes).digest("hex");
+  fs.writeFileSync(rotationFixtureFile, rotationFixtureBytes, { mode: 0o600 });
   let tenantLoginObserved = false;
   const fetchImpl = async (url, options) => {
     requests.push({ url, options });
@@ -200,12 +223,12 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     getTenantMfaCode: () => "654321",
     runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
     ecsExecEvidence: async () => ({ valid: true, proof }),
-    rotationStateReadback: async () => ({ rotationId: "rotation-test-1", phase: "overlap-deploy-required" }),
+    rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "overlap-deploy-required" }, sha256: "b".repeat(64) }),
     rotationFixtureFile,
     fetchImpl,
   });
   assert.equal(mfaReads, 0);
-  const evidence = await run({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1" });
+  const evidence = await run({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 });
   assert.equal(evidence.valid, true);
   assert.equal(mfaReads, 1);
   assert.ok(requests.findIndex(({ url }) => url.endsWith("/mfa/challenge/begin")) > requests.findIndex(({ url }) => url.endsWith("/login")));
@@ -222,6 +245,21 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
   assert.notEqual(qrRequests[0].options.headers["x-mscqr-verification-token"], qrRequests[1].options.headers["x-mscqr-verification-token"]);
   assert.ok(requests.some(({ url, options }) => url.includes("/api/licensees/") && tenantLoginObserved && options.headers.Cookie.includes("aq_access=access")));
 
+  const staleRotationState = createStrictHttpOnboardingAdapter({
+    baseUrl: "https://fixture.example",
+    paths,
+    credentials: { email: "admin@example.invalid", password: "fixture-password", mfaCode: "000000" },
+    getMfaCode: () => "000000",
+    tenantCredentials: { email: "tenant@example.invalid", password: "tenant-fixture-password" },
+    getTenantMfaCode: () => "654321",
+    runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
+    ecsExecEvidence: async () => ({ valid: true, proof }),
+    rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "overlap-deploy-required" }, sha256: "c".repeat(64) }),
+    rotationFixtureFile,
+    fetchImpl,
+  });
+  await assert.rejects(() => staleRotationState({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /Mandatory onboarding check failed: rotationState/);
+
   currentMfaCode = undefined;
   const missing = createStrictHttpOnboardingAdapter({
     baseUrl: "https://fixture.example",
@@ -230,10 +268,17 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     getMfaCode: () => currentMfaCode,
     runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
     ecsExecEvidence: async () => ({ valid: true, proof }),
-    rotationStateReadback: async () => ({ rotationId: "rotation-test-1", phase: "overlap-deploy-required" }),
+    rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "overlap-deploy-required" }, sha256: "b".repeat(64) }),
     rotationFixtureFile,
     fetchImpl,
   });
-  await assert.rejects(() => missing({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1" }), /Mandatory onboarding check failed: superAdminLogin/);
+  await assert.rejects(() => missing({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /Mandatory onboarding check failed: superAdminLogin/);
+
+  const callsBeforeFixtureFailures = requests.length;
+  await assert.rejects(() => run({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64) }), /Hash-bound rotation QR fixture/);
+  await assert.rejects(() => run({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256: "c".repeat(64) }), /unavailable, changed, or malformed/);
+  fs.writeFileSync(rotationFixtureFile, JSON.stringify({ token: "replacement-token" }), { mode: 0o600 });
+  await assert.rejects(() => run({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /unavailable, changed, or malformed/);
+  assert.equal(requests.length, callsBeforeFixtureFailures);
   fs.rmSync(rotationFixtureFile, { force: true });
 });

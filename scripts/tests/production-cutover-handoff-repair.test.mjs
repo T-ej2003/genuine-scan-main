@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { assertRootDropEvidence, buildRootDropEvidence, buildRootDropPayload, canonicalRootDropPayload, ROOT_DROP_SIGNING_KEY_ARN } from "../aws/production-root-drop-evidence.mjs";
-import { assertPostApplyStageAPlanRecovery, producePostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "../aws/production-stage-a-recovery-evidence.mjs";
+import { assertAuthenticatedCurrentStageBState, assertPostApplyStageAPlanRecovery, producePostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "../aws/production-stage-a-recovery-evidence.mjs";
 import { assertStageAStateContract, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { createInitialDualSlotSecretsManagerClient, generatePendingMaterial, INITIAL_DUAL_SLOT_NAMES, supersedeStalePendingRotation } from "../aws/production-initial-dual-slot-bootstrap.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
@@ -58,6 +58,16 @@ function rotationSender(store, { failAt } = {}) {
 function convergedStageBState() {
   return { version: 4, serial: 98, lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", outputs: {}, resources: [{ mode: "managed", type: "aws_ecs_service", name: "backend", instances: [{ schema_version: 0, attributes: { id: "mscqr-backend-servi-euw2" } }] }] };
 }
+
+test("historical Stage-B provenance remains distinct from authenticated current Stage-B state", () => {
+  const current = { ...convergedStageBState(), serial: 100, outputs: { bound_images: { value: { backend: "sha256:fixture" }, type: ["object", { backend: "string" }] } } };
+  const prepared = JSON.parse(JSON.stringify(current));
+  assert.equal(assertAuthenticatedCurrentStageBState(current, prepared, { lineage: current.lineage }), true);
+  prepared.resources[0].instances[0].attributes.id = "different-service";
+  assert.throws(() => assertAuthenticatedCurrentStageBState(current, prepared, { lineage: current.lineage }), /does not match/);
+  assert.throws(() => assertAuthenticatedCurrentStageBState(current, { ...current, serial: 99 }, { lineage: current.lineage }), /does not match/);
+  assert.throws(() => assertAuthenticatedCurrentStageBState(current, { ...current, lineage: "wrong" }, { lineage: current.lineage }), /identity is invalid/);
+});
 
 test("Stage-A metadata-only state cannot authorize post-apply recovery", () => {
   assert.throws(() => assertStageAStateContract({ version: 4, serial: 42, lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837" }), /stage_b_prerequisites|output/);

@@ -11,7 +11,9 @@ requires an explicit mode:
 --status    report only version IDs, slots, and fingerprints
 ```
 
-The operator supplies a private JSON configuration outside the repository. It
+The operator supplies a private JSON configuration outside the repository and
+passes its exact SHA-256 through `--config-sha256`; the coordinator authenticates
+those bytes before parsing or making AWS calls. It
 contains only secret identifiers and evidence metadata:
 
 ```json

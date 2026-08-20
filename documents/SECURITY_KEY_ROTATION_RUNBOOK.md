@@ -50,11 +50,11 @@ release role; it never prints secret values. Run one explicit mode at a time:
 
 ```bash
 npm --prefix backend run security:rotate-production-signing-material -- \
-  --config /secure/operator/rotation.json --state-file /secure/operator/rotation-state.json \
+  --config /secure/operator/rotation.json --config-sha256 <exact-config-sha256> --state-file /secure/operator/rotation-state.json \
   --fixture-file /secure/operator/previous-qr-fixture.json --prepare
 
 npm --prefix backend run security:rotate-production-signing-material -- \
-  --config /secure/operator/rotation.json --state-file /secure/operator/rotation-state.json \
+  --config /secure/operator/rotation.json --config-sha256 <exact-config-sha256> --state-file /secure/operator/rotation-state.json \
   --fixture-file /secure/operator/previous-qr-fixture.json --runtime-verification-file /secure/operator/overlap-runtime.json \
   --verify
 

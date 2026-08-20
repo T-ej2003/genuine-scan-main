@@ -41,6 +41,14 @@ initial value. Bootstrap-returned bindings are the authoritative artifact refere
 and validate the overlap task input, replacing stale preloaded artifact references without changing
 unrelated task inputs.
 
+Run `npm run stage-b:bootstrap-artifact-signing -- --source-sha <full-protected-main-sha>` before
+runtime preparation. This is the canonical idempotent producer of the runtime binding file; it
+requires the exact fetched protected-main identity and the release-deployer profile, and reports
+container creation separately from secret-value writes. It emits the source-bound binding at
+`~/.mscqr/production-cutover/<full-protected-main-sha>/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json`
+as a 0600 file under a 0700 private directory outside the Git checkout. Pass that emitted path to
+`stage-b:prepare-cutover-runtime` as `--artifact-binding`; copying it into the repository is rejected.
+
 The later rotation coordinator remains intentionally operator-supplied: its reviewed external
 configuration binds the approved rotation ID, source SHA, grace window, and current/previous/pending
 JWT/QR secret identifiers. Those are live rotation-state inputs, not derivable secret names, and no
@@ -49,8 +57,9 @@ secret values belong in that configuration.
 Before MFA, use `npm run stage-b:prepare-cutover-runtime --` with the reviewed approval metadata.
 This private preflight derives protected-main SHA, production region and role, overlap deployment
 SHA, current runtime metadata, image/IAM/artifact evidence references, and phase-owned output paths.
-It validates the complete adapter graph and writes only an identifier-only rotation config and a
-redacted manifest in a 0700 runtime directory; config and manifest files are atomic 0600 outputs.
+It validates the complete adapter graph before live ECS discovery, then atomically publishes the
+identifier-only rotation config, redacted manifest, canonical onboarding paths, and rotation Terraform
+input in a 0700 runtime directory; all four are 0600 outputs.
 It never creates rotation state or the rotation fixture. Those remain outputs of the coordinator's
 `--prepare` phase. The command emits one exact `run-production-cutover.mjs` command only after all
 pre-MFA inputs are valid. The pre-MFA bootstrap does not collect onboarding MFA. The onboarding
@@ -61,6 +70,17 @@ The rotation config's logical `qr.previousKeyVersion` must equal the live task's
 Secrets Manager references. Bootstrap and execution share the canonical image-authorization validator,
 including evidence, signature, attestation, provenance, source-SHA, workflow, release, service-record,
 and digest checks.
+For the post-apply Stage-A recovery branch, pass the immutable historical Stage-B state used by the
+recovery evidence with `--stage-b-state`, and pass the fresh current Stage-B state bound by the
+current tfvars report with `--current-stage-b-state`. Runtime revalidation preserves the historical
+state as provenance and separately requires the live Stage-B state to match the current state
+semantically. The canonical IAM report's nested temporary-capability absence proof is authoritative;
+an optional standalone proof is accepted only when it is exactly equivalent.
+Runtime preparation records the raw-byte SHA-256 of every private eligibility artifact, including
+the IAM report. Cutover consumers validate the private external path and exact recorded hash before
+parsing those same captured bytes; replacing a nested self-consistent proof therefore remains invalid.
+The coordinator's rotation fixture is similarly hashed from its persisted private bytes after prepare;
+ECS Exec and onboarding consume that exact hash-bound fixture and reject replacement before any probe.
 The source-bound authorization is produced only by `scripts/aws/production-image-authorization.mjs`.
 Before producing it, the shared protected-main identity helper performs a successful `git fetch origin main`
 and resolves the fetched commit from `FETCH_HEAD`; it never treats a stale `refs/remotes/origin/main` as
@@ -86,7 +106,7 @@ Cutover input ownership is explicit:
 | --- | --- |
 | Repository-derived | region, release role, protected-main SHA, overlap deployment SHA, policy constants, phase paths, inventory role/log target |
 | AWS read-only | current task definition ARN, HTTPS production base URL, current QR key-version metadata |
-| Existing runtime artifacts | image authorization, IAM evidence, Stage-A plan/root evidence, artifact binding file |
+| Existing runtime artifacts | image authorization, IAM evidence, Stage-A plan or historical recovery evidence, root evidence, current Stage-B state, canonical artifact binding file |
 | Human approval | ticket, approver identity/role, reason, verification reference, grace-window policy value |
 | Identifier-only external binding | dual-slot JWT/QR secret references, including current/previous key-version references not present in the legacy task |
 | Prepare-generated | rotation state and rotation fixture |

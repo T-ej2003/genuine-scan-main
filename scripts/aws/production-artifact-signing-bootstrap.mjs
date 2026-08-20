@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { ARTIFACT_SIGNING_BINDINGS } from "./production-artifact-signing-domain.mjs";
+import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -10,6 +11,7 @@ const CONTRACT_NAME = "MSCQRProductionGreenStageBArtifactSigningBootstrap-v1.jso
 const RUNTIME_BINDING_NAME = "MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json";
 const NAME_PATTERN = /^mscqr\/production\/rls-green\/artifact-signing\/[a-z0-9-]+$/;
 const ARN_PATTERN = new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:mscqr/production/rls-green/artifact-signing/[A-Za-z0-9/_+=.@-]+$`);
+const SHA40 = /^[a-f0-9]{40}$/;
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
 const reviewedDirectory = path.resolve("documents/ops/iam");
@@ -20,8 +22,11 @@ const assertReviewedPath = (filePath, expectedName) => {
 };
 
 export const ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH = path.join(reviewedDirectory, CONTRACT_NAME);
-export const ARTIFACT_SIGNING_RUNTIME_BINDING_PATH = path.join(reviewedDirectory, RUNTIME_BINDING_NAME);
 export const ARTIFACT_SIGNING_INITIAL_KEY_VERSION = "v1";
+export const artifactSigningRuntimeBindingPath = (sourceSha) => {
+  if (!SHA40.test(sourceSha || "")) throw new Error("Artifact signing runtime binding requires a full protected-main SHA.");
+  return path.join(os.homedir(), ".mscqr", "production-cutover", sourceSha, RUNTIME_BINDING_NAME);
+};
 
 export function loadArtifactSigningBootstrapContract(filePath = ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH) {
   const resolved = assertReviewedPath(filePath, CONTRACT_NAME);
@@ -49,25 +54,27 @@ const hasCurrentVersion = (metadata) => {
   });
 };
 
-const writeBindingsAtomically = (outputPath, bindings) => {
-  const resolved = assertReviewedPath(outputPath, RUNTIME_BINDING_NAME);
-  mkdirSync(path.dirname(resolved), { recursive: true, mode: 0o700 });
-  const directory = mkdtempSync(path.join(path.dirname(resolved), ".artifact-signing-bootstrap-"));
-  const temporary = path.join(directory, "bindings.json");
-  try {
-    const bytes = `${JSON.stringify({ schemaVersion: 1, generatedBy: "scripts/aws/production-artifact-signing-bootstrap.mjs", bindings }, null, 2)}\n`;
-    writeFileSync(temporary, bytes, { mode: 0o600 });
-    chmodSync(temporary, 0o600);
-    renameSync(temporary, resolved);
-    chmodSync(resolved, 0o600);
-    return { path: resolved, evidenceSha256: sha256(bytes) };
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
+const assertRuntimeBindingOutput = ({ outputPath, sourceSha }) => {
+  const expected = artifactSigningRuntimeBindingPath(sourceSha);
+  if (path.resolve(outputPath) !== expected) throw new Error(`Artifact signing runtime binding path must be ${expected}.`);
+  let ancestor = path.dirname(expected);
+  while (!existsSync(ancestor)) ancestor = path.dirname(ancestor);
+  if (realpathSync(ancestor) !== ancestor) throw new Error("Artifact signing runtime binding path must not traverse a symlink.");
+  return expected;
 };
 
-export async function bootstrapArtifactSigningBindings({ run, contractFile = ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, outputFile = ARTIFACT_SIGNING_RUNTIME_BINDING_PATH } = {}) {
-  if (typeof run !== "function") throw new Error("Artifact signing bootstrap AWS runner is required.");
+const writeBindingsAtomically = ({ outputPath, bindings, sourceSha, repositoryRoot }) => {
+  const expected = assertRuntimeBindingOutput({ outputPath, sourceSha });
+  const bytes = Buffer.from(`${JSON.stringify({ schemaVersion: 2, generatedBy: "scripts/aws/production-artifact-signing-bootstrap.mjs", sourceSha, bindings }, null, 2)}\n`);
+  const written = writeStageBPrivateFileAtomic({ filePath: expected, bytes, repositoryRoot, overwrite: true, label: "Artifact signing runtime binding" });
+  return { path: written.path, evidenceSha256: sha256(bytes) };
+};
+
+export async function bootstrapArtifactSigningBindings({ run, sourceSha, repositoryRoot = process.cwd(), contractFile = ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, outputFile = artifactSigningRuntimeBindingPath(sourceSha) } = {}) {
+  if (typeof run !== "function" || !SHA40.test(sourceSha || "")) throw new Error("Artifact signing bootstrap AWS runner and protected-main SHA are required.");
+  const outputPath = assertRuntimeBindingOutput({ outputPath: outputFile, sourceSha });
+  ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot, create: true, label: "Artifact signing runtime directory" });
+  if (lstatSync(outputPath, { throwIfNoEntry: false })) ensureStageBPrivateFile({ filePath: outputPath, repositoryRoot, label: "Artifact signing runtime binding" });
   const contract = loadArtifactSigningBootstrapContract(contractFile);
   const bindings = {};
   const created = [];
@@ -92,6 +99,6 @@ export async function bootstrapArtifactSigningBindings({ run, contractFile = ART
     if (created.includes(name) || !hasCurrentVersion(metadata)) uninitializedSecretRefs.push(bindings[name]);
   }
   if (new Set(Object.values(bindings)).size !== ARTIFACT_SIGNING_BINDINGS.length) throw new Error("Artifact signing bootstrap returned duplicate secret ARNs.");
-  const evidence = writeBindingsAtomically(outputFile, bindings);
+  const evidence = writeBindingsAtomically({ outputPath: outputFile, bindings, sourceSha, repositoryRoot });
   return { valid: true, bindings, created, uninitializedSecretRefs, createSecretCount: created.length, bindingFile: evidence.path, evidenceSha256: evidence.evidenceSha256 };
 }

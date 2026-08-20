@@ -10,10 +10,16 @@ const mode = (stat) => stat.mode & 0o777;
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const currentUid = () => typeof process.getuid === "function" ? process.getuid() : undefined;
 
-function assertOutsideRepository(target, repositoryRoot, label) {
+function assertOutsideRepository(target, repositoryRoot, label, fsOps = fs) {
   const resolved = path.resolve(target || "");
   if (!path.isAbsolute(target || "")) throw new Error(`${label} must be an absolute path.`);
-  if (repositoryRoot && (resolved === path.resolve(repositoryRoot) || resolved.startsWith(`${path.resolve(repositoryRoot)}${path.sep}`))) {
+  const targetStat = fsOps.lstatSync(resolved, { throwIfNoEntry: false });
+  let ancestor = targetStat?.isSymbolicLink() ? path.dirname(resolved) : resolved;
+  while (!fsOps.lstatSync(ancestor, { throwIfNoEntry: false }) && path.dirname(ancestor) !== ancestor) ancestor = path.dirname(ancestor);
+  const physical = path.resolve(fsOps.realpathSync(ancestor), path.relative(ancestor, resolved));
+  const repositoryPath = repositoryRoot ? path.resolve(repositoryRoot) : null;
+  const repository = repositoryPath && fsOps.lstatSync(repositoryPath, { throwIfNoEntry: false }) ? fsOps.realpathSync(repositoryPath) : repositoryPath;
+  if (repository && (physical === repository || physical.startsWith(`${repository}${path.sep}`))) {
     throw new Error(`${label} must be outside the repository.`);
   }
   return resolved;
@@ -31,7 +37,7 @@ export function assertStageBNoSymlink(target, { fsOps = fs, label = "Stage B art
 }
 
 export function ensureStageBPrivateDirectory({ directory, repositoryRoot, create = false, normalize = false, fsOps = fs, label = "Stage B private directory" } = {}) {
-  const resolved = assertOutsideRepository(directory, repositoryRoot, label);
+  const resolved = assertOutsideRepository(directory, repositoryRoot, label, fsOps);
   let stat = fsOps.lstatSync(resolved, { throwIfNoEntry: false });
   if (!stat && create) {
     fsOps.mkdirSync(resolved, { recursive: true, mode: STAGE_B_PRIVATE_DIRECTORY_MODE });
@@ -49,7 +55,7 @@ export function ensureStageBPrivateDirectory({ directory, repositoryRoot, create
 }
 
 export function ensureStageBPrivateFile({ filePath, repositoryRoot, normalize = false, fsOps = fs, label = "Stage B private file" } = {}) {
-  const resolved = assertOutsideRepository(filePath, repositoryRoot, label);
+  const resolved = assertOutsideRepository(filePath, repositoryRoot, label, fsOps);
   let stat = fsOps.lstatSync(resolved, { throwIfNoEntry: false });
   if (!stat || !stat.isFile() || stat.isSymbolicLink()) throw new Error(`${label} must be a regular non-symlink file.`);
   if (normalize && mode(stat) !== STAGE_B_PRIVATE_FILE_MODE) {
@@ -62,6 +68,33 @@ export function ensureStageBPrivateFile({ filePath, repositoryRoot, normalize = 
 }
 
 export const assertStageBPrivateFile = (options = {}) => ensureStageBPrivateFile({ ...options, normalize: false });
+
+export function readStageBPrivateFileBytes({ filePath, repositoryRoot = process.cwd(), fsOps = fs, label = "Stage B private file" } = {}) {
+  const resolved = assertOutsideRepository(filePath, repositoryRoot, label, fsOps);
+  const before = fsOps.lstatSync(resolved, { throwIfNoEntry: false });
+  if (!before || !before.isFile() || before.isSymbolicLink()) throw new Error(`${label} must be a regular non-symlink file.`);
+  assertOwner(before, label);
+  if (mode(before) !== STAGE_B_PRIVATE_FILE_MODE) throw new Error(`${label} must have mode 0600.`);
+  let descriptor;
+  try {
+    descriptor = fsOps.openSync(resolved, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const opened = fsOps.fstatSync(descriptor);
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino) throw new Error(`${label} changed during authenticated read.`);
+    assertOwner(opened, label);
+    if (mode(opened) !== STAGE_B_PRIVATE_FILE_MODE) throw new Error(`${label} must have mode 0600.`);
+    const bytes = fsOps.readFileSync(descriptor);
+    return { path: resolved, bytes, sha256: sha256(bytes) };
+  } finally {
+    if (descriptor !== undefined) fsOps.closeSync(descriptor);
+  }
+}
+
+export function readBoundStageBPrivateJson({ filePath, expectedSha256, repositoryRoot = process.cwd(), fsOps = fs, label = "Stage B private JSON" } = {}) {
+  const captured = readStageBPrivateFileBytes({ filePath, repositoryRoot, fsOps, label });
+  if (!/^[a-f0-9]{64}$/.test(expectedSha256 || "")) throw new Error(`${label} expected SHA-256 is invalid.`);
+  if (captured.sha256 !== expectedSha256) throw new Error(`${label} changed after runtime preparation.`);
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes));
+}
 
 function removeExactFile(filePath, fsOps) {
   const stat = fsOps.lstatSync(filePath, { throwIfNoEntry: false });
@@ -86,9 +119,9 @@ function transactionalFailure(originalError, rollbackErrors, committedOutputs, r
   throw error;
 }
 
-export function assertStageBArtifactPath({ artifactPath, repositoryRoot, label = "Stage B artifact", allowExisting = true } = {}) {
-  const resolved = assertOutsideRepository(artifactPath, repositoryRoot, label);
-  const stat = fs.lstatSync(resolved, { throwIfNoEntry: false });
+export function assertStageBArtifactPath({ artifactPath, repositoryRoot, label = "Stage B artifact", allowExisting = true, fsOps = fs } = {}) {
+  const resolved = assertOutsideRepository(artifactPath, repositoryRoot, label, fsOps);
+  const stat = fsOps.lstatSync(resolved, { throwIfNoEntry: false });
   if (stat?.isSymbolicLink()) throw new Error(`${label} must not be a symlink.`);
   if (!allowExisting && stat) throw new Error(`${label} must be a new absolute private output path outside the repository.`);
   return resolved;
@@ -97,7 +130,7 @@ export function assertStageBArtifactPath({ artifactPath, repositoryRoot, label =
 export function writeStageBPrivateFilesAtomic({ files = [], repositoryRoot, overwrite = false, fsOps = fs } = {}) {
   if (!Array.isArray(files) || files.length === 0) throw new Error("Stage B artifact batch must contain at least one file.");
   const outputs = files.map(({ filePath, bytes, label = "Stage B private file" }) => ({
-    path: assertStageBArtifactPath({ artifactPath: filePath, repositoryRoot, label, allowExisting: true }), bytes, label,
+    path: assertStageBArtifactPath({ artifactPath: filePath, repositoryRoot, label, allowExisting: true, fsOps }), bytes, label,
   }));
   const parent = path.dirname(outputs[0].path);
   if (outputs.some((output) => path.dirname(output.path) !== parent)) throw new Error("Stage B atomic artifact batch must use one directory.");
@@ -186,7 +219,7 @@ export function writeStageBPrivateFileAtomic({ filePath, bytes, repositoryRoot, 
 }
 
 export function writeStageBPrivateFileExclusive({ filePath, bytes, repositoryRoot, fsOps = fs, label = "Stage B private file" } = {}) {
-  const resolved = assertStageBArtifactPath({ artifactPath: filePath, repositoryRoot, label, allowExisting: true });
+  const resolved = assertStageBArtifactPath({ artifactPath: filePath, repositoryRoot, label, allowExisting: true, fsOps });
   ensureStageBPrivateDirectory({ directory: path.dirname(resolved), repositoryRoot, create: true, fsOps });
   let descriptor;
   try {
@@ -206,6 +239,7 @@ export const STAGE_B_ARTIFACT_CONTRACTS = Object.freeze([
   { id: "release-preflight-report", kind: "file", producer: "scripts/aws/run-production-green-stage-b-preflight.mjs:runReleaseReadiness", consumers: ["scripts/aws/validate-stage-b-deployment-closure.mjs", "scripts/plan-production-green-stage-b.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
   { id: "image-manifest", kind: "file", producer: "external:protected image workflow artifact", consumers: ["scripts/aws/production-green-stage-b-image-evidence.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true, externalProducer: true },
   { id: "initial-dual-slot-rotation-bindings", kind: "file", producer: "scripts/aws/production-initial-dual-slot-bootstrap.mjs:bootstrapInitialDualSlotRotation", consumers: ["scripts/aws/prepare-production-cutover-runtime.mjs", "scripts/aws/production-cutover-runtime-bootstrap.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
+  { id: "artifact-signing-runtime-binding", kind: "file", producer: "scripts/aws/bootstrap-production-artifact-signing.mjs:runCli", consumers: ["scripts/aws/production-cutover-runtime-bootstrap.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-cutover-control-plane.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: true, hashBound: true },
   { id: "stage-a-state-backup", kind: "file", producer: "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight", consumers: ["scripts/aws/generate-production-green-stage-a-prerequisites.mjs", "scripts/aws/generate-production-green-stage-b-tfvars.mjs", "scripts/refresh-production-green-stage-b.mjs", "scripts/aws/validate-stage-b-deployment-closure.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: false, overwrite: false, hashBound: true },
   { id: "stage-a-state-identity", kind: "file", producer: "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight", consumers: ["scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: true, hashBound: true },
   { id: "stage-b-state-backup", kind: "file", producer: "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight", consumers: ["scripts/aws/generate-production-green-stage-b-tfvars.mjs", "scripts/refresh-production-green-stage-b.mjs", "scripts/plan-production-green-stage-b.mjs", "scripts/aws/validate-stage-b-deployment-closure.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: false, overwrite: false, hashBound: true },
