@@ -447,6 +447,32 @@ function makeFreshImagePartialApplyReferenceFixture() {
   return fixture;
 }
 
+function makeAlreadyReconciledFreshImageFixture() {
+  const fixture = makeFreshImagePartialApplyReferenceFixture();
+  fixture.plan.resource_changes = fixture.plan.resource_changes.filter((change) => !Object.hasOwn(change, "deposed"));
+  fixture.plan.prior_state.values.root_module.resources = fixture.plan.prior_state.values.root_module.resources.filter((resource) => !Object.hasOwn(resource, "deposed_key"));
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
+}
+
+function makePartialFreshImageCleanupFixture(cleanupCount) {
+  const fixture = makeFreshImagePartialApplyReferenceFixture();
+  const deposed = fixture.plan.resource_changes.filter((change) => Object.hasOwn(change, "deposed"));
+  if (cleanupCount <= deposed.length) {
+    const retained = new Set(deposed.slice(0, cleanupCount).map((change) => `${change.address}:${change.deposed}`));
+    fixture.plan.resource_changes = fixture.plan.resource_changes.filter((change) => !Object.hasOwn(change, "deposed") || retained.has(`${change.address}:${change.deposed}`));
+    fixture.plan.prior_state.values.root_module.resources = fixture.plan.prior_state.values.root_module.resources.filter((resource) => !Object.hasOwn(resource, "deposed_key") || retained.has(`${resource.address}:${resource.deposed_key}`));
+  } else {
+    const current = fixture.plan.prior_state.values.root_module.resources.find((resource) => resource.address === backendAddress && !Object.hasOwn(resource, "deposed_key"));
+    fixture.plan.resource_changes.push({ address: backendAddress, deposed: "ffffffff", mode: "managed", type: "aws_ecs_task_definition", change: { actions: ["delete"], before: { family: current.values.family, arn: oldArnFor(current.values.family).replace(":1", ":5"), skip_destroy: true }, after: null } });
+    fixture.plan.prior_state.values.root_module.resources.push({ ...structuredClone(current), deposed_key: "ffffffff", values: { ...structuredClone(current.values), arn: oldArnFor(current.values.family).replace(":1", ":5") } });
+  }
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
+}
+
 function makeSerial96DeposedBrokerPredecessorFixture() {
   const fixture = makeFreshImagePartialApplyReferenceFixture();
   const revisionForAddress = (address) => address === backendAddress ? 9 : address === readOnlyCanaryAddress ? 3 : 6;
@@ -611,16 +637,32 @@ test("fresh-image recovery partitions current runtime instances from reviewed de
 });
 
 test("fresh-image recovery audits an already-reconciled plan with no deposed residue", () => {
-  const fixture = makeFreshImagePartialApplyReferenceFixture();
-  fixture.plan.resource_changes = fixture.plan.resource_changes.filter((change) => !Object.hasOwn(change, "deposed"));
-  fixture.plan.prior_state.values.root_module.resources = fixture.plan.prior_state.values.root_module.resources.filter((resource) => !Object.hasOwn(resource, "deposed_key"));
-  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
-  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  const fixture = makeAlreadyReconciledFreshImageFixture();
   const audit = generate(fixture);
   assert.equal(audit.currentTaskDefinitionReferenceCount, 12);
   assert.deepEqual(audit.deposedTaskDefinitionCleanups, []);
   assert.equal(audit.taskDefinitionMutationInstances.length, 12);
   assert.doesNotThrow(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, audit, { terraformConfiguration: fixture.options.terraformConfiguration, planJsonSha256: fixture.planJsonSha256 }));
+});
+
+test("already-reconciled fresh-image audit rejects an unrecorded same-family broker revision during generation", () => {
+  const fixture = makeAlreadyReconciledFreshImageFixture();
+  const mode = "full-rls-admin-bootstrap";
+  const original = fixture.reader.getFunctionConfiguration;
+  fixture.reader.getFunctionConfiguration = () => {
+    const configuration = original();
+    const mapping = JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+    mapping[mode] = mapping[mode].replace(/:[0-9]+$/, ":999999");
+    configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(mapping);
+    return configuration;
+  };
+  assert.throws(() => generate(fixture), /not an explicitly retained or current no-op revision or reviewed deposed predecessor/);
+});
+
+test("fresh-image reference-audit generation rejects partial and extra cleanup topologies", () => {
+  for (const cleanupCount of [1, 10, 12]) {
+    assert.throws(() => generate(makePartialFreshImageCleanupFixture(cleanupCount)), /either no deposed residue or the exact eleven reviewed deposed cleanups/);
+  }
 });
 
 test("fresh-image plans traverse classifier, capture, validation, and approval for both reviewed cleanup topologies", () => {

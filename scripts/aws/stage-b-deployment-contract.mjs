@@ -601,6 +601,15 @@ export function assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraform
   return { profile: STAGE_B_FRESH_IMAGE_PARTIAL_APPLY_RECOVERY, currentAddresses, cleanupAddresses, brokerAddresses: [brokerPolicy.address, brokerFunction.address, brokerAlias.address] };
 }
 
+export function classifyStageBFreshImagePartialApplyRecoveryTopology(plan, options = {}) {
+  const currentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
+  const current = (plan?.resource_changes || []).filter((change) => currentAddresses.includes(change?.address) && change.deposed === undefined);
+  if (current.length !== currentAddresses.length || current.some((change) => !exactActions(change.change?.actions, ["create", "delete"]))) return null;
+  const envelope = assertStageBFreshImagePartialApplyRecoveryPlan(plan, options);
+  const topology = assertStageBFreshImageRecoveryCensus({ create: 0, replacement: envelope.currentAddresses.length, update: envelope.brokerAddresses.length, destroy: envelope.cleanupAddresses.length, unclassified: 0 });
+  return { ...envelope, topology };
+}
+
 export function assertReviewedBrokerTimeoutTransition(change) {
   if (change?.address !== "aws_lambda_function.broker" || change?.type !== "aws_lambda_function"
     || !exactActions(change.change?.actions, ["update"])

@@ -35,6 +35,11 @@ approval use the shared numeric census only after the plan's exact
 mutation-instance set has passed structural validation; partial cleanup sets
 and any unrelated mutation remain fail closed.
 
+Reference-audit generation enters strict fresh-image broker validation from
+that same complete structural plan contract. It does not infer recovery mode
+from the DEPOSED cleanup count, so both reviewed topologies enforce identical
+broker-revision evidence.
+
 ## Evidence
 
 The reference-audit regression covers both reviewed cleanup topologies through
