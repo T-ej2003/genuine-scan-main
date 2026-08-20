@@ -8,7 +8,20 @@ variable "aws_region" {
 
 variable "vpc_id" { type = string }
 variable "private_subnet_ids" { type = list(string) }
-variable "runtime_security_group_ids" { type = set(string) }
+variable "runtime_endpoint_security_group_ids" {
+  type = set(string)
+  validation {
+    condition     = length(var.runtime_endpoint_security_group_ids) > 0 && alltrue([for id in var.runtime_endpoint_security_group_ids : can(regex("^sg-(?:[a-f0-9]{8}|[a-f0-9]{17})$", id))])
+    error_message = "runtime_endpoint_security_group_ids must contain explicit security-group identifiers."
+  }
+}
+variable "database_runtime_security_group_ids" {
+  type = set(string)
+  validation {
+    condition     = length(var.database_runtime_security_group_ids) > 0 && alltrue([for id in var.database_runtime_security_group_ids : can(regex("^sg-(?:[a-f0-9]{8}|[a-f0-9]{17})$", id))])
+    error_message = "database_runtime_security_group_ids must contain explicit security-group identifiers."
+  }
+}
 variable "s3_prefix_list_id" {
   type = string
   validation {

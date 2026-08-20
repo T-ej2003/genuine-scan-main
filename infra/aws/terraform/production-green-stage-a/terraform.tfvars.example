@@ -1,7 +1,8 @@
 aws_region = "eu-west-2"
 vpc_id = "vpc-xxxxxxxx"
 private_subnet_ids = ["subnet-aaaaaaaa", "subnet-bbbbbbbb"]
-runtime_security_group_ids = ["sg-xxxxxxxx"]
+runtime_endpoint_security_group_ids = ["sg-xxxxxxxx"]
+database_runtime_security_group_ids = ["sg-xxxxxxxx"]
 s3_prefix_list_id     = "pl-xxxxxxxxxxxxxxxxx"
 vpc_dns_resolver_cidr = "10.0.0.2/32"
 

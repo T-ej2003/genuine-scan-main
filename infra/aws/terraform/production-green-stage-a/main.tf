@@ -78,7 +78,7 @@ resource "aws_vpc_security_group_ingress_rule" "executor_endpoints_https" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "runtime_endpoints_https" {
-  for_each                     = var.runtime_security_group_ids
+  for_each                     = var.runtime_endpoint_security_group_ids
   security_group_id            = aws_security_group.executor_endpoints.id
   referenced_security_group_id = each.value
   from_port                    = 443
@@ -153,7 +153,7 @@ resource "aws_vpc_security_group_egress_rule" "executor_dns_tcp" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "runtime_database" {
-  for_each                     = var.runtime_security_group_ids
+  for_each                     = var.database_runtime_security_group_ids
   security_group_id            = aws_security_group.database.id
   referenced_security_group_id = each.value
   from_port                    = 5432
