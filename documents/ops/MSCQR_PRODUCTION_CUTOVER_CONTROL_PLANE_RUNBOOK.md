@@ -44,7 +44,10 @@ unrelated task inputs.
 Run `npm run stage-b:bootstrap-artifact-signing -- --source-sha <full-protected-main-sha>` before
 runtime preparation. This is the canonical idempotent producer of the runtime binding file; it
 requires the exact fetched protected-main identity and the release-deployer profile, and reports
-container creation separately from secret-value writes.
+container creation separately from secret-value writes. It emits the source-bound binding at
+`~/.mscqr/production-cutover/<full-protected-main-sha>/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json`
+as a 0600 file under a 0700 private directory outside the Git checkout. Pass that emitted path to
+`stage-b:prepare-cutover-runtime` as `--artifact-binding`; copying it into the repository is rejected.
 
 The later rotation coordinator remains intentionally operator-supplied: its reviewed external
 configuration binds the approved rotation ID, source SHA, grace window, and current/previous/pending

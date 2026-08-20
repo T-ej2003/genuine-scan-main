@@ -16,7 +16,7 @@ import { assertSelectedTargetTask, selectTargetTask } from "./ecs-exec-target-se
 import { createStrictHttpOnboardingAdapter } from "../security/production-strict-onboarding-http.mjs";
 import { resolveSmokeAdminMfaCode } from "../lib/staging-smoke-totp.mjs";
 import { persistOverlapReadinessEvidence } from "./produce-production-overlap-readiness-evidence.mjs";
-import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, ARTIFACT_SIGNING_RUNTIME_BINDING_PATH } from "./production-artifact-signing-bootstrap.mjs";
+import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH } from "./production-artifact-signing-bootstrap.mjs";
 import { assertStageBCanonicalTfvarsFile } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBPrivateFile, ensureStageBPrivateDirectory } from "./stage-b-artifact-contract.mjs";
 import { assertRotationInfrastructurePlan, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
@@ -218,11 +218,14 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     assertPreCutoverTemporaryCapabilityAbsent(report.temporaryKmsCapability, { sourceSha });
     return report;
   };
+  const artifactBinding = assertStageBPrivateFile({ filePath: config.artifactBindingFile, repositoryRoot: process.cwd(), label: "Artifact-signing runtime binding" });
+  if (artifactBinding.sha256 !== config.artifactBindingSha256) throw new Error("Artifact-signing runtime binding changed after runtime preparation.");
   const artifact = createAwsArtifactSigningAdapter({
     run: async (args) => releaseRun(args),
+    sourceSha,
     approvedBindings: config.artifactBindingFile,
     bootstrapContractFile: config.artifactBootstrapContractFile || ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH,
-    bindingOutputFile: config.artifactBindingOutputFile || ARTIFACT_SIGNING_RUNTIME_BINDING_PATH,
+    bindingOutputFile: config.artifactBindingFile,
     activeKeyVersion: config.artifactActiveKeyVersion,
   });
   const stageA = config.stageARecoveryEvidenceFile ? null : createTerraformStageAAdapter({

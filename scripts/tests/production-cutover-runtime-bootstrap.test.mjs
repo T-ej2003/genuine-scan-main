@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +15,8 @@ import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-c
 import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 import { buildRootDropEvidence, buildRootDropPayload } from "../aws/production-root-drop-evidence.mjs";
 import { buildTemporaryCapabilityEvidence } from "../aws/production-stage-a-temporary-kms-capability.mjs";
+import { artifactSigningRuntimeBindingPath, loadArtifactSigningBootstrapContract } from "../aws/production-artifact-signing-bootstrap.mjs";
+import { runCli as runArtifactSigningBootstrap } from "../aws/bootstrap-production-artifact-signing.mjs";
 import { producePostApplyStageAPlanRecovery } from "../aws/production-stage-a-recovery-evidence.mjs";
 import { STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { productionStageAIngress, productionStageAState, STAGE_A_STATE_OBJECT } from "./fixtures/production-stage-a-state.mjs";
@@ -40,12 +43,12 @@ const bindings = {
   },
 };
 
-function gitFixture() {
+function gitFixture(expectedSha = sourceSha) {
   return (file, args) => {
     if (file === "git" && args[0] === "status") return "";
     if (file === "git" && args[0] === "fetch") return "";
-    if (file === "git" && args[0] === "rev-parse" && args[1] === "FETCH_HEAD") return sourceSha + "\n";
-    if (file === "git" && args[0] === "rev-parse") return sourceSha + "\n";
+    if (file === "git" && args[0] === "rev-parse" && args[1] === "FETCH_HEAD") return expectedSha + "\n";
+    if (file === "git" && args[0] === "rev-parse") return expectedSha + "\n";
     throw new Error("unexpected git call: " + file + " " + args.join(" "));
   };
 }
@@ -58,17 +61,17 @@ function taskDefinition() {
   return { taskDefinition: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", containerDefinitions: [{ name: "backend", environment: [{ name: "PUBLIC_APP_URL", value: "https://www.mscqr.com" }, { name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "qr-v1" }] }] } };
 }
 
-function evidenceFiles(directory, repositoryRoot) {
+function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha) {
   const file = (name, value) => { const target = path.join(directory, name); writeFileSync(target, JSON.stringify(value) + "\n", { mode: 0o600 }); chmodSync(target, 0o600); return target; };
-  const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha });
+  const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha: expectedSha });
   const imageAuthorization = file("image-authorization.json", imageAuthorizationFixture.authorization);
   const iamEvidence = file("iam-evidence.json", { status: "valid", iamEvaluationCensus: { total: 158, executed: 158, invalid: 0, failures: [] }, evidenceSha256: "d".repeat(64) });
-  const temporaryKmsCapability = file("temporary-kms-capability.json", buildTemporaryCapabilityEvidence({ state: "ABSENCE_VERIFIED", sourceSha, transitionId: "rehearsal-transition", defaultVersionId: "v1", observedAt: "2026-08-18T12:00:00.000Z" }));
+  const temporaryKmsCapability = file("temporary-kms-capability.json", buildTemporaryCapabilityEvidence({ state: "ABSENCE_VERIFIED", sourceSha: expectedSha, transitionId: "rehearsal-transition", defaultVersionId: "v1", observedAt: "2026-08-18T12:00:00.000Z" }));
   const iamDocument = JSON.parse(readFileSync(iamEvidence, "utf8"));
   iamDocument.temporaryKmsCapability = JSON.parse(readFileSync(temporaryKmsCapability, "utf8"));
   writeFileSync(iamEvidence, JSON.stringify(iamDocument) + "\n", { mode: 0o600 });
   chmodSync(iamEvidence, 0o600);
-  const rootDrop = file("root-drop.json", buildRootDropEvidence({ payload: buildRootDropPayload({ sourceSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "runtime-bootstrap-root-with-entropy" }), signatureBase64: "c2lnbmF0dXJl" }));
+  const rootDrop = file("root-drop.json", buildRootDropEvidence({ payload: buildRootDropPayload({ sourceSha: expectedSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "runtime-bootstrap-root-with-entropy" }), signatureBase64: "c2lnbmF0dXJl" }));
   const stageAPlan = file("stage-a.tfplan", "binary-fixture");
   const tfvarsBytes = Buffer.from("production_rotation_enabled = false\n");
   const stageBTfvarsPath = path.join(directory, "stage-b.tfvars");
@@ -76,8 +79,9 @@ function evidenceFiles(directory, repositoryRoot) {
   const stageBTfvarsBindingReportPath = file("stage-b.tfvars.binding.json", { schemaVersion: 2, tfvarsSchemaVersion: 1, tfvarsFormat: "hcl", tfvarsFileName: "stage-b.tfvars", tfvarsExtension: ".tfvars", generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs", tfvarsSha256: createHash("sha256").update(tfvarsBytes).digest("hex") });
   const stageBTerraformDataDir = path.join(directory, "terraform-data");
   mkdirSync(stageBTerraformDataDir, { mode: 0o700 }); chmodSync(stageBTerraformDataDir, 0o700);
-  const artifactBinding = path.join(repositoryRoot, `documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime-${process.pid}.json`);
-  writeFileSync(artifactBinding, JSON.stringify({ bindings: {
+  const artifactBinding = artifactSigningRuntimeBindingPath(expectedSha);
+  mkdirSync(path.dirname(artifactBinding), { recursive: true, mode: 0o700 }); chmodSync(path.dirname(artifactBinding), 0o700);
+  writeFileSync(artifactBinding, JSON.stringify({ schemaVersion: 2, generatedBy: "scripts/aws/production-artifact-signing-bootstrap.mjs", sourceSha: expectedSha, bindings: {
     ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-a",
     ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-key-current-b",
     ARTIFACT_SIGN_ACTIVE_KEY_VERSION: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/active-key-version-c",
@@ -87,14 +91,14 @@ function evidenceFiles(directory, repositoryRoot) {
   return { imageAuthorization, imageAuthorizationFixture, iamEvidence, temporaryKmsCapability, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
 }
 
-function fullInput(directory, repositoryRoot) {
-  const evidence = evidenceFiles(directory, repositoryRoot);
+function fullInput(directory, repositoryRoot, expectedSha = sourceSha) {
+  const evidence = evidenceFiles(directory, repositoryRoot, expectedSha);
   return {
     outputDirectory: path.join(directory, "runtime"),
     repositoryRoot,
     approval: approval(),
     rotationBindings: bindings,
-    git: gitFixture(),
+    git: gitFixture(expectedSha),
     imageAuthorization: { ...JSON.parse(readFileSync(evidence.imageAuthorization, "utf8")), filePath: evidence.imageAuthorization },
     iamEvidence: { ...JSON.parse(readFileSync(evidence.iamEvidence, "utf8")), filePath: evidence.iamEvidence },
     temporaryKmsCapabilityFile: evidence.temporaryKmsCapability,
@@ -106,7 +110,7 @@ function fullInput(directory, repositoryRoot) {
     stageBTfvarsBindingReportSha256: evidence.stageBTfvarsBindingReportSha256,
     stageBTerraformDataDir: evidence.stageBTerraformDataDir,
     currentTaskDefinition: taskDefinition(),
-    inventoryApprovalId: stageBApprovalIdForReleaseSha(sourceSha),
+    inventoryApprovalId: stageBApprovalIdForReleaseSha(expectedSha),
     onboardingPaths: paths,
     constructAdapters: ({ config, sourceSha: actualSha, rotationId }) => createProductionCutoverAdapters({ config, sourceSha: actualSha, rotationId }),
     imageAuthorizationValidation: { now: evidence.imageAuthorizationFixture.now, verifyImageEvidence: evidence.imageAuthorizationFixture.verifyImageEvidence },
@@ -136,6 +140,58 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     assert.doesNotMatch(readFileSync(result.configPath, "utf8"), /PRIVATE KEY|SecretString|fixture-password|123456/);
   } finally {
     rmSync(path.join(repositoryRoot, "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("artifact bootstrap keeps a clean checkout executable through runtime preparation", async () => {
+  const directory = fsTemp();
+  const remote = path.join(directory, "origin.git");
+  const checkout = path.join(directory, "checkout");
+  const actualSourceSha = sourceSha;
+  execFileSync("git", ["init", "--bare", remote]);
+  execFileSync("git", ["clone", "--shared", "--no-checkout", process.cwd(), checkout]);
+  execFileSync("git", ["sparse-checkout", "set", "README.md"], { cwd: checkout });
+  execFileSync("git", ["checkout", "-B", "main", actualSourceSha], { cwd: checkout });
+  execFileSync("git", ["remote", "set-url", "origin", remote], { cwd: checkout });
+  execFileSync("git", ["push", "-u", "origin", "main"], { cwd: checkout });
+  const gitArgs = (args) => execFileSync("git", args, { cwd: checkout, encoding: "utf8" });
+  const gitExec = (file, args) => execFileSync(file, args, { cwd: checkout, encoding: "utf8" });
+  const contract = loadArtifactSigningBootstrapContract();
+  const run = async (args) => {
+    const name = args[args.indexOf("--secret-id") + 1];
+    return JSON.stringify({ Name: name, ARN: `arn:aws:secretsmanager:eu-west-2:368992683803:secret:${name}-AbCd12`, VersionIdsToStages: { current: ["AWSCURRENT"] } });
+  };
+  const evidenceDirectory = path.join(directory, "evidence");
+  mkdirSync(evidenceDirectory, { mode: 0o700 });
+  const input = fullInput(evidenceDirectory, checkout, actualSourceSha);
+  try {
+    assert.equal(Object.values(contract.names).length, 4);
+    const bootstrapResult = await runArtifactSigningBootstrap(["--source-sha", actualSourceSha], { git: gitArgs, run, repositoryRoot: checkout, write: () => {} });
+    assert.equal(bootstrapResult.bindingFile, artifactSigningRuntimeBindingPath(actualSourceSha));
+    assert.equal(gitArgs(["status", "--porcelain=v1", "--untracked-files=all"]).trim(), "");
+    input.git = gitExec;
+    const prepared = prepareProductionCutoverRuntime(input);
+    assert.equal(prepared.readyToConsumeMfa, true);
+
+    writeFileSync(path.join(checkout, "dirty.txt"), "dirty\n");
+    const dirtyInput = { ...input, outputDirectory: path.join(directory, "dirty-runtime") };
+    const rejected = prepareProductionCutoverRuntime(dirtyInput);
+    assert.equal(rejected.readyToConsumeMfa, false);
+    assert.match(rejected.blockers.join("\n"), /execution tree is not clean/);
+  } finally {
+    rmSync(artifactSigningRuntimeBindingPath(actualSourceSha), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("runtime adapter rejects artifact binding tamper after preparation", () => {
+  const directory = fsTemp();
+  try {
+    const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
+    writeFileSync(result.config.artifactBindingFile, `${readFileSync(result.config.artifactBindingFile, "utf8")} `, { mode: 0o600 });
+    assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId }), /changed after runtime preparation/);
+  } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -475,4 +531,4 @@ function fsTemp() {
   return directory;
 }
 
-test.after(() => rmSync(path.join(process.cwd(), `documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime-${process.pid}.json`), { force: true }));
+test.after(() => rmSync(artifactSigningRuntimeBindingPath(sourceSha), { force: true }));

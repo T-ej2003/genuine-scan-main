@@ -124,6 +124,26 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "artifact-signing-runtime-binding",
+      "kind": "file",
+      "producer": "scripts/aws/bootstrap-production-artifact-signing.mjs:runCli",
+      "consumers": [
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/production-cutover-control-plane.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": true,
+      "hashBound": true,
+      "atomicGroup": "artifact-signing-runtime-binding",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "stage-a-state-backup",
       "kind": "file",
       "producer": "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight",

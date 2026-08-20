@@ -18,7 +18,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
   });
   if (fresh.headSha !== sourceSha || fresh.freshRemoteMainSha !== sourceSha) throw new Error("Artifact-signing bootstrap requires exact fresh protected main.");
   const run = deps.run || createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
-  const result = await (deps.bootstrap || bootstrapArtifactSigningBindings)({ run: async (args) => run(args) });
+  const result = await (deps.bootstrap || bootstrapArtifactSigningBindings)({ run: async (args) => run(args), sourceSha, repositoryRoot: deps.repositoryRoot || process.cwd() });
   const output = { status: "valid", sourceSha, bindingFile: result.bindingFile, bindingEvidenceSha256: result.evidenceSha256, createdSecretContainers: result.created, secretValueWrites: 0, AWS_WRITES: result.createSecretCount };
   (deps.write || ((value) => process.stdout.write(value)))(`${JSON.stringify(output, null, 2)}\n`);
   return output;

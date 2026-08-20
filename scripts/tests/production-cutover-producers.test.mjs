@@ -46,7 +46,7 @@ test("artifact signing rejects mismatched pair and never accepts sensitive evide
 });
 
 test("artifact secret bindings are loaded only from reviewed IAM configuration", () => {
-  assert.throws(() => loadApprovedArtifactSigningBindings("/tmp/unreviewed-artifact-bindings.json"), /repository-reviewed IAM configuration/);
+  assert.throws(() => loadApprovedArtifactSigningBindings("/tmp/unreviewed-artifact-bindings.json", { expectedSourceSha: "a".repeat(40) }), /canonical external runtime path/);
 });
 
 test("production AWS command runner executes service operations through aws", () => {

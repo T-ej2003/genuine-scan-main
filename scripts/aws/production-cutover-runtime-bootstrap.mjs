@@ -200,7 +200,7 @@ export function prepareProductionCutoverRuntime({
       if (canonicalHash(temporaryKmsCapability.value) !== canonicalHash(iamEvidence.temporaryKmsCapability)) throw new Error("Standalone temporary capability evidence diverges from canonical IAM evidence.");
     }
     if (!artifactBindingFile) throw new Error("Existing artifact-signing runtime binding file is required.");
-    const artifactBindings = loadApprovedArtifactSigningBindings(artifactBindingFile);
+    const artifactBindings = loadApprovedArtifactSigningBindings(artifactBindingFile, { expectedSourceSha: protectedSha, repositoryRoot });
     if (!rootDropEvidenceFile) throw new Error("Root-drop evidence file is required.");
     const rootDrop = readInputFile(rootDropEvidenceFile, repositoryRoot, "Root-drop evidence");
     assertRootDropEvidence(rootDrop.value, { sourceSha: protectedSha, ...(verifyRootDropSignature ? { verifySignature: verifyRootDropSignature } : {}) });
