@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 
 export const READY_FOR_OVERLAP_DEPLOYMENT_STAGES = Object.freeze([
   "imageAuthorization",
@@ -70,11 +69,11 @@ export function assertReadyForOverlapDeployment(evidence, expected = {}) {
 export function readAndAssertReadyForOverlapDeployment({ filePath, evidenceSha256, sourceSha, rotationId, rotationStateSha256, now = Date.now() } = {}) {
   if (typeof filePath !== "string" || filePath.trim() === "") fail("READY_FOR_OVERLAP_DEPLOYMENT evidence file is required");
   if (!SHA256.test(evidenceSha256)) fail("READY_FOR_OVERLAP_DEPLOYMENT evidence SHA-256 is invalid");
-  const raw = readFileSync(filePath);
-  if (createHash("sha256").update(raw).digest("hex") !== evidenceSha256) fail("READY_FOR_OVERLAP_DEPLOYMENT evidence SHA-256 does not match the evidence file");
-  const evidence = JSON.parse(raw);
+  const captured = readStageBPrivateFileBytes({ filePath, repositoryRoot: process.cwd(), label: "READY_FOR_OVERLAP_DEPLOYMENT evidence" });
+  if (captured.sha256 !== evidenceSha256) fail("READY_FOR_OVERLAP_DEPLOYMENT evidence SHA-256 does not match the evidence file");
+  const evidence = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes));
   const result = assertReadyForOverlapDeployment(evidence, { sourceSha, rotationId, rotationStateSha256, now });
-  return { ...result, evidenceSha256 };
+  return { ...result, evidenceSha256, evidence };
 }
 
 function argument(name, argv) {

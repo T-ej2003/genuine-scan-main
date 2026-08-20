@@ -9,7 +9,7 @@ import { generateStageBTerraformBackendConfig } from "../aws/generate-production
 import { ensureStageBTerraformBackendMetadataPrivate } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { STAGE_B_EXPECTED_CHECK_ADDRESSES, STAGE_B_EXPECTED_RESOURCE_PRECONDITION_ADDRESSES, STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
 import { runRefreshOnly } from "../refresh-production-green-stage-b.mjs";
-import { STAGE_B_ARTIFACT_CONTRACTS, STAGE_B_PRIVATE_FILE_MODE, STAGE_B_PRIVATE_DIRECTORY_MODE, canonicalStageBArtifactContracts, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "../aws/stage-b-artifact-contract.mjs";
+import { STAGE_B_ARTIFACT_CONTRACTS, STAGE_B_PRIVATE_FILE_MODE, STAGE_B_PRIVATE_DIRECTORY_MODE, canonicalStageBArtifactContracts, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, writeStageBPrivateFilesAtomic } from "../aws/stage-b-artifact-contract.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 
@@ -28,6 +28,48 @@ const binding = (stateHash, tfvarsHash) => ({
 });
 
 test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+test("bound private JSON hashes and parses the same captured bytes", () => {
+  const directory = path.join(root, "bound-json"); fs.mkdirSync(directory, { mode: 0o700 });
+  const filePath = path.join(directory, "evidence.json");
+  const original = Buffer.from('{"status":"valid"}\n');
+  fs.writeFileSync(filePath, original, { mode: 0o600 });
+  assert.deepEqual(readBoundStageBPrivateJson({ filePath, expectedSha256: sha256(original), repositoryRoot: process.cwd(), label: "Evidence" }), { status: "valid" });
+  let replaced = false;
+  const fsOps = { ...fs, readFileSync(target, ...args) {
+    const bytes = fs.readFileSync(target, ...args);
+    if (typeof target === "number" && !replaced) {
+      replaced = true;
+      fs.writeFileSync(filePath, '{"status":"tampered"}\n', { mode: 0o600 });
+    }
+    return bytes;
+  } };
+  assert.deepEqual(readBoundStageBPrivateJson({ filePath, expectedSha256: sha256(original), repositoryRoot: process.cwd(), fsOps, label: "Evidence" }), { status: "valid" });
+  assert.equal(replaced, true);
+});
+
+test("bound private JSON rejects replacement between path validation and descriptor capture", () => {
+  const directory = path.join(root, "bound-json-replacement"); fs.mkdirSync(directory, { mode: 0o700 });
+  const filePath = path.join(directory, "evidence.json");
+  const original = Buffer.from('{"status":"valid"}\n');
+  fs.writeFileSync(filePath, original, { mode: 0o600 });
+  let replaced = false;
+  const fsOps = { ...fs, openSync(target, ...args) {
+    if (target === filePath && !replaced) {
+      replaced = true;
+      fs.renameSync(filePath, `${filePath}.old`);
+      fs.writeFileSync(filePath, '{"status":"tampered"}\n', { mode: 0o600 });
+    }
+    return fs.openSync(target, ...args);
+  } };
+  assert.throws(() => readBoundStageBPrivateJson({ filePath, expectedSha256: sha256(original), repositoryRoot: process.cwd(), fsOps, label: "Evidence" }), /changed during authenticated read/);
+});
+
+test("bound private JSON rejects an external path whose parent resolves into the repository", () => {
+  const linkedRepository = path.join(root, "linked-repository");
+  fs.symlinkSync(process.cwd(), linkedRepository, "dir");
+  assert.throws(() => readBoundStageBPrivateJson({ filePath: path.join(linkedRepository, "package.json"), expectedSha256: "0".repeat(64), repositoryRoot: process.cwd(), label: "Evidence" }), /must be outside the repository/);
+});
 
 test("Stage-A state identity registers its producer and authorization consumer", () => {
   const artifact = STAGE_B_ARTIFACT_CONTRACTS.find(({ id }) => id === "stage-a-state-identity");

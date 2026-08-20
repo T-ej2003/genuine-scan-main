@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -100,8 +100,9 @@ test("empty environment creates exactly four containers and emits identifiers on
   assert.equal(result.createSecretCount, 4);
   assert.equal(result.created.length, 4);
   assert.deepEqual(Object.keys(result.bindings).sort(), [...ARTIFACT_SIGNING_BINDINGS].sort());
-  const bindingFile = loadApprovedArtifactSigningBindings(result.bindingFile, { expectedSourceSha: sourceSha });
+  const bindingFile = loadApprovedArtifactSigningBindings(result.bindingFile, { expectedSourceSha: sourceSha, expectedSha256: result.evidenceSha256 });
   assert.deepEqual(bindingFile, result.bindings);
+  assert.throws(() => loadApprovedArtifactSigningBindings(result.bindingFile, { expectedSourceSha: sourceSha, expectedSha256: "f".repeat(64) }), /changed after runtime preparation/);
   const bytes = readFileSync(result.bindingFile, "utf8");
   assert.doesNotMatch(bytes, /BEGIN .*PRIVATE KEY|SecretString|password|token/i);
   assert.equal(fixture.calls.some((args) => args.includes("list-secrets")), false);
@@ -118,7 +119,8 @@ test("runtime binding path is exact, source-bound, external, and fail-closed", a
   await bootstrap({ run: fixture.run });
   assert.throws(() => loadApprovedArtifactSigningBindings(runtimeBindingPath, { expectedSourceSha: "b".repeat(40) }), /canonical external runtime path/);
   writeFileSync(runtimeBindingPath, "{}\n", { mode: 0o600 });
-  assert.throws(() => loadApprovedArtifactSigningBindings(runtimeBindingPath, { expectedSourceSha: sourceSha }), /source identity is invalid/);
+  assert.throws(() => loadApprovedArtifactSigningBindings(runtimeBindingPath, { expectedSourceSha: sourceSha }), /SHA-256 is required/);
+  assert.throws(() => loadApprovedArtifactSigningBindings(runtimeBindingPath, { expectedSourceSha: sourceSha, expectedSha256: createHash("sha256").update("{}\n").digest("hex") }), /source identity is invalid/);
 });
 
 test("runtime binding rejects symlink traversal into a repository", () => {
@@ -131,7 +133,7 @@ test("runtime binding rejects symlink traversal into a repository", () => {
   writeFileSync(target, "{}\n", { mode: 0o600 });
   symlinkSync(target, runtimeBindingPath);
   try {
-    assert.throws(() => loadApprovedArtifactSigningBindings(runtimeBindingPath, { expectedSourceSha: sourceSha, repositoryRoot }), /non-symlink|must not traverse a symlink/);
+    assert.throws(() => loadApprovedArtifactSigningBindings(runtimeBindingPath, { expectedSourceSha: sourceSha, expectedSha256: "0".repeat(64), repositoryRoot }), /non-symlink|must not traverse a symlink/);
   } finally {
     rmSync(runtimeBindingPath, { force: true });
     rmSync(repositoryRoot, { recursive: true, force: true });
@@ -154,6 +156,20 @@ test("bootstrap rejects a symlinked parent before writing into a repository", as
   } finally {
     unlinkSync(path.dirname(symlinkBindingPath));
     rmSync(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+test("bootstrap rejects a public runtime directory before any AWS call", async () => {
+  const publicSourceSha = "d".repeat(40);
+  const publicBindingPath = artifactSigningRuntimeBindingPath(publicSourceSha);
+  rmSync(path.dirname(publicBindingPath), { recursive: true, force: true });
+  mkdirSync(path.dirname(publicBindingPath), { recursive: true, mode: 0o755 });
+  const fixture = fakeRunner();
+  try {
+    await assert.rejects(() => bootstrapArtifactSigningBindings({ run: fixture.run, sourceSha: publicSourceSha }), /mode 0700/);
+    assert.equal(fixture.calls.length, 0);
+  } finally {
+    rmSync(path.dirname(publicBindingPath), { recursive: true, force: true });
   }
 });
 

@@ -22,6 +22,7 @@ const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d
 const imageDigest = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`;
 const rotationId = "rotation-rehearsal-1";
 const rotationStateSha256 = "c".repeat(64);
+const rotationFixtureSha256 = "e".repeat(64);
 const evidenceSha256 = "d".repeat(64);
 const validEvidence = (ref) => ({ valid: true, evidenceRef: ref, evidenceSha256 });
 const checkerPolicyDocument = ({ action = STAGE_A_CHECKER_POLICY.action, resource = STAGE_A_CHECKER_POLICY.resource, extraStatements = [] } = {}) => JSON.stringify({
@@ -130,7 +131,7 @@ export function fixtureInput(overrides = {}) {
     return [name, ecsJsonKeyBindings.has(name) ? `${base}:value::` : base];
   }));
   return {
-    sourceSha, rotationId, rotationStateSha256,
+    sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256,
     imageAuthorization: structuredClone(imageAuthorizationFixture.authorization),
     imageAuthorizationValidation: { now: imageAuthorizationFixture.now, verifyImageEvidence: imageAuthorizationFixture.verifyImageEvidence },
     iamReport: iamFixture(),
@@ -144,7 +145,7 @@ export function fixtureInput(overrides = {}) {
     artifactSigning: artifactFixture(),
     overlapTask: { input: { backendImage: imageDigest, releaseSha: sourceSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } }, register: async () => { mutations.push("M4_REGISTER_TASK_DEFINITION"); return { taskDefinition: { taskDefinitionArn } }; }, describe: async (arn) => ({ taskDefinitionArn: arn, family: "mscqr-production-rls-green-backend-candidate", status: "ACTIVE", tags: [{ key: "MSCQRExecTarget", value: "production-backend" }] }) },
     inventory: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", execute: async () => ({ inventory, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", taskArn }) },
-    rotationPrepare: { run: async () => { mutations.push("M5_ROTATION_STATE_PERSISTENCE"); return { valid: true, prepared: true, rotationId, rotationStateSha256, evidenceRef: "rotation:rehearsal", evidenceSha256, mutationCount: 1 }; } },
+    rotationPrepare: { run: async () => { mutations.push("M5_ROTATION_STATE_PERSISTENCE"); return { valid: true, prepared: true, rotationId, rotationStateSha256, rotationFixtureSha256, evidenceRef: "rotation:rehearsal", evidenceSha256, mutationCount: 1 }; } },
     rotationInfrastructure: { run: async ({ sourceSha: currentSourceSha, rotationId: currentRotationId, secretBindings }) => { mutations.push("M5_ROTATION_INFRA_CONVERGENCE"); const overlapSecretSet = Object.values(secretBindings).filter((value) => typeof value === "string" && value.startsWith("arn:aws:secretsmanager:")).map((value) => value.replace(/:value::$/, "")); return { valid: true, converged: true, rotationEnabled: true, sourceSha: currentSourceSha, rotationId: currentRotationId, applyCount: 1, overlapSecretSet, authorizedOverlapSecretSet: overlapSecretSet, unrelatedSecretAccess: false, evidenceRef: "terraform:rotation-infrastructure", evidenceSha256, mutationCount: 1 }; } },
     deployOverlap: { run: async ({ taskDefinitionArn: arn }) => { mutations.push("M6_ECS_UPDATE_SERVICE"); return { updateServiceCount: 1, propagateTags: "TASK_DEFINITION", taskDefinitionArn: arn, mutationPayload: { cluster: "mscqr-prod-euw2-main", service: "mscqr-backend-servi-euw2", taskDefinition: arn, enableExecuteCommand: true, propagateTags: "TASK_DEFINITION" } }; } },
     postDeploy: { run: async () => ({ valid: true, taskArn, taskDefinitionArn, imageDigest: digest, taskTag: "MSCQRExecTarget=production-backend", evidenceRef: "deploy:rehearsal", evidenceSha256 }) },
@@ -432,6 +433,16 @@ test("the real cutover orchestrator reaches synthetic onboarding with ordered mu
   assert.equal(result.transitionMatrix.every((edge) => edge.result === "PASS"), true);
 });
 
+test("invalid IAM evidence is rejected before reconciliation", async () => {
+  const input = fixtureInput();
+  let reconciliationCalls = 0;
+  input.iamReport = { ...input.iamReport, status: "invalid" };
+  input.iam = { report: input.iamReport, reconcile: async () => { reconciliationCalls += 1; return { mutationCount: 1 }; } };
+  await assert.rejects(() => runProductionCutoverControlPlane(input), /IAM preflight is invalid/);
+  assert.equal(reconciliationCalls, 0);
+  assert.deepEqual(input._mutations, []);
+});
+
 test("the real predeployment adapter feeds the same cutover spine before deployment", async () => {
   const input = fixtureInput();
   const order = [];
@@ -558,7 +569,7 @@ test("post-prepare overlap registration uses JSON-key references for promoted cu
   const current = input.overlapTask.input.secretBindings;
   const overlapSecretBindings = Object.fromEntries(Object.entries(current).map(([name, value]) => [name,
     ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"].includes(name) ? `${value}:value::` : value]));
-  input.rotationPrepare.run = async () => ({ valid: true, prepared: true, rotationId, rotationStateSha256, evidenceRef: "rotation:rehearsal", evidenceSha256, mutationCount: 1, overlapSecretBindings });
+  input.rotationPrepare.run = async () => ({ valid: true, prepared: true, rotationId, rotationStateSha256, rotationFixtureSha256, evidenceRef: "rotation:rehearsal", evidenceSha256, mutationCount: 1, overlapSecretBindings });
   let registeredPayload;
   input.overlapTask.register = async (payload) => {
     registeredPayload = payload;
@@ -617,14 +628,14 @@ test("transition matrix rejects field, SHA, identity, and ARN handoff corruption
 test("strict onboarding has no skip path", async () => {
   const probes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
   delete probes.rbac;
-  await assert.rejects(() => runStrictOnboardingProbes({ probes, expected: { sourceSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId } }), /unavailable/);
+  await assert.rejects(() => runStrictOnboardingProbes({ probes, expected: { sourceSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 } }), /unavailable/);
 });
 
 test("onboarding evidence fingerprint contains only non-secret metadata", async () => {
   const probes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
-  const evidence = await runStrictOnboardingProbes({ probes, expected: { sourceSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId } });
+  const evidence = await runStrictOnboardingProbes({ probes, expected: { sourceSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 } });
   const fingerprint = buildOnboardingEvidenceFingerprint(evidence);
-  assert.deepEqual(Object.keys(fingerprint).sort(), ["checks", "imageDigest", "rotationId", "rotationPhase", "sourceSha", "taskArn", "taskDefinitionArn"].sort());
+  assert.deepEqual(Object.keys(fingerprint).sort(), ["checks", "imageDigest", "rotationId", "rotationStateSha256", "rotationPhase", "sourceSha", "taskArn", "taskDefinitionArn"].sort());
   assert.doesNotMatch(JSON.stringify(fingerprint), /password|database_url|private.?key|secret|bearer|qr.?payload/i);
 });
 
@@ -662,9 +673,10 @@ const failCases = [
   ["inventory-unknown-category", (i) => { i.inventory.execute = async () => ({ ...inventory, unknown: { count: 0 } }); }],
   ["inventory-sensitive-field", (i) => { i.inventory.execute = async () => ({ ...inventory, refreshSessions: { count: 0, token: "x" } }); }],
   ["inventory-malformed-count", (i) => { i.inventory.execute = async () => ({ ...inventory, refreshSessions: { count: "0" } }); }],
-  ["rotation-persistence-mismatch", (i) => { i.rotationPrepare.run = async () => ({ valid: true, prepared: true, rotationId: "wrong", rotationStateSha256, evidenceRef: "bad", evidenceSha256 }); }],
+  ["rotation-persistence-mismatch", (i) => { i.rotationPrepare.run = async () => ({ valid: true, prepared: true, rotationId: "wrong", rotationStateSha256, rotationFixtureSha256, evidenceRef: "bad", evidenceSha256 }); }],
+  ["rotation-fixture-unbound", (i) => { i.rotationPrepare.run = async () => ({ valid: true, prepared: true, rotationId, rotationStateSha256, evidenceRef: "bad", evidenceSha256 }); }],
   ["readiness-evidence-hash-mismatch", (i) => { i.readiness = { produce: async () => ({}) }; }],
-  ["readiness-identity-mismatch", (i) => { i.rotationPrepare.run = async () => ({ valid: true, prepared: true, rotationId, rotationStateSha256: "f".repeat(64), evidenceRef: "bad", evidenceSha256 }); }],
+  ["readiness-identity-mismatch", (i) => { i.rotationPrepare.run = async () => ({ valid: true, prepared: true, rotationId, rotationStateSha256: "f".repeat(64), rotationFixtureSha256, evidenceRef: "bad", evidenceSha256 }); }],
   ["deployment-wrong-task-definition", (i) => { i.deployOverlap.run = async () => ({ updateServiceCount: 1, propagateTags: "TASK_DEFINITION", taskDefinitionArn: "wrong" }); }],
   ["deployment-missing-propagate-tags", (i) => { i.deployOverlap.run = async ({ taskDefinitionArn: arn }) => ({ updateServiceCount: 1, taskDefinitionArn: arn }); }],
   ["deployment-extra-update-service", (i) => { i.deployOverlap.run = async ({ taskDefinitionArn: arn }) => ({ updateServiceCount: 2, propagateTags: "TASK_DEFINITION", taskDefinitionArn: arn }); }],
@@ -706,7 +718,7 @@ test("every cutover failure injection fails closed", async () => {
     }
   }
   assert.equal(unexpectedPasses, 0);
-  assert.equal(failCases.length, 53);
+  assert.equal(failCases.length, 54);
   assert.equal(failureResults.length, failCases.length);
   assert.equal(failureResults.filter(({ result }) => result !== "EXPECTED_FAILURE").length, 0);
 });

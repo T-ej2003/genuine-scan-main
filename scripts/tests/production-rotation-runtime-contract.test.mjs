@@ -109,6 +109,8 @@ test("overlap secret set is bounded into the backend execution role", () => {
 test("coordinator exposes explicit resumable phases and no implicit cleanup", () => {
   for (const mode of ["--prepare", "--verify", "--cleanup", "--status"]) assert.match(coordinator, new RegExp(mode.slice(2)));
   assert.match(coordinator, /exactly one of --prepare, --verify, --cleanup, or --status/);
+  assert.match(coordinator, /--config-sha256 must be an exact SHA-256/);
+  assert.match(coordinator, /rotation config changed after approval/);
   assert.match(coordinator, /--confirm-cleanup is required for cleanup/);
   assert.match(coordinator, /config\.qr\.previousKeyVersion/);
   assert.match(coordinator, /deploymentRequired: true/);

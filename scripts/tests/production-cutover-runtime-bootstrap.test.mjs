@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, chmodSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createHash } from "node:crypto";
-import { createProductionCutoverAdapters } from "../aws/production-cutover-production-adapters.mjs";
+import { createProductionCutoverAdapters, createProductionRotationInfrastructureAdapter } from "../aws/production-cutover-production-adapters.mjs";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
-import { parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { assertUniqueSecretBindingNames, buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
@@ -112,7 +112,7 @@ function fullInput(directory, repositoryRoot, expectedSha = sourceSha) {
     currentTaskDefinition: taskDefinition(),
     inventoryApprovalId: stageBApprovalIdForReleaseSha(expectedSha),
     onboardingPaths: paths,
-    constructAdapters: ({ config, sourceSha: actualSha, rotationId }) => createProductionCutoverAdapters({ config, sourceSha: actualSha, rotationId }),
+    constructAdapters: ({ config, sourceSha: actualSha, rotationId, runtimeConfigSha256 }) => createProductionCutoverAdapters({ config, sourceSha: actualSha, rotationId, runtimeConfigSha256 }),
     imageAuthorizationValidation: { now: evidence.imageAuthorizationFixture.now, verifyImageEvidence: evidence.imageAuthorizationFixture.verifyImageEvidence },
     verifyRootDropSignature: () => true,
   };
@@ -190,7 +190,87 @@ test("runtime adapter rejects artifact binding tamper after preparation", () => 
   try {
     const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
     writeFileSync(result.config.artifactBindingFile, `${readFileSync(result.config.artifactBindingFile, "utf8")} `, { mode: 0o600 });
-    assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId }), /changed after runtime preparation/);
+    assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256 }), /changed after runtime preparation/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("runtime adapter authenticates every prepared eligibility artifact before AWS work", () => {
+  for (const [field, message] of [
+    ["iamEvidenceFile", /IAM evidence changed after runtime preparation/],
+    ["rootDropEvidenceFile", /Root-drop evidence changed after runtime preparation/],
+    ["onboardingPathsFile", /Onboarding path manifest changed after runtime preparation/],
+  ]) {
+    const directory = fsTemp();
+    try {
+      const input = fullInput(directory, process.cwd());
+      if (field === "iamEvidenceFile") delete input.temporaryKmsCapabilityFile;
+      const result = prepareProductionCutoverRuntime(input);
+      writeFileSync(result.config[field], `${readFileSync(result.config[field], "utf8")} `, { mode: 0o600 });
+      assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256 }), message);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("rotation infrastructure revalidates the classified saved plan before apply", async () => {
+  const directory = fsTemp();
+  try {
+    const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
+    let applyCalls = 0;
+    const run = (command, args, options) => {
+      assert.equal(command, "terraform");
+      assert.equal(options.env.AWS_PROFILE, "fixture");
+      for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(options.env[name], undefined);
+      if (args.includes("plan")) { writeFileSync(result.config.rotationTerraformPlanFile, "classified-plan\n", { mode: 0o600 }); return ""; }
+      if (args.includes("show")) {
+        writeFileSync(result.config.rotationTerraformPlanFile, "replaced-plan\n", { mode: 0o600 });
+        return JSON.stringify({ resource_changes: [{ address: 'aws_iam_role_policy.execution["backend"]', change: { actions: ["update"] } }] });
+      }
+      if (args.includes("apply")) applyCalls += 1;
+      return "";
+    };
+    const artifactBindings = Object.fromEntries(Object.entries(result.config.overlapTaskInput.secretBindings).filter(([name]) => name.startsWith("ARTIFACT_SIGN_")));
+    const adapter = createProductionRotationInfrastructureAdapter({ run, releaseProfile: "fixture", config: result.config });
+    await assert.rejects(() => adapter.run({ sourceSha, rotationId: result.config.rotationId, secretBindings: { ...rotationBindingsToPostPrepareTaskBindings(bindings), ...artifactBindings } }), /changed after classification/);
+    assert.equal(applyCalls, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("rotation infrastructure rejects a substituted plan destination before Terraform", async () => {
+  const directory = fsTemp();
+  try {
+    const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
+    symlinkSync(path.join(directory, "plan-target"), result.config.rotationTerraformPlanFile);
+    let terraformCalls = 0;
+    const artifactBindings = Object.fromEntries(Object.entries(result.config.overlapTaskInput.secretBindings).filter(([name]) => name.startsWith("ARTIFACT_SIGN_")));
+    const adapter = createProductionRotationInfrastructureAdapter({ run: () => { terraformCalls += 1; }, releaseProfile: "fixture", config: result.config });
+    await assert.rejects(() => adapter.run({ sourceSha, rotationId: result.config.rotationId, secretBindings: { ...rotationBindingsToPostPrepareTaskBindings(bindings), ...artifactBindings } }), /must not be a symlink/);
+    assert.equal(terraformCalls, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("generated cutover command binds runtime config and image authorization bytes", () => {
+  const directory = fsTemp();
+  try {
+    const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
+    assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId }), /Hash-authenticated/);
+    assert.match(result.nextCommand, new RegExp(`--config-sha256 ${result.runtimeConfigSha256}`));
+    const run = () => execFileSync(process.execPath, ["scripts/aws/run-production-cutover.mjs", "--mode", "production", "--config", result.configPath, "--config-sha256", result.runtimeConfigSha256, "--source-sha", sourceSha, "--rotation-id", result.config.rotationId], { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    writeFileSync(result.configPath, `${readFileSync(result.configPath, "utf8")} `, { mode: 0o600 });
+    assert.throws(run, /Production cutover runtime config changed after runtime preparation/);
+
+    const secondDirectory = path.join(directory, "second");
+    mkdirSync(secondDirectory, { mode: 0o700 });
+    const second = prepareProductionCutoverRuntime(fullInput(secondDirectory, process.cwd()));
+    writeFileSync(second.config.imageAuthorizationFile, `${readFileSync(second.config.imageAuthorizationFile, "utf8")} `, { mode: 0o600 });
+    assert.throws(() => execFileSync(process.execPath, ["scripts/aws/run-production-cutover.mjs", "--mode", "production", "--config", second.configPath, "--config-sha256", second.runtimeConfigSha256, "--source-sha", sourceSha, "--rotation-id", second.config.rotationId], { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), /Image authorization evidence changed after runtime preparation/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -204,6 +284,98 @@ test("canonical IAM evidence is sufficient without a duplicate temporary-capabil
     const result = prepareProductionCutoverRuntime(input);
     assert.equal(result.readyToConsumeMfa, true);
     assert.equal(result.config.temporaryKmsCapabilityFile, null);
+    assert.doesNotThrow(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256 }));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("runtime preparation validates canonical IAM evidence before live AWS discovery", () => {
+  const directory = fsTemp();
+  let awsReads = 0;
+  try {
+    const input = fullInput(directory, process.cwd());
+    input.iamEvidence.iamEvaluationCensus.executed -= 1;
+    const { filePath, ...report } = input.iamEvidence;
+    writeFileSync(filePath, `${JSON.stringify(report)}\n`, { mode: 0o600 });
+    input.loadCurrentTaskDefinition = () => { awsReads += 1; return input.currentTaskDefinition; };
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, false);
+    assert.match(result.blockers.join("\n"), /IAM evidence is incomplete/);
+    assert.equal(awsReads, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("canonical IAM outer hash fails closed for nested, census, SHA, path, and symlink tamper", () => {
+  const cases = [
+    ["self-consistent nested absence", (result) => {
+      const report = JSON.parse(readFileSync(result.config.iamEvidenceFile, "utf8"));
+      report.temporaryKmsCapability = buildTemporaryCapabilityEvidence({ state: "ABSENCE_VERIFIED", sourceSha, transitionId: "different-transition", defaultVersionId: "v1", observedAt: "2026-08-18T12:01:00.000Z" });
+      writeFileSync(result.config.iamEvidenceFile, `${JSON.stringify(report)}\n`, { mode: 0o600 });
+    }, /IAM evidence changed/],
+    ["changed census", (result) => {
+      const report = JSON.parse(readFileSync(result.config.iamEvidenceFile, "utf8"));
+      report.iamEvaluationCensus.executed -= 1;
+      writeFileSync(result.config.iamEvidenceFile, `${JSON.stringify(report)}\n`, { mode: 0o600 });
+    }, /IAM evidence changed/],
+    ["missing SHA", (result) => { delete result.config.iamEvidenceFileSha256; }, /expected SHA-256 is invalid/],
+    ["malformed SHA", (result) => { result.config.iamEvidenceFileSha256 = "not-a-sha"; }, /expected SHA-256 is invalid/],
+    ["wrong SHA", (result) => { result.config.iamEvidenceFileSha256 = "0".repeat(64); }, /IAM evidence changed/],
+    ["repository path escape", (result) => { result.config.iamEvidenceFile = path.join(process.cwd(), "package.json"); }, /must be outside the repository|must have mode 0600/],
+    ["parent symlink into repository", (result, directory) => {
+      const linkedRepository = path.join(directory, "linked-repository");
+      symlinkSync(process.cwd(), linkedRepository, "dir");
+      result.config.iamEvidenceFile = path.join(linkedRepository, "package.json");
+    }, /must be outside the repository/],
+    ["symlink replacement", (result, directory) => {
+      const original = result.config.iamEvidenceFile;
+      const replacement = path.join(directory, "replacement-iam.json");
+      writeFileSync(replacement, readFileSync(original), { mode: 0o600 });
+      rmSync(original);
+      symlinkSync(replacement, original);
+    }, /must be a regular non-symlink file/],
+  ];
+  for (const [name, mutate, expected] of cases) {
+    const directory = fsTemp();
+    try {
+      const input = fullInput(directory, process.cwd());
+      delete input.temporaryKmsCapabilityFile;
+      const result = prepareProductionCutoverRuntime(input);
+      mutate(result, directory);
+      assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256 }), expected, name);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("standalone temporary-capability evidence remains independently authenticated and consistent", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    const result = prepareProductionCutoverRuntime(input);
+    writeFileSync(result.config.temporaryKmsCapabilityFile, `${readFileSync(result.config.temporaryKmsCapabilityFile, "utf8")} `, { mode: 0o600 });
+    assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256 }), /Temporary Stage-A KMS capability evidence changed/);
+
+    const disagreementDirectory = path.join(directory, "disagreement");
+    mkdirSync(disagreementDirectory, { mode: 0o700 });
+    const disagreement = fullInput(disagreementDirectory, process.cwd());
+    writeFileSync(disagreement.temporaryKmsCapabilityFile, `${JSON.stringify(buildTemporaryCapabilityEvidence({ state: "ABSENCE_VERIFIED", sourceSha, transitionId: "different-transition", defaultVersionId: "v1", observedAt: "2026-08-18T12:01:00.000Z" }))}\n`, { mode: 0o600 });
+    const rejected = prepareProductionCutoverRuntime(disagreement);
+    assert.equal(rejected.readyToConsumeMfa, false);
+    assert.match(rejected.blockers.join("\n"), /diverges from canonical IAM evidence/);
+
+    const runtimeDirectory = path.join(directory, "runtime-disagreement");
+    mkdirSync(runtimeDirectory, { mode: 0o700 });
+    const runtime = prepareProductionCutoverRuntime(fullInput(runtimeDirectory, process.cwd()));
+    const canonicalIam = JSON.parse(readFileSync(runtime.config.iamEvidenceFile, "utf8"));
+    canonicalIam.temporaryKmsCapability = buildTemporaryCapabilityEvidence({ state: "ABSENCE_VERIFIED", sourceSha, transitionId: "runtime-different-transition", defaultVersionId: "v1", observedAt: "2026-08-18T12:02:00.000Z" });
+    const canonicalIamBytes = Buffer.from(`${JSON.stringify(canonicalIam)}\n`);
+    writeFileSync(runtime.config.iamEvidenceFile, canonicalIamBytes, { mode: 0o600 });
+    runtime.config.iamEvidenceFileSha256 = createHash("sha256").update(canonicalIamBytes).digest("hex");
+    assert.throws(() => createProductionCutoverAdapters({ config: runtime.config, sourceSha, rotationId: runtime.config.rotationId, runtimeConfigSha256: runtime.runtimeConfigSha256 }), /diverges from canonical IAM evidence/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -250,6 +422,8 @@ test("post-apply recovery binds historical provenance separately from current St
     assert.equal(result.config.stageBStatePath, stageBStatePath);
     assert.equal(result.config.currentStageBStatePath, currentStageBStatePath);
     assert.equal(result.config.currentStageBStateSha256, binding.stateBackupSha256);
+    writeFileSync(result.config.stageARecoveryEvidenceFile, `${readFileSync(result.config.stageARecoveryEvidenceFile, "utf8")} `, { mode: 0o600 });
+    assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256 }), /Stage-A recovery evidence changed after runtime preparation/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -296,9 +470,11 @@ test("post-prepare current bindings use ECS JSON-key references while SDK bindin
     const prepare = createProductionRotationPrepareAdapter({
       coordinator: "backend/scripts/security/rotate-production-signing-material.mjs",
       configFile: result.configPath,
+      configSha256: result.runtimeConfigSha256,
       stateFile: result.phasePaths.rotationStateFile,
       fixtureFile: result.phasePaths.rotationFixtureFile,
-      run: async () => {
+      run: async (args) => {
+        assert.deepEqual(args.slice(args.indexOf("--config-sha256"), args.indexOf("--config-sha256") + 2), ["--config-sha256", result.runtimeConfigSha256]);
         writeFileSync(result.phasePaths.rotationStateFile, JSON.stringify({ rotationId: result.config.rotationId, phase: "overlap-deploy-required", sourceSha }), { mode: 0o600 });
         writeFileSync(result.phasePaths.rotationFixtureFile, JSON.stringify({ payload: null, signature: null, token: null }), { mode: 0o600 });
         return JSON.stringify({ rotationId: result.config.rotationId, phase: "overlap-deploy-required" });
@@ -465,6 +641,7 @@ test("PREPARE_ARTIFACT_LIFECYCLE leaves future files absent until coordinator pr
     const prepare = createProductionRotationPrepareAdapter({
       coordinator: "backend/scripts/security/rotate-production-signing-material.mjs",
       configFile: result.configPath,
+      configSha256: result.runtimeConfigSha256,
       stateFile: result.phasePaths.rotationStateFile,
       fixtureFile: result.phasePaths.rotationFixtureFile,
       run: async () => {
@@ -477,10 +654,76 @@ test("PREPARE_ARTIFACT_LIFECYCLE leaves future files absent until coordinator pr
     assert.equal(existsSync(result.phasePaths.rotationFixtureFile), false);
     const prepared = await prepare.run({ rotationId: result.config.rotationId, inventory: { evidenceSha256: "f".repeat(64) } });
     assert.equal(prepared.prepared, true);
+    assert.match(prepared.rotationFixtureSha256, /^[a-f0-9]{64}$/);
     assert.equal(existsSync(result.phasePaths.rotationStateFile), true);
     assert.equal(existsSync(result.phasePaths.rotationFixtureFile), true);
   } finally {
     rmSync(path.join(repositoryRoot, "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("rotation prepare reauthenticates runtime config before invoking the mutating coordinator", async () => {
+  const directory = fsTemp();
+  let coordinatorCalls = 0;
+  try {
+    const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
+    const prepare = createProductionRotationPrepareAdapter({
+      coordinator: "backend/scripts/security/rotate-production-signing-material.mjs",
+      configFile: result.configPath,
+      configSha256: result.runtimeConfigSha256,
+      stateFile: result.phasePaths.rotationStateFile,
+      fixtureFile: result.phasePaths.rotationFixtureFile,
+      run: async () => { coordinatorCalls += 1; return ""; },
+    });
+    writeFileSync(result.configPath, `${readFileSync(result.configPath, "utf8")} `, { mode: 0o600 });
+    await assert.rejects(() => prepare.run({ rotationId: result.config.rotationId, inventory: { evidenceSha256: "f".repeat(64) } }), /Production cutover runtime config changed after runtime preparation/);
+    assert.equal(coordinatorCalls, 0);
+    assert.equal(existsSync(result.phasePaths.rotationStateFile), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("rotation prepare rejects unsafe output paths before invoking the mutating coordinator", async () => {
+  const directory = fsTemp();
+  let coordinatorCalls = 0;
+  try {
+    const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
+    symlinkSync(result.configPath, result.phasePaths.rotationFixtureFile);
+    const prepare = createProductionRotationPrepareAdapter({
+      coordinator: "backend/scripts/security/rotate-production-signing-material.mjs",
+      configFile: result.configPath,
+      configSha256: result.runtimeConfigSha256,
+      stateFile: result.phasePaths.rotationStateFile,
+      fixtureFile: result.phasePaths.rotationFixtureFile,
+      run: async () => { coordinatorCalls += 1; return ""; },
+    });
+    await assert.rejects(() => prepare.run({ rotationId: result.config.rotationId, inventory: { evidenceSha256: "f".repeat(64) } }), /Persisted rotation fixture must not be a symlink/);
+    assert.equal(coordinatorCalls, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("rotation prepare authenticates persisted state before authorizing the next boundary", async () => {
+  const directory = fsTemp();
+  try {
+    const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
+    const prepare = createProductionRotationPrepareAdapter({
+      coordinator: "backend/scripts/security/rotate-production-signing-material.mjs",
+      configFile: result.configPath,
+      configSha256: result.runtimeConfigSha256,
+      stateFile: result.phasePaths.rotationStateFile,
+      fixtureFile: result.phasePaths.rotationFixtureFile,
+      run: async () => {
+        writeFileSync(result.phasePaths.rotationStateFile, JSON.stringify({ rotationId: "different-rotation", phase: "overlap-deploy-required" }), { mode: 0o600 });
+        writeFileSync(result.phasePaths.rotationFixtureFile, JSON.stringify({ payload: null, signature: null, token: null }), { mode: 0o600 });
+        return JSON.stringify({ rotationId: result.config.rotationId, phase: "overlap-deploy-required" });
+      },
+    });
+    await assert.rejects(() => prepare.run({ rotationId: result.config.rotationId, inventory: { evidenceSha256: "f".repeat(64) } }), /does not match coordinator readback/);
+  } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });

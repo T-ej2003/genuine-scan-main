@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
 import { runStrictOnboardingProbes } from "./production-strict-onboarding.mjs";
 import { assertOnboardingPaths } from "./production-onboarding-contract.mjs";
+import { readStageBPrivateFileBytes } from "../aws/stage-b-artifact-contract.mjs";
 
 const REQUIRED_PATHS = Object.freeze(["tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "artifactSigning", "publicQrVerification"]);
 const trim = (value) => String(value || "").replace(/\/+$/, "");
@@ -11,10 +11,14 @@ function splitSetCookieHeader(value) {
   return String(value || "").split(/,(?=\s*[^=;,\s]+=)/).map((part) => part.trim()).filter(Boolean);
 }
 
-const readRotationQrFixtureToken = (fixtureFile) => {
-  if (typeof fixtureFile !== "string" || !fixtureFile) throw new Error("Rotation QR fixture file is required for public verification probes.");
+const readRotationQrFixtureToken = (fixtureFile, expectedSha256) => {
+  if (typeof fixtureFile !== "string" || !fixtureFile || !/^[a-f0-9]{64}$/.test(expectedSha256 || "")) throw new Error("Hash-bound rotation QR fixture is required for public verification probes.");
   let fixture;
-  try { fixture = JSON.parse(readFileSync(fixtureFile, "utf8")); } catch { throw new Error("Rotation QR fixture is unavailable or malformed."); }
+  try {
+    const captured = readStageBPrivateFileBytes({ filePath: fixtureFile, repositoryRoot: process.cwd(), label: "Rotation QR fixture" });
+    if (captured.sha256 !== expectedSha256) throw new Error("changed");
+    fixture = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes));
+  } catch { throw new Error("Rotation QR fixture is unavailable, changed, or malformed."); }
   if (typeof fixture?.token !== "string" || !fixture.token.trim()) throw new Error("Rotation QR fixture token is missing.");
   return fixture.token.trim();
 };
@@ -96,8 +100,10 @@ export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials,
     }
     return auth?.mfaVerified === true;
   };
-  return async ({ sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId }) => runStrictOnboardingProbes({
-    expected: { sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId },
+  return async ({ sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256, rotationFixtureSha256 }) => {
+    const rotationQrToken = readRotationQrFixtureToken(rotationFixtureFile, rotationFixtureSha256);
+    return runStrictOnboardingProbes({
+    expected: { sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 },
     probes: {
       deployedReleaseSha: async () => { const { response, payload } = await request("/version"); return response.ok && (payload?.releaseGitSha === sourceSha || payload?.gitSha === sourceSha); },
       deployedImageDigest: async () => (await runtimeReadback({ sourceSha, imageDigest, taskDefinitionArn, taskArn })).imageDigest === imageDigest,
@@ -118,7 +124,7 @@ export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials,
       refresh: async () => ok("/api/auth/refresh", { method: "POST", body: {} }),
       dashboardStats: async () => ok("/api/dashboard/stats"),
       qrStats: async () => ok("/api/qr/stats"),
-      publicQrVerification: async () => ok(resolveQrProbePath(reviewedPaths.publicQrVerification), { headers: { [QR_VERIFICATION_TOKEN_HEADER]: readRotationQrFixtureToken(rotationFixtureFile) } }),
+      publicQrVerification: async () => ok(resolveQrProbePath(reviewedPaths.publicQrVerification), { headers: { [QR_VERIFICATION_TOKEN_HEADER]: rotationQrToken } }),
       artifactSigning: async () => ok(reviewedPaths.artifactSigning),
       tenantIsolation: async () => {
         if (!tenantRequest) tenantRequest = createCookieAuthenticatedRequest({ baseUrl, fetchImpl }).request;
@@ -130,7 +136,7 @@ export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials,
       rbac: async () => { const { response } = await request(reviewedPaths.rbac); return [403, 404].includes(response.status); },
       auditPath: async () => ok(reviewedPaths.auditPath),
       printerTrust: async () => ok(reviewedPaths.printerTrust),
-      antiCloning: async () => { const token = readRotationQrFixtureToken(rotationFixtureFile); const { response } = await request(resolveQrProbePath(reviewedPaths.antiCloning), { headers: { [QR_VERIFICATION_TOKEN_HEADER]: tamperToken(token) } }); return [400, 401, 403, 409, 422].includes(response.status); },
+      antiCloning: async () => { const { response } = await request(resolveQrProbePath(reviewedPaths.antiCloning), { headers: { [QR_VERIFICATION_TOKEN_HEADER]: tamperToken(rotationQrToken) } }); return [400, 401, 403, 409, 422].includes(response.status); },
       jwtCurrentRuntimeVerify: async () => proofCheck("jwtCurrentRuntimeVerify"),
       jwtPreviousRuntimeVerify: async () => proofCheck("jwtPreviousRuntimeVerify"),
       jwtInvalidRuntimeRejected: async () => proofCheck("jwtInvalidRuntimeRejected"),
@@ -141,9 +147,10 @@ export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials,
       artifactCurrentRuntimeVerify: async () => proofCheck("artifactCurrentRuntimeVerify"),
       artifactHistoricalRuntimeVerify: async () => proofCheck("artifactHistoricalRuntimeVerify"),
       rotationState: async () => {
-        const state = await rotationStateReadback({ rotationId });
-        return state?.rotationId === rotationId && state?.phase === "overlap-deploy-required";
+        const readback = await rotationStateReadback({ rotationId });
+        return readback?.sha256 === rotationStateSha256 && readback.state?.rotationId === rotationId && readback.state?.phase === "overlap-deploy-required";
       },
     },
-  });
+    });
+  };
 }

@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { ARTIFACT_SIGNING_BINDINGS } from "./production-artifact-signing-domain.mjs";
-import { writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -72,7 +72,9 @@ const writeBindingsAtomically = ({ outputPath, bindings, sourceSha, repositoryRo
 
 export async function bootstrapArtifactSigningBindings({ run, sourceSha, repositoryRoot = process.cwd(), contractFile = ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, outputFile = artifactSigningRuntimeBindingPath(sourceSha) } = {}) {
   if (typeof run !== "function" || !SHA40.test(sourceSha || "")) throw new Error("Artifact signing bootstrap AWS runner and protected-main SHA are required.");
-  assertRuntimeBindingOutput({ outputPath: outputFile, sourceSha });
+  const outputPath = assertRuntimeBindingOutput({ outputPath: outputFile, sourceSha });
+  ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot, create: true, label: "Artifact signing runtime directory" });
+  if (lstatSync(outputPath, { throwIfNoEntry: false })) ensureStageBPrivateFile({ filePath: outputPath, repositoryRoot, label: "Artifact signing runtime binding" });
   const contract = loadArtifactSigningBootstrapContract(contractFile);
   const bindings = {};
   const created = [];

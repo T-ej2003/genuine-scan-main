@@ -14,17 +14,19 @@ import { establishReleaseDeployerIdentity, establishVerifierIdentity, createAwsS
 import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 import { assertSelectedTargetTask, selectTargetTask } from "./ecs-exec-target-selection.mjs";
 import { createStrictHttpOnboardingAdapter } from "../security/production-strict-onboarding-http.mjs";
+import { assertOnboardingPaths } from "../security/production-onboarding-contract.mjs";
 import { resolveSmokeAdminMfaCode } from "../lib/staging-smoke-totp.mjs";
 import { persistOverlapReadinessEvidence } from "./produce-production-overlap-readiness-evidence.mjs";
 import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH } from "./production-artifact-signing-bootstrap.mjs";
 import { assertStageBCanonicalTfvarsFile } from "./generate-production-green-stage-b-tfvars.mjs";
-import { assertStageBPrivateFile, ensureStageBPrivateDirectory } from "./stage-b-artifact-contract.mjs";
+import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { assertRotationInfrastructurePlan, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
 import { createLiveCheckerChainAssertionAdapter } from "./production-checker-chain-contract.mjs";
 import { assertStageAStateContract, parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertAuthenticatedCurrentStageBState, readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
+import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -35,16 +37,21 @@ const CONTAINER = "backend";
 const STATE_BUCKET = "mscqr-production-terraform-state-368992683803-eu-west-2";
 const STAGE_A_STATE_URI = `s3://${STATE_BUCKET}/mscqr/production/rls-green/stage-a/terraform.tfstate`;
 const STAGE_B_STATE_URI = `s3://${STATE_BUCKET}/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate`;
-const jsonFile = (filePath) => JSON.parse(readFileSync(filePath, "utf8"));
+const ROTATION_EXECUTION_POLICY_ADDRESS = 'aws_iam_role_policy.execution["backend"]';
+const ROTATION_EXECUTION_ROLE = "mscqr-production-rls-green-backend-execution";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const AWS_SERVICE_COMMANDS = new Set(["ec2", "ecs", "ecr", "iam", "kms", "logs", "rds", "s3", "secretsmanager", "ssm", "sts"]);
+const profileEnvironment = (profile, env = process.env) => {
+  const result = { ...env, AWS_REGION: REGION, AWS_DEFAULT_REGION: REGION };
+  if (profile) {
+    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) delete result[key];
+    result.AWS_PROFILE = profile;
+  }
+  return result;
+};
 
 export function createProductionCommandRunner({ profile, region = REGION, exec = execFileSync } = {}) {
-  const env = { ...process.env, AWS_REGION: region, AWS_DEFAULT_REGION: region };
-  if (profile) {
-    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) delete env[key];
-    env.AWS_PROFILE = profile;
-  }
+  const env = { ...profileEnvironment(profile), AWS_REGION: region, AWS_DEFAULT_REGION: region };
   return (args) => {
     if (!Array.isArray(args) || args.length === 0) throw new Error("Production command arguments are required.");
     const command = args[0] === "aws" ? args.slice(1) : [...args];
@@ -79,7 +86,7 @@ export function describeStageAIngress({ run, endpointSecurityGroupId, runtimeSec
 }
 
 export function createProductionOverlapDeploymentAdapter({ run, runScript = execFileSync, profile, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh"), cluster = CLUSTER, service = SERVICE, expectedCurrentTaskDefinitionArn, readinessFile, readinessSha256, sourceSha, rotationId, imageDigest, expectedFamily = "mscqr-production-rls-green-backend-candidate", versionUrl, expectedGitSha } = {}) {
-  if (typeof runScript !== "function" || !path.isAbsolute(deployScript)) throw new Error("Production overlap deployment runner is required.");
+  if (typeof runScript !== "function" || !path.isAbsolute(deployScript) || profile !== "mscqr-production-release-deployer") throw new Error("Production overlap deployment runner and exact release profile are required.");
   return {
     run: async ({ taskDefinitionArn, readinessSha256: suppliedReadinessSha256, rotationStateSha256: suppliedRotationStateSha256 }) => {
       if (!/^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend-candidate:[1-9][0-9]*$/.test(taskDefinitionArn || "")) throw new Error("Overlap deployment ARN is outside the reviewed family.");
@@ -89,8 +96,7 @@ export function createProductionOverlapDeploymentAdapter({ run, runScript = exec
       const metadataFile = path.join(temporaryDirectory, "deployment.json");
       try {
         const env = {
-          ...process.env,
-          ...(profile ? { AWS_PROFILE: profile } : {}),
+          ...profileEnvironment(profile),
           CLUSTER_NAME: cluster,
           SERVICE_NAME: service,
           CONTAINER_NAME: CONTAINER,
@@ -154,26 +160,28 @@ const runtimeProofCommand = ({ sourceSha, rotationId, deploymentSha, healthUrl, 
 
 export function createProductionRotationInfrastructureAdapter({ run = execFileSync, releaseProfile, root = path.resolve("infra/aws/terraform/production-green-stage-b"), config } = {}) {
   if (!config?.stageBTfvarsPath || !config.stageBTfvarsBindingReportPath || !config.stageBTfvarsBindingReportSha256 || !config.rotationTerraformInputFile || !config.rotationTerraformPlanFile || !config.stageBTerraformDataDir) throw new Error("Canonical rotation Terraform inputs are required.");
-  const terraformEnv = { ...process.env, AWS_REGION: REGION, AWS_DEFAULT_REGION: REGION, TF_DATA_DIR: config.stageBTerraformDataDir, TF_WORKSPACE: "default", ...(releaseProfile ? { AWS_PROFILE: releaseProfile } : {}) };
+  const terraformEnv = { ...profileEnvironment(releaseProfile), TF_DATA_DIR: config.stageBTerraformDataDir, TF_WORKSPACE: "default" };
   const terraform = (args, encoding = "utf8") => run("terraform", [`-chdir=${root}`, ...args], { cwd: process.cwd(), env: terraformEnv, encoding, stdio: ["ignore", "pipe", "pipe"] });
   return {
     async run({ sourceSha, rotationId, secretBindings }) {
-      const tfvarsBytes = readFileSync(config.stageBTfvarsPath);
-      const reportBytes = readFileSync(config.stageBTfvarsBindingReportPath);
-      assertStageBPrivateFile({ filePath: config.stageBTfvarsPath, repositoryRoot: process.cwd(), label: "Canonical Stage B tfvars" });
-      assertStageBPrivateFile({ filePath: config.stageBTfvarsBindingReportPath, repositoryRoot: process.cwd(), label: "Canonical Stage B tfvars binding report" });
+      const tfvars = readStageBPrivateFileBytes({ filePath: config.stageBTfvarsPath, repositoryRoot: process.cwd(), label: "Canonical Stage B tfvars" });
+      const report = readStageBPrivateFileBytes({ filePath: config.stageBTfvarsBindingReportPath, repositoryRoot: process.cwd(), label: "Canonical Stage B tfvars binding report" });
+      const rotationInput = readStageBPrivateFileBytes({ filePath: config.rotationTerraformInputFile, repositoryRoot: process.cwd(), label: "Rotation Terraform input" });
       ensureStageBPrivateDirectory({ directory: config.stageBTerraformDataDir, repositoryRoot: process.cwd(), create: false, normalize: true, label: "Canonical Stage B Terraform data directory" });
-      if (sha256(reportBytes) !== config.stageBTfvarsBindingReportSha256) throw new Error("Canonical Stage B tfvars binding report changed before rotation infrastructure convergence.");
-      if (sha256(readFileSync(config.rotationTerraformInputFile)) !== config.rotationTerraformInputSha256) throw new Error("Rotation Terraform input changed before convergence.");
-      assertStageBCanonicalTfvarsFile({ tfvarsPath: config.stageBTfvarsPath, bindingReport: JSON.parse(reportBytes), tfvarsBytes });
+      if (report.sha256 !== config.stageBTfvarsBindingReportSha256) throw new Error("Canonical Stage B tfvars binding report changed before rotation infrastructure convergence.");
+      if (rotationInput.sha256 !== config.rotationTerraformInputSha256) throw new Error("Rotation Terraform input changed before convergence.");
+      assertStageBCanonicalTfvarsFile({ tfvarsPath: tfvars.path, bindingReport: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(report.bytes)), tfvarsBytes: tfvars.bytes });
       const rotationInputs = buildRotationTerraformInputs({ secretBindings, sourceSha, rotationId });
-      if (readFileSync(config.rotationTerraformInputFile, "utf8") !== renderRotationTerraformInput(rotationInputs)) throw new Error("Rotation Terraform input does not match the post-prepare overlap bindings.");
+      if (new TextDecoder("utf-8", { fatal: true }).decode(rotationInput.bytes) !== renderRotationTerraformInput(rotationInputs)) throw new Error("Rotation Terraform input does not match the post-prepare overlap bindings.");
+      assertStageBArtifactPath({ artifactPath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan", allowExisting: false });
       const target = ROTATION_EXECUTION_POLICY_ADDRESS;
       terraform(["init", "-upgrade=false", "-input=false", "-lockfile=readonly", "-no-color"]);
       terraform(["plan", "-input=false", "-refresh=true", "-var-file", config.stageBTfvarsPath, "-var-file", config.rotationTerraformInputFile, "-target", target, "-out", config.rotationTerraformPlanFile, "-no-color"]);
-      assertStageBPrivateFile({ filePath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan" });
+      const savedPlan = readStageBPrivateFileBytes({ filePath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan" });
       const plan = JSON.parse(terraform(["show", "-json", config.rotationTerraformPlanFile]));
       assertRotationInfrastructurePlan(plan, { sourceSha, rotationId, secretBindings });
+      const revalidatedPlan = readStageBPrivateFileBytes({ filePath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan" });
+      if (revalidatedPlan.sha256 !== savedPlan.sha256) throw new Error("Rotation Terraform plan changed after classification.");
       terraform(["apply", "-input=false", "-no-color", config.rotationTerraformPlanFile]);
       const policy = parseJson((args) => run("aws", args, { cwd: process.cwd(), env: terraformEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), ["iam", "get-role-policy", "--role-name", ROTATION_EXECUTION_ROLE, "--policy-name", "stage-b-exact-image-logs-and-secrets"]);
       let document;
@@ -183,13 +191,15 @@ export function createProductionRotationInfrastructureAdapter({ run = execFileSy
       const authorizedOverlapSecretSet = overlapSecretSet.filter((arn) => authorizedSecretSet.includes(arn));
       if (authorizedOverlapSecretSet.length !== overlapSecretSet.length) throw new Error("Backend execution role is missing a required rotation secret permission.");
       const unrelatedSecretAccess = authorizedOverlapSecretSet.length !== new Set(overlapSecretSet).size;
-      return { valid: true, converged: true, rotationEnabled: true, sourceSha, rotationId, applyCount: 1, overlapSecretSet, authorizedOverlapSecretSet, unrelatedSecretAccess, evidenceRef: "terraform:rotation-infrastructure", evidenceSha256: sha256(Buffer.from(JSON.stringify({ sourceSha, rotationId, overlapSecretSet, authorizedOverlapSecretSet }))), mutationCount: 1, mutationPayload: { target, rotationInputSha256: sha256(readFileSync(config.rotationTerraformInputFile)), planSha256: sha256(readFileSync(config.rotationTerraformPlanFile)) } };
+      return { valid: true, converged: true, rotationEnabled: true, sourceSha, rotationId, applyCount: 1, overlapSecretSet, authorizedOverlapSecretSet, unrelatedSecretAccess, evidenceRef: "terraform:rotation-infrastructure", evidenceSha256: sha256(Buffer.from(JSON.stringify({ sourceSha, rotationId, overlapSecretSet, authorizedOverlapSecretSet }))), mutationCount: 1, mutationPayload: { target, rotationInputSha256: rotationInput.sha256, planSha256: savedPlan.sha256 } };
     },
   };
 }
 
-export function createProductionCutoverAdapters({ config, sourceSha, rotationId, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier" } = {}) {
-  if (!config || typeof config !== "object") throw new Error("Production cutover adapter configuration is required.");
+export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier" } = {}) {
+  if (!config || typeof config !== "object" || !/^[a-f0-9]{64}$/.test(runtimeConfigSha256 || "")) throw new Error("Hash-authenticated production cutover adapter configuration is required.");
+  if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || config.sourceSha !== sourceSha || typeof rotationId !== "string" || config.rotationId !== rotationId) throw new Error("Production cutover adapter identity does not match its runtime config.");
+  if (releaseProfile !== "mscqr-production-release-deployer" || verifierProfile !== "mscqr-production-ecs-exec-verifier") throw new Error("Production cutover adapter profiles do not match the asymmetric identity contract.");
   const releaseRun = createProductionCommandRunner({ profile: releaseProfile });
   const releaseSts = createAwsStsRunner({ profile: releaseProfile });
   const verifierSts = createAwsStsRunner({ profile: config.bootstrapProfile || verifierProfile });
@@ -207,23 +217,29 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     const task = assertSelectedTargetTask({ task: described.tasks?.[0], expectedClusterArn: CLUSTER_ARN, expectedTaskDefinitionArn: taskDefinitionArn, expectedImageDigest: imageDigest, serviceName: SERVICE, containerName: CONTAINER, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });
     return { serviceStable: service?.status === "ACTIVE" && service.runningCount === service.desiredCount && service.pendingCount === 0, taskDefinitionArn: task.taskDefinitionArn, imageDigest: task.containers.find(({ name }) => name === CONTAINER)?.imageDigest, taskMarker: true };
   };
-  const rotationStateReadback = async () => jsonFile(config.rotationStateFile);
+  const rotationStateReadback = async () => {
+    const captured = readStageBPrivateFileBytes({ filePath: config.rotationStateFile, repositoryRoot: process.cwd(), label: "Persisted rotation state" });
+    return { state: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes)), sha256: captured.sha256 };
+  };
+  const rootDropEvidence = readBoundStageBPrivateJson({ filePath: config.rootDropEvidenceFile, expectedSha256: config.rootDropEvidenceSha256, label: "Root-drop evidence" });
+  const stageARecoveryEvidence = config.stageARecoveryEvidenceFile ? readBoundStageBPrivateJson({ filePath: config.stageARecoveryEvidenceFile, expectedSha256: config.stageARecoveryEvidenceSha256, label: "Stage-A recovery evidence" }) : null;
+  const onboardingPaths = assertOnboardingPaths(readBoundStageBPrivateJson({ filePath: config.onboardingPathsFile, expectedSha256: config.onboardingPathsSha256, label: "Onboarding path manifest" }));
+  if (canonicalJson(onboardingPaths) !== canonicalJson(config.onboardingPaths)) throw new Error("Onboarding path manifest diverges from the authenticated runtime config.");
   const readIamEvidence = () => {
-    const report = jsonFile(config.iamEvidenceFile);
+    const report = readBoundStageBPrivateJson({ filePath: config.iamEvidenceFile, expectedSha256: config.iamEvidenceFileSha256, label: "IAM evidence" });
     if (config.temporaryKmsCapabilityFile) {
-      const temporaryFile = assertStageBPrivateFile({ filePath: config.temporaryKmsCapabilityFile, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
-      if (temporaryFile.sha256 !== config.temporaryKmsCapabilitySha256) throw new Error("Temporary Stage-A KMS capability evidence changed after runtime preparation.");
-      assertPreCutoverTemporaryCapabilityAbsent(jsonFile(temporaryFile.path), { sourceSha });
+      const temporaryEvidence = readBoundStageBPrivateJson({ filePath: config.temporaryKmsCapabilityFile, expectedSha256: config.temporaryKmsCapabilitySha256, label: "Temporary Stage-A KMS capability evidence" });
+      assertPreCutoverTemporaryCapabilityAbsent(temporaryEvidence, { sourceSha });
+      if (canonicalJson(temporaryEvidence) !== canonicalJson(report.temporaryKmsCapability)) throw new Error("Standalone temporary capability evidence diverges from canonical IAM evidence.");
     }
     assertPreCutoverTemporaryCapabilityAbsent(report.temporaryKmsCapability, { sourceSha });
     return report;
   };
-  const artifactBinding = assertStageBPrivateFile({ filePath: config.artifactBindingFile, repositoryRoot: process.cwd(), label: "Artifact-signing runtime binding" });
-  if (artifactBinding.sha256 !== config.artifactBindingSha256) throw new Error("Artifact-signing runtime binding changed after runtime preparation.");
   const artifact = createAwsArtifactSigningAdapter({
     run: async (args) => releaseRun(args),
     sourceSha,
     approvedBindings: config.artifactBindingFile,
+    approvedBindingsSha256: config.artifactBindingSha256,
     bootstrapContractFile: config.artifactBootstrapContractFile || ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH,
     bindingOutputFile: config.artifactBindingFile,
     activeKeyVersion: config.artifactActiveKeyVersion,
@@ -256,7 +272,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
         const verifier = await establishVerifierIdentity({ adapter: verifierSts, mfaSerial: process.env.MSCQR_VERIFIER_MFA_SERIAL, mfaCode: process.env.MSCQR_VERIFIER_MFA_CODE });
         verifierSession = verifier.session || verifierSts.getVerifierSession();
         return {
-          rootDrop: jsonFile(config.rootDropEvidenceFile),
+          rootDrop: rootDropEvidence,
           releaseDeployer,
           verifier,
         };
@@ -264,18 +280,18 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     },
     stageA: config.stageARecoveryEvidenceFile
       ? {
-        recoveryEvidence: jsonFile(config.stageARecoveryEvidenceFile),
+        recoveryEvidence: stageARecoveryEvidence,
         revalidateRecovery: async () => {
           const local = readAuthenticatedStageARecoverySources({ stageAStatePath: config.stageAStatePath, stageAHandoffPath: config.stageAHandoffPath, stageBStatePath: config.stageBStatePath, repositoryRoot: process.cwd() });
+          const currentStageB = readStageBPrivateFileBytes({ filePath: config.currentStageBStatePath, repositoryRoot: process.cwd(), label: "Current Stage-B state" });
+          if (currentStageB.sha256 !== config.currentStageBStateSha256) throw new Error("Current Stage-B state changed after runtime preparation.");
           const remoteStageABytes = Buffer.from(releaseRun(["s3", "cp", STAGE_A_STATE_URI, "-"]));
           const remoteStageBBytes = Buffer.from(releaseRun(["s3", "cp", STAGE_B_STATE_URI, "-"]));
-          const currentStageBBytes = readFileSync(config.currentStageBStatePath);
-          if (sha256(currentStageBBytes) !== config.currentStageBStateSha256) throw new Error("Current Stage-B state changed after runtime preparation.");
           const authenticated = {
             ...local,
             stageAState: { ...local.stageAState, bytes: remoteStageABytes, value: parseAuthenticatedStateBytes(remoteStageABytes) },
           };
-          assertAuthenticatedCurrentStageBState(parseAuthenticatedStateBytes(remoteStageBBytes), parseAuthenticatedStateBytes(currentStageBBytes), { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a" });
+          assertAuthenticatedCurrentStageBState(parseAuthenticatedStateBytes(remoteStageBBytes), parseAuthenticatedStateBytes(currentStageB.bytes), { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a" });
           const stageAContract = assertStageAStateContract(authenticated.stageAState.value, { phase: "POST_APPLY" });
           return { ...authenticated, ingress: describeStageAIngress({ run: releaseRun, endpointSecurityGroupId: stageAContract.endpointSecurityGroupId, runtimeSecurityGroupId: stageAContract.executorSecurityGroupId }) };
         },
@@ -289,6 +305,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       run: async (args) => releaseRun(args),
       coordinator: config.rotationCoordinator || "backend/scripts/security/rotate-production-signing-material.mjs",
       configFile: config.rotationConfigFile,
+      configSha256: runtimeConfigSha256,
       stateFile: config.rotationStateFile,
       fixtureFile: config.rotationFixtureFile,
     }),
@@ -305,22 +322,27 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       const described = await verifierEcs.describeTasks({ taskArns: listed.taskArns || [], includeTags: true });
       const task = selectTargetTask({ tasks: described.tasks, expectedClusterArn: CLUSTER_ARN, expectedTaskDefinitionArn: taskDefinitionArn, expectedImageDigest: config.backendImageDigest, serviceName: SERVICE, containerName: CONTAINER, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE }).selectedTask;
       const image = config.backendImageDigest;
-      return { valid: true, taskArn: task.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: image, taskTag: `${ECS_EXEC_OPERATOR_TASK_TAG_KEY}=${ECS_EXEC_OPERATOR_TASK_TAG_VALUE}`, evidenceRef: `task:${task.taskArn}`, evidenceSha256: config.postDeployEvidenceSha256 };
+      const evidence = { taskArn: task.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: image, taskTag: `${ECS_EXEC_OPERATOR_TASK_TAG_KEY}=${ECS_EXEC_OPERATOR_TASK_TAG_VALUE}` };
+      return { valid: true, ...evidence, evidenceRef: `task:${task.taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(evidence))) };
     } },
-    ecsExec: { run: async ({ taskArn, taskDefinitionArn, imageDigest, sourceSha, rotationId, verifierSession: suppliedVerifierSession }) => {
+    ecsExec: { run: async ({ taskArn, taskDefinitionArn, imageDigest, sourceSha, rotationId, rotationFixtureSha256, verifierSession: suppliedVerifierSession }) => {
       if (suppliedVerifierSession !== requireVerifierSession()) throw new Error("ECS Exec verification received a verifier session different from the established cutover session.");
       const result = await verifierEcs.describeTasks({ taskArns: [taskArn], includeTags: true });
       const task = result.tasks?.[0];
       assertSelectedTargetTask({ task, expectedClusterArn: CLUSTER_ARN, expectedTaskDefinitionArn: taskDefinitionArn, expectedImageDigest: imageDigest, serviceName: SERVICE, containerName: CONTAINER, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });
+      const fixtureBefore = readStageBPrivateFileBytes({ filePath: config.runtimeProofFixtureFile, repositoryRoot: process.cwd(), label: "Rotation runtime fixture" });
+      if (fixtureBefore.sha256 !== rotationFixtureSha256) throw new Error("Rotation runtime fixture changed after preparation.");
       const transcript = await verifierEcs.executeCommand({ taskArn, container: CONTAINER, inputFile: config.runtimeProofFixtureFile, command: runtimeProofCommand({ sourceSha, rotationId, deploymentSha: config.rotationDeploymentSha, healthUrl: config.rotationHealthUrl || `${config.onboardingBaseUrl}/api/health`, invocationRef: config.runtimeInvocationRef }) });
+      const fixtureAfter = readStageBPrivateFileBytes({ filePath: config.runtimeProofFixtureFile, repositoryRoot: process.cwd(), label: "Rotation runtime fixture" });
+      if (fixtureAfter.sha256 !== rotationFixtureSha256) throw new Error("Rotation runtime fixture changed during verification.");
       const proof = extractMarkedJson(transcript, "MSCQR_PROOF_BEGIN", "MSCQR_PROOF_END");
       if (proof.rotationId !== rotationId || proof.phase !== "overlap" || proof.deploymentSha !== (config.rotationDeploymentSha || sourceSha) || proof.healthReleaseGitSha !== sourceSha || proof.artifactCurrentRuntimeVerify !== true || proof.artifactHistoricalRuntimeVerify !== true) throw new Error("ECS Exec runtime proof is not bound to the exact deployment.");
-      latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: config.ecsExecEvidenceSha256, proof };
+      latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(proof))), proof };
       return latestEcsExecProof;
     } },
     onboarding: { run: createStrictHttpOnboardingAdapter({
       baseUrl: config.onboardingBaseUrl,
-      paths: config.onboardingPaths,
+      paths: onboardingPaths,
       credentials: { email: process.env.MSCQR_ONBOARDING_EMAIL, password: process.env.MSCQR_ONBOARDING_PASSWORD },
       getMfaCode: () => process.env.MSCQR_ONBOARDING_MFA_CODE,
       tenantCredentials: { email: process.env.MSCQR_CANARY_ORDINARY_EMAIL, password: process.env.MSCQR_CANARY_ORDINARY_PASSWORD },

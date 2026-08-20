@@ -57,8 +57,9 @@ secret values belong in that configuration.
 Before MFA, use `npm run stage-b:prepare-cutover-runtime --` with the reviewed approval metadata.
 This private preflight derives protected-main SHA, production region and role, overlap deployment
 SHA, current runtime metadata, image/IAM/artifact evidence references, and phase-owned output paths.
-It validates the complete adapter graph and writes only an identifier-only rotation config and a
-redacted manifest in a 0700 runtime directory; config and manifest files are atomic 0600 outputs.
+It validates the complete adapter graph before live ECS discovery, then atomically publishes the
+identifier-only rotation config, redacted manifest, canonical onboarding paths, and rotation Terraform
+input in a 0700 runtime directory; all four are 0600 outputs.
 It never creates rotation state or the rotation fixture. Those remain outputs of the coordinator's
 `--prepare` phase. The command emits one exact `run-production-cutover.mjs` command only after all
 pre-MFA inputs are valid. The pre-MFA bootstrap does not collect onboarding MFA. The onboarding
@@ -75,6 +76,11 @@ current tfvars report with `--current-stage-b-state`. Runtime revalidation prese
 state as provenance and separately requires the live Stage-B state to match the current state
 semantically. The canonical IAM report's nested temporary-capability absence proof is authoritative;
 an optional standalone proof is accepted only when it is exactly equivalent.
+Runtime preparation records the raw-byte SHA-256 of every private eligibility artifact, including
+the IAM report. Cutover consumers validate the private external path and exact recorded hash before
+parsing those same captured bytes; replacing a nested self-consistent proof therefore remains invalid.
+The coordinator's rotation fixture is similarly hashed from its persisted private bytes after prepare;
+ECS Exec and onboarding consume that exact hash-bound fixture and reject replacement before any probe.
 The source-bound authorization is produced only by `scripts/aws/production-image-authorization.mjs`.
 Before producing it, the shared protected-main identity helper performs a successful `git fetch origin main`
 and resolves the fetched commit from `FETCH_HEAD`; it never treats a stale `refs/remotes/origin/main` as
