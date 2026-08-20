@@ -146,6 +146,10 @@ representation: after Terraform already owns
 the AWS provider may add its exact TCP/443 SG-source representation to the
 computed `ingress` set on `aws_security_group.executor_endpoints`. The operator
 must supply `--endpoint-security-group-id` and `--runtime-security-group-id`.
+Terraform 1.15.8 omits `resource_changes` from this refresh-only JSON when
+there are zero configuration actions; an explicit array is therefore not
+required, but `null`, malformed, incomplete, errored, or non-applyable plans
+remain rejected.
 The classifier authenticates those IDs against the raw Stage-A state, the
 standalone rule ID/provider identity, account, region, and the parent SG's
 pre-refresh attributes. It then permits only the single matching ingress-set

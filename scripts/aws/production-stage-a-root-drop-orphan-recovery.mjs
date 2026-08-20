@@ -453,7 +453,7 @@ export function assertRootDropRefreshOnlyPlan(plan, { keyId, stateAlreadyConverg
   if (rootChanges.length > 1 || rdsChanges.length > 1 || endpointChanges.length > 1 || rootChanges.length + rdsChanges.length + endpointChanges.length !== changes.length || rootChanges.length === 0 && !stateAlreadyConverged) fail("refresh-only root-drop plan must contain only the contracted root-drop, RDS, and endpoint parent-SG computed convergence");
   if (rdsChanges.length) assertRdsLatestRestorableTimeDrift(rdsChanges[0]);
   if (endpointChanges.length) {
-    if (!Array.isArray(plan.resource_changes) || rootChanges.length || !stateAlreadyConverged) fail("endpoint parent-SG convergence requires a complete no-action refresh plan and cannot be combined with root-drop identity convergence");
+    if (plan.complete !== true || plan.errored !== false || plan.applyable !== true || rootChanges.length || !stateAlreadyConverged) fail("endpoint parent-SG convergence requires a complete no-action refresh plan and cannot be combined with root-drop identity convergence");
     assertRootDropStateIdentity(terraformState, { keyId, requireCanonicalPolicy: true });
     assertEndpointParentIngressDrift(endpointChanges[0], { terraformState, endpointSecurityGroupId, runtimeSecurityGroupId });
   }
