@@ -21,6 +21,7 @@ import {
   assertRootDropCensus,
   assertRootDropCreationInterlock,
   assertRootDropKeyIdentity,
+  assertAuthorizedEndpointParentIngressRefreshTransition,
   assertAuthorizedRootDropRefreshTransition,
   assertAuthorizedRootDropUntaintTransition,
   assertRootDropPreImportPlan,
@@ -123,6 +124,27 @@ const refreshOnlyIdentityPlan = ({ key = legacyKeyId, beforeArn = null, beforeKe
   { address: ROOT_DROP_KEY_ADDRESS, mode: "managed", type: "aws_kms_key", name: "root_drop", change: { before: { arn: beforeArn, custom_key_store_id: null, key_id: beforeKeyId, id: beforeId, multi_region: null, rotation_period_in_days: null, xks_key_id: null, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, actions: ["update"], after: { arn: afterArn, custom_key_store_id: "", key_id: afterKeyId, id: afterId, multi_region: false, rotation_period_in_days: 0, xks_key_id: "", key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, replace_paths: [] } },
 ] });
 const rdsRefreshDrift = { address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", change: { actions: ["update"], before: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-18T22:41:17Z", storage_encrypted: true }, after: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-19T19:26:15Z", storage_encrypted: true }, replace_paths: [] } };
+const endpointSecurityGroupId = "sg-04d5bf116755ba412";
+const frontendSecurityGroupId = "sg-0126cf7854fef6be6";
+const backendSecurityGroupId = "sg-0db971332ae625441";
+const executorSecurityGroupId = "sg-051a24aedff773761";
+const endpointIngress = (source, description = "Approved production runtime to reviewed AWS interface endpoints") => ({ cidr_blocks: [], description, from_port: 443, ipv6_cidr_blocks: [], prefix_list_ids: [], protocol: "tcp", security_groups: [source], self: false, to_port: 443 });
+const endpointParentAttributes = (ingress) => ({ arn: `arn:aws:ec2:${STAGE_B.region}:${STAGE_B.account}:security-group/${endpointSecurityGroupId}`, description: "HTTPS only from the production green executor", egress: [], id: endpointSecurityGroupId, ingress, name: "mscqr-production-rls-green-executor-endpoints", name_prefix: "", owner_id: STAGE_B.account, region: STAGE_B.region, revoke_rules_on_delete: false, tags: { Component: "full-rls-green-stage-a", Environment: "production", ManagedBy: "Terraform", Stack: "production-green-stage-a" }, tags_all: { Component: "full-rls-green-stage-a", Environment: "production", ManagedBy: "Terraform", Stack: "production-green-stage-a" }, timeouts: null, vpc_id: "vpc-09825a6dc884b486a" });
+const preRefreshIngress = () => [endpointIngress(backendSecurityGroupId), endpointIngress(executorSecurityGroupId, "Production green executor to reviewed AWS interface endpoints")];
+const withEndpointRuleState = (value, { converged = false, source = frontendSecurityGroupId, destination = endpointSecurityGroupId, port = 443 } = {}) => {
+  const copy = structuredClone(value);
+  copy.resources = copy.resources.filter(({ type, name }) => !(type === "aws_vpc_security_group_ingress_rule" && name === "runtime_endpoints_https"));
+  const parent = copy.resources.find(({ type, name }) => type === "aws_security_group" && name === "executor_endpoints");
+  Object.assign(parent, { mode: "managed", instances: [{ schema_version: 1, identity_schema_version: 0, identity: { account_id: STAGE_B.account, id: endpointSecurityGroupId, region: STAGE_B.region }, attributes: endpointParentAttributes(converged ? [...preRefreshIngress(), endpointIngress(source)] : preRefreshIngress()) }] });
+  copy.resources.push({ mode: "managed", type: "aws_vpc_security_group_ingress_rule", name: "runtime_endpoints_https", instances: [{ index_key: source, schema_version: 0, identity_schema_version: 0, identity: { account_id: STAGE_B.account, id: "sgr-0848f728ad1a35377", region: STAGE_B.region }, attributes: { arn: `arn:aws:ec2:${STAGE_B.region}:${STAGE_B.account}:security-group-rule/sgr-0848f728ad1a35377`, cidr_ipv4: null, cidr_ipv6: null, description: "Approved production runtime to reviewed AWS interface endpoints", from_port: port, id: "sgr-0848f728ad1a35377", ip_protocol: "tcp", prefix_list_id: null, referenced_security_group_id: source, region: STAGE_B.region, security_group_id: destination, security_group_rule_id: "sgr-0848f728ad1a35377", tags: null, tags_all: {}, to_port: port } }] });
+  return copy;
+};
+const endpointParentRefreshPlan = ({ before = endpointParentAttributes(preRefreshIngress()), after = endpointParentAttributes([...preRefreshIngress(), endpointIngress(frontendSecurityGroupId)]), resourceChanges = [{ address: `aws_vpc_security_group_ingress_rule.runtime_endpoints_https[${JSON.stringify(frontendSecurityGroupId)}]`, mode: "managed", type: "aws_vpc_security_group_ingress_rule", name: "runtime_endpoints_https", index: frontendSecurityGroupId, change: { actions: ["no-op"], before: {}, after: {} } }] } = {}) => ({
+  format_version: "1.2",
+  terraform_version: "1.15.8",
+  resource_changes: resourceChanges,
+  resource_drift: [{ address: "aws_security_group.executor_endpoints", mode: "managed", type: "aws_security_group", name: "executor_endpoints", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before, after, after_unknown: {}, before_sensitive: { egress: [], ingress: before.ingress.map(() => ({ cidr_blocks: [], ipv6_cidr_blocks: [], prefix_list_ids: [], security_groups: [false] })), tags: {}, tags_all: {} }, after_sensitive: { egress: [], ingress: after.ingress.map(() => ({ cidr_blocks: [], ipv6_cidr_blocks: [], prefix_list_ids: [], security_groups: [false] })), tags: {}, tags_all: {} } } }],
+});
 const keyState = () => ({ ...absentState, resources: absentState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, identity_schema_version: 0, identity: providerIdentity(keyId), attributes: { arn: keyArn, key_id: keyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) });
 const ownedState = () => ({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(buildStageARootDropKeyPolicy()) } })) } : resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: keyId, target_key_arn: keyArn } }] } : resource) });
 const stateWithRootDropPolicy = (value, policy) => ({ ...value, resources: value.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(policy) } })) } : resource) });
@@ -319,6 +341,79 @@ test("RDS refresh drift permits only the exact forward computed timestamp transi
   const actionableChange = accepted();
   actionableChange.resource_changes = [{ address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", change: { actions: ["update"] } }];
   assert.throws(() => assertRootDropRefreshOnlyPlan(actionableChange, { keyId: legacyKeyId }), /configuration-driven resource changes/);
+});
+
+test("serial-50 refresh classification accepts only the Terraform-owned frontend endpoint parent-SG convergence", () => {
+  const terraformState = withEndpointRuleState({ ...ownedState(), serial: 50 });
+  const options = { keyId, stateAlreadyConverged: true, terraformState, endpointSecurityGroupId, runtimeSecurityGroupId: frontendSecurityGroupId };
+  const exact = endpointParentRefreshPlan();
+  const classified = assertRootDropRefreshOnlyPlan(exact, options);
+  assert.equal(classified.endpointParentIngressRefreshed, true);
+  assert.equal(classified.requiresPersistence, true);
+  assert.throws(() => assertRootDropRefreshOnlyPlan(exact, { ...options, endpointSecurityGroupId: undefined }), /missing or malformed/);
+  assert.throws(() => assertRootDropRefreshOnlyPlan(exact, { ...options, runtimeSecurityGroupId: undefined }), /missing or malformed/);
+  const cases = [
+    ["frontend PostgreSQL", (plan) => { plan.resource_drift[0].change.after.ingress.at(-1).from_port = 5432; plan.resource_drift[0].change.after.ingress.at(-1).to_port = 5432; }],
+    ["wrong source", (plan) => { plan.resource_drift[0].change.after.ingress.at(-1).security_groups = ["sg-09999999999999999"]; }],
+    ["wrong destination", (plan) => { plan.resource_drift[0].change.after.id = "sg-09999999999999999"; }],
+    ["HTTP", (plan) => { plan.resource_drift[0].change.after.ingress.at(-1).from_port = 80; plan.resource_drift[0].change.after.ingress.at(-1).to_port = 80; }],
+    ["wrong protocol", (plan) => { plan.resource_drift[0].change.after.ingress.at(-1).protocol = "udp"; }],
+    ["port expansion", (plan) => { plan.resource_drift[0].change.after.ingress.at(-1).from_port = 0; plan.resource_drift[0].change.after.ingress.at(-1).to_port = 65535; }],
+    ["CIDR source", (plan) => { const entry = plan.resource_drift[0].change.after.ingress.at(-1); entry.security_groups = []; entry.cidr_blocks = ["10.0.0.0/8"]; }],
+    ["IPv6 source", (plan) => { const entry = plan.resource_drift[0].change.after.ingress.at(-1); entry.security_groups = []; entry.ipv6_cidr_blocks = ["::/0"]; }],
+    ["prefix-list source", (plan) => { const entry = plan.resource_drift[0].change.after.ingress.at(-1); entry.security_groups = []; entry.prefix_list_ids = ["pl-0123456789abcdef0"]; }],
+    ["self ingress", (plan) => { plan.resource_drift[0].change.after.ingress.at(-1).self = true; }],
+    ["additional ingress", (plan) => { plan.resource_drift[0].change.after.ingress.push(endpointIngress("sg-08888888888888888")); }],
+    ["duplicate source representation", (plan) => { plan.resource_drift[0].change.after.ingress.push(endpointIngress(frontendSecurityGroupId, "different description")); }],
+    ["ingress removal", (plan) => { plan.resource_drift[0].change.after.ingress = preRefreshIngress().slice(1); }],
+    ["egress change", (plan) => { plan.resource_drift[0].change.after.egress = [endpointIngress(frontendSecurityGroupId)]; }],
+    ["tags change", (plan) => { plan.resource_drift[0].change.after.tags.Changed = "true"; }],
+    ["description change", (plan) => { plan.resource_drift[0].change.after.description = "changed"; }],
+    ["VPC change", (plan) => { plan.resource_drift[0].change.after.vpc_id = "vpc-00000000000000000"; }],
+    ["replacement", (plan) => { plan.resource_drift[0].change.replace_paths = [["ingress"]]; }],
+    ["delete", (plan) => { plan.resource_drift[0].change.actions = ["delete"]; }],
+    ["create", (plan) => { plan.resource_drift[0].change.actions = ["create"]; }],
+    ["unknown value", (plan) => { plan.resource_drift[0].change.after_unknown = { ingress: true }; }],
+    ["unknown prior value", (plan) => { plan.resource_drift[0].change.before_unknown = { ingress: true }; }],
+    ["second parent transition", (plan) => { plan.resource_drift.push(structuredClone(plan.resource_drift[0])); }],
+    ["mixed root identity convergence", (plan) => { plan.resource_drift.push(structuredClone(refreshOnlyIdentityPlan({ key: keyId }).resource_drift[0])); }],
+    ["unrelated drift", (plan) => { plan.resource_drift.push({ address: "aws_security_group.database", mode: "managed", type: "aws_security_group", name: "database", change: { actions: ["update"], before: {}, after: {} } }); }],
+    ["configuration change", (plan) => { plan.resource_changes.push({ address: "aws_security_group.database", change: { actions: ["update"], before: {}, after: {} } }); }],
+    ["missing resource changes", (plan) => { delete plan.resource_changes; }],
+  ];
+  for (const [label, mutate] of cases) {
+    const plan = structuredClone(exact);
+    mutate(plan);
+    assert.throws(() => assertRootDropRefreshOnlyPlan(plan, options), /refresh-only root-drop plan|endpoint parent security-group|endpoint parent-SG/, label);
+  }
+  for (const [label, mutateState] of [
+    ["missing standalone rule", (value) => { value.resources = value.resources.filter(({ type, name }) => !(type === "aws_vpc_security_group_ingress_rule" && name === "runtime_endpoints_https")); }],
+    ["wrong standalone source", (value) => { value.resources.find(({ type, name }) => type === "aws_vpc_security_group_ingress_rule" && name === "runtime_endpoints_https").instances[0].attributes.referenced_security_group_id = "sg-09999999999999999"; }],
+    ["wrong standalone destination", (value) => { value.resources.find(({ type, name }) => type === "aws_vpc_security_group_ingress_rule" && name === "runtime_endpoints_https").instances[0].attributes.security_group_id = "sg-09999999999999999"; }],
+    ["wrong standalone port", (value) => { value.resources.find(({ type, name }) => type === "aws_vpc_security_group_ingress_rule" && name === "runtime_endpoints_https").instances[0].attributes.to_port = 5432; }],
+  ]) {
+    const changedState = structuredClone(terraformState);
+    mutateState(changedState);
+    assert.throws(() => assertRootDropRefreshOnlyPlan(exact, { ...options, terraformState: changedState }), /Terraform-owned standalone rule/, label);
+  }
+});
+
+test("authorized serial-50 to serial-51 transition persists only the exact computed parent ingress", () => {
+  const before = withEndpointRuleState({ ...ownedState(), serial: 50 });
+  const after = withEndpointRuleState({ ...ownedState(), serial: 51 }, { converged: true });
+  const transition = (candidate = after) => assertAuthorizedEndpointParentIngressRefreshTransition({ beforeState: before, beforeStateBytes: Buffer.from(JSON.stringify(before)), afterState: candidate, afterStateBytes: Buffer.from(JSON.stringify(candidate)), keyId, endpointSecurityGroupId, runtimeSecurityGroupId: frontendSecurityGroupId });
+  assert.equal(transition().serial, 51);
+  for (const [label, mutate] of [
+    ["serial replay", (value) => { value.serial = 50; }],
+    ["serial jump", (value) => { value.serial = 52; }],
+    ["lineage", (value) => { value.lineage = "wrong"; }],
+    ["second ingress", (value) => { value.resources.find(({ type, name }) => type === "aws_security_group" && name === "executor_endpoints").instances[0].attributes.ingress.push(endpointIngress("sg-08888888888888888")); }],
+    ["unrelated state", (value) => { value.resources.find(({ type, name }) => type === "aws_security_group" && name === "database").instances[0].attributes.id = "sg-09999999999999999"; }],
+  ]) {
+    const candidate = structuredClone(after);
+    mutate(candidate);
+    assert.throws(() => transition(candidate), /authorized endpoint parent-SG refresh|endpoint parent security-group|outside|identity transition|state binding|lineage/, label);
+  }
 });
 
 test("recovery and zero-drift plans reject uncontracted provider drift", async () => {
@@ -1562,6 +1657,55 @@ test("completed legacy adoption replay reconciles the historical census identity
     assert.equal(result.status, "ALREADY_RECOVERED");
     assert.equal(result.zeroDrift, true);
     assert.deepEqual(result.accounting, { terraformImports: 0, terraformApplies: 0, kmsWrites: 0, iamWrites: 0, unknownMutations: 0, unclassifiedMutations: 0 });
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("completed serial-50 recovery persists only the authenticated parent-SG refresh and never replays the resource plan", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-parent-sg-refresh-"));
+  const statePath = path.join(directory, "state.json");
+  const identityPath = path.join(directory, "identity.json");
+  const censusPath = path.join(directory, "census.json");
+  const planPath = path.join(directory, "recovery.plan");
+  const before = withEndpointRuleState({ ...ownedState(), serial: 50 });
+  const after = withEndpointRuleState({ ...ownedState(), serial: 51 }, { converged: true });
+  const beforeIdentity = identityForState(before);
+  const currentCensus = buildRootDropCensus({ sourceSha, transitionId, stageAStateIdentity: beforeIdentity, keyUniverse: [keyId], candidates: [{ ...candidate(), ...authenticated() }], failedApplyEvidence });
+  writeFileSync(statePath, JSON.stringify(before), { mode: 0o600 });
+  writeFileSync(identityPath, `${JSON.stringify(beforeIdentity)}\n`, { mode: 0o600 });
+  writeFileSync(censusPath, `${JSON.stringify(currentCensus)}\n`, { mode: 0o600 });
+  const saved = Object.fromEntries(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS.map((key) => [key, process.env[key]]));
+  let currentState = before;
+  let refreshOnlyApplies = 0;
+  let resourcePlanApplies = 0;
+  try {
+    Object.assign(process.env, stageAVars);
+    const result = await runAdoption({
+      argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--endpoint-security-group-id", endpointSecurityGroupId, "--runtime-security-group-id", frontendSecurityGroupId, "--plan-path", planPath, "--execute"],
+      runGit: cleanGit(),
+      readRootDropCensus: async () => { throw new Error("completed recovery must not require a fresh orphan census"); },
+      readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
+      execFile: (command, args) => {
+        if (args.includes("workspace")) return "default\n";
+        if (args.includes("state") && args.includes("pull")) return JSON.stringify(currentState);
+        if (args.includes("plan") && args.includes("-out")) { writeFileSync(args[args.indexOf("-out") + 1], args.includes("-refresh-only") ? "parent-sg-refresh" : "zero-drift"); return ""; }
+        if (args.includes("show")) return JSON.stringify(args.at(-1).endsWith(".pre-import") ? endpointParentRefreshPlan() : { resource_changes: [], resource_drift: [] });
+        if (args.includes("apply")) {
+          if (args.at(-1).endsWith(".pre-import")) { refreshOnlyApplies += 1; currentState = after; return ""; }
+          resourcePlanApplies += 1;
+          throw new Error("the already-applied resource plan must never be replayed");
+        }
+        throw new Error(`unexpected Terraform command: ${args.join(" ")}`);
+      },
+      write: () => {},
+    });
+    assert.equal(result.status, "ALREADY_RECOVERED");
+    assert.equal(result.terraformRefreshOnlyApplies, 1);
+    assert.equal(result.terraformStateWrites, 1);
+    assert.deepEqual({ refreshOnlyApplies, resourcePlanApplies }, { refreshOnlyApplies: 1, resourcePlanApplies: 0 });
+    assert.equal(result.accounting.terraformApplies, 0);
   } finally {
     for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     rmSync(directory, { recursive: true, force: true });
