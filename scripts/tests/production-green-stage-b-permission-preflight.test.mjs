@@ -856,11 +856,28 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 227);
+  assert.equal(report.requiredEvaluations.length, 229);
   assert.equal(report.forbiddenEvaluations.length, 37);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
     if (evaluation.resource.startsWith("arn:aws:") && !evaluation.resource.startsWith("arn:aws:s3:::")) assert.ok(evaluation.resource === "*" || evaluation.resource.includes(":368992683803:"), evaluation.resource);
+  }
+});
+
+test("backend health recovery permissions fail the administrator preflight before ECS mutation", () => {
+  for (const deniedId of ["backend-health-recovery-register-legacy-task-definition", "backend-health-recovery-update-service"]) {
+    const report = runPermissionPreflight({
+      reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan,
+      planBytes: productionPlanBytes, savedPlanBytes, manifest, generatedAt: now, now,
+      policyPublishedAt: now, cloudTrailSessionName: "backend-health-recovery-preflight",
+      simulate: ({ evaluation }) => evaluation.manifestId === deniedId
+        ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] }
+        : allowRequiredDenyForbidden({ evaluation }),
+      cloudTrail: clearCloudTrail,
+    });
+    assert.equal(report.status, "invalid");
+    assert.equal(report.deniedCount, 1);
+    assert.equal(report.requiredEvaluations.find(({ manifestId }) => manifestId === deniedId).validation, "rejected");
   }
 });
 
@@ -1201,7 +1218,7 @@ test("the exact twelve task-definition creates expand to registration, tagging, 
   })), plan.resource_changes[1]] };
   const derived = deriveRequiredEvaluations(fullPlan, manifest);
   assert.equal(derived.coveredChanges.length, 13);
-  assert.equal(derived.required.filter((item) => item.action === "ecs:RegisterTaskDefinition").length, 13);
+  assert.equal(derived.required.filter((item) => item.action === "ecs:RegisterTaskDefinition").length, 14);
   assert.equal(derived.required.filter((item) => item.action === "ecs:TagResource").length, 13);
   assert.equal(derived.required.filter((item) => item.action === "iam:PassRole").length, 26);
 });
@@ -1225,7 +1242,7 @@ test("task-definition registration context is complete and bound to each planned
 test("operation context uses one ECS scalar per request and omits task scalars elsewhere", () => {
   const productionPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json"));
   const derived = deriveRequiredEvaluations(productionPlan, manifest).required;
-  for (const item of derived.filter(({ action }) => action === "ecs:RegisterTaskDefinition")) {
+  for (const item of derived.filter(({ action, manifestId }) => action === "ecs:RegisterTaskDefinition" && manifest.taskDefinitionMappings.some(({ id }) => manifestId === `${id}-register`))) {
     for (const context of item.context.filter(({ key }) => ["ecs:task-cpu", "ecs:task-memory"].includes(key))) assert.equal(context.values.length, 1);
   }
   for (const item of derived.filter(({ action }) => ["ecs:TagResource", "iam:PassRole"].includes(action))) {

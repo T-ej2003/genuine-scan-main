@@ -84,6 +84,17 @@
       }
     },
     {
+      "Sid": "ListStageBTaskDefinitionsReadOnly",
+      "Effect": "Allow",
+      "Action": "ecs:ListTaskDefinitions",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
       "Sid": "ReadStageBBrokerConfiguration",
       "Effect": "Allow",
       "Action": "lambda:GetFunctionConfiguration",

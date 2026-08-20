@@ -62,7 +62,7 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
   });
   assertStageBPermissionEvidenceKind(report, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredAllowedCount, 227);
+  assert.equal(report.requiredAllowedCount, 229);
   assert.equal(report.forbiddenDeniedCount, 37);
   assert.equal(report.principalEvaluations.ecsExecVerifier.status, "valid");
   assert.equal(report.cutoverCritical.stageAIngress, "allowed");

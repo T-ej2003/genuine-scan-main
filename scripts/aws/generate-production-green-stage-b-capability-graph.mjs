@@ -28,6 +28,7 @@ const awsCliSourceFiles = [
   "scripts/aws/validate-production-green-stage-b-permissions.mjs", "scripts/aws/production-checker-chain-contract.mjs",
   "scripts/aws/publish-production-green-stage-b-approval.mjs", "scripts/aws/check-production-green-stage-b-approval-publication.mjs",
   "scripts/aws/recover-stage-b-backend-task-definition.mjs", "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+  "scripts/aws/recover-production-backend-health.mjs",
   "scripts/aws/production-root-drop-evidence.mjs", "scripts/aws/produce-production-root-drop-evidence.mjs",
 ];
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -192,7 +193,8 @@ function discoverAwsCliActions() {
     for (const match of source.matchAll(pattern)) {
       const service = match[1] === "s3api" ? "s3" : match[1];
       const operation = match[2].split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("").replaceAll("Db", "DB").replaceAll("Vpc", "VPC").replaceAll("Url", "URL");
-      const action = `${service}:${service === "lambda" && operation === "Invoke" ? "InvokeFunction" : operation}`;
+      const action = service === "ecs" && operation === "Wait" ? "ecs:DescribeServices"
+        : `${service}:${service === "lambda" && operation === "Invoke" ? "InvokeFunction" : operation}`;
       calls.push(sourceFile === "scripts/aws/produce-production-root-drop-evidence.mjs" && action === "kms:Sign"
         ? { sourceFile, sourceFunction: "produce-production-root-drop-evidence", phase: "root-drop-evidence-signing", identity: "ROOT_OPERATOR", action, resources: [ROOT_DROP_SIGNING_KEY_ARN], capabilityId: "root-drop-sign-evidence" }
         : { sourceFile, action });

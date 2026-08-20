@@ -93,7 +93,7 @@ const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-m
 const backendServiceArn = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2";
 const unrelatedServiceArn = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-unrelated-service";
 const approvedTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7";
-const rollbackTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47";
+const legacyBackendFamilyArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*";
 const mutationActions = new Set([
   "ecs:TagResource",
   "ecs:RegisterTaskDefinition",
@@ -112,7 +112,7 @@ test("all policy artifacts parse and historical v2/v3 remain byte-stable", () =>
 test("v4 and the companion policy fit the AWS managed-policy document limit", () => {
   assert.equal(awsCharacterCount(policies.v3), 6651);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
-  assert.equal(awsCharacterCount(policies.audit), 2432);
+  assert.equal(awsCharacterCount(policies.audit), 2608);
   assert.ok(awsCharacterCount(policies.finalWrite) < 6144);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.ok(awsCharacterCount(policies.audit) < 6144);
@@ -128,12 +128,12 @@ test("backend recovery tagging is split from the broad provider tag authority", 
 });
 
 test("the split keeps the reviewed policy boundaries and adds exact backend recovery authority", () => {
-  assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, ...movedSids, ...auditAdditionSids]);
+  assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, ...movedSids.slice(0, -1), "ListStageBTaskDefinitionsReadOnly", movedSids.at(-1), ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["UpdateExactStageBBackendService", ...finalWriteSids, "BootstrapExactProductionSecretContainers", "TagExactInitialRotationSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets"]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
-  assert.ok(statementOf(policies.taskDefinitionRegistration, "ListExactStageBBackendRecoveryRevisions"));
+  assert.ok(statementOf(policies.audit, "ListStageBTaskDefinitionsReadOnly"));
   assert.ok(statementOf(policies.taskDefinitionRegistration, "TagExactStageBBackendRecoveryTaskDefinition"));
   for (const sid of movedSids) {
     if (sid === "DescribeStageBTasksReadOnly") continue;
@@ -181,19 +181,11 @@ test("DescribeTaskDefinition is isolated, wildcard-only, and read-only", () => {
   });
 });
 
-test("release task-definition registration uses AWS-required wildcard read scope", () => {
-  const matches = statementsForAction(policies.taskDefinitionRegistration, "ecs:DescribeTaskDefinition");
-  assert.equal(matches.length, 1);
-  assert.deepEqual(matches[0], {
-    Sid: "DescribeOnlyExactStageBTaskDefinitions",
-    Effect: "Allow",
-    Action: "ecs:DescribeTaskDefinition",
-    Resource: "*",
-    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
-  });
-  assert.equal(matches.some((statement) => actionsOf(statement).some((action) => action !== "ecs:DescribeTaskDefinition")), false);
-  assert.deepEqual(statementOf(policies.taskDefinitionRegistration, "ListExactStageBBackendRecoveryRevisions"), {
-    Sid: "ListExactStageBBackendRecoveryRevisions",
+test("read-only companion owns AWS-required wildcard task-definition discovery", () => {
+  assert.equal(statementsForAction(policies.taskDefinitionRegistration, "ecs:DescribeTaskDefinition").length, 0);
+  assert.equal(statementsForAction(policies.taskDefinitionRegistration, "ecs:ListTaskDefinitions").length, 0);
+  assert.deepEqual(statementOf(policies.audit, "ListStageBTaskDefinitionsReadOnly"), {
+    Sid: "ListStageBTaskDefinitionsReadOnly",
     Effect: "Allow",
     Action: "ecs:ListTaskDefinitions",
     Resource: "*",
@@ -343,12 +335,34 @@ test("UpdateService is limited to the exact production backend service and clust
     Resource: backendServiceArn,
     Condition: {
       StringEquals: { "aws:RequestedRegion": "eu-west-2", "ecs:cluster": clusterArn },
-      ArnEquals: { "ecs:task-definition": [approvedTaskDefinitionArn, rollbackTaskDefinitionArn] },
+      ArnLike: { "ecs:task-definition": [approvedTaskDefinitionArn, legacyBackendFamilyArn] },
     },
   });
   assert.notEqual(statement.Resource, unrelatedServiceArn);
   assert.equal(policies.finalWrite.Statement.some((candidate) => actionsOf(candidate).includes("ecs:UpdateService") && candidate.Resource === "*"), false);
   for (const action of ["ecs:DeleteService", "ecs:CreateService", "ecs:DeregisterTaskDefinition"]) assert.equal(statementsForAction(policies.finalWrite, action).length, 0, action);
+});
+
+test("legacy backend health recovery IAM is family-, shape-, service-, and cluster-bound", () => {
+  const registration = statementOf(policies.taskDefinitionRegistration, "RegisterLegacyBackendHealth");
+  assert.deepEqual(registration, {
+    Sid: "RegisterLegacyBackendHealth",
+    Effect: "Allow",
+    Action: "ecs:RegisterTaskDefinition",
+    Resource: legacyBackendFamilyArn,
+    Condition: {
+      StringEquals: { "aws:RequestedRegion": "eu-west-2", "ecs:privileged": "false" },
+      "ForAllValues:StringEquals": { "ecs:compute-compatibility": ["FARGATE"] },
+      NumericEquals: { "ecs:task-cpu": 2048, "ecs:task-memory": 4096 },
+      Null: { "ecs:compute-compatibility": "false" },
+    },
+  });
+  assert.equal(registration.Resource.includes("frontend"), false);
+  assert.equal(registration.Resource.includes("rls-green"), false);
+  const update = statementOf(policies.finalWrite, "UpdateExactStageBBackendService");
+  assert.equal(update.Resource, backendServiceArn);
+  assert.equal(update.Condition.StringEquals["ecs:cluster"], clusterArn);
+  assert.deepEqual(update.Condition.ArnLike["ecs:task-definition"], [approvedTaskDefinitionArn, legacyBackendFamilyArn]);
 });
 
 test("cluster, broker, and exact twelve-family restrictions remain unchanged", () => {
@@ -551,7 +565,7 @@ test("the runbook targets v4 and the companion policy for the separately authori
 });
 
 test("active read-only companion policy records the bounded signature verifier", () => {
-  assert.equal(sha256(read(paths.audit)), "38ecce64a6b7497f74ac2360cbc3dbf6af877017287dc6be635660965c31b0d0");
+  assert.equal(sha256(read(paths.audit)), "37dc546ea25e7a3de496089c4468b87a9d8aefe1f2bcb64461947de712716201");
 });
 
 test("runbook is companion-first and verifies complete policy attachments before provider mutation", () => {

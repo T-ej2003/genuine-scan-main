@@ -20,6 +20,15 @@ The `backend-health-recovery` release-gate mode requires:
   replacement digest; and
 - the protected GitHub `production` environment approval.
 
+Before dispatch, the canonical administrator capability preflight must report
+both `backend-health-recovery-register-legacy-task-definition` and
+`backend-health-recovery-update-service` as allowed for the production release
+role. The first is limited to the legacy `mscqr-backend:*` family with the
+reviewed Fargate, non-privileged, 2048 CPU, and 4096 MiB shape. The second is
+limited to the exact production backend service and cluster and a legacy
+`mscqr-backend:*` revision. The application contract still binds the exact
+current revision, replacement digest, candidate diff, and human approval.
+
 The candidate task definition is derived from the current AWS readback. Only
 the backend image and `GIT_SHA`/`RELEASE_GIT_SHA` values may change; both
 identity fields must equal the image authorization's authenticated release SHA. Roles,
@@ -34,16 +43,19 @@ applies Stage B, or satisfies/bypasses rotation freshness.
 
 ## Operator sequence
 
-1. Produce exact JSON bytes for canonical image authorization and human
+1. Run the canonical administrator/release capability preflight after the
+   reviewed IAM policy versions are published, and require both recovery
+   evaluations to pass.
+2. Produce exact JSON bytes for canonical image authorization and human
    approval. Record each file's SHA-256. The approval object must contain
    `ticket`, `approvedBy`, `approverRole`, `reason`, `verificationRef`,
    `sourceSha`, `currentTaskDefinitionArn`, and `recoveryImageDigest`.
-2. Dispatch `.github/workflows/release-gate.yml` on protected main with
+3. Dispatch `.github/workflows/release-gate.yml` on protected main with
    `release_mode=backend-health-recovery` and the six recovery inputs.
-3. Have a different authorized reviewer approve the GitHub `production`
+4. Have a different authorized reviewer approve the GitHub `production`
    environment deployment.
-4. Retain the uploaded `backend-health-recovery-evidence` artifact.
-5. After backend health is proven, resume the canonical dual-slot rotation.
+5. Retain the uploaded `backend-health-recovery-evidence` artifact.
+6. After backend health is proven, resume the canonical dual-slot rotation.
    This recovery does not create or refresh rotation evidence.
 
 Do not use this mode when the current digest still exists, for frontend or
