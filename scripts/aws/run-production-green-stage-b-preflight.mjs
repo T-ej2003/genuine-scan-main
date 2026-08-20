@@ -62,8 +62,7 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   const partialApplyRecovery = argv.includes("--partial-apply-recovery");
   const freshImagePartialApplyRecovery = argv.includes("--fresh-image-partial-apply-recovery");
   const recoveryMode = resolveStageBRecoveryMode({ recoveryOnly: false, partialApplyRecovery, freshImagePartialApplyRecovery });
-  const stageAPhase = recoveryMode === "NORMAL" ? "PRE_APPLY" : "POST_APPLY";
-  generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff, phase: stageAPhase });
+  generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff, phase: "POST_APPLY" });
   const generated = generateStageBTfvars({
     imageEvidence: value(argv, "--image-evidence"), imageEvidenceSignature: value(argv, "--image-evidence-signature"), stateBackup: stageBState,
     stageAInput: handoff, stageAStateBackup: stageAState, brokerPackagePath: value(argv, "--broker-package"), toolingSha, toolingTreeSha256,
