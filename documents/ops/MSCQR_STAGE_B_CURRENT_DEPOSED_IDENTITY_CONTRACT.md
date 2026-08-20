@@ -27,8 +27,22 @@ Address-only maps are permitted only after the input has been proven
 CURRENT-only or for a canonical resource-address allowlist. Mixed CURRENT /
 DEPOSED collections require mutation-instance identity.
 
+Fresh-image partial-apply recovery has exactly two valid cleanup topologies:
+`LEGACY_RESIDUE` contains all 11 reviewed DEPOSED cleanups, while
+`ALREADY_RECONCILED` contains none. Both require the same 12 CURRENT
+task-definition replacements and three broker updates. Plan capture and
+approval use the shared numeric census only after the plan's exact
+mutation-instance set has passed structural validation; partial cleanup sets
+and any unrelated mutation remain fail closed.
+
+Reference-audit generation enters strict fresh-image broker validation from
+that same complete structural plan contract. It does not infer recovery mode
+from the DEPOSED cleanup count, so both reviewed topologies enforce identical
+broker-revision evidence.
+
 ## Evidence
 
-The reference-audit regression covers the serial-96 topology of 12 CURRENT
-task-definition replacements and 11 DEPOSED cleanups, reversed input order,
-malformed deposed keys, and duplicate deposed identities.
+The reference-audit regression covers both reviewed cleanup topologies through
+classification, capture, validation, and approval, plus reversed input order,
+partial cleanup counts, malformed deposed keys, and duplicate deposed
+identities.

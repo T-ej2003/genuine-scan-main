@@ -19,7 +19,7 @@ import {
   STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT,
 } from "../aws/stage-b-provider-semantic-snapshot.mjs";
 import { assertRecoveryPlanDelta } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
-import { assertStageBBrokerFunctionUpdate, assertStageBFreshImagePartialApplyRecoveryPlan, assertStageBMutationInstanceMultisetEqual, classifyStageBPlan, stageBMutationInstanceIdentity, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS } from "../aws/stage-b-deployment-contract.mjs";
+import { assertStageBBrokerFunctionUpdate, assertStageBFreshImagePartialApplyRecoveryPlan, assertStageBFreshImageRecoveryCensus, assertStageBMutationInstanceMultisetEqual, classifyStageBPlan, stageBMutationInstanceIdentity, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_BROKER_PUBLISH_PROVIDER_UNKNOWN_METADATA_FIELDS } from "../aws/stage-b-deployment-contract.mjs";
 import { assertStageBPlanCapture } from "../plan-production-green-stage-b.mjs";
 import {
   STAGE_B_CANDIDATE_FOR_EACH_REFERENCES,
@@ -766,12 +766,39 @@ test("fresh-image partial-apply recovery admits only the reviewed 12 rotations, 
   }
 });
 
+test("fresh-image recovery accepts the already-reconciled retained-resource topology without deposed residue", () => {
+  const value = freshImagePartialApplyRecoveryPlan();
+  value.resource_changes = value.resource_changes.filter((change) => !Object.hasOwn(change, "deposed"));
+  const configurationText = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  const envelope = assertStageBFreshImagePartialApplyRecoveryPlan(value, { terraformConfiguration: configurationText });
+  assert.deepEqual(envelope.cleanupAddresses, []);
+  const classified = classifyStageBPlan(value, { freshImagePartialApplyRecovery: true, terraformConfiguration: configurationText });
+  assert.equal(classified.actionCounts.replacement, 12);
+  assert.equal(classified.actionCounts.destroy, undefined);
+  assert.equal(classified.actionCounts.update, 3);
+
+  const partialResidue = freshImagePartialApplyRecoveryPlan();
+  partialResidue.resource_changes = partialResidue.resource_changes.filter((change) => !Object.hasOwn(change, "deposed") || change.address !== 'aws_ecs_task_definition.candidate["worker"]');
+  assert.throws(() => assertStageBFreshImagePartialApplyRecoveryPlan(partialResidue, { terraformConfiguration: configurationText }), /either no deposed residue or the exact eleven/);
+});
+
 test("fresh-image recovery remains reachable through plan capture", () => {
   const configurationText = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
-  assert.doesNotThrow(() => assertStageBPlanCapture(freshImagePartialApplyRecoveryPlan(), {
-    terraformConfiguration: configurationText,
-    freshImagePartialApplyRecovery: true,
-  }));
+  for (const cleanupCount of [11, 0]) {
+    const value = freshImagePartialApplyRecoveryPlan();
+    if (cleanupCount === 0) value.resource_changes = value.resource_changes.filter((change) => !Object.hasOwn(change, "deposed"));
+    assert.doesNotThrow(() => assertStageBPlanCapture(value, { terraformConfiguration: configurationText, freshImagePartialApplyRecovery: true }));
+  }
+});
+
+test("fresh-image recovery census admits only the two reviewed cleanup topologies", () => {
+  const census = (destroy) => ({ create: 0, replacement: 12, update: 3, destroy, unclassified: 0 });
+  assert.equal(assertStageBFreshImageRecoveryCensus(census(11)), "LEGACY_RESIDUE");
+  assert.equal(assertStageBFreshImageRecoveryCensus(census(0)), "ALREADY_RECONCILED");
+  for (const destroy of [1, 10, 12]) assert.throws(() => assertStageBFreshImageRecoveryCensus(census(destroy)), /legacy-residue or already-reconciled/);
+  for (const [field, value] of [["create", 1], ["replacement", 11], ["update", 4], ["unclassified", 1]]) {
+    assert.throws(() => assertStageBFreshImageRecoveryCensus({ ...census(0), [field]: value }), /legacy-residue or already-reconciled/);
+  }
 });
 
 test("baseline initial-create semantics fail closed on action, identity, path, and reference drift", () => {

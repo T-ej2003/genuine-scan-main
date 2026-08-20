@@ -513,6 +513,17 @@ const brokerFunctionAllowedChangedFields = new Set([
 export const STAGE_B_REVIEWED_BROKER_TIMEOUT_SECONDS = Object.freeze({ before: 30, after: 180 });
 export const STAGE_B_PARTIAL_APPLY_RECOVERY = "PARTIAL_APPLY_RECOVERY";
 export const STAGE_B_FRESH_IMAGE_PARTIAL_APPLY_RECOVERY = "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY";
+export const STAGE_B_FRESH_IMAGE_RECOVERY_CENSUSES = Object.freeze([
+  Object.freeze({ create: 0, replacement: 12, update: 3, destroy: 11, unclassified: 0 }),
+  Object.freeze({ create: 0, replacement: 12, update: 3, destroy: 0, unclassified: 0 }),
+]);
+
+export function assertStageBFreshImageRecoveryCensus(census) {
+  if (!STAGE_B_FRESH_IMAGE_RECOVERY_CENSUSES.some((expected) => Object.entries(expected).every(([key, value]) => (census?.[key] ?? 0) === value))) {
+    throw new Error("Fresh-image partial-apply recovery census must be exactly the legacy-residue or already-reconciled topology.");
+  }
+  return census.destroy === 11 ? "LEGACY_RESIDUE" : "ALREADY_RECONCILED";
+}
 
 export function isStageBPartialApplyDeposedTaskDefinitionCleanup(change) {
   const family = STAGE_B_TASK_DEFINITION_FAMILIES[change?.address];
@@ -521,6 +532,18 @@ export function isStageBPartialApplyDeposedTaskDefinitionCleanup(change) {
     && /^[a-f0-9]{8}$/.test(change.deposed) && exactActions(change.change?.actions, ["delete"])
     && change.change?.after === null && change.change?.before?.skip_destroy === true
     && change.change?.before?.family === family && new RegExp(`^arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${family}:[1-9][0-9]*$`).test(change.change?.before?.arn || ""));
+}
+
+export function assertStageBFreshImageDeposedCleanupSet(changes) {
+  const deposed = changes.filter((change) => Object.hasOwn(change, "deposed"));
+  if (deposed.length === 0) return [];
+  const expected = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).filter((address) => address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS);
+  const reviewed = deposed.filter(isStageBPartialApplyDeposedTaskDefinitionCleanup);
+  const addresses = new Set(reviewed.map((change) => change.address));
+  if (reviewed.length !== expected.length || addresses.size !== expected.length || expected.some((address) => !addresses.has(address))) {
+    throw new Error("Fresh-image partial-apply recovery requires either no deposed residue or the exact eleven reviewed deposed cleanups.");
+  }
+  return expected;
 }
 
 export function assertStageBPartialApplyRecoveryPlan(plan) {
@@ -544,7 +567,7 @@ export function assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraform
   for (const change of plan?.resource_changes || []) if (Object.hasOwn(change, "deposed") && !/^[a-f0-9]{8}$/.test(change.deposed)) throw new Error(`Stage B fresh-image partial-apply recovery contains a malformed deposed identity: ${change.address}.`);
   const changes = (plan?.resource_changes || []).filter((change) => !exactActions(change.change?.actions, ["no-op"]));
   const currentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
-  const expectedCleanupAddresses = currentAddresses.filter((address) => address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS);
+  const cleanupAddresses = assertStageBFreshImageDeposedCleanupSet(changes);
   const current = new Map();
   const cleanups = new Map();
   const deposedIdentities = new Set();
@@ -557,8 +580,8 @@ export function assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraform
       cleanups.set(change.address, change);
     }
   }
-  if (current.size !== currentAddresses.length || expectedCleanupAddresses.some((address) => !cleanups.has(address)) || cleanups.size !== expectedCleanupAddresses.length) {
-    throw new Error("Fresh-image partial-apply recovery requires all twelve current replacements and the exact eleven reviewed deposed cleanups.");
+  if (current.size !== currentAddresses.length || cleanupAddresses.some((address) => !cleanups.has(address)) || cleanups.size !== cleanupAddresses.length) {
+    throw new Error("Fresh-image partial-apply recovery requires all twelve current replacements and either no deposed residue or the exact eleven reviewed deposed cleanups.");
   }
   for (const address of currentAddresses) {
     const change = current.get(address);
@@ -568,14 +591,23 @@ export function assertStageBFreshImagePartialApplyRecoveryPlan(plan, { terraform
   const brokerFunction = changes.find((change) => change.address === "aws_lambda_function.broker");
   const brokerAlias = changes.find((change) => change.address === "aws_lambda_alias.reviewed");
   const brokerPolicy = changes.find((change) => change.address === policyAddress);
-  if (!brokerFunction || !brokerAlias || !brokerPolicy || changes.length !== currentAddresses.length + expectedCleanupAddresses.length + 3) {
-    throw new Error("Fresh-image partial-apply recovery must contain exactly twelve task-definition replacements, eleven deposed cleanups, and broker function, alias, and policy updates.");
+  if (!brokerFunction || !brokerAlias || !brokerPolicy || changes.length !== currentAddresses.length + cleanupAddresses.length + 3) {
+    throw new Error("Fresh-image partial-apply recovery must contain exactly twelve task-definition replacements, the reviewed optional deposed cleanup set, and broker function, alias, and policy updates.");
   }
   assertStageBBrokerFunctionUpdate(brokerFunction);
   if (brokerAlias.type !== "aws_lambda_alias" || brokerAlias.mode !== "managed" || !exactActions(brokerAlias.change?.actions, ["update"])) throw new Error("Fresh-image partial-apply recovery broker alias update is outside the exact contract.");
   assertBrokerPolicyChange(brokerPolicy, { strict: true, terraformConfiguration, validateActions: true, allowBrokerPolicyCreate: false });
   if (brokerPolicy.change?.after_unknown?.policy !== true) throw new Error("Fresh-image partial-apply recovery broker policy must remain computed from the exact active task-definition ARN set.");
-  return { profile: STAGE_B_FRESH_IMAGE_PARTIAL_APPLY_RECOVERY, currentAddresses, cleanupAddresses: expectedCleanupAddresses, brokerAddresses: [brokerPolicy.address, brokerFunction.address, brokerAlias.address] };
+  return { profile: STAGE_B_FRESH_IMAGE_PARTIAL_APPLY_RECOVERY, currentAddresses, cleanupAddresses, brokerAddresses: [brokerPolicy.address, brokerFunction.address, brokerAlias.address] };
+}
+
+export function classifyStageBFreshImagePartialApplyRecoveryTopology(plan, options = {}) {
+  const currentAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
+  const current = (plan?.resource_changes || []).filter((change) => currentAddresses.includes(change?.address) && change.deposed === undefined);
+  if (current.length !== currentAddresses.length || current.some((change) => !exactActions(change.change?.actions, ["create", "delete"]))) return null;
+  const envelope = assertStageBFreshImagePartialApplyRecoveryPlan(plan, options);
+  const topology = assertStageBFreshImageRecoveryCensus({ create: 0, replacement: envelope.currentAddresses.length, update: envelope.brokerAddresses.length, destroy: envelope.cleanupAddresses.length, unclassified: 0 });
+  return { ...envelope, topology };
 }
 
 export function assertReviewedBrokerTimeoutTransition(change) {

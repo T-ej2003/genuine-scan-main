@@ -20,7 +20,7 @@ import {
 import { assertStageBBrokerConfigurationIdentity, canonicalJson, STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-stage-b-image-evidence.mjs";
 import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage-b-tfvars.mjs";
-import { assertStageBBrokerFunctionUpdate, assertStageBImportedBackendMetadataNormalization, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, assertStageBRecoveryRefreshStatus, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, resolveStageBRecoveryMode, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./aws/stage-b-deployment-contract.mjs";
+import { assertStageBBrokerFunctionUpdate, assertStageBImportedBackendMetadataNormalization, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, assertStageBFreshImageRecoveryCensus, assertStageBRecoveryRefreshStatus, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, resolveStageBRecoveryMode, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./aws/stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments } from "./aws/stage-b-terraform-workspace.mjs";
@@ -724,7 +724,7 @@ export function assertStageBPlanCapture(plan, options = {}) {
     if ((result.actionCounts?.destroy || 0) !== 0 || result.unclassifiedResources?.length !== 0 || (result.actionCounts?.replacement || 0) !== (result.taskDefinitionRotations?.length || 0)) throw new Error("Stage B plan capture contains an unauthorized destructive or unclassified action.");
   }
   if (isPartialApplyRecovery && (result.actionCounts?.destroy !== 11 || result.actionCounts?.update !== 2 || result.unclassifiedResources?.length !== 0)) throw new Error("Stage B partial-apply recovery plan capture census is not exact.");
-  if (isFreshImagePartialApplyRecovery && (result.actionCounts?.replacement !== 12 || result.actionCounts?.destroy !== 11 || result.actionCounts?.update !== 3 || result.unclassifiedResources?.length !== 0)) throw new Error("Fresh-image partial-apply recovery plan capture census is not exact.");
+  if (isFreshImagePartialApplyRecovery) assertStageBFreshImageRecoveryCensus({ ...result.actionCounts, unclassified: result.unclassifiedResources?.length });
   return result;
 }
 

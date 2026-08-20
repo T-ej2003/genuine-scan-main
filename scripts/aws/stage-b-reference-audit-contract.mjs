@@ -127,8 +127,11 @@ export function normalizeStageBFreshImageRuntimeModel({ plan, audit } = {}) {
     deposedByAddress.set(change.address, [...(deposedByAddress.get(change.address) || []), entry]);
     deposedByArn.set(beforeArn, entry);
   }
-  if (currentPlanReplacements.length !== Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length || deposedCleanups.length !== 11) {
-    throw new Error("Stage B fresh-image recovery task-definition partition is not the exact 12-current/11-deposed topology.");
+  const expectedDeposedAddresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).filter((address) => address !== 'aws_ecs_task_definition.candidate["backend"]');
+  if (currentPlanReplacements.length !== Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length
+    || (deposedCleanups.length !== 0 && (deposedCleanups.length !== expectedDeposedAddresses.length
+      || expectedDeposedAddresses.some((address) => (deposedByAddress.get(address) || []).length !== 1)))) {
+    throw new Error("Stage B fresh-image recovery task-definition partition requires 12 current replacements and either no deposed residue or the exact 11 reviewed deposed cleanups.");
   }
   const referencesByTaskDefinitionArn = normalizeEcsReferences(audit);
   const liveMappings = audit.broker?.liveTaskDefinitionMappings;

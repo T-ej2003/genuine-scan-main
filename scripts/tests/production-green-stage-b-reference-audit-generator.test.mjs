@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { assertStageBPlan, assertStageBPlanCapture } from "../plan-production-green-stage-b.mjs";
-import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
+import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, canonicalJson, STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import {
   createAwsReader,
   generateReferenceAudit,
@@ -26,7 +26,7 @@ import {
   STAGE_B_ACTIVE_BROKER_TASK_DEFINITION_LOCAL_EXPRESSION,
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "../aws/stage-b-reference-audit-contract.mjs";
-import { assertStageBFreshImageReferenceAuditBinding } from "../aws/stage-b-plan-approval-contract.mjs";
+import { assertStageBFreshImageReferenceAuditBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes } from "../aws/stage-b-plan-approval-contract.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const planSha256 = "a".repeat(64);
@@ -447,6 +447,32 @@ function makeFreshImagePartialApplyReferenceFixture() {
   return fixture;
 }
 
+function makeAlreadyReconciledFreshImageFixture() {
+  const fixture = makeFreshImagePartialApplyReferenceFixture();
+  fixture.plan.resource_changes = fixture.plan.resource_changes.filter((change) => !Object.hasOwn(change, "deposed"));
+  fixture.plan.prior_state.values.root_module.resources = fixture.plan.prior_state.values.root_module.resources.filter((resource) => !Object.hasOwn(resource, "deposed_key"));
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
+}
+
+function makePartialFreshImageCleanupFixture(cleanupCount) {
+  const fixture = makeFreshImagePartialApplyReferenceFixture();
+  const deposed = fixture.plan.resource_changes.filter((change) => Object.hasOwn(change, "deposed"));
+  if (cleanupCount <= deposed.length) {
+    const retained = new Set(deposed.slice(0, cleanupCount).map((change) => `${change.address}:${change.deposed}`));
+    fixture.plan.resource_changes = fixture.plan.resource_changes.filter((change) => !Object.hasOwn(change, "deposed") || retained.has(`${change.address}:${change.deposed}`));
+    fixture.plan.prior_state.values.root_module.resources = fixture.plan.prior_state.values.root_module.resources.filter((resource) => !Object.hasOwn(resource, "deposed_key") || retained.has(`${resource.address}:${resource.deposed_key}`));
+  } else {
+    const current = fixture.plan.prior_state.values.root_module.resources.find((resource) => resource.address === backendAddress && !Object.hasOwn(resource, "deposed_key"));
+    fixture.plan.resource_changes.push({ address: backendAddress, deposed: "ffffffff", mode: "managed", type: "aws_ecs_task_definition", change: { actions: ["delete"], before: { family: current.values.family, arn: oldArnFor(current.values.family).replace(":1", ":5"), skip_destroy: true }, after: null } });
+    fixture.plan.prior_state.values.root_module.resources.push({ ...structuredClone(current), deposed_key: "ffffffff", values: { ...structuredClone(current.values), arn: oldArnFor(current.values.family).replace(":1", ":5") } });
+  }
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
+}
+
 function makeSerial96DeposedBrokerPredecessorFixture() {
   const fixture = makeFreshImagePartialApplyReferenceFixture();
   const revisionForAddress = (address) => address === backendAddress ? 9 : address === readOnlyCanaryAddress ? 3 : 6;
@@ -608,6 +634,64 @@ test("fresh-image recovery partitions current runtime instances from reviewed de
   assert.equal(new Set(audit.taskDefinitionMutationInstances.map((entry) => entry.mutationInstanceIdentity)).size, 23);
   assert.equal(audit.deposedTaskDefinitionCleanups.every((entry) => entry.classification === "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP" && entry.remoteDeletion === false), true);
   assert.equal(audit.deposedTaskDefinitionCleanups.every((entry) => Object.values(entry.runtimeReferences).every((references) => references.length === 0)), true);
+});
+
+test("fresh-image recovery audits an already-reconciled plan with no deposed residue", () => {
+  const fixture = makeAlreadyReconciledFreshImageFixture();
+  const audit = generate(fixture);
+  assert.equal(audit.currentTaskDefinitionReferenceCount, 12);
+  assert.deepEqual(audit.deposedTaskDefinitionCleanups, []);
+  assert.equal(audit.taskDefinitionMutationInstances.length, 12);
+  assert.doesNotThrow(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, audit, { terraformConfiguration: fixture.options.terraformConfiguration, planJsonSha256: fixture.planJsonSha256 }));
+});
+
+test("already-reconciled fresh-image audit rejects an unrecorded same-family broker revision during generation", () => {
+  const fixture = makeAlreadyReconciledFreshImageFixture();
+  const mode = "full-rls-admin-bootstrap";
+  const original = fixture.reader.getFunctionConfiguration;
+  fixture.reader.getFunctionConfiguration = () => {
+    const configuration = original();
+    const mapping = JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+    mapping[mode] = mapping[mode].replace(/:[0-9]+$/, ":999999");
+    configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(mapping);
+    return configuration;
+  };
+  assert.throws(() => generate(fixture), /not an explicitly retained or current no-op revision or reviewed deposed predecessor/);
+});
+
+test("fresh-image reference-audit generation rejects partial and extra cleanup topologies", () => {
+  for (const cleanupCount of [1, 10, 12]) {
+    assert.throws(() => generate(makePartialFreshImageCleanupFixture(cleanupCount)), /either no deposed residue or the exact eleven reviewed deposed cleanups/);
+  }
+});
+
+test("fresh-image plans traverse classifier, capture, validation, and approval for both reviewed cleanup topologies", () => {
+  for (const cleanupCount of [11, 0]) {
+    const fixture = makeFreshImagePartialApplyReferenceFixture();
+    if (cleanupCount === 0) {
+      fixture.plan.resource_changes = fixture.plan.resource_changes.filter((change) => !Object.hasOwn(change, "deposed"));
+      fixture.plan.prior_state.values.root_module.resources = fixture.plan.prior_state.values.root_module.resources.filter((resource) => !Object.hasOwn(resource, "deposed_key"));
+      fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+      fixture.planJsonSha256 = sha256(fixture.planBytes);
+    }
+    const classified = assertStageBPlanCapture(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration, freshImagePartialApplyRecovery: true });
+    const savedPlanBytes = Buffer.from(`fresh-image-${cleanupCount}`);
+    const planJsonBytes = Buffer.from(`${JSON.stringify(fixture.plan)}\n`);
+    const canonicalPlanJsonBytes = Buffer.from(`${canonicalJson(fixture.plan)}\n`);
+    const hashes = stageBPlanHashes({ savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes });
+    fixture.planBytes = planJsonBytes;
+    fixture.planJsonSha256 = hashes.planJsonSha256;
+    const audit = generate(fixture);
+    const auditBytes = Buffer.from(`${JSON.stringify(audit)}\n`);
+    const classification = { noOp: classified.actionCounts["no-op"] || 0, create: classified.actionCounts.create || 0, replacement: classified.actionCounts.replacement || 0, update: classified.actionCounts.update || 0, destroy: classified.actionCounts.destroy || 0, unclassified: classified.unclassifiedResources.length };
+    const common = { toolingSha: "e".repeat(40), toolingTreeSha256: "f".repeat(64), refreshReportSha256: "a".repeat(64), refreshBindingReportSha256: "b".repeat(64), stageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stageBSerial: 96, hashes, classification, planProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" };
+    const capture = createStageBPlanCaptureReport({ ...common, capturedAt: audit.auditedAt, terraformVersion: fixture.plan.terraform_version, terraformFormatVersion: fixture.plan.format_version, brokerEvidence: classified.brokerCapture });
+    const captureBytes = Buffer.from(`${JSON.stringify(capture, null, 2)}\n`);
+    assert.doesNotThrow(() => assertStageBPlanCaptureReport(capture, { captureReportBytes: captureBytes, hashes, stageBLineage: common.stageBLineage, stageBSerial: common.stageBSerial }));
+    const approval = createStageBPlanApprovalReport({ ...common, captureReportSha256: sha256(captureBytes), referenceAuditPath: "fresh-image-reference-audit.json", referenceAuditSha256: sha256(auditBytes), referenceAuditCallerArn: audit.callerArn, referenceAuditAt: audit.auditedAt, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: audit.auditedAt, brokerOperation: capture.brokerOperation, brokerUpdatePresent: capture.brokerUpdatePresent, brokerActions: capture.brokerActions, brokerResourceAddresses: capture.brokerResourceAddresses });
+    const approvalBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
+    assert.doesNotThrow(() => assertStageBPlanApprovalReport(approval, { approvalReportBytes: approvalBytes, captureReport: capture, captureReportBytes: captureBytes, referenceAudit: audit, referenceAuditBytes: auditBytes, plan: fixture.plan, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: sha256(auditBytes), trustedCallerArn: audit.callerArn, stageBLineage: common.stageBLineage, stageBSerial: common.stageBSerial, terraformConfiguration: fixture.options.terraformConfiguration }));
+  }
 });
 
 test("serial-96 live broker mappings bind reviewed deposed predecessors without collapsing current identity", () => {

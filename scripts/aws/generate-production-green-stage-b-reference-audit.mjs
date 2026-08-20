@@ -17,7 +17,7 @@ import {
   STAGE_B_BROKER_TASK_DEFINITION_REFERENCE,
 } from "./stage-b-reference-audit-contract.mjs";
 import { batch, createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
-import { assertStageBImportedBackendMetadataNormalization, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
+import { assertStageBImportedBackendMetadataNormalization, classifyStageBFreshImagePartialApplyRecoveryTopology, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
 import { isTerraformDeposedKey } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
@@ -596,7 +596,7 @@ export function generateReferenceAudit({
     if (!current || current.family !== rollover.family || current.arn !== rollover.oldArn) throw new Error(`Terraform plan rollover predecessor is not the exact current managed task definition: ${rollover.address}`);
     if (retainedArnSet.has(current.arn)) throw new Error(`Terraform plan rollover predecessor is also present in retained history: ${rollover.address}`);
   }
-  const freshImagePartialApplyRecovery = rolloverByAddress.size === 12 && deposedTaskDefinitionChanges.length === 11;
+  const freshImagePartialApplyRecovery = classifyStageBFreshImagePartialApplyRecoveryTopology(plan, { terraformConfiguration }) !== null;
   const createOnlyFamilies = new Set([...createOnlyByAddress.values()].map((entry) => entry.family));
   const noOpFamilies = new Set([...noOpByAddress.values()].map((entry) => entry.family));
   const retainedArnSetByFamily = new Map([...retainedByFamily].map(([family, entries]) => [family, new Set(entries.map((entry) => entry.oldArn))]));

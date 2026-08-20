@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { assertStageBCurrentRolloverReferenceBinding, assertStageBReferenceAuditFreshness, normalizeStageBFreshImageRuntimeModel, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
-import { assertStageBMutationInstanceMultisetEqual, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
+import { assertStageBFreshImageDeposedCleanupSet, assertStageBFreshImageRecoveryCensus, assertStageBMutationInstanceMultisetEqual, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_FRESH_IMAGE_RECOVERY_CENSUSES, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 
@@ -51,7 +51,8 @@ export function assertStageBFreshImageReferenceAuditBinding(plan, referenceAudit
   const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change?.type === "aws_ecs_task_definition");
   const currentChanges = taskDefinitionChanges.filter((change) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, change.address) && !Object.hasOwn(change, "deposed"));
   const deposedChanges = taskDefinitionChanges.filter((change) => Object.hasOwn(change, "deposed"));
-  if (currentChanges.length !== 12 || deposedChanges.length !== 11) throw new Error("Stage B fresh-image reference audit plan partition is not the exact 12-current/11-deposed topology.");
+  const cleanupAddresses = assertStageBFreshImageDeposedCleanupSet(taskDefinitionChanges);
+  if (currentChanges.length !== 12 || deposedChanges.length !== cleanupAddresses.length) throw new Error("Stage B fresh-image reference audit plan partition is not the exact 12-current reviewed cleanup topology.");
   for (const change of deposedChanges) if (!isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) throw new Error(`Stage B fresh-image reference audit contains an unexpected deposed task-definition instance: ${change.address}.`);
   const expectedCurrent = currentChanges.map((change) => ({ terraformAddress: change.address, mutationInstanceIdentity: stageBMutationInstanceIdentity(change), classification: freshImageCurrentClassification }));
   const expectedDeposed = deposedChanges.map((change) => ({ terraformAddress: change.address, deposed: change.deposed, mutationInstanceIdentity: stageBMutationInstanceIdentity(change), family: STAGE_B_TASK_DEFINITION_FAMILIES[change.address], beforeTaskDefinitionArn: change.change.before.arn, actions: ["delete"], classification: freshImageDeposedClassification, remoteDeletion: false }));
@@ -97,7 +98,7 @@ export const STAGE_B_PLAN_PROFILE_CENSUS = Object.freeze({
   BASELINE: Object.freeze({ create: 12, replacement: 0, update: 3, destroy: 0, unclassified: 0 }),
   IMPORTED_BACKEND_METADATA_NORMALIZATION: Object.freeze({ create: 1, replacement: 11, update: 4, destroy: 0, unclassified: 0 }),
   PARTIAL_APPLY_RECOVERY: Object.freeze({ create: 0, replacement: 0, update: 2, destroy: 11, unclassified: 0 }),
-  FRESH_IMAGE_PARTIAL_APPLY_RECOVERY: Object.freeze({ create: 0, replacement: 12, update: 3, destroy: 11, unclassified: 0 }),
+  FRESH_IMAGE_PARTIAL_APPLY_RECOVERY: STAGE_B_FRESH_IMAGE_RECOVERY_CENSUSES,
 });
 
 function assertPlanProfile(profile, label = "Stage B plan evidence") {
@@ -125,6 +126,7 @@ function assertBrokerEvidence(report, { approved = false } = {}) {
 }
 
 function assertPlanProfileCensus(classification, profile, label) {
+  if (profile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY") return assertStageBFreshImageRecoveryCensus(classification);
   const expected = STAGE_B_PLAN_PROFILE_CENSUS[profile];
   if (!expected || Object.entries(expected).some(([key, value]) => (classification?.[key] ?? 0) !== value)) {
     throw new Error(`${label} is not the exact ${profile} census.`);

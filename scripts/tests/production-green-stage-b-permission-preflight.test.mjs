@@ -1272,16 +1272,24 @@ test("fresh-image recovery separates twelve registrations from eleven reviewed d
 
   const missingCleanup = structuredClone(fresh);
   missingCleanup.resource_changes = missingCleanup.resource_changes.filter((change) => !Object.hasOwn(change, "deposed") || change.address !== 'aws_ecs_task_definition.candidate["worker"]');
-  assert.throws(() => assertTaskDefinitionRegistrationContexts(missingCleanup, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration }), /exactly one reviewed deposed cleanup/);
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(missingCleanup, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration }), /exact eleven reviewed deposed cleanups/);
 
   const duplicateCleanup = structuredClone(fresh);
   const cleanup = duplicateCleanup.resource_changes.find((change) => Object.hasOwn(change, "deposed"));
   duplicateCleanup.resource_changes.push({ ...structuredClone(cleanup), deposed: "deadbeef" });
-  assert.throws(() => assertTaskDefinitionRegistrationContexts(duplicateCleanup, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration }), /exactly one reviewed deposed cleanup/);
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(duplicateCleanup, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration }), /exact eleven reviewed deposed cleanups/);
 
   const contextForCleanup = structuredClone(fresh);
   contextForCleanup.resource_changes.find((change) => Object.hasOwn(change, "deposed")).change.actions = ["create"];
-  assert.throws(() => assertTaskDefinitionRegistrationContexts(contextForCleanup, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration }), /exactly one reviewed deposed cleanup|exactly one reviewed task-definition registration|unreviewed task-definition change/);
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(contextForCleanup, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration }), /exact eleven reviewed deposed cleanups|exactly one reviewed task-definition registration|unreviewed task-definition change/);
+});
+
+test("fresh-image permissions accept twelve registrations after deposed residue is already reconciled", () => {
+  const fresh = freshImageRecoveryRegistrationPlan();
+  fresh.resource_changes = fresh.resource_changes.filter((change) => !Object.hasOwn(change, "deposed"));
+  assert.doesNotThrow(() => assertTaskDefinitionRegistrationContexts(fresh, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration }));
+  const derived = deriveRequiredEvaluations(fresh, manifest, { permissionProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY", terraformConfiguration });
+  assert.equal(derived.coveredChanges.filter((change) => change.classification === "PARTIAL_APPLY_RECOVERY_DEPOSED_TASK_DEFINITION_CLEANUP").length, 0);
 });
 
 test("manifest rejects missing, duplicate, and cross-family ECS registration context", () => {
