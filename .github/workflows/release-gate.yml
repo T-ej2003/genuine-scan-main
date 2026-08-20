@@ -27,6 +27,7 @@ on:
         type: choice
         options:
           - normal
+          - backend-health-recovery
           - rotation-overlap
           - rotation-cleanup
         default: normal
@@ -64,6 +65,30 @@ on:
         type: string
       rotation_readiness_evidence_sha256:
         description: "SHA-256 of the exact readiness evidence JSON bytes."
+        required: false
+        type: string
+      backend_recovery_current_task_definition_arn:
+        description: "Exact unhealthy legacy backend task definition ARN."
+        required: false
+        type: string
+      backend_recovery_image_digest:
+        description: "Exact approved immutable backend recovery digest."
+        required: false
+        type: string
+      backend_recovery_image_authorization_json:
+        description: "Canonical signed-image authorization JSON."
+        required: false
+        type: string
+      backend_recovery_image_authorization_sha256:
+        description: "SHA-256 of the exact image authorization JSON bytes."
+        required: false
+        type: string
+      backend_recovery_approval_json:
+        description: "Human approval metadata bound to this recovery."
+        required: false
+        type: string
+      backend_recovery_approval_sha256:
+        description: "SHA-256 of the exact approval JSON bytes."
         required: false
         type: string
 
@@ -144,11 +169,36 @@ jobs:
           ROTATION_DEPLOYMENT_SHA: ${{ inputs.rotation_deployment_sha }}
           ROTATION_READINESS_EVIDENCE_JSON: ${{ inputs.rotation_readiness_evidence_json }}
           ROTATION_READINESS_EVIDENCE_SHA256: ${{ inputs.rotation_readiness_evidence_sha256 }}
+          BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN: ${{ inputs.backend_recovery_current_task_definition_arn }}
+          BACKEND_RECOVERY_IMAGE_DIGEST: ${{ inputs.backend_recovery_image_digest }}
+          BACKEND_RECOVERY_IMAGE_AUTHORIZATION_JSON: ${{ inputs.backend_recovery_image_authorization_json }}
+          BACKEND_RECOVERY_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.backend_recovery_image_authorization_sha256 }}
+          BACKEND_RECOVERY_APPROVAL_JSON: ${{ inputs.backend_recovery_approval_json }}
+          BACKEND_RECOVERY_APPROVAL_SHA256: ${{ inputs.backend_recovery_approval_sha256 }}
         run: |
           set -euo pipefail
           case "$RELEASE_MODE" in
             normal)
               npm run check:rotation-evidence-freshness
+              ;;
+            backend-health-recovery)
+              for name in BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN BACKEND_RECOVERY_IMAGE_DIGEST BACKEND_RECOVERY_IMAGE_AUTHORIZATION_JSON BACKEND_RECOVERY_IMAGE_AUTHORIZATION_SHA256 BACKEND_RECOVERY_APPROVAL_JSON BACKEND_RECOVERY_APPROVAL_SHA256; do
+                if [ -z "${!name:-}" ]; then
+                  echo "::error::${name} is required for ${RELEASE_MODE}."
+                  exit 1
+                fi
+              done
+              node --input-type=module - <<'NODE'
+              import { createHash } from "node:crypto";
+              const inputs = [
+                [process.env.BACKEND_RECOVERY_IMAGE_AUTHORIZATION_JSON, process.env.BACKEND_RECOVERY_IMAGE_AUTHORIZATION_SHA256, "image authorization"],
+                [process.env.BACKEND_RECOVERY_APPROVAL_JSON, process.env.BACKEND_RECOVERY_APPROVAL_SHA256, "approval"],
+              ];
+              for (const [bytes, expected, label] of inputs) {
+                if (!/^[a-f0-9]{64}$/.test(expected) || createHash("sha256").update(bytes).digest("hex") !== expected) throw new Error(`Backend recovery ${label} bytes do not match their SHA-256.`);
+                JSON.parse(bytes);
+              }
+              NODE
               ;;
             rotation-overlap|rotation-cleanup)
               for name in ROTATION_ID ROTATION_STATE_JSON ROTATION_STATE_SHA256 ROTATION_TASK_DEFINITION_ARN ROTATION_EXPECTED_CURRENT_TASK_DEFINITION_ARN ROTATION_IMAGE_DIGEST ROTATION_DEPLOYMENT_SHA ROTATION_READINESS_EVIDENCE_JSON ROTATION_READINESS_EVIDENCE_SHA256; do
@@ -596,7 +646,7 @@ jobs:
           ./scripts/aws/deploy-ecs-service.sh
 
       - name: Authorize rotation transition readiness immediately before mutation
-        if: ${{ inputs.release_mode != 'normal' }}
+        if: ${{ inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup' }}
         env:
           ROTATION_READINESS_EVIDENCE_JSON: ${{ inputs.rotation_readiness_evidence_json }}
           ROTATION_READINESS_EVIDENCE_SHA256: ${{ inputs.rotation_readiness_evidence_sha256 }}
@@ -617,7 +667,7 @@ jobs:
             --rotation-state-sha256 "$ROTATION_STATE_SHA256"
 
       - name: Deploy rotation transition backend ECS service
-        if: ${{ inputs.release_mode != 'normal' }}
+        if: ${{ inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup' }}
         env:
           AWS_REGION: ${{ env.AWS_REGION }}
           CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
@@ -648,6 +698,68 @@ jobs:
             --task-definition "$EXISTING_TASK_DEFINITION_ARN" \
             --readiness-file "$OVERLAP_READINESS_EVIDENCE_FILE" \
             --readiness-sha256 "$OVERLAP_READINESS_EVIDENCE_SHA256"
+
+      - name: Prepare governed legacy backend health recovery
+        id: backend-recovery
+        if: ${{ inputs.release_mode == 'backend-health-recovery' }}
+        env:
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          CURRENT_TASK_DEFINITION_ARN: ${{ inputs.backend_recovery_current_task_definition_arn }}
+          RECOVERY_IMAGE_DIGEST: ${{ inputs.backend_recovery_image_digest }}
+          IMAGE_AUTHORIZATION_JSON: ${{ inputs.backend_recovery_image_authorization_json }}
+          IMAGE_AUTHORIZATION_SHA256: ${{ inputs.backend_recovery_image_authorization_sha256 }}
+          APPROVAL_JSON: ${{ inputs.backend_recovery_approval_json }}
+          APPROVAL_SHA256: ${{ inputs.backend_recovery_approval_sha256 }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          recovery_dir="$RUNNER_TEMP/backend-health-recovery"
+          install -d -m 700 "$recovery_dir"
+          image_file="$recovery_dir/image-authorization.json"
+          approval_file="$recovery_dir/approval.json"
+          authorization_file="$recovery_dir/authorization.json"
+          printf '%s' "$IMAGE_AUTHORIZATION_JSON" > "$image_file"
+          printf '%s' "$APPROVAL_JSON" > "$approval_file"
+          chmod 600 "$image_file" "$approval_file"
+          node scripts/aws/recover-production-backend-health.mjs \
+            --prepare \
+            --source-sha "$SOURCE_SHA" \
+            --current-task-definition "$CURRENT_TASK_DEFINITION_ARN" \
+            --recovery-image-digest "$RECOVERY_IMAGE_DIGEST" \
+            --image-authorization "$image_file" \
+            --image-authorization-sha256 "$IMAGE_AUTHORIZATION_SHA256" \
+            --approval "$approval_file" \
+            --approval-sha256 "$APPROVAL_SHA256" \
+            --output "$authorization_file"
+          echo "image_file=$image_file" >> "$GITHUB_OUTPUT"
+          echo "authorization_file=$authorization_file" >> "$GITHUB_OUTPUT"
+          echo "authorization_sha256=$(sha256sum "$authorization_file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Execute governed legacy backend health recovery
+        if: ${{ inputs.release_mode == 'backend-health-recovery' }}
+        env:
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/recover-production-backend-health.mjs \
+            --execute \
+            --source-sha "$SOURCE_SHA" \
+            --image-authorization "${{ steps.backend-recovery.outputs.image_file }}" \
+            --image-authorization-sha256 "${{ inputs.backend_recovery_image_authorization_sha256 }}" \
+            --authorization "${{ steps.backend-recovery.outputs.authorization_file }}" \
+            --authorization-sha256 "${{ steps.backend-recovery.outputs.authorization_sha256 }}" \
+            --health-url "${{ env.PUBLIC_BASE_URL }}/api/health" \
+            --evidence-out "$RUNNER_TEMP/backend-health-recovery/evidence.json"
+
+      - name: Upload backend health recovery evidence
+        if: ${{ inputs.release_mode == 'backend-health-recovery' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-health-recovery-evidence
+          path: ${{ runner.temp }}/backend-health-recovery/evidence.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Verify backend health
         env:
