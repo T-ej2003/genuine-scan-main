@@ -610,6 +610,19 @@ test("fresh-image recovery partitions current runtime instances from reviewed de
   assert.equal(audit.deposedTaskDefinitionCleanups.every((entry) => Object.values(entry.runtimeReferences).every((references) => references.length === 0)), true);
 });
 
+test("fresh-image recovery audits an already-reconciled plan with no deposed residue", () => {
+  const fixture = makeFreshImagePartialApplyReferenceFixture();
+  fixture.plan.resource_changes = fixture.plan.resource_changes.filter((change) => !Object.hasOwn(change, "deposed"));
+  fixture.plan.prior_state.values.root_module.resources = fixture.plan.prior_state.values.root_module.resources.filter((resource) => !Object.hasOwn(resource, "deposed_key"));
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  const audit = generate(fixture);
+  assert.equal(audit.currentTaskDefinitionReferenceCount, 12);
+  assert.deepEqual(audit.deposedTaskDefinitionCleanups, []);
+  assert.equal(audit.taskDefinitionMutationInstances.length, 12);
+  assert.doesNotThrow(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, audit, { terraformConfiguration: fixture.options.terraformConfiguration, planJsonSha256: fixture.planJsonSha256 }));
+});
+
 test("serial-96 live broker mappings bind reviewed deposed predecessors without collapsing current identity", () => {
   const fixture = makeSerial96DeposedBrokerPredecessorFixture();
   const audit = generate(fixture);

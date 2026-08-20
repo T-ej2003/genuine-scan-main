@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { assertStageBCurrentRolloverReferenceBinding, assertStageBReferenceAuditFreshness, normalizeStageBFreshImageRuntimeModel, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
-import { assertStageBMutationInstanceMultisetEqual, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
+import { assertStageBFreshImageDeposedCleanupSet, assertStageBMutationInstanceMultisetEqual, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 
@@ -51,7 +51,8 @@ export function assertStageBFreshImageReferenceAuditBinding(plan, referenceAudit
   const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change?.type === "aws_ecs_task_definition");
   const currentChanges = taskDefinitionChanges.filter((change) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, change.address) && !Object.hasOwn(change, "deposed"));
   const deposedChanges = taskDefinitionChanges.filter((change) => Object.hasOwn(change, "deposed"));
-  if (currentChanges.length !== 12 || deposedChanges.length !== 11) throw new Error("Stage B fresh-image reference audit plan partition is not the exact 12-current/11-deposed topology.");
+  const cleanupAddresses = assertStageBFreshImageDeposedCleanupSet(taskDefinitionChanges);
+  if (currentChanges.length !== 12 || deposedChanges.length !== cleanupAddresses.length) throw new Error("Stage B fresh-image reference audit plan partition is not the exact 12-current reviewed cleanup topology.");
   for (const change of deposedChanges) if (!isStageBPartialApplyDeposedTaskDefinitionCleanup(change)) throw new Error(`Stage B fresh-image reference audit contains an unexpected deposed task-definition instance: ${change.address}.`);
   const expectedCurrent = currentChanges.map((change) => ({ terraformAddress: change.address, mutationInstanceIdentity: stageBMutationInstanceIdentity(change), classification: freshImageCurrentClassification }));
   const expectedDeposed = deposedChanges.map((change) => ({ terraformAddress: change.address, deposed: change.deposed, mutationInstanceIdentity: stageBMutationInstanceIdentity(change), family: STAGE_B_TASK_DEFINITION_FAMILIES[change.address], beforeTaskDefinitionArn: change.change.before.arn, actions: ["delete"], classification: freshImageDeposedClassification, remoteDeletion: false }));

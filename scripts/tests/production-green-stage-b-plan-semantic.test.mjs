@@ -766,6 +766,22 @@ test("fresh-image partial-apply recovery admits only the reviewed 12 rotations, 
   }
 });
 
+test("fresh-image recovery accepts the already-reconciled retained-resource topology without deposed residue", () => {
+  const value = freshImagePartialApplyRecoveryPlan();
+  value.resource_changes = value.resource_changes.filter((change) => !Object.hasOwn(change, "deposed"));
+  const configurationText = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  const envelope = assertStageBFreshImagePartialApplyRecoveryPlan(value, { terraformConfiguration: configurationText });
+  assert.deepEqual(envelope.cleanupAddresses, []);
+  const classified = classifyStageBPlan(value, { freshImagePartialApplyRecovery: true, terraformConfiguration: configurationText });
+  assert.equal(classified.actionCounts.replacement, 12);
+  assert.equal(classified.actionCounts.destroy, undefined);
+  assert.equal(classified.actionCounts.update, 3);
+
+  const partialResidue = freshImagePartialApplyRecoveryPlan();
+  partialResidue.resource_changes = partialResidue.resource_changes.filter((change) => !Object.hasOwn(change, "deposed") || change.address !== 'aws_ecs_task_definition.candidate["worker"]');
+  assert.throws(() => assertStageBFreshImagePartialApplyRecoveryPlan(partialResidue, { terraformConfiguration: configurationText }), /either no deposed residue or the exact eleven/);
+});
+
 test("fresh-image recovery remains reachable through plan capture", () => {
   const configurationText = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
   assert.doesNotThrow(() => assertStageBPlanCapture(freshImagePartialApplyRecoveryPlan(), {

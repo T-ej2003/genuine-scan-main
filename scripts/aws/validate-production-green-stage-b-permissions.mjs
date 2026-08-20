@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
-import { assertStageBImportedBackendMetadataNormalization, assertStageBFreshImagePartialApplyRecoveryPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS, STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION } from "./stage-b-deployment-contract.mjs";
+import { assertStageBImportedBackendMetadataNormalization, assertStageBFreshImageDeposedCleanupSet, assertStageBFreshImagePartialApplyRecoveryPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS, STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION } from "./stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
@@ -853,12 +853,7 @@ export function assertTaskDefinitionRegistrationContexts(plan, manifest, { permi
   const registrations = taskDefinitionChanges.filter((change) => exactActions(change.change?.actions, ["create"]) || isStageBTaskDefinitionRotationActionsValue(change.change?.actions));
   const reviewedDeposedCleanups = taskDefinitionChanges.filter((change) => allowsReviewedDeposedCleanup && isStageBPartialApplyDeposedTaskDefinitionCleanup(change));
   if (allowsReviewedDeposedCleanup) {
-    const expectedCleanupAddresses = new Set(TASK_DEFINITION_MAPPINGS.filter(({ address }) => address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS).map(({ address }) => address));
-    const actualCleanupAddresses = new Set(reviewedDeposedCleanups.map(({ address }) => address));
-    if (reviewedDeposedCleanups.length !== expectedCleanupAddresses.size || actualCleanupAddresses.size !== expectedCleanupAddresses.size
-      || [...expectedCleanupAddresses].some((address) => !actualCleanupAddresses.has(address))) {
-      throw new Error("Fresh-image recovery must contain exactly one reviewed deposed cleanup for each non-backend task-definition address.");
-    }
+    assertStageBFreshImageDeposedCleanupSet(taskDefinitionChanges);
   }
   const allowedMetadataChange = (change) => importedBackendNormalization && change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && exactActions(change.change?.actions, ["update"]);
   const allowedNoOp = (change) => {
