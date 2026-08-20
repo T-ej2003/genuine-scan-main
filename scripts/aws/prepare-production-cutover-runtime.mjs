@@ -16,10 +16,10 @@ if (!currentService?.taskDefinition) throw new Error("Current production task de
 const currentTaskDefinition = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", currentService.taskDefinition, "--include", "TAGS"]));
 const imageAuthorizationPath = required("image-authorization");
 const iamEvidencePath = required("iam-evidence");
-const temporaryKmsCapabilityPath = required("temporary-kms-capability");
+const temporaryKmsCapabilityPath = args.get("temporary-kms-capability");
 ensureStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: process.cwd(), label: "Image authorization evidence" });
 ensureStageBPrivateFile({ filePath: iamEvidencePath, repositoryRoot: process.cwd(), label: "IAM evidence" });
-ensureStageBPrivateFile({ filePath: temporaryKmsCapabilityPath, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
+if (temporaryKmsCapabilityPath) ensureStageBPrivateFile({ filePath: temporaryKmsCapabilityPath, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
 const imageAuthorization = read("image-authorization");
 const iamEvidence = read("iam-evidence");
 iamEvidence.filePath = path.resolve(required("iam-evidence"));
@@ -49,6 +49,7 @@ const result = prepareProductionCutoverRuntime({
   stageAStatePath: args.get("stage-a-state"),
   stageAHandoffPath: args.get("stage-a-handoff"),
   stageBStatePath: args.get("stage-b-state"),
+  currentStageBStatePath: args.get("current-stage-b-state"),
   currentTaskDefinition,
   inventoryApprovalId: args.get("inventory-approval-id"),
   onboardingPaths,

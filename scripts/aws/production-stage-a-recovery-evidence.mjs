@@ -16,6 +16,15 @@ export function readAuthenticatedStageARecoverySources({ stageAStatePath, stageA
   return Object.freeze({ stageAState, stageAHandoff, stageBState });
 }
 
+export function assertAuthenticatedCurrentStageBState(current, expected, { lineage, minimumSerial = 98 } = {}) {
+  for (const [state, label] of [[current, "Live"], [expected, "Prepared"]]) {
+    if (state?.version !== 4 || !Array.isArray(state.resources) || state.resources.length === 0 || !state.outputs || typeof state.outputs !== "object") throw new Error(`${label} Stage-B state is truncated or incomplete.`);
+    if (state.lineage !== lineage || !Number.isSafeInteger(state.serial) || state.serial < minimumSerial) throw new Error(`${label} Stage-B state identity is invalid.`);
+  }
+  if (current.serial !== expected.serial || stageAStateSemanticSha256(current) !== stageAStateSemanticSha256(expected)) throw new Error("Live Stage-B state does not match the authenticated current Stage-B state.");
+  return true;
+}
+
 function assertAuthenticatedSources(authenticated, { sourceSha, expectedStageBLineage, expectedStageBSerial, expectedIngress } = {}) {
   if (!authenticated?.stageAState?.bytes || !authenticated?.stageAHandoff?.bytes || !authenticated?.stageBState?.bytes || !authenticated.ingress) throw new Error("Stage-A recovery requires independently authenticated source artifacts and live ingress evidence.");
   const { stageAState, stageAHandoff, stageBState, ingress } = authenticated;

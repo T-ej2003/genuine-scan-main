@@ -21,8 +21,8 @@ import { assertStageBCanonicalTfvarsFile } from "./generate-production-green-sta
 import { assertStageBPrivateFile, ensureStageBPrivateDirectory } from "./stage-b-artifact-contract.mjs";
 import { assertRotationInfrastructurePlan, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
 import { createLiveCheckerChainAssertionAdapter } from "./production-checker-chain-contract.mjs";
-import { assertStageAStateContract } from "./generate-production-green-stage-a-prerequisites.mjs";
-import { readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
+import { assertStageAStateContract, parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertAuthenticatedCurrentStageBState, readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 
@@ -210,9 +210,11 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   const rotationStateReadback = async () => jsonFile(config.rotationStateFile);
   const readIamEvidence = () => {
     const report = jsonFile(config.iamEvidenceFile);
-    const temporaryFile = assertStageBPrivateFile({ filePath: config.temporaryKmsCapabilityFile, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
-    if (temporaryFile.sha256 !== config.temporaryKmsCapabilitySha256) throw new Error("Temporary Stage-A KMS capability evidence changed after runtime preparation.");
-    assertPreCutoverTemporaryCapabilityAbsent(jsonFile(temporaryFile.path), { sourceSha });
+    if (config.temporaryKmsCapabilityFile) {
+      const temporaryFile = assertStageBPrivateFile({ filePath: config.temporaryKmsCapabilityFile, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
+      if (temporaryFile.sha256 !== config.temporaryKmsCapabilitySha256) throw new Error("Temporary Stage-A KMS capability evidence changed after runtime preparation.");
+      assertPreCutoverTemporaryCapabilityAbsent(jsonFile(temporaryFile.path), { sourceSha });
+    }
     assertPreCutoverTemporaryCapabilityAbsent(report.temporaryKmsCapability, { sourceSha });
     return report;
   };
@@ -264,11 +266,13 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
           const local = readAuthenticatedStageARecoverySources({ stageAStatePath: config.stageAStatePath, stageAHandoffPath: config.stageAHandoffPath, stageBStatePath: config.stageBStatePath, repositoryRoot: process.cwd() });
           const remoteStageABytes = Buffer.from(releaseRun(["s3", "cp", STAGE_A_STATE_URI, "-"]));
           const remoteStageBBytes = Buffer.from(releaseRun(["s3", "cp", STAGE_B_STATE_URI, "-"]));
+          const currentStageBBytes = readFileSync(config.currentStageBStatePath);
+          if (sha256(currentStageBBytes) !== config.currentStageBStateSha256) throw new Error("Current Stage-B state changed after runtime preparation.");
           const authenticated = {
             ...local,
-            stageAState: { ...local.stageAState, bytes: remoteStageABytes, value: JSON.parse(remoteStageABytes.toString("utf8")) },
-            stageBState: { ...local.stageBState, bytes: remoteStageBBytes, value: JSON.parse(remoteStageBBytes.toString("utf8")) },
+            stageAState: { ...local.stageAState, bytes: remoteStageABytes, value: parseAuthenticatedStateBytes(remoteStageABytes) },
           };
+          assertAuthenticatedCurrentStageBState(parseAuthenticatedStateBytes(remoteStageBBytes), parseAuthenticatedStateBytes(currentStageBBytes), { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a" });
           const stageAContract = assertStageAStateContract(authenticated.stageAState.value, { phase: "POST_APPLY" });
           return { ...authenticated, ingress: describeStageAIngress({ run: releaseRun, endpointSecurityGroupId: stageAContract.endpointSecurityGroupId, runtimeSecurityGroupId: stageAContract.executorSecurityGroupId }) };
         },

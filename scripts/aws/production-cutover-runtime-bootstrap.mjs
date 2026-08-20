@@ -10,9 +10,10 @@ import { RELEASE_ROLE_ARN } from "./production-identity-adapters.mjs";
 import { assertImageAuthorization, authorizedBackendDigest, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertOnboardingPaths, PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
-import { assertPostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
+import { assertAuthenticatedCurrentStageBState, assertPostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
 import { assertRootDropEvidence } from "./production-root-drop-evidence.mjs";
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
+import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -66,11 +67,12 @@ function assertBindings(bindings = {}) {
   return Object.freeze({ ...checked, ecs: Object.freeze(ecs) });
 }
 
-function readInputFile(filePath, repositoryRoot, label) {
+function readInputFile(filePath, repositoryRoot, label, parse = (bytes) => JSON.parse(bytes.toString("utf8"))) {
   const resolved = ensureStageBPrivateFile({ filePath, repositoryRoot, label });
-  const value = json(resolved.path);
+  const bytes = readFileSync(resolved.path);
+  const value = parse(bytes);
   assertNoSecretMaterial(value, label);
-  return { path: resolved.path, value, sha256: hash(readFileSync(resolved.path)) };
+  return { path: resolved.path, value, sha256: hash(bytes) };
 }
 
 export function deriveRuntimeMetadata(taskDefinition) {
@@ -156,6 +158,7 @@ export function prepareProductionCutoverRuntime({
   stageAStatePath,
   stageAHandoffPath,
   stageBStatePath,
+  currentStageBStatePath,
   currentTaskDefinition,
   inventoryApprovalId,
   onboardingPaths,
@@ -190,9 +193,12 @@ export function prepareProductionCutoverRuntime({
     const backendImageDigest = authorizedBackendDigest(imageAuthorization);
     if (!backendImageDigest) throw new Error("Authorized backend image digest is missing.");
     if (!iamEvidence || iamEvidence.status !== "valid" || iamEvidence.iamEvaluationCensus?.executed !== iamEvidence.iamEvaluationCensus?.total || iamEvidence.iamEvaluationCensus?.invalid !== 0) throw new Error("IAM evidence is incomplete.");
-    if (!temporaryKmsCapabilityFile) throw new Error("Temporary Stage-A KMS capability absence evidence is required.");
-    const temporaryKmsCapability = readInputFile(temporaryKmsCapabilityFile, repositoryRoot, "Temporary Stage-A KMS capability evidence");
-    assertPreCutoverTemporaryCapabilityAbsent(temporaryKmsCapability.value, { sourceSha: protectedSha });
+    assertPreCutoverTemporaryCapabilityAbsent(iamEvidence.temporaryKmsCapability, { sourceSha: protectedSha });
+    const temporaryKmsCapability = temporaryKmsCapabilityFile ? readInputFile(temporaryKmsCapabilityFile, repositoryRoot, "Temporary Stage-A KMS capability evidence") : null;
+    if (temporaryKmsCapability) {
+      assertPreCutoverTemporaryCapabilityAbsent(temporaryKmsCapability.value, { sourceSha: protectedSha });
+      if (canonicalHash(temporaryKmsCapability.value) !== canonicalHash(iamEvidence.temporaryKmsCapability)) throw new Error("Standalone temporary capability evidence diverges from canonical IAM evidence.");
+    }
     if (!artifactBindingFile) throw new Error("Existing artifact-signing runtime binding file is required.");
     const artifactBindings = loadApprovedArtifactSigningBindings(artifactBindingFile);
     if (!rootDropEvidenceFile) throw new Error("Root-drop evidence file is required.");
@@ -200,8 +206,8 @@ export function prepareProductionCutoverRuntime({
     assertRootDropEvidence(rootDrop.value, { sourceSha: protectedSha, ...(verifyRootDropSignature ? { verifySignature: verifyRootDropSignature } : {}) });
     if ((stageAPlanPath && stageARecoveryEvidenceFile) || (!stageAPlanPath && !stageARecoveryEvidenceFile)) throw new Error("Exactly one of preserved Stage-A saved plan or post-apply Stage-A recovery evidence is required.");
     const stageARecovery = stageARecoveryEvidenceFile ? readInputFile(stageARecoveryEvidenceFile, repositoryRoot, "Stage-A recovery evidence") : null;
-    if (stageARecovery && (!stageAStatePath || !stageAHandoffPath || !stageBStatePath)) throw new Error("Stage-A recovery requires the independently authenticated Stage-A and converged Stage-B state artifacts.");
-    for (const [filePath, label] of [[stageAStatePath, "Stage-A state"], [stageAHandoffPath, "Stage-A handoff"], [stageBStatePath, "Stage-B state"]]) if (stageARecovery) ensureStageBPrivateFile({ filePath, repositoryRoot, label });
+    if (stageARecovery && (!stageAStatePath || !stageAHandoffPath || !stageBStatePath || !currentStageBStatePath)) throw new Error("Stage-A recovery requires historical provenance and the authenticated current Stage-B state.");
+    for (const [filePath, label] of [[stageAStatePath, "Stage-A state"], [stageAHandoffPath, "Stage-A handoff"], [stageBStatePath, "Historical Stage-B state"], [currentStageBStatePath, "Current Stage-B state"]]) if (stageARecovery) ensureStageBPrivateFile({ filePath, repositoryRoot, label });
     if (stageARecovery) assertPostApplyStageAPlanRecovery(stageARecovery.value, { sourceSha: protectedSha, expectedStageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", expectedStageBSerial: 98, authenticated: { ...readAuthenticatedStageARecoverySources({ stageAStatePath, stageAHandoffPath, stageBStatePath, repositoryRoot }), ingress: stageARecovery.value.ingress } });
     if (stageAPlanPath) ensureStageBPrivateFile({ filePath: stageAPlanPath, repositoryRoot, label: "Preserved Stage-A saved plan" });
     const taskDefinition = currentTaskDefinition?.taskDefinition || currentTaskDefinition;
@@ -217,8 +223,18 @@ export function prepareProductionCutoverRuntime({
     if (!inventoryApprovalId || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(inventoryApprovalId)) throw new Error("Inventory approval ID is required.");
     if (!stageBTfvarsPath || !stageBTfvarsBindingReportPath || !SHA256.test(stageBTfvarsBindingReportSha256 || "") || !stageBTerraformDataDir) throw new Error("Canonical Stage B tfvars and Terraform data directory are required for rotation infrastructure convergence.");
     ensureStageBPrivateFile({ filePath: stageBTfvarsPath, repositoryRoot, label: "Canonical Stage B tfvars" });
-    ensureStageBPrivateFile({ filePath: stageBTfvarsBindingReportPath, repositoryRoot, label: "Canonical Stage B tfvars binding report" });
+    const stageBTfvarsBinding = readInputFile(stageBTfvarsBindingReportPath, repositoryRoot, "Canonical Stage B tfvars binding report");
+    if (stageBTfvarsBinding.sha256 !== stageBTfvarsBindingReportSha256) throw new Error("Canonical Stage B tfvars binding report hash does not match its authenticated input.");
     ensureStageBPrivateDirectory({ directory: stageBTerraformDataDir, repositoryRoot, create: false, normalize: true, label: "Canonical Stage B Terraform data directory" });
+    let currentStageBStateSha256 = null;
+    if (stageARecovery) {
+      const checkedCurrentStageB = ensureStageBPrivateFile({ filePath: currentStageBStatePath, repositoryRoot, label: "Current Stage-B state" });
+      const currentStageBBytes = readFileSync(checkedCurrentStageB.path);
+      const currentStageB = { path: checkedCurrentStageB.path, value: parseAuthenticatedStateBytes(currentStageBBytes), sha256: hash(currentStageBBytes) };
+      if (currentStageB.sha256 !== stageBTfvarsBinding.value.stateBackupSha256 || currentStageB.value.lineage !== stageBTfvarsBinding.value.stateLineage || currentStageB.value.serial !== stageBTfvarsBinding.value.stateSerial) throw new Error("Current Stage-B state is not bound to canonical Stage-B tfvars evidence.");
+      assertAuthenticatedCurrentStageBState(currentStageB.value, currentStageB.value, { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a" });
+      currentStageBStateSha256 = currentStageB.sha256;
+    }
     const overlapTaskInput = buildOverlapTaskDefinition({
       backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${backendImageDigest}`,
       releaseSha: protectedSha,
@@ -246,8 +262,8 @@ export function prepareProductionCutoverRuntime({
       iamEvidenceSha256: iamEvidence.evidence?.evidenceSha256 || iamEvidence.evidenceSha256 || null,
       rootDropEvidenceFile: rootDrop.path,
       rootDropEvidenceSha256: rootDrop.sha256,
-      temporaryKmsCapabilityFile: temporaryKmsCapability.path,
-      temporaryKmsCapabilitySha256: temporaryKmsCapability.sha256,
+      temporaryKmsCapabilityFile: temporaryKmsCapability?.path || null,
+      temporaryKmsCapabilitySha256: temporaryKmsCapability?.sha256 || null,
       stageARoot: path.resolve("infra/aws/terraform/production-green-stage-a"),
       stageAPlanPath: stageAPlanPath ? path.resolve(stageAPlanPath) : null,
       stageAPlanSha256: stageAPlanPath ? ensureStageBPrivateFile({ filePath: stageAPlanPath, repositoryRoot, label: "Preserved Stage-A saved plan" }).sha256 : null,
@@ -257,6 +273,8 @@ export function prepareProductionCutoverRuntime({
       stageAStatePath: stageARecovery ? path.resolve(stageAStatePath) : null,
       stageAHandoffPath: stageARecovery ? path.resolve(stageAHandoffPath) : null,
       stageBStatePath: stageARecovery ? path.resolve(stageBStatePath) : null,
+      currentStageBStatePath: stageARecovery ? path.resolve(currentStageBStatePath) : null,
+      currentStageBStateSha256,
       artifactBindingSha256: hash(readFileSync(artifactBindingFile)),
       imageAuthorizationSha256: imageAuthorization.filePath ? ensureStageBPrivateFile({ filePath: imageAuthorization.filePath, repositoryRoot, label: "Image authorization evidence" }).sha256 : null,
       iamEvidenceFileSha256: iamEvidence.filePath ? ensureStageBPrivateFile({ filePath: iamEvidence.filePath, repositoryRoot, label: "IAM evidence" }).sha256 : null,
@@ -341,7 +359,7 @@ export function parseBootstrapArgs(argv) {
   const supported = new Set([
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
     "minimum-grace-seconds", "rotation-bindings", "image-authorization", "iam-evidence",
-    "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "inventory-approval-id", "onboarding-paths",
+    "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "onboarding-paths",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir",
   ]);
   const values = new Map();

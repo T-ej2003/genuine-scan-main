@@ -14,6 +14,9 @@ import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-c
 import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 import { buildRootDropEvidence, buildRootDropPayload } from "../aws/production-root-drop-evidence.mjs";
 import { buildTemporaryCapabilityEvidence } from "../aws/production-stage-a-temporary-kms-capability.mjs";
+import { producePostApplyStageAPlanRecovery } from "../aws/production-stage-a-recovery-evidence.mjs";
+import { STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { productionStageAIngress, productionStageAState, STAGE_A_STATE_OBJECT } from "./fixtures/production-stage-a-state.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
@@ -133,6 +136,65 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     assert.doesNotMatch(readFileSync(result.configPath, "utf8"), /PRIVATE KEY|SecretString|fixture-password|123456/);
   } finally {
     rmSync(path.join(repositoryRoot, "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("canonical IAM evidence is sufficient without a duplicate temporary-capability file", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    delete input.temporaryKmsCapabilityFile;
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, true);
+    assert.equal(result.config.temporaryKmsCapabilityFile, null);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("runtime preparation authenticates the tfvars binding report before consuming state identity", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    input.stageBTfvarsBindingReportSha256 = "0".repeat(64);
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, false);
+    assert.match(result.blockers.join("\n"), /binding report hash/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("post-apply recovery binds historical provenance separately from current Stage-B state", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    const stageAState = productionStageAState();
+    const historicalStageB = { version: 4, serial: 98, lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", outputs: {}, resources: [{ mode: "managed", type: "aws_ecs_service", name: "backend", instances: [{ schema_version: 0, attributes: { id: "mscqr-backend-servi-euw2" } }] }] };
+    const currentStageB = { ...historicalStageB, serial: 100, outputs: { bound_images: { value: { backend: digest }, type: ["object", { backend: "string" }] } } };
+    const stageAStatePath = path.join(directory, "stage-a-state.json");
+    const stageAHandoffPath = path.join(directory, "stage-a-handoff.json");
+    const stageBStatePath = path.join(directory, "stage-b-historical.json");
+    const currentStageBStatePath = path.join(directory, "stage-b-current.json");
+    const stageARecoveryEvidenceFile = path.join(directory, "stage-a-recovery.json");
+    writeFileSync(stageAStatePath, JSON.stringify(stageAState), { mode: 0o600 });
+    writeFileSync(stageAHandoffPath, JSON.stringify({ toolingSha: sourceSha, stageAStateIdentityVersion: STAGE_A_STATE_IDENTITY_VERSION, stageAStateObject: STAGE_A_STATE_OBJECT, stageAStateLineage: stageAState.lineage, stageAStateSerial: stageAState.serial, stageAStateSha256: stageAStateSemanticSha256(stageAState) }), { mode: 0o600 });
+    writeFileSync(stageBStatePath, JSON.stringify(historicalStageB), { mode: 0o600 });
+    const currentBytes = Buffer.from(JSON.stringify(currentStageB));
+    writeFileSync(currentStageBStatePath, currentBytes, { mode: 0o600 });
+    producePostApplyStageAPlanRecovery({ sourceSha, stageAStatePath, stageAHandoffPath, stageBStatePath, ingress: productionStageAIngress(), outputPath: stageARecoveryEvidenceFile, repositoryRoot: process.cwd() });
+    const binding = JSON.parse(readFileSync(input.stageBTfvarsBindingReportPath, "utf8"));
+    Object.assign(binding, { stateBackupSha256: createHash("sha256").update(currentBytes).digest("hex"), stateLineage: currentStageB.lineage, stateSerial: currentStageB.serial });
+    writeFileSync(input.stageBTfvarsBindingReportPath, `${JSON.stringify(binding)}\n`, { mode: 0o600 });
+    delete input.stageAPlanPath;
+    Object.assign(input, { stageARecoveryEvidenceFile, stageAStatePath, stageAHandoffPath, stageBStatePath, currentStageBStatePath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(input.stageBTfvarsBindingReportPath)).digest("hex") });
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, true);
+    assert.equal(result.config.stageBStatePath, stageBStatePath);
+    assert.equal(result.config.currentStageBStatePath, currentStageBStatePath);
+    assert.equal(result.config.currentStageBStateSha256, binding.stateBackupSha256);
+  } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });

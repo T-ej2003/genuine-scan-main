@@ -91,6 +91,7 @@
     "stage-b:deployment-closure:production": "npm run check:rotation-evidence-freshness && node scripts/aws/validate-stage-b-deployment-closure.mjs --mode production",
     "stage-b:prepare-cutover-runtime": "node scripts/aws/prepare-production-cutover-runtime.mjs",
     "stage-b:bootstrap-initial-dual-slot": "node scripts/aws/bootstrap-production-initial-dual-slot.mjs",
+    "stage-b:bootstrap-artifact-signing": "node scripts/aws/bootstrap-production-artifact-signing.mjs",
     "stage-b:supersede-stale-rotation": "node scripts/aws/supersede-production-stale-rotation.mjs",
     "stage-b:produce-root-drop-evidence": "node scripts/aws/produce-production-root-drop-evidence.mjs",
     "stage-a:temporary-kms-capability": "node scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs",

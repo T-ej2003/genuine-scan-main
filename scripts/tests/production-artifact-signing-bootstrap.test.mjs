@@ -5,6 +5,7 @@ import test from "node:test";
 import { ARTIFACT_SIGNING_BINDINGS } from "../aws/production-artifact-signing-domain.mjs";
 import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, ARTIFACT_SIGNING_RUNTIME_BINDING_PATH, bootstrapArtifactSigningBindings, loadArtifactSigningBootstrapContract } from "../aws/production-artifact-signing-bootstrap.mjs";
 import { createAwsArtifactSigningAdapter, loadApprovedArtifactSigningBindings } from "../aws/production-artifact-signing-secrets-adapter.mjs";
+import { parseArgs, runCli } from "../aws/bootstrap-production-artifact-signing.mjs";
 
 const suffix = (name) => `arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/${name}-AbCd12`;
 const names = loadArtifactSigningBootstrapContract().names;
@@ -64,6 +65,20 @@ function denyOperationRunner(operation) {
 const cleanup = () => { if (existsSync(ARTIFACT_SIGNING_RUNTIME_BINDING_PATH)) rmSync(ARTIFACT_SIGNING_RUNTIME_BINDING_PATH, { force: true }); };
 
 test.afterEach(cleanup);
+
+test("protected-main bootstrap CLI exposes the existing idempotent producer", async () => {
+  const sourceSha = "a".repeat(40);
+  let written = "";
+  const result = await runCli(["--source-sha", sourceSha], {
+    readFresh: () => ({ headSha: sourceSha, freshRemoteMainSha: sourceSha }),
+    bootstrap: async () => ({ bindingFile: "/private/tmp/bindings.json", evidenceSha256: "b".repeat(64), created: [], createSecretCount: 0 }),
+    write: (value) => { written = value; },
+  });
+  assert.equal(result.AWS_WRITES, 0);
+  assert.equal(JSON.parse(written).sourceSha, sourceSha);
+  assert.throws(() => parseArgs(["--source-sha", "short"]), /full protected-main SHA/);
+  await assert.rejects(() => runCli(["--source-sha", sourceSha], { readFresh: () => ({ headSha: "c".repeat(40), freshRemoteMainSha: sourceSha }) }), /exact fresh protected main/);
+});
 
 test("canonical names are stable and source-controlled", () => {
   assert.deepEqual(Object.keys(names).sort(), [...ARTIFACT_SIGNING_BINDINGS].sort());

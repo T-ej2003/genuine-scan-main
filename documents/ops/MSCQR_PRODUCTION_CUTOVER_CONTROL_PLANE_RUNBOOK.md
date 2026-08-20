@@ -41,6 +41,11 @@ initial value. Bootstrap-returned bindings are the authoritative artifact refere
 and validate the overlap task input, replacing stale preloaded artifact references without changing
 unrelated task inputs.
 
+Run `npm run stage-b:bootstrap-artifact-signing -- --source-sha <full-protected-main-sha>` before
+runtime preparation. This is the canonical idempotent producer of the runtime binding file; it
+requires the exact fetched protected-main identity and the release-deployer profile, and reports
+container creation separately from secret-value writes.
+
 The later rotation coordinator remains intentionally operator-supplied: its reviewed external
 configuration binds the approved rotation ID, source SHA, grace window, and current/previous/pending
 JWT/QR secret identifiers. Those are live rotation-state inputs, not derivable secret names, and no
@@ -61,6 +66,12 @@ The rotation config's logical `qr.previousKeyVersion` must equal the live task's
 Secrets Manager references. Bootstrap and execution share the canonical image-authorization validator,
 including evidence, signature, attestation, provenance, source-SHA, workflow, release, service-record,
 and digest checks.
+For the post-apply Stage-A recovery branch, pass the immutable historical Stage-B state used by the
+recovery evidence with `--stage-b-state`, and pass the fresh current Stage-B state bound by the
+current tfvars report with `--current-stage-b-state`. Runtime revalidation preserves the historical
+state as provenance and separately requires the live Stage-B state to match the current state
+semantically. The canonical IAM report's nested temporary-capability absence proof is authoritative;
+an optional standalone proof is accepted only when it is exactly equivalent.
 The source-bound authorization is produced only by `scripts/aws/production-image-authorization.mjs`.
 Before producing it, the shared protected-main identity helper performs a successful `git fetch origin main`
 and resolves the fetched commit from `FETCH_HEAD`; it never treats a stale `refs/remotes/origin/main` as
@@ -86,7 +97,7 @@ Cutover input ownership is explicit:
 | --- | --- |
 | Repository-derived | region, release role, protected-main SHA, overlap deployment SHA, policy constants, phase paths, inventory role/log target |
 | AWS read-only | current task definition ARN, HTTPS production base URL, current QR key-version metadata |
-| Existing runtime artifacts | image authorization, IAM evidence, Stage-A plan/root evidence, artifact binding file |
+| Existing runtime artifacts | image authorization, IAM evidence, Stage-A plan or historical recovery evidence, root evidence, current Stage-B state, canonical artifact binding file |
 | Human approval | ticket, approver identity/role, reason, verification reference, grace-window policy value |
 | Identifier-only external binding | dual-slot JWT/QR secret references, including current/previous key-version references not present in the legacy task |
 | Prepare-generated | rotation state and rotation fixture |
