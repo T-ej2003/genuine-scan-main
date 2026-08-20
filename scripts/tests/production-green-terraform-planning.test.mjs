@@ -24,11 +24,12 @@ test("Stage A canonically owns its existing Stack tag", () => {
   assert.match(source.match(/resource "aws_kms_key" "root_drop" \{([\s\S]*?)\n\}/)?.[1] || "", /tags\s*=\s*local\.tags/);
 });
 
-const terraformVariables = (tags) => [
+const terraformVariables = (tags, { endpointSecurityGroupIds = ["sg-00000000"], databaseSecurityGroupIds = ["sg-00000000"] } = {}) => [
     "aws_region=eu-west-2",
     "vpc_id=vpc-00000000000000000",
     "private_subnet_ids=[]",
-    "runtime_security_group_ids=[]",
+    `runtime_endpoint_security_group_ids=${JSON.stringify(endpointSecurityGroupIds)}`,
+    `database_runtime_security_group_ids=${JSON.stringify(databaseSecurityGroupIds)}`,
     "s3_prefix_list_id=pl-00000000",
     "vpc_dns_resolver_cidr=10.0.0.2/32",
     "checker_principal_arns=[\"arn:aws:iam::368992683803:role/mscqr-production-independent-checker\"]",
@@ -86,6 +87,17 @@ const createTerraformConsole = () => {
           "-input=false",
           ...terraformVariables(tags).flatMap((value) => ["-var", value]),
         ], { cwd: process.cwd(), env, input: "jsonencode(local.tags)\n", encoding: "utf8" });
+        assert.equal(result.status, 0, terraformDiagnostic("terraform console", result));
+        return JSON.parse(JSON.parse(result.stdout.trim()));
+      },
+      evaluateNetworkSets(endpointSecurityGroupIds, databaseSecurityGroupIds) {
+        const result = spawnSync("terraform", [
+          `-chdir=${terraformRoot}`,
+          "console",
+          "-state=/dev/null",
+          "-input=false",
+          ...terraformVariables({}, { endpointSecurityGroupIds, databaseSecurityGroupIds }).flatMap((value) => ["-var", value]),
+        ], { cwd: process.cwd(), env, input: "jsonencode({ endpoint = sort(tolist(var.runtime_endpoint_security_group_ids)), database = sort(tolist(var.database_runtime_security_group_ids)) })\n", encoding: "utf8" });
         assert.equal(result.status, 0, terraformDiagnostic("terraform console", result));
         return JSON.parse(JSON.parse(result.stdout.trim()));
       },
@@ -189,6 +201,32 @@ test("Stage A declares executor egress only through standalone reviewed rules an
     assert.doesNotMatch(rule, /cidr_ipv4|cidr_ipv6|0\.0\.0\.0\/0|::\/0/);
   }
   assert.doesNotMatch(source, /aws_ecs_task_definition|aws_ecs_service|aws_lambda_function/);
+});
+
+test("Stage A governs endpoint and database runtime access independently without address churn", () => {
+  const endpointRule = source.match(/resource "aws_vpc_security_group_ingress_rule" "runtime_endpoints_https" \{([\s\S]*?)\n\}/)?.[1] || "";
+  const databaseRule = source.match(/resource "aws_vpc_security_group_ingress_rule" "runtime_database" \{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(endpointRule, /for_each\s*=\s*var\.runtime_endpoint_security_group_ids/);
+  assert.match(databaseRule, /for_each\s*=\s*var\.database_runtime_security_group_ids/);
+  assert.doesNotMatch(endpointRule, /database_runtime_security_group_ids|5432/);
+  assert.doesNotMatch(databaseRule, /runtime_endpoint_security_group_ids|443/);
+  assert.match(variables, /variable "runtime_endpoint_security_group_ids"[\s\S]*length\(var\.runtime_endpoint_security_group_ids\) > 0[\s\S]*\^sg-/);
+  assert.match(variables, /variable "database_runtime_security_group_ids"[\s\S]*length\(var\.database_runtime_security_group_ids\) > 0[\s\S]*\^sg-/);
+  assert.doesNotMatch(`${source}\n${variables}\n${readme}\n${tfvarsExample}`, /\bruntime_security_group_ids\b/);
+  assert.match(tfvarsExample, /runtime_endpoint_security_group_ids[\s\S]*database_runtime_security_group_ids/);
+
+  const runtime = createTerraformConsole();
+  try {
+    assert.deepEqual(runtime.evaluateNetworkSets(
+      ["sg-0db971332ae625441", "sg-0126cf7854fef6be6"],
+      ["sg-0db971332ae625441"],
+    ), {
+      endpoint: ["sg-0126cf7854fef6be6", "sg-0db971332ae625441"],
+      database: ["sg-0db971332ae625441"],
+    });
+  } finally {
+    runtime.cleanup();
+  }
 });
 
 test("Stage A preserves the RDS force-SSL parameter's provider-stable apply method", () => {

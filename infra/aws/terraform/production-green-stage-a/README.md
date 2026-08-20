@@ -35,7 +35,7 @@ initialized S3 backend coordinates above, and the `default` workspace. It
 removes inherited Terraform redirect variables and uses only the exact
 production Stage-A `TF_VAR_*` inputs already supplied to the normal reviewed
 launch: `TF_VAR_aws_region`, `TF_VAR_vpc_id`, `TF_VAR_private_subnet_ids`,
-`TF_VAR_runtime_security_group_ids`, `TF_VAR_s3_prefix_list_id`,
+`TF_VAR_runtime_endpoint_security_group_ids`, `TF_VAR_database_runtime_security_group_ids`, `TF_VAR_s3_prefix_list_id`,
 `TF_VAR_vpc_dns_resolver_cidr`, `TF_VAR_checker_principal_arns`,
 `TF_VAR_release_role_arn`, and `TF_VAR_receipt_bucket_arn`. The recovery
 command rejects every other `TF_VAR_*` key and does not fall back to a local
@@ -98,4 +98,4 @@ Stage A exclusively owns the green database and executor security groups, the ex
 
 The executor security group has no default egress. Stage A permits only PostgreSQL to the green database security group, HTTPS to its private ECR API, ECR Docker, CloudWatch Logs, Secrets Manager, and KMS interface endpoints and the regional S3 prefix list, and TCP/UDP DNS to the exact VPC resolver `/32`. Stage B must consume this group and must not recreate or mutate its network rules.
 
-The five interface endpoints share one Stage A-owned security group that accepts TCP/443 only from the executor security group and the exact `runtime_security_group_ids` set. The runtime ingress is required for ECS execution-role secret retrieval; it adds no endpoint egress or internet access. The S3 gateway prefix list and VPC resolver remain separate exact inputs.
+The five interface endpoints share one Stage A-owned security group that accepts TCP/443 only from the executor security group and the exact `runtime_endpoint_security_group_ids` set. PostgreSQL ingress is governed independently by `database_runtime_security_group_ids`; endpoint membership never grants database connectivity. Runtime endpoint ingress is required for ECS execution-role secret retrieval; it adds no endpoint egress or internet access. The S3 gateway prefix list and VPC resolver remain separate exact inputs.
