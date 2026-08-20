@@ -513,6 +513,17 @@ const brokerFunctionAllowedChangedFields = new Set([
 export const STAGE_B_REVIEWED_BROKER_TIMEOUT_SECONDS = Object.freeze({ before: 30, after: 180 });
 export const STAGE_B_PARTIAL_APPLY_RECOVERY = "PARTIAL_APPLY_RECOVERY";
 export const STAGE_B_FRESH_IMAGE_PARTIAL_APPLY_RECOVERY = "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY";
+export const STAGE_B_FRESH_IMAGE_RECOVERY_CENSUSES = Object.freeze([
+  Object.freeze({ create: 0, replacement: 12, update: 3, destroy: 11, unclassified: 0 }),
+  Object.freeze({ create: 0, replacement: 12, update: 3, destroy: 0, unclassified: 0 }),
+]);
+
+export function assertStageBFreshImageRecoveryCensus(census) {
+  if (!STAGE_B_FRESH_IMAGE_RECOVERY_CENSUSES.some((expected) => Object.entries(expected).every(([key, value]) => (census?.[key] ?? 0) === value))) {
+    throw new Error("Fresh-image partial-apply recovery census must be exactly the legacy-residue or already-reconciled topology.");
+  }
+  return census.destroy === 11 ? "LEGACY_RESIDUE" : "ALREADY_RECONCILED";
+}
 
 export function isStageBPartialApplyDeposedTaskDefinitionCleanup(change) {
   const family = STAGE_B_TASK_DEFINITION_FAMILIES[change?.address];

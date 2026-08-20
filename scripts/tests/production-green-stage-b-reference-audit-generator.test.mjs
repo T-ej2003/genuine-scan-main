@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { assertStageBPlan, assertStageBPlanCapture } from "../plan-production-green-stage-b.mjs";
-import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
+import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, canonicalJson, STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import {
   createAwsReader,
   generateReferenceAudit,
@@ -26,7 +26,7 @@ import {
   STAGE_B_ACTIVE_BROKER_TASK_DEFINITION_LOCAL_EXPRESSION,
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "../aws/stage-b-reference-audit-contract.mjs";
-import { assertStageBFreshImageReferenceAuditBinding } from "../aws/stage-b-plan-approval-contract.mjs";
+import { assertStageBFreshImageReferenceAuditBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes } from "../aws/stage-b-plan-approval-contract.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const planSha256 = "a".repeat(64);
@@ -621,6 +621,35 @@ test("fresh-image recovery audits an already-reconciled plan with no deposed res
   assert.deepEqual(audit.deposedTaskDefinitionCleanups, []);
   assert.equal(audit.taskDefinitionMutationInstances.length, 12);
   assert.doesNotThrow(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, audit, { terraformConfiguration: fixture.options.terraformConfiguration, planJsonSha256: fixture.planJsonSha256 }));
+});
+
+test("fresh-image plans traverse classifier, capture, validation, and approval for both reviewed cleanup topologies", () => {
+  for (const cleanupCount of [11, 0]) {
+    const fixture = makeFreshImagePartialApplyReferenceFixture();
+    if (cleanupCount === 0) {
+      fixture.plan.resource_changes = fixture.plan.resource_changes.filter((change) => !Object.hasOwn(change, "deposed"));
+      fixture.plan.prior_state.values.root_module.resources = fixture.plan.prior_state.values.root_module.resources.filter((resource) => !Object.hasOwn(resource, "deposed_key"));
+      fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+      fixture.planJsonSha256 = sha256(fixture.planBytes);
+    }
+    const classified = assertStageBPlanCapture(fixture.plan, { terraformConfiguration: fixture.options.terraformConfiguration, freshImagePartialApplyRecovery: true });
+    const savedPlanBytes = Buffer.from(`fresh-image-${cleanupCount}`);
+    const planJsonBytes = Buffer.from(`${JSON.stringify(fixture.plan)}\n`);
+    const canonicalPlanJsonBytes = Buffer.from(`${canonicalJson(fixture.plan)}\n`);
+    const hashes = stageBPlanHashes({ savedPlanBytes, planJsonBytes, canonicalPlanJsonBytes });
+    fixture.planBytes = planJsonBytes;
+    fixture.planJsonSha256 = hashes.planJsonSha256;
+    const audit = generate(fixture);
+    const auditBytes = Buffer.from(`${JSON.stringify(audit)}\n`);
+    const classification = { noOp: classified.actionCounts["no-op"] || 0, create: classified.actionCounts.create || 0, replacement: classified.actionCounts.replacement || 0, update: classified.actionCounts.update || 0, destroy: classified.actionCounts.destroy || 0, unclassified: classified.unclassifiedResources.length };
+    const common = { toolingSha: "e".repeat(40), toolingTreeSha256: "f".repeat(64), refreshReportSha256: "a".repeat(64), refreshBindingReportSha256: "b".repeat(64), stageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stageBSerial: 96, hashes, classification, planProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" };
+    const capture = createStageBPlanCaptureReport({ ...common, capturedAt: audit.auditedAt, terraformVersion: fixture.plan.terraform_version, terraformFormatVersion: fixture.plan.format_version, brokerEvidence: classified.brokerCapture });
+    const captureBytes = Buffer.from(`${JSON.stringify(capture, null, 2)}\n`);
+    assert.doesNotThrow(() => assertStageBPlanCaptureReport(capture, { captureReportBytes: captureBytes, hashes, stageBLineage: common.stageBLineage, stageBSerial: common.stageBSerial }));
+    const approval = createStageBPlanApprovalReport({ ...common, captureReportSha256: sha256(captureBytes), referenceAuditPath: "fresh-image-reference-audit.json", referenceAuditSha256: sha256(auditBytes), referenceAuditCallerArn: audit.callerArn, referenceAuditAt: audit.auditedAt, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, approvedAt: audit.auditedAt, brokerOperation: capture.brokerOperation, brokerUpdatePresent: capture.brokerUpdatePresent, brokerActions: capture.brokerActions, brokerResourceAddresses: capture.brokerResourceAddresses });
+    const approvalBytes = Buffer.from(`${JSON.stringify(approval, null, 2)}\n`);
+    assert.doesNotThrow(() => assertStageBPlanApprovalReport(approval, { approvalReportBytes: approvalBytes, captureReport: capture, captureReportBytes: captureBytes, referenceAudit: audit, referenceAuditBytes: auditBytes, plan: fixture.plan, hashes, logicalCanonicalPlanJsonSha256: hashes.logicalCanonicalPlanJsonSha256, referenceAuditSha256: sha256(auditBytes), trustedCallerArn: audit.callerArn, stageBLineage: common.stageBLineage, stageBSerial: common.stageBSerial, terraformConfiguration: fixture.options.terraformConfiguration }));
+  }
 });
 
 test("serial-96 live broker mappings bind reviewed deposed predecessors without collapsing current identity", () => {
