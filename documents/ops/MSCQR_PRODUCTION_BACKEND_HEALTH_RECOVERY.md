@@ -67,6 +67,12 @@ dependencies. Recovery additionally requires the readiness release SHA to
 equal the authenticated replacement image release SHA; HTTP 200 alone is never
 recovery evidence.
 
+The public production readiness URL is `/api/health/ready`. Frontend Nginx
+rewrites that path to the backend's direct `/health/ready` route; the direct
+route is not itself a public frontend path. Normal release smoke and governed
+backend recovery therefore use the same proxied URL and parse its JSON
+readiness payload rather than accepting frontend reachability.
+
 The private, atomic recovery evidence is written before AWS discovery and
 updated immediately before and after each ECS mutation. Its source,
 environment approval, authorization bytes, current task definition, and target

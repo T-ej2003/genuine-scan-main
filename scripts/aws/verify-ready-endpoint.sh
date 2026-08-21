@@ -37,11 +37,10 @@ curl --fail --silent --show-error --location "$READY_URL" >"$RESPONSE_FILE"
 
 node --input-type=module - "$READY_URL" "$RESPONSE_FILE" <<'NODE'
 import fs from "node:fs";
-import { assertProductionBackendReadiness } from "./scripts/aws/production-backend-readiness-contract.mjs";
+import { parseProductionBackendReadiness } from "./scripts/aws/production-backend-readiness-contract.mjs";
 
 const [readyUrl, responsePath] = process.argv.slice(2);
-const payload = JSON.parse(fs.readFileSync(responsePath, "utf8"));
-assertProductionBackendReadiness(payload);
+parseProductionBackendReadiness(fs.readFileSync(responsePath));
 
 console.log(`Verified ${readyUrl} returned production-ready dependency health`);
 NODE

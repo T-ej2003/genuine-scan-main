@@ -10,7 +10,7 @@ Verify the production public endpoints after an ECS deployment.
 Environment:
   PUBLIC_BASE_URL   Default: https://www.mscqr.com
   SMOKE_PATHS       Optional space-separated paths. Default:
-                    / /login /api/health /health/ready
+                    / /login /api/health/ready
 EOF
 }
 
@@ -29,7 +29,7 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://www.mscqr.com}"
-SMOKE_PATHS="${SMOKE_PATHS:-/ /login /api/health /health/ready}"
+SMOKE_PATHS="${SMOKE_PATHS:-/ /login /api/health/ready}"
 
 base_url="${PUBLIC_BASE_URL%/}"
 
@@ -56,13 +56,13 @@ for path in $SMOKE_PATHS; do
     exit 1
   fi
 
-  if [[ "$path" == "/api/health" || "$path" == "/health/ready" ]]; then
+  if [[ "$path" == "/api/health/ready" ]]; then
     node --input-type=module - "$url" "$response_file" <<'NODE'
 import fs from "node:fs";
-import { assertProductionBackendReadiness } from "./scripts/aws/production-backend-readiness-contract.mjs";
+import { parseProductionBackendReadiness } from "./scripts/aws/production-backend-readiness-contract.mjs";
 
 const [url, responsePath] = process.argv.slice(2);
-assertProductionBackendReadiness(JSON.parse(fs.readFileSync(responsePath, "utf8")));
+parseProductionBackendReadiness(fs.readFileSync(responsePath));
 NODE
   fi
 

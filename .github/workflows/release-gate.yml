@@ -775,7 +775,7 @@ jobs:
 
       - name: Verify backend health
         env:
-          SMOKE_PATHS: /api/health /health/ready
+          SMOKE_PATHS: /api/health/ready
         run: |
           set -euo pipefail
           ./scripts/aws/verify-production-smoke.sh
@@ -882,7 +882,7 @@ jobs:
             echo "- Image: \`${BACKEND_IMAGE_REF}\`"
             echo "- Previous task definition: \`${backend_previous_task}\`"
             echo "- New task definition: \`${backend_new_task}\`"
-            echo "- Health: \`/api/health\` and \`/health/ready\` passed"
+            echo "- Health: \`/api/health/ready\` passed"
             echo
             echo "### Worker"
             echo
@@ -901,6 +901,6 @@ jobs:
             if [ "$PRESERVE_CURRENT_FRONTEND" = "true" ]; then
               echo "- Deployment: preserved reviewed task definition \`mscqr-frontend:20\`"
             else
-              echo "- Health: \`/\`, \`/login\`, \`/api/health\`, and \`/health/ready\` passed"
+              echo "- Health: \`/\`, \`/login\`, and \`/api/health/ready\` passed"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

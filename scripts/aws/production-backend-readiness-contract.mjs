@@ -33,9 +33,8 @@ export function parseProductionBackendReadiness(bytes, options) {
 export function assertProductionBackendReadinessUrl(value) {
   let url;
   try { url = new URL(value); } catch { throw new Error("Backend recovery readiness URL is invalid."); }
-  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash
-    || !["/api/health/ready", "/health/ready"].includes(url.pathname)) {
-    throw new Error("Backend recovery must use the canonical HTTPS readiness endpoint.");
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname !== "/api/health/ready") {
+    throw new Error("Backend recovery must use the canonical public HTTPS readiness endpoint.");
   }
   return url.href;
 }

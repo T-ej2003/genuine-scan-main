@@ -30,10 +30,9 @@ test("canonical production readiness requires semantic health, not HTTP reachabi
   assert.throws(() => parseProductionBackendReadiness(Buffer.from([0xff])), /encoded data/);
 });
 
-test("recovery accepts only the canonical HTTPS readiness paths", () => {
+test("recovery accepts only the canonical public HTTPS readiness path", () => {
   assert.equal(assertProductionBackendReadinessUrl("https://www.mscqr.com/api/health/ready"), "https://www.mscqr.com/api/health/ready");
-  assert.equal(assertProductionBackendReadinessUrl("https://api.mscqr.com/health/ready"), "https://api.mscqr.com/health/ready");
-  for (const url of ["https://www.mscqr.com/api/health", "http://www.mscqr.com/api/health/ready", "https://www.mscqr.com/api/health/ready?ok=1", "malformed"]) {
+  for (const url of ["https://www.mscqr.com/health/ready", "https://api.mscqr.com/health/ready", "https://www.mscqr.com/api/health", "http://www.mscqr.com/api/health/ready", "https://www.mscqr.com/api/health/ready?ok=1", "malformed"]) {
     assert.throws(() => assertProductionBackendReadinessUrl(url), /readiness URL|canonical/);
   }
 });
