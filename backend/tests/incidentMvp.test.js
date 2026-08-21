@@ -7,6 +7,7 @@ const {
   sanitizeIncidentText,
 } = require("../dist/services/incidentService");
 const { enforceIncidentRateLimit } = require("../dist/services/incidentRateLimitService");
+const { closeRedisConnections } = require("../dist/services/redisService");
 const { requireAnyAdmin } = require("../dist/middleware/rbac");
 
 const assert = (condition, message) => {
@@ -271,7 +272,7 @@ const run = async () => {
   console.log("incident MVP tests passed");
 };
 
-run().catch((err) => {
+run().finally(closeRedisConnections).catch((err) => {
   console.error(err);
   process.exit(1);
 });

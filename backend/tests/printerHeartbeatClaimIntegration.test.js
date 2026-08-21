@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const { generateKeyPairSync } = require("node:crypto");
 const { PrinterTrustStatus, UserRole } = require("@prisma/client");
+const { closeRedisConnections } = require("../dist/services/redisService");
 
 process.env.PRINT_AGENT_REQUIRE_SIGNATURE = "true";
 process.env.PRINT_AGENT_REQUIRE_MTLS = "false";
@@ -352,7 +353,7 @@ const invokeClaim = async (body) => {
   assert.strictEqual(registrations.some((entry) => entry.id !== "registration-old" && entry.trustStatus === PrinterTrustStatus.TRUSTED), false, "stale replacement heartbeat must not create a trusted replacement");
 
   console.log("printer heartbeat claim integration tests passed");
-})().catch((error) => {
+})().finally(closeRedisConnections).catch((error) => {
   console.error(error);
   process.exit(1);
 });

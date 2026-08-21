@@ -2,6 +2,7 @@ const assert = require("assert");
 const path = require("path");
 const { generateKeyPairSync } = require("crypto");
 const { PrinterTrustStatus, UserRole } = require("@prisma/client");
+const { closeRedisConnections } = require("../dist/services/redisService");
 
 process.env.PRINT_AGENT_REQUIRE_SIGNATURE = "true";
 process.env.PRINT_AGENT_REQUIRE_MTLS = "false";
@@ -205,7 +206,7 @@ const { getPrinterConnectionStatusForUser, upsertPrinterConnectionHeartbeat } = 
   );
 
   console.log("printer heartbeat key rotation tests passed");
-})().catch((error) => {
+})().finally(closeRedisConnections).catch((error) => {
   console.error(error);
   process.exit(1);
 });

@@ -2,6 +2,7 @@ const assert = require("assert");
 const path = require("path");
 const { generateKeyPairSync } = require("crypto");
 const { PrinterTrustStatus, UserRole } = require("@prisma/client");
+const { closeRedisConnections } = require("../dist/services/redisService");
 
 process.env.PRINT_AGENT_REQUIRE_SIGNATURE = "true";
 process.env.PRINT_AGENT_REQUIRE_MTLS = "false";
@@ -232,7 +233,7 @@ const signedHeartbeatInput = (overrides = {}) => {
   assert.strictEqual(wrongDeviceStatus.eligibleForPrinting, false, "wrong device must not create a print-eligible registration");
 
   console.log("printer launch trust contract tests passed");
-})().catch((error) => {
+})().finally(closeRedisConnections).catch((error) => {
   console.error(error);
   process.exit(1);
 });

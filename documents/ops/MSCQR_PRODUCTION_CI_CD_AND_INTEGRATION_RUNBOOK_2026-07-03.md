@@ -49,7 +49,7 @@ If worker variables are absent, CI still builds and pushes `mscqr-worker:${GITHU
 
 CI runs `npm run test:integration:ci` in `quality-gate.yml` on pull requests and `main` pushes. The job starts:
 
-- PostgreSQL service container with disposable DB `mscqr_integration_admin_test`
+- PostgreSQL service container with disposable DB `mscqr_p2_integration_test`
 - Redis service container at `redis://127.0.0.1:6379/0`
 
 The integration harness:
@@ -76,10 +76,10 @@ CI-equivalent run when PostgreSQL and Redis are already running:
 ```bash
 export P2_TEST_DATABASE_REQUIRED=true
 export P2_TEST_DB_PROTOCOL=postgresql
-export P2_TEST_DB_USER=postgres
+export P2_TEST_DB_USER=mscqr_rls_cert_admin
 export P2_TEST_DB_HOST=127.0.0.1
 export P2_TEST_DB_PORT=5432
-export P2_TEST_DB_NAME=mscqr_integration_admin_test
+export P2_TEST_DB_NAME=mscqr_p2_integration_test
 admin_scheme="${P2_TEST_DB_PROTOCOL}:"
 admin_authority="${P2_TEST_DB_USER}@${P2_TEST_DB_HOST}:${P2_TEST_DB_PORT}"
 export P2_TEST_DATABASE_ADMIN_URL="${admin_scheme}//${admin_authority}/${P2_TEST_DB_NAME}"
