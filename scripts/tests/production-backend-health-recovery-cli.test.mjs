@@ -48,11 +48,20 @@ const deps = (fixture, overrides = {}) => ({ baseEnv: githubEnv, now, readProtec
 const readiness = (overrides = {}) => JSON.stringify({ success: true, status: "ready", timestamp: now.toISOString(), release: { gitSha: sourceSha }, dependencies: { database: { configured: true, ready: true }, redis: { configured: true, ready: true }, objectStorage: { configured: true, ready: true } }, ...overrides });
 
 test("health verifier rejects HTTP failure, timeout, malformed JSON, and HTTP-200 degraded payloads", () => {
-  assert.equal(verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", () => readiness(), sourceSha).healthy, true);
-  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", () => readiness({ success: false, status: "degraded" })), /readiness/);
-  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", () => "not-json"), /JSON/);
-  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", () => readiness(), "a".repeat(40)), /release identity/);
-  for (const message of ["curl: HTTP 503", "curl: operation timed out"]) assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", () => { throw new Error(message); }), new RegExp(message.split(": ")[1]));
+  const response = (body, status = 200) => `${body}\n${status}`;
+  const run = (body, status) => (_command, args) => {
+    assert.equal(args.includes("--location") || args.includes("-L") || args.includes("--insecure") || args.includes("-k"), false);
+    assert.equal(args[0], "--disable");
+    return response(body, status);
+  };
+  assert.equal(verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", run(readiness()), sourceSha).healthy, true);
+  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", run(readiness({ success: false, status: "degraded" }))), /readiness/);
+  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", run("not-json")), /JSON/);
+  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", run("<html>frontend</html>")), /JSON/);
+  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", run(readiness()), "a".repeat(40)), /release identity/);
+  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", run(readiness(), 302)), /HTTP 302/);
+  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", run(readiness(), 503)), /HTTP 503/);
+  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", () => { throw new Error("curl: operation timed out"); }), /operation timed out/);
 });
 
 test("prepare authenticates private input bytes and writes a bound private authorization", async (t) => {
@@ -136,6 +145,38 @@ test("execute requires authenticated environment bytes before any external call"
     "--evidence-out", path.join(fixture.dir, "evidence.json"),
   ], deps(fixture, { exec: () => { externalCalls += 1; } })), /--environment-approval/);
   assert.equal(externalCalls, 0);
+});
+
+test("execute rejects a foreign health origin before any AWS call", async (t) => {
+  const fixture = privateFixture();
+  t.after(() => fs.rmSync(fixture.dir, { recursive: true, force: true }));
+  const authorizationPath = path.join(fixture.dir, "authorization.json");
+  await runBackendHealthRecoveryCli([
+    "--prepare", "--source-sha", sourceSha, "--current-task-definition", currentArn,
+    ...environmentArgs(fixture), "--recovery-image-digest", digest,
+    "--image-authorization", fixture.image, "--image-authorization-sha256", sha(fixture.imageBytes),
+    "--approval", fixture.approvalPath, "--approval-sha256", sha(fixture.approvalBytes), "--output", authorizationPath,
+  ], deps(fixture));
+  const authorizationBytes = fs.readFileSync(authorizationPath);
+  const evidencePath = path.join(fixture.dir, "evidence.json");
+  let externalCalls = 0;
+  let registrations = 0;
+  let updates = 0;
+  await assert.rejects(() => runBackendHealthRecoveryCli([
+    "--execute", "--source-sha", sourceSha, ...environmentArgs(fixture),
+    "--image-authorization", fixture.image, "--image-authorization-sha256", sha(fixture.imageBytes),
+    "--authorization", authorizationPath, "--authorization-sha256", sha(authorizationBytes),
+    "--health-url", "https://example.invalid/api/health/ready", "--evidence-out", evidencePath,
+  ], deps(fixture, { exec: (_command, args = []) => {
+    externalCalls += 1;
+    if (args.includes("register-task-definition")) registrations += 1;
+    if (args.includes("update-service")) updates += 1;
+    throw new Error("external call");
+  } })), /canonical public HTTPS/);
+  assert.equal(externalCalls, 0);
+  assert.equal(registrations, 0);
+  assert.equal(updates, 0);
+  assert.equal(fs.existsSync(evidencePath), false);
 });
 
 test("execute publishes authenticated zero-mutation evidence before the first AWS read", async (t) => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertProductionBackendReadiness, assertProductionBackendReadinessUrl, parseProductionBackendReadiness } from "../aws/production-backend-readiness-contract.mjs";
+import { CANONICAL_PRODUCTION_ORIGIN, CANONICAL_PRODUCTION_READINESS_URL, assertProductionBackendReadiness, assertProductionBackendReadinessUrl, parseProductionBackendReadiness } from "../aws/production-backend-readiness-contract.mjs";
 
 const healthy = () => ({
   success: true,
@@ -31,8 +31,23 @@ test("canonical production readiness requires semantic health, not HTTP reachabi
 });
 
 test("recovery accepts only the canonical public HTTPS readiness path", () => {
-  assert.equal(assertProductionBackendReadinessUrl("https://www.mscqr.com/api/health/ready"), "https://www.mscqr.com/api/health/ready");
-  for (const url of ["https://www.mscqr.com/health/ready", "https://api.mscqr.com/health/ready", "https://www.mscqr.com/api/health", "http://www.mscqr.com/api/health/ready", "https://www.mscqr.com/api/health/ready?ok=1", "malformed"]) {
+  assert.equal(CANONICAL_PRODUCTION_ORIGIN, "https://www.mscqr.com");
+  assert.equal(assertProductionBackendReadinessUrl(CANONICAL_PRODUCTION_READINESS_URL), CANONICAL_PRODUCTION_READINESS_URL);
+  for (const url of [
+    "https://example.invalid/api/health/ready",
+    "https://mscqr.com/api/health/ready",
+    "http://www.mscqr.com/api/health/ready",
+    "https://www.mscqr.com:443/api/health/ready",
+    "https://www.mscqr.com:444/api/health/ready",
+    "https://user@www.mscqr.com/api/health/ready",
+    "https://www.mscqr.com/api/health/ready?ok=1",
+    "https://www.mscqr.com/api/health/ready#ok",
+    "https://www.mscqr.com/health/ready",
+    "https://www.mscqr.com.example.invalid/api/health/ready",
+    "https://www.mscqr.com@evil.invalid/api/health/ready",
+    "https://127.0.0.1/api/health/ready",
+    "malformed",
+  ]) {
     assert.throws(() => assertProductionBackendReadinessUrl(url), /readiness URL|canonical/);
   }
 });

@@ -1,5 +1,8 @@
 const object = (value) => value && typeof value === "object" && !Array.isArray(value);
 
+export const CANONICAL_PRODUCTION_ORIGIN = "https://www.mscqr.com";
+export const CANONICAL_PRODUCTION_READINESS_URL = `${CANONICAL_PRODUCTION_ORIGIN}/api/health/ready`;
+
 export function assertProductionBackendReadiness(payload, { expectedReleaseSha } = {}) {
   if (!object(payload) || payload.success !== true || payload.status !== "ready") {
     throw new Error("Production backend readiness did not report success=true and status=ready.");
@@ -31,10 +34,9 @@ export function parseProductionBackendReadiness(bytes, options) {
 }
 
 export function assertProductionBackendReadinessUrl(value) {
-  let url;
-  try { url = new URL(value); } catch { throw new Error("Backend recovery readiness URL is invalid."); }
-  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname !== "/api/health/ready") {
+  try { new URL(value); } catch { throw new Error("Backend recovery readiness URL is invalid."); }
+  if (value !== CANONICAL_PRODUCTION_READINESS_URL) {
     throw new Error("Backend recovery must use the canonical public HTTPS readiness endpoint.");
   }
-  return url.href;
+  return CANONICAL_PRODUCTION_READINESS_URL;
 }

@@ -32,7 +32,8 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --output) output="$2"; shift 2 ;;
     --write-out) shift 2 ;;
-    --silent|--show-error|--location) shift ;;
+    --silent|--show-error|--disable) shift ;;
+    --proto) shift 2 ;;
     *) url="$1"; shift ;;
   esac
 done
@@ -44,7 +45,7 @@ printf '%s' "\${MOCK_CURL_STATUS:-200}"
   return { directory, log };
 }
 
-function runSmoke(t, body, paths) {
+function runSmoke(t, body, paths, overrides = {}) {
   const { directory, log } = fixture(t);
   const env = {
     ...process.env,
@@ -53,6 +54,7 @@ function runSmoke(t, body, paths) {
     MOCK_CURL_BODY: body,
     MOCK_CURL_LOG: log,
     ...(paths ? { SMOKE_PATHS: paths } : {}),
+    ...overrides,
   };
   const run = () => execFileSync("bash", [smoke], { cwd: root, env, encoding: "utf8", stdio: "pipe" });
   return { run, urls: () => fs.readFileSync(log, "utf8").trim().split("\n") };
@@ -77,6 +79,8 @@ test("normal and recovery smoke use the one public Nginx-proxied readiness path"
   assert.deepEqual([...workflow.matchAll(/SMOKE_PATHS:\s*([^\n]+)/g)].map((match) => match[1].trim()), ["/api/health/ready"]);
   assert.doesNotMatch(workflow, /`\/health\/ready` passed/);
   assert.match(verifier, /\[\[ "\$path" == "\/api\/health\/ready" \]\]/);
+  assert.doesNotMatch(verifier, /--location|\s-L(?:\s|\\)/);
+  assert.match(verifier, /--disable/);
 });
 
 test("public readiness rejects frontend HTML, malformed JSON, and degraded HTTP-200 payloads", (t) => {
@@ -93,4 +97,14 @@ test("public readiness rejects frontend HTML, malformed JSON, and degraded HTTP-
 test("healthy canonical public readiness JSON passes semantic verification", (t) => {
   const smokeRun = runSmoke(t, ready, "/api/health/ready");
   assert.match(smokeRun.run(), /Verified https:\/\/www\.mscqr\.com\/api\/health\/ready returned HTTP 200/);
+});
+
+test("foreign origins and redirects fail closed", (t) => {
+  const foreign = runSmoke(t, ready, "/api/health/ready", { PUBLIC_BASE_URL: "https://example.invalid" });
+  assert.throws(foreign.run);
+
+  for (const location of ["https://evil.invalid/api/health/ready", "https://www.mscqr.com/api/health/ready"]) {
+    const redirected = runSmoke(t, ready, "/api/health/ready", { MOCK_CURL_STATUS: "302", MOCK_LOCATION: location });
+    assert.throws(redirected.run);
+  }
 });

@@ -33,6 +33,12 @@ SMOKE_PATHS="${SMOKE_PATHS:-/ /login /api/health/ready}"
 
 base_url="${PUBLIC_BASE_URL%/}"
 
+node --input-type=module - "$base_url" <<'NODE'
+import { assertProductionBackendReadinessUrl } from "./scripts/aws/production-backend-readiness-contract.mjs";
+
+assertProductionBackendReadinessUrl(`${process.argv[2]}/api/health/ready`);
+NODE
+
 for path in $SMOKE_PATHS; do
   case "$path" in
     /*) url="${base_url}${path}" ;;
@@ -42,9 +48,10 @@ for path in $SMOKE_PATHS; do
   response_file="$(mktemp)"
   status_code="$(
     curl \
+      --disable \
       --silent \
       --show-error \
-      --location \
+      --proto '=https' \
       --output "$response_file" \
       --write-out '%{http_code}' \
       "$url"

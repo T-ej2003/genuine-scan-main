@@ -26,8 +26,11 @@ const digestPattern = /^sha256:[a-f0-9]{64}$/;
 
 export function verifyProductionBackendHealth(healthUrl, run, expectedReleaseSha) {
   const url = assertProductionBackendReadinessUrl(healthUrl);
-  const bytes = run("curl", ["--fail", "--silent", "--show-error", "--location", "--max-time", "20", url]);
-  return parseProductionBackendReadiness(bytes, { expectedReleaseSha });
+  const response = Buffer.from(run("curl", ["--disable", "--silent", "--show-error", "--max-time", "20", "--proto", "=https", "--output", "-", "--write-out", "\n%{http_code}", url]));
+  const separator = response.lastIndexOf(0x0a);
+  const status = separator < 0 ? "" : response.subarray(separator + 1).toString("ascii");
+  if (!/^2[0-9]{2}$/.test(status)) throw new Error(`Production backend readiness returned HTTP ${status || "unknown"}.`);
+  return parseProductionBackendReadiness(response.subarray(0, separator), { expectedReleaseSha });
 }
 
 function readAuthenticatedJson(filePath, expectedSha256, label) {
