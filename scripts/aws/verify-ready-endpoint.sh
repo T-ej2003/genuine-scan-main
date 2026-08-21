@@ -5,8 +5,8 @@ usage() {
   cat <<'EOF'
 Usage: scripts/aws/verify-ready-endpoint.sh <ready-url>
 
-Fetch a backend /health/ready endpoint and fail unless the payload reports
-success=true.
+Fetch a backend /health/ready endpoint and enforce the production readiness
+payload, including all required dependency checks.
 EOF
 }
 
@@ -37,14 +37,11 @@ curl --fail --silent --show-error --location "$READY_URL" >"$RESPONSE_FILE"
 
 node --input-type=module - "$READY_URL" "$RESPONSE_FILE" <<'NODE'
 import fs from "node:fs";
+import { assertProductionBackendReadiness } from "./scripts/aws/production-backend-readiness-contract.mjs";
 
 const [readyUrl, responsePath] = process.argv.slice(2);
 const payload = JSON.parse(fs.readFileSync(responsePath, "utf8"));
+assertProductionBackendReadiness(payload);
 
-if (payload?.success !== true) {
-  console.error(`Ready endpoint ${readyUrl} did not return success=true.`);
-  process.exit(1);
-}
-
-console.log(`Verified ${readyUrl} returned success=true`);
+console.log(`Verified ${readyUrl} returned production-ready dependency health`);
 NODE

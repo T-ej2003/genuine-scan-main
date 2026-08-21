@@ -639,6 +639,60 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "production-environment-approval",
+      "kind": "file",
+      "producer": "scripts/aws/production-github-environment-approval.mjs:runCli",
+      "consumers": [
+        "scripts/aws/recover-production-backend-health.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "production-environment-approval",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "backend-health-recovery-authorization",
+      "kind": "file",
+      "producer": "scripts/aws/recover-production-backend-health.mjs:runBackendHealthRecoveryCli --prepare",
+      "consumers": [
+        "scripts/aws/recover-production-backend-health.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "backend-health-recovery-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "backend-health-recovery-evidence",
+      "kind": "file",
+      "producer": "scripts/aws/recover-production-backend-health.mjs:runBackendHealthRecoveryCli --execute",
+      "consumers": [
+        ".github/workflows/release-gate.yml"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": true,
+      "hashBound": true,
+      "atomicGroup": "backend-health-recovery-evidence",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "temporary-stage-a-kms-capability",
       "kind": "file",
       "producer": "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs:createTemporaryKmsCapabilityRunner",

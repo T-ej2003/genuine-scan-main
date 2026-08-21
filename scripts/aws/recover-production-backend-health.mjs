@@ -9,17 +9,26 @@ import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-e
 import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
 import {
   BACKEND_HEALTH_RECOVERY,
+  BACKEND_HEALTH_RECOVERY_STATUS,
+  assertLegacyBackendRecoveryEvidence,
   assertLegacyBackendRecoveryAuthorization,
   buildLegacyBackendRecoveryCandidate,
   createLegacyBackendRecoveryAuthorization,
   runLegacyBackendHealthRecovery,
 } from "./production-backend-health-recovery-contract.mjs";
+import { assertProductionBackendReadinessUrl, parseProductionBackendReadiness } from "./production-backend-readiness-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const hex256 = /^[a-f0-9]{64}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
+
+export function verifyProductionBackendHealth(healthUrl, run, expectedReleaseSha) {
+  const url = assertProductionBackendReadinessUrl(healthUrl);
+  const bytes = run("curl", ["--fail", "--silent", "--show-error", "--location", "--max-time", "20", url]);
+  return parseProductionBackendReadiness(bytes, { expectedReleaseSha });
+}
 
 function readAuthenticatedJson(filePath, expectedSha256, label) {
   if (!hex256.test(expectedSha256 || "")) throw new Error(`${label} expected SHA-256 is invalid.`);
@@ -82,6 +91,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     sourceSha,
     currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn,
     recoveryImageDigest: authorization.value.recoveryImageDigest,
+    imageReleaseSha: authorization.value.imageReleaseSha,
     imageAuthorization: image.value,
     imageValidation: { verifyImageEvidence },
     environmentApproval: environmentApproval.value,
@@ -89,8 +99,36 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     executionActor: env.GITHUB_ACTOR,
   });
   const evidenceOut = path.resolve(required(argv, "--evidence-out"));
-  const healthUrl = required(argv, "--health-url");
-  if (!/^https:\/\//.test(healthUrl)) throw new Error("Backend recovery health URL must use HTTPS.");
+  const healthUrl = assertProductionBackendReadinessUrl(required(argv, "--health-url"));
+  const evidenceBase = {
+    schemaVersion: 2,
+    kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE",
+    sourceSha,
+    authorizationFileSha256: authorization.sha256,
+    authorizationSha256: authorization.value.authorizationSha256,
+    environmentApprovalFileSha256: environmentApproval.sha256,
+    environmentApprovalSha256: environmentApproval.value.evidenceSha256,
+    imageAuthorizationFileSha256: image.sha256,
+    imageAuthorizationSha256: image.value.evidenceSha256,
+    currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn,
+    recoveryImageDigest: authorization.value.recoveryImageDigest,
+    imageReleaseSha: authorization.value.imageReleaseSha,
+    account: BACKEND_HEALTH_RECOVERY.account,
+    region: BACKEND_HEALTH_RECOVERY.region,
+  };
+  let evidenceState = { status: BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE, targetArn: null, registrations: 0, updates: 0 };
+  let lastEvidence;
+  const generatedAt = () => new Date(typeof deps.now === "function" ? deps.now() : deps.now || Date.now()).toISOString();
+  const record = async (next = {}) => {
+    evidenceState = { ...evidenceState, ...next };
+    const body = { ...evidenceBase, ...evidenceState, generatedAt: generatedAt() };
+    const evidence = { ...body, evidenceSha256: canonicalSha256(body) };
+    writeStageBPrivateFilesAtomic({ repositoryRoot: root, overwrite: true, files: [{ filePath: evidenceOut, bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), label: "Backend health recovery evidence" }] });
+    const persisted = readStageBPrivateFileBytes({ filePath: evidenceOut, repositoryRoot: root, label: "Backend health recovery evidence" });
+    lastEvidence = assertLegacyBackendRecoveryEvidence(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(persisted.bytes)), evidenceBase);
+    return evidence;
+  };
+  await record();
   const run = deps.exec || ((command, args) => execFileSync(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   const aws = (args) => JSON.parse(run("aws", [...args, "--region", BACKEND_HEALTH_RECOVERY.region, "--output", "json", "--no-cli-pager"]));
   const caller = aws(["sts", "get-caller-identity"]);
@@ -142,7 +180,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     if (response.failures?.length || response.services?.length !== 1) throw new Error("Backend service reconciliation readback failed.");
     return response.services[0];
   };
-  const result = await runLegacyBackendHealthRecovery({
+  await runLegacyBackendHealthRecovery({
     sourceSha, service, currentTaskDefinition, currentImageExists: imageExists(currentDigest), stoppedReasons,
     replacementImage: { exists: imageExists(recoveryDigest), immutable: repository?.imageTagMutability === "IMMUTABLE", signatureValid: true, attestationValid: true, provenanceValid: true, criticalFindings: 0, repository: BACKEND_HEALTH_RECOVERY.repository, digest: recoveryDigest },
     authorization: authorization.value, imageAuthorization: image.value, imageValidation, environmentApproval: environmentApproval.value, githubContext, executionActor: env.GITHUB_ACTOR, candidate,
@@ -157,14 +195,14 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       const listed = aws(["ecs", "list-tasks", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--service-name", BACKEND_HEALTH_RECOVERY.service, "--desired-status", "RUNNING"]);
       if (!listed.taskArns?.length) return [];
       const tasks = aws(["ecs", "describe-tasks", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--tasks", ...listed.taskArns]).tasks || [];
-      return tasks.map((task) => ({ taskDefinitionArn: task.taskDefinitionArn, imageDigest: task.containers?.find(({ name }) => name === BACKEND_HEALTH_RECOVERY.container)?.imageDigest }));
+      return tasks.map((task) => ({ taskDefinitionArn: task.taskDefinitionArn, imageDigest: task.containers?.find(({ name }) => name === BACKEND_HEALTH_RECOVERY.container)?.imageDigest, healthStatus: task.healthStatus }));
     },
-    verifyHealth: async () => { try { run("curl", ["--fail", "--silent", "--show-error", "--max-time", "20", healthUrl]); return true; } catch { return false; } },
+    verifyHealth: async () => {
+      return verifyProductionBackendHealth(healthUrl, run, authorization.value.imageReleaseSha);
+    },
+    record,
   });
-  const evidenceBody = { schemaVersion: 1, kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE", sourceSha, authorizationSha256: authorization.sha256, imageAuthorizationSha256: image.sha256, account: BACKEND_HEALTH_RECOVERY.account, region: BACKEND_HEALTH_RECOVERY.region, ...result, generatedAt: new Date().toISOString() };
-  const evidence = { ...evidenceBody, evidenceSha256: canonicalSha256(evidenceBody) };
-  writeStageBPrivateFilesAtomic({ repositoryRoot: root, overwrite: false, files: [{ filePath: evidenceOut, bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), label: "Backend health recovery evidence" }] });
-  return evidence;
+  return lastEvidence;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) runBackendHealthRecoveryCli().then((result) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`));

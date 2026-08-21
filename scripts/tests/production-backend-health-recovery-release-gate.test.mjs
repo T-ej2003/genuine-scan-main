@@ -10,7 +10,8 @@ test("release gate exposes one bounded backend health recovery mode", () => {
   const recoveryCase = workflow.match(/backend-health-recovery\)([\s\S]*?)\n\s*;;/u)?.[1] || "";
   assert.doesNotMatch(recoveryCase, /check:rotation-evidence-freshness/);
   assert.match(workflow, /Execute governed legacy backend health recovery[\s\S]*recover-production-backend-health\.mjs[\s\S]*--execute/);
-  assert.match(workflow, /if: \$\{\{ inputs\.release_mode == 'backend-health-recovery' \}\}[\s\S]*backend-health-recovery-evidence/);
+  assert.match(workflow, /Upload backend health recovery evidence\n\s*if: \$\{\{ always\(\) && inputs\.release_mode == 'backend-health-recovery' \}\}[\s\S]*backend-health-recovery-evidence[\s\S]*if-no-files-found: ignore/);
+  assert.match(workflow, /--health-url "\$\{\{ env\.PUBLIC_BASE_URL \}\}\/api\/health\/ready"/);
   assert.match(workflow, /deploy-production-ecs:[\s\S]*environment: production/);
   assert.match(workflow, /Authenticate production environment approval boundary[\s\S]*approval_dir="\$RUNNER_TEMP\/production-environment-approval"[\s\S]*! -d "\$approval_dir" \|\| -L "\$approval_dir"[\s\S]*install -d -m 700 -- "\$approval_dir"[\s\S]*stat -c '%a'[\s\S]*stat -c '%u'[\s\S]*production-github-environment-approval\.mjs[\s\S]*--environment production[\s\S]*--workflow-ref "\$GITHUB_WORKFLOW_REF"[\s\S]*--event-name "\$GITHUB_EVENT_NAME"[\s\S]*--workflow-run-id "\$GITHUB_RUN_ID"/);
   assert.doesNotMatch(workflow, /evidence_file="\$RUNNER_TEMP\/production-environment-approval\.json"/);

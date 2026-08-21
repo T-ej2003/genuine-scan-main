@@ -47,11 +47,35 @@ identity fields must equal the image authorization's authenticated release SHA. 
 secrets, database bindings, networking, ports, command, health check, logging,
 resources, and every other runtime field must remain byte-semantically equal.
 
+The IAM model follows the AWS ECS service-authorization reference: the
+registration write stays scoped to the `mscqr-backend:*` task-definition
+resource with the supported compute/privileged/CPU/memory conditions, while
+`UpdateService` stays scoped to the exact backend service, cluster, and target
+task-definition condition. Application-side candidate equality and exact
+legacy-role `PassRole` boundaries remain mandatory because IAM is not the
+task-definition semantic-diff engine.
+
+- [Amazon ECS actions, resources, and condition keys](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonelasticcontainerservice.html)
+- [Amazon ECS identity-based policy examples](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/security_iam_id-based-policy-examples.html)
+
 The mode registers at most one matching legacy revision, updates only the
 backend service, reconciles ambiguous registration/update outcomes from live
-ECS, waits for stability, verifies running digests, verifies backend health,
-and publishes recovery evidence. It never deploys frontend/worker workloads,
-applies Stage B, or satisfies/bypasses rotation freshness.
+ECS, waits for stability, verifies running digests, and verifies the canonical
+`/api/health/ready` payload. Readiness requires `success=true`,
+`status=ready`, and ready production database, Redis, and object-storage
+dependencies. Recovery additionally requires the readiness release SHA to
+equal the authenticated replacement image release SHA; HTTP 200 alone is never
+recovery evidence.
+
+The private, atomic recovery evidence is written before AWS discovery and
+updated immediately before and after each ECS mutation. Its source,
+environment approval, authorization bytes, current task definition, and target
+digest bindings survive registration, service-update, waiter, running-digest,
+or readiness failure. The workflow uploads this evidence on success or failure
+when present. A retry reconciles the live revision census and service before
+registering or updating, so a failed run cannot create duplicate recovery
+revisions blindly. The mode never deploys frontend/worker workloads, applies
+Stage B, or satisfies/bypasses rotation freshness.
 
 Before registration, the initially observed service must identify the approved
 legacy source revision unless it already identifies the single exact recovery

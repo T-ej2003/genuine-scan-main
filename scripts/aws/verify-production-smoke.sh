@@ -59,28 +59,10 @@ for path in $SMOKE_PATHS; do
   if [[ "$path" == "/api/health" || "$path" == "/health/ready" ]]; then
     node --input-type=module - "$url" "$response_file" <<'NODE'
 import fs from "node:fs";
+import { assertProductionBackendReadiness } from "./scripts/aws/production-backend-readiness-contract.mjs";
 
 const [url, responsePath] = process.argv.slice(2);
-const text = fs.readFileSync(responsePath, "utf8").trim();
-
-if (!text.startsWith("{")) {
-  console.log(`Verified ${url} returned HTTP 2xx; response was not JSON.`);
-  process.exit(0);
-}
-
-const payload = JSON.parse(text);
-const successValues = [
-  payload?.success,
-  payload?.ready,
-  payload?.healthy,
-  payload?.status === "ok",
-  payload?.status === "ready",
-];
-
-if (!successValues.some((value) => value === true)) {
-  console.error(`${url} JSON did not report success, ready, healthy, or status=ok/ready.`);
-  process.exit(1);
-}
+assertProductionBackendReadiness(JSON.parse(fs.readFileSync(responsePath, "utf8")));
 NODE
   fi
 

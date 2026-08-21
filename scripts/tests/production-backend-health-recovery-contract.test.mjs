@@ -4,10 +4,11 @@ import test from "node:test";
 import {
   BACKEND_HEALTH_RECOVERY,
   assertLegacyBackendRecoveryCandidate,
+  assertLegacyBackendRecoveryEvidence,
   assertLegacyBackendRecoveryEligibility,
   buildLegacyBackendRecoveryCandidate,
   createLegacyBackendRecoveryAuthorization,
-  runLegacyBackendHealthRecovery,
+  runLegacyBackendHealthRecovery as runRecoveryContract,
 } from "../aws/production-backend-health-recovery-contract.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
@@ -51,6 +52,8 @@ const base = () => ({
   executionActor: "release-operator",
   candidate: structuredClone(candidate),
 });
+const healthy = Object.freeze({ healthy: true, success: true, status: "ready" });
+const runLegacyBackendHealthRecovery = (input, adapters) => runRecoveryContract(input, { record: async () => {}, ...adapters });
 
 const mutate = (path, value) => {
   const input = base();
@@ -133,8 +136,8 @@ test("runner reconciles registration and update partial success without duplicat
     readService: async () => service,
     updateService: async (arn) => { updateCalls += 1; service = { taskDefinition: arn, desiredCount: 2, runningCount: 2, pendingCount: 0 }; throw new Error("response lost"); },
     waitStable: async () => {},
-    readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest })),
-    verifyHealth: async () => true,
+    readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })),
+    verifyHealth: async () => healthy,
   });
   assert.equal(result.registrations, 1);
   assert.equal(result.updates, 1);
@@ -151,7 +154,7 @@ test("already recovered replay performs no registration or service update", asyn
   const result = await runLegacyBackendHealthRecovery(input, {
     census: async () => [registered], register: async () => assert.fail("register called"), describe: async () => registered, readService: async () => service,
     updateService: async () => assert.fail("update called"), waitStable: async () => {},
-    readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest })), verifyHealth: async () => true,
+    readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy,
   });
   assert.equal(result.registrations, 0);
   assert.equal(result.updates, 0);
@@ -182,7 +185,7 @@ test("stale source revisions fail before registration while authenticated recove
   const result = await runLegacyBackendHealthRecovery(replay, {
     census: async () => [registered], register: async () => assert.fail("register called"), describe: async () => registered,
     readService: async () => ({ ...replay.service, runningCount: 2, pendingCount: 0 }), updateService: async () => assert.fail("update called"),
-    waitStable: async () => {}, readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest })), verifyHealth: async () => true,
+    waitStable: async () => {}, readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy,
   });
   assert.equal(result.registrations, 0);
   assert.equal(result.updates, 0);
@@ -303,8 +306,8 @@ test("registered revision is reused after a rejected update and health/digest fa
     readService: async () => service,
     updateService: async (arn) => { updates += 1; if (updates === 1) throw new Error("rejected"); service = { taskDefinition: arn, desiredCount: 2, runningCount: 2, pendingCount: 0 }; },
     waitStable: async () => {},
-    readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest })),
-    verifyHealth: async () => true,
+    readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })),
+    verifyHealth: async () => healthy,
   };
   await assert.rejects(() => runLegacyBackendHealthRecovery(base(), adapters), /rejected/);
   const recovered = await runLegacyBackendHealthRecovery(base(), adapters);
@@ -315,6 +318,113 @@ test("registered revision is reused after a rejected update and health/digest fa
   const stable = { ...adapters, census: async () => [registered], readService: async () => ({ taskDefinition: targetArn, desiredCount: 2, runningCount: 2, pendingCount: 0 }) };
   const already = base();
   already.service.taskDefinition = targetArn;
-  await assert.rejects(() => runLegacyBackendHealthRecovery(already, { ...stable, readRunningTasks: async () => [{ taskDefinitionArn: targetArn, imageDigest: "sha256:" + "f".repeat(64) }, { taskDefinitionArn: targetArn, imageDigest: digest }] }), /Running backend/);
+  await assert.rejects(() => runLegacyBackendHealthRecovery(already, { ...stable, readRunningTasks: async () => [{ taskDefinitionArn: targetArn, imageDigest: "sha256:" + "f".repeat(64), healthStatus: "HEALTHY" }, { taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" }] }), /Running backend/);
   await assert.rejects(() => runLegacyBackendHealthRecovery(already, { ...stable, verifyHealth: async () => false }), /health did not recover/);
+});
+
+test("durable recovery states preserve every confirmed partial mutation and terminal verification failure", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  const run = async ({ register = async () => registered, updateService, waitStable = async () => {}, readRunningTasks, verifyHealth }) => {
+    const records = [];
+    let service = { ...base().service, runningCount: 0, pendingCount: 2 };
+    const adapters = {
+      census: async () => [], register, describe: async () => registered, readService: async () => service,
+      updateService: updateService || (async (arn) => { service = { ...service, taskDefinition: arn, runningCount: 2, pendingCount: 0 }; }),
+      waitStable,
+      readRunningTasks: readRunningTasks || (async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" }))),
+      verifyHealth: verifyHealth || (async () => healthy),
+      record: async (entry) => { records.push(structuredClone(entry)); },
+    };
+    return { records, execute: () => runRecoveryContract(base(), adapters), setService: (value) => { service = value; } };
+  };
+
+  const updateFailure = await run({ updateService: async () => { throw new Error("update rejected"); } });
+  await assert.rejects(updateFailure.execute(), /update rejected/);
+  assert.deepEqual(updateFailure.records.map(({ status }) => status), [
+    "TASK_DEFINITION_REGISTRATION_ATTEMPTED", "TASK_DEFINITION_REGISTERED_ONLY", "SERVICE_UPDATE_ATTEMPTED", "TASK_DEFINITION_REGISTERED_ONLY",
+  ]);
+
+  const waiterFailure = await run({ waitStable: async () => { throw new Error("waiter timeout"); } });
+  await assert.rejects(waiterFailure.execute(), /waiter timeout/);
+  assert.equal(waiterFailure.records.at(-1).status, "SERVICE_STABILIZATION_FAILED");
+  assert.equal(waiterFailure.records.at(-1).updates, 1);
+
+  const digestFailure = await run({ readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: "sha256:" + "f".repeat(64), healthStatus: "HEALTHY" })) });
+  await assert.rejects(digestFailure.execute(), /Running backend/);
+  assert.equal(digestFailure.records.at(-1).status, "RUNNING_DIGEST_VERIFICATION_FAILED");
+
+  const oneTaskUnhealthy = await run({ readRunningTasks: async () => ["HEALTHY", "UNHEALTHY"].map((healthStatus) => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus })) });
+  await assert.rejects(oneTaskUnhealthy.execute(), /Every running backend task/);
+  assert.equal(oneTaskUnhealthy.records.at(-1).status, "SERVICE_STABILIZATION_FAILED");
+
+  const healthFailure = await run({ verifyHealth: async () => { throw new Error("HTTP 503"); } });
+  await assert.rejects(healthFailure.execute(), /HTTP 503/);
+  assert.equal(healthFailure.records.at(-1).status, "HEALTH_VERIFICATION_FAILED");
+
+  const success = await run({});
+  const result = await success.execute();
+  assert.equal(result.health.status, "ready");
+  assert.equal(success.records.at(-1).status, "RECOVERY_COMPLETE");
+  assert.equal(success.records.at(-1).health.healthy, true);
+});
+
+test("already-recovered replay records completion without fake mutations", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  const input = base();
+  input.service.taskDefinition = targetArn;
+  const records = [];
+  await runRecoveryContract(input, {
+    census: async () => [registered], register: async () => assert.fail("register called"), describe: async () => registered,
+    readService: async () => ({ ...input.service, runningCount: 2, pendingCount: 0 }), updateService: async () => assert.fail("update called"),
+    waitStable: async () => {}, readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })),
+    verifyHealth: async () => healthy, record: async (entry) => { records.push(structuredClone(entry)); },
+  });
+  assert.deepEqual(records.map(({ status }) => status), ["RECOVERY_COMPLETE"]);
+  assert.equal(records[0].registrations, 0);
+  assert.equal(records[0].updates, 0);
+});
+
+test("reused orphan revision preserves zero-mutation update-failure evidence", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  const records = [];
+  await assert.rejects(() => runRecoveryContract(base(), {
+    census: async () => [registered], register: async () => assert.fail("register called"), describe: async () => registered,
+    readService: async () => base().service, updateService: async () => { throw new Error("update rejected"); },
+    waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
+    record: async (entry) => { records.push(structuredClone(entry)); },
+  }), /update rejected/);
+  assert.deepEqual(records.map(({ status }) => status), ["SERVICE_UPDATE_ATTEMPTED", "SERVICE_UPDATE_ATTEMPTED"]);
+  assert.equal(records.at(-1).registrations, 0);
+  assert.equal(records.at(-1).updates, 0);
+});
+
+test("partial and complete recovery evidence is self-authenticating", () => {
+  const bindings = {
+    authorizationFileSha256: "1".repeat(64), authorizationSha256: "2".repeat(64),
+    environmentApprovalFileSha256: "3".repeat(64), environmentApprovalSha256: "4".repeat(64),
+    imageAuthorizationFileSha256: "5".repeat(64), imageAuthorizationSha256: "6".repeat(64),
+    imageReleaseSha: sourceSha,
+    account: "368992683803", region: "eu-west-2",
+  };
+  const body = {
+    schemaVersion: 2, kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE", sourceSha,
+    currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
+    ...bindings, status: "NO_MUTATION_FAILURE", targetArn: null, registrations: 0, updates: 0, generatedAt: now.toISOString(),
+  };
+  const evidence = { ...body, evidenceSha256: canonicalSha256(body) };
+  const expected = { sourceSha, currentTaskDefinitionArn: body.currentTaskDefinitionArn, recoveryImageDigest: digest, ...bindings };
+  assert.equal(assertLegacyBackendRecoveryEvidence(evidence, expected).status, "NO_MUTATION_FAILURE");
+  assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...evidence, status: "RECOVERY_COMPLETE" }, expected), /tampered/);
+  const contradictoryBody = { ...body, registrations: 1 };
+  assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...contradictoryBody, evidenceSha256: canonicalSha256(contradictoryBody) }, expected), /No-mutation/);
+  const incompleteBody = { ...body };
+  delete incompleteBody.environmentApprovalSha256;
+  assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...incompleteBody, evidenceSha256: canonicalSha256(incompleteBody) }, expected), /malformed/);
+  const overcountedBody = { ...body, registrations: 2 };
+  assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...overcountedBody, evidenceSha256: canonicalSha256(overcountedBody) }, expected), /malformed/);
+  const incompleteHealthBody = { ...body, status: "RECOVERY_COMPLETE", targetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", backendHealthy: true, rotationRequired: true, health: { healthy: true, success: true, status: "ready" } };
+  assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...incompleteHealthBody, evidenceSha256: canonicalSha256(incompleteHealthBody) }, expected), /readiness proof/);
 });

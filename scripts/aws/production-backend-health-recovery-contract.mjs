@@ -14,6 +14,19 @@ export const BACKEND_HEALTH_RECOVERY = Object.freeze({
   repository: "mscqr-backend",
 });
 
+export const BACKEND_HEALTH_RECOVERY_STATUS = Object.freeze({
+  NO_MUTATION_FAILURE: "NO_MUTATION_FAILURE",
+  TASK_DEFINITION_REGISTRATION_ATTEMPTED: "TASK_DEFINITION_REGISTRATION_ATTEMPTED",
+  TASK_DEFINITION_REGISTERED_ONLY: "TASK_DEFINITION_REGISTERED_ONLY",
+  SERVICE_UPDATE_ATTEMPTED: "SERVICE_UPDATE_ATTEMPTED",
+  SERVICE_UPDATE_CONFIRMED: "SERVICE_UPDATE_CONFIRMED",
+  SERVICE_STABILIZATION_FAILED: "SERVICE_STABILIZATION_FAILED",
+  RUNNING_DIGEST_VERIFICATION_FAILED: "RUNNING_DIGEST_VERIFICATION_FAILED",
+  HEALTH_VERIFICATION_FAILED: "HEALTH_VERIFICATION_FAILED",
+  RECOVERY_COMPLETE: "RECOVERY_COMPLETE",
+});
+const RECOVERY_STATUSES = new Set(Object.values(BACKEND_HEALTH_RECOVERY_STATUS));
+
 const SHA = /^[a-f0-9]{40}$/;
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX256 = /^[a-f0-9]{64}$/;
@@ -27,6 +40,48 @@ const requiredText = (value, label) => {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required.`);
   return value.trim();
 };
+
+export function assertLegacyBackendRecoveryEvidence(evidence, {
+  sourceSha, currentTaskDefinitionArn, recoveryImageDigest, authorizationFileSha256, authorizationSha256,
+  environmentApprovalFileSha256, environmentApprovalSha256, imageAuthorizationFileSha256, imageAuthorizationSha256,
+  imageReleaseSha,
+  account = BACKEND_HEALTH_RECOVERY.account, region = BACKEND_HEALTH_RECOVERY.region,
+} = {}) {
+  const { evidenceSha256, ...body } = evidence || {};
+  if (evidence?.schemaVersion !== 2 || evidence?.kind !== "BACKEND_HEALTH_RECOVERY_EVIDENCE"
+    || evidence.sourceSha !== sourceSha || !SHA.test(sourceSha || "")
+    || evidence.currentTaskDefinitionArn !== currentTaskDefinitionArn || !TASK_ARN.test(currentTaskDefinitionArn || "")
+    || evidence.recoveryImageDigest !== recoveryImageDigest || !SHA256.test(recoveryImageDigest || "")
+    || evidence.imageReleaseSha !== imageReleaseSha || !SHA.test(imageReleaseSha || "")
+    || evidence.account !== account || evidence.region !== region
+    || ![authorizationFileSha256, authorizationSha256, environmentApprovalFileSha256, environmentApprovalSha256,
+      imageAuthorizationFileSha256, imageAuthorizationSha256].every((expected) => HEX256.test(expected || ""))
+    || evidence.authorizationFileSha256 !== authorizationFileSha256 || evidence.authorizationSha256 !== authorizationSha256
+    || evidence.environmentApprovalFileSha256 !== environmentApprovalFileSha256 || evidence.environmentApprovalSha256 !== environmentApprovalSha256
+    || evidence.imageAuthorizationFileSha256 !== imageAuthorizationFileSha256 || evidence.imageAuthorizationSha256 !== imageAuthorizationSha256
+    || !RECOVERY_STATUSES.has(evidence.status)
+    || !Number.isSafeInteger(evidence.registrations) || evidence.registrations < 0 || evidence.registrations > 1
+    || !Number.isSafeInteger(evidence.updates) || evidence.updates < 0 || evidence.updates > 1
+    || !Number.isFinite(Date.parse(evidence.generatedAt))
+    || !HEX256.test(evidenceSha256 || "") || canonicalSha256(body) !== evidenceSha256) {
+    throw new Error("Backend health recovery evidence is malformed, stale, or tampered.");
+  }
+  if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE && (evidence.registrations !== 0 || evidence.updates !== 0)) throw new Error("No-mutation recovery evidence records a mutation.");
+  if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED && (evidence.registrations !== 0 || evidence.updates !== 0)) throw new Error("Registration-attempt evidence records a confirmed mutation.");
+  if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTERED_ONLY && (evidence.registrations !== 1 || evidence.updates !== 0)) throw new Error("Registered-only evidence has inconsistent mutation counts.");
+  if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED && evidence.updates !== 0) throw new Error("Service-update-attempt evidence records a confirmed update.");
+  if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_CONFIRMED && evidence.updates !== 1) throw new Error("Service-update confirmation lacks its mutation count.");
+  if ([BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE, BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED].includes(evidence.status) && evidence.targetArn !== null) throw new Error("Pre-registration recovery evidence records a target revision.");
+  if (![BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE, BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED].includes(evidence.status) && !TASK_ARN.test(evidence.targetArn || "")) throw new Error("Post-registration recovery evidence lacks the authenticated target revision.");
+  if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.RECOVERY_COMPLETE
+    && (evidence.backendHealthy !== true || evidence.health?.healthy !== true || evidence.health?.success !== true || evidence.health?.status !== "ready"
+      || evidence.health?.dependencies?.database !== "ready" || evidence.health?.dependencies?.redis !== "ready" || evidence.health?.dependencies?.objectStorage !== "ready"
+      || evidence.health?.release?.gitSha !== imageReleaseSha || !Number.isFinite(Date.parse(evidence.health?.timestamp))
+      || evidence.rotationRequired !== true)) {
+    throw new Error("Completed backend recovery evidence lacks final readiness proof.");
+  }
+  return evidence;
+}
 
 export function createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, imageAuthorization, environmentApproval, approval } = {}) {
   const body = {
@@ -150,7 +205,7 @@ export function assertLegacyBackendRecoveryEligibility(input = {}) {
 }
 
 export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
-  for (const name of ["census", "register", "describe", "readService", "updateService", "waitStable", "readRunningTasks", "verifyHealth"]) if (typeof adapters[name] !== "function") throw new Error(`Recovery adapter ${name} is required.`);
+  for (const name of ["census", "register", "describe", "readService", "updateService", "waitStable", "readRunningTasks", "verifyHealth", "record"]) if (typeof adapters[name] !== "function") throw new Error(`Recovery adapter ${name} is required.`);
   const eligible = assertLegacyBackendRecoveryEligibility(input);
   const revisions = await adapters.census();
   if (!Array.isArray(revisions)) throw new Error("Legacy backend revision census is incomplete.");
@@ -164,6 +219,7 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
   }
   let registrations = 0;
   if (!targetArn) {
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED, targetArn: null, registrations: 0, updates: 0 });
     try {
       const result = await adapters.register(eligible.candidate);
       targetArn = result?.taskDefinition?.taskDefinitionArn || result?.taskDefinitionArn;
@@ -177,6 +233,7 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     }
   }
   if (!TASK_ARN.test(targetArn || "")) throw new Error("Recovery registration did not resolve one exact legacy backend revision.");
+  if (registrations) await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTERED_ONLY, targetArn, registrations, updates: 0 });
   const target = await adapters.describe(targetArn);
   if (taskDefinitionFingerprint(target, target?.tags || []) !== eligible.fingerprint) throw new Error("Recovery target readback does not match the exact authorized candidate.");
   let live = await adapters.readService();
@@ -185,18 +242,59 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     if (live.taskDefinition !== eligible.currentTaskDefinitionArn || eligible.observedServiceTaskDefinitionArn !== eligible.currentTaskDefinitionArn
       || live.desiredCount !== eligible.desiredCount || canonicalSha256(live.networkConfiguration) !== eligible.networkConfigurationSha256
       || canonicalSha256(live.loadBalancers) !== eligible.loadBalancersSha256) throw new Error("Backend service changed concurrently before recovery update.");
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, targetArn, registrations, updates: 0 });
     try { await adapters.updateService(targetArn); updates = 1; }
     catch (error) {
       live = await adapters.readService();
-      if (live.taskDefinition !== targetArn) throw error;
+      if (live.taskDefinition !== targetArn) {
+        await adapters.record({ status: registrations
+          ? BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTERED_ONLY
+          : BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, targetArn, registrations, updates: 0 });
+        throw error;
+      }
       updates = 1;
     }
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_CONFIRMED, targetArn, registrations, updates });
   }
-  await adapters.waitStable(targetArn);
-  live = await adapters.readService();
-  if (live.taskDefinition !== targetArn || live.desiredCount !== eligible.desiredCount || live.runningCount !== eligible.desiredCount || live.pendingCount !== 0) throw new Error("Backend service did not converge on the recovery revision.");
-  const tasks = await adapters.readRunningTasks();
-  if (!Array.isArray(tasks) || tasks.length !== eligible.desiredCount || tasks.some((task) => task.taskDefinitionArn !== targetArn || task.imageDigest !== eligible.recoveryImageDigest)) throw new Error("Running backend tasks do not match the approved recovery digest.");
-  if (await adapters.verifyHealth() !== true) throw new Error("Backend health did not recover after the governed image replacement.");
-  return Object.freeze({ mode: BACKEND_HEALTH_RECOVERY.kind, targetArn, recoveryImageDigest: eligible.recoveryImageDigest, registrations, updates, backendHealthy: true, rotationRequired: true, stageBApplied: false, frontendDeployed: false });
+  try { await adapters.waitStable(targetArn); }
+  catch (error) {
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, targetArn, registrations, updates });
+    throw error;
+  }
+  try { live = await adapters.readService(); }
+  catch (error) {
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, targetArn, registrations, updates });
+    throw error;
+  }
+  if (live.taskDefinition !== targetArn || live.desiredCount !== eligible.desiredCount || live.runningCount !== eligible.desiredCount || live.pendingCount !== 0) {
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, targetArn, registrations, updates });
+    throw new Error("Backend service did not converge on the recovery revision.");
+  }
+  let tasks;
+  try { tasks = await adapters.readRunningTasks(); }
+  catch (error) {
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.RUNNING_DIGEST_VERIFICATION_FAILED, targetArn, registrations, updates });
+    throw error;
+  }
+  if (!Array.isArray(tasks) || tasks.length !== eligible.desiredCount || tasks.some((task) => task.taskDefinitionArn !== targetArn || task.imageDigest !== eligible.recoveryImageDigest)) {
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.RUNNING_DIGEST_VERIFICATION_FAILED, targetArn, registrations, updates });
+    throw new Error("Running backend tasks do not match the approved recovery digest.");
+  }
+  if (tasks.some((task) => task.healthStatus !== "HEALTHY")) {
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, targetArn, registrations, updates });
+    throw new Error("Every running backend task must report HEALTHY before recovery completion.");
+  }
+  let health;
+  try { health = await adapters.verifyHealth(); }
+  catch (error) {
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.HEALTH_VERIFICATION_FAILED, targetArn, registrations, updates });
+    throw error;
+  }
+  if (health?.healthy !== true || health?.success !== true || health?.status !== "ready") {
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.HEALTH_VERIFICATION_FAILED, targetArn, registrations, updates });
+    throw new Error("Backend health did not recover after the governed image replacement.");
+  }
+  const result = Object.freeze({ mode: BACKEND_HEALTH_RECOVERY.kind, targetArn, recoveryImageDigest: eligible.recoveryImageDigest, registrations, updates, backendHealthy: true, health, rotationRequired: true, stageBApplied: false, frontendDeployed: false });
+  await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.RECOVERY_COMPLETE, ...result });
+  return result;
 }

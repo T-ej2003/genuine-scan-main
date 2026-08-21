@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { runBackendHealthRecoveryCli } from "../aws/recover-production-backend-health.mjs";
+import { runBackendHealthRecoveryCli, verifyProductionBackendHealth } from "../aws/recover-production-backend-health.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
@@ -45,6 +45,15 @@ function privateFixture() {
 
 const environmentArgs = (fixture) => ["--environment-approval", fixture.environmentPath, "--environment-approval-sha256", sha(fixture.environmentBytes)];
 const deps = (fixture, overrides = {}) => ({ baseEnv: githubEnv, now, readProtectedMain: () => ({ headSha: sourceSha, freshRemoteMainSha: sourceSha }), verifyImageEvidence: fixture.imageFixture.verifyImageEvidence, ...overrides });
+const readiness = (overrides = {}) => JSON.stringify({ success: true, status: "ready", timestamp: now.toISOString(), release: { gitSha: sourceSha }, dependencies: { database: { configured: true, ready: true }, redis: { configured: true, ready: true }, objectStorage: { configured: true, ready: true } }, ...overrides });
+
+test("health verifier rejects HTTP failure, timeout, malformed JSON, and HTTP-200 degraded payloads", () => {
+  assert.equal(verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", () => readiness(), sourceSha).healthy, true);
+  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", () => readiness({ success: false, status: "degraded" })), /readiness/);
+  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", () => "not-json"), /JSON/);
+  assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", () => readiness(), "a".repeat(40)), /release identity/);
+  for (const message of ["curl: HTTP 503", "curl: operation timed out"]) assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", () => { throw new Error(message); }), new RegExp(message.split(": ")[1]));
+});
 
 test("prepare authenticates private input bytes and writes a bound private authorization", async (t) => {
   const fixture = privateFixture();
@@ -127,4 +136,33 @@ test("execute requires authenticated environment bytes before any external call"
     "--evidence-out", path.join(fixture.dir, "evidence.json"),
   ], deps(fixture, { exec: () => { externalCalls += 1; } })), /--environment-approval/);
   assert.equal(externalCalls, 0);
+});
+
+test("execute publishes authenticated zero-mutation evidence before the first AWS read", async (t) => {
+  const fixture = privateFixture();
+  t.after(() => fs.rmSync(fixture.dir, { recursive: true, force: true }));
+  const authorizationPath = path.join(fixture.dir, "authorization.json");
+  const authorization = await runBackendHealthRecoveryCli([
+    "--prepare", "--source-sha", sourceSha, "--current-task-definition", currentArn,
+    ...environmentArgs(fixture), "--recovery-image-digest", digest,
+    "--image-authorization", fixture.image, "--image-authorization-sha256", sha(fixture.imageBytes),
+    "--approval", fixture.approvalPath, "--approval-sha256", sha(fixture.approvalBytes), "--output", authorizationPath,
+  ], deps(fixture));
+  const authorizationBytes = fs.readFileSync(authorizationPath);
+  const evidencePath = path.join(fixture.dir, "evidence.json");
+  await assert.rejects(() => runBackendHealthRecoveryCli([
+    "--execute", "--source-sha", sourceSha, ...environmentArgs(fixture),
+    "--image-authorization", fixture.image, "--image-authorization-sha256", sha(fixture.imageBytes),
+    "--authorization", authorizationPath, "--authorization-sha256", sha(authorizationBytes),
+    "--health-url", "https://www.mscqr.com/api/health/ready", "--evidence-out", evidencePath,
+  ], deps(fixture, { exec: () => { throw new Error("STS unavailable"); } })), /STS unavailable/);
+  const evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+  assert.equal(evidence.status, "NO_MUTATION_FAILURE");
+  assert.equal(evidence.registrations, 0);
+  assert.equal(evidence.updates, 0);
+  assert.equal(evidence.currentTaskDefinitionArn, currentArn);
+  assert.equal(evidence.recoveryImageDigest, digest);
+  assert.equal(evidence.authorizationSha256, authorization.authorizationSha256);
+  assert.equal(evidence.evidenceSha256, canonicalSha256(Object.fromEntries(Object.entries(evidence).filter(([key]) => key !== "evidenceSha256"))));
+  assert.equal(fs.statSync(evidencePath).mode & 0o777, 0o600);
 });

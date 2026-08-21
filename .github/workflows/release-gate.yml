@@ -761,16 +761,16 @@ jobs:
             --image-authorization-sha256 "${{ inputs.backend_recovery_image_authorization_sha256 }}" \
             --authorization "${{ steps.backend-recovery.outputs.authorization_file }}" \
             --authorization-sha256 "${{ steps.backend-recovery.outputs.authorization_sha256 }}" \
-            --health-url "${{ env.PUBLIC_BASE_URL }}/api/health" \
+            --health-url "${{ env.PUBLIC_BASE_URL }}/api/health/ready" \
             --evidence-out "$RUNNER_TEMP/backend-health-recovery/evidence.json"
 
       - name: Upload backend health recovery evidence
-        if: ${{ inputs.release_mode == 'backend-health-recovery' }}
+        if: ${{ always() && inputs.release_mode == 'backend-health-recovery' }}
         uses: actions/upload-artifact@v7
         with:
           name: backend-health-recovery-evidence
           path: ${{ runner.temp }}/backend-health-recovery/evidence.json
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 90
 
       - name: Verify backend health

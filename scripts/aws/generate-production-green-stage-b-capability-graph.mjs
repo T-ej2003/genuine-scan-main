@@ -54,6 +54,7 @@ const PHASES = Object.freeze([
   ["backend-metadata-validation", "scripts/aws/stage-b-terraform-backend-contract.mjs"],
   ["workspace-validation", "scripts/aws/stage-b-terraform-workspace.mjs"],
   ["canonical-backend-recovery", "scripts/aws/recover-stage-b-backend-task-definition.mjs"],
+  ["backend-health-recovery", "scripts/aws/recover-production-backend-health.mjs"],
   ["existing-revision-forward-recovery", "scripts/aws/forward-recover-stage-b-existing-revision.mjs"],
   ["stage-b-state-pull", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["stage-a-state-read", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
@@ -127,11 +128,13 @@ const FORWARD_RECOVERY_CAPABILITIES = Object.freeze([
 
 const PHASE_CAPABILITY_REQUIREMENTS = Object.freeze({
   "canonical-backend-recovery": RECOVERY_CAPABILITIES.map(([id]) => id),
+  "backend-health-recovery": ["manifest-backend-health-recovery-register-legacy-task-definition", "manifest-backend-health-recovery-update-service"],
   "existing-revision-forward-recovery": FORWARD_RECOVERY_CAPABILITIES.map(([id]) => id),
 });
 
 const classification = (entry, forbidden) => forbidden ? "FORBIDDEN"
   : entry.phase === "apply" ? "TERRAFORM_APPLY_MUTATION"
+    : entry.phase === "recovery" ? "RELEASE_DIRECT_MUTATION"
     : entry.phase === "refresh" ? "TERRAFORM_REFRESH_READ"
       : entry.phase === "reference-audit" ? "POST_APPLY_READ" : "RELEASE_DIRECT_READ";
 
@@ -208,11 +211,11 @@ export function buildStageBDeploymentCapabilityGraph() {
   const manifest = readJson(manifestPath); const policies = sourcePolicies(); const probesByAction = new Map();
   for (const probe of RELEASE_READ_PROBES) probesByAction.set(probe.action, [...(probesByAction.get(probe.action) || []), probe.id]);
   const manifestCapabilities = [[manifest.required, false], [manifest.forbidden, true]].flatMap(([entries, forbidden]) => entries.map((entry) => ({
-    id: `manifest-${entry.id}`, phase: entry.phase === "apply" ? "wrapper-apply" : entry.phase === "reference-audit" ? "reference-audit" : entry.phase === "preflight" ? "release-direct-read-preflight" : "refresh-only",
-    identity: forbidden ? "ADMINISTRATOR" : "RELEASE_DEPLOYER", executor: forbidden ? "iam-simulator" : "terraform-or-aws-cli", sourceFile: manifestPath,
+    id: `manifest-${entry.id}`, phase: entry.phase === "apply" ? "wrapper-apply" : entry.phase === "recovery" ? "backend-health-recovery" : entry.phase === "reference-audit" ? "reference-audit" : entry.phase === "preflight" ? "release-direct-read-preflight" : "refresh-only",
+    identity: forbidden ? "ADMINISTRATOR" : "RELEASE_DEPLOYER", executor: forbidden ? "iam-simulator" : entry.phase === "recovery" ? "aws-cli" : "terraform-or-aws-cli", sourceFile: manifestPath,
     sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: classification(entry, forbidden),
     probe: forbidden ? "administrator-simulation" : probesByAction.has(entry.action) ? "direct" : entry.phase === "apply" ? "plan-derived-simulation" : "administrator-simulation",
-    probeIds: probesByAction.get(entry.action) || [], policy: authority(entry, forbidden, policies), required: true, mutation: entry.phase === "apply" || forbidden,
+    probeIds: probesByAction.get(entry.action) || [], policy: authority(entry, forbidden, policies), required: true, mutation: ["apply", "recovery"].includes(entry.phase) || forbidden,
   })));
   const checkerCapabilities = manifest.checkerRequired.map((entry) => ({
     id: `checker-${entry.id}`, phase: "approval-publication", identity: "INDEPENDENT_CHECKER", executor: "aws-cli", sourceFile: manifestPath,
@@ -255,7 +258,7 @@ export function buildStageBDeploymentCapabilityGraph() {
 export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILITY_GRAPH_PATH)) {
   const expected = buildStageBDeploymentCapabilityGraph();
   if (canonicalizeJson(graph) !== canonicalizeJson(expected)) throw new Error("Stage B deployment capability graph is stale or incomplete.");
-  if (graph.phases.length !== 34 || new Set(graph.phases.map(({ id }) => id)).size !== 34) throw new Error("Stage B capability graph phase coverage is incomplete.");
+  if (graph.phases.length !== 35 || new Set(graph.phases.map(({ id }) => id)).size !== 35) throw new Error("Stage B capability graph phase coverage is incomplete.");
   if (new Set(graph.capabilities.map(({ id }) => id)).size !== graph.capabilities.length) throw new Error("Stage B capability IDs are not unique.");
   if (graph.capabilities.some(({ identity, action }) => !identity || !action)) throw new Error("Stage B capability identity is ambiguous.");
   for (const [phase, ids] of Object.entries(PHASE_CAPABILITY_REQUIREMENTS)) {
