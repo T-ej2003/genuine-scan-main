@@ -36,12 +36,18 @@ The workflow creates a dedicated operator-owned `0700` directory below
 evidence there as mode `0600` without changing the runner temp directory or
 dirtying the checkout.
 
-Before dispatch, the canonical administrator capability preflight must report
-both `backend-health-recovery-register-legacy-task-definition` and
-`backend-health-recovery-update-service` as allowed for the production release
-role. The first is limited to the legacy `mscqr-backend:*` family with the
-reviewed Fargate, non-privileged, 2048 CPU, and 4096 MiB shape. The second is
-limited to the exact production backend service and cluster and a legacy
+Before dispatch, the canonical administrator capability preflight and the
+release-deployer direct-read preflight must report
+`backend-health-recovery-describe-images`,
+`backend-health-recovery-describe-repositories`,
+`backend-health-recovery-register-legacy-task-definition`, and
+`backend-health-recovery-update-service` as allowed. Both ECR reads are limited
+to `arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend`; a failed direct
+read stops before the GitHub production approval is requested. Registration is
+limited to the legacy `mscqr-backend:*` family with the
+reviewed Fargate, non-privileged, 2048 CPU, and 4096 MiB shape. The service
+update is limited to the exact production backend service and
+cluster and a legacy
 `mscqr-backend:*` revision. The application contract still binds the exact
 current revision, replacement digest, candidate diff, and human approval.
 
@@ -61,6 +67,7 @@ task-definition semantic-diff engine.
 
 - [Amazon ECS actions, resources, and condition keys](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonelasticcontainerservice.html)
 - [Amazon ECS identity-based policy examples](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/security_iam_id-based-policy-examples.html)
+- [Amazon ECR actions, resources, and condition keys](https://docs.aws.amazon.com/service-authorization/latest/reference/list_ecr.html)
 
 The mode registers at most one matching legacy revision, updates only the
 backend service, reconciles ambiguous registration/update outcomes from live
@@ -97,8 +104,8 @@ closed without an update.
 ## Operator sequence
 
 1. Run the canonical administrator/release capability preflight after the
-   reviewed IAM policy versions are published, and require both recovery
-   evaluations to pass.
+   reviewed IAM policy versions are published. Require both exact ECR direct
+   reads and both recovery mutation evaluations to pass before dispatch.
 2. Produce exact JSON bytes for canonical image authorization and human
    approval. Record each file's SHA-256. The approval object must contain
    `ticket`, `approvedBy`, `approverRole`, `reason`, `verificationRef`,

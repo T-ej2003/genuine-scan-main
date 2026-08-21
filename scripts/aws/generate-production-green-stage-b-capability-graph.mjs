@@ -128,7 +128,12 @@ const FORWARD_RECOVERY_CAPABILITIES = Object.freeze([
 
 const PHASE_CAPABILITY_REQUIREMENTS = Object.freeze({
   "canonical-backend-recovery": RECOVERY_CAPABILITIES.map(([id]) => id),
-  "backend-health-recovery": ["manifest-backend-health-recovery-register-legacy-task-definition", "manifest-backend-health-recovery-update-service"],
+  "backend-health-recovery": [
+    "manifest-backend-health-recovery-describe-images",
+    "manifest-backend-health-recovery-describe-repositories",
+    "manifest-backend-health-recovery-register-legacy-task-definition",
+    "manifest-backend-health-recovery-update-service",
+  ],
   "existing-revision-forward-recovery": FORWARD_RECOVERY_CAPABILITIES.map(([id]) => id),
 });
 
@@ -211,8 +216,8 @@ export function buildStageBDeploymentCapabilityGraph() {
   const manifest = readJson(manifestPath); const policies = sourcePolicies(); const probesByAction = new Map();
   for (const probe of RELEASE_READ_PROBES) probesByAction.set(probe.action, [...(probesByAction.get(probe.action) || []), probe.id]);
   const manifestCapabilities = [[manifest.required, false], [manifest.forbidden, true]].flatMap(([entries, forbidden]) => entries.map((entry) => ({
-    id: `manifest-${entry.id}`, phase: entry.phase === "apply" ? "wrapper-apply" : entry.phase === "recovery" ? "backend-health-recovery" : entry.phase === "reference-audit" ? "reference-audit" : entry.phase === "preflight" ? "release-direct-read-preflight" : "refresh-only",
-    identity: forbidden ? "ADMINISTRATOR" : "RELEASE_DEPLOYER", executor: forbidden ? "iam-simulator" : entry.phase === "recovery" ? "aws-cli" : "terraform-or-aws-cli", sourceFile: manifestPath,
+    id: `manifest-${entry.id}`, phase: entry.phase === "apply" ? "wrapper-apply" : ["recovery", "recovery-read"].includes(entry.phase) ? "backend-health-recovery" : entry.phase === "reference-audit" ? "reference-audit" : entry.phase === "preflight" ? "release-direct-read-preflight" : "refresh-only",
+    identity: forbidden ? "ADMINISTRATOR" : "RELEASE_DEPLOYER", executor: forbidden ? "iam-simulator" : ["recovery", "recovery-read"].includes(entry.phase) ? "aws-cli" : "terraform-or-aws-cli", sourceFile: manifestPath,
     sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: classification(entry, forbidden),
     probe: forbidden ? "administrator-simulation" : probesByAction.has(entry.action) ? "direct" : entry.phase === "apply" ? "plan-derived-simulation" : "administrator-simulation",
     probeIds: probesByAction.get(entry.action) || [], policy: authority(entry, forbidden, policies), required: true, mutation: ["apply", "recovery"].includes(entry.phase) || forbidden,

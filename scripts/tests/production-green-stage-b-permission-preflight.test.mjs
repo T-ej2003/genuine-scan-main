@@ -856,7 +856,7 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 229);
+  assert.equal(report.requiredEvaluations.length, 231);
   assert.equal(report.forbiddenEvaluations.length, 37);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
@@ -865,7 +865,12 @@ test("production-shaped plan requires and binds the exact account and region var
 });
 
 test("backend health recovery permissions fail the administrator preflight before ECS mutation", () => {
-  for (const deniedId of ["backend-health-recovery-register-legacy-task-definition", "backend-health-recovery-update-service"]) {
+  for (const deniedId of [
+    "backend-health-recovery-describe-images",
+    "backend-health-recovery-describe-repositories",
+    "backend-health-recovery-register-legacy-task-definition",
+    "backend-health-recovery-update-service",
+  ]) {
     const report = runPermissionPreflight({
       reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan,
       planBytes: productionPlanBytes, savedPlanBytes, manifest, generatedAt: now, now,
