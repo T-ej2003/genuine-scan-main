@@ -255,13 +255,13 @@ jobs:
       postgres:
         image: postgres:18.4
         env:
-          POSTGRES_DB: mscqr_integration_admin_test
-          POSTGRES_USER: postgres
+          POSTGRES_DB: mscqr_p2_integration_test
+          POSTGRES_USER: mscqr_rls_cert_admin
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d mscqr_integration_admin_test"
+          --health-cmd "pg_isready -U mscqr_rls_cert_admin -d mscqr_p2_integration_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -297,10 +297,10 @@ jobs:
       RELEASE_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
       P2_TEST_DATABASE_REQUIRED: "true"
       P2_TEST_DB_PROTOCOL: postgresql
-      P2_TEST_DB_USER: postgres
+      P2_TEST_DB_USER: mscqr_rls_cert_admin
       P2_TEST_DB_HOST: 127.0.0.1
       P2_TEST_DB_PORT: "5432"
-      P2_TEST_DB_NAME: mscqr_integration_admin_test
+      P2_TEST_DB_NAME: mscqr_p2_integration_test
       REDIS_URL: redis://127.0.0.1:6379/0
       REDIS_TLS: "false"
     steps:
@@ -367,15 +367,20 @@ jobs:
 
       - name: Disposable integration tests
         run: |
+          set -euo pipefail
           admin_scheme="${P2_TEST_DB_PROTOCOL}:"
           admin_authority="${P2_TEST_DB_USER}@${P2_TEST_DB_HOST}:${P2_TEST_DB_PORT}"
-          P2_TEST_DATABASE_ADMIN_URL="${admin_scheme}//${admin_authority}/${P2_TEST_DB_NAME}" npm run test:integration:ci
+          admin_url="${admin_scheme}//${admin_authority}/${P2_TEST_DB_NAME}"
+          printf 'P2_TEST_DATABASE_ADMIN_URL=%s\n' "$admin_url" >> "$GITHUB_ENV"
+          P2_TEST_DATABASE_ADMIN_URL="$admin_url" npm run test:integration:ci
 
       - name: Full RLS verification and PostgreSQL 18.4 certification
         run: |
           set -euo pipefail
           npm run rls:full-verify
-          npm run rls:full-certify
+          MSCQR_FULL_RLS_CERTIFICATION_CONFIRM=MSCQR_RUN_LOCAL_FULL_RLS_CERTIFICATION \
+            MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL="${P2_TEST_DATABASE_ADMIN_URL:?Disposable PostgreSQL admin URL was not established}" \
+            npm run rls:full-certify
 
       - name: Authenticate production environment approval boundary
         id: production-environment-approval

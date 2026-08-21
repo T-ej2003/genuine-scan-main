@@ -1,6 +1,7 @@
 const assert = require("assert");
 
 const { getOrComputeVersionedCache } = require("../dist/services/versionedCacheService");
+const { closeRedisConnections } = require("../dist/services/redisService");
 
 (async () => {
   let calls = 0;
@@ -33,7 +34,7 @@ const { getOrComputeVersionedCache } = require("../dist/services/versionedCacheS
   assert.strictEqual(calls, 1, "cache hit should avoid recompute");
 
   console.log("readCacheCoalescing.test passed");
-})().catch((error) => {
+})().finally(closeRedisConnections).catch((error) => {
   console.error(error);
   process.exit(1);
 });

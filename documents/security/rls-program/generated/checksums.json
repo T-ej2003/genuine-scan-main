@@ -2,7 +2,7 @@
   "schemaVersion": 3,
   "algorithm": "sha256",
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "67080246839f3ce4c8531b22f2ce0d0a1484914a7e34fc0cea67bf43cfd6cd84",
+  "sourceContractSha256": "1a44108ec38a98067c2b627088659fc3a5a2edd847abb517ce38546c30eaedc5",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "productionApprovalContractSha256": null,
   "sourceContractInputs": [
@@ -216,7 +216,7 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "49517aa97ad32295fad47dc9961cc7bc837521dd24da09fafbc5aabfde61f753"
+      "sha256": "218bc982bee1b3f580224c2cd762293f05f7ff439f9332c79989b077fbbd66ce"
     },
     {
       "path": ".github/workflows/release-train.yml",
@@ -289,31 +289,31 @@
   ],
   "files": {
     "00-preflight.sql": "adc995094cc2df2e51261aba015172611196dfd9b7b9ee101302a7db3e9d93b5",
-    "10-roles.sql": "356902663c9200206dd6c55d547d3802c15aa3b88230f33f161ecd66ae02edd1",
-    "15-migration-preflight.sql": "f79d0487ee038b5cc45ebc29713acc77f2f68accf29511bfbc722c4c07132c71",
-    "11-ownership-grants.sql": "41fea975cb534f64b1f0d1c9fc253d21d5cfa4c4bfb3fd20aef99b5db4393603",
-    "20-context-helpers.sql": "f9e95e45292206d0dd3142618f4f365cfc08528ea15e0ae1d92fcb2d2e2e35b7",
-    "21-runtime-grants.sql": "271c8c172234ace689e4e42b7ecaf7ad5073048bc9ada5ee8352db116b290df7",
-    "30-policies.sql": "cb445d682dc03cfe17fededeeb12b16b57b898821df9363d32acc79521076b8b",
-    "40-post-apply-verification.sql": "2d8cf9ccbc43d6ad9d4a8782ce705086060d08f45daacfb6f4b75c5630a8e31a",
+    "10-roles.sql": "28d9b164b9f966de148d64e762d18a189b5671ee1b5e74bf978c7c7530129402",
+    "15-migration-preflight.sql": "d877df709cbd241c324614cc0cb1b89fc585e99efe9498b15612d20fa054c1cf",
+    "11-ownership-grants.sql": "4a57cb14fc569a35cd0f685ce16272fbf25ad59adcb37e40b33b8ae3ae47c8b3",
+    "20-context-helpers.sql": "a19551dfad2330c9206c39449440276199950a1106a0e82570bd395f08eebf3c",
+    "21-runtime-grants.sql": "3336940fda0968211dbc18ff983389b1c68ac4773ad5053b58ebce71e1180b69",
+    "30-policies.sql": "5b0a33de1fa7f005ca6b6c8c9dfbfa00533a2b7e4f9edd8e01579d7781630962",
+    "40-post-apply-verification.sql": "5d488041dc0aaeee4ae304c077f0243c1de35a4e6765acc97ec5a0280f8cc493",
     "50-certification-fixtures.sql": "78df5820fe2178a15078a8f82c5603a21f38b526085d36720c6d39438fa57deb",
-    "90-clean-room-role-cleanup.sql": "120e6a2adaaa300266b41859c1cc5ab08355db645f662bb63ecf880fb904e7b2",
+    "90-clean-room-role-cleanup.sql": "a382bcf6bfec2c54a86a5aaffd3281098dcd29030f5667a248e270010cdb32eb",
     "admin-bootstrap.sql": "5b4c0bcaa258038280d31bf4a85379d504809a04ec9205634ed4fc91494e46fb",
     "migration.sql": "ea5e0babccc4b268943d4e9ea7b28d0f6b7f1f9136edc7acb1b866082baf9e4a",
     "admin-ownership.sql": "a10897614902c090d720464868cdc616d36c4c367cc032de0bdf8007cfcae6be",
     "runtime-policy.sql": "1e67b2ff32e6ef897fd1e5be408da1c6cdb0a481a84a7698c823cd37a244a531",
     "verification.sql": "aa4791230fb7e1b8f9bd8d26358e462fbc7c59d8dd91993a6bcd848310b7f0f5",
     "clean-room-cleanup.sql": "6e34330ad5addc0cb5918614f98933dd74daa517f5297a460a59c6de16a7c721",
-    "full-rls-implementation-manifest.json": "91a7ea7a0614f73ea1dcfdb2ccb6f6ccf186c18e341466dbebfad3aa71236873",
-    "package-execution-report.json": "b7cacc73396dc8b59241a6059f23c6af44fdb97adde7200c6918b7836b5a3467",
+    "full-rls-implementation-manifest.json": "2ded5c41ab6c61783e73c2f353528bafbf00b9d351a2a360a34ff09a2563a8f6",
+    "package-execution-report.json": "e5ddd1c3d5d7f47d8049391c6e0976bd48bbeb0331f9c46b2735d6d4ee672971",
     "contract-only-implementation-inventory.json": "7c1634bd7160a6a07eae8b2bbee2c6a112b994615fba5cd45e8b77ff43a88237",
     "workflow-call-path-evidence.json": "3e12109f927ffc4e4c1cda83fe95d16baf2c598fe74074ff6677971d365bb364",
-    "expected-catalog-snapshot.json": "cefa1f165eb1683bb78c88e5ead7358f30359bd227ec367885bdc7c29f466bf2",
+    "expected-catalog-snapshot.json": "16226e21c2f7ccd484bffc4cf6063ab9f34aea2b475c656a6ccec58cc8431a31",
     "column-privilege-report.json": "2b398a868ed32594ec3db4a674cfd5e872ff96030d411b2b666d2d161749927d",
     "privilege-diff-report.json": "f8362085c348c38fb064e8b86f9e0283f63eb311e1c91d51e0a9ac44db782b5b",
     "ownership-diff-report.json": "c1ca4bb4e9c8c045a080be9a9f5153c2643333e84a3c7cadd92ae11a35f099ce",
     "force-rls-report.json": "714b90691d34d2f91a2a770960ed23fde5f29104646d19f3978cd186c17be73b",
     "policy-inventory-report.json": "ca4f695e438095fa770109a38d8a8226e13d972d71f833937201a7734430ac1a",
-    "role-lifecycle-report.json": "1e6bfb4a619077fd1903bcebcc755f74d0f761b0d905e760046082077084cc34"
+    "role-lifecycle-report.json": "0e844d443b886837d88ae017482140ddfc4a112d2ee0d9cf411083f2df388b45"
   }
 }
