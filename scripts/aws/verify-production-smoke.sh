@@ -10,7 +10,7 @@ Verify the production public endpoints after an ECS deployment.
 Environment:
   PUBLIC_BASE_URL   Default: https://www.mscqr.com
   SMOKE_PATHS       Optional space-separated paths. Default:
-                    / /login /api/health /health/ready
+                    / /login /api/health/ready
 EOF
 }
 
@@ -29,9 +29,15 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://www.mscqr.com}"
-SMOKE_PATHS="${SMOKE_PATHS:-/ /login /api/health /health/ready}"
+SMOKE_PATHS="${SMOKE_PATHS:-/ /login /api/health/ready}"
 
 base_url="${PUBLIC_BASE_URL%/}"
+
+node --input-type=module - "$base_url" <<'NODE'
+import { assertProductionBackendReadinessUrl } from "./scripts/aws/production-backend-readiness-contract.mjs";
+
+assertProductionBackendReadinessUrl(`${process.argv[2]}/api/health/ready`);
+NODE
 
 for path in $SMOKE_PATHS; do
   case "$path" in
@@ -42,9 +48,10 @@ for path in $SMOKE_PATHS; do
   response_file="$(mktemp)"
   status_code="$(
     curl \
+      --disable \
       --silent \
       --show-error \
-      --location \
+      --proto '=https' \
       --output "$response_file" \
       --write-out '%{http_code}' \
       "$url"
@@ -56,31 +63,13 @@ for path in $SMOKE_PATHS; do
     exit 1
   fi
 
-  if [[ "$path" == "/api/health" || "$path" == "/health/ready" ]]; then
+  if [[ "$path" == "/api/health/ready" ]]; then
     node --input-type=module - "$url" "$response_file" <<'NODE'
 import fs from "node:fs";
+import { parseProductionBackendReadiness } from "./scripts/aws/production-backend-readiness-contract.mjs";
 
 const [url, responsePath] = process.argv.slice(2);
-const text = fs.readFileSync(responsePath, "utf8").trim();
-
-if (!text.startsWith("{")) {
-  console.log(`Verified ${url} returned HTTP 2xx; response was not JSON.`);
-  process.exit(0);
-}
-
-const payload = JSON.parse(text);
-const successValues = [
-  payload?.success,
-  payload?.ready,
-  payload?.healthy,
-  payload?.status === "ok",
-  payload?.status === "ready",
-];
-
-if (!successValues.some((value) => value === true)) {
-  console.error(`${url} JSON did not report success, ready, healthy, or status=ok/ready.`);
-  process.exit(1);
-}
+parseProductionBackendReadiness(fs.readFileSync(responsePath));
 NODE
   fi
 

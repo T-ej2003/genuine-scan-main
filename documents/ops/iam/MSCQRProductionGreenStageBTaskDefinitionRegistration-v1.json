@@ -2,17 +2,6 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "ListExactStageBBackendRecoveryRevisions",
-      "Effect": "Allow",
-      "Action": "ecs:ListTaskDefinitions",
-      "Resource": "*",
-      "Condition": {
-        "StringEquals": {
-          "aws:RequestedRegion": "eu-west-2"
-        }
-      }
-    },
-    {
       "Sid": "RegisterExactStageBBackendTaskDefinition1024",
       "Effect": "Allow",
       "Action": "ecs:RegisterTaskDefinition",
@@ -40,6 +29,30 @@
         "NumericEquals": {
           "ecs:task-cpu": 1024,
           "ecs:task-memory": 2048
+        },
+        "Null": {
+          "ecs:compute-compatibility": "false"
+        }
+      }
+    },
+    {
+      "Sid": "RegisterLegacyBackendHealth",
+      "Effect": "Allow",
+      "Action": "ecs:RegisterTaskDefinition",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:privileged": "false"
+        },
+        "ForAllValues:StringEquals": {
+          "ecs:compute-compatibility": [
+            "FARGATE"
+          ]
+        },
+        "NumericEquals": {
+          "ecs:task-cpu": 2048,
+          "ecs:task-memory": 4096
         },
         "Null": {
           "ecs:compute-compatibility": "false"
@@ -140,17 +153,6 @@
         },
         "NumericEquals": { "ecs:task-cpu": 256, "ecs:task-memory": 512 },
         "Null": { "ecs:compute-compatibility": "false" }
-      }
-    },
-    {
-      "Sid": "DescribeOnlyExactStageBTaskDefinitions",
-      "Effect": "Allow",
-      "Action": "ecs:DescribeTaskDefinition",
-      "Resource": "*",
-      "Condition": {
-        "StringEquals": {
-          "aws:RequestedRegion": "eu-west-2"
-        }
       }
     },
     {

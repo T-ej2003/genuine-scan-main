@@ -214,7 +214,7 @@ test("release gate keeps normal strictness and admits only governed transition m
   assert.doesNotMatch(releaseGate, /expert_override/);
   assert.doesNotMatch(releaseTrain, /expert_override/);
   assert.match(releaseGate, /TARGET_EVENTS: \$\{\{ inputs\.release_mode == 'normal' && 'push,workflow_dispatch' \|\| 'push' \}\}/);
-  assert.match(releaseGate, /inputs\.release_mode != 'normal'[\s\S]*run-production-cutover\.mjs/);
+  assert.match(releaseGate, /inputs\.release_mode == 'rotation-overlap' \|\| inputs\.release_mode == 'rotation-cleanup'[\s\S]*run-production-cutover\.mjs/);
   assert.match(releaseGate, /ENABLE_EXECUTE_COMMAND: "true"/);
   assert.match(releaseGate, /inputs\.release_mode == 'normal'[\s\S]*Publish immutable ECS images/);
   assert.match(releaseGate, /deploy-production-ecs:[\s\S]*needs: resolve-deploy-target/);

@@ -20,12 +20,13 @@ const conditionsMatch = (condition = {}, evaluation) => {
       const actual = context.get(key);
       if (operator === "StringEquals" && (!actual || actual.length !== 1 || !expected.includes(actual[0]))) return false;
       if (operator === "ArnEquals" && (!actual || actual.length !== 1 || !expected.includes(actual[0]))) return false;
+      if (operator === "ArnLike" && (!actual || actual.length !== 1 || !expected.some((pattern) => matches(pattern, actual[0])))) return false;
       if (operator === "StringEqualsIfExists" && actual && (actual.length !== expected.length || !actual.every((value) => expected.includes(value)))) return false;
       if (operator === "ForAllValues:StringEquals" && (!actual || !actual.every((value) => expected.includes(value)))) return false;
       if (operator === "Bool" && (!actual || actual.length !== 1 || actual[0].toLowerCase() !== expected[0].toLowerCase())) return false;
       if (operator === "NumericEquals" && (!actual || actual.length !== expected.length || !actual.every((value) => expected.some((candidate) => Number(candidate) === Number(value))))) return false;
       if (operator === "Null" && String(!actual) !== expected[0]) return false;
-      if (!["StringEquals", "ArnEquals", "StringEqualsIfExists", "ForAllValues:StringEquals", "Bool", "NumericEquals", "Null"].includes(operator)) throw new Error(`Unsupported IAM condition operator: ${operator}.`);
+      if (!["StringEquals", "ArnEquals", "ArnLike", "StringEqualsIfExists", "ForAllValues:StringEquals", "Bool", "NumericEquals", "Null"].includes(operator)) throw new Error(`Unsupported IAM condition operator: ${operator}.`);
     }
   }
   return true;
@@ -60,20 +61,20 @@ test("broker alias update is authorized on the exact broker function resource", 
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: STAGE_B.brokerAliasArn, context }), false);
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: `${functionArn}:other`, context }), false);
   assert.equal(finalWrite.Statement.some((statement) => list(statement.Action).some((action) => ["lambda:CreateAlias", "lambda:DeleteAlias"].includes(action))), false);
-  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "1fbe669cfbc70381047273211346417a38c5ee1a475e3670c9a14df69f791799");
+  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "ccbffee957ba429f12bc6a491634921c3e3d74fdda98b5e8bd79a4afbcad5cc1");
 });
 
 test("production-shaped required and forbidden resources reconcile to the source policy set", () => {
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 227);
+  assert.equal(evaluations.required.length, 229);
   assert.equal(evaluations.forbidden.length, 37);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
   const registrations = evaluations.required.filter(({ action }) => action === "ecs:RegisterTaskDefinition");
-  assert.equal(registrations.length, 13);
-  assert.equal(registrations.filter(allows).length, 13);
+  assert.equal(registrations.length, 14);
+  assert.equal(registrations.filter(allows).length, 14);
   const switchEvaluation = evaluations.required.find(({ manifestId }) => manifestId === "activate-exact-ecs-service");
   assert.equal(switchEvaluation.action, "ecs:UpdateService");
   assert.equal(switchEvaluation.resource, "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2");
@@ -81,6 +82,20 @@ test("production-shaped required and forbidden resources reconcile to the source
   assert.deepEqual(switchEvaluation.context.find(({ key }) => key === "ecs:task-definition").values, ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7"]);
   const rollbackEvaluation = evaluations.required.find(({ manifestId }) => manifestId === "rollback-exact-ecs-service");
   assert.equal(allows(rollbackEvaluation), true);
+  const recoveryRegistration = evaluations.required.find(({ manifestId }) => manifestId === "backend-health-recovery-register-legacy-task-definition");
+  const recoveryUpdate = evaluations.required.find(({ manifestId }) => manifestId === "backend-health-recovery-update-service");
+  assert.equal(recoveryRegistration.resource, "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*");
+  assert.equal(recoveryRegistration.context.find(({ key }) => key === "ecs:task-cpu").values[0], "2048");
+  assert.equal(recoveryRegistration.context.find(({ key }) => key === "ecs:task-memory").values[0], "4096");
+  assert.equal(allows(recoveryRegistration), true);
+  assert.equal(allows({ ...recoveryRegistration, resource: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:48" }), false);
+  assert.equal(allows(replaceContext(recoveryRegistration, "ecs:task-cpu", ["1024"])), false);
+  assert.equal(allows(replaceContext(recoveryRegistration, "ecs:task-memory", ["2048"])), false);
+  assert.equal(recoveryUpdate.resource, "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2");
+  assert.equal(allows(recoveryUpdate), true);
+  assert.equal(allows({ ...recoveryUpdate, resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-frontend-servi-euw2" }), false);
+  assert.equal(allows(replaceContext(recoveryUpdate, "ecs:cluster", ["arn:aws:ecs:eu-west-2:368992683803:cluster/unrelated"])), false);
+  assert.equal(allows(replaceContext(recoveryUpdate, "ecs:task-definition", ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:48"])), false);
   for (const [manifestId, roleArn] of [
     ["rollback-exact-backend-execution-passrole", "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"],
     ["rollback-exact-backend-task-passrole", "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"],
@@ -91,7 +106,7 @@ test("production-shaped required and forbidden resources reconcile to the source
     assert.equal(allows(passRole), true);
     assert.equal(allows({ ...passRole, context: passRole.context.map((entry) => entry.key === "iam:PassedToService" ? { ...entry, values: ["lambda.amazonaws.com"] } : entry) }), false);
   }
-  const replaceContext = (evaluation, key, values) => ({ ...evaluation, context: evaluation.context.map((entry) => entry.key === key ? { ...entry, values } : entry) });
+  function replaceContext(evaluation, key, values) { return { ...evaluation, context: evaluation.context.map((entry) => entry.key === key ? { ...entry, values } : entry) }; }
   assert.equal(allows(replaceContext(switchEvaluation, "ecs:task-definition", ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:2"])), false);
   for (const revision of [1, 5, 6, 8]) {
     assert.equal(allows(replaceContext(switchEvaluation, "ecs:task-definition", [`arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:${revision}`])), false);
@@ -140,7 +155,7 @@ test("IAM condition evaluation fails closed for missing context and unknown oper
   assert.equal(conditionsMatch({ StringEqualsIfExists: { optional: "value" } }, { context: [] }), true);
   assert.equal(conditionsMatch({ Bool: { enabled: "false" } }, { context: [{ key: "enabled", values: ["false"] }] }), true);
   assert.equal(conditionsMatch({ Null: { required: "false" } }, { context: [] }), false);
-  assert.throws(() => conditionsMatch({ ArnLike: { key: "*" } }, { context: [] }), /Unsupported IAM condition operator/);
+  assert.throws(() => conditionsMatch({ ArnNotLike: { key: "*" } }, { context: [] }), /Unsupported IAM condition operator/);
 });
 
 test("generated capability graph binds UpdateAlias to the broker function policy statement", () => {
