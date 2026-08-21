@@ -55,6 +55,20 @@
       }
     },
     {
+      "Sid": "ReadExactLegacyBackendRecoveryRepository",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:DescribeImages",
+        "ecr:DescribeRepositories"
+      ],
+      "Resource": "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
       "Sid": "ReadExactStageBReplayTable",
       "Effect": "Allow",
       "Action": [

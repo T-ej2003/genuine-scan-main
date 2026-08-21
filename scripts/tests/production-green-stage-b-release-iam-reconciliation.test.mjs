@@ -64,11 +64,24 @@ test("broker alias update is authorized on the exact broker function resource", 
   assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "ccbffee957ba429f12bc6a491634921c3e3d74fdda98b5e8bd79a4afbcad5cc1");
 });
 
+test("backend recovery ECR reads are exact and add no ECR write authority", () => {
+  const providerRead = policies.find(({ name }) => name === "MSCQRProductionGreenStageBProviderReadOnly").document;
+  const statement = providerRead.Statement.find(({ Sid }) => Sid === "ReadExactLegacyBackendRecoveryRepository");
+  assert.deepEqual(statement, {
+    Sid: "ReadExactLegacyBackendRecoveryRepository",
+    Effect: "Allow",
+    Action: ["ecr:DescribeImages", "ecr:DescribeRepositories"],
+    Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
+  assert.equal(policies.some(({ document }) => document.Statement.some(({ Effect, Action }) => Effect === "Allow" && list(Action).some((action) => action.startsWith("ecr:") && !["ecr:DescribeImages", "ecr:DescribeRepositories"].includes(action)))), false);
+});
+
 test("production-shaped required and forbidden resources reconcile to the source policy set", () => {
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 229);
+  assert.equal(evaluations.required.length, 231);
   assert.equal(evaluations.forbidden.length, 37);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
@@ -84,6 +97,17 @@ test("production-shaped required and forbidden resources reconcile to the source
   assert.equal(allows(rollbackEvaluation), true);
   const recoveryRegistration = evaluations.required.find(({ manifestId }) => manifestId === "backend-health-recovery-register-legacy-task-definition");
   const recoveryUpdate = evaluations.required.find(({ manifestId }) => manifestId === "backend-health-recovery-update-service");
+  const recoveryReads = evaluations.required.filter(({ manifestId }) => manifestId.startsWith("backend-health-recovery-describe-"));
+  assert.deepEqual(recoveryReads.map(({ action, resource }) => ({ action, resource })), [
+    { action: "ecr:DescribeImages", resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend" },
+    { action: "ecr:DescribeRepositories", resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend" },
+  ]);
+  assert(recoveryReads.every(allows));
+  for (const repository of ["mscqr-frontend", "mscqr-worker", "unrelated"]) {
+    assert(recoveryReads.every((evaluation) => !allows({ ...evaluation, resource: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}` })));
+  }
+  assert(recoveryReads.every((evaluation) => !allows({ ...evaluation, resource: evaluation.resource.replace(":368992683803:", ":000000000000:") })));
+  assert(recoveryReads.every((evaluation) => !allows({ ...evaluation, resource: evaluation.resource.replace(":eu-west-2:", ":us-east-1:") })));
   assert.equal(recoveryRegistration.resource, "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*");
   assert.equal(recoveryRegistration.context.find(({ key }) => key === "ecs:task-cpu").values[0], "2048");
   assert.equal(recoveryRegistration.context.find(({ key }) => key === "ecs:task-memory").values[0], "4096");

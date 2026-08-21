@@ -53,7 +53,7 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 35, capabilities: 262, uniqueActions: 125, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 35, capabilities: 264, uniqueActions: 125, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
@@ -64,8 +64,22 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   assert(first.capabilities.some(({ id, action }) => id === "recovery-list-backend-revisions" && action === "ecs:ListTaskDefinitions"));
   assert(first.capabilities.some(({ id, action, resources, phase, classification, mutation }) => id === "manifest-backend-health-recovery-register-legacy-task-definition" && action === "ecs:RegisterTaskDefinition" && resources.length === 1 && resources[0].endsWith("task-definition/mscqr-backend:*") && phase === "backend-health-recovery" && classification === "RELEASE_DIRECT_MUTATION" && mutation === true));
   assert(first.capabilities.some(({ id, action, resources, phase, classification, mutation }) => id === "manifest-backend-health-recovery-update-service" && action === "ecs:UpdateService" && resources.length === 1 && resources[0].endsWith("service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2") && phase === "backend-health-recovery" && classification === "RELEASE_DIRECT_MUTATION" && mutation === true));
+  for (const [id, action, probeId] of [
+    ["manifest-backend-health-recovery-describe-images", "ecr:DescribeImages", "backend-health-recovery-images"],
+    ["manifest-backend-health-recovery-describe-repositories", "ecr:DescribeRepositories", "backend-health-recovery-repository"],
+  ]) {
+    assert(first.capabilities.some((capability) => capability.id === id && capability.action === action
+      && capability.phase === "backend-health-recovery" && capability.classification === "RELEASE_DIRECT_READ"
+      && capability.mutation === false && capability.probe === "direct"
+      && capability.probeIds.includes(probeId)
+      && capability.resources.length === 1
+      && capability.resources[0] === "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
+      && capability.policy.sourceFile === "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json"));
+  }
   assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecs:RegisterTaskDefinition"));
   assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecs:UpdateService"));
+  assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecr:DescribeImages"));
+  assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecr:DescribeRepositories"));
   const forward = first.capabilities.filter(({ phase }) => phase === "existing-revision-forward-recovery");
   assert.equal(forward.length, 9);
   assert(forward.every(({ sourceFile, identity }) => sourceFile === "scripts/aws/forward-recover-stage-b-existing-revision.mjs" && identity === "RELEASE_DEPLOYER"));
@@ -103,6 +117,13 @@ test("release probes cover policy-list access on both canary roles", () => {
   }
 });
 
+test("backend recovery ECR probes are exact read-only repository calls", () => {
+  assert.deepEqual(RELEASE_READ_PROBES.filter(({ id }) => id.startsWith("backend-health-recovery-")), [
+    { id: "backend-health-recovery-images", action: "ecr:DescribeImages", args: ["ecr", "describe-images", "--repository-name", "mscqr-backend", "--max-results", "1"] },
+    { id: "backend-health-recovery-repository", action: "ecr:DescribeRepositories", args: ["ecr", "describe-repositories", "--repository-names", "mscqr-backend"] },
+  ]);
+});
+
 test("release preflight aggregates independent read denials and never simulates IAM", () => {
   const calls = []; const directory = temp();
   const report = runReleaseReadPreflight({ outputDirectory: directory, run: (args, probe) => {
@@ -115,6 +136,21 @@ test("release preflight aggregates independent read denials and never simulates 
   assert(calls.length >= RELEASE_READ_PROBES.length);
   assert(!calls.includes("iam:SimulatePrincipalPolicy"));
   assert.equal(fs.existsSync(path.join(directory, "stage-a-state-identity.json")), false);
+});
+
+test("backend recovery ECR denial blocks the release preflight before mutation", () => {
+  for (const deniedAction of ["ecr:DescribeImages", "ecr:DescribeRepositories"]) {
+    const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+      if (probe.action === deniedAction) throw new Error("AccessDenied");
+      return allowed(args);
+    } });
+    assert.equal(report.status, "blocked");
+    assert.deepEqual(report.failed.filter(({ action }) => action === deniedAction), [{
+      id: deniedAction === "ecr:DescribeImages" ? "backend-health-recovery-images" : "backend-health-recovery-repository",
+      action: deniedAction,
+      classification: "AccessDenied",
+    }]);
+  }
 });
 
 test("complete release preflight is valid and has no skipped probes", () => {
