@@ -1,6 +1,6 @@
 import { canonicalSha256, taskDefinitionFingerprint } from "./stage-b-task-definition-recovery-contract.mjs";
 import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
-import { assertProductionEnvironmentApprovalEvidence } from "./production-github-environment-approval.mjs";
+import { assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmentReviewer } from "./production-github-environment-approval.mjs";
 
 export const BACKEND_HEALTH_RECOVERY = Object.freeze({
   kind: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME",
@@ -177,8 +177,7 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
   if (!approval || Object.keys(approval).some((field) => !APPROVAL_FIELDS.has(field)) || Object.keys(approval).length !== APPROVAL_FIELDS.size) throw new Error("Backend health recovery approval schema is invalid.");
   for (const field of ["ticket", "approvedBy", "approverRole", "reason", "verificationRef"]) requiredText(approval?.[field], `approval.${field}`);
   if (approval.sourceSha !== sourceSha || approval.currentTaskDefinitionArn !== currentTaskDefinitionArn || approval.recoveryImageDigest !== recoveryImageDigest) throw new Error("Human approval is bound to a different recovery.");
-  const actor = requiredText(executionActor, "executionActor");
-  if (approval.approvedBy.toLowerCase() === actor.toLowerCase()) throw new Error("Backend health recovery cannot be self-approved.");
+  assertProductionEnvironmentReviewer(environmentApproval, { approvedBy: approval.approvedBy, executionActor });
   if (/(BEGIN [A-Z ]+PRIVATE KEY|SecretString|AccessKeyId|SecretAccessKey|SessionToken|DATABASE_URL=|password|token)/i.test(JSON.stringify(approval))) throw new Error("Backend health recovery approval contains prohibited secret material.");
   const { authorizationSha256, ...body } = authorization;
   if (!HEX256.test(authorizationSha256 || "") || canonicalSha256(body) !== authorizationSha256) throw new Error("Backend health recovery authorization hash is invalid.");

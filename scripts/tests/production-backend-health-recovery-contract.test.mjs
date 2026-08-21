@@ -21,7 +21,7 @@ const githubContext = { repository: "T-ej2003/genuine-scan-main", workflowRef: "
 const environmentApproval = createProductionEnvironmentApprovalEvidence({
   repository: githubContext.repository, environment: "production", sourceSha, workflowRunId: githubContext.workflowRunId,
   workflowRef: githubContext.workflowRef, eventName: githubContext.eventName, workflowRunAttempt: githubContext.workflowRunAttempt, executionActor: "release-operator", observedAt: now.toISOString(),
-  environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 1 } }] }] },
+  environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 1, login: "security-reviewer" } }] }] },
 });
 const current = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
 const imageFixture = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: sourceSha, imageDigests: {
@@ -31,7 +31,7 @@ const imageFixture = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSh
   "rls-canary": "sha256:f26b3c87ef6b7d1545936e50a41a049e5d02b3f11ef81bd41946ca1c967b05ab",
 } });
 const approval = {
-  ticket: "INC-BACKEND-IMAGE-0001", approvedBy: "security@example.invalid", approverRole: "Security Lead",
+  ticket: "INC-BACKEND-IMAGE-0001", approvedBy: "security-reviewer", approverRole: "Security Lead",
   reason: "Restore backend health so canonical dual-slot rotation can run", verificationRef: "https://example.invalid/recovery/1",
   sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
 };
@@ -214,6 +214,7 @@ test("authorization hash and human bindings fail closed", () => {
     (x) => { x.approval.recoveryImageDigest = "sha256:" + "b".repeat(64); },
     (x) => { x.approval.currentTaskDefinitionArn = x.approval.currentTaskDefinitionArn.replace(":47", ":46"); },
     (x) => { x.sourceSha = "a".repeat(40); },
+    (x) => { x.kind = "UNRELATED_RECOVERY_MODE"; },
   ]) {
     const input = base();
     input.authorization = structuredClone(authorization);
@@ -222,9 +223,31 @@ test("authorization hash and human bindings fail closed", () => {
     input.authorization.authorizationSha256 = canonicalSha256(body);
     assert.throws(() => assertLegacyBackendRecoveryEligibility(input));
   }
+  const selfEnvironmentApproval = createProductionEnvironmentApprovalEvidence({
+    repository: githubContext.repository, environment: "production", sourceSha, workflowRunId: githubContext.workflowRunId,
+    workflowRef: githubContext.workflowRef, eventName: githubContext.eventName, workflowRunAttempt: githubContext.workflowRunAttempt, executionActor: "release-operator", observedAt: now.toISOString(),
+    environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 1, login: "release-operator" } }] }] },
+  });
   const selfApproved = base();
-  selfApproved.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, approval: { ...approval, approvedBy: "Release-Operator" } });
-  assert.throws(() => assertLegacyBackendRecoveryEligibility(selfApproved), /self-approved/);
+  selfApproved.environmentApproval = selfEnvironmentApproval;
+  selfApproved.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval: selfEnvironmentApproval, approval: { ...approval, approvedBy: "Release-Operator" } });
+  assert.throws(() => assertLegacyBackendRecoveryEligibility(selfApproved), /prevents self-review/);
+});
+
+test("configured solo operator may dispatch and approve when GitHub allows self-review", () => {
+  const soloEnvironmentApproval = createProductionEnvironmentApprovalEvidence({
+    repository: githubContext.repository, environment: "production", sourceSha, workflowRunId: githubContext.workflowRunId,
+    workflowRef: githubContext.workflowRef, eventName: githubContext.eventName, workflowRunAttempt: githubContext.workflowRunAttempt, executionActor: "T-ej2003", observedAt: now.toISOString(),
+    environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 183396573, login: "T-ej2003" } }] }] },
+  });
+  const input = base();
+  input.executionActor = "T-ej2003";
+  input.environmentApproval = soloEnvironmentApproval;
+  input.authorization = createLegacyBackendRecoveryAuthorization({
+    sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
+    imageAuthorization: imageFixture.authorization, environmentApproval: soloEnvironmentApproval, approval: { ...approval, approvedBy: "T-ej2003" },
+  });
+  assert.equal(assertLegacyBackendRecoveryEligibility(input).recoveryImageDigest, digest);
 });
 
 test("fabricated human metadata cannot replace authenticated GitHub environment approval", async () => {

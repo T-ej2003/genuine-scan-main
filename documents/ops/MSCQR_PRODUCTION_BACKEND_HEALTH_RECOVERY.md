@@ -19,13 +19,17 @@ The `backend-health-recovery` release-gate mode requires:
 - descriptive human metadata bound to the source SHA, current task-definition
   ARN, and replacement digest; and
 - the protected GitHub `production` environment, with at least one required
-  reviewer, self-review prevention, and administrator bypass disabled.
+  reviewer and administrator bypass disabled.
 
-`approvedBy` and `approverRole` are audit metadata, not authenticated identity.
 GitHub's protected-environment gate is the approval authority. The workflow
-authenticates its live configuration through the GitHub API and binds the
-resulting private, source/run-specific evidence into recovery authorization
-before configuring AWS credentials.
+authenticates its live reviewer principals and self-review policy through the
+GitHub API and binds the resulting private, source/run-specific evidence into
+recovery authorization before configuring AWS credentials. `approvedBy` must
+name one of those configured principals, but it is audit metadata rather than
+standalone proof of identity. When GitHub has `Prevent self-review` enabled it
+must differ from the dispatcher; when disabled, GitHub may accept the configured
+solo operator as both dispatcher and reviewer. `approverRole` remains descriptive
+audit metadata.
 
 The workflow creates a dedicated operator-owned `0700` directory below
 `RUNNER_TEMP`; the shared artifact contract atomically publishes the approval
@@ -103,8 +107,9 @@ closed without an update.
    `release_mode=backend-health-recovery` and the six recovery inputs.
 4. Have an authorized reviewer approve the GitHub `production` environment
    deployment. Repository administrators must first configure that environment
-   with required reviewers, `Prevent self-review` enabled, and administrator
-   bypass disabled.
+   with required reviewers and administrator bypass disabled. Configure
+   `Prevent self-review` to match the repository's actual multi-operator or
+   solo-operator governance model.
 5. Retain the uploaded `backend-health-recovery-evidence` artifact.
 6. After backend health is proven, resume the canonical dual-slot rotation.
    This recovery does not create or refresh rotation evidence.
