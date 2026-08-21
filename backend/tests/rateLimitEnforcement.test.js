@@ -1,5 +1,6 @@
 const assert = require("assert");
 const express = require("express");
+const { closeRedisConnections } = require("../dist/services/redisService");
 
 process.env.PUBLIC_VERIFY_RATE_LIMIT_PER_MIN = "3";
 
@@ -345,7 +346,7 @@ verifySessionMutationApp.post("/verify/session/abc/intake", verifySessionMutatio
   });
 
   console.log("rate limit enforcement tests passed");
-})().catch((error) => {
+})().finally(closeRedisConnections).catch((error) => {
   console.error(error);
   process.exit(1);
 });

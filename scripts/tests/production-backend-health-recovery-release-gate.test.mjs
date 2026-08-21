@@ -7,6 +7,7 @@ import yaml from "js-yaml";
 
 const workflow = fs.readFileSync(".github/workflows/release-gate.yml", "utf8");
 const parsedWorkflow = yaml.load(workflow);
+const rateLimitEnforcementTest = fs.readFileSync("backend/tests/rateLimitEnforcement.test.js", "utf8");
 
 test("release gate exposes one bounded backend health recovery mode", () => {
   assert.match(workflow, /- backend-health-recovery/);
@@ -31,6 +32,12 @@ test("backend recovery cannot enter rotation, frontend, worker, or normal releas
   assert.match(workflow, /Deploy rotation transition backend ECS service\n\s*if: \$\{\{ inputs\.release_mode == 'rotation-overlap' \|\| inputs\.release_mode == 'rotation-cleanup' \}\}/);
   assert.match(workflow, /Deploy frontend ECS service\n\s*if: \$\{\{ inputs\.release_mode == 'normal'/);
   assert.match(workflow, /Deploy worker ECS service\n\s*if: \$\{\{ inputs\.release_mode == 'normal'/);
+});
+
+test("backend validation closes its shared Redis client before advancing", () => {
+  assert.match(workflow, /REDIS_URL: redis:\/\/127\.0\.0\.1:6379\/0/);
+  assert.match(rateLimitEnforcementTest, /closeRedisConnections/);
+  assert.match(rateLimitEnforcementTest, /\.finally\(closeRedisConnections\)/);
 });
 
 test("release gate heredocs parse and backend recovery lifecycle validation executes", () => {
