@@ -157,6 +157,11 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
   const matches = revisions.filter((item) => taskDefinitionFingerprint(item, item.tags || []) === eligible.fingerprint);
   if (matches.length > 1) throw new Error("Multiple matching recovery revisions make replay ambiguous.");
   let targetArn = matches[0]?.taskDefinition?.taskDefinitionArn || matches[0]?.taskDefinitionArn;
+  if (targetArn && !TASK_ARN.test(targetArn)) throw new Error("Recovery census returned an invalid legacy backend revision.");
+  if (eligible.observedServiceTaskDefinitionArn !== eligible.currentTaskDefinitionArn
+    && eligible.observedServiceTaskDefinitionArn !== targetArn) {
+    throw new Error("Backend service current task definition is stale and does not match an authenticated completed recovery.");
+  }
   let registrations = 0;
   if (!targetArn) {
     try {

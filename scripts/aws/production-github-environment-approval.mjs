@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
 
 export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
@@ -86,6 +86,8 @@ export async function fetchProductionEnvironmentApprovalEvidence(input, { fetchI
 }
 
 export async function runProductionEnvironmentApprovalCli(argv = process.argv.slice(2), deps = {}) {
+  const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--output")), repositoryRoot: root, label: "GitHub environment approval evidence", allowExisting: false });
+  ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "GitHub environment approval directory" });
   const evidence = await fetchProductionEnvironmentApprovalEvidence({
     token: (deps.env || process.env).GITHUB_TOKEN,
     repository: required(argv, "--repository"),
@@ -97,7 +99,6 @@ export async function runProductionEnvironmentApprovalCli(argv = process.argv.sl
     workflowRunAttempt: required(argv, "--workflow-run-attempt"),
     executionActor: required(argv, "--execution-actor"),
   }, deps);
-  const output = path.resolve(required(argv, "--output"));
   writeStageBPrivateFilesAtomic({ repositoryRoot: root, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), label: "GitHub environment approval evidence" }] });
   return evidence;
 }

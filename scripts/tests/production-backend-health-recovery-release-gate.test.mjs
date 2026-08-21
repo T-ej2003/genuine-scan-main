@@ -12,7 +12,10 @@ test("release gate exposes one bounded backend health recovery mode", () => {
   assert.match(workflow, /Execute governed legacy backend health recovery[\s\S]*recover-production-backend-health\.mjs[\s\S]*--execute/);
   assert.match(workflow, /if: \$\{\{ inputs\.release_mode == 'backend-health-recovery' \}\}[\s\S]*backend-health-recovery-evidence/);
   assert.match(workflow, /deploy-production-ecs:[\s\S]*environment: production/);
-  assert.match(workflow, /Authenticate production environment approval boundary[\s\S]*production-github-environment-approval\.mjs[\s\S]*--environment production[\s\S]*--workflow-ref "\$GITHUB_WORKFLOW_REF"[\s\S]*--event-name "\$GITHUB_EVENT_NAME"[\s\S]*--workflow-run-id "\$GITHUB_RUN_ID"/);
+  assert.match(workflow, /Authenticate production environment approval boundary[\s\S]*approval_dir="\$RUNNER_TEMP\/production-environment-approval"[\s\S]*! -d "\$approval_dir" \|\| -L "\$approval_dir"[\s\S]*install -d -m 700 -- "\$approval_dir"[\s\S]*stat -c '%a'[\s\S]*stat -c '%u'[\s\S]*production-github-environment-approval\.mjs[\s\S]*--environment production[\s\S]*--workflow-ref "\$GITHUB_WORKFLOW_REF"[\s\S]*--event-name "\$GITHUB_EVENT_NAME"[\s\S]*--workflow-run-id "\$GITHUB_RUN_ID"/);
+  assert.doesNotMatch(workflow, /evidence_file="\$RUNNER_TEMP\/production-environment-approval\.json"/);
+  assert.match(workflow, /Generate and verify checksum-bound production RLS package[\s\S]*approval_dir="\$\(dirname "\$\{\{ steps\.production-environment-approval\.outputs\.evidence_file \}\}"\)"[\s\S]*stat -c '%a'[\s\S]*production-rls-approval\.json/);
+  assert.doesNotMatch(workflow, /approval_file="\$RUNNER_TEMP\/production-rls-approval\.json"/);
   assert.doesNotMatch(workflow, /production-github-environment-approval\.mjs[^\n]*--github-token/);
   assert.match(workflow, /--environment-approval "\$\{\{ steps\.production-environment-approval\.outputs\.evidence_file \}\}"[\s\S]*--environment-approval-sha256 "\$\{\{ steps\.production-environment-approval\.outputs\.evidence_sha256 \}\}"/);
   assert.ok(workflow.indexOf("Authenticate production environment approval boundary") < workflow.indexOf("Configure AWS credentials via OIDC"));

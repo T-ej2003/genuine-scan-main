@@ -27,6 +27,11 @@ authenticates its live configuration through the GitHub API and binds the
 resulting private, source/run-specific evidence into recovery authorization
 before configuring AWS credentials.
 
+The workflow creates a dedicated operator-owned `0700` directory below
+`RUNNER_TEMP`; the shared artifact contract atomically publishes the approval
+evidence there as mode `0600` without changing the runner temp directory or
+dirtying the checkout.
+
 Before dispatch, the canonical administrator capability preflight must report
 both `backend-health-recovery-register-legacy-task-definition` and
 `backend-health-recovery-update-service` as allowed for the production release
@@ -47,6 +52,12 @@ backend service, reconciles ambiguous registration/update outcomes from live
 ECS, waits for stability, verifies running digests, verifies backend health,
 and publishes recovery evidence. It never deploys frontend/worker workloads,
 applies Stage B, or satisfies/bypasses rotation freshness.
+
+Before registration, the initially observed service must identify the approved
+legacy source revision unless it already identifies the single exact recovery
+revision authenticated by the candidate fingerprint. The service is read again
+immediately before `UpdateService`, so a later concurrent change still fails
+closed without an update.
 
 ## Operator sequence
 

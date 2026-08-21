@@ -157,6 +157,54 @@ test("already recovered replay performs no registration or service update", asyn
   assert.equal(result.updates, 0);
 });
 
+test("stale source revisions fail before registration while authenticated recovery replay remains valid", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  for (const staleArn of [
+    "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:46",
+    "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:49",
+  ]) {
+    const input = base();
+    input.service.taskDefinition = staleArn;
+    let registrations = 0;
+    let updates = 0;
+    await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
+      census: async () => [], register: async () => { registrations += 1; }, describe: async () => registered,
+      readService: async () => input.service, updateService: async () => { updates += 1; }, waitStable: async () => {},
+      readRunningTasks: async () => [], verifyHealth: async () => false,
+    }), /current task definition is stale/);
+    assert.equal(registrations, 0);
+    assert.equal(updates, 0);
+  }
+
+  const replay = base();
+  replay.service.taskDefinition = targetArn;
+  const result = await runLegacyBackendHealthRecovery(replay, {
+    census: async () => [registered], register: async () => assert.fail("register called"), describe: async () => registered,
+    readService: async () => ({ ...replay.service, runningCount: 2, pendingCount: 0 }), updateService: async () => assert.fail("update called"),
+    waitStable: async () => {}, readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest })), verifyHealth: async () => true,
+  });
+  assert.equal(result.registrations, 0);
+  assert.equal(result.updates, 0);
+});
+
+test("registration follows initial live revision validation and pre-update concurrency remains fail closed", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  const input = base();
+  const order = [];
+  let updates = 0;
+  await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
+    census: async () => { order.push("census"); return []; },
+    register: async () => { order.push("register"); return registered; },
+    describe: async () => registered,
+    readService: async () => ({ ...input.service, taskDefinition: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:49" }),
+    updateService: async () => { updates += 1; }, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => false,
+  }), /changed concurrently/);
+  assert.deepEqual(order, ["census", "register"]);
+  assert.equal(updates, 0);
+});
+
 test("authorization hash and human bindings fail closed", () => {
   for (const change of [
     (x) => { delete x.approval; },
