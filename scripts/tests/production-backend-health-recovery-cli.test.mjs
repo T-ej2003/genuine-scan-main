@@ -31,7 +31,7 @@ function privateFixture() {
   const environmentApproval = createProductionEnvironmentApprovalEvidence({
     repository: githubEnv.GITHUB_REPOSITORY, environment: "production", sourceSha, workflowRunId: githubEnv.GITHUB_RUN_ID,
     workflowRef: githubEnv.GITHUB_WORKFLOW_REF, eventName: githubEnv.GITHUB_EVENT_NAME, workflowRunAttempt: githubEnv.GITHUB_RUN_ATTEMPT, executionActor: githubEnv.GITHUB_ACTOR, observedAt: now.toISOString(),
-    environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 1 } }] }] },
+    environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 1, login: "security" } }] }] },
   });
   const environmentBytes = Buffer.from(JSON.stringify(environmentApproval));
   const image = path.join(dir, "image.json");
@@ -104,7 +104,7 @@ test("prepare rejects tampered bytes and self approval before any AWS call", asy
     "--recovery-image-digest", digest, "--image-authorization", selfApproved.image,
     "--image-authorization-sha256", sha(selfApproved.imageBytes), "--approval", selfApproved.approvalPath,
     "--approval-sha256", sha(approvalBytes), "--output", path.join(selfApproved.dir, "authorization.json"),
-  ], deps(selfApproved)), /self-approved/);
+  ], deps(selfApproved)), /configured production environment reviewer/);
 });
 
 test("execute authenticates semantic authorization before any AWS call", async (t) => {
