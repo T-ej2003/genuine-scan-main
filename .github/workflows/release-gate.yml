@@ -188,17 +188,17 @@ jobs:
                   exit 1
                 fi
               done
-              node --input-type=module - <<'NODE'
-              import { createHash } from "node:crypto";
-              const inputs = [
-                [process.env.BACKEND_RECOVERY_IMAGE_AUTHORIZATION_JSON, process.env.BACKEND_RECOVERY_IMAGE_AUTHORIZATION_SHA256, "image authorization"],
-                [process.env.BACKEND_RECOVERY_APPROVAL_JSON, process.env.BACKEND_RECOVERY_APPROVAL_SHA256, "approval"],
-              ];
-              for (const [bytes, expected, label] of inputs) {
-                if (!/^[a-f0-9]{64}$/.test(expected) || createHash("sha256").update(bytes).digest("hex") !== expected) throw new Error(`Backend recovery ${label} bytes do not match their SHA-256.`);
-                JSON.parse(bytes);
-              }
-              NODE
+          node --input-type=module - <<'NODE'
+          import { createHash } from "node:crypto";
+          const inputs = [
+            [process.env.BACKEND_RECOVERY_IMAGE_AUTHORIZATION_JSON, process.env.BACKEND_RECOVERY_IMAGE_AUTHORIZATION_SHA256, "image authorization"],
+            [process.env.BACKEND_RECOVERY_APPROVAL_JSON, process.env.BACKEND_RECOVERY_APPROVAL_SHA256, "approval"],
+          ];
+          for (const [bytes, expected, label] of inputs) {
+            if (!/^[a-f0-9]{64}$/.test(expected) || createHash("sha256").update(bytes).digest("hex") !== expected) throw new Error(`Backend recovery ${label} bytes do not match their SHA-256.`);
+            JSON.parse(bytes);
+          }
+          NODE
               ;;
             rotation-overlap|rotation-cleanup)
               for name in ROTATION_ID ROTATION_STATE_JSON ROTATION_STATE_SHA256 ROTATION_TASK_DEFINITION_ARN ROTATION_EXPECTED_CURRENT_TASK_DEFINITION_ARN ROTATION_IMAGE_DIGEST ROTATION_DEPLOYMENT_SHA ROTATION_READINESS_EVIDENCE_JSON ROTATION_READINESS_EVIDENCE_SHA256; do
@@ -555,15 +555,15 @@ jobs:
               echo "::error::Current frontend task definition is not bound to an immutable production image digest."
               exit 1
             fi
-            node --input-type=module - "$OUTPUT_FILE" "$frontend_image" <<'NODE'
-            import fs from "node:fs";
-            const [outputPath, imageRef] = process.argv.slice(2);
-            const [imageUri, imageDigest] = imageRef.split("@");
-            fs.appendFileSync(outputPath, `${JSON.stringify({
-              service: "frontend", repository: "mscqr-web", image_uri: imageUri,
-              image_tag: "preserved-current-task-definition", image_digest: imageDigest, image_ref: imageRef,
-            })}\n`);
-            NODE
+          node --input-type=module - "$OUTPUT_FILE" "$frontend_image" <<'NODE'
+          import fs from "node:fs";
+          const [outputPath, imageRef] = process.argv.slice(2);
+          const [imageUri, imageDigest] = imageRef.split("@");
+          fs.appendFileSync(outputPath, `${JSON.stringify({
+            service: "frontend", repository: "mscqr-web", image_uri: imageUri,
+            image_tag: "preserved-current-task-definition", image_digest: imageDigest, image_ref: imageRef,
+          })}\n`);
+          NODE
           else
             ./scripts/aws/publish-ecs-images.sh all
           fi

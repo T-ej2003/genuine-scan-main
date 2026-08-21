@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import test from "node:test";
+import yaml from "js-yaml";
 
 const workflow = fs.readFileSync(".github/workflows/release-gate.yml", "utf8");
+const parsedWorkflow = yaml.load(workflow);
 
 test("release gate exposes one bounded backend health recovery mode", () => {
   assert.match(workflow, /- backend-health-recovery/);
@@ -27,4 +31,29 @@ test("backend recovery cannot enter rotation, frontend, worker, or normal releas
   assert.match(workflow, /Deploy rotation transition backend ECS service\n\s*if: \$\{\{ inputs\.release_mode == 'rotation-overlap' \|\| inputs\.release_mode == 'rotation-cleanup' \}\}/);
   assert.match(workflow, /Deploy frontend ECS service\n\s*if: \$\{\{ inputs\.release_mode == 'normal'/);
   assert.match(workflow, /Deploy worker ECS service\n\s*if: \$\{\{ inputs\.release_mode == 'normal'/);
+});
+
+test("release gate heredocs parse and backend recovery lifecycle validation executes", () => {
+  const heredocSteps = Object.values(parsedWorkflow.jobs).flatMap((job) => job.steps || []).filter((step) => step.run?.includes("<<"));
+  for (const step of heredocSteps) {
+    const parsed = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
+    assert.equal(parsed.status, 0, `${step.name}: ${parsed.stderr}`);
+  }
+
+  const lifecycle = parsedWorkflow.jobs["resolve-deploy-target"].steps.find((step) => step.name === "Validate production release lifecycle mode").run;
+  const image = JSON.stringify({ valid: true });
+  const approval = JSON.stringify({ approvedBy: "T-ej2003" });
+  const env = {
+    ...process.env,
+    RELEASE_MODE: "backend-health-recovery",
+    BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47",
+    BACKEND_RECOVERY_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
+    BACKEND_RECOVERY_IMAGE_AUTHORIZATION_JSON: image,
+    BACKEND_RECOVERY_IMAGE_AUTHORIZATION_SHA256: createHash("sha256").update(image).digest("hex"),
+    BACKEND_RECOVERY_APPROVAL_JSON: approval,
+    BACKEND_RECOVERY_APPROVAL_SHA256: createHash("sha256").update(approval).digest("hex"),
+  };
+  assert.equal(spawnSync("bash", ["-e"], { input: lifecycle, env }).status, 0);
+  assert.notEqual(spawnSync("bash", ["-e"], { input: lifecycle, env: { ...env, BACKEND_RECOVERY_APPROVAL_SHA256: "0".repeat(64) } }).status, 0);
+  assert.notEqual(spawnSync("bash", ["-e"], { input: lifecycle, env: { ...env, RELEASE_MODE: "unsupported" } }).status, 0);
 });
