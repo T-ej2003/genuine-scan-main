@@ -10,10 +10,18 @@ import {
   runLegacyBackendHealthRecovery,
 } from "../aws/production-backend-health-recovery-contract.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
+import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 
 const sourceSha = "565f78be803558feb40a543ead464c5410738960";
 const digest = "sha256:3dbd02136a99d1741fdfa655397a661fa2275812e1cad0675c93fc5c7c4b4477";
+const now = new Date("2026-08-20T18:00:00.000Z");
+const githubContext = { repository: "T-ej2003/genuine-scan-main", workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main", eventName: "workflow_dispatch", workflowRunId: "123", workflowRunAttempt: "1", githubActions: "true", now };
+const environmentApproval = createProductionEnvironmentApprovalEvidence({
+  repository: githubContext.repository, environment: "production", sourceSha, workflowRunId: githubContext.workflowRunId,
+  workflowRef: githubContext.workflowRef, eventName: githubContext.eventName, workflowRunAttempt: githubContext.workflowRunAttempt, executionActor: "release-operator", observedAt: now.toISOString(),
+  environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 1 } }] }] },
+});
 const current = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
 const imageFixture = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: sourceSha, imageDigests: {
   backend: digest,
@@ -26,7 +34,7 @@ const approval = {
   reason: "Restore backend health so canonical dual-slot rotation can run", verificationRef: "https://example.invalid/recovery/1",
   sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
 };
-const authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, approval });
+const authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, approval });
 const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: digest, imageReleaseSha: imageFixture.imageReleaseSha });
 const base = () => ({
   sourceSha,
@@ -38,6 +46,8 @@ const base = () => ({
   authorization,
   imageAuthorization: imageFixture.authorization,
   imageValidation: { now: imageFixture.now, verifyImageEvidence: imageFixture.verifyImageEvidence },
+  environmentApproval,
+  githubContext: { ...githubContext },
   executionActor: "release-operator",
   candidate: structuredClone(candidate),
 });
@@ -79,7 +89,7 @@ test("eligibility rejects absent approval, wrong bindings, present current image
     [mutate("stoppedReasons", ["CannotPullContainerError: image sha256:" + "f".repeat(64) + " not found"]), /missing-image/],
   ]) assert.throws(() => assertLegacyBackendRecoveryEligibility(input), pattern);
   const wrongApproval = base();
-  wrongApproval.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: "sha256:" + "a".repeat(64), imageAuthorization: imageFixture.authorization, approval: { ...approval, recoveryImageDigest: "sha256:" + "a".repeat(64) } });
+  wrongApproval.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: "sha256:" + "a".repeat(64), imageAuthorization: imageFixture.authorization, environmentApproval, approval: { ...approval, recoveryImageDigest: "sha256:" + "a".repeat(64) } });
   assert.throws(() => assertLegacyBackendRecoveryEligibility(wrongApproval), /different incident|digest/);
 });
 
@@ -162,8 +172,32 @@ test("authorization hash and human bindings fail closed", () => {
     assert.throws(() => assertLegacyBackendRecoveryEligibility(input));
   }
   const selfApproved = base();
-  selfApproved.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, approval: { ...approval, approvedBy: "Release-Operator" } });
+  selfApproved.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, approval: { ...approval, approvedBy: "Release-Operator" } });
   assert.throws(() => assertLegacyBackendRecoveryEligibility(selfApproved), /self-approved/);
+});
+
+test("fabricated human metadata cannot replace authenticated GitHub environment approval", async () => {
+  for (const change of [
+    (input) => { input.environmentApproval = undefined; },
+    (input) => { input.githubContext.repository = "attacker/repository"; },
+    (input) => { input.githubContext.githubActions = "false"; },
+    (input) => { input.githubContext.workflowRunId = "999"; },
+    (input) => { input.githubContext.now = new Date(now.getTime() + 31 * 60 * 1000); },
+  ]) {
+    const input = base();
+    input.authorization = createLegacyBackendRecoveryAuthorization({
+      sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
+      imageAuthorization: imageFixture.authorization, environmentApproval, approval: { ...approval, approvedBy: "fabricated-reviewer", approverRole: "fabricated-role" },
+    });
+    change(input);
+    let calls = 0;
+    const forbidden = async () => { calls += 1; };
+    await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
+      census: forbidden, register: forbidden, describe: forbidden, readService: forbidden, updateService: forbidden,
+      waitStable: forbidden, readRunningTasks: forbidden, verifyHealth: forbidden,
+    }), /authorization|protected recovery run|stale/);
+    assert.equal(calls, 0);
+  }
 });
 
 test("invalid evidence makes zero mutation adapter calls", async () => {

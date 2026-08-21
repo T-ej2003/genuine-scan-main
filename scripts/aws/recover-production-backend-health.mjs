@@ -37,10 +37,12 @@ const cleanEnv = (base = process.env, profile) => {
 
 export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), deps = {}) {
   const sourceSha = required(argv, "--source-sha");
+  const environmentApproval = readAuthenticatedJson(required(argv, "--environment-approval"), required(argv, "--environment-approval-sha256"), "GitHub environment approval evidence");
   const imageFile = required(argv, "--image-authorization");
   const imageSha = required(argv, "--image-authorization-sha256");
   const profile = option(argv, "--aws-profile");
   const env = cleanEnv(deps.baseEnv, profile);
+  const githubContext = { repository: env.GITHUB_REPOSITORY, workflowRef: env.GITHUB_WORKFLOW_REF, eventName: env.GITHUB_EVENT_NAME, workflowRunId: env.GITHUB_RUN_ID, workflowRunAttempt: env.GITHUB_RUN_ATTEMPT, githubActions: env.GITHUB_ACTIONS, now: deps.now };
   const verifyImageEvidence = deps.verifyImageEvidence || ((input) => verifyImageEvidenceSignature({ ...input, env }));
   const image = readAuthenticatedJson(imageFile, imageSha, "Backend recovery image authorization");
   const protectedMain = (deps.readProtectedMain || readFreshProtectedMainIdentity)({ cwd: root, expectedSourceSha: sourceSha, ...(deps.git ? { run: deps.git } : {}) });
@@ -56,6 +58,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       currentTaskDefinitionArn: required(argv, "--current-task-definition"),
       recoveryImageDigest: required(argv, "--recovery-image-digest"),
       imageAuthorization: image.value,
+      environmentApproval: environmentApproval.value,
       approval: approval.value,
     });
     assertLegacyBackendRecoveryAuthorization(authorization, {
@@ -64,6 +67,8 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       recoveryImageDigest: authorization.recoveryImageDigest,
       imageAuthorization: image.value,
       imageValidation: { verifyImageEvidence },
+      environmentApproval: environmentApproval.value,
+      githubContext,
       executionActor: env.GITHUB_ACTOR,
     });
     const output = path.resolve(required(argv, "--output"));
@@ -79,6 +84,8 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     recoveryImageDigest: authorization.value.recoveryImageDigest,
     imageAuthorization: image.value,
     imageValidation: { verifyImageEvidence },
+    environmentApproval: environmentApproval.value,
+    githubContext,
     executionActor: env.GITHUB_ACTOR,
   });
   const evidenceOut = path.resolve(required(argv, "--evidence-out"));
@@ -138,7 +145,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   const result = await runLegacyBackendHealthRecovery({
     sourceSha, service, currentTaskDefinition, currentImageExists: imageExists(currentDigest), stoppedReasons,
     replacementImage: { exists: imageExists(recoveryDigest), immutable: repository?.imageTagMutability === "IMMUTABLE", signatureValid: true, attestationValid: true, provenanceValid: true, criticalFindings: 0, repository: BACKEND_HEALTH_RECOVERY.repository, digest: recoveryDigest },
-    authorization: authorization.value, imageAuthorization: image.value, imageValidation, executionActor: process.env.GITHUB_ACTOR, candidate,
+    authorization: authorization.value, imageAuthorization: image.value, imageValidation, environmentApproval: environmentApproval.value, githubContext, executionActor: env.GITHUB_ACTOR, candidate,
   }, {
     census,
     describe,

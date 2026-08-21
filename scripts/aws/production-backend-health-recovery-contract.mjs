@@ -1,5 +1,6 @@
 import { canonicalSha256, taskDefinitionFingerprint } from "./stage-b-task-definition-recovery-contract.mjs";
 import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
+import { assertProductionEnvironmentApprovalEvidence } from "./production-github-environment-approval.mjs";
 
 export const BACKEND_HEALTH_RECOVERY = Object.freeze({
   kind: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME",
@@ -19,7 +20,7 @@ const HEX256 = /^[a-f0-9]{64}$/;
 const TASK_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-backend:([1-9][0-9]*)$/;
 const IMAGE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@(sha256:[a-f0-9]{64})$/;
 const IDENTITY_ENV = new Set(["GIT_SHA", "RELEASE_GIT_SHA"]);
-const AUTHORIZATION_FIELDS = new Set(["schemaVersion", "kind", "environment", "account", "region", "cluster", "service", "family", "sourceSha", "imageReleaseSha", "currentTaskDefinitionArn", "recoveryImageDigest", "imageAuthorizationSha256", "reasonCode", "allowedDeltaProfile", "approval", "authorizationSha256"]);
+const AUTHORIZATION_FIELDS = new Set(["schemaVersion", "kind", "environment", "account", "region", "cluster", "service", "family", "sourceSha", "imageReleaseSha", "currentTaskDefinitionArn", "recoveryImageDigest", "imageAuthorizationSha256", "environmentApprovalSha256", "reasonCode", "allowedDeltaProfile", "approval", "authorizationSha256"]);
 const APPROVAL_FIELDS = new Set(["ticket", "approvedBy", "approverRole", "reason", "verificationRef", "sourceSha", "currentTaskDefinitionArn", "recoveryImageDigest"]);
 
 const requiredText = (value, label) => {
@@ -27,7 +28,7 @@ const requiredText = (value, label) => {
   return value.trim();
 };
 
-export function createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, imageAuthorization, approval } = {}) {
+export function createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, imageAuthorization, environmentApproval, approval } = {}) {
   const body = {
     schemaVersion: BACKEND_HEALTH_RECOVERY.schemaVersion,
     kind: BACKEND_HEALTH_RECOVERY.kind,
@@ -42,6 +43,7 @@ export function createLegacyBackendRecoveryAuthorization({ sourceSha, currentTas
     currentTaskDefinitionArn,
     recoveryImageDigest,
     imageAuthorizationSha256: imageAuthorization?.evidenceSha256,
+    environmentApprovalSha256: environmentApproval?.evidenceSha256,
     reasonCode: "CURRENT_IMAGE_DIGEST_MISSING",
     allowedDeltaProfile: "IMAGE_AND_SOURCE_IDENTITY_ONLY",
     approval: structuredClone(approval),
@@ -97,7 +99,7 @@ export function assertLegacyBackendRecoveryCandidate({ currentTaskDefinition, ca
 }
 
 export function assertLegacyBackendRecoveryAuthorization(authorization, {
-  sourceSha, currentTaskDefinitionArn, recoveryImageDigest, imageAuthorization, imageValidation, executionActor,
+  sourceSha, currentTaskDefinitionArn, recoveryImageDigest, imageAuthorization, imageValidation, environmentApproval, githubContext, executionActor,
 } = {}) {
   if (!authorization || Object.keys(authorization).some((field) => !AUTHORIZATION_FIELDS.has(field)) || Object.keys(authorization).length !== AUTHORIZATION_FIELDS.size) throw new Error("Backend health recovery authorization schema is invalid.");
   if (authorization?.schemaVersion !== BACKEND_HEALTH_RECOVERY.schemaVersion || authorization?.kind !== BACKEND_HEALTH_RECOVERY.kind
@@ -109,9 +111,11 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
     || authorization?.reasonCode !== "CURRENT_IMAGE_DIGEST_MISSING" || authorization?.allowedDeltaProfile !== "IMAGE_AND_SOURCE_IDENTITY_ONLY"
     || authorization?.sourceSha !== sourceSha || !SHA.test(sourceSha || "")
     || authorization?.imageReleaseSha !== imageAuthorization?.imageReleaseSha || !SHA.test(authorization?.imageReleaseSha || "")
-    || !HEX256.test(authorization?.imageAuthorizationSha256 || "") || authorization.imageAuthorizationSha256 !== imageAuthorization?.evidenceSha256) {
+    || !HEX256.test(authorization?.imageAuthorizationSha256 || "") || authorization.imageAuthorizationSha256 !== imageAuthorization?.evidenceSha256
+    || !HEX256.test(authorization?.environmentApprovalSha256 || "") || authorization.environmentApprovalSha256 !== environmentApproval?.evidenceSha256) {
     throw new Error("Backend health recovery authorization is incomplete or bound to a different incident.");
   }
+  assertProductionEnvironmentApprovalEvidence(environmentApproval, { sourceSha, repository: githubContext?.repository, environment: "production", workflowRef: githubContext?.workflowRef, eventName: githubContext?.eventName, workflowRunId: githubContext?.workflowRunId, workflowRunAttempt: githubContext?.workflowRunAttempt, executionActor, githubActions: githubContext?.githubActions, now: githubContext?.now });
   assertImageAuthorization(imageAuthorization, sourceSha, imageValidation);
   if (authorizedBackendDigest(imageAuthorization) !== recoveryImageDigest) throw new Error("Recovery digest differs from canonical image authorization.");
   const approval = authorization.approval;
@@ -127,7 +131,7 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
 }
 
 export function assertLegacyBackendRecoveryEligibility(input = {}) {
-  const { sourceSha, service, currentTaskDefinition, currentImageExists, replacementImage, stoppedReasons = [], authorization, imageAuthorization, imageValidation, executionActor } = input;
+  const { sourceSha, service, currentTaskDefinition, currentImageExists, replacementImage, stoppedReasons = [], authorization, imageAuthorization, imageValidation, environmentApproval, githubContext, executionActor } = input;
   const current = definition(currentTaskDefinition);
   const currentArn = current.taskDefinitionArn;
   const imageMatch = IMAGE.exec(backendContainer(current).image || "");
@@ -140,7 +144,7 @@ export function assertLegacyBackendRecoveryEligibility(input = {}) {
   if (replacementImage?.exists !== true || replacementImage?.immutable !== true || replacementImage?.signatureValid !== true
     || replacementImage?.attestationValid !== true || replacementImage?.provenanceValid !== true || replacementImage?.criticalFindings !== 0
     || replacementImage?.repository !== BACKEND_HEALTH_RECOVERY.repository || !SHA256.test(replacementImage?.digest || "")) throw new Error("Replacement image does not satisfy the recovery evidence contract.");
-  assertLegacyBackendRecoveryAuthorization(authorization, { sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: replacementImage.digest, imageAuthorization, imageValidation, executionActor });
+  assertLegacyBackendRecoveryAuthorization(authorization, { sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: replacementImage.digest, imageAuthorization, imageValidation, environmentApproval, githubContext, executionActor });
   const checked = assertLegacyBackendRecoveryCandidate({ currentTaskDefinition, candidate: input.candidate, recoveryImageDigest: replacementImage.digest, imageReleaseSha: authorization.imageReleaseSha });
   return Object.freeze({ ...checked, currentTaskDefinitionArn: currentArn, observedServiceTaskDefinitionArn: service.taskDefinition, currentImageDigest: imageMatch[1], recoveryImageDigest: replacementImage.digest, desiredCount: service.desiredCount, networkConfigurationSha256: canonicalSha256(service.networkConfiguration), loadBalancersSha256: canonicalSha256(service.loadBalancers) });
 }

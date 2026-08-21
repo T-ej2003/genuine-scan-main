@@ -11,6 +11,11 @@ test("release gate exposes one bounded backend health recovery mode", () => {
   assert.doesNotMatch(recoveryCase, /check:rotation-evidence-freshness/);
   assert.match(workflow, /Execute governed legacy backend health recovery[\s\S]*recover-production-backend-health\.mjs[\s\S]*--execute/);
   assert.match(workflow, /if: \$\{\{ inputs\.release_mode == 'backend-health-recovery' \}\}[\s\S]*backend-health-recovery-evidence/);
+  assert.match(workflow, /deploy-production-ecs:[\s\S]*environment: production/);
+  assert.match(workflow, /Authenticate production environment approval boundary[\s\S]*production-github-environment-approval\.mjs[\s\S]*--environment production[\s\S]*--workflow-ref "\$GITHUB_WORKFLOW_REF"[\s\S]*--event-name "\$GITHUB_EVENT_NAME"[\s\S]*--workflow-run-id "\$GITHUB_RUN_ID"/);
+  assert.doesNotMatch(workflow, /production-github-environment-approval\.mjs[^\n]*--github-token/);
+  assert.match(workflow, /--environment-approval "\$\{\{ steps\.production-environment-approval\.outputs\.evidence_file \}\}"[\s\S]*--environment-approval-sha256 "\$\{\{ steps\.production-environment-approval\.outputs\.evidence_sha256 \}\}"/);
+  assert.ok(workflow.indexOf("Authenticate production environment approval boundary") < workflow.indexOf("Configure AWS credentials via OIDC"));
 });
 
 test("backend recovery cannot enter rotation, frontend, worker, or normal release steps", () => {

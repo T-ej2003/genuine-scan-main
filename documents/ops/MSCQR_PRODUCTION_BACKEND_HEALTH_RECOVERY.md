@@ -16,9 +16,16 @@ The `backend-health-recovery` release-gate mode requires:
   in the immutable `mscqr-backend` repository;
 - stopped-task or service-event evidence identifying a missing-digest
   `CannotPullContainerError`;
-- human approval bound to the source SHA, current task-definition ARN, and
-  replacement digest; and
-- the protected GitHub `production` environment approval.
+- descriptive human metadata bound to the source SHA, current task-definition
+  ARN, and replacement digest; and
+- the protected GitHub `production` environment, with at least one required
+  reviewer, self-review prevention, and administrator bypass disabled.
+
+`approvedBy` and `approverRole` are audit metadata, not authenticated identity.
+GitHub's protected-environment gate is the approval authority. The workflow
+authenticates its live configuration through the GitHub API and binds the
+resulting private, source/run-specific evidence into recovery authorization
+before configuring AWS credentials.
 
 Before dispatch, the canonical administrator capability preflight must report
 both `backend-health-recovery-register-legacy-task-definition` and
@@ -52,8 +59,10 @@ applies Stage B, or satisfies/bypasses rotation freshness.
    `sourceSha`, `currentTaskDefinitionArn`, and `recoveryImageDigest`.
 3. Dispatch `.github/workflows/release-gate.yml` on protected main with
    `release_mode=backend-health-recovery` and the six recovery inputs.
-4. Have a different authorized reviewer approve the GitHub `production`
-   environment deployment.
+4. Have an authorized reviewer approve the GitHub `production` environment
+   deployment. Repository administrators must first configure that environment
+   with required reviewers, `Prevent self-review` enabled, and administrator
+   bypass disabled.
 5. Retain the uploaded `backend-health-recovery-evidence` artifact.
 6. After backend health is proven, resume the canonical dual-slot rotation.
    This recovery does not create or refresh rotation evidence.
