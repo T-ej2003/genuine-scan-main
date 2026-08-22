@@ -113,7 +113,10 @@ closed without an update.
 3. Dispatch through `scripts/aws/dispatch-production-backend-health-recovery.mjs`.
    It serializes each JSON input once and derives the workflow value and SHA-256
    from those exact transport bytes; do not compose byte-sensitive inputs with
-   shell command substitution.
+   shell command substitution. The dispatcher authenticates both canonical image
+   paths: a fresh publication uses the protected source SHA, while `IMAGE_REUSE`
+   retains its earlier authenticated `imageReleaseSha`; recovery writes that image
+   release identity, not the newer tooling SHA, into `GIT_SHA` and `RELEASE_GIT_SHA`.
 
    ```bash
    node scripts/aws/dispatch-production-backend-health-recovery.mjs \

@@ -5,15 +5,35 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { buildBackendHealthRecoveryDispatch, canonicalWorkflowJsonInput, runCli } from "../aws/dispatch-production-backend-health-recovery.mjs";
+import { buildLegacyBackendRecoveryCandidate } from "../aws/production-backend-health-recovery-contract.mjs";
+import { imageAuthorizationSha256 } from "../aws/production-image-authorization.mjs";
+import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
+import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 
-const sourceSha = "d".repeat(40);
+const reused = makeCanonicalImageAuthorization({ sourceSha: "96a4be6f0edcd626285c6a1bd8062a4008175d25", imageReleaseSha: "594bab55f23ff8b2438c12b85b149ba0aebeed1e" });
+const fresh = makeCanonicalImageAuthorization({ sourceSha: "94da9651eb9427603be87abe89f89111412755c9", imageReleaseSha: "94da9651eb9427603be87abe89f89111412755c9", impactImageReleaseSha: "29bf92a14d5e832575009bd76b16886feff62cbd" });
 const currentTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47";
-const recoveryImageDigest = `sha256:${"4".repeat(64)}`;
-const image = { schemaVersion: 2, valid: true, sourceSha, imageReleaseSha: sourceSha, backendDigest: recoveryImageDigest, evidenceSha256: "a".repeat(64), authorizationSha256: "a".repeat(64) };
-const approval = { ticket: "ticket", approvedBy: "operator", approverRole: "production operator", reason: "missing image recovery", verificationRef: "verification", sourceSha, currentTaskDefinitionArn, recoveryImageDigest };
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
+const approval = (fixture) => ({ ticket: "ticket", approvedBy: "operator", approverRole: "production operator", reason: "missing image recovery", verificationRef: "verification", sourceSha: fixture.authorization.sourceSha, currentTaskDefinitionArn, recoveryImageDigest: fixture.authorization.backendDigest });
+const input = (fixture) => ({
+  sourceSha: fixture.authorization.sourceSha,
+  currentTaskDefinitionArn,
+  recoveryImageDigest: fixture.authorization.backendDigest,
+  service: "mscqr-backend-servi-euw2",
+  releaseMode: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME",
+  imageAuthorizationBytes: Buffer.from(JSON.stringify(fixture.authorization)),
+  imageValidation: { now: fixture.now, verifyImageEvidence: fixture.verifyImageEvidence },
+  approvalBytes: Buffer.from(JSON.stringify(approval(fixture))),
+});
+const fields = (dispatch) => Object.fromEntries(dispatch.args.flatMap((value, index) => value === "-f" ? [dispatch.args[index + 1].split(/=(.*)/s).slice(0, 2)] : []));
+const rehash = (authorization) => {
+  authorization.evidenceSha256 = imageAuthorizationSha256(authorization);
+  authorization.authorizationSha256 = authorization.evidenceSha256;
+  return authorization;
+};
 
 test("workflow JSON transport owns serialization and hash bytes", () => {
+  const image = reused.authorization;
   const variants = [JSON.stringify(image), `${JSON.stringify(image)}\n`, JSON.stringify(image, null, 2), `${JSON.stringify(image, null, 2)}\n`];
   const results = variants.map((value) => canonicalWorkflowJsonInput(Buffer.from(value), "fixture"));
   for (const result of results) assert.equal(result.sha256, hash(result.value));
@@ -21,13 +41,25 @@ test("workflow JSON transport owns serialization and hash bytes", () => {
   assert.notEqual(hash(Buffer.from(`${JSON.stringify(image, null, 2)}\n`)), hash(JSON.stringify(image, null, 2)), "run 32567632721 failure construction must remain reproducible");
 });
 
-test("recovery dispatch sends byte-identical authorization and approval hashes", () => {
-  const dispatch = buildBackendHealthRecoveryDispatch({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service: "mscqr-backend-servi-euw2", releaseMode: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", imageAuthorizationBytes: Buffer.from(`${JSON.stringify(image, null, 2)}\n`), approvalBytes: Buffer.from(`${JSON.stringify(approval, null, 2)}\n`) });
-  const fields = Object.fromEntries(dispatch.args.flatMap((value, index) => value === "-f" ? [dispatch.args[index + 1].split(/=(.*)/s).slice(0, 2)] : []));
-  assert.equal(hash(fields.backend_recovery_image_authorization_json), fields.backend_recovery_image_authorization_sha256);
-  assert.equal(hash(fields.backend_recovery_approval_json), fields.backend_recovery_approval_sha256);
-  assert.deepEqual(JSON.parse(fields.backend_recovery_image_authorization_json), image);
-  assert.deepEqual(JSON.parse(fields.backend_recovery_approval_json), approval);
+test("fresh and authenticated reused images dispatch with byte-identical hashes", () => {
+  for (const fixture of [fresh, reused]) {
+    const dispatch = buildBackendHealthRecoveryDispatch(input(fixture));
+    const sent = fields(dispatch);
+    assert.equal(hash(sent.backend_recovery_image_authorization_json), sent.backend_recovery_image_authorization_sha256);
+    assert.equal(hash(sent.backend_recovery_approval_json), sent.backend_recovery_approval_sha256);
+    assert.deepEqual(JSON.parse(sent.backend_recovery_image_authorization_json), fixture.authorization);
+  }
+  assert.equal(fresh.authorization.sourceSha, fresh.authorization.imageReleaseSha);
+  assert.notEqual(reused.authorization.sourceSha, reused.authorization.imageReleaseSha);
+  assert.equal(reused.authorization.authorizationPath, "IMAGE_REUSE");
+});
+
+test("reused image keeps its authenticated release identity in the recovery task definition", () => {
+  const current = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
+  const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: reused.authorization.backendDigest, imageReleaseSha: reused.authorization.imageReleaseSha });
+  const environment = new Map(candidate.containerDefinitions.find(({ name }) => name === "backend").environment.map(({ name, value }) => [name, value]));
+  assert.equal(environment.get("GIT_SHA"), reused.authorization.imageReleaseSha);
+  assert.equal(environment.get("RELEASE_GIT_SHA"), reused.authorization.imageReleaseSha);
 });
 
 test("recovery CLI passes the builder's exact JSON and hashes to gh", (context) => {
@@ -35,30 +67,41 @@ test("recovery CLI passes the builder's exact JSON and hashes to gh", (context) 
   context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const imagePath = path.join(directory, "image.json");
   const approvalPath = path.join(directory, "approval.json");
-  fs.writeFileSync(imagePath, `${JSON.stringify(image, null, 2)}\n`, { mode: 0o600 });
-  fs.writeFileSync(approvalPath, `${JSON.stringify(approval, null, 2)}\n`, { mode: 0o600 });
+  fs.writeFileSync(imagePath, `${JSON.stringify(reused.authorization, null, 2)}\n`, { mode: 0o600 });
+  fs.writeFileSync(approvalPath, `${JSON.stringify(approval(reused), null, 2)}\n`, { mode: 0o600 });
   let invocation;
   const result = runCli([
-    "--source-sha", sourceSha, "--current-task-definition", currentTaskDefinitionArn,
-    "--recovery-image-digest", recoveryImageDigest, "--service", "mscqr-backend-servi-euw2",
+    "--source-sha", reused.authorization.sourceSha, "--current-task-definition", currentTaskDefinitionArn,
+    "--recovery-image-digest", reused.authorization.backendDigest, "--service", "mscqr-backend-servi-euw2",
     "--release-mode", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME",
     "--image-authorization", imagePath, "--approval", approvalPath,
-  ], { protectedMain: () => {}, run: (command, args) => { invocation = { command, args }; } });
-  const fields = Object.fromEntries(invocation.args.flatMap((value, index) => value === "-f" ? [invocation.args[index + 1].split(/=(.*)/s).slice(0, 2)] : []));
+  ], { protectedMain: () => {}, imageValidation: input(reused).imageValidation, run: (command, args) => { invocation = { command, args }; } });
+  const sent = fields(invocation);
   assert.equal(invocation.command, "gh");
-  assert.equal(hash(fields.backend_recovery_image_authorization_json), fields.backend_recovery_image_authorization_sha256);
-  assert.equal(hash(fields.backend_recovery_approval_json), fields.backend_recovery_approval_sha256);
-  assert.equal(result.imageTransportSha256, fields.backend_recovery_image_authorization_sha256);
-  assert.equal(result.approvalTransportSha256, fields.backend_recovery_approval_sha256);
+  assert.equal(hash(sent.backend_recovery_image_authorization_json), sent.backend_recovery_image_authorization_sha256);
+  assert.equal(hash(sent.backend_recovery_approval_json), sent.backend_recovery_approval_sha256);
+  assert.equal(result.imageTransportSha256, sent.backend_recovery_image_authorization_sha256);
+  assert.equal(result.approvalTransportSha256, sent.backend_recovery_approval_sha256);
   assert.equal(result.dispatchCount, 1);
 });
 
-test("recovery dispatch rejects every mismatched protected binding", () => {
-  const valid = { sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service: "mscqr-backend-servi-euw2", releaseMode: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", imageAuthorizationBytes: Buffer.from(JSON.stringify(image)), approvalBytes: Buffer.from(JSON.stringify(approval)) };
-  for (const change of [
-    { sourceSha: "e".repeat(40) }, { currentTaskDefinitionArn: currentTaskDefinitionArn.replace(":47", ":48") },
-    { recoveryImageDigest: `sha256:${"5".repeat(64)}` }, { service: "wrong" }, { releaseMode: "normal" },
-  ]) assert.throws(() => buildBackendHealthRecoveryDispatch({ ...valid, ...change }), /different recovery|differs|invalid/);
+test("unauthorized reuse, forged envelopes, stale source, and wrong digest fail closed", () => {
+  const valid = input(reused);
+  const unauthorized = structuredClone(reused.authorization);
+  unauthorized.imageReuseEvidence = { ...unauthorized.imageReuseEvidence, imageReuseCompatible: false };
+  unauthorized.imageReuseEvidenceSha256 = canonicalSha256(unauthorized.imageReuseEvidence);
+  rehash(unauthorized);
+  const wrongRelease = rehash({ ...structuredClone(reused.authorization), imageReleaseSha: "a".repeat(40) });
+  for (const changed of [
+    { imageAuthorizationBytes: Buffer.from(JSON.stringify(unauthorized)) },
+    { imageAuthorizationBytes: Buffer.from(JSON.stringify(wrongRelease)) },
+    { imageValidation: { now: reused.now, verifyImageEvidence: () => false } },
+    { sourceSha: "e".repeat(40) },
+    { recoveryImageDigest: `sha256:${"5".repeat(64)}` },
+    { currentTaskDefinitionArn: currentTaskDefinitionArn.replace(":47", ":48") },
+    { service: "wrong" },
+    { releaseMode: "normal" },
+  ]) assert.throws(() => buildBackendHealthRecoveryDispatch({ ...valid, ...changed }), /authorization|different|differs|invalid|source|hash|impact|evidence/);
   assert.throws(() => canonicalWorkflowJsonInput(Buffer.from("not-json")), /valid JSON/);
 });
 

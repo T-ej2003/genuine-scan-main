@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { BACKEND_HEALTH_RECOVERY } from "./production-backend-health-recovery-contract.mjs";
+import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 
@@ -27,24 +28,23 @@ export function canonicalWorkflowJsonInput(bytes, label = "Workflow JSON input")
   return Object.freeze({ value, sha256: sha256(transportBytes), bytes: transportBytes });
 }
 
-function assertBindings({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorization, approval }) {
+function assertBindings({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorization, imageValidation, approval }) {
   if (!SHA.test(sourceSha || "")) throw new Error("Recovery source SHA is invalid.");
   if (!TASK_DEFINITION.test(currentTaskDefinitionArn || "")) throw new Error("Recovery task definition is invalid.");
   if (!DIGEST.test(recoveryImageDigest || "")) throw new Error("Recovery image digest is invalid.");
   if (service !== BACKEND_HEALTH_RECOVERY.service) throw new Error("Recovery service differs from the protected contract.");
   if (releaseMode !== MODE_KIND) throw new Error("Recovery mode differs from the protected contract.");
-  if (imageAuthorization?.schemaVersion !== 2 || imageAuthorization.valid !== true || imageAuthorization.sourceSha !== sourceSha
-    || imageAuthorization.imageReleaseSha !== sourceSha || imageAuthorization.backendDigest !== recoveryImageDigest
-    || imageAuthorization.authorizationSha256 !== imageAuthorization.evidenceSha256) throw new Error("Recovery image authorization is bound to a different recovery.");
+  assertImageAuthorization(imageAuthorization, sourceSha, imageValidation);
+  if (authorizedBackendDigest(imageAuthorization) !== recoveryImageDigest) throw new Error("Recovery image authorization is bound to a different digest.");
   if (!approval || JSON.stringify(Object.keys(approval).sort()) !== JSON.stringify([...APPROVAL_FIELDS].sort())
     || approval.sourceSha !== sourceSha || approval.currentTaskDefinitionArn !== currentTaskDefinitionArn
     || approval.recoveryImageDigest !== recoveryImageDigest) throw new Error("Recovery approval is bound to a different recovery.");
 }
 
-export function buildBackendHealthRecoveryDispatch({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorizationBytes, approvalBytes } = {}) {
+export function buildBackendHealthRecoveryDispatch({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorizationBytes, imageValidation, approvalBytes } = {}) {
   const image = canonicalWorkflowJsonInput(imageAuthorizationBytes, "Recovery image authorization");
   const approval = canonicalWorkflowJsonInput(approvalBytes, "Recovery approval");
-  assertBindings({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorization: JSON.parse(image.value), approval: JSON.parse(approval.value) });
+  assertBindings({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorization: JSON.parse(image.value), imageValidation, approval: JSON.parse(approval.value) });
   const args = ["workflow", "run", WORKFLOW, "--repo", REPOSITORY, "--ref", "main",
     "-f", "git_ref=main", "-f", `target_sha=${sourceSha}`, "-f", `release_mode=${MODE}`,
     "-f", `backend_recovery_current_task_definition_arn=${currentTaskDefinitionArn}`,
@@ -68,12 +68,12 @@ function options(argv) {
   return Object.fromEntries([...values].map(([key, value]) => [key.slice(2), value]));
 }
 
-export function runCli(argv = process.argv.slice(2), { run = execFileSync, protectedMain = readFreshProtectedMainIdentity } = {}) {
+export function runCli(argv = process.argv.slice(2), { run = execFileSync, protectedMain = readFreshProtectedMainIdentity, imageValidation } = {}) {
   const values = options(argv);
   protectedMain({ expectedSourceSha: values["source-sha"] });
   const imageAuthorizationBytes = readStageBPrivateFileBytes({ filePath: values["image-authorization"], repositoryRoot: process.cwd(), label: "Recovery image authorization" }).bytes;
   const approvalBytes = readStageBPrivateFileBytes({ filePath: values.approval, repositoryRoot: process.cwd(), label: "Recovery approval" }).bytes;
-  const dispatch = buildBackendHealthRecoveryDispatch({ sourceSha: values["source-sha"], currentTaskDefinitionArn: values["current-task-definition"], recoveryImageDigest: values["recovery-image-digest"], service: values.service, releaseMode: values["release-mode"], imageAuthorizationBytes, approvalBytes });
+  const dispatch = buildBackendHealthRecoveryDispatch({ sourceSha: values["source-sha"], currentTaskDefinitionArn: values["current-task-definition"], recoveryImageDigest: values["recovery-image-digest"], service: values.service, releaseMode: values["release-mode"], imageAuthorizationBytes, imageValidation, approvalBytes });
   run("gh", dispatch.args, { stdio: "inherit" });
   return { sourceSha: values["source-sha"], imageTransportSha256: dispatch.image.sha256, approvalTransportSha256: dispatch.approval.sha256, dispatchCount: 1 };
 }
