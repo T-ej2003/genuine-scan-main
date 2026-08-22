@@ -96,6 +96,7 @@
     "stage-b:supersede-stale-rotation": "node scripts/aws/supersede-production-stale-rotation.mjs",
     "stage-b:produce-root-drop-evidence": "node scripts/aws/produce-production-root-drop-evidence.mjs",
     "production:release-oidc-trust": "node scripts/aws/converge-production-release-oidc-trust.mjs",
+    "production:normal-backend-activation": "node scripts/aws/production-normal-backend-activation.mjs",
     "stage-a:temporary-kms-capability": "node scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs",
     "stage-a:root-drop:census": "node scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs --mode census",
     "stage-a:root-drop:adopt": "node scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs --mode adopt",

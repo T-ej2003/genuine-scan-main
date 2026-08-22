@@ -8,6 +8,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import yaml from "js-yaml";
+import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
+import { verifyProductionReleaseImageAuthorization } from "../aws/verify-production-release-image-authorization.mjs";
+import { RELEASE_POLICY_SOURCES } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import {
   CONFIRM_ENV,
   CONFIRM_VALUE,
@@ -213,8 +216,8 @@ test("release gate exposes one bounded backend health recovery mode", () => {
   assert.match(workflow, /deploy-production-ecs:[\s\S]*environment: production/);
   assert.match(workflow, /Authenticate production environment approval boundary[\s\S]*approval_dir="\$RUNNER_TEMP\/production-environment-approval"[\s\S]*! -d "\$approval_dir" \|\| -L "\$approval_dir"[\s\S]*install -d -m 700 -- "\$approval_dir"[\s\S]*stat -c '%a'[\s\S]*stat -c '%u'[\s\S]*production-github-environment-approval\.mjs[\s\S]*--environment production[\s\S]*--workflow-ref "\$GITHUB_WORKFLOW_REF"[\s\S]*--event-name "\$GITHUB_EVENT_NAME"[\s\S]*--workflow-run-id "\$GITHUB_RUN_ID"/);
   assert.doesNotMatch(workflow, /evidence_file="\$RUNNER_TEMP\/production-environment-approval\.json"/);
-  assert.match(workflow, /Generate and verify checksum-bound production RLS package[\s\S]*approval_dir="\$\(dirname "\$\{\{ steps\.production-environment-approval\.outputs\.evidence_file \}\}"\)"[\s\S]*stat -c '%a'[\s\S]*production-rls-approval\.json/);
-  assert.doesNotMatch(workflow, /approval_file="\$RUNNER_TEMP\/production-rls-approval\.json"/);
+  assert.match(workflow, /Verify checksum-bound production RLS package[\s\S]*npm run rls:full-verify[\s\S]*stageBApprovalIdForReleaseSha/);
+  assert.doesNotMatch(workflow, /secretsmanager get-secret-value|PRODUCTION_RLS_APPROVAL_SECRET_ARN|production-rls-approval\.json/);
   assert.doesNotMatch(workflow, /production-github-environment-approval\.mjs[^\n]*--github-token/);
   assert.match(workflow, /--environment-approval "\$\{\{ steps\.production-environment-approval\.outputs\.evidence_file \}\}"[\s\S]*--environment-approval-sha256 "\$\{\{ steps\.production-environment-approval\.outputs\.evidence_sha256 \}\}"/);
   assert.ok(workflow.indexOf("Authenticate production environment approval boundary") < workflow.indexOf("Configure AWS credentials via OIDC"));
@@ -223,8 +226,38 @@ test("release gate exposes one bounded backend health recovery mode", () => {
 test("backend recovery cannot enter rotation, frontend, worker, or normal release steps", () => {
   assert.doesNotMatch(workflow, /if: \$\{\{ inputs\.release_mode != 'normal' \}\}/);
   assert.match(workflow, /Deploy rotation transition backend ECS service\n\s*if: \$\{\{ inputs\.release_mode == 'rotation-overlap' \|\| inputs\.release_mode == 'rotation-cleanup' \}\}/);
-  assert.match(workflow, /Deploy frontend ECS service\n\s*if: \$\{\{ inputs\.release_mode == 'normal'/);
-  assert.match(workflow, /Deploy worker ECS service\n\s*if: \$\{\{ inputs\.release_mode == 'normal'/);
+  assert.doesNotMatch(workflow, /Deploy frontend ECS service/);
+  assert.doesNotMatch(workflow, /Deploy worker ECS service|PRODUCTION_WORKER_SERVICE_NAME/);
+});
+
+test("normal release consumes separated publisher and checker outputs under the deployment principal", () => {
+  assert.match(workflow, /normal_image_authorization_json/);
+  assert.match(workflow, /verify-production-release-image-authorization\.mjs/);
+  assert.match(workflow, /PRODUCTION_RLS_CANARY_IMAGE/);
+  assert.match(workflow, /PRODUCTION_FRONTEND_TASK_DEFINITION: mscqr-frontend:20/);
+  assert.doesNotMatch(workflow, /amazon-ecr-login|setup-buildx|publish-ecs-images|apply-ecr-repository-controls/);
+  assert.doesNotMatch(workflow, /secretsmanager get-secret-value|PRODUCTION_RLS_APPROVAL_SECRET_ARN/);
+  assert.match(workflow, /role-to-assume: \$\{\{ env\.PRODUCTION_RELEASE_ROLE_ARN \}\}/);
+});
+
+test("normal release identity routing rejects both under-privilege and cross-phase privilege inheritance", () => {
+  const sourceSha = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  const fixture = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: sourceSha });
+  const refs = verifyProductionReleaseImageAuthorization({ authorization: fixture.authorization, sourceSha, now: fixture.now, verifyImageEvidence: fixture.verifyImageEvidence });
+  assert.deepEqual(Object.keys(refs).sort(), ["backend", "rls-canary", "rls-executor", "worker"]);
+  assert.match(refs.backend, /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:/);
+  assert.throws(() => verifyProductionReleaseImageAuthorization({ authorization: fixture.authorization, sourceSha: "b".repeat(40), now: fixture.now, verifyImageEvidence: fixture.verifyImageEvidence }), /source SHA/);
+
+  const releaseStatements = RELEASE_POLICY_SOURCES.flatMap(({ sourcePath }) => JSON.parse(fs.readFileSync(sourcePath, "utf8")).Statement || []);
+  const releaseActions = releaseStatements.flatMap(({ Effect, Action }) => Effect === "Allow" ? (Array.isArray(Action) ? Action : [Action]) : []);
+  for (const action of ["ecr:GetAuthorizationToken", "ecr:PutImage", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload"]) assert.equal(releaseActions.includes(action), false, action);
+  assert.equal(releaseActions.includes("secretsmanager:GetSecretValue") && releaseStatements.some(({ Resource }) => JSON.stringify(Resource).includes("phase2/approval")), false);
+
+  const publisher = JSON.parse(fs.readFileSync("infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json", "utf8"));
+  const publisherAllows = publisher.Statement.filter(({ Effect }) => Effect === "Allow").flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
+  assert.equal(publisherAllows.includes("ecr:PutImage"), true);
+  assert.equal(publisher.Statement.some(({ Effect, Action }) => Effect === "Deny" && JSON.stringify(Action).includes("ecs:*") && JSON.stringify(Action).includes("secretsmanager:*")), true);
+  assert.doesNotMatch(workflow, /AWS_ROLE_TO_ASSUME|aws-access-key-id|aws-secret-access-key/);
 });
 
 test("backend validation closes its shared Redis client before advancing", () => {

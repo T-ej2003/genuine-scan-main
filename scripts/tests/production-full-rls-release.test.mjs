@@ -200,13 +200,14 @@ test("production release uses only the approval broker, runs canaries, and write
 
 test("production workflow applies verified green and canaries before backend traffic switch", () => {
   const workflow = fs.readFileSync(".github/workflows/release-gate.yml", "utf8");
+  const authorize = workflow.indexOf("Authorize exact Stage-B backend candidate before database mutation");
   const apply = workflow.indexOf("Apply and verify checksum-bound production RLS package");
-  const backend = workflow.indexOf("Deploy backend ECS service");
-  assert(apply > 0 && backend > apply);
-  assert.match(workflow, /PRODUCTION_RLS_APPROVAL_SECRET_ARN/);
+  const backend = workflow.indexOf("Activate exact Stage-B backend candidate");
+  assert(authorize > 0 && authorize < apply && backend > apply);
+  assert.doesNotMatch(workflow, /PRODUCTION_RLS_APPROVAL_SECRET_ARN|Deploy worker ECS service/);
   assert.match(workflow, /MSCQR_FULL_RLS_MIGRATION_SET_DIGEST/);
-  assert.match(workflow, /SECRET_UPDATES_JSON/);
-  assert.match(workflow, /Require complete production worker deployment configuration/);
+  assert.match(workflow, /production-normal-backend-activation\.mjs/);
+  assert.doesNotMatch(workflow, /TASK_DEFINITION: mscqr-backend|PRODUCTION_WORKER_SERVICE_NAME/);
   assert.match(workflow, /mscqr-frontend:20/);
   assert.doesNotMatch(workflow, /PRODUCTION_RLS_ADMIN_SECRET_ARN|PRODUCTION_RLS_PRIVATE_SUBNETS_JSON/);
 });

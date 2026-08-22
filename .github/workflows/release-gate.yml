@@ -21,6 +21,14 @@ on:
         required: false
         type: boolean
         default: false
+      normal_image_authorization_json:
+        description: "Canonical signed four-image authorization for normal Stage-B activation."
+        required: false
+        type: string
+      normal_image_authorization_sha256:
+        description: "SHA-256 of the exact normal image authorization JSON bytes."
+        required: false
+        type: string
       release_mode:
         description: "Governed production release mode."
         required: false
@@ -175,10 +183,24 @@ jobs:
           BACKEND_RECOVERY_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.backend_recovery_image_authorization_sha256 }}
           BACKEND_RECOVERY_APPROVAL_JSON: ${{ inputs.backend_recovery_approval_json }}
           BACKEND_RECOVERY_APPROVAL_SHA256: ${{ inputs.backend_recovery_approval_sha256 }}
+          NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
+          NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
+          PRESERVE_CURRENT_FRONTEND: ${{ inputs.preserve_current_frontend }}
         run: |
           set -euo pipefail
           case "$RELEASE_MODE" in
             normal)
+              if [ "$PRESERVE_CURRENT_FRONTEND" != "true" ]; then
+                echo "::error::Normal Stage-B activation must preserve the reviewed frontend task definition."
+                exit 1
+              fi
+              for name in NORMAL_IMAGE_AUTHORIZATION_JSON NORMAL_IMAGE_AUTHORIZATION_SHA256; do
+                if [ -z "${!name:-}" ]; then
+                  echo "::error::${name} is required for ${RELEASE_MODE}."
+                  exit 1
+                fi
+              done
+              node --input-type=module -e 'import { createHash } from "node:crypto"; const bytes=process.env.NORMAL_IMAGE_AUTHORIZATION_JSON; const expected=process.env.NORMAL_IMAGE_AUTHORIZATION_SHA256; if (!/^[a-f0-9]{64}$/.test(expected) || createHash("sha256").update(bytes).digest("hex") !== expected) throw new Error("Normal image authorization bytes do not match their SHA-256."); JSON.parse(bytes);'
               npm run check:rotation-evidence-freshness
               ;;
             backend-health-recovery)
@@ -284,14 +306,10 @@ jobs:
       CLUSTER_NAME: mscqr-prod-euw2-main
       BACKEND_SERVICE_NAME: mscqr-backend-servi-euw2
       FRONTEND_SERVICE_NAME: mscqr-frontend-servi-euw2
-      WORKER_SERVICE_NAME: ${{ vars.PRODUCTION_WORKER_SERVICE_NAME }}
-      BACKEND_TASK_DEFINITION: mscqr-backend
       ROTATION_BACKEND_TASK_DEFINITION_FAMILY: mscqr-production-rls-green-backend-candidate
       FRONTEND_TASK_DEFINITION: mscqr-frontend
-      WORKER_TASK_DEFINITION: ${{ vars.PRODUCTION_WORKER_TASK_DEFINITION }}
       BACKEND_CONTAINER_NAME: backend
       FRONTEND_CONTAINER_NAME: frontend
-      WORKER_CONTAINER_NAME: ${{ vars.PRODUCTION_WORKER_CONTAINER_NAME || 'worker' }}
       PLATFORMS: linux/amd64
       PUBLIC_BASE_URL: https://www.mscqr.com
       DEPLOY_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
@@ -445,155 +463,85 @@ jobs:
           fi
           echo "AWS account verified for production deployment."
 
-      - name: Login to Amazon ECR
-        if: ${{ inputs.release_mode == 'normal' }}
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Set up Docker Buildx
-        if: ${{ inputs.release_mode == 'normal' }}
-        uses: docker/setup-buildx-action@v4
-
-      - name: Generate and verify checksum-bound production RLS package
+      - name: Verify checksum-bound production RLS package
         id: rls-package
         if: ${{ inputs.release_mode == 'normal' }}
-        env:
-          PRODUCTION_RLS_APPROVAL_SECRET_ARN: ${{ vars.PRODUCTION_RLS_APPROVAL_SECRET_ARN }}
-          PRODUCTION_RLS_APPROVAL_KMS_KEY_ARN: ${{ vars.PRODUCTION_RLS_APPROVAL_KMS_KEY_ARN }}
         run: |
           set -euo pipefail
-          approval_dir="$(dirname "${{ steps.production-environment-approval.outputs.evidence_file }}")"
-          if [[ ! -d "$approval_dir" || -L "$approval_dir" || "$(stat -c '%a' "$approval_dir")" != "700" || "$(stat -c '%u' "$approval_dir")" != "$(id -u)" ]]; then
-            echo "::error::Production RLS approval requires the authenticated private approval directory."
-            exit 1
-          fi
-          approval_file="$approval_dir/production-rls-approval.json"
-          trap 'rm -f "$approval_file"' EXIT
-          aws secretsmanager get-secret-value \
-            --secret-id "$PRODUCTION_RLS_APPROVAL_SECRET_ARN" \
-            --version-stage AWSCURRENT \
-            --query SecretString \
-            --output text > "$approval_file"
-          chmod 600 "$approval_file"
-          node scripts/rls/generate-clean-room-rls-sql.mjs \
-            --environment production \
-            --deployment-id phase2 \
-            --release-sha "$RELEASE_GIT_SHA" \
-            --approval-artifact "$approval_file" \
-            --approval-kms-key-arn "$PRODUCTION_RLS_APPROVAL_KMS_KEY_ARN"
           npm run rls:full-verify
           source_contract="$(node -e 'const value=require("./documents/security/rls-program/generated/checksums.json");process.stdout.write(value.sourceContractSha256)')"
           migration_set_digest="$(node -e 'const value=require("./documents/security/rls-program/generated/checksums.json");process.stdout.write(value.migrationSetDigest)')"
           package_checksum="$(sha256sum documents/security/rls-program/generated/checksums.json | cut -d' ' -f1)"
+          approval_id="$(node --input-type=module -e 'import { stageBApprovalIdForReleaseSha } from "./scripts/aws/production-green-stage-b-contract.mjs"; process.stdout.write(stageBApprovalIdForReleaseSha(process.env.RELEASE_GIT_SHA));')"
           echo "source_contract_sha256=$source_contract" >> "$GITHUB_OUTPUT"
           echo "migration_set_digest=$migration_set_digest" >> "$GITHUB_OUTPUT"
           echo "package_checksum_sha256=$package_checksum" >> "$GITHUB_OUTPUT"
+          echo "approval_id=$approval_id" >> "$GITHUB_OUTPUT"
 
       - name: Resolve image metadata
         id: image-meta
+        if: ${{ inputs.release_mode == 'normal' }}
         run: |
           set -euo pipefail
-
           account_id="$(aws sts get-caller-identity --query Account --output text)"
-          images_file="$RUNNER_TEMP/published-images.jsonl"
-          : > "$images_file"
-
           echo "account_id=$account_id" >> "$GITHUB_OUTPUT"
-          echo "images_file=$images_file" >> "$GITHUB_OUTPUT"
-          echo "image_tag=$DEPLOY_SHA" >> "$GITHUB_OUTPUT"
           echo "backend_metadata_file=$RUNNER_TEMP/backend-deployment.json" >> "$GITHUB_OUTPUT"
-          echo "frontend_metadata_file=$RUNNER_TEMP/frontend-deployment.json" >> "$GITHUB_OUTPUT"
-          echo "worker_metadata_file=$RUNNER_TEMP/worker-deployment.json" >> "$GITHUB_OUTPUT"
 
-      - name: Enforce ECR repository controls
-        if: ${{ inputs.release_mode == 'normal' }}
-        run: |
-          set -euo pipefail
-          ./scripts/aws/apply-ecr-repository-controls.sh all
-
-      - name: Publish immutable ECS images
-        if: ${{ inputs.release_mode == 'normal' }}
-        env:
-          AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
-          IMAGE_TAG: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
-          OUTPUT_FILE: ${{ steps.image-meta.outputs.images_file }}
-          PRESERVE_CURRENT_FRONTEND: ${{ inputs.preserve_current_frontend }}
-        run: |
-          set -euo pipefail
-          if [ "$PRESERVE_CURRENT_FRONTEND" = "true" ]; then
-            ./scripts/aws/publish-ecs-images.sh backend
-            ./scripts/aws/publish-ecs-images.sh worker
-            ./scripts/aws/publish-ecs-images.sh rls-executor
-            frontend_task="$(
-              aws ecs describe-services \
-                --cluster "$CLUSTER_NAME" \
-                --services "$FRONTEND_SERVICE_NAME" \
-                --query 'services[0].taskDefinition' \
-                --output text
-            )"
-            if [ "$frontend_task" != "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:20" ]; then
-              echo "::error::Frontend preservation requires the reviewed mscqr-frontend:20 task definition."
-              exit 1
-            fi
-            frontend_image="$(
-              aws ecs describe-task-definition \
-                --task-definition "$frontend_task" \
-                --query "taskDefinition.containerDefinitions[?name=='${FRONTEND_CONTAINER_NAME}'].image | [0]" \
-                --output text
-            )"
-            if ! [[ "$frontend_image" =~ ^[0-9]{12}\.dkr\.ecr\.eu-west-2\.amazonaws\.com/mscqr-web@sha256:[a-f0-9]{64}$ ]]; then
-              echo "::error::Current frontend task definition is not bound to an immutable production image digest."
-              exit 1
-            fi
-          node --input-type=module - "$OUTPUT_FILE" "$frontend_image" <<'NODE'
-          import fs from "node:fs";
-          const [outputPath, imageRef] = process.argv.slice(2);
-          const [imageUri, imageDigest] = imageRef.split("@");
-          fs.appendFileSync(outputPath, `${JSON.stringify({
-            service: "frontend", repository: "mscqr-web", image_uri: imageUri,
-            image_tag: "preserved-current-task-definition", image_digest: imageDigest, image_ref: imageRef,
-          })}\n`);
-          NODE
-          else
-            ./scripts/aws/publish-ecs-images.sh all
-          fi
-
-      - name: Resolve backend, frontend, and worker digest refs
+      - name: Authenticate normal release image authorization
         id: images
         if: ${{ inputs.release_mode == 'normal' }}
         env:
-          IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
+          IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
+          IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
         run: |
           set -euo pipefail
+          image_dir="$RUNNER_TEMP/normal-release-images"
+          install -d -m 700 "$image_dir"
+          image_file="$image_dir/image-authorization.json"
+          printf '%s' "$IMAGE_AUTHORIZATION_JSON" > "$image_file"
+          chmod 600 "$image_file"
+          node scripts/aws/verify-production-release-image-authorization.mjs \
+            --source-sha "$SOURCE_SHA" \
+            --authorization "$image_file" \
+            --authorization-sha256 "$IMAGE_AUTHORIZATION_SHA256" \
+            --github-output "$GITHUB_OUTPUT"
+          echo "authorization_file=$image_file" >> "$GITHUB_OUTPUT"
 
-          node --input-type=module - "$IMAGES_FILE" "$GITHUB_OUTPUT" <<'NODE'
-          import fs from "node:fs";
-
-          const [imagesPath, outputPath] = process.argv.slice(2);
-          const records = fs.readFileSync(imagesPath, "utf8")
-            .split(/\n+/)
-            .filter(Boolean)
-            .map((line) => JSON.parse(line));
-
-          for (const service of ["backend", "frontend", "worker", "rls-executor"]) {
-            const record = records.find((item) => item.service === service);
-            if (!record?.image_ref) {
-              throw new Error(`Missing published image record for ${service}.`);
-            }
-            const outputName = service.replaceAll("-", "_");
-            fs.appendFileSync(outputPath, `${outputName}_image_ref=${record.image_ref}\n`);
-            fs.appendFileSync(outputPath, `${outputName}_image_uri=${record.image_uri}\n`);
-            fs.appendFileSync(outputPath, `${outputName}_image_digest=${record.image_digest}\n`);
-          }
-          NODE
-
-      - name: Require complete production worker deployment configuration
+      - name: Verify preserved frontend deployment identity
+        id: frontend
         if: ${{ inputs.release_mode == 'normal' }}
         run: |
           set -euo pipefail
-          if [ -z "$WORKER_SERVICE_NAME" ] || [ -z "$WORKER_TASK_DEFINITION" ]; then
-            echo "::error::Production RLS activation requires the current worker service and task definition."
+          frontend_task="$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$FRONTEND_SERVICE_NAME" --query 'services[0].taskDefinition' --output text)"
+          if [ "$frontend_task" != "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:20" ]; then
+            echo "::error::Normal Stage-B activation requires the reviewed mscqr-frontend:20 task definition."
             exit 1
           fi
+          frontend_image="$(aws ecs describe-task-definition --task-definition "$frontend_task" --query "taskDefinition.containerDefinitions[?name=='${FRONTEND_CONTAINER_NAME}'].image | [0]" --output text)"
+          if ! [[ "$frontend_image" =~ ^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com/mscqr-web@sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::Reviewed frontend task definition is not bound to an immutable production image digest."
+            exit 1
+          fi
+          echo "task_definition=$frontend_task" >> "$GITHUB_OUTPUT"
+          echo "image_ref=$frontend_image" >> "$GITHUB_OUTPUT"
+
+      - name: Authorize exact Stage-B backend candidate before database mutation
+        id: backend-activation
+        if: ${{ inputs.release_mode == 'normal' }}
+        env:
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          BINDING_FILE: ${{ runner.temp }}/normal-backend-activation.json
+        run: |
+          set -euo pipefail
+          node scripts/aws/production-normal-backend-activation.mjs \
+            --mode prepare \
+            --source-sha "$SOURCE_SHA" \
+            --image-authorization "${{ steps.images.outputs.authorization_file }}" \
+            --image-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
+            --binding-out "$BINDING_FILE"
+          echo "binding_file=$BINDING_FILE" >> "$GITHUB_OUTPUT"
+          echo "binding_sha256=$(sha256sum "$BINDING_FILE" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Apply and verify checksum-bound production RLS package
         id: database-release
@@ -602,12 +550,13 @@ jobs:
           MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256: ${{ steps.rls-package.outputs.source_contract_sha256 }}
           MSCQR_FULL_RLS_MIGRATION_SET_DIGEST: ${{ steps.rls-package.outputs.migration_set_digest }}
           MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256: ${{ steps.rls-package.outputs.package_checksum_sha256 }}
-          PRODUCTION_RLS_APPROVAL_ID: ${{ vars.PRODUCTION_RLS_APPROVAL_ID }}
+          PRODUCTION_RLS_APPROVAL_ID: ${{ steps.rls-package.outputs.approval_id }}
           PRODUCTION_RLS_BROKER_ARN: ${{ vars.PRODUCTION_RLS_BROKER_ARN }}
           PRODUCTION_RLS_EXECUTOR_IMAGE: ${{ steps.images.outputs.rls_executor_image_ref }}
           PRODUCTION_BACKEND_IMAGE: ${{ steps.images.outputs.backend_image_ref }}
           PRODUCTION_WORKER_IMAGE: ${{ steps.images.outputs.worker_image_ref }}
-          PRODUCTION_FRONTEND_IMAGE: ${{ steps.images.outputs.frontend_image_ref }}
+          PRODUCTION_RLS_CANARY_IMAGE: ${{ steps.images.outputs.rls_canary_image_ref }}
+          PRODUCTION_FRONTEND_TASK_DEFINITION: mscqr-frontend:20
           PRODUCTION_RLS_CLUSTER_ARN: arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main
           PRODUCTION_RLS_RECEIPT_BUCKET: ${{ vars.PRODUCTION_RLS_RECEIPT_BUCKET }}
           PRODUCTION_RLS_RELEASE_RECEIPT_PATH: ${{ runner.temp }}/production-rls-release-receipt.json
@@ -624,23 +573,24 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Deploy backend ECS service
+      - name: Activate exact Stage-B backend candidate
         if: ${{ inputs.release_mode == 'normal' }}
         env:
-          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
-          SERVICE_NAME: ${{ env.BACKEND_SERVICE_NAME }}
-          TASK_DEFINITION: ${{ env.BACKEND_TASK_DEFINITION }}
-          CONTAINER_NAME: ${{ env.BACKEND_CONTAINER_NAME }}
-          IMAGE_URI: ${{ steps.images.outputs.backend_image_ref }}
-          METADATA_FILE: ${{ steps.image-meta.outputs.backend_metadata_file }}
-          ENV_UPDATES: GIT_SHA,RELEASE_GIT_SHA
-          SECRET_UPDATES_JSON: >-
-            {"DATABASE_URL":"${{ vars.PRODUCTION_RLS_APP_SECRET_ARN }}","AUTHENTICATED_APP_DATABASE_URL":"${{ vars.PRODUCTION_RLS_APP_SECRET_ARN }}","PREAUTH_DATABASE_URL":"${{ vars.PRODUCTION_RLS_PREAUTH_SECRET_ARN }}","MSCQR_C03_PREAUTH_DATABASE_URL":"${{ vars.PRODUCTION_RLS_PREAUTH_SECRET_ARN }}"}
-          GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
-          RELEASE_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          RLS_RECEIPT: ${{ runner.temp }}/production-rls-release-receipt.json
         run: |
           set -euo pipefail
-          ./scripts/aws/deploy-ecs-service.sh
+          receipt_sha256="$(sha256sum "$RLS_RECEIPT" | cut -d' ' -f1)"
+          node scripts/aws/production-normal-backend-activation.mjs \
+            --mode execute \
+            --source-sha "$SOURCE_SHA" \
+            --image-authorization "${{ steps.images.outputs.authorization_file }}" \
+            --image-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
+            --binding "${{ steps.backend-activation.outputs.binding_file }}" \
+            --binding-sha256 "${{ steps.backend-activation.outputs.binding_sha256 }}" \
+            --release-receipt "$RLS_RECEIPT" \
+            --release-receipt-sha256 "$receipt_sha256" \
+            --metadata-out "${{ steps.image-meta.outputs.backend_metadata_file }}"
 
       - name: Authorize rotation transition readiness immediately before mutation
         if: ${{ inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup' }}
@@ -689,6 +639,7 @@ jobs:
           set -euo pipefail
           node scripts/aws/run-production-cutover.mjs \
             --mode rotation-overlap \
+            --credential-source github-oidc-release-deployer \
             --source-sha "$DEPLOYMENT_SOURCE_SHA" \
             --rotation-id "$ROTATION_ID" \
             --rotation-state-sha256 "$ROTATION_STATE_SHA256" \
@@ -769,85 +720,27 @@ jobs:
           set -euo pipefail
           ./scripts/aws/verify-production-smoke.sh
 
-      - name: Deploy worker ECS service
-        if: ${{ inputs.release_mode == 'normal' }}
-        env:
-          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
-          SERVICE_NAME: ${{ env.WORKER_SERVICE_NAME }}
-          TASK_DEFINITION: ${{ env.WORKER_TASK_DEFINITION }}
-          CONTAINER_NAME: ${{ env.WORKER_CONTAINER_NAME }}
-          IMAGE_URI: ${{ steps.images.outputs.worker_image_ref }}
-          METADATA_FILE: ${{ steps.image-meta.outputs.worker_metadata_file }}
-          ENV_UPDATES: GIT_SHA,RELEASE_GIT_SHA
-          SECRET_UPDATES_JSON: >-
-            {"DATABASE_URL":"${{ vars.PRODUCTION_RLS_WORKER_SECRET_ARN }}"}
-          GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
-          RELEASE_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
-        run: |
-          set -euo pipefail
-          ./scripts/aws/deploy-ecs-service.sh
-
-      - name: Deploy frontend ECS service
-        if: ${{ inputs.release_mode == 'normal' && !inputs.preserve_current_frontend }}
-        env:
-          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
-          SERVICE_NAME: ${{ env.FRONTEND_SERVICE_NAME }}
-          TASK_DEFINITION: ${{ env.FRONTEND_TASK_DEFINITION }}
-          CONTAINER_NAME: ${{ env.FRONTEND_CONTAINER_NAME }}
-          IMAGE_URI: ${{ steps.images.outputs.frontend_image_ref }}
-          METADATA_FILE: ${{ steps.image-meta.outputs.frontend_metadata_file }}
-          ENV_UPDATES: GIT_SHA
-          GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
-        run: |
-          set -euo pipefail
-          ./scripts/aws/deploy-ecs-service.sh
-
-      - name: Verify frontend and public health
-        if: ${{ inputs.release_mode == 'normal' && !inputs.preserve_current_frontend }}
-        run: |
-          set -euo pipefail
-          ./scripts/aws/verify-production-smoke.sh
-
       - name: Summarize ECS production deployment
         if: ${{ inputs.release_mode == 'normal' }}
         env:
           BACKEND_METADATA_FILE: ${{ steps.image-meta.outputs.backend_metadata_file }}
-          FRONTEND_METADATA_FILE: ${{ steps.image-meta.outputs.frontend_metadata_file }}
-          WORKER_METADATA_FILE: ${{ steps.image-meta.outputs.worker_metadata_file }}
           BACKEND_IMAGE_REF: ${{ steps.images.outputs.backend_image_ref }}
-          FRONTEND_IMAGE_REF: ${{ steps.images.outputs.frontend_image_ref }}
-          WORKER_IMAGE_REF: ${{ steps.images.outputs.worker_image_ref }}
+          FRONTEND_IMAGE_REF: ${{ steps.frontend.outputs.image_ref }}
           RLS_EXECUTOR_IMAGE_REF: ${{ steps.images.outputs.rls_executor_image_ref }}
           RLS_SOURCE_CONTRACT_SHA256: ${{ steps.rls-package.outputs.source_contract_sha256 }}
           RLS_PACKAGE_CHECKSUM_SHA256: ${{ steps.rls-package.outputs.package_checksum_sha256 }}
           RLS_RELEASE_RECEIPT_FILE: ${{ runner.temp }}/production-rls-release-receipt.json
-          PRESERVE_CURRENT_FRONTEND: ${{ inputs.preserve_current_frontend }}
         run: |
           set -euo pipefail
 
           backend_new_task="$(
-            node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.newTaskDefinitionArn || "");' "$BACKEND_METADATA_FILE"
+            node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.targetTaskDefinitionArn || "");' "$BACKEND_METADATA_FILE"
           )"
           backend_previous_task="$(
             node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.previousTaskDefinitionArn || "");' "$BACKEND_METADATA_FILE"
           )"
-          if [ "$PRESERVE_CURRENT_FRONTEND" = "true" ]; then
-            frontend_new_task="arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:20"
-            frontend_previous_task="$frontend_new_task"
-          else
-            frontend_new_task="$(
-              node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.newTaskDefinitionArn || "");' "$FRONTEND_METADATA_FILE"
-            )"
-            frontend_previous_task="$(
-              node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.previousTaskDefinitionArn || "");' "$FRONTEND_METADATA_FILE"
-            )"
-          fi
-          worker_new_task="$(
-            node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.newTaskDefinitionArn || "");' "$WORKER_METADATA_FILE"
-          )"
-          worker_previous_task="$(
-            node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.previousTaskDefinitionArn || "");' "$WORKER_METADATA_FILE"
-          )"
+          frontend_new_task="arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:20"
+          frontend_previous_task="$frontend_new_task"
           rls_receipt_bundle="$(
             node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.receiptBundleSha256 || "");' "$RLS_RELEASE_RECEIPT_FILE"
           )"
@@ -873,23 +766,11 @@ jobs:
             echo "- New task definition: \`${backend_new_task}\`"
             echo "- Health: \`/api/health/ready\` passed"
             echo
-            echo "### Worker"
-            echo
-            echo "- Image: \`${WORKER_IMAGE_REF}\`"
-            echo "- Service: \`${WORKER_SERVICE_NAME}\`"
-            echo "- Previous task definition: \`${worker_previous_task}\`"
-            echo "- New task definition: \`${worker_new_task}\`"
-            echo "- Stability: ECS service-stable waiter passed"
-            echo
             echo "### Frontend"
             echo
             echo "- Service: \`${FRONTEND_SERVICE_NAME}\`"
             echo "- Image: \`${FRONTEND_IMAGE_REF}\`"
             echo "- Previous task definition: \`${frontend_previous_task}\`"
             echo "- New task definition: \`${frontend_new_task}\`"
-            if [ "$PRESERVE_CURRENT_FRONTEND" = "true" ]; then
-              echo "- Deployment: preserved reviewed task definition \`mscqr-frontend:20\`"
-            else
-              echo "- Health: \`/\`, \`/login\`, and \`/api/health/ready\` passed"
-            fi
+            echo "- Deployment: preserved reviewed task definition \`mscqr-frontend:20\`"
           } >> "$GITHUB_STEP_SUMMARY"

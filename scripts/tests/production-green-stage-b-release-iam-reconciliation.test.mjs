@@ -56,12 +56,12 @@ test("broker alias update is authorized on the exact broker function resource", 
   const finalWrite = policies.find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").document;
   const statements = finalWrite.Statement.filter((statement) => list(statement.Action).includes("lambda:UpdateAlias"));
   const context = manifest.required.find(({ action }) => action === "lambda:UpdateAlias").context;
-  assert.deepEqual(statements.map(({ Sid, Resource }) => ({ Sid, Resource })), [{ Sid: "UpdateExactStageBBrokerReviewedAlias", Resource: functionArn }]);
+  assert.deepEqual(statements.map(({ Sid, Resource }) => ({ Sid, Resource })), [{ Sid: "UpdateBrokerAlias", Resource: functionArn }]);
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: functionArn, context }), true);
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: STAGE_B.brokerAliasArn, context }), false);
   assert.equal(allows({ action: "lambda:UpdateAlias", resource: `${functionArn}:other`, context }), false);
   assert.equal(finalWrite.Statement.some((statement) => list(statement.Action).some((action) => ["lambda:CreateAlias", "lambda:DeleteAlias"].includes(action))), false);
-  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "ccbffee957ba429f12bc6a491634921c3e3d74fdda98b5e8bd79a4afbcad5cc1");
+  assert.equal(sourcePolicyEvidence().find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").sourceSha256, "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a");
 });
 
 test("backend recovery ECR reads are exact and add no ECR write authority", () => {
@@ -81,7 +81,7 @@ test("production-shaped required and forbidden resources reconcile to the source
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 231);
+  assert.equal(evaluations.required.length, 233);
   assert.equal(evaluations.forbidden.length, 37);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
@@ -185,5 +185,5 @@ test("IAM condition evaluation fails closed for missing context and unknown oper
 test("generated capability graph binds UpdateAlias to the broker function policy statement", () => {
   const capability = buildStageBDeploymentCapabilityGraph().capabilities.find(({ id }) => id === "manifest-update-reviewed-broker-alias");
   assert.equal(capability.resources[0], STAGE_B.brokerFunctionArn);
-  assert.equal(capability.policy.sid, "UpdateExactStageBBrokerReviewedAlias");
+  assert.equal(capability.policy.sid, "UpdateBrokerAlias");
 });

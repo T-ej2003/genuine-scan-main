@@ -19,6 +19,14 @@ export const PRODUCTION_RELEASE_WORKFLOW_PATH = ".github/workflows/release-gate.
 export const PRODUCTION_RELEASE_CONVERGENCE_COMMAND = "npm run production:release-oidc-trust";
 export const PRODUCTION_RELEASE_ROLLOUT_PENDING = "PENDING_ADMINISTRATOR_CONVERGENCE";
 export const PRODUCTION_RELEASE_ROLLOUT_ENABLED = "OIDC_ATTEMPT_ENABLED";
+export const PRODUCTION_RELEASE_PRINCIPALS = Object.freeze({
+  imagePublisher: "arn:aws:iam::368992683803:role/mscqr-production-stage-b-image-publisher",
+  approvalPublisher: "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+  approvalReader: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+  releaseDeployer: PRODUCTION_RELEASE_ROLE_ARN,
+  postDeployVerifier: "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
+  trustConvergence: PRODUCTION_RELEASE_ADMINISTRATOR_ARN,
+});
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const readJson = (relativePath) => JSON.parse(fs.readFileSync(path.join(root, relativePath), "utf8"));
@@ -129,7 +137,17 @@ export function assertReleaseGateProductionIdentity(workflow = yaml.load(fs.read
   const credentialStep = job.steps[credentialIndexes[0]];
   if (credentialStep.with?.["role-to-assume"] !== "${{ env.PRODUCTION_RELEASE_ROLE_ARN }}") throw new Error("Release Gate must establish credentials once through the canonical OIDC role.");
   const serialized = canonicalProductionReleaseValue(job);
+  const workflowSerialized = canonicalProductionReleaseValue(workflow);
   if (/AWS_ROLE_TO_ASSUME|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|github-actions-mscqr-deploy/.test(serialized)) throw new Error("Release Gate permits role injection or static AWS credentials.");
+  if (/amazon-ecr-login|docker\/setup-buildx|publish-ecs-images|apply-ecr-repository-controls|secretsmanager get-secret-value|PRODUCTION_RLS_APPROVAL_SECRET_ARN/.test(serialized)) throw new Error("Release Gate crosses the image-publisher or approval-secret boundary.");
+  const normalInputs = workflow?.on?.workflow_dispatch?.inputs;
+  if (!normalInputs?.normal_image_authorization_json || !normalInputs?.normal_image_authorization_sha256) throw new Error("Normal Release Gate lacks authenticated external image authorization inputs.");
+  if (!serialized.includes("verify-production-release-image-authorization.mjs") || !serialized.includes("PRODUCTION_RLS_CANARY_IMAGE") || !serialized.includes("PRODUCTION_FRONTEND_TASK_DEFINITION")) throw new Error("Normal Release Gate does not consume the canonical Stage-B image/deployment bindings.");
+  if (!serialized.includes("production-normal-backend-activation.mjs") || !serialized.includes("Authorize exact Stage-B backend candidate before database mutation") || serialized.includes("Deploy worker ECS service") || serialized.includes("PRODUCTION_WORKER_SERVICE_NAME") || serialized.includes("TASK_DEFINITION: mscqr-backend")) throw new Error("Normal Release Gate must activate only the exact Stage-B backend candidate and must not reuse recovery registration or a nonexistent worker service.");
+  if (!workflowSerialized.includes("Normal Stage-B activation must preserve the reviewed frontend task definition") || serialized.includes("Deploy frontend ECS service")) throw new Error("Normal Stage-B activation must preserve the reviewed frontend boundary.");
+  for (const mode of ["normal", "backend-health-recovery", "rotation-overlap", "rotation-cleanup"]) {
+    if (!serialized.includes(mode)) throw new Error(`Release Gate mode ${mode} is not guarded by the canonical release-deployer boundary.`);
+  }
   const modes = workflow?.on?.workflow_dispatch?.inputs?.release_mode?.options;
   if (canonicalProductionReleaseValue(modes) !== canonicalProductionReleaseValue(["normal", "backend-health-recovery", "rotation-overlap", "rotation-cleanup"])) throw new Error("Release Gate production modes are not the reviewed common identity boundary.");
   return true;

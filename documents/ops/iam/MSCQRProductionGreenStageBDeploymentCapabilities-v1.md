@@ -2,8 +2,8 @@
 
 Generated from the permission manifest, reviewed source policies, release probes, canonical recovery, zero-registration forward recovery, publisher policy, Terraform runtime policy actions, and the production path. Do not edit generated capability rows manually.
 
-- Phases: 36
-- Capability nodes: 267
+- Phases: 38
+- Capability nodes: 286
 - Unique AWS actions: 125
 - Identities: GITHUB_IMAGE_PUBLISHER, ADMINISTRATOR, ROOT_OPERATOR, BOOTSTRAP_OPERATOR, RELEASE_DEPLOYER, INDEPENDENT_CHECKER, ECS_EXEC_VERIFIER_OPERATOR, SERVICE_RUNTIME
 
@@ -17,31 +17,33 @@ Generated from the permission manifest, reviewed source policies, release probes
 | 6 | image-artifact-verification | `.github/workflows/production-green-stage-b-image-build.yml` |
 | 7 | schema-v3-image-evidence | `scripts/aws/production-green-stage-b-image-evidence.mjs` |
 | 8 | administrator-release-oidc-trust-convergence | `scripts/aws/converge-production-release-oidc-trust.mjs` |
-| 9 | administrator-iam-simulation | `scripts/aws/validate-production-green-stage-b-permissions.mjs` |
-| 10 | administrator-kms-signing | `scripts/aws/validate-production-green-stage-b-permissions.mjs` |
-| 11 | bootstrap-mfa-session | `documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md` |
-| 12 | release-role-assumption | `documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md` |
-| 13 | release-direct-read-preflight | `scripts/aws/run-production-green-stage-b-preflight.mjs` |
-| 14 | backend-config-generation | `scripts/aws/generate-production-green-stage-b-backend-config.mjs` |
-| 15 | terraform-initialization | `scripts/aws/run-production-green-stage-b-preflight.mjs` |
-| 16 | backend-metadata-validation | `scripts/aws/stage-b-terraform-backend-contract.mjs` |
-| 17 | workspace-validation | `scripts/aws/stage-b-terraform-workspace.mjs` |
-| 18 | canonical-backend-recovery | `scripts/aws/recover-stage-b-backend-task-definition.mjs` |
-| 19 | backend-health-recovery | `scripts/aws/recover-production-backend-health.mjs` |
-| 20 | existing-revision-forward-recovery | `scripts/aws/forward-recover-stage-b-existing-revision.mjs` |
-| 21 | stage-b-state-pull | `scripts/aws/run-production-green-stage-b-preflight.mjs` |
-| 22 | stage-a-state-read | `scripts/aws/run-production-green-stage-b-preflight.mjs` |
-| 23 | stage-a-handoff-generation | `scripts/aws/generate-production-green-stage-a-prerequisites.mjs` |
-| 24 | root-drop-evidence-signing | `scripts/aws/produce-production-root-drop-evidence.mjs` |
-| 25 | tfvars-generation | `scripts/aws/generate-production-green-stage-b-tfvars.mjs` |
-| 26 | refresh-only | `scripts/refresh-production-green-stage-b.mjs` |
-| 27 | saved-plan-generation | `scripts/plan-production-green-stage-b.mjs` |
-| 28 | plan-json-canonicalization | `scripts/plan-production-green-stage-b.mjs` |
-| 29 | reference-audit | `scripts/aws/generate-production-green-stage-b-reference-audit.mjs` |
-| 30 | plan-bound-permission-report | `scripts/aws/validate-production-green-stage-b-permissions.mjs` |
-| 31 | production-closure | `scripts/aws/validate-stage-b-deployment-closure.mjs` |
-| 32 | validator | `scripts/plan-production-green-stage-b.mjs` |
-| 33 | wrapper-verify-only | `scripts/apply-production-green-stage-b.mjs` |
-| 34 | wrapper-apply | `scripts/apply-production-green-stage-b.mjs` |
-| 35 | post-apply-verification | `scripts/aws/verify-production-green-stage-b-ecs-observations.mjs` |
-| 36 | runtime-activation-boundary | `scripts/aws/create-production-green-stage-b-approval.mjs` |
+| 9 | administrator-normal-backend-activation-convergence | `scripts/aws/production-normal-backend-activation.mjs` |
+| 10 | administrator-iam-simulation | `scripts/aws/validate-production-green-stage-b-permissions.mjs` |
+| 11 | administrator-kms-signing | `scripts/aws/validate-production-green-stage-b-permissions.mjs` |
+| 12 | bootstrap-mfa-session | `documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md` |
+| 13 | release-role-assumption | `documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md` |
+| 14 | release-direct-read-preflight | `scripts/aws/run-production-green-stage-b-preflight.mjs` |
+| 15 | backend-config-generation | `scripts/aws/generate-production-green-stage-b-backend-config.mjs` |
+| 16 | terraform-initialization | `scripts/aws/run-production-green-stage-b-preflight.mjs` |
+| 17 | backend-metadata-validation | `scripts/aws/stage-b-terraform-backend-contract.mjs` |
+| 18 | workspace-validation | `scripts/aws/stage-b-terraform-workspace.mjs` |
+| 19 | canonical-backend-recovery | `scripts/aws/recover-stage-b-backend-task-definition.mjs` |
+| 20 | backend-health-recovery | `scripts/aws/recover-production-backend-health.mjs` |
+| 21 | existing-revision-forward-recovery | `scripts/aws/forward-recover-stage-b-existing-revision.mjs` |
+| 22 | stage-b-state-pull | `scripts/aws/run-production-green-stage-b-preflight.mjs` |
+| 23 | stage-a-state-read | `scripts/aws/run-production-green-stage-b-preflight.mjs` |
+| 24 | stage-a-handoff-generation | `scripts/aws/generate-production-green-stage-a-prerequisites.mjs` |
+| 25 | root-drop-evidence-signing | `scripts/aws/produce-production-root-drop-evidence.mjs` |
+| 26 | tfvars-generation | `scripts/aws/generate-production-green-stage-b-tfvars.mjs` |
+| 27 | refresh-only | `scripts/refresh-production-green-stage-b.mjs` |
+| 28 | saved-plan-generation | `scripts/plan-production-green-stage-b.mjs` |
+| 29 | plan-json-canonicalization | `scripts/plan-production-green-stage-b.mjs` |
+| 30 | reference-audit | `scripts/aws/generate-production-green-stage-b-reference-audit.mjs` |
+| 31 | plan-bound-permission-report | `scripts/aws/validate-production-green-stage-b-permissions.mjs` |
+| 32 | production-closure | `scripts/aws/validate-stage-b-deployment-closure.mjs` |
+| 33 | validator | `scripts/plan-production-green-stage-b.mjs` |
+| 34 | wrapper-verify-only | `scripts/apply-production-green-stage-b.mjs` |
+| 35 | wrapper-apply | `scripts/apply-production-green-stage-b.mjs` |
+| 36 | post-apply-verification | `scripts/aws/verify-production-green-stage-b-ecs-observations.mjs` |
+| 37 | runtime-activation-boundary | `scripts/aws/create-production-green-stage-b-approval.mjs` |
+| 38 | normal-backend-activation | `scripts/aws/production-normal-backend-activation.mjs` |

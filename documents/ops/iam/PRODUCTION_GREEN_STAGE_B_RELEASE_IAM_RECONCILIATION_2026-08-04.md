@@ -23,7 +23,7 @@ required.
 The canonical FinalApplyWrite SHA-256 changes from
 `04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`
 to
-`ccbffee957ba429f12bc6a491634921c3e3d74fdda98b5e8bd79a4afbcad5cc1`.
+`edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a`.
 
 The policy also contains the narrowly bounded initial legacy-to-dual-slot
 rotation bootstrap. It permits only the seven exact `mscqr/prod/rotation/*`
@@ -64,9 +64,9 @@ Primary references:
 - [Amazon ECS actions, resources, and condition keys](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonelasticcontainerservice.html)
 - [IAM SimulatePrincipalPolicy API](https://docs.aws.amazon.com/IAM/latest/APIReference/API_SimulatePrincipalPolicy.html)
 
-`UpdateExactStageBBrokerFunctionRelease` remains limited to code,
+`UpdateBrokerRelease` remains limited to code,
 configuration, and version operations on the unqualified function.
-`UpdateExactStageBBrokerReviewedAlias` separately permits only
+`UpdateBrokerAlias` separately permits only
 `lambda:UpdateAlias` on the broker function resource and retains the reviewed
 region and resource-tag conditions. The Terraform alias binding restricts the
 operation to the `reviewed` alias. Alias creation, deletion, invocation, and
@@ -159,13 +159,13 @@ denials have empty sets.
 
 | Condition keys | Reviewed statement origins |
 |---|---|
-| `aws:RequestTag/Component`, `Environment`, `ManagedBy` | `RegisterExactStageBReadOnlyCanaryTaskDefinition`; `TagExactStageBLogs`; `TagExactReplayTable`; `TagExactStageBTaskDefinitions`; `RegisterExactStageBTaskDefinitions1024`; `RegisterExactStageBTaskDefinitionWorker` |
+| `aws:RequestTag/Component`, `Environment`, `ManagedBy` | `RegisterReadOnlyCanary`; `TagExactStageBLogs`; `TagExactReplayTable`; `TagExactStageBTaskDefinitions`; `RegisterExactStageBTaskDefinitions1024`; `RegisterExactStageBTaskDefinitionWorker` |
 | `aws:RequestedRegion` | Region-bound FinalApplyWrite, ProviderReadOnly, ProviderRecovery, ReferenceAuditReadOnly, and TaskDefinitionRegistration statements |
-| `aws:ResourceTag/Component`, `Environment`, `ManagedBy` | `UpdateExactStageBBrokerFunctionRelease`; `UpdateExactStageBBrokerReviewedAlias` |
+| `aws:ResourceTag/Component`, `Environment`, `ManagedBy` | `UpdateBrokerRelease`; `UpdateBrokerAlias` |
 | `aws:TagKeys` | Canary and task-definition registration statements plus the ProviderRecovery tag statements |
 | `ecs:cluster` | `ListStageBServicesAndTasks`; `DescribeStageBServicesAndTasks` |
-| `ecs:compute-compatibility`, `ecs:privileged`, `ecs:task-cpu`, `ecs:task-memory` | `RegisterExactStageBTaskDefinitions1024`; `RegisterExactStageBTaskDefinitionWorker`; `RegisterLegacyBackendHealth` |
-| `iam:PassedToService` | `PassExactStageBReadOnlyCanaryRolesToEcsTasks`; `PassOnlyExactStageBTaskRolesToEcsTasks` |
+| `ecs:compute-compatibility`, `ecs:privileged`, `ecs:task-cpu`, `ecs:task-memory` | `RegisterExactStageBTaskDefinitions1024`; `RegisterExactStageBTaskDefinitionWorker`; `RegisterLegacyBackend` |
+| `iam:PassedToService` | `PassEcsTaskRoles`; `PassOnlyExactStageBTaskRolesToEcsTasks` |
 
 Validation fails for an unexplained key, source-condition drift, a different
 deny kind, or any missing, extra, duplicate, or wrong observed key. Required
@@ -207,7 +207,7 @@ The allowed inline-policy set is empty.
 The candidate source policy union was evaluated with AWS IAM custom-policy
 simulation against the production-shaped plan:
 
-- required evaluations: 231/231 allowed
+- required evaluations: 233/233 allowed
 - required failures: 0
 - forbidden evaluations: 37/37 denied
 - forbidden allowed: 0

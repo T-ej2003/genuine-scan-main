@@ -61,6 +61,6 @@ test("release gate and deploy wrapper enforce the same checkpoint immediately be
   assert.ok(releaseGate.indexOf("Authorize rotation transition readiness immediately before mutation") < releaseGate.indexOf("Deploy rotation transition backend ECS service"));
   assert.match(releaseGate, /OVERLAP_READINESS_EVIDENCE_FILE/);
   assert.match(releaseGate, /run-production-cutover\.mjs/);
-  assert.match(deploy, /require_overlap_readiness/);
-  assert.ok(deploy.indexOf("require_overlap_readiness") < deploy.indexOf("aws ecs update-service"));
+  assert.match(deploy, /require_existing_activation_authorization/);
+  assert.ok(deploy.indexOf("require_existing_activation_authorization") < deploy.indexOf("aws ecs update-service"));
 });

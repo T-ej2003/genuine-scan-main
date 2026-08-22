@@ -38,6 +38,13 @@ Optional environment:
                     SHA-256 of the persisted redacted rotation state bound to readiness evidence.
   DEPLOYMENT_SOURCE_SHA
                     Exact protected-main source SHA bound to readiness evidence.
+  MSCQR_EXISTING_TASK_DEPLOYMENT_MODE
+                    rotation (default) or normal-stage-b. Normal mode is accepted
+                    only from the live-state normal activation coordinator.
+  NORMAL_ACTIVATION_BINDING_FILE
+                    Mode-0600 state/live-policy binding created by the normal activation coordinator.
+  NORMAL_ACTIVATION_BINDING_SHA256
+                    SHA-256 of NORMAL_ACTIVATION_BINDING_FILE.
   ENV_UPDATES       Comma-separated container env names to set. Default:
                     GIT_SHA,RELEASE_GIT_SHA when EXPECTED_GIT_SHA is set.
   GIT_SHA           Value used when ENV_UPDATES includes GIT_SHA.
@@ -148,12 +155,27 @@ require_version_verification_inputs() {
   fi
 }
 
-require_overlap_readiness() {
+require_existing_activation_authorization() {
   if [[ -z "$EXISTING_TASK_DEFINITION_ARN" ]]; then return; fi
   if [[ "${MSCQR_GOVERNED_ORCHESTRATOR:-}" != "1" ]]; then
-    echo "Rotation-overlap deployment must be invoked by run-production-cutover.mjs." >&2
+    echo "Existing task-definition deployment must be invoked by run-production-cutover.mjs or production-normal-backend-activation.mjs." >&2
     exit 1
   fi
+  if [[ "${MSCQR_EXISTING_TASK_DEPLOYMENT_MODE:-rotation}" == "normal-stage-b" ]]; then
+    require_env NORMAL_ACTIVATION_BINDING_FILE
+    require_env NORMAL_ACTIVATION_BINDING_SHA256
+    node --input-type=module - "$NORMAL_ACTIVATION_BINDING_FILE" "$NORMAL_ACTIVATION_BINDING_SHA256" "$EXISTING_TASK_DEFINITION_ARN" "$EXPECTED_CURRENT_TASK_DEFINITION_ARN" "$EXPECTED_IMAGE_DIGEST" "${EXPECTED_GIT_SHA:-}" <<'NODE'
+import crypto from "node:crypto";
+import fs from "node:fs";
+const [file, expectedSha, targetArn, currentArn, digest, sourceSha] = process.argv.slice(2);
+const bytes = fs.readFileSync(file);
+if (crypto.createHash("sha256").update(bytes).digest("hex") !== expectedSha) throw new Error("Normal activation binding changed before the existing-task switch.");
+const value = JSON.parse(bytes);
+if (value.releaseMode !== "normal" || value.targetArn !== targetArn || value.expectedCurrentTaskDefinitionArn !== currentArn || value.digest !== digest || value.sourceSha !== sourceSha || value.clusterArn !== "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" || value.serviceArn !== "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2") throw new Error("Normal activation binding does not match the exact switch inputs.");
+NODE
+    return
+  fi
+  [[ "${MSCQR_EXISTING_TASK_DEPLOYMENT_MODE:-rotation}" == "rotation" ]] || { echo "Unsupported existing task-definition deployment mode." >&2; exit 1; }
   require_env OVERLAP_READINESS_EVIDENCE_FILE
   require_env OVERLAP_READINESS_EVIDENCE_SHA256
   require_env ROTATION_ID
@@ -451,7 +473,7 @@ if [[ -n "$EXISTING_TASK_DEFINITION_ARN" ]]; then
     exit 1
   }
   require_version_verification_inputs
-  require_overlap_readiness
+  require_existing_activation_authorization
 
   aws sts get-caller-identity \
     --query Arn \

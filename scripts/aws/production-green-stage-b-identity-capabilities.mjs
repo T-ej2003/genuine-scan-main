@@ -16,6 +16,7 @@ export const RELEASE_PREFLIGHT_SCHEMA_VERSION = 1;
 
 const roleName = (arn) => arn.split("/").at(-1);
 const policyArn = STAGE_B_BROKER_POLICY.arn;
+const normalActivationPolicyArn = "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite";
 const canaryRoles = [
   "mscqr-production-full-rls-green-read-only-canary-execution",
   "mscqr-production-full-rls-green-read-only-canary-task",
@@ -41,6 +42,7 @@ export const RELEASE_READ_PROBES = Object.freeze([
   ["audit-broker", "lambda:GetFunctionConfiguration", ["lambda", "get-function-configuration", "--function-name", STAGE_B.brokerFunctionArn]],
   ["audit-broker-alias", "lambda:GetAlias", ["lambda", "get-alias", "--function-name", STAGE_B.brokerFunctionArn, "--name", STAGE_B.brokerAliasQualifier]],
   ["refresh-broker-policy", "iam:GetPolicy", ["iam", "get-policy", "--policy-arn", policyArn]],
+  ["normal-activation-policy", "iam:GetPolicy", ["iam", "get-policy", "--policy-arn", normalActivationPolicyArn]],
   ["refresh-broker-policy-versions", "iam:ListPolicyVersions", ["iam", "list-policy-versions", "--policy-arn", policyArn]],
   ["refresh-broker-attachments", "iam:ListAttachedRolePolicies", ["iam", "list-attached-role-policies", "--role-name", roleName(STAGE_B.brokerRoleArn)]],
   ["checker-role-a-trust", "iam:GetRole", ["iam", "get-role", "--role-name", CHECKER_SOURCE_ROLE_NAME]],
@@ -54,7 +56,7 @@ export const RELEASE_READ_PROBES = Object.freeze([
 
 export function readIdentityCapabilityMatrix() {
   const matrix = JSON.parse(fs.readFileSync(path.join(root, IDENTITY_CAPABILITY_MATRIX_PATH), "utf8"));
-  if (matrix.schemaVersion !== 1 || matrix.account !== STAGE_B.account || matrix.region !== STAGE_B.region || matrix.phases?.length !== 36) throw new Error("Stage B identity capability matrix identity is wrong.");
+  if (matrix.schemaVersion !== 1 || matrix.account !== STAGE_B.account || matrix.region !== STAGE_B.region || matrix.phases?.length !== 38) throw new Error("Stage B identity capability matrix identity is wrong.");
   const releaseActions = new Set(matrix.capabilities.filter(({ identity }) => identity === "RELEASE_DEPLOYER").map(({ action }) => action));
   for (const probe of RELEASE_READ_PROBES) if (!releaseActions.has(probe.action)) throw new Error(`Stage B identity capability matrix omits release action ${probe.action}.`);
   if (matrix.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && ["iam:SimulatePrincipalPolicy", "cloudtrail:LookupEvents"].includes(action))) throw new Error("Stage B release identity must not own administrator audit actions.");
@@ -112,6 +114,8 @@ export function runReleaseReadPreflight({
     if (taskArns.length) dependent.push({ id: "audit-task-details", action: "ecs:DescribeTasks", args: ["ecs", "describe-tasks", "--cluster", STAGE_B.clusterArn, "--tasks", ...taskArns] });
     const defaultVersionId = JSON.parse(responses.get("refresh-broker-policy") || "{}").Policy?.DefaultVersionId;
     if (defaultVersionId) dependent.push({ id: "refresh-broker-policy-version", action: "iam:GetPolicyVersion", args: ["iam", "get-policy-version", "--policy-arn", policyArn, "--version-id", defaultVersionId] });
+    const normalActivationVersionId = JSON.parse(responses.get("normal-activation-policy") || "{}").Policy?.DefaultVersionId;
+    if (normalActivationVersionId) dependent.push({ id: "normal-activation-policy-version", action: "iam:GetPolicyVersion", args: ["iam", "get-policy-version", "--policy-arn", normalActivationPolicyArn, "--version-id", normalActivationVersionId] });
     for (const roleName of canaryRoles) {
       const inlinePolicyNames = JSON.parse(responses.get(`refresh-${roleName}-inline-policies`) || "{}").PolicyNames || [];
       for (const policyName of inlinePolicyNames) dependent.push({ id: `refresh-${roleName}-inline-policy-${policyName}`, action: "iam:GetRolePolicy", args: ["iam", "get-role-policy", "--role-name", roleName, "--policy-name", policyName] });

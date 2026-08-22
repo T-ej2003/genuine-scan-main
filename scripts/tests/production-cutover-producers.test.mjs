@@ -103,6 +103,7 @@ test("production overlap adapter invokes the governed deploy wrapper with exact 
   try {
     const adapter = createProductionOverlapDeploymentAdapter({
       profile: "mscqr-production-release-deployer",
+      run: () => JSON.stringify({ Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test" }),
       deployScript: path.join(directory, "deploy-ecs-service.sh"),
       readinessFile,
       sourceSha: "a".repeat(40),
@@ -133,12 +134,37 @@ test("production overlap adapter invokes the governed deploy wrapper with exact 
   }
 });
 
-test("production overlap adapter rejects an omitted or wrong AWS profile before deployment", () => {
+test("production overlap adapter rejects an omitted, mixed, or wrong credential source before deployment", () => {
   let calls = 0;
   for (const profile of [undefined, "administrator"]) {
-    assert.throws(() => createProductionOverlapDeploymentAdapter({ profile, runScript: () => { calls += 1; } }), /exact release profile/);
+    assert.throws(() => createProductionOverlapDeploymentAdapter({ profile, run: () => "{}", runScript: () => { calls += 1; } }), /exact release-deployer credential source/);
   }
+  assert.throws(() => createProductionOverlapDeploymentAdapter({ profile: "mscqr-production-release-deployer", credentialSource: "github-oidc-release-deployer", run: () => "{}", runScript: () => { calls += 1; } }), /exact release-deployer credential source/);
   assert.equal(calls, 0);
+});
+
+test("production overlap GitHub OIDC credentials remain explicit and caller-bound", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-overlap-oidc-test-"));
+  const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
+  const previous = Object.fromEntries(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"].map((name) => [name, process.env[name]]));
+  Object.assign(process.env, { AWS_ACCESS_KEY_ID: "oidc", AWS_SECRET_ACCESS_KEY: "oidc", AWS_SESSION_TOKEN: "oidc" });
+  let invocation;
+  try {
+    const adapter = createProductionOverlapDeploymentAdapter({
+      credentialSource: "github-oidc-release-deployer",
+      run: () => JSON.stringify({ Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/github" }),
+      deployScript: path.join(directory, "deploy.sh"), readinessFile: path.join(directory, "readiness.json"), sourceSha: "a".repeat(40), rotationId: "rotation-test-1", readinessSha256: "d".repeat(64), imageDigest: digest,
+      runScript: (_script, _args, options) => { invocation = options; fs.writeFileSync(options.env.METADATA_FILE, JSON.stringify({ newTaskDefinitionArn: taskDefinitionArn })); },
+    });
+    await adapter.run({ taskDefinitionArn, rotationStateSha256: "c".repeat(64) });
+    assert.equal(invocation.env.AWS_PROFILE, undefined);
+    for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]) assert.equal(invocation.env[name], "oidc");
+    const wrong = createProductionOverlapDeploymentAdapter({ credentialSource: "github-oidc-release-deployer", run: () => JSON.stringify({ Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/other/x" }), runScript: () => {} });
+    await assert.rejects(() => wrong.run({ taskDefinitionArn, rotationStateSha256: "c".repeat(64) }), /canonical release-deployer/);
+  } finally {
+    for (const [name, value] of Object.entries(previous)) value === undefined ? delete process.env[name] : process.env[name] = value;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("production inventory executes the corrected SQL through the psql boundary", () => {

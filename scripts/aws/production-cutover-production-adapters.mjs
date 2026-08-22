@@ -85,10 +85,14 @@ export function describeStageAIngress({ run, endpointSecurityGroupId, runtimeSec
   };
 }
 
-export function createProductionOverlapDeploymentAdapter({ run, runScript = execFileSync, profile, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh"), cluster = CLUSTER, service = SERVICE, expectedCurrentTaskDefinitionArn, readinessFile, readinessSha256, sourceSha, rotationId, imageDigest, expectedFamily = "mscqr-production-rls-green-backend-candidate", versionUrl, expectedGitSha } = {}) {
-  if (typeof runScript !== "function" || !path.isAbsolute(deployScript) || profile !== "mscqr-production-release-deployer") throw new Error("Production overlap deployment runner and exact release profile are required.");
+export function createProductionOverlapDeploymentAdapter({ run, runScript = execFileSync, profile, credentialSource, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh"), cluster = CLUSTER, service = SERVICE, expectedCurrentTaskDefinitionArn, readinessFile, readinessSha256, sourceSha, rotationId, imageDigest, expectedFamily = "mscqr-production-rls-green-backend-candidate", versionUrl, expectedGitSha } = {}) {
+  const localProfile = profile === "mscqr-production-release-deployer" && credentialSource === undefined;
+  const githubOidc = credentialSource === "github-oidc-release-deployer" && profile === undefined;
+  if (typeof run !== "function" || typeof runScript !== "function" || !path.isAbsolute(deployScript) || (!localProfile && !githubOidc)) throw new Error("Production overlap deployment requires one exact release-deployer credential source.");
   return {
     run: async ({ taskDefinitionArn, readinessSha256: suppliedReadinessSha256, rotationStateSha256: suppliedRotationStateSha256 }) => {
+      const caller = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
+      if (caller.Account !== ACCOUNT || !/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/.test(caller.Arn || "")) throw new Error("Production overlap credentials are not the canonical release-deployer session.");
       if (!/^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend-candidate:[1-9][0-9]*$/.test(taskDefinitionArn || "")) throw new Error("Overlap deployment ARN is outside the reviewed family.");
       const effectiveReadinessSha256 = suppliedReadinessSha256 || readinessSha256;
       if (!readinessFile || !/^[a-f0-9]{64}$/.test(effectiveReadinessSha256 || "") || !/^[a-f0-9]{40}$/.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "") || !/^[a-f0-9]{64}$/.test(suppliedRotationStateSha256 || "")) throw new Error("Overlap deployment readiness binding is incomplete.");
