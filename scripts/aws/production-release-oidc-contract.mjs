@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
@@ -13,12 +12,13 @@ export const PRODUCTION_RELEASE_ROLE_NAME = "mscqr-production-release-deployer";
 export const PRODUCTION_RELEASE_OIDC_PROVIDER_ARN = `arn:aws:iam::${PRODUCTION_RELEASE_ACCOUNT}:oidc-provider/token.actions.githubusercontent.com`;
 export const PRODUCTION_RELEASE_OIDC_AUDIENCE = "sts.amazonaws.com";
 export const PRODUCTION_RELEASE_OIDC_SUBJECT = "repo:T-ej2003/genuine-scan-main:environment:production";
+export const PRODUCTION_RELEASE_OIDC_CONFIGURATION_PATH = "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_OIDC_SUBJECT_TRANSITION.json";
 export const PRODUCTION_RELEASE_TRUST_POLICY_PATH = "documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_TRUST_POLICY.json";
 export const PRODUCTION_RELEASE_OIDC_ROLLOUT_PATH = "documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_OIDC_ROLLOUT.json";
 export const PRODUCTION_RELEASE_WORKFLOW_PATH = ".github/workflows/release-gate.yml";
 export const PRODUCTION_RELEASE_CONVERGENCE_COMMAND = "npm run production:release-oidc-trust";
-export const PRODUCTION_RELEASE_ROLLOUT_PENDING = "PENDING_LIVE_CONVERGENCE";
-export const PRODUCTION_RELEASE_ROLLOUT_ENABLED = "LIVE_TRUST_READBACK_EXACT";
+export const PRODUCTION_RELEASE_ROLLOUT_PENDING = "PENDING_ADMINISTRATOR_CONVERGENCE";
+export const PRODUCTION_RELEASE_ROLLOUT_ENABLED = "OIDC_ATTEMPT_ENABLED";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const readJson = (relativePath) => JSON.parse(fs.readFileSync(path.join(root, relativePath), "utf8"));
@@ -86,22 +86,37 @@ export function evaluateProductionReleaseOidcClaims({ providerArn, audience, sub
   return providerArn === PRODUCTION_RELEASE_OIDC_PROVIDER_ARN && audience === PRODUCTION_RELEASE_OIDC_AUDIENCE && subject === PRODUCTION_RELEASE_OIDC_SUBJECT;
 }
 
+export function assertProductionReleaseOidcSubjectConfiguration(configuration = readJson(PRODUCTION_RELEASE_OIDC_CONFIGURATION_PATH)) {
+  const template = configuration?.repositoryOidcSubjectTemplate;
+  const consumer = configuration?.repositoryOidcConsumers?.find(({ workflow }) => workflow === PRODUCTION_RELEASE_WORKFLOW_PATH);
+  const derivedSubject = `repo:${configuration?.repository}:environment:${consumer?.environment}`;
+  if (configuration?.repository !== "T-ej2003/genuine-scan-main" || template?.use_default !== true || template?.use_immutable_subject !== false || template?.sub_claim_prefix !== "repo:T-ej2003/genuine-scan-main" || consumer?.roleSource !== "source-controlled exact mscqr-production-release-deployer ARN" || derivedSubject !== PRODUCTION_RELEASE_OIDC_SUBJECT) throw new Error("Production Release Gate OIDC subject configuration is not the reviewed default production-environment contract.");
+  return Object.freeze({ repository: configuration.repository, environment: consumer.environment, subject: derivedSubject, useDefault: true, immutableSubjects: false });
+}
+
 export function assertProductionReleaseOidcRolloutManifest(manifest = readProductionReleaseOidcRollout()) {
-  const common = manifest?.schemaVersion === 1 && manifest.roleArn === PRODUCTION_RELEASE_ROLE_ARN && manifest.sourceTrustCanonicalSha256 === PRODUCTION_RELEASE_SOURCE_TRUST_SHA256;
+  const common = manifest?.schemaVersion === 2 && manifest.roleArn === PRODUCTION_RELEASE_ROLE_ARN && manifest.sourceTrustCanonicalSha256 === PRODUCTION_RELEASE_SOURCE_TRUST_SHA256;
   if (!common) throw new Error("Production release OIDC rollout manifest is not bound to the reviewed role and trust.");
-  const manifestFields = ["activation", "roleArn", "schemaVersion", "sourceTrustCanonicalSha256", "status"];
+  const manifestFields = ["roleArn", "schemaVersion", "sourceTrustCanonicalSha256", "status"];
   if (Object.keys(manifest).sort().join(",") !== manifestFields.sort().join(",")) throw new Error("Production release OIDC rollout manifest fields are not exact.");
-  if (manifest.status === PRODUCTION_RELEASE_ROLLOUT_PENDING && manifest.activation === null) return Object.freeze({ enabled: false, status: manifest.status });
-  const activation = manifest.activation;
-  if (manifest.status !== PRODUCTION_RELEASE_ROLLOUT_ENABLED || !activation) throw new Error("Production release OIDC rollout is not activated by exact live-trust readback.");
-  const validated = assertProductionReleaseOidcConvergenceEvidence(activation);
-  return Object.freeze({ enabled: true, status: manifest.status, activation: validated });
+  if (manifest.status === PRODUCTION_RELEASE_ROLLOUT_PENDING) return Object.freeze({ enabled: false, status: manifest.status });
+  if (manifest.status !== PRODUCTION_RELEASE_ROLLOUT_ENABLED) throw new Error("Production release OIDC rollout source phase is invalid.");
+  return Object.freeze({ enabled: true, status: manifest.status });
 }
 
 export function assertProductionReleaseOidcRolloutEnabled(manifest = readProductionReleaseOidcRollout()) {
   const result = assertProductionReleaseOidcRolloutManifest(manifest);
-  if (!result.enabled) throw new Error("Production Release Gate is disabled until governed live-trust convergence and protected activation complete.");
+  if (!result.enabled) throw new Error("Production Release Gate is disabled until governed administrator convergence and protected source activation complete.");
   return result;
+}
+
+export function buildProductionReleaseOidcAttemptManifest() {
+  return Object.freeze({
+    schemaVersion: 2,
+    status: PRODUCTION_RELEASE_ROLLOUT_ENABLED,
+    roleArn: PRODUCTION_RELEASE_ROLE_ARN,
+    sourceTrustCanonicalSha256: PRODUCTION_RELEASE_SOURCE_TRUST_SHA256,
+  });
 }
 
 export function assertReleaseGateProductionIdentity(workflow = yaml.load(fs.readFileSync(path.join(root, PRODUCTION_RELEASE_WORKFLOW_PATH), "utf8"))) {
@@ -109,8 +124,8 @@ export function assertReleaseGateProductionIdentity(workflow = yaml.load(fs.read
   if (!job || job.environment !== "production" || job.permissions?.["id-token"] !== "write") throw new Error("Release Gate production job must retain environment binding and OIDC permission.");
   if (job.env?.PRODUCTION_RELEASE_ROLE_ARN !== PRODUCTION_RELEASE_ROLE_ARN) throw new Error("Release Gate production role is not the canonical release-deployer.");
   const credentialIndexes = (job.steps || []).flatMap((step, index) => step.uses === "aws-actions/configure-aws-credentials@v6" ? [index] : []);
-  const guardIndex = (job.steps || []).findIndex((step) => step.name === "Require activated production OIDC trust" && step.run?.includes(`${PRODUCTION_RELEASE_CONVERGENCE_COMMAND} -- --mode assert-release-gate-enabled`));
-  if (credentialIndexes.length !== 1 || guardIndex < 0 || guardIndex >= credentialIndexes[0]) throw new Error("Release Gate must prove protected OIDC rollout activation before credential establishment.");
+  const guardIndex = (job.steps || []).findIndex((step) => step.name === "Require enabled production OIDC source phase" && step.run?.includes(`${PRODUCTION_RELEASE_CONVERGENCE_COMMAND} -- --mode assert-release-gate-enabled`));
+  if (credentialIndexes.length !== 1 || guardIndex < 0 || guardIndex >= credentialIndexes[0]) throw new Error("Release Gate must require the protected OIDC rollout source phase before credential establishment.");
   const credentialStep = job.steps[credentialIndexes[0]];
   if (credentialStep.with?.["role-to-assume"] !== "${{ env.PRODUCTION_RELEASE_ROLE_ARN }}") throw new Error("Release Gate must establish credentials once through the canonical OIDC role.");
   const serialized = canonicalProductionReleaseValue(job);
@@ -124,12 +139,14 @@ export function assertProductionReleaseOidcSourceContract(manifest) {
   const contract = manifest?.principalContracts?.releaseDeployer;
   if (!contract || contract.roleArn !== PRODUCTION_RELEASE_ROLE_ARN || contract.trustPolicyPath !== PRODUCTION_RELEASE_TRUST_POLICY_PATH || contract.rolloutPath !== PRODUCTION_RELEASE_OIDC_ROLLOUT_PATH || contract.workflowPath !== PRODUCTION_RELEASE_WORKFLOW_PATH || contract.evaluationSource !== "scripts/aws/production-release-oidc-contract.mjs" || contract.convergenceCommand !== PRODUCTION_RELEASE_CONVERGENCE_COMMAND) throw new Error("Release-deployer principal contract is missing or does not bind the canonical role, trust, rollout, workflow, evaluator, and convergence command.");
   assertProductionReleaseTrustPolicy();
+  assertProductionReleaseOidcSubjectConfiguration();
   assertProductionReleaseOidcRolloutManifest();
   assertReleaseGateProductionIdentity();
   return true;
 }
 
-export function collectLiveProductionReleaseTrustEvidence({ run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+export function readAndAssertLiveProductionReleaseTrust({ run } = {}) {
+  if (typeof run !== "function") throw new Error("Governed administrator AWS runner is required for live trust readback.");
   const role = JSON.parse(run(["iam", "get-role", "--role-name", PRODUCTION_RELEASE_ROLE_NAME, "--output", "json", "--no-cli-pager"])).Role;
   if (role?.Arn !== PRODUCTION_RELEASE_ROLE_ARN) throw new Error("Live production release-deployer role ARN is not canonical.");
   const liveTrust = normalizeProductionReleaseTrustPolicy(role?.AssumeRolePolicyDocument);
@@ -139,34 +156,12 @@ export function collectLiveProductionReleaseTrustEvidence({ run = (args) => exec
   return { roleArn: role.Arn, liveTrustCanonicalSha256, sourceLiveMatch: true };
 }
 
-export function buildProductionReleaseOidcConvergenceEvidence({ administratorCallerArn, sourceSha, iamWrites, initialState, observedAt, liveTrustCanonicalSha256 } = {}) {
-  const evidence = { schemaVersion: 1, status: PRODUCTION_RELEASE_ROLLOUT_ENABLED, roleArn: PRODUCTION_RELEASE_ROLE_ARN, administratorCallerArn, sourceSha, initialState, iamWrites, sourceTrustCanonicalSha256: PRODUCTION_RELEASE_SOURCE_TRUST_SHA256, liveTrustCanonicalSha256, readbackVerified: true, observedAt };
-  if (administratorCallerArn !== PRODUCTION_RELEASE_ADMINISTRATOR_ARN || !/^[a-f0-9]{40}$/.test(sourceSha || "") || ![0, 1].includes(iamWrites) || !["MFA_ONLY", "TARGET"].includes(initialState) || liveTrustCanonicalSha256 !== PRODUCTION_RELEASE_SOURCE_TRUST_SHA256 || !Number.isFinite(Date.parse(observedAt))) throw new Error("Production release OIDC convergence evidence is incomplete or unauthenticated.");
-  return Object.freeze({ ...evidence, evidenceSha256: sha256(evidence) });
-}
-
-export function assertProductionReleaseOidcConvergenceEvidence(evidence, { expectedSha256 } = {}) {
-  const fields = ["administratorCallerArn", "evidenceSha256", "iamWrites", "initialState", "liveTrustCanonicalSha256", "observedAt", "readbackVerified", "roleArn", "schemaVersion", "sourceSha", "sourceTrustCanonicalSha256", "status"];
-  if (!evidence || Object.keys(evidence).sort().join(",") !== fields.sort().join(",") || evidence.schemaVersion !== 1 || evidence.status !== PRODUCTION_RELEASE_ROLLOUT_ENABLED || evidence.roleArn !== PRODUCTION_RELEASE_ROLE_ARN || evidence.sourceTrustCanonicalSha256 !== PRODUCTION_RELEASE_SOURCE_TRUST_SHA256 || evidence.readbackVerified !== true) throw new Error("Production release OIDC convergence evidence fields are not exact.");
-  const { evidenceSha256, ...unsigned } = evidence || {};
-  const rebuilt = buildProductionReleaseOidcConvergenceEvidence(unsigned);
-  if (evidenceSha256 !== rebuilt.evidenceSha256 || (expectedSha256 !== undefined && evidenceSha256 !== expectedSha256)) throw new Error("Production release OIDC convergence evidence hash is invalid.");
-  return rebuilt;
-}
-
-export function buildProductionReleaseOidcActivation(evidence) {
-  const valid = assertProductionReleaseOidcConvergenceEvidence(evidence);
-  return Object.freeze({
-    schemaVersion: 1,
-    status: PRODUCTION_RELEASE_ROLLOUT_ENABLED,
-    roleArn: PRODUCTION_RELEASE_ROLE_ARN,
-    sourceTrustCanonicalSha256: PRODUCTION_RELEASE_SOURCE_TRUST_SHA256,
-    activation: valid,
-  });
-}
-
-export function convergeProductionReleaseOidcTrust({ run, sourceSha, now = () => new Date().toISOString() } = {}) {
+export function convergeProductionReleaseOidcTrust({ run, sourceSha } = {}) {
   if (typeof run !== "function") throw new Error("Governed administrator AWS runner is required.");
+  if (!/^[a-f0-9]{40}$/.test(sourceSha || "")) throw new Error("Production release OIDC convergence requires the exact protected source SHA.");
+  const sourceTrust = normalizeProductionReleaseTrustPolicy(readProductionReleaseTrustPolicy());
+  assertProductionReleaseTrustPolicy(sourceTrust);
+  assertProductionReleaseOidcSubjectConfiguration();
   const identity = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
   if (identity.Account !== PRODUCTION_RELEASE_ACCOUNT || identity.Arn !== PRODUCTION_RELEASE_ADMINISTRATOR_ARN) throw new Error("Production release OIDC trust convergence requires the exact governed root administrator identity.");
   const initialRole = JSON.parse(run(["iam", "get-role", "--role-name", PRODUCTION_RELEASE_ROLE_NAME, "--output", "json", "--no-cli-pager"])).Role;
@@ -176,14 +171,21 @@ export function convergeProductionReleaseOidcTrust({ run, sourceSha, now = () =>
   let updateError;
   if (initialState === "MFA_ONLY") {
     iamWrites = 1;
-    try { run(["iam", "update-assume-role-policy", "--role-name", PRODUCTION_RELEASE_ROLE_NAME, "--policy-document", `file://${path.join(root, PRODUCTION_RELEASE_TRUST_POLICY_PATH)}`, "--no-cli-pager"]); } catch (error) { updateError = error; }
+    try { run(["iam", "update-assume-role-policy", "--role-name", PRODUCTION_RELEASE_ROLE_NAME, "--policy-document", JSON.stringify(sourceTrust), "--no-cli-pager"]); } catch (error) { updateError = error; }
   }
   try {
-    const live = collectLiveProductionReleaseTrustEvidence({ run });
-    return buildProductionReleaseOidcConvergenceEvidence({ administratorCallerArn: identity.Arn, sourceSha, iamWrites, initialState, observedAt: now(), liveTrustCanonicalSha256: live.liveTrustCanonicalSha256 });
+    const live = readAndAssertLiveProductionReleaseTrust({ run });
+    return Object.freeze({ status: "LIVE_TRUST_VERIFIED_BY_AWS", roleArn: live.roleArn, sourceSha, initialState, iamWrites, liveTrustCanonicalSha256: live.liveTrustCanonicalSha256 });
   } catch (error) {
     error.iamWrites = iamWrites;
     if (updateError) error.cause = updateError;
     throw error;
   }
+}
+
+export function convergeAndEnableProductionReleaseOidc({ run, sourceSha, writeRolloutManifest } = {}) {
+  if (typeof writeRolloutManifest !== "function") throw new Error("Production release OIDC rollout writer is required before IAM convergence.");
+  const result = convergeProductionReleaseOidcTrust({ run, sourceSha });
+  writeRolloutManifest(buildProductionReleaseOidcAttemptManifest());
+  return result;
 }

@@ -22,7 +22,7 @@ review remain GitHub-owned gates.
 
 ## Bootstrap-safe rollout
 
-The tracked rollout manifest starts as `PENDING_LIVE_CONVERGENCE`. In that
+The tracked rollout manifest starts as `PENDING_ADMINISTRATOR_CONVERGENCE`. In that
 state every Release Gate mode exits before `configure-aws-credentials`; merging
 the convergence tooling cannot strand the existing administrator path or make
 an unready OIDC attempt.
@@ -33,32 +33,24 @@ From a fresh, clean protected-main checkout, the root administrator runs:
 npm run production:release-oidc-trust -- \
   --mode converge \
   --admin-profile <authenticated-root-administrator-profile> \
-  --source-sha <protected-main-sha> \
-  --output /private/path/release-oidc-convergence.json
+  --source-sha <protected-main-sha>
 ```
 
 The command accepts only the exact MFA-only current trust or the exact target
 trust. It performs at most one `iam:UpdateAssumeRolePolicy`, preserves the MFA
-statement, calls `iam:GetRole` again, and writes private evidence only after
-the live readback is semantically identical to the reviewed source. Running it
-against the exact target is a zero-write no-op. Any other principal, role,
-trust, partial write, or failed readback stops without activation evidence.
+statement, and calls `iam:GetRole` again. Only after the authenticated live
+readback is semantically identical to the reviewed source
+does it change the tracked source phase to `OIDC_ATTEMPT_ENABLED`. Running it
+against the exact target is a zero-write IAM no-op. Any other principal, role,
+trust, partial write, or failed readback leaves the source phase pending.
 
-The administrator then converts the hash-bound private evidence into the
-tracked activation manifest:
-
-```sh
-npm run production:release-oidc-trust -- \
-  --mode activate \
-  --source-sha <protected-main-sha> \
-  --evidence /private/path/release-oidc-convergence.json \
-  --evidence-sha256 <file-sha256>
-```
-
-That one generated manifest change requires protected review and merge. Only
-`LIVE_TRUST_READBACK_EXACT` enables Release Gate. This ordering keeps initial
-trust convergence on the existing administrator boundary and prevents the new
-OIDC role from attempting to grant its own first trust.
+The resulting one-file source-phase change requires protected review and merge.
+It is rollout intent, not authentication evidence: it contains no caller claim,
+`readbackVerified` flag, timestamp, or self-authenticating digest. At runtime,
+AWS STS evaluates the GitHub token against the role's current live trust and is
+the final authentication authority. If trust changes after administrator
+readback, `AssumeRoleWithWebIdentity` fails closed. This small residual TOCTOU
+window cannot produce AWS credentials from stale source metadata.
 
 The legacy `github-actions-mscqr-deploy` role is not a valid Release Gate
 principal and is not changed or deleted by this contract.

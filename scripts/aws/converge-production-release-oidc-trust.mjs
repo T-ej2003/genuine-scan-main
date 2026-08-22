@@ -3,9 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
-import { readStageBPrivateFileBytes, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
-import { PRODUCTION_RELEASE_OIDC_ROLLOUT_PATH, assertProductionReleaseOidcConvergenceEvidence, assertProductionReleaseOidcRolloutEnabled, buildProductionReleaseOidcActivation, convergeProductionReleaseOidcTrust } from "./production-release-oidc-contract.mjs";
+import { PRODUCTION_RELEASE_OIDC_ROLLOUT_PATH, assertProductionReleaseOidcRolloutEnabled, assertProductionReleaseOidcRolloutManifest, convergeAndEnableProductionReleaseOidc } from "./production-release-oidc-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const values = new Map();
@@ -29,7 +28,7 @@ const requireProtectedMain = (sourceSha) => {
   if (checkout.currentHead !== sourceSha) throw new Error("OIDC rollout source SHA does not match fresh protected main.");
   return checkout;
 };
-const writeActivation = (manifest) => {
+const writeRolloutManifest = (manifest) => {
   const target = path.join(root, PRODUCTION_RELEASE_OIDC_ROLLOUT_PATH);
   const temporary = `${target}.tmp-${process.pid}`;
   const stat = fs.lstatSync(target, { throwIfNoEntry: false });
@@ -37,7 +36,7 @@ const writeActivation = (manifest) => {
   try {
     fs.writeFileSync(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx", mode: 0o600 });
     const current = fs.lstatSync(target, { throwIfNoEntry: false });
-    if (!current?.isFile() || current.isSymbolicLink() || current.dev !== stat.dev || current.ino !== stat.ino) throw new Error("OIDC rollout manifest changed during activation.");
+    if (!current?.isFile() || current.isSymbolicLink() || current.dev !== stat.dev || current.ino !== stat.ino) throw new Error("OIDC rollout manifest changed during source-phase update.");
     fs.renameSync(temporary, target);
     fs.chmodSync(target, 0o644);
   } finally { fs.rmSync(temporary, { force: true }); }
@@ -46,26 +45,14 @@ const writeActivation = (manifest) => {
 if (mode === "assert-release-gate-enabled") {
   requireExactOptions("--mode");
   assertProductionReleaseOidcRolloutEnabled();
-  process.stdout.write('{"status":"LIVE_TRUST_READBACK_EXACT"}\n');
+  process.stdout.write('{"status":"OIDC_ATTEMPT_ENABLED","authority":"AWS_STS_LIVE_TRUST"}\n');
 } else if (mode === "converge") {
-  requireExactOptions("--mode", "--source-sha", "--admin-profile", "--output");
+  requireExactOptions("--mode", "--source-sha", "--admin-profile");
   const sourceSha = requireValue("--source-sha");
   requireProtectedMain(sourceSha);
-  const evidence = convergeProductionReleaseOidcTrust({ run: createProductionCommandRunner({ profile: requireValue("--admin-profile") }), sourceSha });
-  const written = writeStageBPrivateFileAtomic({ filePath: requireValue("--output"), bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), repositoryRoot: root, overwrite: true, label: "Production release OIDC convergence evidence" });
-  process.stdout.write(`${JSON.stringify({ status: evidence.status, iamWrites: evidence.iamWrites, evidenceSha256: evidence.evidenceSha256, outputSha256: written.sha256 })}\n`);
-} else if (mode === "activate") {
-  requireExactOptions("--mode", "--source-sha", "--evidence", "--evidence-sha256");
-  const sourceSha = requireValue("--source-sha");
-  requireProtectedMain(sourceSha);
-  const captured = readStageBPrivateFileBytes({ filePath: requireValue("--evidence"), repositoryRoot: root, label: "Production release OIDC convergence evidence" });
-  const expectedSha256 = requireValue("--evidence-sha256");
-  if (captured.sha256 !== expectedSha256) throw new Error("OIDC convergence evidence file changed before activation.");
-  const evidence = assertProductionReleaseOidcConvergenceEvidence(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes)));
-  if (evidence.sourceSha !== sourceSha) throw new Error("OIDC convergence evidence is bound to a different protected source.");
-  const activation = buildProductionReleaseOidcActivation(evidence);
-  writeActivation(activation);
-  process.stdout.write(`${JSON.stringify({ status: activation.status, evidenceSha256: evidence.evidenceSha256 })}\n`);
+  assertProductionReleaseOidcRolloutManifest();
+  const result = convergeAndEnableProductionReleaseOidc({ run: createProductionCommandRunner({ profile: requireValue("--admin-profile") }), sourceSha, writeRolloutManifest });
+  process.stdout.write(`${JSON.stringify({ status: result.status, authority: "AWS_IAM_GET_ROLE_AND_STS", initialState: result.initialState, iamWrites: result.iamWrites, nextSourcePhase: "OIDC_ATTEMPT_ENABLED" })}\n`);
 } else {
-  throw new Error("--mode must be converge, activate, or assert-release-gate-enabled.");
+  throw new Error("--mode must be converge or assert-release-gate-enabled.");
 }

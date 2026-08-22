@@ -36,9 +36,10 @@ Production environment or repository variables/secrets:
   `arn:aws:iam::368992683803:role/mscqr-production-release-deployer` through
   GitHub OIDC. It does not accept a role variable or static AWS credentials.
 - Release Gate fails before credential establishment until protected
-  `MSCQR_PRODUCTION_RELEASE_DEPLOYER_OIDC_ROLLOUT.json` records exact live-trust
-  readback. Follow `documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_OIDC.md`
-  for the one-time root-administrator convergence and activation sequence.
+  `MSCQR_PRODUCTION_RELEASE_DEPLOYER_OIDC_ROLLOUT.json` enables the OIDC attempt.
+  That source phase is not trust evidence; AWS STS remains the live authority.
+  Follow `documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_OIDC.md` for the
+  one-time root-administrator convergence and protected source-phase sequence.
 - `production` GitHub Environment: must require at least one reviewer.
 
 Optional worker deployment variables in the `production` environment:

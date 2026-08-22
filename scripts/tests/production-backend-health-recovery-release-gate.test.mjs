@@ -23,12 +23,14 @@ import {
   PRODUCTION_RELEASE_ROLE_ARN,
   PRODUCTION_RELEASE_SOURCE_TRUST_SHA256,
   assertProductionReleaseOidcRolloutEnabled,
+  assertProductionReleaseOidcSubjectConfiguration,
   assertProductionReleaseOidcSourceContract,
   assertProductionReleaseTrustPolicy,
   assertReleaseGateProductionIdentity,
-  buildProductionReleaseOidcActivation,
+  buildProductionReleaseOidcAttemptManifest,
   classifyProductionReleaseTrustPolicy,
-  collectLiveProductionReleaseTrustEvidence,
+  convergeAndEnableProductionReleaseOidc,
+  readAndAssertLiveProductionReleaseTrust,
   convergeProductionReleaseOidcTrust,
   evaluateProductionReleaseOidcClaims,
   readProductionReleaseTrustPolicy,
@@ -41,6 +43,10 @@ const permissionManifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRPr
 
 test("Release Gate uses the exact production environment OIDC identity", () => {
   assert.equal(assertProductionReleaseOidcSourceContract(permissionManifest), true);
+  assert.deepEqual(assertProductionReleaseOidcSubjectConfiguration(), { repository: "T-ej2003/genuine-scan-main", environment: "production", subject: PRODUCTION_RELEASE_OIDC_SUBJECT, useDefault: true, immutableSubjects: false });
+  const wrongSubjectConfiguration = JSON.parse(fs.readFileSync("documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_OIDC_SUBJECT_TRANSITION.json", "utf8"));
+  wrongSubjectConfiguration.repositoryOidcSubjectTemplate.use_default = false;
+  assert.throws(() => assertProductionReleaseOidcSubjectConfiguration(wrongSubjectConfiguration), /subject configuration/);
   assert.equal(assertReleaseGateProductionIdentity(parsedWorkflow), true);
   const expected = { providerArn: PRODUCTION_RELEASE_OIDC_PROVIDER_ARN, audience: PRODUCTION_RELEASE_OIDC_AUDIENCE, subject: PRODUCTION_RELEASE_OIDC_SUBJECT };
   assert.equal(evaluateProductionReleaseOidcClaims(expected), true);
@@ -61,9 +67,12 @@ test("Release Gate uses the exact production environment OIDC identity", () => {
     assert.throws(() => assertProductionReleaseTrustPolicy(trust), /exact production-environment OIDC trust/);
   }
 
-  const evidence = collectLiveProductionReleaseTrustEvidence({ run: () => JSON.stringify({ Role: { Arn: PRODUCTION_RELEASE_ROLE_ARN, AssumeRolePolicyDocument: readProductionReleaseTrustPolicy() } }) });
-  assert.deepEqual(evidence, { roleArn: PRODUCTION_RELEASE_ROLE_ARN, liveTrustCanonicalSha256: PRODUCTION_RELEASE_SOURCE_TRUST_SHA256, sourceLiveMatch: true });
-  assert.throws(() => collectLiveProductionReleaseTrustEvidence({ run: () => JSON.stringify({ Role: { Arn: "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy", AssumeRolePolicyDocument: readProductionReleaseTrustPolicy() } }) }), /role ARN is not canonical/);
+  const liveTrust = readAndAssertLiveProductionReleaseTrust({ run: () => JSON.stringify({ Role: { Arn: PRODUCTION_RELEASE_ROLE_ARN, AssumeRolePolicyDocument: readProductionReleaseTrustPolicy() } }) });
+  assert.deepEqual(liveTrust, { roleArn: PRODUCTION_RELEASE_ROLE_ARN, liveTrustCanonicalSha256: PRODUCTION_RELEASE_SOURCE_TRUST_SHA256, sourceLiveMatch: true });
+  assert.throws(() => readAndAssertLiveProductionReleaseTrust(), /Governed administrator AWS runner/);
+  assert.throws(() => readAndAssertLiveProductionReleaseTrust({ run: () => { throw new Error("GetRole denied"); } }), /GetRole denied/);
+  assert.throws(() => readAndAssertLiveProductionReleaseTrust({ run: () => JSON.stringify({ Role: { Arn: PRODUCTION_RELEASE_ROLE_ARN, AssumeRolePolicyDocument: "%E0%A4%A" } }) }), /malformed/);
+  assert.throws(() => readAndAssertLiveProductionReleaseTrust({ run: () => JSON.stringify({ Role: { Arn: "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy", AssumeRolePolicyDocument: readProductionReleaseTrustPolicy() } }) }), /role ARN is not canonical/);
 
   for (const roleArn of ["arn:aws:iam::368992683803:role/github-actions-mscqr-deploy", "arn:aws:iam::368992683803:role/arbitrary"]) {
     const changed = structuredClone(parsedWorkflow);
@@ -82,21 +91,23 @@ test("Release Gate uses the exact production environment OIDC identity", () => {
   assert.match(fs.readFileSync("documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_OIDC_SUBJECT_TRANSITION.json", "utf8"), /source-controlled exact mscqr-production-release-deployer ARN/);
 });
 
-test("governed administrator convergence gates Release Gate until exact live readback", () => {
+test("governed administrator convergence requires live readback before source enables an AWS-authorized OIDC attempt", () => {
   const target = readProductionReleaseTrustPolicy();
   const mfaOnly = { Version: target.Version, Statement: [target.Statement[0]] };
   const sourceSha = "1".repeat(40);
   const now = "2026-08-22T01:00:00.000Z";
-  const runner = (initial, { readback = target, callerArn = PRODUCTION_RELEASE_ADMINISTRATOR_ARN, roleArn = PRODUCTION_RELEASE_ROLE_ARN, encoded = false, updateThrows = false } = {}) => {
+  const runner = (initial, { readback = target, callerArn = PRODUCTION_RELEASE_ADMINISTRATOR_ARN, account = "368992683803", roleArn = PRODUCTION_RELEASE_ROLE_ARN, encoded = false, updateThrows = false, readbackThrows = false } = {}) => {
     let trust = structuredClone(initial);
     const calls = [];
     return {
       calls,
       run(args) {
         calls.push(args);
-        if (args[0] === "sts") return JSON.stringify({ Account: "368992683803", Arn: callerArn });
+        if (args[0] === "sts") return JSON.stringify({ Account: account, Arn: callerArn });
         if (args[1] === "get-role") {
-          const document = calls.filter((entry) => entry[1] === "get-role").length > 1 ? readback : trust;
+          const readCount = calls.filter((entry) => entry[1] === "get-role").length;
+          if (readCount > 1 && readbackThrows) throw new Error("GetRole denied");
+          const document = readCount > 1 ? readback : trust;
           const represented = encoded ? { ...document, Statement: document.Statement.map((statement) => ({ ...statement, Action: [statement.Action], Principal: Object.fromEntries(Object.entries(statement.Principal).map(([key, value]) => [key, [value]])), Condition: Object.fromEntries(Object.entries(statement.Condition).map(([operator, values]) => [operator, Object.fromEntries(Object.entries(values).map(([key, value]) => [key, [value]]))])) })) } : document;
           return JSON.stringify({ Role: { Arn: roleArn, AssumeRolePolicyDocument: encoded ? encodeURIComponent(JSON.stringify(represented)) : represented } });
         }
@@ -107,38 +118,66 @@ test("governed administrator convergence gates Release Gate until exact live rea
   };
 
   const migration = runner(mfaOnly, { encoded: true });
-  const migrated = convergeProductionReleaseOidcTrust({ run: migration.run, sourceSha, now: () => now });
+  let publishedRollout;
+  const migrated = convergeAndEnableProductionReleaseOidc({ run: migration.run, sourceSha, writeRolloutManifest: (value) => { publishedRollout = value; } });
+  assert.equal(migrated.status, "LIVE_TRUST_VERIFIED_BY_AWS");
   assert.equal(migrated.initialState, "MFA_ONLY");
   assert.equal(migrated.iamWrites, 1);
   assert.equal(migrated.liveTrustCanonicalSha256, PRODUCTION_RELEASE_SOURCE_TRUST_SHA256);
+  assert.equal(Object.hasOwn(migrated, "evidenceSha256"), false);
+  assert.equal(Object.hasOwn(migrated, "readbackVerified"), false);
   assert.equal(migration.calls.filter((args) => args[1] === "update-assume-role-policy").length, 1);
   assert.equal(migration.calls.filter((args) => args[1] === "get-role").length, 2);
-  const activation = buildProductionReleaseOidcActivation(migrated);
-  assert.equal(assertProductionReleaseOidcRolloutEnabled(activation).enabled, true);
-  const tamperedActivation = structuredClone(activation);
-  tamperedActivation.activation.iamWrites = 0;
-  assert.throws(() => assertProductionReleaseOidcRolloutEnabled(tamperedActivation), /evidence hash is invalid/);
-  const extendedActivation = structuredClone(activation);
-  extendedActivation.activation.unreviewed = true;
-  assert.throws(() => assertProductionReleaseOidcRolloutEnabled(extendedActivation), /fields are not exact/);
+  const updateCall = migration.calls.find((args) => args[1] === "update-assume-role-policy");
+  const updateDocument = JSON.parse(updateCall[updateCall.indexOf("--policy-document") + 1]);
+  assert.equal(updateCall.some((value) => value.startsWith?.("file://")), false);
+  assert.doesNotThrow(() => assertProductionReleaseTrustPolicy(updateDocument));
+  const rollout = buildProductionReleaseOidcAttemptManifest();
+  assert.deepEqual(publishedRollout, rollout);
+  assert.equal(assertProductionReleaseOidcRolloutEnabled(rollout).enabled, true);
+  const forgedHashedEvidence = { ...rollout, schemaVersion: 1, activation: { administratorCallerArn: PRODUCTION_RELEASE_ADMINISTRATOR_ARN, sourceSha, observedAt: now, readbackVerified: true, evidenceSha256: createHash("sha256").update("attacker-controlled").digest("hex") } };
+  assert.throws(() => assertProductionReleaseOidcRolloutEnabled(forgedHashedEvidence), /manifest.*reviewed role and trust|fields are not exact/);
+  assert.throws(() => assertProductionReleaseOidcRolloutEnabled({ ...rollout, readbackVerified: true }), /fields are not exact/);
+  assert.throws(() => assertProductionReleaseOidcRolloutEnabled({ ...rollout, sourceSha: "0".repeat(40), observedAt: "2020-01-01T00:00:00.000Z" }), /fields are not exact/);
+  assert.throws(() => assertProductionReleaseOidcRolloutEnabled({ ...rollout, roleArn: "arn:aws:iam::000000000000:role/mscqr-production-release-deployer" }), /reviewed role and trust/);
 
-  const reconciled = convergeProductionReleaseOidcTrust({ run: runner(mfaOnly, { updateThrows: true }).run, sourceSha, now: () => now });
+  const reconciled = convergeProductionReleaseOidcTrust({ run: runner(mfaOnly, { updateThrows: true }).run, sourceSha });
   assert.equal(reconciled.iamWrites, 1);
 
+  const publicationFailure = runner(mfaOnly);
+  assert.throws(() => convergeAndEnableProductionReleaseOidc({ run: publicationFailure.run, sourceSha, writeRolloutManifest: () => { throw new Error("source publication failed"); } }), /source publication failed/);
+  let retryPublished = false;
+  const publicationRetry = convergeAndEnableProductionReleaseOidc({ run: publicationFailure.run, sourceSha, writeRolloutManifest: () => { retryPublished = true; } });
+  assert.equal(publicationRetry.initialState, "TARGET");
+  assert.equal(publicationRetry.iamWrites, 0);
+  assert.equal(retryPublished, true);
+
   const alreadyLive = runner(target);
-  const noOp = convergeProductionReleaseOidcTrust({ run: alreadyLive.run, sourceSha, now: () => now });
+  const noOp = convergeProductionReleaseOidcTrust({ run: alreadyLive.run, sourceSha });
   assert.equal(noOp.initialState, "TARGET");
   assert.equal(noOp.iamWrites, 0);
   assert.equal(alreadyLive.calls.some((args) => args[1] === "update-assume-role-policy"), false);
+  assert.equal(alreadyLive.calls.filter((args) => args[1] === "get-role").length, 2);
 
-  assert.throws(() => assertProductionReleaseOidcRolloutEnabled({ schemaVersion: 1, status: "PENDING_LIVE_CONVERGENCE", roleArn: PRODUCTION_RELEASE_ROLE_ARN, sourceTrustCanonicalSha256: PRODUCTION_RELEASE_SOURCE_TRUST_SHA256, activation: null }), /disabled until governed live-trust convergence/);
+  assert.throws(() => assertProductionReleaseOidcRolloutEnabled({ ...rollout, status: "PENDING_ADMINISTRATOR_CONVERGENCE" }), /disabled until governed administrator convergence/);
   const partial = runner(mfaOnly, { readback: mfaOnly });
-  assert.throws(() => convergeProductionReleaseOidcTrust({ run: partial.run, sourceSha, now: () => now }), (error) => error.iamWrites === 1 && /exact MFA handoff/.test(error.message));
+  let partialPublished = false;
+  assert.throws(() => convergeAndEnableProductionReleaseOidc({ run: partial.run, sourceSha, writeRolloutManifest: () => { partialPublished = true; } }), (error) => error.iamWrites === 1 && /exact MFA handoff/.test(error.message));
+  assert.equal(partialPublished, false);
+  assert.throws(() => convergeProductionReleaseOidcTrust({ run: runner(mfaOnly, { readbackThrows: true }).run, sourceSha }), (error) => error.iamWrites === 1 && /GetRole denied/.test(error.message));
+  assert.throws(() => convergeProductionReleaseOidcTrust({ run: migration.run, sourceSha: "wrong" }), /exact protected source SHA/);
+  assert.throws(() => convergeProductionReleaseOidcTrust({ run: runner(mfaOnly, { account: "000000000000" }).run, sourceSha }), /exact governed root administrator/);
   assert.throws(() => convergeProductionReleaseOidcTrust({ run: runner(mfaOnly, { callerArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator" }).run, sourceSha }), /exact governed root administrator/);
   assert.throws(() => convergeProductionReleaseOidcTrust({ run: runner(mfaOnly, { roleArn: "arn:aws:iam::368992683803:role/arbitrary" }).run, sourceSha }), /wrong role/);
+  const skippedConvergence = spawnSync(process.execPath, ["scripts/aws/converge-production-release-oidc-trust.mjs", "--mode", "assert-release-gate-enabled"], { encoding: "utf8" });
+  assert.notEqual(skippedConvergence.status, 0);
+  assert.match(skippedConvergence.stderr, /disabled until governed administrator convergence/);
   const injectedRole = spawnSync(process.execPath, ["scripts/aws/converge-production-release-oidc-trust.mjs", "--mode", "assert-release-gate-enabled", "--role", "arn:aws:iam::368992683803:role/arbitrary"], { encoding: "utf8" });
   assert.notEqual(injectedRole.status, 0);
   assert.match(injectedRole.stderr, /Unsupported argument.*--role/);
+  const directActivation = spawnSync(process.execPath, ["scripts/aws/converge-production-release-oidc-trust.mjs", "--mode", "activate", "--source-sha", sourceSha], { encoding: "utf8" });
+  assert.notEqual(directActivation.status, 0);
+  assert.match(directActivation.stderr, /mode must be converge/);
 
   const broad = [
     { ...target.Statement[1], Principal: { Federated: "*" } },
@@ -153,10 +192,14 @@ test("governed administrator convergence gates Release Gate until exact live rea
   assert.throws(() => classifyProductionReleaseTrustPolicy({ Version: target.Version, Statement: [target.Statement[1]] }), /neither the exact MFA-only/);
 
   const steps = parsedWorkflow.jobs["deploy-production-ecs"].steps;
-  assert.ok(steps.findIndex(({ name }) => name === "Require activated production OIDC trust") < steps.findIndex(({ uses }) => uses === "aws-actions/configure-aws-credentials@v6"));
+  assert.ok(steps.findIndex(({ name }) => name === "Require enabled production OIDC source phase") < steps.findIndex(({ uses }) => uses === "aws-actions/configure-aws-credentials@v6"));
   assert.deepEqual(parsedWorkflow.on.workflow_dispatch.inputs.release_mode.options, ["normal", "backend-health-recovery", "rotation-overlap", "rotation-cleanup"]);
-  assert.equal(activation.status, PRODUCTION_RELEASE_ROLLOUT_ENABLED);
+  assert.equal(rollout.status, PRODUCTION_RELEASE_ROLLOUT_ENABLED);
   assert.match(JSON.stringify(permissionManifest.principalContracts.releaseDeployer), /production:release-oidc-trust/);
+  const convergenceCli = fs.readFileSync("scripts/aws/converge-production-release-oidc-trust.mjs", "utf8");
+  assert.doesNotMatch(convergenceCli, /evidenceSha256|readbackVerified|--evidence|--output/);
+  assert.match(convergenceCli, /convergeAndEnableProductionReleaseOidc[\s\S]*writeRolloutManifest/);
+  assert.match(convergenceCli, /authority: "AWS_IAM_GET_ROLE_AND_STS"/);
 });
 
 test("release gate exposes one bounded backend health recovery mode", () => {
