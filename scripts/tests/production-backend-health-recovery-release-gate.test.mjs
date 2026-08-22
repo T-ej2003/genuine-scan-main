@@ -172,9 +172,9 @@ test("governed administrator convergence requires live readback before source en
   assert.throws(() => convergeProductionReleaseOidcTrust({ run: runner(mfaOnly, { account: "000000000000" }).run, sourceSha }), /exact governed root administrator/);
   assert.throws(() => convergeProductionReleaseOidcTrust({ run: runner(mfaOnly, { callerArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator" }).run, sourceSha }), /exact governed root administrator/);
   assert.throws(() => convergeProductionReleaseOidcTrust({ run: runner(mfaOnly, { roleArn: "arn:aws:iam::368992683803:role/arbitrary" }).run, sourceSha }), /wrong role/);
-  const skippedConvergence = spawnSync(process.execPath, ["scripts/aws/converge-production-release-oidc-trust.mjs", "--mode", "assert-release-gate-enabled"], { encoding: "utf8" });
-  assert.notEqual(skippedConvergence.status, 0);
-  assert.match(skippedConvergence.stderr, /disabled until governed administrator convergence/);
+  const enabledSource = spawnSync(process.execPath, ["scripts/aws/converge-production-release-oidc-trust.mjs", "--mode", "assert-release-gate-enabled"], { encoding: "utf8" });
+  assert.equal(enabledSource.status, 0, enabledSource.stderr);
+  assert.match(enabledSource.stdout, /OIDC_ATTEMPT_ENABLED/);
   const injectedRole = spawnSync(process.execPath, ["scripts/aws/converge-production-release-oidc-trust.mjs", "--mode", "assert-release-gate-enabled", "--role", "arn:aws:iam::368992683803:role/arbitrary"], { encoding: "utf8" });
   assert.notEqual(injectedRole.status, 0);
   assert.match(injectedRole.stderr, /Unsupported argument.*--role/);

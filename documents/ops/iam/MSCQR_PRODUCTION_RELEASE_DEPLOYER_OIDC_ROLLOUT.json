@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "status": "PENDING_ADMINISTRATOR_CONVERGENCE",
+  "status": "OIDC_ATTEMPT_ENABLED",
   "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
   "sourceTrustCanonicalSha256": "be8abe186536c001225258e356d6ae03007be3c05a10fcb0205413d674eca9bb"
 }
