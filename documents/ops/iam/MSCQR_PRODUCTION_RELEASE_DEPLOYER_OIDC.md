@@ -20,8 +20,45 @@ environment. It intentionally does not combine the environment subject with a
 branch subject. Protected deployment-branch rules and required environment
 review remain GitHub-owned gates.
 
-After protected merge, an authenticated administrator must compare the live
-role trust with this source, publish this exact trust document through the
-governed IAM path if it differs, and read it back before Release Gate is
-dispatched. The legacy `github-actions-mscqr-deploy` role is not a valid Release
-Gate principal and is not changed or deleted by this contract.
+## Bootstrap-safe rollout
+
+The tracked rollout manifest starts as `PENDING_LIVE_CONVERGENCE`. In that
+state every Release Gate mode exits before `configure-aws-credentials`; merging
+the convergence tooling cannot strand the existing administrator path or make
+an unready OIDC attempt.
+
+From a fresh, clean protected-main checkout, the root administrator runs:
+
+```sh
+npm run production:release-oidc-trust -- \
+  --mode converge \
+  --admin-profile <authenticated-root-administrator-profile> \
+  --source-sha <protected-main-sha> \
+  --output /private/path/release-oidc-convergence.json
+```
+
+The command accepts only the exact MFA-only current trust or the exact target
+trust. It performs at most one `iam:UpdateAssumeRolePolicy`, preserves the MFA
+statement, calls `iam:GetRole` again, and writes private evidence only after
+the live readback is semantically identical to the reviewed source. Running it
+against the exact target is a zero-write no-op. Any other principal, role,
+trust, partial write, or failed readback stops without activation evidence.
+
+The administrator then converts the hash-bound private evidence into the
+tracked activation manifest:
+
+```sh
+npm run production:release-oidc-trust -- \
+  --mode activate \
+  --source-sha <protected-main-sha> \
+  --evidence /private/path/release-oidc-convergence.json \
+  --evidence-sha256 <file-sha256>
+```
+
+That one generated manifest change requires protected review and merge. Only
+`LIVE_TRUST_READBACK_EXACT` enables Release Gate. This ordering keeps initial
+trust convergence on the existing administrator boundary and prevents the new
+OIDC role from attempting to grant its own first trust.
+
+The legacy `github-actions-mscqr-deploy` role is not a valid Release Gate
+principal and is not changed or deleted by this contract.

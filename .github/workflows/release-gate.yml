@@ -425,6 +425,9 @@ jobs:
             exit 1
           fi
 
+      - name: Require activated production OIDC trust
+        run: npm run production:release-oidc-trust -- --mode assert-release-gate-enabled
+
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v6
         with:

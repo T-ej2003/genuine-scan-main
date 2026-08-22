@@ -949,8 +949,10 @@
     "releaseDeployer": {
       "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
       "trustPolicyPath": "documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_TRUST_POLICY.json",
+      "rolloutPath": "documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_OIDC_ROLLOUT.json",
       "workflowPath": ".github/workflows/release-gate.yml",
-      "evaluationSource": "scripts/aws/production-release-oidc-contract.mjs"
+      "evaluationSource": "scripts/aws/production-release-oidc-contract.mjs",
+      "convergenceCommand": "npm run production:release-oidc-trust"
     },
     "ecsExecVerifier": {
       "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",

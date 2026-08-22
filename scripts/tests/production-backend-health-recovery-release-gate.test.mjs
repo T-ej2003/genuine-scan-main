@@ -15,14 +15,21 @@ import {
   runCertification,
 } from "../rls/certify-full-database.mjs";
 import {
+  PRODUCTION_RELEASE_ADMINISTRATOR_ARN,
   PRODUCTION_RELEASE_OIDC_AUDIENCE,
   PRODUCTION_RELEASE_OIDC_PROVIDER_ARN,
+  PRODUCTION_RELEASE_ROLLOUT_ENABLED,
   PRODUCTION_RELEASE_OIDC_SUBJECT,
   PRODUCTION_RELEASE_ROLE_ARN,
+  PRODUCTION_RELEASE_SOURCE_TRUST_SHA256,
+  assertProductionReleaseOidcRolloutEnabled,
   assertProductionReleaseOidcSourceContract,
   assertProductionReleaseTrustPolicy,
   assertReleaseGateProductionIdentity,
+  buildProductionReleaseOidcActivation,
+  classifyProductionReleaseTrustPolicy,
   collectLiveProductionReleaseTrustEvidence,
+  convergeProductionReleaseOidcTrust,
   evaluateProductionReleaseOidcClaims,
   readProductionReleaseTrustPolicy,
 } from "../aws/production-release-oidc-contract.mjs";
@@ -55,7 +62,7 @@ test("Release Gate uses the exact production environment OIDC identity", () => {
   }
 
   const evidence = collectLiveProductionReleaseTrustEvidence({ run: () => JSON.stringify({ Role: { Arn: PRODUCTION_RELEASE_ROLE_ARN, AssumeRolePolicyDocument: readProductionReleaseTrustPolicy() } }) });
-  assert.deepEqual(evidence, { roleArn: PRODUCTION_RELEASE_ROLE_ARN, sourceLiveMatch: true });
+  assert.deepEqual(evidence, { roleArn: PRODUCTION_RELEASE_ROLE_ARN, liveTrustCanonicalSha256: PRODUCTION_RELEASE_SOURCE_TRUST_SHA256, sourceLiveMatch: true });
   assert.throws(() => collectLiveProductionReleaseTrustEvidence({ run: () => JSON.stringify({ Role: { Arn: "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy", AssumeRolePolicyDocument: readProductionReleaseTrustPolicy() } }) }), /role ARN is not canonical/);
 
   for (const roleArn of ["arn:aws:iam::368992683803:role/github-actions-mscqr-deploy", "arn:aws:iam::368992683803:role/arbitrary"]) {
@@ -73,6 +80,83 @@ test("Release Gate uses the exact production environment OIDC identity", () => {
   assert.doesNotMatch(workflow, /AWS_ROLE_TO_ASSUME|github-actions-mscqr-deploy|aws-access-key-id|aws-secret-access-key/);
   assert.match(fs.readFileSync("documents/ops/MSCQR_PRODUCTION_CI_CD_AND_INTEGRATION_RUNBOOK_2026-07-03.md", "utf8"), /does not accept a role variable or static AWS credentials/);
   assert.match(fs.readFileSync("documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_OIDC_SUBJECT_TRANSITION.json", "utf8"), /source-controlled exact mscqr-production-release-deployer ARN/);
+});
+
+test("governed administrator convergence gates Release Gate until exact live readback", () => {
+  const target = readProductionReleaseTrustPolicy();
+  const mfaOnly = { Version: target.Version, Statement: [target.Statement[0]] };
+  const sourceSha = "1".repeat(40);
+  const now = "2026-08-22T01:00:00.000Z";
+  const runner = (initial, { readback = target, callerArn = PRODUCTION_RELEASE_ADMINISTRATOR_ARN, roleArn = PRODUCTION_RELEASE_ROLE_ARN, encoded = false, updateThrows = false } = {}) => {
+    let trust = structuredClone(initial);
+    const calls = [];
+    return {
+      calls,
+      run(args) {
+        calls.push(args);
+        if (args[0] === "sts") return JSON.stringify({ Account: "368992683803", Arn: callerArn });
+        if (args[1] === "get-role") {
+          const document = calls.filter((entry) => entry[1] === "get-role").length > 1 ? readback : trust;
+          const represented = encoded ? { ...document, Statement: document.Statement.map((statement) => ({ ...statement, Action: [statement.Action], Principal: Object.fromEntries(Object.entries(statement.Principal).map(([key, value]) => [key, [value]])), Condition: Object.fromEntries(Object.entries(statement.Condition).map(([operator, values]) => [operator, Object.fromEntries(Object.entries(values).map(([key, value]) => [key, [value]]))])) })) } : document;
+          return JSON.stringify({ Role: { Arn: roleArn, AssumeRolePolicyDocument: encoded ? encodeURIComponent(JSON.stringify(represented)) : represented } });
+        }
+        if (args[1] === "update-assume-role-policy") { trust = structuredClone(target); if (updateThrows) throw new Error("simulated lost update response"); return ""; }
+        throw new Error(`Unexpected AWS call: ${args.join(" ")}`);
+      },
+    };
+  };
+
+  const migration = runner(mfaOnly, { encoded: true });
+  const migrated = convergeProductionReleaseOidcTrust({ run: migration.run, sourceSha, now: () => now });
+  assert.equal(migrated.initialState, "MFA_ONLY");
+  assert.equal(migrated.iamWrites, 1);
+  assert.equal(migrated.liveTrustCanonicalSha256, PRODUCTION_RELEASE_SOURCE_TRUST_SHA256);
+  assert.equal(migration.calls.filter((args) => args[1] === "update-assume-role-policy").length, 1);
+  assert.equal(migration.calls.filter((args) => args[1] === "get-role").length, 2);
+  const activation = buildProductionReleaseOidcActivation(migrated);
+  assert.equal(assertProductionReleaseOidcRolloutEnabled(activation).enabled, true);
+  const tamperedActivation = structuredClone(activation);
+  tamperedActivation.activation.iamWrites = 0;
+  assert.throws(() => assertProductionReleaseOidcRolloutEnabled(tamperedActivation), /evidence hash is invalid/);
+  const extendedActivation = structuredClone(activation);
+  extendedActivation.activation.unreviewed = true;
+  assert.throws(() => assertProductionReleaseOidcRolloutEnabled(extendedActivation), /fields are not exact/);
+
+  const reconciled = convergeProductionReleaseOidcTrust({ run: runner(mfaOnly, { updateThrows: true }).run, sourceSha, now: () => now });
+  assert.equal(reconciled.iamWrites, 1);
+
+  const alreadyLive = runner(target);
+  const noOp = convergeProductionReleaseOidcTrust({ run: alreadyLive.run, sourceSha, now: () => now });
+  assert.equal(noOp.initialState, "TARGET");
+  assert.equal(noOp.iamWrites, 0);
+  assert.equal(alreadyLive.calls.some((args) => args[1] === "update-assume-role-policy"), false);
+
+  assert.throws(() => assertProductionReleaseOidcRolloutEnabled({ schemaVersion: 1, status: "PENDING_LIVE_CONVERGENCE", roleArn: PRODUCTION_RELEASE_ROLE_ARN, sourceTrustCanonicalSha256: PRODUCTION_RELEASE_SOURCE_TRUST_SHA256, activation: null }), /disabled until governed live-trust convergence/);
+  const partial = runner(mfaOnly, { readback: mfaOnly });
+  assert.throws(() => convergeProductionReleaseOidcTrust({ run: partial.run, sourceSha, now: () => now }), (error) => error.iamWrites === 1 && /exact MFA handoff/.test(error.message));
+  assert.throws(() => convergeProductionReleaseOidcTrust({ run: runner(mfaOnly, { callerArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator" }).run, sourceSha }), /exact governed root administrator/);
+  assert.throws(() => convergeProductionReleaseOidcTrust({ run: runner(mfaOnly, { roleArn: "arn:aws:iam::368992683803:role/arbitrary" }).run, sourceSha }), /wrong role/);
+  const injectedRole = spawnSync(process.execPath, ["scripts/aws/converge-production-release-oidc-trust.mjs", "--mode", "assert-release-gate-enabled", "--role", "arn:aws:iam::368992683803:role/arbitrary"], { encoding: "utf8" });
+  assert.notEqual(injectedRole.status, 0);
+  assert.match(injectedRole.stderr, /Unsupported argument.*--role/);
+
+  const broad = [
+    { ...target.Statement[1], Principal: { Federated: "*" } },
+    { ...target.Statement[1], Action: "*" },
+    { ...target.Statement[1], Condition: { StringEquals: { ...target.Statement[1].Condition.StringEquals, "token.actions.githubusercontent.com:sub": "*" } } },
+    { ...target.Statement[1], Condition: { StringEquals: { ...target.Statement[1].Condition.StringEquals, "token.actions.githubusercontent.com:sub": "repo:T-ej2003/genuine-scan-main:ref:refs/heads/main" } } },
+    { ...target.Statement[1], Condition: { StringEquals: { ...target.Statement[1].Condition.StringEquals, "token.actions.githubusercontent.com:aud": "wrong" } } },
+    { ...target.Statement[1], Principal: { Federated: "arn:aws:iam::000000000000:oidc-provider/token.actions.githubusercontent.com" } },
+  ];
+  for (const oidc of broad) assert.throws(() => classifyProductionReleaseTrustPolicy({ Version: target.Version, Statement: [target.Statement[0], oidc] }), /neither the exact MFA-only/);
+  assert.throws(() => classifyProductionReleaseTrustPolicy({ Version: target.Version, Statement: [...target.Statement, { ...target.Statement[1], Sid: "UnexpectedFederatedTrust" }] }), /neither the exact MFA-only/);
+  assert.throws(() => classifyProductionReleaseTrustPolicy({ Version: target.Version, Statement: [target.Statement[1]] }), /neither the exact MFA-only/);
+
+  const steps = parsedWorkflow.jobs["deploy-production-ecs"].steps;
+  assert.ok(steps.findIndex(({ name }) => name === "Require activated production OIDC trust") < steps.findIndex(({ uses }) => uses === "aws-actions/configure-aws-credentials@v6"));
+  assert.deepEqual(parsedWorkflow.on.workflow_dispatch.inputs.release_mode.options, ["normal", "backend-health-recovery", "rotation-overlap", "rotation-cleanup"]);
+  assert.equal(activation.status, PRODUCTION_RELEASE_ROLLOUT_ENABLED);
+  assert.match(JSON.stringify(permissionManifest.principalContracts.releaseDeployer), /production:release-oidc-trust/);
 });
 
 test("release gate exposes one bounded backend health recovery mode", () => {

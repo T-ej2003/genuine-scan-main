@@ -11,7 +11,7 @@
   },
   "repositoryOidcConsumers": [
     { "workflow": ".github/workflows/production-green-stage-b-image-build.yml", "roleSource": "production-stage-b-image-publish environment variable PRODUCTION_STAGE_B_IMAGE_PUBLISH_ROLE", "environment": "production-stage-b-image-publish", "migration": "dedicated default-sub publisher boundary" },
-    { "workflow": ".github/workflows/release-gate.yml", "roleSource": "source-controlled exact mscqr-production-release-deployer ARN", "environment": "production", "migration": "exact default production-environment subject; repository OIDC subject template remains default" },
+    { "workflow": ".github/workflows/release-gate.yml", "roleSource": "source-controlled exact mscqr-production-release-deployer ARN", "environment": "production", "migration": "two-phase root-administrator live-trust convergence and protected activation required before exact default production-environment subject; repository OIDC subject template remains default" },
     { "workflow": ".github/workflows/deploy-ecs-release.yml", "roleSource": "none; legacy direct writer is disabled", "environment": "none", "migration": "none; disabled legacy writer has no AWS identity" },
     { "workflow": ".github/workflows/publish-ecs-images.yml", "roleSource": "AWS_ROLE_TO_ASSUME", "environment": "none declared", "migration": "none; repository OIDC subject template remains default" },
     { "workflow": ".github/workflows/staging-terraform-remote-state-drift.yml", "roleSource": "MSCQR_STAGING_TERRAFORM_PLAN_ROLE_ARN", "environment": "none declared", "migration": "none; missing MSCQRStagingTerraformPlanRole remains a separate follow-up" },

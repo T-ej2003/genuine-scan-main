@@ -41,141 +41,146 @@
     },
     {
       "order": 8,
+      "id": "administrator-release-oidc-trust-convergence",
+      "sourceFile": "scripts/aws/converge-production-release-oidc-trust.mjs"
+    },
+    {
+      "order": 9,
       "id": "administrator-iam-simulation",
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs"
     },
     {
-      "order": 9,
+      "order": 10,
       "id": "administrator-kms-signing",
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs"
     },
     {
-      "order": 10,
+      "order": 11,
       "id": "bootstrap-mfa-session",
       "sourceFile": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"
     },
     {
-      "order": 11,
+      "order": 12,
       "id": "release-role-assumption",
       "sourceFile": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"
     },
     {
-      "order": 12,
+      "order": 13,
       "id": "release-direct-read-preflight",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 13,
+      "order": 14,
       "id": "backend-config-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-backend-config.mjs"
     },
     {
-      "order": 14,
+      "order": 15,
       "id": "terraform-initialization",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 15,
+      "order": 16,
       "id": "backend-metadata-validation",
       "sourceFile": "scripts/aws/stage-b-terraform-backend-contract.mjs"
     },
     {
-      "order": 16,
+      "order": 17,
       "id": "workspace-validation",
       "sourceFile": "scripts/aws/stage-b-terraform-workspace.mjs"
     },
     {
-      "order": 17,
+      "order": 18,
       "id": "canonical-backend-recovery",
       "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs"
     },
     {
-      "order": 18,
+      "order": 19,
       "id": "backend-health-recovery",
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs"
     },
     {
-      "order": 19,
+      "order": 20,
       "id": "existing-revision-forward-recovery",
       "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs"
     },
     {
-      "order": 20,
+      "order": 21,
       "id": "stage-b-state-pull",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 21,
+      "order": 22,
       "id": "stage-a-state-read",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 22,
+      "order": 23,
       "id": "stage-a-handoff-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"
     },
     {
-      "order": 23,
+      "order": 24,
       "id": "root-drop-evidence-signing",
       "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs"
     },
     {
-      "order": 24,
+      "order": 25,
       "id": "tfvars-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-tfvars.mjs"
     },
     {
-      "order": 25,
+      "order": 26,
       "id": "refresh-only",
       "sourceFile": "scripts/refresh-production-green-stage-b.mjs"
     },
     {
-      "order": 26,
+      "order": 27,
       "id": "saved-plan-generation",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 27,
+      "order": 28,
       "id": "plan-json-canonicalization",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 28,
+      "order": 29,
       "id": "reference-audit",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs"
     },
     {
-      "order": 29,
+      "order": 30,
       "id": "plan-bound-permission-report",
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs"
     },
     {
-      "order": 30,
+      "order": 31,
       "id": "production-closure",
       "sourceFile": "scripts/aws/validate-stage-b-deployment-closure.mjs"
     },
     {
-      "order": 31,
+      "order": 32,
       "id": "validator",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 32,
+      "order": 33,
       "id": "wrapper-verify-only",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 33,
+      "order": 34,
       "id": "wrapper-apply",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 34,
+      "order": 35,
       "id": "post-apply-verification",
       "sourceFile": "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs"
     },
     {
-      "order": 35,
+      "order": 36,
       "id": "runtime-activation-boundary",
       "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs"
     }
@@ -325,6 +330,87 @@
       },
       "required": true,
       "mutation": false
+    },
+    {
+      "id": "admin-release-oidc-identify",
+      "phase": "administrator-release-oidc-trust-convergence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
+      "sourceFunction": "admin-release-oidc-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
+        "sid": "identity-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "admin-release-oidc-trust-read",
+      "phase": "administrator-release-oidc-trust-convergence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
+      "sourceFunction": "admin-release-oidc-trust-read",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
+        "sid": "identity-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "admin-release-oidc-trust-update",
+      "phase": "administrator-release-oidc-trust-convergence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
+      "sourceFunction": "admin-release-oidc-trust-update",
+      "action": "iam:UpdateAssumeRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_IAM_MUTATION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
+        "sid": "identity-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
     },
     {
       "id": "admin-role",
@@ -9165,6 +9251,18 @@
     },
     {
       "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
+      "action": "iam:GetRole"
+    },
+    {
+      "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
+      "action": "iam:UpdateAssumeRolePolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
       "action": "sts:GetCallerIdentity"
     },
     {
