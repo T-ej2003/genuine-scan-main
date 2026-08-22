@@ -216,21 +216,23 @@ test("release gate keeps normal strictness and admits only governed transition m
   assert.match(releaseGate, /TARGET_EVENTS: \$\{\{ inputs\.release_mode == 'normal' && 'push,workflow_dispatch' \|\| 'push' \}\}/);
   assert.match(releaseGate, /inputs\.release_mode == 'rotation-overlap' \|\| inputs\.release_mode == 'rotation-cleanup'[\s\S]*run-production-cutover\.mjs/);
   assert.match(releaseGate, /ENABLE_EXECUTE_COMMAND: "true"/);
-  assert.match(releaseGate, /inputs\.release_mode == 'normal'[\s\S]*Publish immutable ECS images/);
+  assert.match(releaseGate, /inputs\.release_mode == 'normal'[\s\S]*Authenticate normal release image authorization/);
+  assert.doesNotMatch(releaseGate, /Publish immutable ECS images/);
   assert.match(releaseGate, /deploy-production-ecs:[\s\S]*needs: resolve-deploy-target/);
   const packageJson = JSON.parse(read("package.json"));
   assert.match(packageJson.scripts["check:rotation-evidence-freshness"], /check-rotation-evidence-freshness/);
   assert.match(packageJson.scripts["security:check-production-rotation-transition"], /check-production-rotation-transition/);
 });
 
-test("rotation transitions use the reviewed candidate family while normal releases keep the backend family", () => {
-  const normalFamily = "mscqr-backend";
-  const rotationFamily = "mscqr-production-rls-green-backend-candidate";
-  assert.ok(releaseGate.includes(`BACKEND_TASK_DEFINITION: ${normalFamily}`));
-  assert.ok(releaseGate.includes(`ROTATION_BACKEND_TASK_DEFINITION_FAMILY: ${rotationFamily}`));
+test("normal and rotation consume the reviewed candidate family through separate authorization paths", () => {
+  const candidateFamily = "mscqr-production-rls-green-backend-candidate";
+  const normalActivation = read("scripts/aws/production-normal-backend-activation.mjs");
+  assert.ok(releaseGate.includes(`ROTATION_BACKEND_TASK_DEFINITION_FAMILY: ${candidateFamily}`));
+  assert.ok(releaseGate.includes("production-normal-backend-activation.mjs"));
+  assert.match(normalActivation, /MSCQR_EXISTING_TASK_DEPLOYMENT_MODE: "normal-stage-b"/);
   assert.ok(releaseGate.includes("EXPECTED_FAMILY: ${{ env.ROTATION_BACKEND_TASK_DEFINITION_FAMILY }}"));
   assert.ok(releaseGate.includes("--task-definition \"$EXISTING_TASK_DEFINITION_ARN\""));
-  assert.doesNotMatch(releaseGate.slice(releaseGate.indexOf("- name: Deploy rotation transition backend ECS service")), /EXPECTED_FAMILY: \$\{\{ env\.BACKEND_TASK_DEFINITION \}\}/);
+  assert.doesNotMatch(releaseGate, /BACKEND_TASK_DEFINITION: mscqr-backend/);
 });
 
 const sourceSha = "a".repeat(40);

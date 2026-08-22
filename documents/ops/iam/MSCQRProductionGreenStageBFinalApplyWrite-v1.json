@@ -2,7 +2,22 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "UpdateExactStageBBackendService",
+      "Sid": "ActivateBackendCandidate",
+      "Effect": "Allow",
+      "Action": "ecs:UpdateService",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+        },
+        "ArnEquals": {
+          "ecs:task-definition": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7"
+        }
+      }
+    },
+    {
+      "Sid": "RecoverLegacyBackend",
       "Effect": "Allow",
       "Action": "ecs:UpdateService",
       "Resource": "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
@@ -12,15 +27,12 @@
           "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
         },
         "ArnLike": {
-          "ecs:task-definition": [
-            "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7",
-            "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*"
-          ]
+          "ecs:task-definition": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*"
         }
       }
     },
     {
-      "Sid": "RegisterExactStageBReadOnlyCanaryTaskDefinition",
+      "Sid": "RegisterReadOnlyCanary",
       "Effect": "Allow",
       "Action": "ecs:RegisterTaskDefinition",
       "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-read-only-canary:*",
@@ -41,24 +53,12 @@
       }
     },
     {
-      "Sid": "PassExactStageBReadOnlyCanaryRolesToEcsTasks",
+      "Sid": "PassEcsTaskRoles",
       "Effect": "Allow",
       "Action": "iam:PassRole",
       "Resource": [
         "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution",
-        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task"
-      ],
-      "Condition": {
-        "StringEquals": {
-          "iam:PassedToService": "ecs-tasks.amazonaws.com"
-        }
-      }
-    },
-    {
-      "Sid": "PassExactLegacyBackendRolesForReviewedRollback",
-      "Effect": "Allow",
-      "Action": "iam:PassRole",
-      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
         "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
         "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"
       ],
@@ -69,7 +69,7 @@
       }
     },
     {
-      "Sid": "UpdateExactStageBBrokerFunctionRelease",
+      "Sid": "UpdateBrokerRelease",
       "Effect": "Allow",
       "Action": [
         "lambda:UpdateFunctionConfiguration",
@@ -87,7 +87,7 @@
       }
     },
     {
-      "Sid": "UpdateExactStageBBrokerReviewedAlias",
+      "Sid": "UpdateBrokerAlias",
       "Effect": "Allow",
       "Action": "lambda:UpdateAlias",
       "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",

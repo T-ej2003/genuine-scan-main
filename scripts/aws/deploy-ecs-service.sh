@@ -38,6 +38,13 @@ Optional environment:
                     SHA-256 of the persisted redacted rotation state bound to readiness evidence.
   DEPLOYMENT_SOURCE_SHA
                     Exact protected-main source SHA bound to readiness evidence.
+  MSCQR_EXISTING_TASK_DEPLOYMENT_MODE
+                    rotation (default) or normal-stage-b. Normal mode is accepted
+                    only from the live-state normal activation coordinator.
+  NORMAL_ACTIVATION_BINDING_FILE
+                    Mode-0600 state/live-policy binding created by the normal activation coordinator.
+  NORMAL_ACTIVATION_BINDING_SHA256
+                    SHA-256 of NORMAL_ACTIVATION_BINDING_FILE.
   ENV_UPDATES       Comma-separated container env names to set. Default:
                     GIT_SHA,RELEASE_GIT_SHA when EXPECTED_GIT_SHA is set.
   GIT_SHA           Value used when ENV_UPDATES includes GIT_SHA.
@@ -148,12 +155,28 @@ require_version_verification_inputs() {
   fi
 }
 
-require_overlap_readiness() {
+require_existing_activation_authorization() {
   if [[ -z "$EXISTING_TASK_DEFINITION_ARN" ]]; then return; fi
   if [[ "${MSCQR_GOVERNED_ORCHESTRATOR:-}" != "1" ]]; then
-    echo "Rotation-overlap deployment must be invoked by run-production-cutover.mjs." >&2
+    echo "Existing task-definition deployment must be invoked by run-production-cutover.mjs or production-normal-backend-activation.mjs." >&2
     exit 1
   fi
+  if [[ "${MSCQR_EXISTING_TASK_DEPLOYMENT_MODE:-rotation}" == "normal-stage-b" ]]; then
+    require_env NORMAL_ACTIVATION_BINDING_FILE
+    require_env NORMAL_ACTIVATION_BINDING_SHA256
+    node --input-type=module - "$NORMAL_ACTIVATION_BINDING_FILE" "$NORMAL_ACTIVATION_BINDING_SHA256" "$EXISTING_TASK_DEFINITION_ARN" "$EXPECTED_CURRENT_TASK_DEFINITION_ARN" "$EXPECTED_IMAGE_DIGEST" "${EXPECTED_GIT_SHA:-}" <<'NODE'
+import crypto from "node:crypto";
+import fs from "node:fs";
+const [file, expectedSha, targetArn, currentArn, digest, sourceSha] = process.argv.slice(2);
+const bytes = fs.readFileSync(file);
+if (crypto.createHash("sha256").update(bytes).digest("hex") !== expectedSha) throw new Error("Normal activation binding changed before the existing-task switch.");
+const value = JSON.parse(bytes);
+const sourcePattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/(mscqr-backend|mscqr-production-rls-green-backend-candidate):[1-9][0-9]*$/;
+if (value.schemaVersion !== 2 || value.releaseMode !== "normal" || value.targetArn !== targetArn || value.sourceArn !== currentArn || value.expectedCurrentTaskDefinitionArn !== currentArn || value.digest !== digest || !/^sha256:[a-f0-9]{64}$/.test(value.sourceDigest || "") || !sourcePattern.test(value.sourceArn || "") || !Number.isInteger(value.desiredCount) || value.desiredCount < 1 || value.sourceSha !== sourceSha || value.clusterArn !== "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" || value.serviceArn !== "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2") throw new Error("Normal activation binding does not match the exact SOURCE/TARGET switch inputs.");
+NODE
+    return
+  fi
+  [[ "${MSCQR_EXISTING_TASK_DEPLOYMENT_MODE:-rotation}" == "rotation" ]] || { echo "Unsupported existing task-definition deployment mode." >&2; exit 1; }
   require_env OVERLAP_READINESS_EVIDENCE_FILE
   require_env OVERLAP_READINESS_EVIDENCE_SHA256
   require_env ROTATION_ID
@@ -258,6 +281,7 @@ existing_mode_active=false
 existing_switch_started=false
 update_attempted=false
 update_state="NOT_ATTEMPTED"
+rollback_result="NOT_REQUIRED"
 UPDATE_SETTLEMENT_ATTEMPTS=6
 UPDATE_SETTLEMENT_INTERVAL_SECONDS=2
 
@@ -401,24 +425,38 @@ cleanup_and_rollback_on_exit() {
     case "$rollback_ownership" in
       TARGET_OWNED)
         echo "Existing task-definition switch failed; restoring ${PREVIOUS_TASK_DEFINITION_ARN}." >&2
-        WAIT_FOR_STABLE=true \
+        if WAIT_FOR_STABLE=true \
           AWS_REGION="$AWS_REGION" \
           CLUSTER_NAME="$CLUSTER_NAME" \
           SERVICE_NAME="$SERVICE_NAME" \
           PREVIOUS_TASK_DEFINITION_ARN="$PREVIOUS_TASK_DEFINITION_ARN" \
-          "$REPO_ROOT/scripts/aws/rollback-ecs-service.sh" || echo "Canonical rollback failed." >&2
-        verify_existing_service_restored || echo "Rollback verification failed." >&2
+          "$REPO_ROOT/scripts/aws/rollback-ecs-service.sh" && verify_existing_service_restored; then
+          rollback_result="VERIFIED_SOURCE"
+        else
+          rollback_result="FAILED_OR_UNVERIFIED"
+          echo "Canonical rollback or verification failed." >&2
+        fi
         ;;
       PREVIOUS_RESTORED)
         echo "Previous task definition is already restored; no rollback required." >&2
+        rollback_result="SOURCE_ALREADY_RESTORED"
         ;;
       FOREIGN)
         echo "CONCURRENT_SERVICE_STATE: refusing to overwrite a foreign ECS task definition." >&2
+        rollback_result="FOREIGN_STATE"
         ;;
       *)
         echo "UNKNOWN_ROLLBACK_OWNERSHIP: refusing rollback because current ECS service ownership could not be established." >&2
+        rollback_result="UNKNOWN_STATE"
         ;;
     esac
+  fi
+  if [[ -n "${NORMAL_ACTIVATION_OUTCOME_FILE:-}" ]]; then
+    node --input-type=module - "$NORMAL_ACTIVATION_OUTCOME_FILE" "$exit_code" "$update_state" "$rollback_result" <<'NODE'
+import fs from "node:fs";
+const [file, exitCode, updateState, rollbackResult] = process.argv.slice(2);
+fs.writeFileSync(file, `${JSON.stringify({ schemaVersion: 1, exitCode: Number(exitCode), updateState, rollbackResult })}\n`, { mode: 0o600 });
+NODE
   fi
   rm -f \
     "$RAW_FILE" \
@@ -451,7 +489,7 @@ if [[ -n "$EXISTING_TASK_DEFINITION_ARN" ]]; then
     exit 1
   }
   require_version_verification_inputs
-  require_overlap_readiness
+  require_existing_activation_authorization
 
   aws sts get-caller-identity \
     --query Arn \

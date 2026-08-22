@@ -11,6 +11,8 @@ import { ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPE
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 import { IMAGE_EVIDENCE_SIGNING_KEY_ARN } from "./production-green-stage-b-image-evidence.mjs";
 import { ROOT_DROP_SIGNING_KEY_ARN } from "./production-root-drop-evidence.mjs";
+import { PRODUCTION_RELEASE_ROLE_ARN, assertProductionReleaseOidcSourceContract } from "./production-release-oidc-contract.mjs";
+import { NORMAL_ACTIVATION } from "./production-normal-backend-activation-policy.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -29,6 +31,8 @@ const awsCliSourceFiles = [
   "scripts/aws/publish-production-green-stage-b-approval.mjs", "scripts/aws/check-production-green-stage-b-approval-publication.mjs",
   "scripts/aws/recover-stage-b-backend-task-definition.mjs", "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
   "scripts/aws/recover-production-backend-health.mjs",
+  "scripts/aws/production-normal-backend-activation.mjs",
+  "scripts/aws/production-release-oidc-contract.mjs",
   "scripts/aws/production-root-drop-evidence.mjs", "scripts/aws/produce-production-root-drop-evidence.mjs",
 ];
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -44,6 +48,8 @@ const PHASES = Object.freeze([
   ["image-workflow-dispatch", "scripts/aws/dispatch-production-green-stage-b-images.mjs"],
   ["image-artifact-verification", ".github/workflows/production-green-stage-b-image-build.yml"],
   ["schema-v3-image-evidence", "scripts/aws/production-green-stage-b-image-evidence.mjs"],
+  ["administrator-release-oidc-trust-convergence", "scripts/aws/converge-production-release-oidc-trust.mjs"],
+  ["administrator-normal-backend-activation-convergence", "scripts/aws/production-normal-backend-activation.mjs"],
   ["administrator-iam-simulation", "scripts/aws/validate-production-green-stage-b-permissions.mjs"],
   ["administrator-kms-signing", "scripts/aws/validate-production-green-stage-b-permissions.mjs"],
   ["bootstrap-mfa-session", "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"],
@@ -72,6 +78,31 @@ const PHASES = Object.freeze([
   ["wrapper-apply", "scripts/apply-production-green-stage-b.mjs"],
   ["post-apply-verification", "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs"],
   ["runtime-activation-boundary", "scripts/aws/create-production-green-stage-b-approval.mjs"],
+  ["normal-backend-activation", "scripts/aws/production-normal-backend-activation.mjs"],
+]);
+
+const NORMAL_ACTIVATION_CAPABILITIES = Object.freeze([
+  ["normal-activation-admin-identify", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "sts:GetCallerIdentity", ["*"], false],
+  ["normal-activation-admin-read-state", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "s3:GetObject", [STAGE_B_TERRAFORM_BACKEND.stateArn], false],
+  ["normal-activation-admin-read-policy", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "iam:GetPolicy", [NORMAL_ACTIVATION.policyArn], false],
+  ["normal-activation-admin-read-policy-version", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "iam:GetPolicyVersion", [NORMAL_ACTIVATION.policyArn], false],
+  ["normal-activation-admin-list-policy-versions", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "iam:ListPolicyVersions", [NORMAL_ACTIVATION.policyArn], false],
+  ["normal-activation-admin-prune-policy-version", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "iam:DeletePolicyVersion", [NORMAL_ACTIVATION.policyArn], true],
+  ["normal-activation-admin-publish-policy-version", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "iam:CreatePolicyVersion", [NORMAL_ACTIVATION.policyArn], true],
+  ["normal-activation-admin-simulate-exact-target", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "iam:SimulatePrincipalPolicy", [NORMAL_ACTIVATION.roleArn], false],
+  ["normal-activation-admin-describe-candidate", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "ecs:DescribeTaskDefinition", ["*"], false],
+  ["normal-activation-admin-describe-service", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "ecs:DescribeServices", [NORMAL_ACTIVATION.serviceArn], false],
+  ["normal-activation-admin-list-tasks", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "ecs:ListTasks", [NORMAL_ACTIVATION.serviceArn], false],
+  ["normal-activation-admin-describe-tasks", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "ecs:DescribeTasks", [`arn:aws:ecs:${NORMAL_ACTIVATION.region}:${NORMAL_ACTIVATION.account}:task/${NORMAL_ACTIVATION.cluster}/*`], false],
+  ["normal-activation-release-identify", "normal-backend-activation", "RELEASE_DEPLOYER", "sts:GetCallerIdentity", ["*"], false],
+  ["normal-activation-release-read-state", "normal-backend-activation", "RELEASE_DEPLOYER", "s3:GetObject", [STAGE_B_TERRAFORM_BACKEND.stateArn], false],
+  ["normal-activation-release-read-policy", "normal-backend-activation", "RELEASE_DEPLOYER", "iam:GetPolicy", [NORMAL_ACTIVATION.policyArn], false],
+  ["normal-activation-release-read-policy-version", "normal-backend-activation", "RELEASE_DEPLOYER", "iam:GetPolicyVersion", [NORMAL_ACTIVATION.policyArn], false],
+  ["normal-activation-release-describe-candidate", "normal-backend-activation", "RELEASE_DEPLOYER", "ecs:DescribeTaskDefinition", ["*"], false],
+  ["normal-activation-release-describe-service", "normal-backend-activation", "RELEASE_DEPLOYER", "ecs:DescribeServices", [NORMAL_ACTIVATION.serviceArn], false],
+  ["normal-activation-release-update-service", "normal-backend-activation", "RELEASE_DEPLOYER", "ecs:UpdateService", [NORMAL_ACTIVATION.serviceArn], true],
+  ["normal-activation-release-list-tasks", "normal-backend-activation", "RELEASE_DEPLOYER", "ecs:ListTasks", [NORMAL_ACTIVATION.serviceArn], false],
+  ["normal-activation-release-describe-tasks", "normal-backend-activation", "RELEASE_DEPLOYER", "ecs:DescribeTasks", [`arn:aws:ecs:${NORMAL_ACTIVATION.region}:${NORMAL_ACTIVATION.account}:task/${NORMAL_ACTIVATION.cluster}/*`], false],
 ]);
 
 const FIXED = Object.freeze([
@@ -86,6 +117,9 @@ const FIXED = Object.freeze([
   ["admin-simulate-release", "administrator-iam-simulation", "ADMINISTRATOR", "iam:SimulatePrincipalPolicy", "ADMIN_SIMULATION", "scripts/aws/validate-production-green-stage-b-permissions.mjs"],
   ["admin-cloudtrail-denials", "administrator-iam-simulation", "ADMINISTRATOR", "cloudtrail:LookupEvents", "ADMIN_DIRECT_READ", "scripts/aws/validate-production-green-stage-b-permissions.mjs"],
   ["admin-sign-evidence", "administrator-kms-signing", "ADMINISTRATOR", "kms:Sign", "ADMIN_SIGN", "scripts/aws/validate-production-green-stage-b-permissions.mjs"],
+  ["admin-release-oidc-identify", "administrator-release-oidc-trust-convergence", "ADMINISTRATOR", "sts:GetCallerIdentity", "ADMIN_DIRECT_READ", "scripts/aws/production-release-oidc-contract.mjs"],
+  ["admin-release-oidc-trust-read", "administrator-release-oidc-trust-convergence", "ADMINISTRATOR", "iam:GetRole", "ADMIN_DIRECT_READ", "scripts/aws/production-release-oidc-contract.mjs"],
+  ["admin-release-oidc-trust-update", "administrator-release-oidc-trust-convergence", "ADMINISTRATOR", "iam:UpdateAssumeRolePolicy", "ADMIN_IAM_MUTATION", "scripts/aws/production-release-oidc-contract.mjs"],
   ["bootstrap-identify", "bootstrap-mfa-session", "BOOTSTRAP_OPERATOR", "sts:GetCallerIdentity", "BOOTSTRAP_SESSION", "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"],
   ["bootstrap-mfa", "bootstrap-mfa-session", "BOOTSTRAP_OPERATOR", "sts:GetSessionToken", "BOOTSTRAP_SESSION", "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"],
   ["bootstrap-assume-release", "release-role-assumption", "BOOTSTRAP_OPERATOR", "sts:AssumeRole", "BOOTSTRAP_SESSION", "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"],
@@ -151,8 +185,11 @@ function authority(entry, forbidden, policies) {
   for (const policy of policies) for (const statement of policy.document.Statement || []) {
     const actions = asArray(statement.Action);
     const resources = asArray(statement.Resource);
+    const taskDefinitionValues = (entry.context || []).find(({ key }) => key === "ecs:task-definition")?.values || [];
+    const taskDefinitionCondition = statement.Condition?.ArnEquals?.["ecs:task-definition"] ?? statement.Condition?.ArnLike?.["ecs:task-definition"];
+    const taskDefinitionMatches = taskDefinitionValues.length === 0 || asArray(taskDefinitionCondition).filter((pattern) => typeof pattern === "string").some((pattern) => taskDefinitionValues.every((value) => pattern === value || (pattern.endsWith("*") && value.startsWith(pattern.slice(0, -1)))));
     if (statement.Effect === (forbidden ? "Deny" : "Allow") && actions.includes(entry.action)
-      && asArray(entry.resources).every((resource) => resources.some((allowed) => allowed === "*" || allowed === resource || (allowed.endsWith("*") && resource.startsWith(allowed.slice(0, -1)))))) {
+      && taskDefinitionMatches && asArray(entry.resources).every((resource) => resources.some((allowed) => allowed === "*" || allowed === resource || (allowed.endsWith("*") && resource.startsWith(allowed.slice(0, -1)))))) {
       return { sourceFile: policy.sourcePath, sid: statement.Sid, livePolicyArn: policy.arn, expectedVersion: "signed-administrator-evidence", expectedPolicySha256: policy.sourceSha256 };
     }
   }
@@ -214,6 +251,7 @@ function discoverAwsCliActions() {
 
 export function buildStageBDeploymentCapabilityGraph() {
   const manifest = readJson(manifestPath); const policies = sourcePolicies(); const probesByAction = new Map();
+  assertProductionReleaseOidcSourceContract(manifest);
   for (const probe of RELEASE_READ_PROBES) probesByAction.set(probe.action, [...(probesByAction.get(probe.action) || []), probe.id]);
   const manifestCapabilities = [[manifest.required, false], [manifest.forbidden, true]].flatMap(([entries, forbidden]) => entries.map((entry) => ({
     id: `manifest-${entry.id}`, phase: entry.phase === "apply" ? "wrapper-apply" : ["recovery", "recovery-read"].includes(entry.phase) ? "backend-health-recovery" : entry.phase === "reference-audit" ? "reference-audit" : entry.phase === "preflight" ? "release-direct-read-preflight" : "refresh-only",
@@ -237,7 +275,15 @@ export function buildStageBDeploymentCapabilityGraph() {
     sourceFile: publisherPolicyPath, sourceFunction: statement.Sid, action, resources: asArray(statement.Resource), context: statement.Condition || {}, classification: statement.Effect === "Deny" ? "FORBIDDEN" : "GITHUB_IMAGE_MUTATION",
     probe: "structural", policy: { sourceFile: publisherPolicyPath, sid: statement.Sid, livePolicyArn: "github-oidc-role-policy", expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(readJson(publisherPolicyPath)))) }, required: true, mutation: statement.Effect !== "Deny",
   })));
-  const fixed = FIXED.map(([id, phase, identity, action, actionClass, sourceFile]) => ({ id, phase, identity, executor: sourceFile.endsWith(".yml") ? "github-actions" : "aws-cli", sourceFile, sourceFunction: id, action, resources: ["reviewed-exact-resource"], context: { account: "368992683803", region: "eu-west-2" }, classification: actionClass, probe: actionClass === "RELEASE_DIRECT_READ" ? "direct" : actionClass === "ADMIN_SIMULATION" ? "administrator-simulation" : "structural", policy: { sourceFile: identity === "RELEASE_DEPLOYER" ? manifestPath : sourceFile, sid: "identity-boundary", livePolicyArn: identity === "RELEASE_DEPLOYER" ? "signed-administrator-evidence" : null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: ["ADMIN_SIGN", "GITHUB_IMAGE_MUTATION"].includes(actionClass) }));
+  const fixed = FIXED.map(([id, phase, identity, action, actionClass, sourceFile]) => ({ id, phase, identity, executor: sourceFile.endsWith(".yml") ? "github-actions" : "aws-cli", sourceFile, sourceFunction: id, action, resources: id === "admin-release-oidc-identify" ? ["*"] : id.startsWith("admin-release-oidc-trust-") ? [PRODUCTION_RELEASE_ROLE_ARN] : ["reviewed-exact-resource"], context: { account: "368992683803", region: "eu-west-2" }, classification: actionClass, probe: actionClass === "RELEASE_DIRECT_READ" ? "direct" : actionClass === "ADMIN_SIMULATION" ? "administrator-simulation" : "structural", policy: { sourceFile: identity === "RELEASE_DEPLOYER" ? manifestPath : sourceFile, sid: "identity-boundary", livePolicyArn: identity === "RELEASE_DEPLOYER" ? "signed-administrator-evidence" : null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: ["ADMIN_SIGN", "ADMIN_IAM_MUTATION", "GITHUB_IMAGE_MUTATION"].includes(actionClass) }));
+  const normalActivation = NORMAL_ACTIVATION_CAPABILITIES.map(([id, phase, identity, action, resources, mutation]) => {
+    const policy = identity === "ADMINISTRATOR" || action === "ecs:UpdateService"
+      ? { sourceFile: "scripts/aws/production-normal-backend-activation-policy.mjs", sid: id, livePolicyArn: action === "ecs:UpdateService" ? NORMAL_ACTIVATION.policyArn : null, expectedVersion: "state-derived-exact-revision", expectedPolicySha256: null }
+      : action === "sts:GetCallerIdentity"
+        ? { sourceFile: "aws-sts", sid: "self-identity", livePolicyArn: null, expectedVersion: "aws-authenticated", expectedPolicySha256: null }
+        : authority({ id, action, resources, context: [] }, false, policies);
+    return { id, phase, identity, executor: "aws-cli", sourceFile: "scripts/aws/production-normal-backend-activation.mjs", sourceFunction: id, action, resources, context: { account: NORMAL_ACTIVATION.account, region: NORMAL_ACTIVATION.region, releaseMode: "normal", targetBinding: "authenticated-stage-b-state-exact-revision" }, classification: mutation ? identity === "ADMINISTRATOR" ? "ADMIN_IAM_MUTATION" : "NORMAL_ACTIVATION_MUTATION" : identity === "ADMINISTRATOR" ? "ADMIN_DIRECT_READ" : "RELEASE_DIRECT_READ", probe: identity === "ADMINISTRATOR" ? "administrator-live-read-or-simulation" : "direct-live-read", policy, required: true, mutation };
+  });
   const recovery = RECOVERY_CAPABILITIES.map(([id, action, resources]) => {
     const entry = { id, action, resources };
     return { id, phase: "canonical-backend-recovery", identity: "RELEASE_DEPLOYER", executor: "aws-cli-or-terraform", sourceFile: "scripts/aws/recover-stage-b-backend-task-definition.mjs", sourceFunction: id, action, resources, context: { account: "368992683803", region: "eu-west-2" }, classification: /^(?:ecs:RegisterTaskDefinition|ecs:TagResource|s3:PutObject|s3:DeleteObject)$/.test(action) ? "CANONICAL_RECOVERY_MUTATION" : "CANONICAL_RECOVERY_READ", probe: "administrator-simulation", probeIds: [], policy: authority(entry, false, policies), required: true, mutation: /^(?:ecs:RegisterTaskDefinition|ecs:TagResource|s3:PutObject|s3:DeleteObject)$/.test(action) };
@@ -247,7 +293,7 @@ export function buildStageBDeploymentCapabilityGraph() {
     return { id, phase: "existing-revision-forward-recovery", identity: "RELEASE_DEPLOYER", executor: "terraform", sourceFile: "scripts/aws/forward-recover-stage-b-existing-revision.mjs", sourceFunction: id, action, resources, context: { account: "368992683803", region: "eu-west-2" }, classification: /^(?:s3:PutObject|s3:DeleteObject)$/.test(action) ? "FORWARD_RECOVERY_IMPORT_MUTATION" : "FORWARD_RECOVERY_READ", probe: "administrator-simulation", probeIds: [], policy: authority(entry, false, policies), required: true, mutation: /^(?:s3:PutObject|s3:DeleteObject)$/.test(action) };
   });
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: !/^(?:ecr:|kms:Verify|secretsmanager:Get|s3:Get)/.test(action) }));
-  const capabilities = [...fixed, ROOT_DROP_SIGNING, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, ...normalActivation, ROOT_DROP_SIGNING, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
@@ -256,14 +302,14 @@ export function buildStageBDeploymentCapabilityGraph() {
     artifactContracts: ["protected-checkout", "image-impact", "schema-v3-image-evidence", "stage-a-handoff", "tfvars-binding-report", "refresh-only", "saved-plan", "canonical-plan-json", "reference-audit", "plan-capability-manifest", "signed-permission-report"],
     stateContracts: ["stage-a-exact-object-lineage-minimum-serial-sha", "stage-b-direct-key-lineage-minimum-serial-sha", "stage-b-serial-stable-plan-to-apply"],
     freshnessContracts: [{ artifact: "image-evidence", maxAgeSeconds: 86400 }, { artifact: "reference-audit", maxAgeSeconds: STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS }, { artifact: "permission-report", maxAgeSeconds: STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS }],
-    configurationContracts: ["head-equals-origin-main", "clean-non-shallow-checkout", "direct-production-s3-key", "strict-backend-metadata", "tf-workspace-default", "no-workspace-select-or-migration", "checker-user-mfa-live-trust-to-independent-role-chain", "structural-normal-resource-universe-append-only-retained-history", "no-service-database-alb-dns-traffic-or-secret-value-change"],
+    configurationContracts: ["head-equals-origin-main", "clean-non-shallow-checkout", "direct-production-s3-key", "strict-backend-metadata", "tf-workspace-default", "no-workspace-select-or-migration", "checker-user-mfa-live-trust-to-independent-role-chain", "release-gate-exact-production-environment-oidc-to-release-deployer", "structural-normal-resource-universe-append-only-retained-history", "no-service-database-alb-dns-traffic-or-secret-value-change"],
   };
 }
 
 export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILITY_GRAPH_PATH)) {
   const expected = buildStageBDeploymentCapabilityGraph();
   if (canonicalizeJson(graph) !== canonicalizeJson(expected)) throw new Error("Stage B deployment capability graph is stale or incomplete.");
-  if (graph.phases.length !== 35 || new Set(graph.phases.map(({ id }) => id)).size !== 35) throw new Error("Stage B capability graph phase coverage is incomplete.");
+  if (graph.phases.length !== 38 || new Set(graph.phases.map(({ id }) => id)).size !== 38) throw new Error("Stage B capability graph phase coverage is incomplete.");
   if (new Set(graph.capabilities.map(({ id }) => id)).size !== graph.capabilities.length) throw new Error("Stage B capability IDs are not unique.");
   if (graph.capabilities.some(({ identity, action }) => !identity || !action)) throw new Error("Stage B capability identity is ambiguous.");
   for (const [phase, ids] of Object.entries(PHASE_CAPABILITY_REQUIREMENTS)) {
@@ -273,6 +319,8 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   const forwardCapabilities = graph.capabilities.filter(({ phase }) => phase === "existing-revision-forward-recovery");
   if (forwardCapabilities.some(({ action, identity, sourceFile }) => identity !== "RELEASE_DEPLOYER" || sourceFile !== "scripts/aws/forward-recover-stage-b-existing-revision.mjs" || ["ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition", "ecs:UpdateService", "iam:PutRolePolicy", "iam:AttachRolePolicy"].includes(action))) throw new Error("Forward recovery capability boundary is broader than zero-registration Terraform import.");
   if (graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy")) throw new Error("Release-deployer cannot own IAM simulation.");
+  const normal = graph.capabilities.filter(({ phase }) => phase === "normal-backend-activation");
+  if (normal.some(({ identity, action }) => identity !== "RELEASE_DEPLOYER" || ["ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition"].includes(action)) || normal.filter(({ action }) => action === "ecs:UpdateService").length !== 1) throw new Error("Normal backend activation capability boundary is not exact or reuses registration authority.");
   const checkerPublication = graph.capabilities.filter(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:PutSecretValue" && resources.includes(STAGE_B.approvalSecretArn));
   if (checkerPublication.length !== 1) throw new Error("Exact checker approval publication capability is absent or duplicated.");
   if (graph.capabilities.some(({ identity, action, resources }) => identity === "RELEASE_DEPLOYER" && ["secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"].includes(action) && resources.includes(STAGE_B.approvalSecretArn))) throw new Error("Release-deployer approval secret authority is present.");

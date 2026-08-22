@@ -201,6 +201,23 @@ function runExisting(options = {}, extraArgs = []) {
     : options.includeExpectedGitSha === true || options.versionUrl || options.expectedGitSha || options.releaseGitSha
     ? options.expectedGitSha || sourceSha
     : undefined;
+  const normalBinding = path.join(fixture.dir, "normal-activation-binding.json");
+  const normalOutcome = path.join(fixture.dir, "normal-activation-outcome.json");
+  const normalBindingBytes = `${JSON.stringify({
+    schemaVersion: 2,
+    releaseMode: "normal",
+    sourceSha,
+    sourceArn: options.expectedCurrent || fromArn,
+    sourceClass: "LEGACY_BACKEND",
+    sourceDigest: options.sourceDigest || `sha256:${"e".repeat(64)}`,
+    desiredCount: 2,
+    targetArn,
+    expectedCurrentTaskDefinitionArn: options.expectedCurrent || fromArn,
+    digest,
+    clusterArn: `arn:aws:ecs:${region}:${account}:cluster/${cluster}`,
+    serviceArn: `arn:aws:ecs:${region}:${account}:service/${cluster}/${service}`,
+  })}\n`;
+  fs.writeFileSync(normalBinding, normalBindingBytes, { mode: 0o600 });
   const result = spawnSync("bash", [script, "--existing-task-definition", options.targetArgument || targetArn, "--expected-current-task-definition", options.expectedCurrent || fromArn, "--expected-family", options.expectedFamily || targetFamily, "--expected-image-digest", options.expectedDigestArgument || digest, ...extraArgs], {
     cwd: path.resolve("."),
     encoding: "utf8",
@@ -214,6 +231,12 @@ function runExisting(options = {}, extraArgs = []) {
       ...(expectedGitSha ? { EXPECTED_GIT_SHA: expectedGitSha } : {}),
       DEPLOYMENT_SOURCE_SHA: sourceSha,
       MSCQR_GOVERNED_ORCHESTRATOR: "1",
+      ...(options.normalStageB ? {
+        MSCQR_EXISTING_TASK_DEPLOYMENT_MODE: "normal-stage-b",
+        NORMAL_ACTIVATION_BINDING_FILE: normalBinding,
+        NORMAL_ACTIVATION_BINDING_SHA256: options.normalBindingSha256 || createHash("sha256").update(normalBindingBytes).digest("hex"),
+        NORMAL_ACTIVATION_OUTCOME_FILE: normalOutcome,
+      } : {}),
       ...(options.versionUrl ? { VERSION_URL: options.versionUrl } : {}),
       ...(options.enableExecuteCommand ? { ENABLE_EXECUTE_COMMAND: "true" } : {}),
       ...(options.propagateTags ? { PROPAGATE_TAGS: options.propagateTags } : {}),
@@ -229,7 +252,8 @@ function runExisting(options = {}, extraArgs = []) {
     },
   });
   const calls = fs.existsSync(fixture.calls) ? fs.readFileSync(fixture.calls, "utf8") : "";
-  return { ...result, calls, fixture };
+  const outcome = fs.existsSync(normalOutcome) ? JSON.parse(fs.readFileSync(normalOutcome, "utf8")) : null;
+  return { ...result, calls, fixture, outcome };
 }
 
 function assertFailure(result, pattern) {
@@ -249,6 +273,33 @@ test("existing production-shaped target switches once without registering", () =
   assert.equal((result.calls.match(/ecs register-task-definition/g) || []).length, 0);
   assert.match(result.stdout, new RegExp(targetArn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assertTempClean(result);
+});
+
+test("normal Stage-B transaction records pre-update failure, verified rollback, and failed rollback distinctly", () => {
+  const beforeUpdate = runExisting({ normalStageB: true, expectedCurrent: fromArn.replace(":47", ":46") });
+  assertFailure(beforeUpdate, /expected current|binding/);
+  assert.equal(beforeUpdate.outcome.updateState, "NOT_ATTEMPTED");
+
+  const rolledBack = runExisting({ normalStageB: true, versionUrl: "https://www.mscqr.com/api/health", scenario: "stable-failure" });
+  assertFailure(rolledBack, /failed|restoring|rollback/i);
+  assert.equal(rolledBack.outcome.rollbackResult, "VERIFIED_SOURCE");
+  assert.match(rolledBack.calls, new RegExp(`ecs update-service[^\n]*${fromArn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+
+  const rollbackFailed = runExisting({ normalStageB: true, versionUrl: "https://www.mscqr.com/api/health", scenario: "rollback-failure" });
+  assertFailure(rollbackFailed, /rollback/i);
+  assert.equal(rollbackFailed.outcome.rollbackResult, "FAILED_OR_UNVERIFIED");
+});
+
+test("normal Stage-B mode consumes its exact authenticated binding without registration", () => {
+  const result = runExisting({ normalStageB: true, versionUrl: "https://www.mscqr.com/api/health" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
+  assert.equal((result.calls.match(/ecs register-task-definition/g) || []).length, 0);
+  assert.deepEqual(result.outcome, { schemaVersion: 1, exitCode: 0, updateState: "VERIFIED", rollbackResult: "NOT_REQUIRED" });
+
+  const forged = runExisting({ normalStageB: true, versionUrl: "https://www.mscqr.com/api/health", normalBindingSha256: "0".repeat(64) });
+  assertFailure(forged, /binding changed/);
+  assert.equal((forged.calls.match(/ecs update-service/g) || []).length, 0);
 });
 
 test("existing mode rejects an unmarked definition before UpdateService and a replacement task without the marker", () => {
@@ -527,7 +578,7 @@ test("list-tasks validates the real response schema and rejects pagination", () 
 test("rollback failure still cleans every temporary file", () => {
   const result = runExisting({ scenario: "rollback-failure" });
   assertFailure(result);
-  assert.match(result.stderr, /Canonical rollback failed/);
+  assert.match(result.stderr, /Canonical rollback or verification failed/);
   assert.equal((result.calls.match(/ecs update-service/g) || []).length, 2);
   assertTempClean(result);
 });
@@ -540,7 +591,7 @@ test("running task-definition and digest mismatches fail closed and roll back", 
   assert.equal((digestMismatch.calls.match(/ecs update-service/g) || []).length, 2);
 });
 
-test("normal mode still registers a new revision before updating the service", () => {
+test("explicit new-revision mode still registers before updating the service", () => {
   const fixture = writeFixture({});
   const result = spawnSync("bash", [script], {
     cwd: path.resolve("."),
@@ -564,7 +615,7 @@ test("normal mode still registers a new revision before updating the service", (
   assertTempClean({ fixture });
 });
 
-test("normal mode rejects an incompatible payload before registration", () => {
+test("explicit new-revision mode rejects an incompatible payload before registration", () => {
   const fixture = writeFixture({}, { normalPortMappings: [] });
   const result = spawnSync("bash", [script], {
     cwd: path.resolve("."),
@@ -589,7 +640,7 @@ test("normal mode rejects an incompatible payload before registration", () => {
   assertTempClean({ fixture });
 });
 
-test("normal mode retains its existing version verification behavior", () => {
+test("explicit new-revision mode retains its existing version verification behavior", () => {
   const fixture = writeFixture({});
   const result = spawnSync("bash", [script], {
     cwd: path.resolve("."),

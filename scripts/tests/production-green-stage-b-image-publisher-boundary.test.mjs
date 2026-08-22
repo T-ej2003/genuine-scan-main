@@ -96,7 +96,7 @@ test("OIDC trust permits only the dedicated default-sub publishing environment",
   assert.equal(canAssume({ ...expected, "token.actions.githubusercontent.com:aud": "other-audience" }), false);
 });
 
-test("repository OIDC stays default and all existing consumers require no subject migration", () => {
+test("repository OIDC stays default and consumers declare exact subject migrations", () => {
   assert.deepEqual(subjectTemplate.repositoryOidcSubjectTemplate, { use_default: true, activation: "do-not-change" });
   assert.equal(subjectTemplate.publisherEnvironment, publisherEnvironment);
   assert.equal(subjectTemplate.publisherSubject, publisherSubject);
@@ -109,7 +109,9 @@ test("repository OIDC stays default and all existing consumers require no subjec
   ];
   assert.deepEqual(transition.repositoryOidcConsumers.map(({ workflow }) => workflow.split("/").at(-1)).sort(), expectedWorkflows.sort());
   assert.equal(transition.status, "superseded-do-not-apply");
-  assert.ok(transition.repositoryOidcConsumers.slice(1).every(({ migration }) => migration.startsWith("none;")));
+  const releaseGate = transition.repositoryOidcConsumers.find(({ workflow }) => workflow.endsWith("release-gate.yml"));
+  assert.match(releaseGate.migration, /exact default production-environment subject/);
+  assert.ok(transition.repositoryOidcConsumers.filter(({ workflow }) => !workflow.endsWith("production-green-stage-b-image-build.yml") && !workflow.endsWith("release-gate.yml")).every(({ migration }) => migration.startsWith("none;")));
   assert.ok(transition.repositoryOidcConsumers.find(({ workflow }) => workflow.endsWith("staging-terraform-remote-state-drift.yml")).migration.includes("missing MSCQRStagingTerraformPlanRole"));
 });
 

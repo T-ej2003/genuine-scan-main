@@ -36,7 +36,7 @@
       }
     },
     {
-      "Sid": "RegisterLegacyBackendHealth",
+      "Sid": "RegisterLegacyBackend",
       "Effect": "Allow",
       "Action": "ecs:RegisterTaskDefinition",
       "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*",

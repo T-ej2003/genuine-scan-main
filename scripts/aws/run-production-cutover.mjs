@@ -9,6 +9,8 @@ const value = (name) => { const index = argv.indexOf(name); if (index < 0 || !ar
 const optionalValue = (name) => { const index = argv.indexOf(name); return index < 0 || !argv[index + 1] || argv[index + 1].startsWith("--") ? undefined : argv[index + 1]; };
 const mode = value("--mode");
 if (mode === "rotation-overlap") {
+  const credentialSource = value("--credential-source");
+  if (credentialSource !== "github-oidc-release-deployer") throw new Error("Rotation overlap requires the source-bound GitHub OIDC release-deployer credential source.");
   const sourceSha = value("--source-sha");
   const rotationId = value("--rotation-id");
   const rotationStateSha256 = value("--rotation-state-sha256");
@@ -16,8 +18,8 @@ if (mode === "rotation-overlap") {
   const readinessFile = value("--readiness-file");
   const readinessSha256 = value("--readiness-sha256");
   const readiness = readAndAssertReadyForOverlapDeployment({ filePath: readinessFile, evidenceSha256: readinessSha256, sourceSha, rotationId, rotationStateSha256 });
-  const run = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
-  const result = await runProductionCutoverOverlapControlPlane({ readiness: readiness.evidence, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256, deployOverlap: createProductionOverlapDeploymentAdapter({ run, profile: "mscqr-production-release-deployer", readinessFile, readinessSha256, sourceSha, rotationId, imageDigest: process.env.EXPECTED_IMAGE_DIGEST, cluster: process.env.CLUSTER_NAME, service: process.env.SERVICE_NAME, expectedCurrentTaskDefinitionArn: process.env.EXPECTED_CURRENT_TASK_DEFINITION_ARN, versionUrl: process.env.VERSION_URL, expectedGitSha: process.env.EXPECTED_GIT_SHA }) });
+  const run = createProductionCommandRunner();
+  const result = await runProductionCutoverOverlapControlPlane({ readiness: readiness.evidence, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256, deployOverlap: createProductionOverlapDeploymentAdapter({ run, credentialSource, readinessFile, readinessSha256, sourceSha, rotationId, imageDigest: process.env.EXPECTED_IMAGE_DIGEST, cluster: process.env.CLUSTER_NAME, service: process.env.SERVICE_NAME, expectedCurrentTaskDefinitionArn: process.env.EXPECTED_CURRENT_TASK_DEFINITION_ARN, versionUrl: process.env.VERSION_URL, expectedGitSha: process.env.EXPECTED_GIT_SHA }) });
   process.stdout.write(`${JSON.stringify({ ready: result.readyForOverlapDeployment, taskDefinitionArn: result.deployment.taskDefinitionArn, propagateTags: result.deployment.propagateTags, updateServiceCount: result.deployment.updateServiceCount, mutationSequence: result.mutationSequence })}\n`);
 } else {
 const config = readBoundStageBPrivateJson({ filePath: value("--config"), expectedSha256: value("--config-sha256"), label: "Production cutover runtime config" });

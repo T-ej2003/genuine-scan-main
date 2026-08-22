@@ -14,17 +14,17 @@ The canonical production path is:
 6. Backend build and backend tests run.
 7. Frontend typecheck, tests, and production build run.
 8. Disposable integration tests run against GitHub Actions PostgreSQL and Redis service containers.
-9. Docker images are built and pushed with immutable `${GITHUB_SHA}` tags for:
+9. The separate governed image-publisher workflow builds, scans, signs, and publishes immutable images for:
    - `mscqr-backend`
    - `mscqr-web`
    - `mscqr-worker`
-10. The release gate resolves ECR digest refs and deploys ECS task definitions with digest image refs.
-11. Backend ECS service is updated first and must reach `services-stable`.
+10. Release Gate authenticates the signed image authorization; it does not publish images.
+11. Release Gate derives the exact Terraform-managed Stage-B backend candidate revision from authenticated state and activates it without registering another task definition.
 12. Backend public health smoke checks must pass.
-13. Worker ECS service is updated if production worker service variables are configured. The worker image is always built and pushed.
-14. Frontend ECS service is updated and must reach `services-stable`.
+13. No worker service update is issued because production currently has no worker ECS service; worker image and candidate contracts remain governed for future topology.
+14. The reviewed frontend task definition `mscqr-frontend:20` is preserved.
 15. Frontend and public health smoke checks must pass.
-16. The workflow summary records SHA, images, services, task definitions, and smoke results.
+16. The workflow summary records SHA, authenticated images, preserved frontend identity, exact backend candidate, and smoke results.
 
 The deployment must not deploy `latest`. The SHA tag and digest refs are the deployable identities.
 
@@ -32,18 +32,19 @@ The deployment must not deploy `latest`. The SHA tag and digest refs are the dep
 
 Production environment or repository variables/secrets:
 
-- `AWS_ROLE_TO_ASSUME`: preferred OIDC role for production deploys.
-- `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`: fallback only if OIDC is unavailable.
-- `AWS_SESSION_TOKEN`: optional fallback session token.
+- Release Gate uses the source-controlled exact role
+  `arn:aws:iam::368992683803:role/mscqr-production-release-deployer` through
+  GitHub OIDC. It does not accept a role variable or static AWS credentials.
+- Release Gate fails before credential establishment until protected
+  `MSCQR_PRODUCTION_RELEASE_DEPLOYER_OIDC_ROLLOUT.json` enables the OIDC attempt.
+  That source phase is not trust evidence; AWS STS remains the live authority.
+  Follow `documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_OIDC.md` for the
+  one-time root-administrator convergence and protected source-phase sequence.
 - `production` GitHub Environment: must require at least one reviewer.
 
-Optional worker deployment variables in the `production` environment:
-
-- `PRODUCTION_WORKER_SERVICE_NAME`
-- `PRODUCTION_WORKER_TASK_DEFINITION`
-- `PRODUCTION_WORKER_CONTAINER_NAME`, defaults to `worker`
-
-If worker variables are absent, CI still builds and pushes `mscqr-worker:${GITHUB_SHA}`, but the production worker ECS update is skipped and noted in the deployment summary. Current live `eu-west-2` ECS service discovery found backend and frontend services only.
+Current live `eu-west-2` ECS discovery and production Terraform state contain no
+worker ECS service. Do not configure worker service variables or grant worker
+`UpdateService` authority until an independently reviewed topology introduces it.
 
 ## Disposable Integration Tests
 
@@ -127,4 +128,4 @@ The smoke check fails closed on non-2xx responses and on JSON health payloads th
 - Use `Release Train` for normal production deployments from `main`.
 - Do not deploy mutable image tags.
 - Do not bypass `quality-gate.yml`, `secret-scan.yml`, or `deployment-audit.yml` except through the explicit `Release Gate` expert override during an emergency.
-- Configure worker ECS variables only after the production worker service exists and its task definition/container name are confirmed from AWS.
+- Introduce any future worker ECS service through Terraform and a separate reviewed activation/IAM contract before changing Release Gate.
