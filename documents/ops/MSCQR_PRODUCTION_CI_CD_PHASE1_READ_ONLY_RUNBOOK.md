@@ -47,15 +47,15 @@ the `production-deploy` concurrency group. `deploy-ecs-release.yml` is now a
 fail-closed disabled tombstone; it cannot configure AWS or mutate ECS.
 `release-train.yml` dispatches gates but is not itself the deployment writer.
 
-Phase 2 remains blocked until a separate reviewed identity migration completes:
+The reviewed production writer identity migration is source-controlled by
+`documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_TRUST_POLICY.json` and
+`scripts/aws/production-release-oidc-contract.mjs`. Live IAM must converge to
+that exact source before Release Gate is dispatched. The retained prerequisites
+are:
 
-- define and apply a dedicated production read-only OIDC role, then separately
-  verify a dedicated mutation role;
-- reconcile the existing canonical engine's required MFA-backed
-  `mscqr-production-release-deployer` identity with the proposed GitHub OIDC
-  identity. The current source contract explicitly rejects GitHub Actions as a
-  release-deployer caller, so this PR does not silently change that trust
-  boundary;
+- preserve the MFA-backed bootstrap path while allowing only the exact
+  environment-bound GitHub OIDC subject to assume
+  `mscqr-production-release-deployer`;
 - scope GitHub OIDC trust to this repository, the protected production
   environment, and `sts.amazonaws.com` (not `repo:*` or an unrestricted branch);
 - configure the `production` environment with main-only deployment restrictions,

@@ -11,6 +11,7 @@ import { ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPE
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 import { IMAGE_EVIDENCE_SIGNING_KEY_ARN } from "./production-green-stage-b-image-evidence.mjs";
 import { ROOT_DROP_SIGNING_KEY_ARN } from "./production-root-drop-evidence.mjs";
+import { assertProductionReleaseOidcSourceContract } from "./production-release-oidc-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -214,6 +215,7 @@ function discoverAwsCliActions() {
 
 export function buildStageBDeploymentCapabilityGraph() {
   const manifest = readJson(manifestPath); const policies = sourcePolicies(); const probesByAction = new Map();
+  assertProductionReleaseOidcSourceContract(manifest);
   for (const probe of RELEASE_READ_PROBES) probesByAction.set(probe.action, [...(probesByAction.get(probe.action) || []), probe.id]);
   const manifestCapabilities = [[manifest.required, false], [manifest.forbidden, true]].flatMap(([entries, forbidden]) => entries.map((entry) => ({
     id: `manifest-${entry.id}`, phase: entry.phase === "apply" ? "wrapper-apply" : ["recovery", "recovery-read"].includes(entry.phase) ? "backend-health-recovery" : entry.phase === "reference-audit" ? "reference-audit" : entry.phase === "preflight" ? "release-direct-read-preflight" : "refresh-only",
@@ -256,7 +258,7 @@ export function buildStageBDeploymentCapabilityGraph() {
     artifactContracts: ["protected-checkout", "image-impact", "schema-v3-image-evidence", "stage-a-handoff", "tfvars-binding-report", "refresh-only", "saved-plan", "canonical-plan-json", "reference-audit", "plan-capability-manifest", "signed-permission-report"],
     stateContracts: ["stage-a-exact-object-lineage-minimum-serial-sha", "stage-b-direct-key-lineage-minimum-serial-sha", "stage-b-serial-stable-plan-to-apply"],
     freshnessContracts: [{ artifact: "image-evidence", maxAgeSeconds: 86400 }, { artifact: "reference-audit", maxAgeSeconds: STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS }, { artifact: "permission-report", maxAgeSeconds: STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS }],
-    configurationContracts: ["head-equals-origin-main", "clean-non-shallow-checkout", "direct-production-s3-key", "strict-backend-metadata", "tf-workspace-default", "no-workspace-select-or-migration", "checker-user-mfa-live-trust-to-independent-role-chain", "structural-normal-resource-universe-append-only-retained-history", "no-service-database-alb-dns-traffic-or-secret-value-change"],
+    configurationContracts: ["head-equals-origin-main", "clean-non-shallow-checkout", "direct-production-s3-key", "strict-backend-metadata", "tf-workspace-default", "no-workspace-select-or-migration", "checker-user-mfa-live-trust-to-independent-role-chain", "release-gate-exact-production-environment-oidc-to-release-deployer", "structural-normal-resource-universe-append-only-retained-history", "no-service-database-alb-dns-traffic-or-secret-value-change"],
   };
 }
 

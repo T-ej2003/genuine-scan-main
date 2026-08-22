@@ -946,6 +946,12 @@
     "scope": "exact twelve root-managed Stage B task-definition addresses"
   },
   "principalContracts": {
+    "releaseDeployer": {
+      "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+      "trustPolicyPath": "documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_TRUST_POLICY.json",
+      "workflowPath": ".github/workflows/release-gate.yml",
+      "evaluationSource": "scripts/aws/production-release-oidc-contract.mjs"
+    },
     "ecsExecVerifier": {
       "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
       "policyPath": "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json",

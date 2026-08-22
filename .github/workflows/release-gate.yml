@@ -277,6 +277,7 @@ jobs:
     env:
       AWS_ACCOUNT_ID_EXPECTED: "368992683803"
       AWS_REGION: eu-west-2
+      PRODUCTION_RELEASE_ROLE_ARN: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
       BACKEND_ECR_REPO: mscqr-backend
       FRONTEND_ECR_REPO: mscqr-web
       WORKER_ECR_REPO: mscqr-worker
@@ -416,39 +417,19 @@ jobs:
           echo "evidence_file=$evidence_file" >> "$GITHUB_OUTPUT"
           echo "evidence_sha256=$(sha256sum "$evidence_file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Validate AWS authentication inputs
-        id: auth-mode
-        env:
-          AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: Validate canonical production AWS principal
         run: |
           set -euo pipefail
-
-          if [ -n "$AWS_ROLE_TO_ASSUME" ]; then
-            echo "mode=oidc" >> "$GITHUB_OUTPUT"
-          elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
-            echo "mode=keys" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Configure repository/environment variable AWS_ROLE_TO_ASSUME for OIDC, or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY as fallback secrets."
+          if [ "$PRODUCTION_RELEASE_ROLE_ARN" != "arn:aws:iam::368992683803:role/mscqr-production-release-deployer" ]; then
+            echo "::error::Release Gate must use the canonical production release-deployer role."
             exit 1
           fi
 
       - name: Configure AWS credentials via OIDC
-        if: steps.auth-mode.outputs.mode == 'oidc'
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
-
-      - name: Configure AWS credentials via access keys
-        if: steps.auth-mode.outputs.mode == 'keys'
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          aws-region: ${{ env.AWS_REGION }}
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          role-to-assume: ${{ env.PRODUCTION_RELEASE_ROLE_ARN }}
 
       - name: Verify AWS account
         run: |

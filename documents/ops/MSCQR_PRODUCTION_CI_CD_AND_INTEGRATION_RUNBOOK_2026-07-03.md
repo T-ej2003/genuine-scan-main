@@ -32,9 +32,9 @@ The deployment must not deploy `latest`. The SHA tag and digest refs are the dep
 
 Production environment or repository variables/secrets:
 
-- `AWS_ROLE_TO_ASSUME`: preferred OIDC role for production deploys.
-- `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`: fallback only if OIDC is unavailable.
-- `AWS_SESSION_TOKEN`: optional fallback session token.
+- Release Gate uses the source-controlled exact role
+  `arn:aws:iam::368992683803:role/mscqr-production-release-deployer` through
+  GitHub OIDC. It does not accept a role variable or static AWS credentials.
 - `production` GitHub Environment: must require at least one reviewer.
 
 Optional worker deployment variables in the `production` environment:

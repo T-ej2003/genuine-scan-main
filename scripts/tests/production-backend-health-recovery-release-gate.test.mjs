@@ -14,10 +14,66 @@ import {
   DATABASE_ENV,
   runCertification,
 } from "../rls/certify-full-database.mjs";
+import {
+  PRODUCTION_RELEASE_OIDC_AUDIENCE,
+  PRODUCTION_RELEASE_OIDC_PROVIDER_ARN,
+  PRODUCTION_RELEASE_OIDC_SUBJECT,
+  PRODUCTION_RELEASE_ROLE_ARN,
+  assertProductionReleaseOidcSourceContract,
+  assertProductionReleaseTrustPolicy,
+  assertReleaseGateProductionIdentity,
+  collectLiveProductionReleaseTrustEvidence,
+  evaluateProductionReleaseOidcClaims,
+  readProductionReleaseTrustPolicy,
+} from "../aws/production-release-oidc-contract.mjs";
 
 const workflow = fs.readFileSync(".github/workflows/release-gate.yml", "utf8");
 const parsedWorkflow = yaml.load(workflow);
 const rateLimitEnforcementTest = fs.readFileSync("backend/tests/rateLimitEnforcement.test.js", "utf8");
+const permissionManifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
+
+test("Release Gate uses the exact production environment OIDC identity", () => {
+  assert.equal(assertProductionReleaseOidcSourceContract(permissionManifest), true);
+  assert.equal(assertReleaseGateProductionIdentity(parsedWorkflow), true);
+  const expected = { providerArn: PRODUCTION_RELEASE_OIDC_PROVIDER_ARN, audience: PRODUCTION_RELEASE_OIDC_AUDIENCE, subject: PRODUCTION_RELEASE_OIDC_SUBJECT };
+  assert.equal(evaluateProductionReleaseOidcClaims(expected), true);
+  for (const claims of [
+    { ...expected, providerArn: "arn:aws:iam::368992683803:oidc-provider/example.invalid" },
+    { ...expected, subject: "repo:other/genuine-scan-main:environment:production" },
+    { ...expected, subject: "repo:T-ej2003/other:environment:production" },
+    { ...expected, subject: "repo:T-ej2003/genuine-scan-main:environment:staging" },
+    { ...expected, subject: "repo:T-ej2003/genuine-scan-main:ref:refs/heads/main" },
+    { ...expected, subject: "repo:T-ej2003/genuine-scan-main:pull_request" },
+    { ...expected, subject: "repo:T-ej2003/genuine-scan-main:ref:refs/heads/codex/merge-main-ours-test2" },
+    { ...expected, audience: "other-audience" },
+  ]) assert.equal(evaluateProductionReleaseOidcClaims(claims), false);
+
+  for (const subject of ["*", "repo:T-ej2003/*", "repo:*/genuine-scan-main:environment:production"]) {
+    const trust = readProductionReleaseTrustPolicy();
+    trust.Statement[1].Condition.StringEquals["token.actions.githubusercontent.com:sub"] = subject;
+    assert.throws(() => assertProductionReleaseTrustPolicy(trust), /exact production-environment OIDC trust/);
+  }
+
+  const evidence = collectLiveProductionReleaseTrustEvidence({ run: () => JSON.stringify({ Role: { Arn: PRODUCTION_RELEASE_ROLE_ARN, AssumeRolePolicyDocument: readProductionReleaseTrustPolicy() } }) });
+  assert.deepEqual(evidence, { roleArn: PRODUCTION_RELEASE_ROLE_ARN, sourceLiveMatch: true });
+  assert.throws(() => collectLiveProductionReleaseTrustEvidence({ run: () => JSON.stringify({ Role: { Arn: "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy", AssumeRolePolicyDocument: readProductionReleaseTrustPolicy() } }) }), /role ARN is not canonical/);
+
+  for (const roleArn of ["arn:aws:iam::368992683803:role/github-actions-mscqr-deploy", "arn:aws:iam::368992683803:role/arbitrary"]) {
+    const changed = structuredClone(parsedWorkflow);
+    changed.jobs["deploy-production-ecs"].env.PRODUCTION_RELEASE_ROLE_ARN = roleArn;
+    assert.throws(() => assertReleaseGateProductionIdentity(changed), /canonical release-deployer/);
+  }
+  const wrongEnvironment = structuredClone(parsedWorkflow);
+  wrongEnvironment.jobs["deploy-production-ecs"].environment = "staging";
+  assert.throws(() => assertReleaseGateProductionIdentity(wrongEnvironment), /environment binding/);
+
+  const missingMfa = readProductionReleaseTrustPolicy();
+  delete missingMfa.Statement[0].Condition;
+  assert.throws(() => assertProductionReleaseTrustPolicy(missingMfa), /exact MFA handoff/);
+  assert.doesNotMatch(workflow, /AWS_ROLE_TO_ASSUME|github-actions-mscqr-deploy|aws-access-key-id|aws-secret-access-key/);
+  assert.match(fs.readFileSync("documents/ops/MSCQR_PRODUCTION_CI_CD_AND_INTEGRATION_RUNBOOK_2026-07-03.md", "utf8"), /does not accept a role variable or static AWS credentials/);
+  assert.match(fs.readFileSync("documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_OIDC_SUBJECT_TRANSITION.json", "utf8"), /source-controlled exact mscqr-production-release-deployer ARN/);
+});
 
 test("release gate exposes one bounded backend health recovery mode", () => {
   assert.match(workflow, /- backend-health-recovery/);

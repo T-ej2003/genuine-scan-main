@@ -9328,6 +9328,7 @@
     "tf-workspace-default",
     "no-workspace-select-or-migration",
     "checker-user-mfa-live-trust-to-independent-role-chain",
+    "release-gate-exact-production-environment-oidc-to-release-deployer",
     "structural-normal-resource-universe-append-only-retained-history",
     "no-service-database-alb-dns-traffic-or-secret-value-change"
   ]
