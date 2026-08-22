@@ -12,7 +12,8 @@ const releaseTrainText = read(".github/workflows/release-train.yml");
 
 test("release-gate is the only enabled production mutation writer", () => {
   assert.match(releaseGateText, /group: production-deploy/);
-  assert.match(releaseGateText, /Deploy backend ECS service/);
+  assert.match(releaseGateText, /Activate exact Stage-B backend candidate/);
+  assert.doesNotMatch(releaseGateText, /Deploy backend ECS service|Deploy worker ECS service/);
   assert.match(releaseGateText, /environment: production/);
   assert.equal(legacy.jobs["legacy-disabled"].if, "${{ false }}");
   assert.doesNotMatch(legacyText, /configure-aws-credentials|AWS_ACCESS_KEY_ID|terraform apply|register-task-definition|update-service|deregister-task-definition/i);

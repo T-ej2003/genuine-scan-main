@@ -12,6 +12,7 @@ export const NORMAL_ACTIVATION = Object.freeze({
 });
 
 export const NORMAL_CANDIDATE_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend-candidate:([1-9][0-9]*)$/;
+export const AWS_MANAGED_POLICY_DOCUMENT_LIMIT = 6144;
 export const canonicalNormalActivationValue = (value) => Array.isArray(value)
   ? `[${value.map(canonicalNormalActivationValue).join(",")}]`
   : value && typeof value === "object"
@@ -36,6 +37,7 @@ export function buildNormalActivationPolicy(targetArn, sourcePolicy = JSON.parse
   const recovery = policy.Statement?.filter(({ Sid }) => Sid === "RecoverLegacyBackend");
   if (!NORMAL_CANDIDATE_ARN.test(sourceTarget || "") || recovery?.length !== 1 || recovery[0].Condition?.ArnLike?.["ecs:task-definition"] !== "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*") throw new Error("Normal activation and recovery update bindings are malformed.");
   statement[0].Condition.ArnEquals["ecs:task-definition"] = targetArn;
+  if (Buffer.byteLength(JSON.stringify(policy)) > AWS_MANAGED_POLICY_DOCUMENT_LIMIT) throw new Error("Normal activation policy exceeds the AWS managed-policy document limit.");
   return policy;
 }
 

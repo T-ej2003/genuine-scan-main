@@ -16,6 +16,9 @@ import { assertStageBImportedBackendRolloverActions, assertStageBTaskDefinitionR
 import { assertEcsExecOperatorEvidence, assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorSourceContract, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 import { buildTemporaryCapabilityEvidence } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
+import { assertSimulationContextCardinality, iamSimulationContextArgs } from "./iam-simulation-context.mjs";
+
+export { assertSimulationContextCardinality } from "./iam-simulation-context.mjs";
 
 export const PERMISSION_PREFLIGHT_SCHEMA_VERSION = 1;
 export const PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION = 3;
@@ -967,21 +970,6 @@ export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = 
   };
 }
 
-export function assertSimulationContextCardinality(context) {
-  const scalarTypes = new Set(["string", "boolean", "numeric", "date", "ip", "binary"]);
-  for (const { key, type, values } of context) {
-    if (scalarTypes.has(type) && values.length !== 1) throw new Error(`IAM simulation scalar context ${key} of type ${type} must contain exactly one value.`);
-  }
-  return true;
-}
-
-function contextArgs(context) {
-  assertSimulationContextCardinality(context);
-  return context.flatMap(({ key, type, values }) => [
-    `ContextKeyName=${key},ContextKeyValues=${values.join(",")},ContextKeyType=${type}`,
-  ]);
-}
-
 export function simulatePrincipalPolicy({ roleArn, evaluation: item, conditionKeyOrigins, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
   const args = [
     "iam", "simulate-principal-policy",
@@ -990,7 +978,7 @@ export function simulatePrincipalPolicy({ roleArn, evaluation: item, conditionKe
     "--resource-arns", item.resource,
     "--output", "json",
   ];
-  if (item.context.length > 0) args.push("--context-entries", ...contextArgs(item.context));
+  if (item.context.length > 0) args.push("--context-entries", ...iamSimulationContextArgs(item.context));
   const response = JSON.parse(run(args));
   if (!Array.isArray(response.EvaluationResults) || response.EvaluationResults.length !== 1) {
     throw new Error(`IAM simulation returned malformed EvaluationResults for ${item.id}.`);

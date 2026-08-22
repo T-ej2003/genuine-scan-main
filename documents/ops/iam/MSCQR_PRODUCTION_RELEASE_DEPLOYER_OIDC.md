@@ -108,7 +108,18 @@ npm run production:normal-backend-activation -- \
 This command changes only the exact candidate-revision condition in
 `MSCQRProductionGreenStageBFinalApplyWrite`, reads the operative policy back,
 and simulates the selected revision as allowed while adjacent revisions remain
-denied. It is idempotent. Release Gate then repeats authenticated state, IAM,
+denied. Each simulation uses AWS CLI `ContextEntry` structures for the exact
+region, cluster ARN, and task-definition ARN; shorthand key/value strings are
+not accepted. It is idempotent. Release Gate then repeats authenticated state, IAM,
 task-definition, and service reads before database mutation and immediately
 before the single `ecs:UpdateService`. The private local binding hash provides
 content identity only; live AWS readback and AWS authorization are authoritative.
+
+Policy publication is followed by an authenticated operative-policy readback
+before simulation. A failed write with an exact readback is reconciled and the
+simulations continue. A write attempt whose final policy cannot be authenticated
+reports `PARTIAL_CONVERGENCE_LIVE_STATE_UNAUTHENTICATED`, performs no automatic
+rollback, and requires the operator to rerun the same governed convergence with
+the administrator profile. A post-readback simulation failure reports
+`CONVERGENCE_MUTATION_READBACK_VERIFIED_VALIDATION_FAILED`; it never claims that
+IAM was unchanged.

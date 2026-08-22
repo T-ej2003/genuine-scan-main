@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import yaml from "js-yaml";
-import { NORMAL_ACTIVATION, assertNormalActivationPolicy, buildNormalActivationPolicy, collectNormalActivationLiveEvidence, convergeNormalActivationPolicy, deriveNormalBackendCandidate, executeNormalBackendActivation } from "../aws/production-normal-backend-activation.mjs";
+import { NORMAL_ACTIVATION, NormalActivationPolicyConvergenceError, assertNormalActivationPolicy, buildNormalActivationPolicy, collectNormalActivationLiveEvidence, convergeNormalActivationPolicy, deriveNormalBackendCandidate, executeNormalBackendActivation, normalActivationSimulationContext } from "../aws/production-normal-backend-activation.mjs";
+import { iamSimulationContextArgs } from "../aws/iam-simulation-context.mjs";
 import { assertNormalActivationPolicyDeltaOnly } from "../aws/production-normal-backend-activation-policy.mjs";
 
 const sourceSha = "a".repeat(40);
@@ -20,6 +21,20 @@ const state = (arn = targetArn, releaseSha = sourceSha, serial = 103) => ({
   } }] }],
 });
 const validate = () => true;
+const contextArgsFor = (arn) => [
+  "ContextKeyName=aws:RequestedRegion,ContextKeyValues=eu-west-2,ContextKeyType=string",
+  `ContextKeyName=ecs:cluster,ContextKeyValues=${NORMAL_ACTIVATION.clusterArn},ContextKeyType=string`,
+  `ContextKeyName=ecs:task-definition,ContextKeyValues=${arn},ContextKeyType=string`,
+];
+
+function simulatedTarget(args) {
+  const start = args.indexOf("--context-entries");
+  const end = args.indexOf("--output");
+  assert(start > 0 && end > start);
+  const entries = args.slice(start + 1, end);
+  assert.deepEqual(entries, contextArgsFor(entries[2]?.split("ContextKeyValues=")[1]?.split(",ContextKeyType=")[0]));
+  return entries[2].split("ContextKeyValues=")[1].split(",ContextKeyType=")[0];
+}
 
 test("normal activation derives one exact current-source candidate from Stage-B state", () => {
   const candidate = deriveNormalBackendCandidate({ state: state(), sourceSha, imageAuthorization, validateImageAuthorization: validate });
@@ -48,6 +63,7 @@ test("normal activation policy binds only candidate N while preserving separate 
   assert.equal(assertNormalActivationPolicyDeltaOnly(policy), targetArn);
   const broadened = structuredClone(policy); broadened.Statement[0].Condition.ArnEquals["ecs:task-definition"] = `${NORMAL_ACTIVATION.family}:*`;
   assert.throws(() => assertNormalActivationPolicyDeltaOnly(broadened), /exact normal candidate revision/);
+  assert.throws(() => buildNormalActivationPolicy(targetArn.replace(":12", ":12345678901234567890")), /managed-policy document limit/);
 });
 
 test("live preparation authenticates caller, state, exact policy, target, service, and current revision", () => {
@@ -84,7 +100,9 @@ test("administrator convergence changes only the exact candidate binding and is 
   const predecessor = buildNormalActivationPolicy(targetArn.replace(":12", ":7"));
   let livePolicy = predecessor;
   let writes = 0;
+  const commands = [];
   const run = (command) => {
+    commands.push(command);
     const joined = command.join(" ");
     let response;
     if (joined.startsWith("sts get-caller-identity")) response = { Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.administratorArn };
@@ -93,7 +111,10 @@ test("administrator convergence changes only the exact candidate binding and is 
     else if (joined.startsWith("iam get-policy-version")) response = { PolicyVersion: { Document: livePolicy } };
     else if (joined.startsWith("iam list-policy-versions")) response = { Versions: [{ VersionId: "v3", IsDefaultVersion: true, CreateDate: "2026-08-01T00:00:00Z" }] };
     else if (joined.startsWith("iam create-policy-version")) { livePolicy = JSON.parse(command[command.indexOf("--policy-document") + 1]); writes += 1; return ""; }
-    else if (joined.startsWith("iam simulate-principal-policy")) response = { EvaluationResults: [{ EvalDecision: joined.includes(`${NORMAL_ACTIVATION.family}:12`) ? "allowed" : "implicitDeny" }] };
+    else if (joined.startsWith("iam simulate-principal-policy")) {
+      const testedArn = simulatedTarget(command);
+      response = { EvaluationResults: [{ EvalActionName: "ecs:UpdateService", EvalResourceName: NORMAL_ACTIVATION.serviceArn, EvalDecision: testedArn === targetArn ? "allowed" : "implicitDeny" }] };
+    }
     else throw new Error(`unexpected command ${joined}`);
     return JSON.stringify(response);
   };
@@ -105,8 +126,158 @@ test("administrator convergence changes only the exact candidate binding and is 
   assert.equal(noOp.status, "ALREADY_CONVERGED");
   assert.equal(noOp.iamWrites, 0);
   assert.equal(writes, 1);
+  const createIndex = commands.findIndex((args) => args[0] === "iam" && args[1] === "create-policy-version");
+  const postWriteReadIndex = commands.findIndex((args, index) => index > createIndex && args[0] === "iam" && args[1] === "get-policy-version");
+  const simulationIndex = commands.findIndex((args) => args[0] === "iam" && args[1] === "simulate-principal-policy");
+  assert(createIndex > 0 && postWriteReadIndex > createIndex && simulationIndex > postWriteReadIndex);
+  const simulatedArns = commands.filter((args) => args[0] === "iam" && args[1] === "simulate-principal-policy").map(simulatedTarget);
+  assert.deepEqual(new Set(simulatedArns), new Set([targetArn, targetArn.replace(":12", ":11"), targetArn.replace(":12", ":13"), targetArn.replace(":12", ":10"), targetArn.replace(":12", ":7")]));
   const wrongCaller = (command) => command[0] === "sts" ? JSON.stringify({ Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.roleArn }) : run(command);
   assert.throws(() => convergeNormalActivationPolicy({ run: wrongCaller, sourceSha }), /root administrator/);
+});
+
+test("normal activation simulation uses canonical AWS CLI context structures and rejects legacy recovery targets", () => {
+  assert.deepEqual(iamSimulationContextArgs(normalActivationSimulationContext(targetArn)), contextArgsFor(targetArn));
+  assert.throws(() => normalActivationSimulationContext("arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48"), /exact Stage-B candidate revision/);
+});
+
+test("ambiguous policy publication is reconciled only by authenticated exact readback", () => {
+  const predecessor = buildNormalActivationPolicy(targetArn.replace(":12", ":7"));
+  const makeRun = ({ publishTarget, failReadback = false }) => {
+    let livePolicy = predecessor;
+    let createAttempted = false;
+    return (command) => {
+      const joined = command.join(" ");
+      let response;
+      if (joined.startsWith("sts get-caller-identity")) response = { Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.administratorArn };
+      else if (joined.startsWith("s3 cp")) return JSON.stringify(state());
+      else if (joined.startsWith("iam get-policy ")) {
+        if (createAttempted && failReadback) throw new Error("READBACK_DENIED");
+        response = { Policy: { DefaultVersionId: createAttempted ? "v4" : "v3" } };
+      } else if (joined.startsWith("iam get-policy-version")) response = { PolicyVersion: { Document: livePolicy } };
+      else if (joined.startsWith("iam list-policy-versions")) response = { Versions: [{ VersionId: "v3", IsDefaultVersion: true, CreateDate: "2026-08-01T00:00:00Z" }] };
+      else if (joined.startsWith("iam create-policy-version")) {
+        createAttempted = true;
+        if (publishTarget) livePolicy = JSON.parse(command[command.indexOf("--policy-document") + 1]);
+        throw new Error("AMBIGUOUS_CREATE_RESULT");
+      } else if (joined.startsWith("iam simulate-principal-policy")) {
+        const testedArn = simulatedTarget(command);
+        response = { EvaluationResults: [{ EvalActionName: "ecs:UpdateService", EvalResourceName: NORMAL_ACTIVATION.serviceArn, EvalDecision: testedArn === targetArn ? "allowed" : "implicitDeny" }] };
+      } else throw new Error(`unexpected command ${joined}`);
+      return JSON.stringify(response);
+    };
+  };
+  const reconciled = convergeNormalActivationPolicy({ run: makeRun({ publishTarget: true }), sourceSha });
+  assert.equal(reconciled.status, "RECONCILED_AFTER_AMBIGUOUS_WRITE");
+  assert.equal(reconciled.iamWrites, 1);
+  assert.equal(reconciled.mutationOutcome, "CONFIRMED_SUCCESS_READBACK");
+  assert.equal(reconciled.unknownMutations, 0);
+  assert.equal(reconciled.readbackVerified, true);
+  assert.equal(reconciled.validationComplete, true);
+
+  for (const run of [makeRun({ publishTarget: false }), makeRun({ publishTarget: true, failReadback: true })]) {
+    assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha }), (error) => {
+      assert(error instanceof NormalActivationPolicyConvergenceError);
+      assert.equal(error.report.status, "PARTIAL_CONVERGENCE_LIVE_STATE_UNAUTHENTICATED");
+      assert.equal(error.report.mutationAttempted, true);
+      assert.equal(error.report.readbackVerified, false);
+      assert.equal(error.report.unknownMutations, 1);
+      assert.equal(error.report.rollbackAttempted, false);
+      assert.match(error.report.exactNextAction, /RERUN_SAME_GOVERNED_CONVERGENCE/);
+      return true;
+    });
+  }
+});
+
+test("post-mutation simulation failure reports authenticated convergence without false rollback", () => {
+  let livePolicy = buildNormalActivationPolicy(targetArn.replace(":12", ":7"));
+  const run = (command) => {
+    const joined = command.join(" ");
+    let response;
+    if (joined.startsWith("sts get-caller-identity")) response = { Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.administratorArn };
+    else if (joined.startsWith("s3 cp")) return JSON.stringify(state());
+    else if (joined.startsWith("iam get-policy ")) response = { Policy: { DefaultVersionId: "v4" } };
+    else if (joined.startsWith("iam get-policy-version")) response = { PolicyVersion: { Document: livePolicy } };
+    else if (joined.startsWith("iam list-policy-versions")) response = { Versions: [{ VersionId: "v4", IsDefaultVersion: true, CreateDate: "2026-08-01T00:00:00Z" }] };
+    else if (joined.startsWith("iam create-policy-version")) { livePolicy = JSON.parse(command[command.indexOf("--policy-document") + 1]); return ""; }
+    else if (joined.startsWith("iam simulate-principal-policy")) throw new Error("SIMULATION_UNAVAILABLE");
+    else throw new Error(`unexpected command ${joined}`);
+    return JSON.stringify(response);
+  };
+  assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha }), (error) => {
+    assert(error instanceof NormalActivationPolicyConvergenceError);
+    assert.equal(error.report.status, "CONVERGENCE_MUTATION_READBACK_VERIFIED_VALIDATION_FAILED");
+    assert.equal(error.report.readbackVerified, true);
+    assert.equal(error.report.unknownMutations, 0);
+    assert.equal(error.report.rollbackAttempted, false);
+    return true;
+  });
+});
+
+test("policy-version pruning plus failed publication reports partial convergence for reconciliation", () => {
+  const predecessor = buildNormalActivationPolicy(targetArn.replace(":12", ":7"));
+  let deleted = false;
+  const run = (command) => {
+    const joined = command.join(" ");
+    let response;
+    if (joined.startsWith("sts get-caller-identity")) response = { Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.administratorArn };
+    else if (joined.startsWith("s3 cp")) return JSON.stringify(state());
+    else if (joined.startsWith("iam get-policy ")) response = { Policy: { DefaultVersionId: "v5" } };
+    else if (joined.startsWith("iam get-policy-version")) response = { PolicyVersion: { Document: predecessor } };
+    else if (joined.startsWith("iam list-policy-versions")) response = { Versions: Array.from({ length: 5 }, (_, index) => ({ VersionId: `v${index + 1}`, IsDefaultVersion: index === 4, CreateDate: `2026-08-0${index + 1}T00:00:00Z` })) };
+    else if (joined.startsWith("iam delete-policy-version")) { deleted = true; return ""; }
+    else if (joined.startsWith("iam create-policy-version")) throw new Error("PUBLICATION_FAILED");
+    else throw new Error(`unexpected command ${joined}`);
+    return JSON.stringify(response);
+  };
+  assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha }), (error) => {
+    assert(error instanceof NormalActivationPolicyConvergenceError);
+    assert.equal(error.report.status, "PARTIAL_CONVERGENCE_LIVE_STATE_UNAUTHENTICATED");
+    assert.equal(error.report.confirmedIamWrites, 1);
+    assert.equal(error.report.unknownMutations, 1);
+    assert.equal(error.report.rollbackAttempted, false);
+    return true;
+  });
+  assert.equal(deleted, true);
+});
+
+test("pre-mutation rejection explicitly reports that no convergence mutation occurred", () => {
+  const run = (command) => command[0] === "sts"
+    ? JSON.stringify({ Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.roleArn })
+    : (() => { throw new Error("unexpected post-authentication command"); })();
+  assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha }), (error) => {
+    assert(error instanceof NormalActivationPolicyConvergenceError);
+    assert.equal(error.report.status, "NO_MUTATION_CONVERGENCE_FAILED");
+    assert.equal(error.report.mutationAttempted, false);
+    assert.equal(error.report.confirmedIamWrites, 0);
+    assert.equal(error.report.unknownMutations, 0);
+    return true;
+  });
+});
+
+test("malformed policy-version topology is rejected before deletion or publication", () => {
+  const predecessor = buildNormalActivationPolicy(targetArn.replace(":12", ":7"));
+  for (const versions of [
+    [{ VersionId: "v3", IsDefaultVersion: false, CreateDate: "2026-08-01T00:00:00Z" }],
+    [{ VersionId: "v3", IsDefaultVersion: true, CreateDate: "invalid" }],
+    Array.from({ length: 6 }, (_, index) => ({ VersionId: `v${index + 1}`, IsDefaultVersion: index === 2, CreateDate: `2026-08-0${index + 1}T00:00:00Z` })),
+  ]) {
+    let mutations = 0;
+    const run = (command) => {
+      const joined = command.join(" ");
+      let response;
+      if (joined.startsWith("sts get-caller-identity")) response = { Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.administratorArn };
+      else if (joined.startsWith("s3 cp")) return JSON.stringify(state());
+      else if (joined.startsWith("iam get-policy ")) response = { Policy: { DefaultVersionId: "v3" } };
+      else if (joined.startsWith("iam get-policy-version")) response = { PolicyVersion: { Document: predecessor } };
+      else if (joined.startsWith("iam list-policy-versions")) response = { Versions: versions };
+      else if (joined.startsWith("iam delete-policy-version") || joined.startsWith("iam create-policy-version")) { mutations += 1; return ""; }
+      else throw new Error(`unexpected command ${joined}`);
+      return JSON.stringify(response);
+    };
+    assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha }), (error) => error instanceof NormalActivationPolicyConvergenceError && error.report.status === "NO_MUTATION_CONVERGENCE_FAILED");
+    assert.equal(mutations, 0);
+  }
 });
 
 test("normal activation rejects a receipt with the wrong Stage-B approval before AWS readback", () => {

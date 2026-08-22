@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
 import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
+import { iamSimulationContextArgs } from "./iam-simulation-context.mjs";
 import { NORMAL_ACTIVATION, NORMAL_CANDIDATE_ARN, assertNormalActivationPolicy, assertNormalActivationPolicyDeltaOnly, buildNormalActivationPolicy, canonicalNormalActivationValue } from "./production-normal-backend-activation-policy.mjs";
 import { stageBApprovalIdForReleaseSha } from "./production-green-stage-b-contract.mjs";
 import { readBoundStageBPrivateJson } from "./stage-b-artifact-contract.mjs";
@@ -19,6 +20,15 @@ const SHA = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const canonical = canonicalNormalActivationValue;
+const POLICY_VERSION = /^v[1-9][0-9]*$/;
+
+export class NormalActivationPolicyConvergenceError extends Error {
+  constructor(report, cause) {
+    super(`${report.status}: ${cause instanceof Error ? cause.message : String(cause)} EXACT_NEXT_ACTION=${report.exactNextAction}`, { cause });
+    this.name = "NormalActivationPolicyConvergenceError";
+    this.report = Object.freeze(report);
+  }
+}
 
 function backendResource(state) {
   const candidates = (state?.resources || []).filter(({ mode, type, name }) => mode === "managed" && type === "aws_ecs_task_definition" && name === "candidate")
@@ -60,6 +70,16 @@ function readLivePolicy(run) {
 function readLiveState(run) {
   const bytes = Buffer.from(run(["s3", "cp", NORMAL_ACTIVATION.stateUrl, "-"]));
   return { bytes, state: JSON.parse(bytes) };
+}
+
+function oldestDeletablePolicyVersion(versions, defaultVersionId) {
+  if (!Array.isArray(versions) || versions.length < 1 || versions.length > 5 || !POLICY_VERSION.test(defaultVersionId || "") || versions.some(({ VersionId, IsDefaultVersion, CreateDate }) => !POLICY_VERSION.test(VersionId || "") || typeof IsDefaultVersion !== "boolean" || Number.isNaN(Date.parse(CreateDate))) || new Set(versions.map(({ VersionId }) => VersionId)).size !== versions.length) throw new Error("FinalApplyWrite policy version topology is malformed.");
+  const defaults = versions.filter(({ IsDefaultVersion }) => IsDefaultVersion);
+  if (defaults.length !== 1 || defaults[0].VersionId !== defaultVersionId) throw new Error("FinalApplyWrite policy default-version topology is inconsistent.");
+  if (versions.length < 5) return null;
+  const oldest = versions.filter(({ IsDefaultVersion }) => !IsDefaultVersion).sort((left, right) => Date.parse(left.CreateDate) - Date.parse(right.CreateDate) || left.VersionId.localeCompare(right.VersionId))[0];
+  if (!oldest?.VersionId) throw new Error("FinalApplyWrite policy version retention cannot be reconciled safely.");
+  return oldest.VersionId;
 }
 
 function assertReleaseReceipt(receipt, { sourceSha, imageAuthorization }) {
@@ -106,42 +126,89 @@ export function assertNormalActivationBinding(binding, expected) {
   return true;
 }
 
+export function normalActivationSimulationContext(taskDefinitionArn) {
+  if (!NORMAL_CANDIDATE_ARN.test(taskDefinitionArn || "")) throw new Error("Normal activation simulation requires one exact Stage-B candidate revision.");
+  return Object.freeze([
+    Object.freeze({ key: "aws:RequestedRegion", type: "string", values: Object.freeze([NORMAL_ACTIVATION.region]) }),
+    Object.freeze({ key: "ecs:cluster", type: "string", values: Object.freeze([NORMAL_ACTIVATION.clusterArn]) }),
+    Object.freeze({ key: "ecs:task-definition", type: "string", values: Object.freeze([taskDefinitionArn]) }),
+  ]);
+}
+
+function simulateNormalActivationTarget(run, taskDefinitionArn) {
+  const response = parseJson(run, ["iam", "simulate-principal-policy", "--policy-source-arn", NORMAL_ACTIVATION.roleArn, "--action-names", "ecs:UpdateService", "--resource-arns", NORMAL_ACTIVATION.serviceArn, "--context-entries", ...iamSimulationContextArgs(normalActivationSimulationContext(taskDefinitionArn))]);
+  if (!Array.isArray(response?.EvaluationResults) || response.EvaluationResults.length !== 1) throw new Error("Normal activation IAM simulation returned malformed results.");
+  const result = response.EvaluationResults[0];
+  if (result?.EvalActionName !== "ecs:UpdateService" || result.EvalResourceName !== NORMAL_ACTIVATION.serviceArn || !["allowed", "explicitDeny", "implicitDeny"].includes(result.EvalDecision)) throw new Error("Normal activation IAM simulation did not bind the exact action and service.");
+  return result.EvalDecision;
+}
+
+function convergenceFailure({ mutationAttempted, readbackVerified, confirmedIamWrites }, error) {
+  const status = !mutationAttempted
+    ? "NO_MUTATION_CONVERGENCE_FAILED"
+    : readbackVerified
+      ? "CONVERGENCE_MUTATION_READBACK_VERIFIED_VALIDATION_FAILED"
+      : "PARTIAL_CONVERGENCE_LIVE_STATE_UNAUTHENTICATED";
+  const exactNextAction = !mutationAttempted
+    ? "CORRECT_REPORTED_PRECONDITION_AND_RERUN_GOVERNED_CONVERGENCE"
+    : readbackVerified
+      ? "RERUN_GOVERNED_CONVERGENCE_TO_COMPLETE_SIMULATION_VALIDATION"
+      : "RERUN_SAME_GOVERNED_CONVERGENCE_WITH_ADMIN_PROFILE_TO_AUTHENTICATE_AND_RECONCILE_LIVE_POLICY";
+  return new NormalActivationPolicyConvergenceError({ status, mutationAttempted, readbackVerified, confirmedIamWrites, unknownMutations: mutationAttempted && !readbackVerified ? 1 : 0, rollbackAttempted: false, retrySafe: true, exactNextAction }, error);
+}
+
 export function convergeNormalActivationPolicy({ run, sourceSha } = {}) {
-  if (typeof run !== "function" || !SHA.test(sourceSha || "")) throw new Error("Governed normal activation convergence inputs are invalid.");
-  const caller = parseJson(run, ["sts", "get-caller-identity"]);
-  if (caller.Account !== NORMAL_ACTIVATION.account || caller.Arn !== NORMAL_ACTIVATION.administratorArn) throw new Error("Normal activation IAM convergence requires the governed root administrator identity.");
-  const liveState = readLiveState(run);
-  const state = liveState.state;
-  const attributes = backendResource(state);
-  const targetArn = attributes?.arn;
-  const containers = JSON.parse(attributes?.container_definitions || "null");
-  const releaseSha = new Map((containers?.find(({ name }) => name === NORMAL_ACTIVATION.container)?.environment || []).map(({ name, value }) => [name, value])).get("RELEASE_GIT_SHA");
-  if (state.lineage !== NORMAL_ACTIVATION.lineage || !Number.isInteger(state.serial) || state.serial < NORMAL_ACTIVATION.minimumSerial || state.outputs?.task_definition_arns?.value?.backend !== targetArn || releaseSha !== sourceSha || !NORMAL_CANDIDATE_ARN.test(targetArn || "")) throw new Error("Normal activation IAM convergence requires the current-source authenticated Stage-B candidate state.");
-  const expected = buildNormalActivationPolicy(targetArn);
-  const before = readLivePolicy(run);
-  assertNormalActivationPolicyDeltaOnly(before.document);
-  let iamWrites = 0;
-  if (canonical(before.document) !== canonical(expected)) {
-    const versions = parseJson(run, ["iam", "list-policy-versions", "--policy-arn", NORMAL_ACTIVATION.policyArn]).Versions || [];
-    if (versions.length >= 5) {
-      const oldest = versions.filter(({ IsDefaultVersion }) => !IsDefaultVersion).sort((a, b) => Date.parse(a.CreateDate) - Date.parse(b.CreateDate))[0];
-      if (!oldest?.VersionId) throw new Error("FinalApplyWrite policy version retention cannot be reconciled safely.");
-      run(["iam", "delete-policy-version", "--policy-arn", NORMAL_ACTIVATION.policyArn, "--version-id", oldest.VersionId, "--no-cli-pager"]); iamWrites += 1;
+  let mutationAttempted = false;
+  let readbackVerified = false;
+  let confirmedIamWrites = 0;
+  try {
+    if (typeof run !== "function" || !SHA.test(sourceSha || "")) throw new Error("Governed normal activation convergence inputs are invalid.");
+    const caller = parseJson(run, ["sts", "get-caller-identity"]);
+    if (caller.Account !== NORMAL_ACTIVATION.account || caller.Arn !== NORMAL_ACTIVATION.administratorArn) throw new Error("Normal activation IAM convergence requires the governed root administrator identity.");
+    const liveState = readLiveState(run);
+    const state = liveState.state;
+    const attributes = backendResource(state);
+    const targetArn = attributes?.arn;
+    const containers = JSON.parse(attributes?.container_definitions || "null");
+    const releaseSha = new Map((containers?.find(({ name }) => name === NORMAL_ACTIVATION.container)?.environment || []).map(({ name, value }) => [name, value])).get("RELEASE_GIT_SHA");
+    if (state.lineage !== NORMAL_ACTIVATION.lineage || !Number.isInteger(state.serial) || state.serial < NORMAL_ACTIVATION.minimumSerial || state.outputs?.task_definition_arns?.value?.backend !== targetArn || releaseSha !== sourceSha || !NORMAL_CANDIDATE_ARN.test(targetArn || "")) throw new Error("Normal activation IAM convergence requires the current-source authenticated Stage-B candidate state.");
+    const expected = buildNormalActivationPolicy(targetArn);
+    const before = readLivePolicy(run);
+    const previousTargetArn = assertNormalActivationPolicyDeltaOnly(before.document);
+    let ambiguousMutationError = null;
+    let policyVersionCreateAttempted = false;
+    if (canonical(before.document) !== canonical(expected)) {
+      try {
+        const versions = parseJson(run, ["iam", "list-policy-versions", "--policy-arn", NORMAL_ACTIVATION.policyArn]).Versions;
+        const versionToDelete = oldestDeletablePolicyVersion(versions, before.defaultVersionId);
+        if (versionToDelete) {
+          mutationAttempted = true;
+          run(["iam", "delete-policy-version", "--policy-arn", NORMAL_ACTIVATION.policyArn, "--version-id", versionToDelete, "--no-cli-pager"]); confirmedIamWrites += 1;
+        }
+        mutationAttempted = true;
+        policyVersionCreateAttempted = true;
+        run(["iam", "create-policy-version", "--policy-arn", NORMAL_ACTIVATION.policyArn, "--policy-document", JSON.stringify(expected), "--set-as-default", "--no-cli-pager"]); confirmedIamWrites += 1;
+      } catch (error) { ambiguousMutationError = error; }
     }
-    run(["iam", "create-policy-version", "--policy-arn", NORMAL_ACTIVATION.policyArn, "--policy-document", JSON.stringify(expected), "--set-as-default", "--no-cli-pager"]); iamWrites += 1;
+    const after = readLivePolicy(run);
+    assertNormalActivationPolicy(after.document, targetArn);
+    readbackVerified = true;
+    if (ambiguousMutationError && policyVersionCreateAttempted) confirmedIamWrites += 1;
+    const exact = simulateNormalActivationTarget(run, targetArn);
+    const revision = Number(NORMAL_CANDIDATE_ARN.exec(targetArn)[1]);
+    const staleRevision = revision > 2 ? revision - 2 : revision + 2;
+    const deniedTargets = new Set([
+      ...[revision - 1, revision + 1].filter((value) => value > 0).map((value) => targetArn.replace(/:[1-9][0-9]*$/, `:${value}`)),
+      targetArn.replace(/:[1-9][0-9]*$/, `:${staleRevision}`),
+      ...(previousTargetArn !== targetArn ? [previousTargetArn] : []),
+    ]);
+    for (const deniedTargetArn of deniedTargets) if (simulateNormalActivationTarget(run, deniedTargetArn) !== "implicitDeny") throw new Error("Stale or adjacent Stage-B candidate revision is unexpectedly authorized.");
+    if (exact !== "allowed") throw new Error("Exact Stage-B candidate revision is not authorized after IAM convergence.");
+    return Object.freeze({ status: mutationAttempted ? ambiguousMutationError ? "RECONCILED_AFTER_AMBIGUOUS_WRITE" : "CONVERGED" : "ALREADY_CONVERGED", sourceSha, targetArn, stateLineage: state.lineage, stateSerial: state.serial, stateSha256: sha256(liveState.bytes), policyVersionId: after.defaultVersionId, iamWrites: confirmedIamWrites, mutationAttempted, mutationOutcome: ambiguousMutationError ? "CONFIRMED_SUCCESS_READBACK" : mutationAttempted ? "CONFIRMED_SUCCESS" : "NO_MUTATION", readbackVerified, validationComplete: true, unknownMutations: 0 });
+  } catch (error) {
+    if (error instanceof NormalActivationPolicyConvergenceError) throw error;
+    throw convergenceFailure({ mutationAttempted, readbackVerified, confirmedIamWrites }, error);
   }
-  const after = readLivePolicy(run);
-  assertNormalActivationPolicy(after.document, targetArn);
-  const context = ["aws:RequestedRegion=string:eu-west-2", `ecs:cluster=string:${NORMAL_ACTIVATION.clusterArn}`, `ecs:task-definition=string:${targetArn}`];
-  const exact = parseJson(run, ["iam", "simulate-principal-policy", "--policy-source-arn", NORMAL_ACTIVATION.roleArn, "--action-names", "ecs:UpdateService", "--resource-arns", NORMAL_ACTIVATION.serviceArn, "--context-entries", ...context]).EvaluationResults?.[0]?.EvalDecision;
-  const revision = Number(NORMAL_CANDIDATE_ARN.exec(targetArn)[1]);
-  for (const adjacent of [revision - 1, revision + 1].filter((value) => value > 0)) {
-    const adjacentArn = targetArn.replace(/:[1-9][0-9]*$/, `:${adjacent}`);
-    const decision = parseJson(run, ["iam", "simulate-principal-policy", "--policy-source-arn", NORMAL_ACTIVATION.roleArn, "--action-names", "ecs:UpdateService", "--resource-arns", NORMAL_ACTIVATION.serviceArn, "--context-entries", ...context.slice(0, 2), `ecs:task-definition=string:${adjacentArn}`]).EvaluationResults?.[0]?.EvalDecision;
-    if (decision !== "implicitDeny") throw new Error("Adjacent Stage-B candidate revision is unexpectedly authorized.");
-  }
-  if (exact !== "allowed") throw new Error("Exact Stage-B candidate revision is not authorized after IAM convergence.");
-  return Object.freeze({ status: iamWrites ? "CONVERGED" : "ALREADY_CONVERGED", sourceSha, targetArn, stateLineage: state.lineage, stateSerial: state.serial, stateSha256: sha256(liveState.bytes), policyVersionId: after.defaultVersionId, iamWrites });
 }
 
 function writePrivateJson(file, value) {
@@ -221,4 +288,11 @@ export function runCli(argv = process.argv.slice(2)) {
   throw new Error("--mode must be converge-policy, prepare, or execute.");
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) runCli();
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
+  try { runCli(); }
+  catch (error) {
+    if (!(error instanceof NormalActivationPolicyConvergenceError)) throw error;
+    process.stderr.write(`${JSON.stringify(error.report)}\n`);
+    process.exitCode = 1;
+  }
+}
