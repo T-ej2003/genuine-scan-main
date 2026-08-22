@@ -6449,6 +6449,93 @@
       "mutation": true
     },
     {
+      "id": "normal-activation-admin-describe-candidate",
+      "phase": "administrator-normal-backend-activation-convergence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "normal-activation-admin-describe-candidate",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "administrator-live-read-or-simulation",
+      "policy": {
+        "sourceFile": "scripts/aws/production-normal-backend-activation-policy.mjs",
+        "sid": "normal-activation-admin-describe-candidate",
+        "livePolicyArn": null,
+        "expectedVersion": "state-derived-exact-revision",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "normal-activation-admin-describe-service",
+      "phase": "administrator-normal-backend-activation-convergence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "normal-activation-admin-describe-service",
+      "action": "ecs:DescribeServices",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "administrator-live-read-or-simulation",
+      "policy": {
+        "sourceFile": "scripts/aws/production-normal-backend-activation-policy.mjs",
+        "sid": "normal-activation-admin-describe-service",
+        "livePolicyArn": null,
+        "expectedVersion": "state-derived-exact-revision",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "normal-activation-admin-describe-tasks",
+      "phase": "administrator-normal-backend-activation-convergence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "normal-activation-admin-describe-tasks",
+      "action": "ecs:DescribeTasks",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "administrator-live-read-or-simulation",
+      "policy": {
+        "sourceFile": "scripts/aws/production-normal-backend-activation-policy.mjs",
+        "sid": "normal-activation-admin-describe-tasks",
+        "livePolicyArn": null,
+        "expectedVersion": "state-derived-exact-revision",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "normal-activation-admin-identify",
       "phase": "administrator-normal-backend-activation-convergence",
       "identity": "ADMINISTRATOR",
@@ -6499,6 +6586,35 @@
       "policy": {
         "sourceFile": "scripts/aws/production-normal-backend-activation-policy.mjs",
         "sid": "normal-activation-admin-list-policy-versions",
+        "livePolicyArn": null,
+        "expectedVersion": "state-derived-exact-revision",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "normal-activation-admin-list-tasks",
+      "phase": "administrator-normal-backend-activation-convergence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "normal-activation-admin-list-tasks",
+      "action": "ecs:ListTasks",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "administrator-live-read-or-simulation",
+      "policy": {
+        "sourceFile": "scripts/aws/production-normal-backend-activation-policy.mjs",
+        "sid": "normal-activation-admin-list-tasks",
         "livePolicyArn": null,
         "expectedVersion": "state-derived-exact-revision",
         "expectedPolicySha256": null
@@ -9821,6 +9937,14 @@
     {
       "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
       "action": "ecs:DescribeTaskDefinition"
+    },
+    {
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "action": "ecs:DescribeTasks"
+    },
+    {
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "action": "ecs:ListTasks"
     },
     {
       "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",

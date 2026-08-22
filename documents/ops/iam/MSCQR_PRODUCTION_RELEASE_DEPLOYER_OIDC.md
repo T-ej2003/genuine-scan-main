@@ -105,15 +105,48 @@ npm run production:normal-backend-activation -- \
   --admin-profile mscqr-production-root
 ```
 
-This command changes only the exact candidate-revision condition in
-`MSCQRProductionGreenStageBFinalApplyWrite`, reads the operative policy back,
-and simulates the selected revision as allowed while adjacent revisions remain
-denied. Each simulation uses AWS CLI `ContextEntry` structures for the exact
+This command authenticates the stable service SOURCE, its running immutable
+digest, and the Stage-B TARGET, then
+temporarily replaces normal/recovery overlap with one exact `{SOURCE,TARGET}`
+transaction in `MSCQRProductionGreenStageBFinalApplyWrite`. SOURCE may be one
+exact legacy backend revision, one exact prior Stage-B candidate, or TARGET for
+an idempotent replay. Unknown families fail closed. The command reads the
+operative policy back and simulates SOURCE and TARGET as allowed while adjacent,
+stale, unrelated legacy, and worker revisions remain denied. Each simulation
+uses AWS CLI `ContextEntry` structures for the exact
 region, cluster ARN, and task-definition ARN; shorthand key/value strings are
 not accepted. It is idempotent. Release Gate then repeats authenticated state, IAM,
 task-definition, and service reads before database mutation and immediately
 before the single `ecs:UpdateService`. The private local binding hash provides
 content identity only; live AWS readback and AWS authorization are authoritative.
+
+Release Train requires the exact canonical image-authorization JSON and its
+byte hash, binds the envelope to its resolved target SHA, and hardcodes
+`preserve_current_frontend=true`. Those workflow inputs are transport, not
+authority: Release Gate authenticates the embedded KMS signature, image
+provenance, freshness, source SHA, and immutable digests after OIDC. There is no
+caller-controlled frontend-preservation switch on Release Train.
+
+On activation failure, the deployment script records whether no update occurred,
+the exact SOURCE was restored and verified, TARGET remains active, or live state
+is unauthenticated. It never infers rollback from `UpdateService` exit status.
+After successful target stability, digest, and readiness verification, download
+the `production-normal-backend-activation-evidence` artifact and run the governed
+administrator contraction using its `normalActivationSourceArn`:
+
+```sh
+npm run production:normal-backend-activation -- \
+  --mode contract-policy \
+  --source-sha "$(git rev-parse HEAD)" \
+  --source-task-definition '<normalActivationSourceArn>' \
+  --admin-profile mscqr-production-root
+```
+
+Contraction authenticates the live service and all running tasks on TARGET with
+the state-bound immutable digest, restores the reviewed
+steady-state target-only normal authority and separate recovery statement, and
+reads the operative policy back. A failed or ambiguous contraction is a
+reconciliation boundary; it does not roll IAM back automatically.
 
 Policy publication is followed by an authenticated operative-policy readback
 before simulation. A failed write with an exact readback is reconciled and the

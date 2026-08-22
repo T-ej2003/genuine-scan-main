@@ -171,7 +171,8 @@ const [file, expectedSha, targetArn, currentArn, digest, sourceSha] = process.ar
 const bytes = fs.readFileSync(file);
 if (crypto.createHash("sha256").update(bytes).digest("hex") !== expectedSha) throw new Error("Normal activation binding changed before the existing-task switch.");
 const value = JSON.parse(bytes);
-if (value.releaseMode !== "normal" || value.targetArn !== targetArn || value.expectedCurrentTaskDefinitionArn !== currentArn || value.digest !== digest || value.sourceSha !== sourceSha || value.clusterArn !== "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" || value.serviceArn !== "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2") throw new Error("Normal activation binding does not match the exact switch inputs.");
+const sourcePattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/(mscqr-backend|mscqr-production-rls-green-backend-candidate):[1-9][0-9]*$/;
+if (value.schemaVersion !== 2 || value.releaseMode !== "normal" || value.targetArn !== targetArn || value.sourceArn !== currentArn || value.expectedCurrentTaskDefinitionArn !== currentArn || value.digest !== digest || !/^sha256:[a-f0-9]{64}$/.test(value.sourceDigest || "") || !sourcePattern.test(value.sourceArn || "") || !Number.isInteger(value.desiredCount) || value.desiredCount < 1 || value.sourceSha !== sourceSha || value.clusterArn !== "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" || value.serviceArn !== "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2") throw new Error("Normal activation binding does not match the exact SOURCE/TARGET switch inputs.");
 NODE
     return
   fi
@@ -280,6 +281,7 @@ existing_mode_active=false
 existing_switch_started=false
 update_attempted=false
 update_state="NOT_ATTEMPTED"
+rollback_result="NOT_REQUIRED"
 UPDATE_SETTLEMENT_ATTEMPTS=6
 UPDATE_SETTLEMENT_INTERVAL_SECONDS=2
 
@@ -423,24 +425,38 @@ cleanup_and_rollback_on_exit() {
     case "$rollback_ownership" in
       TARGET_OWNED)
         echo "Existing task-definition switch failed; restoring ${PREVIOUS_TASK_DEFINITION_ARN}." >&2
-        WAIT_FOR_STABLE=true \
+        if WAIT_FOR_STABLE=true \
           AWS_REGION="$AWS_REGION" \
           CLUSTER_NAME="$CLUSTER_NAME" \
           SERVICE_NAME="$SERVICE_NAME" \
           PREVIOUS_TASK_DEFINITION_ARN="$PREVIOUS_TASK_DEFINITION_ARN" \
-          "$REPO_ROOT/scripts/aws/rollback-ecs-service.sh" || echo "Canonical rollback failed." >&2
-        verify_existing_service_restored || echo "Rollback verification failed." >&2
+          "$REPO_ROOT/scripts/aws/rollback-ecs-service.sh" && verify_existing_service_restored; then
+          rollback_result="VERIFIED_SOURCE"
+        else
+          rollback_result="FAILED_OR_UNVERIFIED"
+          echo "Canonical rollback or verification failed." >&2
+        fi
         ;;
       PREVIOUS_RESTORED)
         echo "Previous task definition is already restored; no rollback required." >&2
+        rollback_result="SOURCE_ALREADY_RESTORED"
         ;;
       FOREIGN)
         echo "CONCURRENT_SERVICE_STATE: refusing to overwrite a foreign ECS task definition." >&2
+        rollback_result="FOREIGN_STATE"
         ;;
       *)
         echo "UNKNOWN_ROLLBACK_OWNERSHIP: refusing rollback because current ECS service ownership could not be established." >&2
+        rollback_result="UNKNOWN_STATE"
         ;;
     esac
+  fi
+  if [[ -n "${NORMAL_ACTIVATION_OUTCOME_FILE:-}" ]]; then
+    node --input-type=module - "$NORMAL_ACTIVATION_OUTCOME_FILE" "$exit_code" "$update_state" "$rollback_result" <<'NODE'
+import fs from "node:fs";
+const [file, exitCode, updateState, rollbackResult] = process.argv.slice(2);
+fs.writeFileSync(file, `${JSON.stringify({ schemaVersion: 1, exitCode: Number(exitCode), updateState, rollbackResult })}\n`, { mode: 0o600 });
+NODE
   fi
   rm -f \
     "$RAW_FILE" \

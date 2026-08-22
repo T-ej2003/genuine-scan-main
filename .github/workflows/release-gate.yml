@@ -186,10 +186,15 @@ jobs:
           NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
           PRESERVE_CURRENT_FRONTEND: ${{ inputs.preserve_current_frontend }}
+          RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
         run: |
           set -euo pipefail
           case "$RELEASE_MODE" in
             normal)
+              if ! [[ "$RELEASE_TRAIN_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+                echo "::error::Normal Stage-B activation requires the exact Release Train run identity."
+                exit 1
+              fi
               if [ "$PRESERVE_CURRENT_FRONTEND" != "true" ]; then
                 echo "::error::Normal Stage-B activation must preserve the reviewed frontend task definition."
                 exit 1
@@ -532,11 +537,14 @@ jobs:
         env:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           BINDING_FILE: ${{ runner.temp }}/normal-backend-activation.json
+          RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
         run: |
           set -euo pipefail
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode prepare \
             --source-sha "$SOURCE_SHA" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
             --image-authorization "${{ steps.images.outputs.authorization_file }}" \
             --image-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
             --binding-out "$BINDING_FILE"
@@ -574,16 +582,20 @@ jobs:
           retention-days: 90
 
       - name: Activate exact Stage-B backend candidate
+        id: normal-activation
         if: ${{ inputs.release_mode == 'normal' }}
         env:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           RLS_RECEIPT: ${{ runner.temp }}/production-rls-release-receipt.json
+          RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
         run: |
           set -euo pipefail
           receipt_sha256="$(sha256sum "$RLS_RECEIPT" | cut -d' ' -f1)"
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode execute \
             --source-sha "$SOURCE_SHA" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
             --image-authorization "${{ steps.images.outputs.authorization_file }}" \
             --image-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
             --binding "${{ steps.backend-activation.outputs.binding_file }}" \
@@ -612,6 +624,15 @@ jobs:
             --source-sha "$SOURCE_SHA" \
             --rotation-id "$ROTATION_ID" \
             --rotation-state-sha256 "$ROTATION_STATE_SHA256"
+
+      - name: Upload normal backend activation evidence
+        if: ${{ always() && inputs.release_mode == 'normal' && steps.normal-activation.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-normal-backend-activation-evidence
+          path: ${{ steps.image-meta.outputs.backend_metadata_file }}
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Deploy rotation transition backend ECS service
         if: ${{ inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup' }}

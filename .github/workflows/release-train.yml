@@ -12,6 +12,14 @@ on:
         description: "Optional exact main-branch commit SHA. Defaults to git_ref HEAD."
         required: false
         type: string
+      normal_image_authorization_json:
+        description: "Exact canonical signed four-image authorization produced by production-image-authorization.mjs. Transport only; Release Gate authenticates it."
+        required: true
+        type: string
+      normal_image_authorization_sha256:
+        description: "SHA-256 of the exact normal image authorization JSON bytes."
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -94,8 +102,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_REF: ${{ steps.resolve.outputs.target_ref }}
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
+          NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
+          NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
         run: |
           set -euo pipefail
+
+          authorization_file="$RUNNER_TEMP/normal-image-authorization.json"
+          trap 'rm -f "$authorization_file"' EXIT
+          printf '%s' "$NORMAL_IMAGE_AUTHORIZATION_JSON" > "$authorization_file"
+          chmod 600 "$authorization_file"
+          node scripts/aws/production-release-dispatch-contract.mjs \
+            --source-sha "$TARGET_SHA" \
+            --authorization "$authorization_file" \
+            --authorization-sha256 "$NORMAL_IMAGE_AUTHORIZATION_SHA256"
+          rm -f "$authorization_file"
+          trap - EXIT
 
           echo "All required gates passed for ${TARGET_SHA}."
           echo "Triggering release-gate.yml for exact target SHA ${TARGET_SHA}."
@@ -103,6 +124,9 @@ jobs:
             --ref "${GIT_REF:-main}" \
             -f git_ref="$TARGET_REF" \
             -f target_sha="$TARGET_SHA" \
-            -f release_train_run_id="$GITHUB_RUN_ID"
+            -f release_train_run_id="$GITHUB_RUN_ID" \
+            -f preserve_current_frontend=true \
+            -f normal_image_authorization_json="$NORMAL_IMAGE_AUTHORIZATION_JSON" \
+            -f normal_image_authorization_sha256="$NORMAL_IMAGE_AUTHORIZATION_SHA256"
 
           echo "Final action: release-gate.yml dispatched for ${TARGET_SHA}. Release Train does not deploy directly."

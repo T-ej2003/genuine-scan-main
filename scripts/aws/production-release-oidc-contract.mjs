@@ -16,6 +16,7 @@ export const PRODUCTION_RELEASE_OIDC_CONFIGURATION_PATH = "documents/security/rl
 export const PRODUCTION_RELEASE_TRUST_POLICY_PATH = "documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_TRUST_POLICY.json";
 export const PRODUCTION_RELEASE_OIDC_ROLLOUT_PATH = "documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_OIDC_ROLLOUT.json";
 export const PRODUCTION_RELEASE_WORKFLOW_PATH = ".github/workflows/release-gate.yml";
+export const PRODUCTION_RELEASE_TRAIN_WORKFLOW_PATH = ".github/workflows/release-train.yml";
 export const PRODUCTION_RELEASE_CONVERGENCE_COMMAND = "npm run production:release-oidc-trust";
 export const PRODUCTION_RELEASE_ROLLOUT_PENDING = "PENDING_ADMINISTRATOR_CONVERGENCE";
 export const PRODUCTION_RELEASE_ROLLOUT_ENABLED = "OIDC_ATTEMPT_ENABLED";
@@ -153,6 +154,16 @@ export function assertReleaseGateProductionIdentity(workflow = yaml.load(fs.read
   return true;
 }
 
+export function assertReleaseTrainNormalDispatchContract(workflow = yaml.load(fs.readFileSync(path.join(root, PRODUCTION_RELEASE_TRAIN_WORKFLOW_PATH), "utf8"))) {
+  const inputs = workflow?.on?.workflow_dispatch?.inputs;
+  if (!inputs?.normal_image_authorization_json?.required || !inputs?.normal_image_authorization_sha256?.required || inputs?.preserve_current_frontend) throw new Error("Release Train must require canonical image-authorization transport without exposing frontend preservation as a caller input.");
+  const step = workflow?.jobs?.orchestrate?.steps?.find(({ name }) => name === "Trigger final Release Gate");
+  const run = step?.run || "";
+  if (!run.includes("production-release-dispatch-contract.mjs") || !run.includes('-f release_train_run_id="$GITHUB_RUN_ID"') || !run.includes("-f preserve_current_frontend=true") || !run.includes('-f normal_image_authorization_json="$NORMAL_IMAGE_AUTHORIZATION_JSON"') || !run.includes('-f normal_image_authorization_sha256="$NORMAL_IMAGE_AUTHORIZATION_SHA256"')) throw new Error("Release Train does not validate and forward the exact normal Release Gate contract.");
+  if (/preserve_current_frontend[^\n]*\$\{\{\s*inputs\./.test(run)) throw new Error("Release Train frontend preservation cannot be caller controlled.");
+  return true;
+}
+
 export function assertProductionReleaseOidcSourceContract(manifest) {
   const contract = manifest?.principalContracts?.releaseDeployer;
   if (!contract || contract.roleArn !== PRODUCTION_RELEASE_ROLE_ARN || contract.trustPolicyPath !== PRODUCTION_RELEASE_TRUST_POLICY_PATH || contract.rolloutPath !== PRODUCTION_RELEASE_OIDC_ROLLOUT_PATH || contract.workflowPath !== PRODUCTION_RELEASE_WORKFLOW_PATH || contract.evaluationSource !== "scripts/aws/production-release-oidc-contract.mjs" || contract.convergenceCommand !== PRODUCTION_RELEASE_CONVERGENCE_COMMAND) throw new Error("Release-deployer principal contract is missing or does not bind the canonical role, trust, rollout, workflow, evaluator, and convergence command.");
@@ -160,6 +171,7 @@ export function assertProductionReleaseOidcSourceContract(manifest) {
   assertProductionReleaseOidcSubjectConfiguration();
   assertProductionReleaseOidcRolloutManifest();
   assertReleaseGateProductionIdentity();
+  assertReleaseTrainNormalDispatchContract();
   return true;
 }
 

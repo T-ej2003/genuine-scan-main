@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import yaml from "js-yaml";
-import { NORMAL_ACTIVATION, NormalActivationPolicyConvergenceError, assertNormalActivationPolicy, buildNormalActivationPolicy, collectNormalActivationLiveEvidence, convergeNormalActivationPolicy, deriveNormalBackendCandidate, executeNormalBackendActivation, normalActivationSimulationContext } from "../aws/production-normal-backend-activation.mjs";
+import { NORMAL_ACTIVATION, NormalActivationPolicyConvergenceError, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, classifyNormalActivationLiveOutcome, collectNormalActivationLiveEvidence, contractNormalActivationPolicy, convergeNormalActivationPolicy, deriveNormalBackendCandidate, executeNormalBackendActivation, normalActivationSimulationContext } from "../aws/production-normal-backend-activation.mjs";
 import { iamSimulationContextArgs } from "../aws/iam-simulation-context.mjs";
 import { assertNormalActivationPolicyDeltaOnly } from "../aws/production-normal-backend-activation-policy.mjs";
 
@@ -11,6 +11,9 @@ const sourceSha = "a".repeat(40);
 const digest = `sha256:${"b".repeat(64)}`;
 const targetArn = `${NORMAL_ACTIVATION.clusterArn.replace("cluster/mscqr-prod-euw2-main", "task-definition/mscqr-production-rls-green-backend-candidate")}:12`;
 const image = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`;
+const sourceArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+const sourceDigest = `sha256:${"c".repeat(64)}`;
+const sourceImage = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${sourceDigest}`;
 const imageAuthorization = { images: [{ service: "backend", digest }] };
 const state = (arn = targetArn, releaseSha = sourceSha, serial = 103) => ({
   version: 4, lineage: NORMAL_ACTIVATION.lineage, serial,
@@ -21,6 +24,10 @@ const state = (arn = targetArn, releaseSha = sourceSha, serial = 103) => ({
   } }] }],
 });
 const validate = () => true;
+const stableService = (taskDefinition = sourceArn) => ({ serviceArn: NORMAL_ACTIVATION.serviceArn, clusterArn: NORMAL_ACTIVATION.clusterArn, status: "ACTIVE", taskDefinition, desiredCount: 2, deployments: [{ status: "PRIMARY", taskDefinition, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" }] });
+const sourceTask = (arn = sourceArn) => ({ taskDefinition: { taskDefinitionArn: arn, family: arn.includes("mscqr-backend:") ? "mscqr-backend" : NORMAL_ACTIVATION.family, status: "ACTIVE", containerDefinitions: [{ name: "backend", image: sourceImage }] }, tags: [] });
+const listedTasks = { taskArns: ["task-1", "task-2"] };
+const describedTasks = (taskDefinitionArn = sourceArn, imageDigest = sourceDigest) => ({ failures: [], tasks: [1, 2].map(() => ({ lastStatus: "RUNNING", taskDefinitionArn, containers: [{ name: "backend", imageDigest }] })) });
 const contextArgsFor = (arn) => [
   "ContextKeyName=aws:RequestedRegion,ContextKeyValues=eu-west-2,ContextKeyType=string",
   `ContextKeyName=ecs:cluster,ContextKeyValues=${NORMAL_ACTIVATION.clusterArn},ContextKeyType=string`,
@@ -53,7 +60,7 @@ test("normal activation derives one exact current-source candidate from Stage-B 
   assert.throws(() => deriveNormalBackendCandidate({ state: state(), sourceSha: "c".repeat(40), imageAuthorization, validateImageAuthorization: validate }), /source/);
 });
 
-test("normal activation policy binds only candidate N while preserving separate recovery authority", () => {
+test("normal activation policies separate steady recovery from exact SOURCE/TARGET transaction authority", () => {
   const policy = buildNormalActivationPolicy(targetArn);
   assertNormalActivationPolicy(policy, targetArn);
   assert.equal(policy.Statement.find(({ Sid }) => Sid === "ActivateBackendCandidate").Condition.ArnEquals["ecs:task-definition"], targetArn);
@@ -64,18 +71,27 @@ test("normal activation policy binds only candidate N while preserving separate 
   const broadened = structuredClone(policy); broadened.Statement[0].Condition.ArnEquals["ecs:task-definition"] = `${NORMAL_ACTIVATION.family}:*`;
   assert.throws(() => assertNormalActivationPolicyDeltaOnly(broadened), /exact normal candidate revision/);
   assert.throws(() => buildNormalActivationPolicy(targetArn.replace(":12", ":12345678901234567890")), /managed-policy document limit/);
+  const transaction = buildNormalActivationTransactionPolicy({ sourceArn, targetArn });
+  assertNormalActivationTransactionPolicy(transaction, { sourceArn, targetArn });
+  assert.deepEqual(transaction.Statement.find(({ Sid }) => Sid === "ActivateBackendCandidate").Condition.ArnEquals["ecs:task-definition"], [sourceArn, targetArn].sort());
+  assert.equal(transaction.Statement.some(({ Sid }) => Sid === "RecoverLegacyBackend"), false);
+  assert.throws(() => assertNormalActivationTransactionPolicy(transaction, { sourceArn: sourceArn.replace(":48", ":49"), targetArn }), /does not exactly match/);
 });
 
 test("live preparation authenticates caller, state, exact policy, target, service, and current revision", () => {
-  const service = { serviceArn: NORMAL_ACTIVATION.serviceArn, clusterArn: NORMAL_ACTIVATION.clusterArn, status: "ACTIVE", taskDefinition: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", desiredCount: 2, deployments: [{ status: "PRIMARY", taskDefinition: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" }] };
+  const service = stableService();
+  let runningDigest = sourceDigest;
   const responses = (command) => {
     const joined = command.join(" ");
     if (joined.startsWith("sts get-caller-identity")) return { Account: NORMAL_ACTIVATION.account, Arn: `arn:aws:sts::${NORMAL_ACTIVATION.account}:assumed-role/mscqr-production-release-deployer/test` };
     if (joined.startsWith("s3 cp")) return state();
     if (joined.startsWith("iam get-policy ")) return { Policy: { DefaultVersionId: "v3" } };
-    if (joined.startsWith("iam get-policy-version")) return { PolicyVersion: { Document: buildNormalActivationPolicy(targetArn) } };
-    if (joined.startsWith("ecs describe-task-definition")) return { taskDefinition: { taskDefinitionArn: targetArn, family: NORMAL_ACTIVATION.family, status: "ACTIVE", containerDefinitions: [{ name: "backend", image }] }, tags: [] };
+    if (joined.startsWith("iam get-policy-version")) return { PolicyVersion: { Document: buildNormalActivationTransactionPolicy({ sourceArn, targetArn }) } };
+    if (joined.startsWith("ecs describe-task-definition") && joined.includes(targetArn)) return { taskDefinition: { taskDefinitionArn: targetArn, family: NORMAL_ACTIVATION.family, status: "ACTIVE", containerDefinitions: [{ name: "backend", image }] }, tags: [] };
+    if (joined.startsWith("ecs describe-task-definition") && joined.includes(sourceArn)) return sourceTask();
     if (joined.startsWith("ecs describe-services")) return { services: [service] };
+    if (joined.startsWith("ecs list-tasks")) return listedTasks;
+    if (joined.startsWith("ecs describe-tasks")) return describedTasks(service.taskDefinition, runningDigest);
     throw new Error(`unexpected command ${joined}`);
   };
   const run = (command) => {
@@ -85,6 +101,7 @@ test("live preparation authenticates caller, state, exact policy, target, servic
   const evidence = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, validateImageAuthorization: validate });
   assert.equal(evidence.targetArn, targetArn);
   assert.equal(evidence.expectedCurrentTaskDefinitionArn, service.taskDefinition);
+  assert.equal(evidence.sourceDigest, sourceDigest);
   for (const mutate of [
     () => { service.taskDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:49"; },
     () => { service.clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/other"; },
@@ -94,6 +111,9 @@ test("live preparation authenticates caller, state, exact policy, target, servic
     assert.throws(() => collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: evidence.expectedCurrentTaskDefinitionArn, validateImageAuthorization: validate }), /service changed|service identity/);
     Object.assign(service, snapshot);
   }
+  runningDigest = digest;
+  assert.throws(() => collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: evidence.expectedCurrentTaskDefinitionArn, validateImageAuthorization: validate }), /running task/);
+  runningDigest = sourceDigest;
 });
 
 test("administrator convergence changes only the exact candidate binding and is idempotent", () => {
@@ -107,13 +127,17 @@ test("administrator convergence changes only the exact candidate binding and is 
     let response;
     if (joined.startsWith("sts get-caller-identity")) response = { Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.administratorArn };
     else if (joined.startsWith("s3 cp")) return JSON.stringify(state());
+    else if (joined.startsWith("ecs describe-services")) response = { services: [stableService()] };
+    else if (joined.startsWith("ecs describe-task-definition")) response = sourceTask();
+    else if (joined.startsWith("ecs list-tasks")) response = listedTasks;
+    else if (joined.startsWith("ecs describe-tasks")) response = describedTasks();
     else if (joined.startsWith("iam get-policy ")) response = { Policy: { DefaultVersionId: writes ? "v4" : "v3" } };
     else if (joined.startsWith("iam get-policy-version")) response = { PolicyVersion: { Document: livePolicy } };
     else if (joined.startsWith("iam list-policy-versions")) response = { Versions: [{ VersionId: "v3", IsDefaultVersion: true, CreateDate: "2026-08-01T00:00:00Z" }] };
     else if (joined.startsWith("iam create-policy-version")) { livePolicy = JSON.parse(command[command.indexOf("--policy-document") + 1]); writes += 1; return ""; }
     else if (joined.startsWith("iam simulate-principal-policy")) {
       const testedArn = simulatedTarget(command);
-      response = { EvaluationResults: [{ EvalActionName: "ecs:UpdateService", EvalResourceName: NORMAL_ACTIVATION.serviceArn, EvalDecision: testedArn === targetArn ? "allowed" : "implicitDeny" }] };
+      response = { EvaluationResults: [{ EvalActionName: "ecs:UpdateService", EvalResourceName: NORMAL_ACTIVATION.serviceArn, EvalDecision: new Set([sourceArn, targetArn]).has(testedArn) ? "allowed" : "implicitDeny" }] };
     }
     else throw new Error(`unexpected command ${joined}`);
     return JSON.stringify(response);
@@ -121,24 +145,82 @@ test("administrator convergence changes only the exact candidate binding and is 
   const converged = convergeNormalActivationPolicy({ run, sourceSha });
   assert.equal(converged.status, "CONVERGED");
   assert.equal(converged.iamWrites, 1);
-  assertNormalActivationPolicy(livePolicy, targetArn);
+  assertNormalActivationTransactionPolicy(livePolicy, { sourceArn, targetArn });
   const noOp = convergeNormalActivationPolicy({ run, sourceSha });
   assert.equal(noOp.status, "ALREADY_CONVERGED");
   assert.equal(noOp.iamWrites, 0);
   assert.equal(writes, 1);
   const createIndex = commands.findIndex((args) => args[0] === "iam" && args[1] === "create-policy-version");
+  const sourceDigestReadIndex = commands.findIndex((args) => args[0] === "ecs" && args[1] === "describe-tasks");
   const postWriteReadIndex = commands.findIndex((args, index) => index > createIndex && args[0] === "iam" && args[1] === "get-policy-version");
   const simulationIndex = commands.findIndex((args) => args[0] === "iam" && args[1] === "simulate-principal-policy");
-  assert(createIndex > 0 && postWriteReadIndex > createIndex && simulationIndex > postWriteReadIndex);
+  assert(sourceDigestReadIndex > 0 && createIndex > sourceDigestReadIndex && postWriteReadIndex > createIndex && simulationIndex > postWriteReadIndex);
   const simulatedArns = commands.filter((args) => args[0] === "iam" && args[1] === "simulate-principal-policy").map(simulatedTarget);
-  assert.deepEqual(new Set(simulatedArns), new Set([targetArn, targetArn.replace(":12", ":11"), targetArn.replace(":12", ":13"), targetArn.replace(":12", ":10"), targetArn.replace(":12", ":7")]));
+  assert(new Set(simulatedArns).has(sourceArn));
+  assert(new Set(simulatedArns).has(targetArn));
+  assert(new Set(simulatedArns).has(sourceArn.replace(":48", ":1")));
   const wrongCaller = (command) => command[0] === "sts" ? JSON.stringify({ Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.roleArn }) : run(command);
   assert.throws(() => convergeNormalActivationPolicy({ run: wrongCaller, sourceSha }), /root administrator/);
 });
 
-test("normal activation simulation uses canonical AWS CLI context structures and rejects legacy recovery targets", () => {
+test("candidate predecessor and already-target sources produce exact bounded transactions", () => {
+  const predecessor = targetArn.replace(":12", ":11");
+  const candidateTransaction = buildNormalActivationTransactionPolicy({ sourceArn: predecessor, targetArn });
+  assertNormalActivationTransactionPolicy(candidateTransaction, { sourceArn: predecessor, targetArn });
+  assert.deepEqual(candidateTransaction.Statement.find(({ Sid }) => Sid === "ActivateBackendCandidate").Condition.ArnEquals["ecs:task-definition"], [predecessor, targetArn]);
+  const replay = buildNormalActivationTransactionPolicy({ sourceArn: targetArn, targetArn });
+  assert.equal(replay.Statement.find(({ Sid }) => Sid === "ActivateBackendCandidate").Condition.ArnEquals["ecs:task-definition"], targetArn);
+  assert.equal(replay.Statement.some(({ Sid }) => Sid === "RecoverLegacyBackend"), false);
+});
+
+test("post-success administrator contraction restores exact steady-state authority idempotently", () => {
+  let livePolicy = buildNormalActivationTransactionPolicy({ sourceArn, targetArn });
+  let writes = 0;
+  let runningDigest = digest;
+  const run = (command) => {
+    const joined = command.join(" ");
+    let response;
+    if (joined.startsWith("sts get-caller-identity")) response = { Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.administratorArn };
+    else if (joined.startsWith("s3 cp")) return JSON.stringify(state());
+    else if (joined.startsWith("ecs describe-services")) response = { services: [stableService(targetArn)] };
+    else if (joined.startsWith("ecs list-tasks")) response = listedTasks;
+    else if (joined.startsWith("ecs describe-tasks")) response = describedTasks(targetArn, runningDigest);
+    else if (joined.startsWith("iam get-policy ")) response = { Policy: { DefaultVersionId: writes ? "v4" : "v3" } };
+    else if (joined.startsWith("iam get-policy-version")) response = { PolicyVersion: { Document: livePolicy } };
+    else if (joined.startsWith("iam list-policy-versions")) response = { Versions: [{ VersionId: "v3", IsDefaultVersion: true, CreateDate: "2026-08-01T00:00:00Z" }] };
+    else if (joined.startsWith("iam create-policy-version")) { livePolicy = JSON.parse(command[command.indexOf("--policy-document") + 1]); writes += 1; return ""; }
+    else if (joined.startsWith("iam simulate-principal-policy")) response = { EvaluationResults: [{ EvalActionName: "ecs:UpdateService", EvalResourceName: NORMAL_ACTIVATION.serviceArn, EvalDecision: simulatedTarget(command) === targetArn ? "allowed" : "implicitDeny" }] };
+    else throw new Error(`unexpected command ${joined}`);
+    return JSON.stringify(response);
+  };
+  const contracted = contractNormalActivationPolicy({ run, sourceSha, sourceArn });
+  assert.equal(contracted.status, "CONTRACTED");
+  assertNormalActivationPolicy(livePolicy, targetArn);
+  assert.equal(contractNormalActivationPolicy({ run, sourceSha, sourceArn }).status, "ALREADY_CONTRACTED");
+  assert.equal(writes, 1);
+  runningDigest = sourceDigest;
+  assert.throws(() => contractNormalActivationPolicy({ run, sourceSha, sourceArn }), /running task/);
+  assert.equal(writes, 1);
+});
+
+test("live outcome reconciliation verifies exact SOURCE/TARGET running digests", () => {
+  const binding = { sourceArn, targetArn, sourceDigest, digest, desiredCount: 2 };
+  const outcomeRun = ({ currentArn = sourceArn, runningDigest = sourceDigest } = {}) => (command) => {
+    const joined = command.join(" ");
+    if (joined.startsWith("ecs describe-services")) return JSON.stringify({ services: [stableService(currentArn)] });
+    if (joined.startsWith("ecs list-tasks")) return JSON.stringify({ taskArns: ["task-1", "task-2"] });
+    if (joined.startsWith("ecs describe-tasks")) return JSON.stringify({ failures: [], tasks: [1, 2].map((value) => ({ lastStatus: "RUNNING", taskDefinitionArn: currentArn, containers: [{ name: "backend", imageDigest: runningDigest }] })) });
+    throw new Error(`unexpected command ${joined}`);
+  };
+  assert.equal(classifyNormalActivationLiveOutcome({ run: outcomeRun(), binding }).status, "SOURCE_STABLE");
+  assert.equal(classifyNormalActivationLiveOutcome({ run: outcomeRun({ currentArn: targetArn, runningDigest: digest }), binding }).status, "TARGET_STABLE");
+  assert.equal(classifyNormalActivationLiveOutcome({ run: outcomeRun({ runningDigest: digest }), binding }).status, "LIVE_STATE_UNAUTHENTICATED");
+});
+
+test("normal activation simulation uses canonical AWS CLI context structures for exact candidate and legacy SOURCE revisions", () => {
   assert.deepEqual(iamSimulationContextArgs(normalActivationSimulationContext(targetArn)), contextArgsFor(targetArn));
-  assert.throws(() => normalActivationSimulationContext("arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48"), /exact Stage-B candidate revision/);
+  assert.deepEqual(iamSimulationContextArgs(normalActivationSimulationContext(sourceArn)), contextArgsFor(sourceArn));
+  assert.throws(() => normalActivationSimulationContext("arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-worker:1"), /outside the permitted/);
 });
 
 test("ambiguous policy publication is reconciled only by authenticated exact readback", () => {
@@ -151,6 +233,10 @@ test("ambiguous policy publication is reconciled only by authenticated exact rea
       let response;
       if (joined.startsWith("sts get-caller-identity")) response = { Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.administratorArn };
       else if (joined.startsWith("s3 cp")) return JSON.stringify(state());
+      else if (joined.startsWith("ecs describe-services")) response = { services: [stableService()] };
+      else if (joined.startsWith("ecs describe-task-definition")) response = sourceTask();
+      else if (joined.startsWith("ecs list-tasks")) response = listedTasks;
+      else if (joined.startsWith("ecs describe-tasks")) response = describedTasks();
       else if (joined.startsWith("iam get-policy ")) {
         if (createAttempted && failReadback) throw new Error("READBACK_DENIED");
         response = { Policy: { DefaultVersionId: createAttempted ? "v4" : "v3" } };
@@ -162,7 +248,7 @@ test("ambiguous policy publication is reconciled only by authenticated exact rea
         throw new Error("AMBIGUOUS_CREATE_RESULT");
       } else if (joined.startsWith("iam simulate-principal-policy")) {
         const testedArn = simulatedTarget(command);
-        response = { EvaluationResults: [{ EvalActionName: "ecs:UpdateService", EvalResourceName: NORMAL_ACTIVATION.serviceArn, EvalDecision: testedArn === targetArn ? "allowed" : "implicitDeny" }] };
+        response = { EvaluationResults: [{ EvalActionName: "ecs:UpdateService", EvalResourceName: NORMAL_ACTIVATION.serviceArn, EvalDecision: new Set([sourceArn, targetArn]).has(testedArn) ? "allowed" : "implicitDeny" }] };
       } else throw new Error(`unexpected command ${joined}`);
       return JSON.stringify(response);
     };
@@ -196,6 +282,10 @@ test("post-mutation simulation failure reports authenticated convergence without
     let response;
     if (joined.startsWith("sts get-caller-identity")) response = { Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.administratorArn };
     else if (joined.startsWith("s3 cp")) return JSON.stringify(state());
+    else if (joined.startsWith("ecs describe-services")) response = { services: [stableService()] };
+    else if (joined.startsWith("ecs describe-task-definition")) response = sourceTask();
+    else if (joined.startsWith("ecs list-tasks")) response = listedTasks;
+    else if (joined.startsWith("ecs describe-tasks")) response = describedTasks();
     else if (joined.startsWith("iam get-policy ")) response = { Policy: { DefaultVersionId: "v4" } };
     else if (joined.startsWith("iam get-policy-version")) response = { PolicyVersion: { Document: livePolicy } };
     else if (joined.startsWith("iam list-policy-versions")) response = { Versions: [{ VersionId: "v4", IsDefaultVersion: true, CreateDate: "2026-08-01T00:00:00Z" }] };
@@ -222,6 +312,10 @@ test("policy-version pruning plus failed publication reports partial convergence
     let response;
     if (joined.startsWith("sts get-caller-identity")) response = { Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.administratorArn };
     else if (joined.startsWith("s3 cp")) return JSON.stringify(state());
+    else if (joined.startsWith("ecs describe-services")) response = { services: [stableService()] };
+    else if (joined.startsWith("ecs describe-task-definition")) response = sourceTask();
+    else if (joined.startsWith("ecs list-tasks")) response = listedTasks;
+    else if (joined.startsWith("ecs describe-tasks")) response = describedTasks();
     else if (joined.startsWith("iam get-policy ")) response = { Policy: { DefaultVersionId: "v5" } };
     else if (joined.startsWith("iam get-policy-version")) response = { PolicyVersion: { Document: predecessor } };
     else if (joined.startsWith("iam list-policy-versions")) response = { Versions: Array.from({ length: 5 }, (_, index) => ({ VersionId: `v${index + 1}`, IsDefaultVersion: index === 4, CreateDate: `2026-08-0${index + 1}T00:00:00Z` })) };
@@ -268,6 +362,10 @@ test("malformed policy-version topology is rejected before deletion or publicati
       let response;
       if (joined.startsWith("sts get-caller-identity")) response = { Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.administratorArn };
       else if (joined.startsWith("s3 cp")) return JSON.stringify(state());
+      else if (joined.startsWith("ecs describe-services")) response = { services: [stableService()] };
+      else if (joined.startsWith("ecs describe-task-definition")) response = sourceTask();
+      else if (joined.startsWith("ecs list-tasks")) response = listedTasks;
+      else if (joined.startsWith("ecs describe-tasks")) response = describedTasks();
       else if (joined.startsWith("iam get-policy ")) response = { Policy: { DefaultVersionId: "v3" } };
       else if (joined.startsWith("iam get-policy-version")) response = { PolicyVersion: { Document: predecessor } };
       else if (joined.startsWith("iam list-policy-versions")) response = { Versions: versions };

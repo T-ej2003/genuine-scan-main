@@ -24,17 +24,30 @@ After all three pass for the exact target SHA, it dispatches `release-gate.yml` 
 
 `Release Gate` is the final protected production deploy gate only. It keeps the existing `production` GitHub Environment approval and the Ansible deployment job. If `Release Gate` reports missing required gates, stop and run `Release Train` for the target SHA. Direct `Release Gate` use with `expert_override=true` is an emergency expert-only path after human verification.
 
-Operator commands:
+Operator command (the authorization file must be the canonical private output
+of `production-image-authorization.mjs`; the workflow authenticates it again):
 
 ```bash
-gh workflow run release-train.yml --ref main -f git_ref=main
-gh workflow run release-train.yml --ref main -f git_ref=main -f target_sha=<main_sha>
+authorization_json="$(jq -c . < "$NORMAL_IMAGE_AUTHORIZATION_FILE")"
+authorization_sha256="$(shasum -a 256 "$NORMAL_IMAGE_AUTHORIZATION_FILE" | awk '{print $1}')"
+gh workflow run release-train.yml --ref main \
+  -f git_ref=main \
+  -f target_sha=<main_sha> \
+  -f normal_image_authorization_json="$authorization_json" \
+  -f normal_image_authorization_sha256="$authorization_sha256"
 ```
 
-Expert-only direct gate:
+Direct normal Release Gate dispatch must carry the same exact authorization,
+frontend-preservation, source, and Release Train run bindings:
 
 ```bash
-gh workflow run release-gate.yml --ref <main_sha> -f git_ref=main -f target_sha=<main_sha> -f expert_override=true
+gh workflow run release-gate.yml --ref main \
+  -f git_ref=main \
+  -f target_sha=<main_sha> \
+  -f release_train_run_id=<release_train_run_id> \
+  -f preserve_current_frontend=true \
+  -f normal_image_authorization_json="$authorization_json" \
+  -f normal_image_authorization_sha256="$authorization_sha256"
 ```
 
 DR automation work should happen on `aws-dr-finish` or an approved feature branch, not directly on `main`.

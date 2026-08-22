@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "582d26fa8ffaf87a1860910eed36a457544f40d296d70152c8762cd5ce170f3a",
+  "sourceContractSha256": "338cb8dffbe92620827d9c6a61a97b9ef5c1797a21f44e5710172c6200c9d073",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -212,7 +212,7 @@
     },
     {
       "path": "scripts/aws/deploy-ecs-service.sh",
-      "sha256": "675ca5225fc6919c8f54cacc283df1d4b3a18402349a22d049be1dcbcc0438bc"
+      "sha256": "89e8e1e393f6e6e6b6d0fa066de2204e1f3a2948df3391760dc6b3cbb91e32d5"
     },
     {
       "path": "scripts/aws/publish-ecs-images.sh",
@@ -228,11 +228,11 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "536cb9accec12675e006214b4375a10fed69033f17f7090159c4cc5ab9354aeb"
+      "sha256": "7a8de803ef17a158dd70a01c7b9dcb87d91d144a85bc9ac48f21da5be2cbd5fc"
     },
     {
       "path": ".github/workflows/release-train.yml",
-      "sha256": "0a65a0d8268d918b5326b6c56fa5399246437a644e3ddd75f22ec28c6835b2d3"
+      "sha256": "03167fab323d3694a9b5fae0fe4d23a0d3436383f8230f3907236669902fbd87"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -324,7 +324,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:582d26fa8ffaf87a1860910eed36a457544f40d296d70152c8762cd5ce170f3a",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:338cb8dffbe92620827d9c6a61a97b9ef5c1797a21f44e5710172c6200c9d073",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

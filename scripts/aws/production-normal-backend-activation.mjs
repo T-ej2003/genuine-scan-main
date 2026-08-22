@@ -9,23 +9,33 @@ import { assertImageAuthorization, authorizedBackendDigest } from "./production-
 import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { iamSimulationContextArgs } from "./iam-simulation-context.mjs";
-import { NORMAL_ACTIVATION, NORMAL_CANDIDATE_ARN, assertNormalActivationPolicy, assertNormalActivationPolicyDeltaOnly, buildNormalActivationPolicy, canonicalNormalActivationValue } from "./production-normal-backend-activation-policy.mjs";
+import { NORMAL_ACTIVATION, NORMAL_CANDIDATE_ARN, NORMAL_LEGACY_SOURCE_ARN, assertNormalActivationPolicy, assertNormalActivationPolicyTransitionOnly, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, canonicalNormalActivationValue } from "./production-normal-backend-activation-policy.mjs";
 import { stageBApprovalIdForReleaseSha } from "./production-green-stage-b-contract.mjs";
 import { readBoundStageBPrivateJson } from "./stage-b-artifact-contract.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
-export { NORMAL_ACTIVATION, assertNormalActivationPolicy, buildNormalActivationPolicy } from "./production-normal-backend-activation-policy.mjs";
+export { NORMAL_ACTIVATION, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy } from "./production-normal-backend-activation-policy.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const canonical = canonicalNormalActivationValue;
 const POLICY_VERSION = /^v[1-9][0-9]*$/;
+const WORKFLOW_RUN_ID = /^[1-9][0-9]*$/;
+const BACKEND_IMAGE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@(sha256:[a-f0-9]{64})$/;
 
 export class NormalActivationPolicyConvergenceError extends Error {
   constructor(report, cause) {
     super(`${report.status}: ${cause instanceof Error ? cause.message : String(cause)} EXACT_NEXT_ACTION=${report.exactNextAction}`, { cause });
     this.name = "NormalActivationPolicyConvergenceError";
+    this.report = Object.freeze(report);
+  }
+}
+
+export class NormalActivationExecutionError extends Error {
+  constructor(report, cause) {
+    super(`${report.status}: ${cause instanceof Error ? cause.message : String(cause)} EXACT_NEXT_ACTION=${report.exactNextAction}`, { cause });
+    this.name = "NormalActivationExecutionError";
     this.report = Object.freeze(report);
   }
 }
@@ -91,7 +101,7 @@ function assertReleaseReceipt(receipt, { sourceSha, imageAuthorization }) {
   return receipt.approvalId;
 }
 
-function assertService(service, expectedCurrentArn, targetArn) {
+function assertService(service, expectedCurrentArn) {
   if (service?.serviceArn !== NORMAL_ACTIVATION.serviceArn || service.clusterArn !== NORMAL_ACTIVATION.clusterArn || service.status !== "ACTIVE" || service.taskDefinition !== expectedCurrentArn || !Number.isInteger(service.desiredCount) || service.desiredCount < 1) throw new Error("Production backend service identity/current revision is invalid.");
   const deployments = service.deployments || [];
   if (deployments.length !== 1 || deployments[0]?.status !== "PRIMARY" || deployments[0]?.taskDefinition !== expectedCurrentArn || deployments[0]?.pendingCount !== 0 || deployments[0]?.runningCount !== service.desiredCount || (deployments[0]?.rolloutState && deployments[0].rolloutState !== "COMPLETED")) throw new Error("Production backend service changed or is not stable before activation.");
@@ -106,19 +116,56 @@ function assertTaskDefinition(response, candidate) {
   return true;
 }
 
-export function collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn, validateImageAuthorization } = {}) {
+export function classifyNormalActivationSource(taskDefinitionArn) {
+  if (NORMAL_CANDIDATE_ARN.test(taskDefinitionArn || "")) return "STAGE_B_CANDIDATE";
+  if (NORMAL_LEGACY_SOURCE_ARN.test(taskDefinitionArn || "")) return "LEGACY_BACKEND";
+  throw new Error("Normal activation SOURCE task definition is outside the permitted rollback families.");
+}
+
+function sourceTaskDefinitionIdentity(response, sourceArn) {
+  const task = response?.taskDefinition;
+  const sourceClass = classifyNormalActivationSource(sourceArn);
+  if (task?.taskDefinitionArn !== sourceArn || task.status !== "ACTIVE") throw new Error("Normal activation SOURCE task definition is not the exact active revision.");
+  const family = sourceClass === "STAGE_B_CANDIDATE" ? NORMAL_ACTIVATION.family : "mscqr-backend";
+  if (task.family !== family) throw new Error("Normal activation SOURCE task-definition family is inconsistent.");
+  const selected = (task.containerDefinitions || []).filter(({ name }) => name === NORMAL_ACTIVATION.container);
+  const match = selected.length === 1 ? BACKEND_IMAGE.exec(selected[0].image || "") : null;
+  if (!match) throw new Error("Normal activation SOURCE backend image is not an exact immutable production digest.");
+  return Object.freeze({ sourceArn, sourceClass, sourceImage: selected[0].image, sourceDigest: match[1] });
+}
+
+function assertRunningServiceTarget(run, { taskDefinitionArn, digest, desiredCount }) {
+  const listed = parseJson(run, ["ecs", "list-tasks", "--cluster", NORMAL_ACTIVATION.cluster, "--service-name", NORMAL_ACTIVATION.service, "--desired-status", "RUNNING"]);
+  if (!Array.isArray(listed?.taskArns) || listed.nextToken || listed.taskArns.length !== desiredCount) throw new Error("Normal activation running task list is incomplete.");
+  const tasks = parseJson(run, ["ecs", "describe-tasks", "--cluster", NORMAL_ACTIVATION.cluster, "--tasks", ...listed.taskArns]);
+  if (!Array.isArray(tasks?.failures) || tasks.failures.length !== 0 || !Array.isArray(tasks.tasks) || tasks.tasks.length !== desiredCount) throw new Error("Normal activation running task readback is incomplete.");
+  for (const task of tasks.tasks) {
+    const containers = (task.containers || []).filter(({ name }) => name === NORMAL_ACTIVATION.container);
+    if (task.lastStatus !== "RUNNING" || task.taskDefinitionArn !== taskDefinitionArn || containers.length !== 1 || containers[0].imageDigest !== digest) throw new Error("Normal activation running task does not match the authenticated task definition and digest.");
+  }
+  return true;
+}
+
+function assertRunIdentity(runIdentity) {
+  if (!WORKFLOW_RUN_ID.test(String(runIdentity?.workflowRunId || "")) || !WORKFLOW_RUN_ID.test(String(runIdentity?.releaseTrainRunId || ""))) throw new Error("Normal activation requires exact Release Gate and Release Train run identities.");
+  return Object.freeze({ workflowRunId: String(runIdentity.workflowRunId), releaseTrainRunId: String(runIdentity.releaseTrainRunId) });
+}
+
+export function collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn, validateImageAuthorization, runIdentity } = {}) {
   if (typeof run !== "function") throw new Error("Authenticated AWS command runner is required.");
   const caller = parseJson(run, ["sts", "get-caller-identity"]);
   if (caller.Account !== NORMAL_ACTIVATION.account || !new RegExp(`^arn:aws:sts::${NORMAL_ACTIVATION.account}:assumed-role/mscqr-production-release-deployer/[^/]+$`).test(caller.Arn || "")) throw new Error("Normal activation requires the canonical release-deployer session.");
   const liveState = readLiveState(run);
   const candidate = deriveNormalBackendCandidate({ state: liveState.state, stateBytes: liveState.bytes, sourceSha, imageAuthorization, ...(validateImageAuthorization ? { validateImageAuthorization } : {}) });
-  const policy = readLivePolicy(run);
-  assertNormalActivationPolicy(policy.document, candidate.targetArn);
   assertTaskDefinition(parseJson(run, ["ecs", "describe-task-definition", "--task-definition", candidate.targetArn, "--include", "TAGS"]), candidate);
   const service = parseJson(run, ["ecs", "describe-services", "--cluster", NORMAL_ACTIVATION.cluster, "--services", NORMAL_ACTIVATION.service]).services?.[0];
   const current = expectedCurrentTaskDefinitionArn || service?.taskDefinition;
-  assertService(service, current, candidate.targetArn);
-  return Object.freeze({ schemaVersion: 1, releaseMode: "normal", ...candidate, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, expectedCurrentTaskDefinitionArn: current, policyArn: NORMAL_ACTIVATION.policyArn, policyVersionId: policy.defaultVersionId, livePolicySha256: sha256(canonical(policy.document)) });
+  assertService(service, current);
+  const source = sourceTaskDefinitionIdentity(parseJson(run, ["ecs", "describe-task-definition", "--task-definition", current, "--include", "TAGS"]), current);
+  assertRunningServiceTarget(run, { taskDefinitionArn: current, digest: source.sourceDigest, desiredCount: service.desiredCount });
+  const policy = readLivePolicy(run);
+  assertNormalActivationTransactionPolicy(policy.document, { sourceArn: current, targetArn: candidate.targetArn });
+  return Object.freeze({ schemaVersion: 2, releaseMode: "normal", ...candidate, ...source, desiredCount: service.desiredCount, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, expectedCurrentTaskDefinitionArn: current, policyArn: NORMAL_ACTIVATION.policyArn, policyVersionId: policy.defaultVersionId, livePolicySha256: sha256(canonical(policy.document)), ...(runIdentity ? assertRunIdentity(runIdentity) : {}) });
 }
 
 export function assertNormalActivationBinding(binding, expected) {
@@ -127,7 +174,7 @@ export function assertNormalActivationBinding(binding, expected) {
 }
 
 export function normalActivationSimulationContext(taskDefinitionArn) {
-  if (!NORMAL_CANDIDATE_ARN.test(taskDefinitionArn || "")) throw new Error("Normal activation simulation requires one exact Stage-B candidate revision.");
+  classifyNormalActivationSource(taskDefinitionArn);
   return Object.freeze([
     Object.freeze({ key: "aws:RequestedRegion", type: "string", values: Object.freeze([NORMAL_ACTIVATION.region]) }),
     Object.freeze({ key: "ecs:cluster", type: "string", values: Object.freeze([NORMAL_ACTIVATION.clusterArn]) }),
@@ -157,57 +204,103 @@ function convergenceFailure({ mutationAttempted, readbackVerified, confirmedIamW
   return new NormalActivationPolicyConvergenceError({ status, mutationAttempted, readbackVerified, confirmedIamWrites, unknownMutations: mutationAttempted && !readbackVerified ? 1 : 0, rollbackAttempted: false, retrySafe: true, exactNextAction }, error);
 }
 
+function publishNormalActivationPolicy({ run, before, expected, assertAfter, progress }) {
+  let ambiguousMutationError = null;
+  let policyVersionCreateAttempted = false;
+  if (canonical(before.document) !== canonical(expected)) {
+    try {
+      const versions = parseJson(run, ["iam", "list-policy-versions", "--policy-arn", NORMAL_ACTIVATION.policyArn]).Versions;
+      const versionToDelete = oldestDeletablePolicyVersion(versions, before.defaultVersionId);
+      if (versionToDelete) {
+        progress.mutationAttempted = true;
+        run(["iam", "delete-policy-version", "--policy-arn", NORMAL_ACTIVATION.policyArn, "--version-id", versionToDelete, "--no-cli-pager"]); progress.confirmedIamWrites += 1;
+      }
+      progress.mutationAttempted = true;
+      policyVersionCreateAttempted = true;
+      run(["iam", "create-policy-version", "--policy-arn", NORMAL_ACTIVATION.policyArn, "--policy-document", JSON.stringify(expected), "--set-as-default", "--no-cli-pager"]); progress.confirmedIamWrites += 1;
+    } catch (error) { ambiguousMutationError = error; }
+  }
+  const after = readLivePolicy(run);
+  assertAfter(after.document);
+  progress.readbackVerified = true;
+  if (ambiguousMutationError && policyVersionCreateAttempted) progress.confirmedIamWrites += 1;
+  return { after, ambiguousMutationError };
+}
+
+function readNormalActivationStateTarget(run, sourceSha) {
+  const liveState = readLiveState(run);
+  const state = liveState.state;
+  const attributes = backendResource(state);
+  const targetArn = attributes?.arn;
+  const containers = JSON.parse(attributes?.container_definitions || "null");
+  const backend = containers?.filter(({ name }) => name === NORMAL_ACTIVATION.container) || [];
+  const releaseSha = new Map((backend[0]?.environment || []).map(({ name, value }) => [name, value])).get("RELEASE_GIT_SHA");
+  const imageMatch = backend.length === 1 ? BACKEND_IMAGE.exec(backend[0].image || "") : null;
+  if (state.lineage !== NORMAL_ACTIVATION.lineage || !Number.isInteger(state.serial) || state.serial < NORMAL_ACTIVATION.minimumSerial || state.outputs?.task_definition_arns?.value?.backend !== targetArn || state.outputs?.bound_images?.value?.backend !== backend[0]?.image || releaseSha !== sourceSha || !NORMAL_CANDIDATE_ARN.test(targetArn || "") || !imageMatch) throw new Error("Normal activation IAM convergence requires the current-source authenticated Stage-B candidate state.");
+  return { liveState, state, targetArn, targetDigest: imageMatch[1] };
+}
+
+function readNormalActivationServiceSource(run, targetArn) {
+  const service = parseJson(run, ["ecs", "describe-services", "--cluster", NORMAL_ACTIVATION.cluster, "--services", NORMAL_ACTIVATION.service]).services?.[0];
+  const sourceArn = service?.taskDefinition;
+  assertService(service, sourceArn);
+  const source = sourceTaskDefinitionIdentity(parseJson(run, ["ecs", "describe-task-definition", "--task-definition", sourceArn, "--include", "TAGS"]), sourceArn);
+  assertRunningServiceTarget(run, { taskDefinitionArn: sourceArn, digest: source.sourceDigest, desiredCount: service.desiredCount });
+  return { service, sourceArn, source, alreadyAtTarget: sourceArn === targetArn };
+}
+
+function normalActivationDeniedTargets(sourceArn, targetArn) {
+  const revision = Number(NORMAL_CANDIDATE_ARN.exec(targetArn)[1]);
+  const candidates = [revision - 2, revision - 1, revision + 1, revision + 2].filter((value) => value > 0).map((value) => targetArn.replace(/:[1-9][0-9]*$/, `:${value}`));
+  const legacy = [1, 2].map((revisionValue) => `arn:aws:ecs:${NORMAL_ACTIVATION.region}:${NORMAL_ACTIVATION.account}:task-definition/mscqr-backend:${revisionValue}`);
+  return [...new Set([...candidates, ...legacy])].filter((arn) => arn !== sourceArn && arn !== targetArn);
+}
+
 export function convergeNormalActivationPolicy({ run, sourceSha } = {}) {
-  let mutationAttempted = false;
-  let readbackVerified = false;
-  let confirmedIamWrites = 0;
+  const progress = { mutationAttempted: false, readbackVerified: false, confirmedIamWrites: 0 };
   try {
     if (typeof run !== "function" || !SHA.test(sourceSha || "")) throw new Error("Governed normal activation convergence inputs are invalid.");
     const caller = parseJson(run, ["sts", "get-caller-identity"]);
     if (caller.Account !== NORMAL_ACTIVATION.account || caller.Arn !== NORMAL_ACTIVATION.administratorArn) throw new Error("Normal activation IAM convergence requires the governed root administrator identity.");
-    const liveState = readLiveState(run);
-    const state = liveState.state;
-    const attributes = backendResource(state);
-    const targetArn = attributes?.arn;
-    const containers = JSON.parse(attributes?.container_definitions || "null");
-    const releaseSha = new Map((containers?.find(({ name }) => name === NORMAL_ACTIVATION.container)?.environment || []).map(({ name, value }) => [name, value])).get("RELEASE_GIT_SHA");
-    if (state.lineage !== NORMAL_ACTIVATION.lineage || !Number.isInteger(state.serial) || state.serial < NORMAL_ACTIVATION.minimumSerial || state.outputs?.task_definition_arns?.value?.backend !== targetArn || releaseSha !== sourceSha || !NORMAL_CANDIDATE_ARN.test(targetArn || "")) throw new Error("Normal activation IAM convergence requires the current-source authenticated Stage-B candidate state.");
-    const expected = buildNormalActivationPolicy(targetArn);
+    const { liveState, state, targetArn } = readNormalActivationStateTarget(run, sourceSha);
+    const { service, sourceArn, source, alreadyAtTarget } = readNormalActivationServiceSource(run, targetArn);
+    const expected = buildNormalActivationTransactionPolicy({ sourceArn, targetArn });
     const before = readLivePolicy(run);
-    const previousTargetArn = assertNormalActivationPolicyDeltaOnly(before.document);
-    let ambiguousMutationError = null;
-    let policyVersionCreateAttempted = false;
-    if (canonical(before.document) !== canonical(expected)) {
-      try {
-        const versions = parseJson(run, ["iam", "list-policy-versions", "--policy-arn", NORMAL_ACTIVATION.policyArn]).Versions;
-        const versionToDelete = oldestDeletablePolicyVersion(versions, before.defaultVersionId);
-        if (versionToDelete) {
-          mutationAttempted = true;
-          run(["iam", "delete-policy-version", "--policy-arn", NORMAL_ACTIVATION.policyArn, "--version-id", versionToDelete, "--no-cli-pager"]); confirmedIamWrites += 1;
-        }
-        mutationAttempted = true;
-        policyVersionCreateAttempted = true;
-        run(["iam", "create-policy-version", "--policy-arn", NORMAL_ACTIVATION.policyArn, "--policy-document", JSON.stringify(expected), "--set-as-default", "--no-cli-pager"]); confirmedIamWrites += 1;
-      } catch (error) { ambiguousMutationError = error; }
-    }
-    const after = readLivePolicy(run);
-    assertNormalActivationPolicy(after.document, targetArn);
-    readbackVerified = true;
-    if (ambiguousMutationError && policyVersionCreateAttempted) confirmedIamWrites += 1;
-    const exact = simulateNormalActivationTarget(run, targetArn);
-    const revision = Number(NORMAL_CANDIDATE_ARN.exec(targetArn)[1]);
-    const staleRevision = revision > 2 ? revision - 2 : revision + 2;
-    const deniedTargets = new Set([
-      ...[revision - 1, revision + 1].filter((value) => value > 0).map((value) => targetArn.replace(/:[1-9][0-9]*$/, `:${value}`)),
-      targetArn.replace(/:[1-9][0-9]*$/, `:${staleRevision}`),
-      ...(previousTargetArn !== targetArn ? [previousTargetArn] : []),
-    ]);
-    for (const deniedTargetArn of deniedTargets) if (simulateNormalActivationTarget(run, deniedTargetArn) !== "implicitDeny") throw new Error("Stale or adjacent Stage-B candidate revision is unexpectedly authorized.");
-    if (exact !== "allowed") throw new Error("Exact Stage-B candidate revision is not authorized after IAM convergence.");
-    return Object.freeze({ status: mutationAttempted ? ambiguousMutationError ? "RECONCILED_AFTER_AMBIGUOUS_WRITE" : "CONVERGED" : "ALREADY_CONVERGED", sourceSha, targetArn, stateLineage: state.lineage, stateSerial: state.serial, stateSha256: sha256(liveState.bytes), policyVersionId: after.defaultVersionId, iamWrites: confirmedIamWrites, mutationAttempted, mutationOutcome: ambiguousMutationError ? "CONFIRMED_SUCCESS_READBACK" : mutationAttempted ? "CONFIRMED_SUCCESS" : "NO_MUTATION", readbackVerified, validationComplete: true, unknownMutations: 0 });
+    assertNormalActivationPolicyTransitionOnly(before.document, { sourceArn, targetArn });
+    const publication = publishNormalActivationPolicy({ run, before, expected, assertAfter: (document) => assertNormalActivationTransactionPolicy(document, { sourceArn, targetArn }), progress });
+    const { after, ambiguousMutationError } = publication;
+    for (const allowedTargetArn of new Set([sourceArn, targetArn])) if (simulateNormalActivationTarget(run, allowedTargetArn) !== "allowed") throw new Error("Exact normal activation SOURCE or TARGET revision is not authorized after IAM convergence.");
+    for (const deniedTargetArn of normalActivationDeniedTargets(sourceArn, targetArn)) if (simulateNormalActivationTarget(run, deniedTargetArn) !== "implicitDeny") throw new Error("Unrelated normal or recovery task-definition revision is unexpectedly authorized during normal activation.");
+    return Object.freeze({ status: progress.mutationAttempted ? ambiguousMutationError ? "RECONCILED_AFTER_AMBIGUOUS_WRITE" : "CONVERGED" : "ALREADY_CONVERGED", sourceSha, sourceArn, sourceClass: source.sourceClass, sourceDigest: source.sourceDigest, targetArn, desiredCount: service.desiredCount, alreadyAtTarget, stateLineage: state.lineage, stateSerial: state.serial, stateSha256: sha256(liveState.bytes), policyVersionId: after.defaultVersionId, iamWrites: progress.confirmedIamWrites, mutationAttempted: progress.mutationAttempted, mutationOutcome: ambiguousMutationError ? "CONFIRMED_SUCCESS_READBACK" : progress.mutationAttempted ? "CONFIRMED_SUCCESS" : "NO_MUTATION", readbackVerified: progress.readbackVerified, validationComplete: true, unknownMutations: 0 });
   } catch (error) {
     if (error instanceof NormalActivationPolicyConvergenceError) throw error;
-    throw convergenceFailure({ mutationAttempted, readbackVerified, confirmedIamWrites }, error);
+    throw convergenceFailure(progress, error);
+  }
+}
+
+export function contractNormalActivationPolicy({ run, sourceSha, sourceArn } = {}) {
+  const progress = { mutationAttempted: false, readbackVerified: false, confirmedIamWrites: 0 };
+  try {
+    if (typeof run !== "function" || !SHA.test(sourceSha || "") || !sourceArn) throw new Error("Governed normal activation contraction inputs are invalid.");
+    const caller = parseJson(run, ["sts", "get-caller-identity"]);
+    if (caller.Account !== NORMAL_ACTIVATION.account || caller.Arn !== NORMAL_ACTIVATION.administratorArn) throw new Error("Normal activation IAM contraction requires the governed root administrator identity.");
+    const { state, targetArn, targetDigest } = readNormalActivationStateTarget(run, sourceSha);
+    classifyNormalActivationSource(sourceArn);
+    const service = parseJson(run, ["ecs", "describe-services", "--cluster", NORMAL_ACTIVATION.cluster, "--services", NORMAL_ACTIVATION.service]).services?.[0];
+    assertService(service, targetArn);
+    assertRunningServiceTarget(run, { taskDefinitionArn: targetArn, digest: targetDigest, desiredCount: service.desiredCount });
+    const before = readLivePolicy(run);
+    let initialState;
+    try { assertNormalActivationPolicy(before.document, targetArn); initialState = "STEADY_TARGET"; }
+    catch { assertNormalActivationTransactionPolicy(before.document, { sourceArn, targetArn }); initialState = "TRANSACTION"; }
+    const expected = buildNormalActivationPolicy(targetArn);
+    const publication = publishNormalActivationPolicy({ run, before, expected, assertAfter: (document) => assertNormalActivationPolicy(document, targetArn), progress });
+    const { after, ambiguousMutationError } = publication;
+    if (simulateNormalActivationTarget(run, targetArn) !== "allowed") throw new Error("Exact steady-state TARGET is not authorized after contraction.");
+    return Object.freeze({ status: progress.mutationAttempted ? ambiguousMutationError ? "CONTRACTION_RECONCILED_AFTER_AMBIGUOUS_WRITE" : "CONTRACTED" : "ALREADY_CONTRACTED", sourceSha, sourceArn, targetArn, initialState, stateLineage: state.lineage, stateSerial: state.serial, policyVersionId: after.defaultVersionId, iamWrites: progress.confirmedIamWrites, readbackVerified: progress.readbackVerified, unknownMutations: 0 });
+  } catch (error) {
+    if (error instanceof NormalActivationPolicyConvergenceError) throw error;
+    throw convergenceFailure(progress, error);
   }
 }
 
@@ -215,12 +308,25 @@ function writePrivateJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
 }
 
-export function executeNormalBackendActivation({ run, runScript = execFileSync, sourceSha, imageAuthorization, releaseReceipt, binding, metadataFile, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh") } = {}) {
+export function classifyNormalActivationLiveOutcome({ run, binding }) {
+  try {
+    const service = parseJson(run, ["ecs", "describe-services", "--cluster", NORMAL_ACTIVATION.cluster, "--services", NORMAL_ACTIVATION.service]).services?.[0];
+    const currentArn = service?.taskDefinition;
+    const expectedDigest = currentArn === binding.targetArn ? binding.digest : currentArn === binding.sourceArn ? binding.sourceDigest : null;
+    if (!expectedDigest) return Object.freeze({ status: "UNEXPECTED_SERVICE_TARGET", currentArn });
+    assertService(service, currentArn);
+    assertRunningServiceTarget(run, { taskDefinitionArn: currentArn, digest: expectedDigest, desiredCount: binding.desiredCount });
+    return Object.freeze({ status: currentArn === binding.sourceArn ? "SOURCE_STABLE" : "TARGET_STABLE", currentArn, runningDigest: expectedDigest });
+  } catch (error) { return Object.freeze({ status: "LIVE_STATE_UNAUTHENTICATED", error: error.message }); }
+}
+
+export function executeNormalBackendActivation({ run, runScript = execFileSync, sourceSha, imageAuthorization, releaseReceipt, binding, metadataFile, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh"), runIdentity } = {}) {
   assertReleaseReceipt(releaseReceipt, { sourceSha, imageAuthorization });
-  const fresh = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: binding?.expectedCurrentTaskDefinitionArn });
+  const fresh = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: binding?.expectedCurrentTaskDefinitionArn, runIdentity });
   assertNormalActivationBinding(binding, fresh);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-normal-activation-"));
   const bindingFile = path.join(directory, "binding.json");
+  const outcomeFile = path.join(directory, "outcome.json");
   try {
     writePrivateJson(bindingFile, binding);
     runScript(deployScript, [], { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: {
@@ -243,8 +349,21 @@ export function executeNormalBackendActivation({ run, runScript = execFileSync, 
       MSCQR_EXISTING_TASK_DEPLOYMENT_MODE: "normal-stage-b",
       NORMAL_ACTIVATION_BINDING_FILE: bindingFile,
       NORMAL_ACTIVATION_BINDING_SHA256: sha256(fs.readFileSync(bindingFile)),
+      NORMAL_ACTIVATION_OUTCOME_FILE: outcomeFile,
     } });
-    return Object.freeze({ status: binding.expectedCurrentTaskDefinitionArn === binding.targetArn ? "ALREADY_APPLIED_EXACT_TARGET" : "APPLIED_EXACT_TARGET", targetArn: binding.targetArn });
+    const metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
+    fs.writeFileSync(metadataFile, `${JSON.stringify({ ...metadata, normalActivationSourceArn: binding.sourceArn, normalActivationTargetArn: binding.targetArn, authorityContractionRequired: true, contractionCommand: `npm run production:normal-backend-activation -- --mode contract-policy --source-sha ${sourceSha} --source-task-definition ${binding.sourceArn} --admin-profile <governed-admin-profile>` }, null, 2)}\n`, { mode: 0o600 });
+    return Object.freeze({ status: binding.sourceArn === binding.targetArn ? "ALREADY_APPLIED_EXACT_TARGET" : "APPLIED_EXACT_TARGET", sourceArn: binding.sourceArn, targetArn: binding.targetArn, postSuccessAuthorityContractionRequired: true, exactNextAction: `RUN_GOVERNED_ADMIN_CONTRACTION_FOR_${binding.targetArn}` });
+  } catch (error) {
+    const outcome = classifyNormalActivationLiveOutcome({ run, binding });
+    let scriptOutcome;
+    try { scriptOutcome = JSON.parse(fs.readFileSync(outcomeFile, "utf8")); } catch { scriptOutcome = null; }
+    const noMutation = scriptOutcome?.updateState === "NOT_ATTEMPTED" && outcome.status === "SOURCE_STABLE";
+    const rollbackVerified = new Set(["VERIFIED_SOURCE", "SOURCE_ALREADY_RESTORED"]).has(scriptOutcome?.rollbackResult) && outcome.status === "SOURCE_STABLE";
+    const status = noMutation ? "NO_ECS_MUTATION_FAILED" : rollbackVerified ? "TARGET_FAILED_ROLLBACK_VERIFIED" : outcome.status === "TARGET_STABLE" ? "TARGET_REMAINS_RECONCILIATION_REQUIRED" : "ACTIVATION_STATE_UNAUTHENTICATED";
+    const report = { status, sourceArn: binding.sourceArn, targetArn: binding.targetArn, scriptOutcome, liveOutcome: outcome, rollbackVerified, retrySafe: noMutation || rollbackVerified, authorityContractionRequired: false, exactNextAction: noMutation || rollbackVerified ? "RETRY_SAME_AUTHENTICATED_NORMAL_ACTIVATION_TRANSACTION" : "READ_LIVE_SERVICE_WITH_GOVERNED_RELEASE_IDENTITY_AND_RECONCILE_BEFORE_RETRY" };
+    fs.writeFileSync(metadataFile, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
+    throw new NormalActivationExecutionError(report, error);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 
@@ -270,10 +389,18 @@ export function runCli(argv = process.argv.slice(2)) {
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }
+  if (mode === "contract-policy") {
+    const checkout = readStageBProtectedMainCheckout({ cwd: process.cwd() });
+    if (checkout.currentHead !== sourceSha) throw new Error("Normal activation contraction must run from exact protected main.");
+    const result = contractNormalActivationPolicy({ run: createProductionCommandRunner({ profile: required(values, "--admin-profile") }), sourceSha, sourceArn: required(values, "--source-task-definition") });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result;
+  }
   const imageAuthorization = readBoundStageBPrivateJson({ filePath: required(values, "--image-authorization"), expectedSha256: required(values, "--image-authorization-sha256"), label: "Normal release image authorization" });
   const run = createProductionCommandRunner();
+  const runIdentity = { workflowRunId: required(values, "--workflow-run-id"), releaseTrainRunId: required(values, "--release-train-run-id") };
   if (mode === "prepare") {
-    const binding = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization });
+    const binding = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, runIdentity });
     writePrivateJson(required(values, "--binding-out"), binding);
     process.stdout.write(`${JSON.stringify({ status: "AUTHORIZED", targetArn: binding.targetArn, stateSerial: binding.stateSerial })}\n`);
     return binding;
@@ -281,17 +408,17 @@ export function runCli(argv = process.argv.slice(2)) {
   if (mode === "execute") {
     const binding = readBoundStageBPrivateJson({ filePath: required(values, "--binding"), expectedSha256: required(values, "--binding-sha256"), label: "Normal backend activation binding" });
     const receipt = readBoundStageBPrivateJson({ filePath: required(values, "--release-receipt"), expectedSha256: required(values, "--release-receipt-sha256"), label: "Production RLS release receipt" });
-    const result = executeNormalBackendActivation({ run, sourceSha, imageAuthorization, releaseReceipt: receipt, binding, metadataFile: required(values, "--metadata-out") });
+    const result = executeNormalBackendActivation({ run, sourceSha, imageAuthorization, releaseReceipt: receipt, binding, metadataFile: required(values, "--metadata-out"), runIdentity });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }
-  throw new Error("--mode must be converge-policy, prepare, or execute.");
+  throw new Error("--mode must be converge-policy, contract-policy, prepare, or execute.");
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   try { runCli(); }
   catch (error) {
-    if (!(error instanceof NormalActivationPolicyConvergenceError)) throw error;
+    if (!(error instanceof NormalActivationPolicyConvergenceError) && !(error instanceof NormalActivationExecutionError)) throw error;
     process.stderr.write(`${JSON.stringify(error.report)}\n`);
     process.exitCode = 1;
   }
