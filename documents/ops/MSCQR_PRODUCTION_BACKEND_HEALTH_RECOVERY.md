@@ -110,8 +110,26 @@ closed without an update.
    approval. Record each file's SHA-256. The approval object must contain
    `ticket`, `approvedBy`, `approverRole`, `reason`, `verificationRef`,
    `sourceSha`, `currentTaskDefinitionArn`, and `recoveryImageDigest`.
-3. Dispatch `.github/workflows/release-gate.yml` on protected main with
-   `release_mode=backend-health-recovery` and the six recovery inputs.
+3. Dispatch through `scripts/aws/dispatch-production-backend-health-recovery.mjs`.
+   It serializes each JSON input once and derives the workflow value and SHA-256
+   from those exact transport bytes; do not compose byte-sensitive inputs with
+   shell command substitution. The dispatcher authenticates both canonical image
+   paths: a fresh publication uses the protected source SHA, while `IMAGE_REUSE`
+   retains its earlier authenticated `imageReleaseSha`; recovery writes that image
+   release identity, not the newer tooling SHA, into `GIT_SHA` and `RELEASE_GIT_SHA`.
+   It resolves the checked-out repository from its own script location, so private
+   authorization and approval files remain outside the worktree from any caller cwd.
+
+   ```bash
+   node scripts/aws/dispatch-production-backend-health-recovery.mjs \
+     --source-sha <protected-main-sha> \
+     --current-task-definition <exact-legacy-task-definition-arn> \
+     --recovery-image-digest sha256:<64-hex> \
+     --service mscqr-backend-servi-euw2 \
+     --release-mode BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME \
+     --image-authorization /secure/operator/image-authorization.json \
+     --approval /secure/operator/recovery-approval.json
+   ```
 4. Have an authorized reviewer approve the GitHub `production` environment
    deployment. Repository administrators must first configure that environment
    with required reviewers and administrator bypass disabled. Configure

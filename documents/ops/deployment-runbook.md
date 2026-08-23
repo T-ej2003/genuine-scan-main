@@ -29,7 +29,7 @@ of `production-image-authorization.mjs`; the workflow authenticates it again):
 
 ```bash
 authorization_json="$(jq -c . < "$NORMAL_IMAGE_AUTHORIZATION_FILE")"
-authorization_sha256="$(shasum -a 256 "$NORMAL_IMAGE_AUTHORIZATION_FILE" | awk '{print $1}')"
+authorization_sha256="$(printf '%s' "$authorization_json" | shasum -a 256 | awk '{print $1}')"
 gh workflow run release-train.yml --ref main \
   -f git_ref=main \
   -f target_sha=<main_sha> \
