@@ -399,12 +399,19 @@ jobs:
           P2_TEST_DATABASE_ADMIN_URL="$admin_url" npm run test:integration:ci
 
       - name: Full RLS verification and PostgreSQL 18.4 certification
+        env:
+          MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: ${{ runner.temp }}/full-rls-certification/disposable-certification-result.json
         run: |
           set -euo pipefail
           npm run rls:full-verify
           MSCQR_FULL_RLS_CERTIFICATION_CONFIRM=MSCQR_RUN_LOCAL_FULL_RLS_CERTIFICATION \
             MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL="${P2_TEST_DATABASE_ADMIN_URL:?Disposable PostgreSQL admin URL was not established}" \
             npm run rls:full-certify
+          if [ -n "$(git status --porcelain=v1)" ]; then
+            echo "::error::Disposable certification modified the protected deployment checkout."
+            git status --short
+            exit 1
+          fi
 
       - name: Authenticate production environment approval boundary
         id: production-environment-approval

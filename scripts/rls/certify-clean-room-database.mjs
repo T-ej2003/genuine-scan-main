@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { assertStageBArtifactPath, writeStageBPrivateFileAtomic } from "../aws/stage-b-artifact-contract.mjs";
 import { verifyFullRlsPackage } from "./verify-full-rls-package.mjs";
 import { applicationPathCertificationFamilies } from "./lib/application-path-certifications.mjs";
 import { EXPECTED_FORCE_RLS_TABLE_COUNT, EXPECTED_TABLE_COUNT } from "./lib/table-inventory-baseline.mjs";
@@ -11,12 +12,27 @@ import { EXPECTED_FORCE_RLS_TABLE_COUNT, EXPECTED_TABLE_COUNT } from "./lib/tabl
 export const CONFIRM_ENV = "MSCQR_FULL_RLS_CERTIFICATION_CONFIRM";
 export const CONFIRM_VALUE = "MSCQR_RUN_LOCAL_FULL_RLS_CERTIFICATION";
 export const DATABASE_ENV = "MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL";
+export const EVIDENCE_PATH_ENV = "MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH";
 const localHosts = new Set(["127.0.0.1", "localhost", "::1"]);
 const forbiddenMarkers = ["staging", "prod", "production", "amazonaws.com", "rds.amazonaws.com", "supabase", "neon", "railway", "render.com"];
 const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const generatedRoot = path.join(root, "documents/security/rls-program/generated");
 const sqlRoot = path.join(root, "scripts/rls/sql/generated");
 export const certificationEvidencePath = (env = process.env) => {
+  const configured = String(env[EVIDENCE_PATH_ENV] || "").trim();
+  if (configured) {
+    let resolved;
+    try {
+      resolved = assertStageBArtifactPath({ artifactPath: configured, repositoryRoot: root, label: "Certification evidence override" });
+    } catch (error) {
+      throw new FullRlsCertificationSafetyError(error instanceof Error ? error.message : String(error));
+    }
+    if (fs.existsSync(resolved)) {
+      const existing = fs.lstatSync(resolved);
+      if (!existing.isFile() || existing.isSymbolicLink()) throw new FullRlsCertificationSafetyError("Certification evidence override must be a regular non-symlink file");
+    }
+    return resolved;
+  }
   const family = String(env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY || "").trim();
   if (family && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(family)) {
     throw new FullRlsCertificationSafetyError("Certification family identifier is invalid");
@@ -25,6 +41,16 @@ export const certificationEvidencePath = (env = process.env) => {
     generatedRoot,
     family ? `disposable-certification-result.${family}.json` : "disposable-certification-result.json"
   );
+};
+
+export const writeCertificationEvidence = (filePath, value) => {
+  const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
+  const relative = path.relative(root, filePath);
+  if (relative.startsWith(`..${path.sep}`) || relative === "..") {
+    writeStageBPrivateFileAtomic({ filePath, bytes, repositoryRoot: root, overwrite: true, label: "Certification evidence" });
+    return;
+  }
+  fs.writeFileSync(filePath, bytes);
 };
 const manifestPath = path.join(generatedRoot, "full-rls-implementation-manifest.json");
 const policyPath = path.join(generatedRoot, "policy-inventory-report.json");
@@ -1048,7 +1074,7 @@ export const runCertification = (adminUrl, env = process.env) => {
       result.cleanupFailure = message;
       failure = failure ? new Error(`${result.failure}; suite cleanup failed: ${message}`) : cleanupError;
     }
-    fs.writeFileSync(evidencePath, `${JSON.stringify(result, null, 2)}\n`);
+    writeCertificationEvidence(evidencePath, result);
   }
   if (failure) throw failure;
   return result;

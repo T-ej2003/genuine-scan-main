@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { TABLE_INVENTORY_BASELINE } from "../rls/lib/table-inventory-baseline.mjs";
@@ -10,6 +11,7 @@ import {
   assertSafeAdminUrl,
   certificationEvidencePath,
   FullRlsCertificationSafetyError,
+  writeCertificationEvidence,
 } from "../rls/certify-full-database.mjs";
 import { calculateCleanRoomSourceContract } from "../rls/lib/clean-room-source-contract.mjs";
 import { validateGeneratedPackage } from "../rls/verify-full-rls-package.mjs";
@@ -42,6 +44,34 @@ test("focused certification writes a family artifact without replacing full evid
     () => certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_FAMILY: "../full" }),
     /family identifier is invalid/
   );
+});
+
+test("release certification evidence can be kept outside the protected checkout", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-full-rls-evidence-"));
+  const external = path.join(directory, "disposable-certification-result.json");
+  const defaultPath = path.join(root, "documents/security/rls-program/generated/disposable-certification-result.json");
+  assert.equal(certificationEvidencePath({}), defaultPath);
+  assert.equal(certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: external }), path.resolve(external));
+  assert.throws(() => certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: "relative.json" }), /absolute path/);
+  assert.throws(() => certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: path.join(root, "result.json") }), /outside the repository/);
+  assert.throws(() => certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: path.join(root, "..", path.basename(root), "result.json") }), /outside the repository/);
+  const parentLink = path.join(directory, "repository-link");
+  fs.symlinkSync(root, parentLink);
+  assert.throws(() => certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: path.join(parentLink, "result.json") }), /outside the repository/);
+  const symlink = path.join(directory, "symlink.json");
+  fs.symlinkSync(defaultPath, symlink);
+  assert.throws(() => certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: symlink }), /symlink/);
+  assert.throws(() => certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: directory }), /regular non-symlink/);
+  const previous = process.cwd();
+  try {
+    process.chdir(path.join(root, "scripts"));
+    assert.equal(certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: external }), path.resolve(external));
+  } finally { process.chdir(previous); }
+  const before = fs.readFileSync(defaultPath);
+  writeCertificationEvidence(certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: external }), { status: "passed" });
+  assert.deepEqual(fs.readFileSync(defaultPath), before);
+  assert.deepEqual(JSON.parse(fs.readFileSync(external)), { status: "passed" });
+  assert.equal(fs.statSync(external).mode & 0o777, 0o600);
 });
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const requireAuthOwnerOrganizationSelect = (policies) => {
