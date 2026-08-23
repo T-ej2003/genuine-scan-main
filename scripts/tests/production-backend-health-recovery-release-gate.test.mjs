@@ -221,6 +221,9 @@ test("release gate exposes one bounded backend health recovery mode", () => {
   assert.doesNotMatch(workflow, /production-github-environment-approval\.mjs[^\n]*--github-token/);
   assert.match(workflow, /--environment-approval "\$\{\{ steps\.production-environment-approval\.outputs\.evidence_file \}\}"[\s\S]*--environment-approval-sha256 "\$\{\{ steps\.production-environment-approval\.outputs\.evidence_sha256 \}\}"/);
   assert.ok(workflow.indexOf("Authenticate production environment approval boundary") < workflow.indexOf("Configure AWS credentials via OIDC"));
+  const certification = parsedWorkflow.jobs["deploy-production-ecs"].steps.find(({ name }) => name === "Full RLS verification and PostgreSQL 18.4 certification");
+  assert.equal(certification.env.MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH, "${{ runner.temp }}/full-rls-certification/disposable-certification-result.json");
+  assert.match(certification.run, /npm run rls:full-certify[\s\S]*git status --porcelain=v1[\s\S]*Disposable certification modified the protected deployment checkout/);
 });
 
 test("backend recovery cannot enter rotation, frontend, worker, or normal release steps", () => {
@@ -277,6 +280,8 @@ test("release gate certifies the same disposable PostgreSQL database used by int
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, "npm"), `#!/bin/sh\nprintf '%s\\t%s\\t%s\\t%s\\n' "$*" "\${${CONFIRM_ENV}:-}" "\${${DATABASE_ENV}:-}" "\${P2_TEST_DATABASE_ADMIN_URL:-}" >> "$INVOCATION_LOG"\n`);
   fs.chmodSync(path.join(bin, "npm"), 0o700);
+  fs.writeFileSync(path.join(bin, "git"), "#!/bin/sh\nprintf '%s' \"${GIT_STATUS_OUTPUT:-}\"\n");
+  fs.chmodSync(path.join(bin, "git"), 0o700);
 
   const env = {
     ...process.env,
@@ -308,6 +313,10 @@ test("release gate certifies the same disposable PostgreSQL database used by int
     const calls = fs.readFileSync(invocations, "utf8").trim().split("\n").map((line) => line.split("\t"));
     assert.deepEqual(calls.map(([command]) => command), ["run test:integration:ci", "run rls:full-verify", "run rls:full-certify"]);
     assert.deepEqual(calls.at(-1), ["run rls:full-certify", CONFIRM_VALUE, adminUrl, adminUrl]);
+
+    const dirtyCertification = spawnSync("bash", ["-e"], { input: certification, env: { ...env, [name]: adminUrl, GIT_STATUS_OUTPUT: " M tracked.json" }, encoding: "utf8" });
+    assert.notEqual(dirtyCertification.status, 0);
+    assert.match(dirtyCertification.stdout, /Disposable certification modified the protected deployment checkout/);
     assert.doesNotMatch(certification, /\|\|\s*true/);
 
     assert.throws(() => runCertification(adminUrl, {}), /Set MSCQR_FULL_RLS_CERTIFICATION_CONFIRM/);

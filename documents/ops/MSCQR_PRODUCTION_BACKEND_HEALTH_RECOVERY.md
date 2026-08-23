@@ -36,6 +36,11 @@ The workflow creates a dedicated operator-owned `0700` directory below
 evidence there as mode `0600` without changing the runner temp directory or
 dirtying the checkout.
 
+Release Gate also directs disposable PostgreSQL certification evidence to
+`RUNNER_TEMP`. Local certification keeps its reviewed repository evidence path,
+but production preflight must not rewrite tracked generated evidence before the
+recovery CLI authenticates the clean protected-main checkout.
+
 Before dispatch, the canonical administrator capability preflight and the
 release-deployer direct-read preflight must report
 `backend-health-recovery-describe-images`,
