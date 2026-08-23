@@ -117,6 +117,8 @@ closed without an update.
    paths: a fresh publication uses the protected source SHA, while `IMAGE_REUSE`
    retains its earlier authenticated `imageReleaseSha`; recovery writes that image
    release identity, not the newer tooling SHA, into `GIT_SHA` and `RELEASE_GIT_SHA`.
+   It resolves the checked-out repository from its own script location, so private
+   authorization and approval files remain outside the worktree from any caller cwd.
 
    ```bash
    node scripts/aws/dispatch-production-backend-health-recovery.mjs \

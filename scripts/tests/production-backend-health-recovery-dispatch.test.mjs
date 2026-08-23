@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { buildBackendHealthRecoveryDispatch, canonicalWorkflowJsonInput, runCli } from "../aws/dispatch-production-backend-health-recovery.mjs";
 import { buildLegacyBackendRecoveryCandidate } from "../aws/production-backend-health-recovery-contract.mjs";
 import { imageAuthorizationSha256 } from "../aws/production-image-authorization.mjs";
@@ -13,6 +14,7 @@ import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-auth
 const reused = makeCanonicalImageAuthorization({ sourceSha: "96a4be6f0edcd626285c6a1bd8062a4008175d25", imageReleaseSha: "594bab55f23ff8b2438c12b85b149ba0aebeed1e" });
 const fresh = makeCanonicalImageAuthorization({ sourceSha: "94da9651eb9427603be87abe89f89111412755c9", imageReleaseSha: "94da9651eb9427603be87abe89f89111412755c9", impactImageReleaseSha: "29bf92a14d5e832575009bd76b16886feff62cbd" });
 const currentTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47";
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const approval = (fixture) => ({ ticket: "ticket", approvedBy: "operator", approverRole: "production operator", reason: "missing image recovery", verificationRef: "verification", sourceSha: fixture.authorization.sourceSha, currentTaskDefinitionArn, recoveryImageDigest: fixture.authorization.backendDigest });
 const input = (fixture) => ({
@@ -31,6 +33,12 @@ const rehash = (authorization) => {
   authorization.authorizationSha256 = authorization.evidenceSha256;
   return authorization;
 };
+const cliArguments = (imagePath, approvalPath) => [
+  "--source-sha", reused.authorization.sourceSha, "--current-task-definition", currentTaskDefinitionArn,
+  "--recovery-image-digest", reused.authorization.backendDigest, "--service", "mscqr-backend-servi-euw2",
+  "--release-mode", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME",
+  "--image-authorization", imagePath, "--approval", approvalPath,
+];
 
 test("workflow JSON transport owns serialization and hash bytes", () => {
   const image = reused.authorization;
@@ -70,12 +78,7 @@ test("recovery CLI passes the builder's exact JSON and hashes to gh", (context) 
   fs.writeFileSync(imagePath, `${JSON.stringify(reused.authorization, null, 2)}\n`, { mode: 0o600 });
   fs.writeFileSync(approvalPath, `${JSON.stringify(approval(reused), null, 2)}\n`, { mode: 0o600 });
   let invocation;
-  const result = runCli([
-    "--source-sha", reused.authorization.sourceSha, "--current-task-definition", currentTaskDefinitionArn,
-    "--recovery-image-digest", reused.authorization.backendDigest, "--service", "mscqr-backend-servi-euw2",
-    "--release-mode", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME",
-    "--image-authorization", imagePath, "--approval", approvalPath,
-  ], { protectedMain: () => {}, imageValidation: input(reused).imageValidation, run: (command, args) => { invocation = { command, args }; } });
+  const result = runCli(cliArguments(imagePath, approvalPath), { protectedMain: () => {}, imageValidation: input(reused).imageValidation, run: (command, args) => { invocation = { command, args }; } });
   const sent = fields(invocation);
   assert.equal(invocation.command, "gh");
   assert.equal(hash(sent.backend_recovery_image_authorization_json), sent.backend_recovery_image_authorization_sha256);
@@ -83,6 +86,45 @@ test("recovery CLI passes the builder's exact JSON and hashes to gh", (context) 
   assert.equal(result.imageTransportSha256, sent.backend_recovery_image_authorization_sha256);
   assert.equal(result.approvalTransportSha256, sent.backend_recovery_approval_sha256);
   assert.equal(result.dispatchCount, 1);
+});
+
+test("recovery CLI anchors private evidence to the worktree regardless of caller cwd", { concurrency: false }, (context) => {
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), "recovery-dispatch-private-"));
+  const inside = fs.mkdtempSync(path.join(repositoryRoot, ".recovery-dispatch-private-"));
+  context.after(() => { fs.rmSync(external, { recursive: true, force: true }); fs.rmSync(inside, { recursive: true, force: true }); });
+  const imagePath = path.join(external, "image.json");
+  const approvalPath = path.join(external, "approval.json");
+  const insideImage = path.join(inside, "image.json");
+  const insideApproval = path.join(inside, "approval.json");
+  for (const [file, value] of [[imagePath, reused.authorization], [approvalPath, approval(reused)], [insideImage, reused.authorization], [insideApproval, approval(reused)]]) {
+    fs.writeFileSync(file, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+  }
+  const originalCwd = process.cwd();
+  const invoke = (cwd, image = imagePath, approvalFile = approvalPath) => {
+    process.chdir(cwd);
+    try {
+      return runCli(cliArguments(image, approvalFile), {
+        protectedMain: ({ cwd: protectedCwd }) => assert.equal(protectedCwd, repositoryRoot),
+        imageValidation: input(reused).imageValidation,
+        run: () => {},
+      });
+    } finally { process.chdir(originalCwd); }
+  };
+  for (const cwd of [repositoryRoot, path.join(repositoryRoot, "scripts"), path.join(repositoryRoot, "backend"), path.join(repositoryRoot, "scripts/aws"), external]) {
+    assert.equal(invoke(cwd).dispatchCount, 1);
+  }
+  assert.throws(() => invoke(repositoryRoot, insideImage), /must be outside the repository/);
+  assert.throws(() => invoke(path.join(repositoryRoot, "scripts"), imagePath, insideApproval), /must be outside the repository/);
+  assert.throws(() => invoke(path.join(repositoryRoot, "backend"), insideImage), /must be outside the repository/);
+  assert.throws(() => invoke(path.join(repositoryRoot, "scripts/aws"), path.join(repositoryRoot, "scripts", "..", path.basename(inside), "image.json")), /must be outside the repository/);
+
+  const symlink = path.join(external, "image-link.json");
+  fs.symlinkSync(imagePath, symlink);
+  assert.throws(() => invoke(repositoryRoot, symlink), /regular non-symlink file/);
+  fs.chmodSync(imagePath, 0o644);
+  assert.throws(() => invoke(repositoryRoot), /mode 0600/);
+  fs.chmodSync(imagePath, 0o600);
+  assert.throws(() => invoke(repositoryRoot, path.join(external, "missing.json")), /regular non-symlink file/);
 });
 
 test("unauthorized reuse, forged envelopes, stale source, and wrong digest fail closed", () => {

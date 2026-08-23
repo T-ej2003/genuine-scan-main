@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BACKEND_HEALTH_RECOVERY } from "./production-backend-health-recovery-contract.mjs";
 import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
@@ -8,6 +9,7 @@ import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 
 const REPOSITORY = "T-ej2003/genuine-scan-main";
+const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const WORKFLOW = "release-gate.yml";
 const MODE = "backend-health-recovery";
 const MODE_KIND = BACKEND_HEALTH_RECOVERY.kind;
@@ -70,9 +72,9 @@ function options(argv) {
 
 export function runCli(argv = process.argv.slice(2), { run = execFileSync, protectedMain = readFreshProtectedMainIdentity, imageValidation } = {}) {
   const values = options(argv);
-  protectedMain({ expectedSourceSha: values["source-sha"] });
-  const imageAuthorizationBytes = readStageBPrivateFileBytes({ filePath: values["image-authorization"], repositoryRoot: process.cwd(), label: "Recovery image authorization" }).bytes;
-  const approvalBytes = readStageBPrivateFileBytes({ filePath: values.approval, repositoryRoot: process.cwd(), label: "Recovery approval" }).bytes;
+  protectedMain({ cwd: REPOSITORY_ROOT, expectedSourceSha: values["source-sha"] });
+  const imageAuthorizationBytes = readStageBPrivateFileBytes({ filePath: values["image-authorization"], repositoryRoot: REPOSITORY_ROOT, label: "Recovery image authorization" }).bytes;
+  const approvalBytes = readStageBPrivateFileBytes({ filePath: values.approval, repositoryRoot: REPOSITORY_ROOT, label: "Recovery approval" }).bytes;
   const dispatch = buildBackendHealthRecoveryDispatch({ sourceSha: values["source-sha"], currentTaskDefinitionArn: values["current-task-definition"], recoveryImageDigest: values["recovery-image-digest"], service: values.service, releaseMode: values["release-mode"], imageAuthorizationBytes, imageValidation, approvalBytes });
   run("gh", dispatch.args, { stdio: "inherit" });
   return { sourceSha: values["source-sha"], imageTransportSha256: dispatch.image.sha256, approvalTransportSha256: dispatch.approval.sha256, dispatchCount: 1 };
