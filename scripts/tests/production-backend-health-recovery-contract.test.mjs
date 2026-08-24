@@ -117,6 +117,22 @@ test("legacy source receives exactly four authenticated secret bindings and reje
   assert.throws(() => assertLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, candidate: override, recoveryImageDigest: digest, imageReleaseSha: sourceSha, artifactSigningBindings }), /outside the exact/);
 });
 
+test("optional legacy secrets normalize without changing existing entries", () => {
+  for (const secrets of [undefined, []]) {
+    const source = structuredClone(current);
+    source.taskDefinition.containerDefinitions[0].secrets = secrets;
+    if (secrets === undefined) delete source.taskDefinition.containerDefinitions[0].secrets;
+    const rendered = buildLegacyBackendRecoveryCandidate({
+      currentTaskDefinition: source,
+      recoveryImageDigest: digest,
+      imageReleaseSha: sourceSha,
+      artifactSigningBindings,
+    });
+    assert.deepEqual(rendered.containerDefinitions[0].secrets, Object.entries(artifactSigningBindings).map(([name, valueFrom]) => ({ name, valueFrom })));
+  }
+  assert.deepEqual(candidate.containerDefinitions[0].secrets.slice(0, -4), current.taskDefinition.containerDefinitions[0].secrets);
+});
+
 test("production failure fixture lacks startup prerequisites while corrected candidate supplies every required binding", () => {
   const runtimeSource = fs.readFileSync(new URL("../../backend/src/index.ts", import.meta.url), "utf8");
   const legacy = new Set(current.taskDefinition.containerDefinitions[0].secrets.map(({ name }) => name));
@@ -530,9 +546,10 @@ test("partial and complete recovery evidence is self-authenticating", () => {
     account: "368992683803", region: "eu-west-2",
   };
   const body = {
-    schemaVersion: 2, kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE", sourceSha,
+    schemaVersion: 3, kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE", sourceSha,
     currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
-    ...bindings, status: "NO_MUTATION_FAILURE", targetArn: null, registrations: 0, updates: 0, generatedAt: now.toISOString(),
+    ...bindings, status: "NO_MUTATION_FAILURE", targetArn: null, registrations: 0, updates: 0,
+    artifactSigningVerification: "PENDING", artifactSigningFailure: null, generatedAt: now.toISOString(),
   };
   const evidence = { ...body, evidenceSha256: canonicalSha256(body) };
   const expected = { sourceSha, currentTaskDefinitionArn: body.currentTaskDefinitionArn, recoveryImageDigest: digest, ...bindings };
@@ -545,6 +562,6 @@ test("partial and complete recovery evidence is self-authenticating", () => {
   assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...incompleteBody, evidenceSha256: canonicalSha256(incompleteBody) }, expected), /malformed/);
   const overcountedBody = { ...body, registrations: 2 };
   assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...overcountedBody, evidenceSha256: canonicalSha256(overcountedBody) }, expected), /malformed/);
-  const incompleteHealthBody = { ...body, status: "RECOVERY_COMPLETE", targetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", backendHealthy: true, rotationRequired: true, health: { healthy: true, success: true, status: "ready" } };
+  const incompleteHealthBody = { ...body, status: "RECOVERY_COMPLETE", targetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", artifactSigningVerification: "VERIFIED", backendHealthy: true, rotationRequired: true, health: { healthy: true, success: true, status: "ready" } };
   assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...incompleteHealthBody, evidenceSha256: canonicalSha256(incompleteHealthBody) }, expected), /readiness proof/);
 });

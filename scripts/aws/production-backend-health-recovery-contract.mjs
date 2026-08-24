@@ -27,7 +27,20 @@ export const BACKEND_HEALTH_RECOVERY_STATUS = Object.freeze({
   HEALTH_VERIFICATION_FAILED: "HEALTH_VERIFICATION_FAILED",
   RECOVERY_COMPLETE: "RECOVERY_COMPLETE",
 });
+export const ARTIFACT_SIGNING_VERIFICATION = Object.freeze({
+  PENDING: "PENDING",
+  VERIFIED: "VERIFIED",
+  FAILED: "FAILED",
+});
+export const ARTIFACT_SIGNING_DISCOVERY_FAILURE = Object.freeze({
+  CALLER_IDENTITY: "CALLER_IDENTITY_DISCOVERY_FAILED",
+  SECRET_REFERENCE: "SECRET_REFERENCE_DISCOVERY_FAILED",
+  SECRET_VALUE: "SECRET_VALUE_VERIFICATION_FAILED",
+  LIVE_BINDING: "LIVE_BINDING_VALIDATION_FAILED",
+});
 const RECOVERY_STATUSES = new Set(Object.values(BACKEND_HEALTH_RECOVERY_STATUS));
+const ARTIFACT_SIGNING_VERIFICATION_STATES = new Set(Object.values(ARTIFACT_SIGNING_VERIFICATION));
+const ARTIFACT_SIGNING_DISCOVERY_FAILURES = new Set(Object.values(ARTIFACT_SIGNING_DISCOVERY_FAILURE));
 
 const SHA = /^[a-f0-9]{40}$/;
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
@@ -53,7 +66,7 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
   account = BACKEND_HEALTH_RECOVERY.account, region = BACKEND_HEALTH_RECOVERY.region,
 } = {}) {
   const { evidenceSha256, ...body } = evidence || {};
-  if (evidence?.schemaVersion !== 2 || evidence?.kind !== "BACKEND_HEALTH_RECOVERY_EVIDENCE"
+  if (evidence?.schemaVersion !== 3 || evidence?.kind !== "BACKEND_HEALTH_RECOVERY_EVIDENCE"
     || evidence.sourceSha !== sourceSha || !SHA.test(sourceSha || "")
     || evidence.currentTaskDefinitionArn !== currentTaskDefinitionArn || !TASK_ARN.test(currentTaskDefinitionArn || "")
     || evidence.recoveryImageDigest !== recoveryImageDigest || !SHA256.test(recoveryImageDigest || "")
@@ -66,6 +79,10 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
     || evidence.imageAuthorizationFileSha256 !== imageAuthorizationFileSha256 || evidence.imageAuthorizationSha256 !== imageAuthorizationSha256
     || !HEX256.test(artifactSigningBindingSha256 || "") || evidence.artifactSigningBindingSha256 !== artifactSigningBindingSha256
     || !RECOVERY_STATUSES.has(evidence.status)
+    || !ARTIFACT_SIGNING_VERIFICATION_STATES.has(evidence.artifactSigningVerification)
+    || (evidence.artifactSigningVerification === ARTIFACT_SIGNING_VERIFICATION.FAILED
+      ? !ARTIFACT_SIGNING_DISCOVERY_FAILURES.has(evidence.artifactSigningFailure)
+      : evidence.artifactSigningFailure !== null)
     || !Number.isSafeInteger(evidence.registrations) || evidence.registrations < 0 || evidence.registrations > 1
     || !Number.isSafeInteger(evidence.updates) || evidence.updates < 0 || evidence.updates > 1
     || !Number.isFinite(Date.parse(evidence.generatedAt))
@@ -73,6 +90,10 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
     throw new Error("Backend health recovery evidence is malformed, stale, or tampered.");
   }
   if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE && (evidence.registrations !== 0 || evidence.updates !== 0)) throw new Error("No-mutation recovery evidence records a mutation.");
+  if (evidence.status !== BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE
+    && evidence.artifactSigningVerification !== ARTIFACT_SIGNING_VERIFICATION.VERIFIED) {
+    throw new Error("Mutation-capable recovery evidence lacks authenticated artifact-signing verification.");
+  }
   if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED && (evidence.registrations !== 0 || evidence.updates !== 0)) throw new Error("Registration-attempt evidence records a confirmed mutation.");
   if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTERED_ONLY && (evidence.registrations !== 1 || evidence.updates !== 0)) throw new Error("Registered-only evidence has inconsistent mutation counts.");
   if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED && evidence.updates !== 0) throw new Error("Service-update-attempt evidence records a confirmed update.");
@@ -166,7 +187,8 @@ export function buildLegacyBackendRecoveryCandidate({ currentTaskDefinition, rec
   const payload = buildLegacyImageIdentityOnlyCandidate({ currentTaskDefinition, recoveryImageDigest, imageReleaseSha });
   const container = backendContainer(payload);
   const checkedBindings = assertArtifactSigningBindings(artifactSigningBindings);
-  container.secrets = [...container.secrets, ...ARTIFACT_SIGNING_BINDINGS.map((name) => ({ name, valueFrom: checkedBindings[name] }))];
+  const legacySecrets = Array.isArray(container.secrets) ? container.secrets : [];
+  container.secrets = [...legacySecrets, ...ARTIFACT_SIGNING_BINDINGS.map((name) => ({ name, valueFrom: checkedBindings[name] }))];
   return payload;
 }
 

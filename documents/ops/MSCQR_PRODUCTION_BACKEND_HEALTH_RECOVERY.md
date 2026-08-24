@@ -71,6 +71,13 @@ authorization, or recovery evidence. Roles, existing secrets, database
 bindings, networking, ports, command, health check, logging, resources, and
 every other runtime field remain byte-semantically equal.
 
+An execute invocation writes durable `PENDING` signing-verification evidence
+before its first live signing lookup. Authenticated resolution advances that
+state to `VERIFIED`; STS, reference-discovery, secret-value, or domain
+validation failures persist only a fixed `FAILED` classification. Provider
+errors and secret material are never copied into recovery evidence or recovery
+CLI errors.
+
 Because recovery preserves the legacy execution role, that role must already
 permit `secretsmanager:GetSecretValue` for each of the four exact resolved
 secret ARNs (and `kms:Decrypt` only when the secret uses a customer-managed

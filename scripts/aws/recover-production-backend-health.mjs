@@ -12,6 +12,8 @@ import { createAwsArtifactSigningAdapter } from "./production-artifact-signing-s
 import {
   BACKEND_HEALTH_RECOVERY,
   BACKEND_HEALTH_RECOVERY_STATUS,
+  ARTIFACT_SIGNING_DISCOVERY_FAILURE,
+  ARTIFACT_SIGNING_VERIFICATION,
   assertLegacyBackendRecoveryEvidence,
   assertLegacyBackendRecoveryAuthorization,
   buildLegacyBackendRecoveryCandidate,
@@ -25,6 +27,10 @@ const option = (argv, name) => { const index = argv.indexOf(name); return index 
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const hex256 = /^[a-f0-9]{64}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
+const signingDiscoveryError = (classification) => Object.assign(
+  new Error(`Artifact-signing discovery failed during ${classification}.`),
+  { artifactSigningFailure: classification },
+);
 
 export function verifyProductionBackendHealth(healthUrl, run, expectedReleaseSha) {
   const url = assertProductionBackendReadinessUrl(healthUrl);
@@ -68,11 +74,22 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   const awsText = (args) => run("aws", [...args, "--region", BACKEND_HEALTH_RECOVERY.region, "--output", "json", "--no-cli-pager"]);
   const aws = (args) => JSON.parse(awsText(args));
   const resolveArtifactSigning = deps.resolveArtifactSigning || (async () => {
-    const caller = aws(["sts", "get-caller-identity"]);
-    if (String(caller.Account) !== BACKEND_HEALTH_RECOVERY.account || !/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\//.test(caller.Arn || "")) throw new Error("Backend recovery requires the exact production release-deployer identity.");
-    const resolved = await resolveExistingArtifactSigningBindings({ run: async (args) => awsText(args), sourceSha, repositoryRoot: root });
-    const adapter = createAwsArtifactSigningAdapter({ run: async (args) => awsText(args), sourceSha, repositoryRoot: root, approvedBindings: resolved.bindingFile, approvedBindingsSha256: resolved.evidenceSha256 });
-    const verification = await adapter.verify();
+    let caller;
+    try { caller = aws(["sts", "get-caller-identity"]); }
+    catch { throw signingDiscoveryError(ARTIFACT_SIGNING_DISCOVERY_FAILURE.CALLER_IDENTITY); }
+    if (String(caller.Account) !== BACKEND_HEALTH_RECOVERY.account || !/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\//.test(caller.Arn || "")) {
+      throw signingDiscoveryError(ARTIFACT_SIGNING_DISCOVERY_FAILURE.CALLER_IDENTITY);
+    }
+    let resolved;
+    try {
+      resolved = await (deps.resolveExistingArtifactSigningBindings || resolveExistingArtifactSigningBindings)({ run: async (args) => awsText(args), sourceSha, repositoryRoot: root });
+    } catch {
+      throw signingDiscoveryError(ARTIFACT_SIGNING_DISCOVERY_FAILURE.SECRET_REFERENCE);
+    }
+    const adapter = (deps.createArtifactSigningAdapter || createAwsArtifactSigningAdapter)({ run: async (args) => awsText(args), sourceSha, repositoryRoot: root, approvedBindings: resolved.bindingFile, approvedBindingsSha256: resolved.evidenceSha256 });
+    let verification;
+    try { verification = await adapter.verify(); }
+    catch { throw signingDiscoveryError(ARTIFACT_SIGNING_DISCOVERY_FAILURE.SECRET_VALUE); }
     return { ...resolved, verification };
   });
 
@@ -134,17 +151,8 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   });
   const evidenceOut = path.resolve(required(argv, "--evidence-out"));
   const healthUrl = assertProductionBackendReadinessUrl(required(argv, "--health-url"));
-  const artifactSigning = await resolveArtifactSigning();
-  if (artifactSigning?.verification?.valid !== true || artifactSigning?.evidenceSha256 !== authorization.value.artifactSigningBindingSha256
-    || artifactSigning?.created?.length || artifactSigning?.uninitializedSecretRefs?.length) throw new Error("Live artifact-signing bindings differ from the authenticated recovery authorization.");
-  assertLegacyBackendRecoveryAuthorization(authorization.value, {
-    sourceSha, currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn, recoveryImageDigest: authorization.value.recoveryImageDigest,
-    imageReleaseSha: authorization.value.imageReleaseSha, imageAuthorization: image.value, imageValidation: { verifyImageEvidence },
-    environmentApproval: environmentApproval.value, artifactSigningBindingSha256: artifactSigning.evidenceSha256,
-    githubContext, executionActor: env.GITHUB_ACTOR,
-  });
   const evidenceBase = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE",
     sourceSha,
     authorizationFileSha256: authorization.sha256,
@@ -153,14 +161,21 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     environmentApprovalSha256: environmentApproval.value.evidenceSha256,
     imageAuthorizationFileSha256: image.sha256,
     imageAuthorizationSha256: image.value.evidenceSha256,
-    artifactSigningBindingSha256: artifactSigning.evidenceSha256,
+    artifactSigningBindingSha256: authorization.value.artifactSigningBindingSha256,
     currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn,
     recoveryImageDigest: authorization.value.recoveryImageDigest,
     imageReleaseSha: authorization.value.imageReleaseSha,
     account: BACKEND_HEALTH_RECOVERY.account,
     region: BACKEND_HEALTH_RECOVERY.region,
   };
-  let evidenceState = { status: BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE, targetArn: null, registrations: 0, updates: 0 };
+  let evidenceState = {
+    status: BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE,
+    targetArn: null,
+    registrations: 0,
+    updates: 0,
+    artifactSigningVerification: ARTIFACT_SIGNING_VERIFICATION.PENDING,
+    artifactSigningFailure: null,
+  };
   let lastEvidence;
   const generatedAt = () => new Date(typeof deps.now === "function" ? deps.now() : deps.now || Date.now()).toISOString();
   const record = async (next = {}) => {
@@ -173,6 +188,27 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     return evidence;
   };
   await record();
+  let artifactSigning;
+  try {
+    artifactSigning = await resolveArtifactSigning();
+    if (artifactSigning?.verification?.valid !== true || artifactSigning?.evidenceSha256 !== authorization.value.artifactSigningBindingSha256
+      || artifactSigning?.created?.length || artifactSigning?.uninitializedSecretRefs?.length) {
+      throw signingDiscoveryError(ARTIFACT_SIGNING_DISCOVERY_FAILURE.LIVE_BINDING);
+    }
+    assertLegacyBackendRecoveryAuthorization(authorization.value, {
+      sourceSha, currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn, recoveryImageDigest: authorization.value.recoveryImageDigest,
+      imageReleaseSha: authorization.value.imageReleaseSha, imageAuthorization: image.value, imageValidation: { verifyImageEvidence },
+      environmentApproval: environmentApproval.value, artifactSigningBindingSha256: artifactSigning.evidenceSha256,
+      githubContext, executionActor: env.GITHUB_ACTOR,
+    });
+  } catch (error) {
+    await record({
+      artifactSigningVerification: ARTIFACT_SIGNING_VERIFICATION.FAILED,
+      artifactSigningFailure: error?.artifactSigningFailure || ARTIFACT_SIGNING_DISCOVERY_FAILURE.LIVE_BINDING,
+    });
+    throw error;
+  }
+  await record({ artifactSigningVerification: ARTIFACT_SIGNING_VERIFICATION.VERIFIED, artifactSigningFailure: null });
   const caller = aws(["sts", "get-caller-identity"]);
   if (String(caller.Account) !== BACKEND_HEALTH_RECOVERY.account || !/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\//.test(caller.Arn || "")) throw new Error("Backend recovery requires the exact production release-deployer identity.");
   const serviceResponse = aws(["ecs", "describe-services", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--services", BACKEND_HEALTH_RECOVERY.service]);

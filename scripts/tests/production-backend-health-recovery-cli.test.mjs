@@ -219,6 +219,8 @@ test("execute publishes authenticated zero-mutation evidence before the first AW
   assert.equal(evidence.currentTaskDefinitionArn, currentArn);
   assert.equal(evidence.recoveryImageDigest, digest);
   assert.equal(evidence.authorizationSha256, authorization.authorizationSha256);
+  assert.equal(evidence.artifactSigningVerification, "VERIFIED");
+  assert.equal(evidence.artifactSigningFailure, null);
   assert.equal(evidence.evidenceSha256, canonicalSha256(Object.fromEntries(Object.entries(evidence).filter(([key]) => key !== "evidenceSha256"))));
   assert.equal(fs.statSync(evidencePath).mode & 0o777, 0o600);
 });
@@ -248,7 +250,97 @@ test("stale or inconsistent live artifact-signing evidence fails before ECS muta
     ], deps(fixture, {
       resolveArtifactSigning,
       exec: (_command, args = []) => { if (args.includes("register-task-definition") || args.includes("update-service")) ecsMutations += 1; throw new Error("unexpected external call"); },
-    })), /artifact-signing bindings/);
+    })), /Artifact-signing discovery failed/);
     assert.equal(ecsMutations, 0);
   }
+});
+
+test("every live artifact-signing discovery failure preserves sanitized durable evidence", async (t) => {
+  const fixture = privateFixture();
+  t.after(() => fs.rmSync(fixture.dir, { recursive: true, force: true }));
+  const authorizationPath = path.join(fixture.dir, "authorization-discovery.json");
+  await runBackendHealthRecoveryCli([
+    "--prepare", "--source-sha", sourceSha, "--current-task-definition", currentArn,
+    ...environmentArgs(fixture), "--recovery-image-digest", digest,
+    "--image-authorization", fixture.image, "--image-authorization-sha256", sha(fixture.imageBytes),
+    "--approval", fixture.approvalPath, "--approval-sha256", sha(fixture.approvalBytes), "--output", authorizationPath,
+  ], deps(fixture));
+  const authorizationBytes = fs.readFileSync(authorizationPath);
+  const secretSentinel = "PRIVATE_KEY_MUST_NOT_APPEAR";
+  const caller = JSON.stringify({ Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/GitHubActions" });
+  const cases = [
+    ["CALLER_IDENTITY_DISCOVERY_FAILED", { exec: () => { throw new Error(`STS failed ${secretSentinel}`); } }],
+    ["SECRET_REFERENCE_DISCOVERY_FAILED", {
+      exec: () => caller,
+      resolveExistingArtifactSigningBindings: async () => { throw new Error(`DescribeSecret failed ${secretSentinel}`); },
+    }],
+    ["SECRET_VALUE_VERIFICATION_FAILED", {
+      exec: () => caller,
+      resolveExistingArtifactSigningBindings: async () => ({ bindingFile: "/private/fake", evidenceSha256: artifactSigningBindingSha256, bindings: artifactSigningBindings, created: [], uninitializedSecretRefs: [] }),
+      createArtifactSigningAdapter: () => ({ verify: async () => { throw new Error(`GetSecretValue failed ${secretSentinel}`); } }),
+    }],
+  ];
+  for (const [expectedFailure, overrides] of cases) {
+    const evidencePath = path.join(fixture.dir, `evidence-${expectedFailure}.json`);
+    let pendingObserved = false;
+    const wrappedOverrides = { ...overrides, resolveArtifactSigning: undefined };
+    if (overrides.resolveExistingArtifactSigningBindings) {
+      const original = overrides.resolveExistingArtifactSigningBindings;
+      wrappedOverrides.resolveExistingArtifactSigningBindings = async (...args) => {
+        const pending = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+        pendingObserved = pending.artifactSigningVerification === "PENDING" && pending.artifactSigningFailure === null;
+        return original(...args);
+      };
+    } else {
+      const original = overrides.exec;
+      wrappedOverrides.exec = (...args) => {
+        const pending = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+        pendingObserved = pending.artifactSigningVerification === "PENDING" && pending.artifactSigningFailure === null;
+        return original(...args);
+      };
+    }
+    await assert.rejects(() => runBackendHealthRecoveryCli([
+      "--execute", "--source-sha", sourceSha, ...environmentArgs(fixture),
+      "--image-authorization", fixture.image, "--image-authorization-sha256", sha(fixture.imageBytes),
+      "--authorization", authorizationPath, "--authorization-sha256", sha(authorizationBytes),
+      "--health-url", "https://www.mscqr.com/api/health/ready", "--evidence-out", evidencePath,
+    ], deps(fixture, wrappedOverrides)), (error) => {
+      assert.match(error.message, /Artifact-signing discovery failed/);
+      assert.equal(error.message.includes(secretSentinel), false);
+      assert.equal(error.cause, undefined);
+      return true;
+    });
+    const bytes = fs.readFileSync(evidencePath, "utf8");
+    const evidence = JSON.parse(bytes);
+    assert.equal(pendingObserved, true);
+    assert.equal(evidence.status, "NO_MUTATION_FAILURE");
+    assert.equal(evidence.artifactSigningVerification, "FAILED");
+    assert.equal(evidence.artifactSigningFailure, expectedFailure);
+    assert.equal(bytes.includes(secretSentinel), false);
+  }
+});
+
+test("malformed live signing state is recorded as failed, never verified", async (t) => {
+  const fixture = privateFixture();
+  t.after(() => fs.rmSync(fixture.dir, { recursive: true, force: true }));
+  const authorizationPath = path.join(fixture.dir, "authorization-malformed.json");
+  await runBackendHealthRecoveryCli([
+    "--prepare", "--source-sha", sourceSha, "--current-task-definition", currentArn,
+    ...environmentArgs(fixture), "--recovery-image-digest", digest,
+    "--image-authorization", fixture.image, "--image-authorization-sha256", sha(fixture.imageBytes),
+    "--approval", fixture.approvalPath, "--approval-sha256", sha(fixture.approvalBytes), "--output", authorizationPath,
+  ], deps(fixture));
+  const authorizationBytes = fs.readFileSync(authorizationPath);
+  const evidencePath = path.join(fixture.dir, "evidence-malformed.json");
+  await assert.rejects(() => runBackendHealthRecoveryCli([
+    "--execute", "--source-sha", sourceSha, ...environmentArgs(fixture),
+    "--image-authorization", fixture.image, "--image-authorization-sha256", sha(fixture.imageBytes),
+    "--authorization", authorizationPath, "--authorization-sha256", sha(authorizationBytes),
+    "--health-url", "https://www.mscqr.com/api/health/ready", "--evidence-out", evidencePath,
+  ], deps(fixture, {
+    resolveArtifactSigning: async () => ({ bindings: artifactSigningBindings, evidenceSha256: artifactSigningBindingSha256, created: [], uninitializedSecretRefs: [], verification: { valid: false } }),
+  })), /Artifact-signing discovery failed/);
+  const evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+  assert.equal(evidence.artifactSigningVerification, "FAILED");
+  assert.equal(evidence.artifactSigningFailure, "LIVE_BINDING_VALIDATION_FAILED");
 });
