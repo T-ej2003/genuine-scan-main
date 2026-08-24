@@ -56,11 +56,25 @@ cluster and a legacy
 `mscqr-backend:*` revision. The application contract still binds the exact
 current revision, replacement digest, candidate diff, and human approval.
 
-The candidate task definition is derived from the current AWS readback. Only
-the backend image and `GIT_SHA`/`RELEASE_GIT_SHA` values may change; both
-identity fields must equal the image authorization's authenticated release SHA. Roles,
-secrets, database bindings, networking, ports, command, health check, logging,
-resources, and every other runtime field must remain byte-semantically equal.
+The candidate task definition is derived from the current AWS readback. Its
+named delta profile permits only the backend image,
+`GIT_SHA`/`RELEASE_GIT_SHA`, and the four mandatory artifact-signing ECS secret
+references. Both identity fields equal the image authorization's authenticated
+release SHA. The four references are resolved read-only from the exact
+source-controlled production names, written to the canonical source-bound
+private runtime-binding file, and authenticated again immediately before task
+registration. Recovery reads and validates the key pair, active version, and
+public-key registry in process but never writes or emits their values. The
+private key and all three companion values remain ECS `valueFrom` references;
+none may appear in task-definition environment values, workflow inputs, logs,
+authorization, or recovery evidence. Roles, existing secrets, database
+bindings, networking, ports, command, health check, logging, resources, and
+every other runtime field remain byte-semantically equal.
+
+Because recovery preserves the legacy execution role, that role must already
+permit `secretsmanager:GetSecretValue` for each of the four exact resolved
+secret ARNs (and `kms:Decrypt` only when the secret uses a customer-managed
+KMS key). This repair does not add, replace, or broaden execution-role IAM.
 
 The IAM model follows the AWS ECS service-authorization reference: the
 registration write stays scoped to the `mscqr-backend:*` task-definition
@@ -105,6 +119,13 @@ legacy source revision unless it already identifies the single exact recovery
 revision authenticated by the candidate fingerprint. The service is read again
 immediately before `UpdateService`, so a later concurrent change still fails
 closed without an update.
+
+A failed historical recovery revision without the four bindings is not a
+matching candidate and is never reused. Once ECS rollback is authenticated as
+complete on the approved legacy source, a later protected run may register one
+new corrected immutable revision. A service still targeting the failed
+revision, an unknown newer revision, or a still-running rollback stops for live
+reconciliation; task definitions are never modified in place.
 
 ## Operator sequence
 

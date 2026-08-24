@@ -24,6 +24,13 @@ const environmentApproval = createProductionEnvironmentApprovalEvidence({
   environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 1, login: "security-reviewer" } }] }] },
 });
 const current = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
+const artifactSigningBindings = Object.freeze({
+  ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-AbCd12",
+  ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-key-current-AbCd12",
+  ARTIFACT_SIGN_ACTIVE_KEY_VERSION: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/active-key-version-AbCd12",
+  ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-AbCd12",
+});
+const artifactSigningBindingSha256 = "7".repeat(64);
 const imageFixture = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: sourceSha, imageDigests: {
   backend: digest,
   worker: "sha256:949a4f25d9cc5d67358722c7af75e91bd9a944e75496c76fa36b4677fd152cfe",
@@ -35,8 +42,8 @@ const approval = {
   reason: "Restore backend health so canonical dual-slot rotation can run", verificationRef: "https://example.invalid/recovery/1",
   sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
 };
-const authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, approval });
-const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: digest, imageReleaseSha: imageFixture.imageReleaseSha });
+const authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, approval });
+const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: digest, imageReleaseSha: imageFixture.imageReleaseSha, artifactSigningBindings });
 const base = () => ({
   sourceSha,
   service: { clusterArn: `arn:aws:ecs:eu-west-2:368992683803:cluster/${BACKEND_HEALTH_RECOVERY.cluster}`, serviceName: BACKEND_HEALTH_RECOVERY.service, taskDefinition: current.taskDefinition.taskDefinitionArn, desiredCount: 2, networkConfiguration: { awsvpcConfiguration: { subnets: ["subnet-fixture"], securityGroups: ["sg-fixture"], assignPublicIp: "DISABLED" } }, loadBalancers: [{ targetGroupArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/fixture/123", containerName: "backend", containerPort: 4000 }] },
@@ -48,6 +55,8 @@ const base = () => ({
   imageAuthorization: imageFixture.authorization,
   imageValidation: { now: imageFixture.now, verifyImageEvidence: imageFixture.verifyImageEvidence },
   environmentApproval,
+  artifactSigningBindings,
+  artifactSigningBindingSha256,
   githubContext: { ...githubContext },
   executionActor: "release-operator",
   candidate: structuredClone(candidate),
@@ -70,11 +79,98 @@ test("real legacy :47 fixture permits only image and source identity replacement
   assert.equal(result.recoveryImageDigest, digest);
   const backend = candidate.containerDefinitions.find(({ name }) => name === "backend");
   assert.equal(backend.image.endsWith(`@${digest}`), true);
-  assert.deepEqual(backend.secrets, current.taskDefinition.containerDefinitions[0].secrets);
+  assert.deepEqual(backend.secrets.slice(0, -4), current.taskDefinition.containerDefinitions[0].secrets);
   assert.equal(backend.environment.length, 44);
-  assert.equal(backend.secrets.length, 14);
+  assert.equal(backend.secrets.length, 18);
+  assert.deepEqual(Object.fromEntries(backend.secrets.slice(-4).map(({ name, valueFrom }) => [name, valueFrom])), artifactSigningBindings);
   assert.equal(candidate.taskRoleArn, current.taskDefinition.taskRoleArn);
   assert.equal(candidate.executionRoleArn, current.taskDefinition.executionRoleArn);
+});
+
+test("legacy source receives exactly four authenticated secret bindings and rejects every binding expansion", () => {
+  const sourceBackend = current.taskDefinition.containerDefinitions[0];
+  assert.equal(sourceBackend.secrets.some(({ name }) => name.startsWith("ARTIFACT_SIGN_")), false);
+  assert.equal(candidate.containerDefinitions[0].environment.some(({ name }) => name.startsWith("ARTIFACT_SIGN_")), false);
+  for (const mutateBindings of [
+    (value) => { delete value.ARTIFACT_SIGN_PUBLIC_KEYS_JSON; },
+    (value) => { value.UNRELATED_FIFTH_BINDING = value.ARTIFACT_SIGN_PUBLIC_KEYS_JSON; },
+    (value) => { value.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT = "plaintext-private-key"; },
+    (value) => { value.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT = value.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT.replace("private-key-current", "unapproved-key"); },
+    (value) => { value.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT = value.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT; },
+    (value) => { value.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT = value.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT.replace("368992683803", "111111111111"); },
+    (value) => { value.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT = value.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT.replace("eu-west-2", "us-east-1"); },
+  ]) {
+    const bindings = structuredClone(artifactSigningBindings);
+    mutateBindings(bindings);
+    assert.throws(() => buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: digest, imageReleaseSha: sourceSha, artifactSigningBindings: bindings }), /artifact-signing bindings/);
+  }
+  for (const [location, entry] of [
+    ["environment", { name: "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", value: "plaintext" }],
+    ["secrets", { name: "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", valueFrom: artifactSigningBindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT }],
+  ]) {
+    const source = structuredClone(current);
+    source.taskDefinition.containerDefinitions[0][location].push(entry);
+    assert.throws(() => buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: source, recoveryImageDigest: digest, imageReleaseSha: sourceSha, artifactSigningBindings }), /plaintext|partial|duplicate/);
+  }
+  const override = structuredClone(candidate);
+  override.containerDefinitions[0].secrets.find(({ name }) => name === "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT").valueFrom += "-caller";
+  assert.throws(() => assertLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, candidate: override, recoveryImageDigest: digest, imageReleaseSha: sourceSha, artifactSigningBindings }), /outside the exact/);
+});
+
+test("production failure fixture lacks startup prerequisites while corrected candidate supplies every required binding", () => {
+  const runtimeSource = fs.readFileSync(new URL("../../backend/src/index.ts", import.meta.url), "utf8");
+  const legacy = new Set(current.taskDefinition.containerDefinitions[0].secrets.map(({ name }) => name));
+  const corrected = new Set(candidate.containerDefinitions[0].secrets.map(({ name }) => name));
+  for (const name of Object.keys(artifactSigningBindings)) {
+    assert.match(runtimeSource, new RegExp(`process\\.env\\.${name}`));
+    assert.equal(legacy.has(name), false);
+    assert.equal(corrected.has(name), true);
+  }
+});
+
+test("failed :48 is never reused as the corrected recovery revision", async () => {
+  const oldCandidate = structuredClone(candidate);
+  oldCandidate.containerDefinitions[0].secrets = oldCandidate.containerDefinitions[0].secrets.filter(({ name }) => !name.startsWith("ARTIFACT_SIGN_"));
+  const failed48 = { taskDefinition: { ...oldCandidate, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", revision: 48, status: "ACTIVE" }, tags: [] };
+  const corrected49 = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:49", revision: 49, status: "ACTIVE" }, tags: [] };
+  let registrations = 0;
+  let service = { ...base().service, runningCount: 0, pendingCount: 0 };
+  const recovered = await runLegacyBackendHealthRecovery(base(), {
+    census: async () => [failed48],
+    register: async () => { registrations += 1; return corrected49; },
+    describe: async (arn) => arn.endsWith(":49") ? corrected49 : failed48,
+    readService: async () => service,
+    updateService: async (arn) => { service = { ...service, taskDefinition: arn, runningCount: 2, pendingCount: 0 }; },
+    waitStable: async () => {},
+    readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: corrected49.taskDefinition.taskDefinitionArn, imageDigest: digest, healthStatus: "HEALTHY" })),
+    verifyHealth: async () => healthy,
+  });
+  assert.equal(registrations, 1);
+  assert.equal(recovered.targetArn.endsWith(":49"), true);
+
+  const rollbackInProgress = base();
+  rollbackInProgress.service.taskDefinition = failed48.taskDefinition.taskDefinitionArn;
+  let mutations = 0;
+  await assert.rejects(() => runLegacyBackendHealthRecovery(rollbackInProgress, {
+    census: async () => [failed48], register: async () => { mutations += 1; }, describe: async () => failed48,
+    readService: async () => rollbackInProgress.service, updateService: async () => { mutations += 1; }, waitStable: async () => {},
+    readRunningTasks: async () => [], verifyHealth: async () => healthy,
+  }), /stale/);
+  assert.equal(mutations, 0);
+
+  const rollingBack = base();
+  rollingBack.service.deployments = [{ status: "PRIMARY", taskDefinition: current.taskDefinition.taskDefinitionArn, rolloutState: "IN_PROGRESS", desiredCount: 2, runningCount: 0, pendingCount: 0 }];
+  assert.throws(() => assertLegacyBackendRecoveryEligibility(rollingBack), /rollback or deployment remains in progress/);
+
+  const unknown49 = structuredClone(corrected49);
+  unknown49.taskDefinition.containerDefinitions[0].cpu = 999;
+  let unknownMutations = 0;
+  await assert.rejects(() => runLegacyBackendHealthRecovery(base(), {
+    census: async () => [failed48, unknown49], register: async () => { unknownMutations += 1; }, describe: async () => unknown49,
+    readService: async () => base().service, updateService: async () => { unknownMutations += 1; }, waitStable: async () => {},
+    readRunningTasks: async () => [], verifyHealth: async () => healthy,
+  }), /newer unknown/);
+  assert.equal(unknownMutations, 0);
 });
 
 test("eligibility rejects absent approval, wrong bindings, present current image, and invalid image evidence", () => {
@@ -92,7 +188,7 @@ test("eligibility rejects absent approval, wrong bindings, present current image
     [mutate("stoppedReasons", ["CannotPullContainerError: image sha256:" + "f".repeat(64) + " not found"]), /missing-image/],
   ]) assert.throws(() => assertLegacyBackendRecoveryEligibility(input), pattern);
   const wrongApproval = base();
-  wrongApproval.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: "sha256:" + "a".repeat(64), imageAuthorization: imageFixture.authorization, environmentApproval, approval: { ...approval, recoveryImageDigest: "sha256:" + "a".repeat(64) } });
+  wrongApproval.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: "sha256:" + "a".repeat(64), imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, approval: { ...approval, recoveryImageDigest: "sha256:" + "a".repeat(64) } });
   assert.throws(() => assertLegacyBackendRecoveryEligibility(wrongApproval), /different incident|digest/);
 });
 
@@ -116,7 +212,7 @@ test("hybrid green semantics and every protected legacy field fail closed", () =
 
 test("runtime source identity is bound to the authenticated image release, not executor tooling", () => {
   const imageReleaseSha = "a".repeat(40);
-  const rendered = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: digest, imageReleaseSha });
+  const rendered = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: digest, imageReleaseSha, artifactSigningBindings });
   const environment = new Map(rendered.containerDefinitions[0].environment.map(({ name, value }) => [name, value]));
   assert.equal(environment.get("GIT_SHA"), imageReleaseSha);
   assert.equal(environment.get("RELEASE_GIT_SHA"), imageReleaseSha);
@@ -230,7 +326,7 @@ test("authorization hash and human bindings fail closed", () => {
   });
   const selfApproved = base();
   selfApproved.environmentApproval = selfEnvironmentApproval;
-  selfApproved.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval: selfEnvironmentApproval, approval: { ...approval, approvedBy: "Release-Operator" } });
+  selfApproved.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval: selfEnvironmentApproval, artifactSigningBindingSha256, approval: { ...approval, approvedBy: "Release-Operator" } });
   assert.throws(() => assertLegacyBackendRecoveryEligibility(selfApproved), /prevents self-review/);
 });
 
@@ -245,7 +341,7 @@ test("configured solo operator may dispatch and approve when GitHub allows self-
   input.environmentApproval = soloEnvironmentApproval;
   input.authorization = createLegacyBackendRecoveryAuthorization({
     sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
-    imageAuthorization: imageFixture.authorization, environmentApproval: soloEnvironmentApproval, approval: { ...approval, approvedBy: "T-ej2003" },
+    imageAuthorization: imageFixture.authorization, environmentApproval: soloEnvironmentApproval, artifactSigningBindingSha256, approval: { ...approval, approvedBy: "T-ej2003" },
   });
   assert.equal(assertLegacyBackendRecoveryEligibility(input).recoveryImageDigest, digest);
 });
@@ -261,7 +357,7 @@ test("fabricated human metadata cannot replace authenticated GitHub environment 
     const input = base();
     input.authorization = createLegacyBackendRecoveryAuthorization({
       sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
-      imageAuthorization: imageFixture.authorization, environmentApproval, approval: { ...approval, approvedBy: "fabricated-reviewer", approverRole: "fabricated-role" },
+      imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, approval: { ...approval, approvedBy: "fabricated-reviewer", approverRole: "fabricated-role" },
     });
     change(input);
     let calls = 0;
@@ -429,6 +525,7 @@ test("partial and complete recovery evidence is self-authenticating", () => {
     authorizationFileSha256: "1".repeat(64), authorizationSha256: "2".repeat(64),
     environmentApprovalFileSha256: "3".repeat(64), environmentApprovalSha256: "4".repeat(64),
     imageAuthorizationFileSha256: "5".repeat(64), imageAuthorizationSha256: "6".repeat(64),
+    artifactSigningBindingSha256,
     imageReleaseSha: sourceSha,
     account: "368992683803", region: "eu-west-2",
   };

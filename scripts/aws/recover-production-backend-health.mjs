@@ -7,6 +7,8 @@ import { readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./sta
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
+import { resolveExistingArtifactSigningBindings } from "./production-artifact-signing-bootstrap.mjs";
+import { createAwsArtifactSigningAdapter } from "./production-artifact-signing-secrets-adapter.mjs";
 import {
   BACKEND_HEALTH_RECOVERY,
   BACKEND_HEALTH_RECOVERY_STATUS,
@@ -55,22 +57,49 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   const profile = option(argv, "--aws-profile");
   const env = cleanEnv(deps.baseEnv, profile);
   const githubContext = { repository: env.GITHUB_REPOSITORY, workflowRef: env.GITHUB_WORKFLOW_REF, eventName: env.GITHUB_EVENT_NAME, workflowRunId: env.GITHUB_RUN_ID, workflowRunAttempt: env.GITHUB_RUN_ATTEMPT, githubActions: env.GITHUB_ACTIONS, now: deps.now };
-  const verifyImageEvidence = deps.verifyImageEvidence || ((input) => verifyImageEvidenceSignature({ ...input, env }));
+  const verifyImageEvidenceSource = deps.verifyImageEvidence || ((input) => verifyImageEvidenceSignature({ ...input, env }));
+  let verifiedImageEvidence;
+  const verifyImageEvidence = (input) => verifiedImageEvidence ??= verifyImageEvidenceSource(input);
   const image = readAuthenticatedJson(imageFile, imageSha, "Backend recovery image authorization");
   const protectedMain = (deps.readProtectedMain || readFreshProtectedMainIdentity)({ cwd: root, expectedSourceSha: sourceSha, ...(deps.git ? { run: deps.git } : {}) });
   if (protectedMain.headSha !== sourceSha || protectedMain.freshRemoteMainSha !== sourceSha) throw new Error("Backend recovery requires the exact fresh protected-main source.");
   if (!deps.readProtectedMain && execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }).trim()) throw new Error("Backend recovery requires a clean protected-main checkout.");
+  const run = deps.exec || ((command, args) => execFileSync(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+  const awsText = (args) => run("aws", [...args, "--region", BACKEND_HEALTH_RECOVERY.region, "--output", "json", "--no-cli-pager"]);
+  const aws = (args) => JSON.parse(awsText(args));
+  const resolveArtifactSigning = deps.resolveArtifactSigning || (async () => {
+    const caller = aws(["sts", "get-caller-identity"]);
+    if (String(caller.Account) !== BACKEND_HEALTH_RECOVERY.account || !/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\//.test(caller.Arn || "")) throw new Error("Backend recovery requires the exact production release-deployer identity.");
+    const resolved = await resolveExistingArtifactSigningBindings({ run: async (args) => awsText(args), sourceSha, repositoryRoot: root });
+    const adapter = createAwsArtifactSigningAdapter({ run: async (args) => awsText(args), sourceSha, repositoryRoot: root, approvedBindings: resolved.bindingFile, approvedBindingsSha256: resolved.evidenceSha256 });
+    const verification = await adapter.verify();
+    return { ...resolved, verification };
+  });
 
   if (argv.includes("--prepare")) {
     const approvalFile = required(argv, "--approval");
     const approvalSha = required(argv, "--approval-sha256");
     const approval = readAuthenticatedJson(approvalFile, approvalSha, "Backend recovery approval");
+    const preliminaryBindingSha256 = "0".repeat(64);
+    const preliminary = createLegacyBackendRecoveryAuthorization({
+      sourceSha, currentTaskDefinitionArn: required(argv, "--current-task-definition"),
+      recoveryImageDigest: required(argv, "--recovery-image-digest"), imageAuthorization: image.value,
+      environmentApproval: environmentApproval.value, artifactSigningBindingSha256: preliminaryBindingSha256, approval: approval.value,
+    });
+    assertLegacyBackendRecoveryAuthorization(preliminary, {
+      sourceSha, currentTaskDefinitionArn: preliminary.currentTaskDefinitionArn, recoveryImageDigest: preliminary.recoveryImageDigest,
+      imageAuthorization: image.value, imageValidation: { verifyImageEvidence }, environmentApproval: environmentApproval.value,
+      artifactSigningBindingSha256: preliminaryBindingSha256, githubContext, executionActor: env.GITHUB_ACTOR,
+    });
+    const artifactSigning = await resolveArtifactSigning();
+    if (artifactSigning?.verification?.valid !== true || artifactSigning?.created?.length || artifactSigning?.uninitializedSecretRefs?.length) throw new Error("Existing canonical artifact-signing bindings are not fully initialized and verified.");
     const authorization = createLegacyBackendRecoveryAuthorization({
       sourceSha,
-      currentTaskDefinitionArn: required(argv, "--current-task-definition"),
-      recoveryImageDigest: required(argv, "--recovery-image-digest"),
+      currentTaskDefinitionArn: preliminary.currentTaskDefinitionArn,
+      recoveryImageDigest: preliminary.recoveryImageDigest,
       imageAuthorization: image.value,
       environmentApproval: environmentApproval.value,
+      artifactSigningBindingSha256: artifactSigning.evidenceSha256,
       approval: approval.value,
     });
     assertLegacyBackendRecoveryAuthorization(authorization, {
@@ -80,6 +109,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       imageAuthorization: image.value,
       imageValidation: { verifyImageEvidence },
       environmentApproval: environmentApproval.value,
+      artifactSigningBindingSha256: artifactSigning.evidenceSha256,
       githubContext,
       executionActor: env.GITHUB_ACTOR,
     });
@@ -98,11 +128,21 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     imageAuthorization: image.value,
     imageValidation: { verifyImageEvidence },
     environmentApproval: environmentApproval.value,
+    artifactSigningBindingSha256: authorization.value.artifactSigningBindingSha256,
     githubContext,
     executionActor: env.GITHUB_ACTOR,
   });
   const evidenceOut = path.resolve(required(argv, "--evidence-out"));
   const healthUrl = assertProductionBackendReadinessUrl(required(argv, "--health-url"));
+  const artifactSigning = await resolveArtifactSigning();
+  if (artifactSigning?.verification?.valid !== true || artifactSigning?.evidenceSha256 !== authorization.value.artifactSigningBindingSha256
+    || artifactSigning?.created?.length || artifactSigning?.uninitializedSecretRefs?.length) throw new Error("Live artifact-signing bindings differ from the authenticated recovery authorization.");
+  assertLegacyBackendRecoveryAuthorization(authorization.value, {
+    sourceSha, currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn, recoveryImageDigest: authorization.value.recoveryImageDigest,
+    imageReleaseSha: authorization.value.imageReleaseSha, imageAuthorization: image.value, imageValidation: { verifyImageEvidence },
+    environmentApproval: environmentApproval.value, artifactSigningBindingSha256: artifactSigning.evidenceSha256,
+    githubContext, executionActor: env.GITHUB_ACTOR,
+  });
   const evidenceBase = {
     schemaVersion: 2,
     kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE",
@@ -113,6 +153,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     environmentApprovalSha256: environmentApproval.value.evidenceSha256,
     imageAuthorizationFileSha256: image.sha256,
     imageAuthorizationSha256: image.value.evidenceSha256,
+    artifactSigningBindingSha256: artifactSigning.evidenceSha256,
     currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn,
     recoveryImageDigest: authorization.value.recoveryImageDigest,
     imageReleaseSha: authorization.value.imageReleaseSha,
@@ -132,8 +173,6 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     return evidence;
   };
   await record();
-  const run = deps.exec || ((command, args) => execFileSync(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-  const aws = (args) => JSON.parse(run("aws", [...args, "--region", BACKEND_HEALTH_RECOVERY.region, "--output", "json", "--no-cli-pager"]));
   const caller = aws(["sts", "get-caller-identity"]);
   if (String(caller.Account) !== BACKEND_HEALTH_RECOVERY.account || !/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\//.test(caller.Arn || "")) throw new Error("Backend recovery requires the exact production release-deployer identity.");
   const serviceResponse = aws(["ecs", "describe-services", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--services", BACKEND_HEALTH_RECOVERY.service]);
@@ -160,7 +199,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     ...(service.events || []).map(({ message }) => message),
     ...stoppedTasks.flatMap((task) => [task.stoppedReason, ...(task.containers || []).map(({ reason }) => reason)]),
   ].filter(Boolean);
-  const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition, recoveryImageDigest: recoveryDigest, imageReleaseSha: image.value.imageReleaseSha });
+  const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition, recoveryImageDigest: recoveryDigest, imageReleaseSha: image.value.imageReleaseSha, artifactSigningBindings: artifactSigning.bindings });
   const imageValidation = { verifyImageEvidence };
   const describe = async (arn) => aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]);
   const census = async () => {
@@ -186,7 +225,9 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   await runLegacyBackendHealthRecovery({
     sourceSha, service, currentTaskDefinition, currentImageExists: imageExists(currentDigest), stoppedReasons,
     replacementImage: { exists: imageExists(recoveryDigest), immutable: repository?.imageTagMutability === "IMMUTABLE", signatureValid: true, attestationValid: true, provenanceValid: true, criticalFindings: 0, repository: BACKEND_HEALTH_RECOVERY.repository, digest: recoveryDigest },
-    authorization: authorization.value, imageAuthorization: image.value, imageValidation, environmentApproval: environmentApproval.value, githubContext, executionActor: env.GITHUB_ACTOR, candidate,
+    authorization: authorization.value, imageAuthorization: image.value, imageValidation, environmentApproval: environmentApproval.value,
+    artifactSigningBindings: artifactSigning.bindings, artifactSigningBindingSha256: artifactSigning.evidenceSha256,
+    githubContext, executionActor: env.GITHUB_ACTOR, candidate,
   }, {
     census,
     describe,
