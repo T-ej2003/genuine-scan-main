@@ -126,11 +126,12 @@
     {
       "id": "artifact-signing-runtime-binding",
       "kind": "file",
-      "producer": "scripts/aws/bootstrap-production-artifact-signing.mjs:runCli",
+      "producer": "scripts/aws/production-artifact-signing-bootstrap.mjs:resolveArtifactSigningBindings",
       "consumers": [
         "scripts/aws/production-cutover-runtime-bootstrap.mjs",
         "scripts/aws/production-cutover-production-adapters.mjs",
-        "scripts/aws/production-cutover-control-plane.mjs"
+        "scripts/aws/production-cutover-control-plane.mjs",
+        "scripts/aws/recover-production-backend-health.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",

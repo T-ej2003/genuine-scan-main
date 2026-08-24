@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ARTIFACT_SIGNING_BINDINGS } from "../aws/production-artifact-signing-domain.mjs";
-import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, artifactSigningRuntimeBindingPath, bootstrapArtifactSigningBindings, loadArtifactSigningBootstrapContract } from "../aws/production-artifact-signing-bootstrap.mjs";
+import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, artifactSigningRuntimeBindingPath, bootstrapArtifactSigningBindings, loadArtifactSigningBootstrapContract, resolveExistingArtifactSigningBindings } from "../aws/production-artifact-signing-bootstrap.mjs";
 import { createAwsArtifactSigningAdapter, loadApprovedArtifactSigningBindings } from "../aws/production-artifact-signing-secrets-adapter.mjs";
 import { parseArgs, runCli } from "../aws/bootstrap-production-artifact-signing.mjs";
 
@@ -110,6 +110,24 @@ test("empty environment creates exactly four containers and emits identifiers on
   assert.equal(lstatSync(path.dirname(result.bindingFile)).mode & 0o777, 0o700);
   assert.equal(lstatSync(result.bindingFile).mode & 0o777, 0o600);
   assert.equal(JSON.parse(bytes).sourceSha, sourceSha);
+});
+
+test("recovery resolver is read-only and rejects missing or uninitialized canonical bindings", async () => {
+  const missing = fakeRunner();
+  await assert.rejects(() => resolveExistingArtifactSigningBindings({ run: missing.run, sourceSha }), /lookup failed/);
+  assert.equal(missing.calls.some((args) => args[1] === "create-secret"), false);
+
+  const existing = Object.fromEntries(Object.values(names).map((name) => [name, { arn: suffix(name.split("/").at(-1)), initialized: true, value: "fixture" }]));
+  const fixture = fakeRunner({ existing });
+  const resolved = await resolveExistingArtifactSigningBindings({ run: fixture.run, sourceSha });
+  assert.equal(resolved.createSecretCount, 0);
+  assert.deepEqual(resolved.created, []);
+  assert.deepEqual(resolved.uninitializedSecretRefs, []);
+  assert.equal(fixture.calls.every((args) => args[1] === "describe-secret"), true);
+
+  existing[Object.values(names)[0]].initialized = false;
+  const uninitialized = await resolveExistingArtifactSigningBindings({ run: fakeRunner({ existing }).run, sourceSha });
+  assert.equal(uninitialized.uninitializedSecretRefs.length, 1);
 });
 
 test("runtime binding path is exact, source-bound, external, and fail-closed", async () => {

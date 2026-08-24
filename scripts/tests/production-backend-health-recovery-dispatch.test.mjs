@@ -16,6 +16,12 @@ const fresh = makeCanonicalImageAuthorization({ sourceSha: "94da9651eb9427603be8
 const currentTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47";
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
+const artifactSigningBindings = {
+  ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-AbCd12",
+  ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-key-current-AbCd12",
+  ARTIFACT_SIGN_ACTIVE_KEY_VERSION: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/active-key-version-AbCd12",
+  ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-AbCd12",
+};
 const approval = (fixture) => ({ ticket: "ticket", approvedBy: "operator", approverRole: "production operator", reason: "missing image recovery", verificationRef: "verification", sourceSha: fixture.authorization.sourceSha, currentTaskDefinitionArn, recoveryImageDigest: fixture.authorization.backendDigest });
 const input = (fixture) => ({
   sourceSha: fixture.authorization.sourceSha,
@@ -64,7 +70,7 @@ test("fresh and authenticated reused images dispatch with byte-identical hashes"
 
 test("reused image keeps its authenticated release identity in the recovery task definition", () => {
   const current = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
-  const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: reused.authorization.backendDigest, imageReleaseSha: reused.authorization.imageReleaseSha });
+  const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: reused.authorization.backendDigest, imageReleaseSha: reused.authorization.imageReleaseSha, artifactSigningBindings });
   const environment = new Map(candidate.containerDefinitions.find(({ name }) => name === "backend").environment.map(({ name, value }) => [name, value]));
   assert.equal(environment.get("GIT_SHA"), reused.authorization.imageReleaseSha);
   assert.equal(environment.get("RELEASE_GIT_SHA"), reused.authorization.imageReleaseSha);
