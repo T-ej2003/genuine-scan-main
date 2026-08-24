@@ -81,7 +81,7 @@ test("production-shaped required and forbidden resources reconcile to the source
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 233);
+  assert.equal(evaluations.required.length, 238);
   assert.equal(evaluations.forbidden.length, 37);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
@@ -101,6 +101,10 @@ test("production-shaped required and forbidden resources reconcile to the source
   assert.deepEqual(recoveryReads.map(({ action, resource }) => ({ action, resource })), [
     { action: "ecr:DescribeImages", resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend" },
     { action: "ecr:DescribeRepositories", resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend" },
+    { action: "ecs:DescribeServiceDeployments", resource: "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*" },
+    { action: "ecs:DescribeServiceDeployments", resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2" },
+    { action: "ecs:DescribeServiceRevisions", resource: "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*" },
+    { action: "ecs:DescribeServiceRevisions", resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2" },
   ]);
   assert(recoveryReads.every(allows));
   for (const repository of ["mscqr-frontend", "mscqr-worker", "unrelated"]) {

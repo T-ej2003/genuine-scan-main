@@ -68,6 +68,21 @@ test("fresh and authenticated reused images dispatch with byte-identical hashes"
   assert.equal(reused.authorization.authorizationPath, "IMAGE_REUSE");
 });
 
+test("stalled rollback dispatch binds the exact deployment, current revision, and target digest", () => {
+  const stalled = {
+    ...approval(reused),
+    rollbackDeploymentArn: "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/deployment-N",
+    rollbackTargetTaskDefinitionArn: currentTaskDefinitionArn,
+    rollbackTargetDigest: `sha256:${"b".repeat(64)}`,
+  };
+  assert.doesNotThrow(() => buildBackendHealthRecoveryDispatch({ ...input(reused), approvalBytes: Buffer.from(JSON.stringify(stalled)) }));
+  for (const changed of [
+    { rollbackDeploymentArn: stalled.rollbackDeploymentArn.replace("mscqr-backend-servi-euw2", "other") },
+    { rollbackTargetTaskDefinitionArn: currentTaskDefinitionArn.replace(":47", ":48") },
+    { rollbackTargetDigest: "sha256:short" },
+  ]) assert.throws(() => buildBackendHealthRecoveryDispatch({ ...input(reused), approvalBytes: Buffer.from(JSON.stringify({ ...stalled, ...changed })) }), /rollback approval identity/);
+});
+
 test("reused image keeps its authenticated release identity in the recovery task definition", () => {
   const current = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
   const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: reused.authorization.backendDigest, imageReleaseSha: reused.authorization.imageReleaseSha, artifactSigningBindings });

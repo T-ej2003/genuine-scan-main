@@ -17,6 +17,7 @@ const targetArn = `arn:aws:ecs:${region}:${account}:task-definition/mscqr-produc
 const targetFamily = "mscqr-production-rls-green-backend-candidate";
 const sourceSha = "5e12983f1fe733473cacb6b213c0c02ef9f38098";
 const digest = "sha256:32cf5587dff017354e637c147a3d985f286933129af83091d48edf35bee4e656";
+const sourceDigest = `sha256:${"e".repeat(64)}`;
 const serviceLoadBalancers = [{ targetGroupArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/example", containerName: "backend", containerPort: 4000 }];
 const validBackendPortMappings = [{ containerPort: 4000, hostPort: 4000, protocol: "tcp", name: "backend-4000-tcp", appProtocol: "http" }];
 
@@ -69,7 +70,7 @@ function writeFixture(data, options = {}) {
     taskDefinition: {
       taskDefinitionArn: fromArn,
       family: "mscqr-backend",
-      containerDefinitions: [{ name: containerName, image: "old-image", portMappings: options.normalPortMappings === undefined ? validBackendPortMappings : options.normalPortMappings }],
+      containerDefinitions: [{ name: containerName, image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${sourceDigest}`, portMappings: options.normalPortMappings === undefined ? validBackendPortMappings : options.normalPortMappings }],
       runtimePlatform: { cpuArchitecture: "X86_64" },
     },
   };
@@ -169,6 +170,11 @@ elif [[ "$1 $2" == "ecs update-service" ]]; then
   if [[ "$task_definition" == "${fromArn}" ]]; then touch "$FAKE_DATA/rollback-attempted"; fi
   if [[ "$FAKE_SCENARIO" == "rollback-failure" && "$task_definition" == "${fromArn}" ]]; then exit 31; fi
   printf '%s' "$task_definition" > "$FAKE_DATA/state"
+elif [[ "$1 $2" == "ecr describe-images" ]]; then
+  if [[ "$FAKE_SCENARIO" == "rollback-image-missing" ]]; then printf '%s' 'ImageNotFoundException' >&2; exit 44; fi
+  requested=""
+  for ((i=1; i<=$#; i++)); do if [[ "\${!i}" == imageDigest=* ]]; then requested="\${!i#imageDigest=}"; fi; done
+  printf '{"imageDetails":[{"imageDigest":"%s"}]}' "$requested"
 elif [[ "$1 $2" == "ecs wait" ]]; then
   if [[ ("$FAKE_SCENARIO" == "stable-failure" || "$FAKE_SCENARIO" == "rollback-failure") && ! -f "$FAKE_DATA/stable-failed" ]]; then touch "$FAKE_DATA/stable-failed"; exit 32; fi
   if [[ "$FAKE_SCENARIO" == "foreign-after-update" && ! -f "$FAKE_DATA/stable-failed" ]]; then touch "$FAKE_DATA/stable-failed"; printf '%s' "${unrelatedTaskDefinition}" > "$FAKE_DATA/state"; exit 32; fi
@@ -210,6 +216,7 @@ function runExisting(options = {}, extraArgs = []) {
     sourceArn: options.expectedCurrent || fromArn,
     sourceClass: "LEGACY_BACKEND",
     sourceDigest: options.sourceDigest || `sha256:${"e".repeat(64)}`,
+    rollbackImageVerified: true,
     desiredCount: 2,
     targetArn,
     expectedCurrentTaskDefinitionArn: options.expectedCurrent || fromArn,
@@ -273,6 +280,12 @@ test("existing production-shaped target switches once without registering", () =
   assert.equal((result.calls.match(/ecs register-task-definition/g) || []).length, 0);
   assert.match(result.stdout, new RegExp(targetArn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assertTempClean(result);
+});
+
+test("deployment refuses a source revision whose exact rollback image is unavailable", () => {
+  const result = runExisting({ scenario: "rollback-image-missing" });
+  assertFailure(result, /Rollback candidate image viability/);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 0);
 });
 
 test("normal Stage-B transaction records pre-update failure, verified rollback, and failed rollback distinctly", () => {
@@ -410,7 +423,7 @@ test("existing mode verifies the deployed version before disarming rollback", ()
       assert.match(result.calls, /curl .*--connect-timeout 5 .*--max-time 15/);
     }
     const events = result.calls.trim().split("\n");
-    assert.ok(events.findIndex((event) => event.startsWith("curl ")) < events.findIndex((event) => event.includes(`--task-definition ${fromArn}`)));
+    assert.ok(events.findIndex((event) => event.startsWith("curl ")) < events.findIndex((event) => event.startsWith("ecs update-service") && event.includes(`--task-definition ${fromArn}`)));
     assertTempClean(result);
   }
 });

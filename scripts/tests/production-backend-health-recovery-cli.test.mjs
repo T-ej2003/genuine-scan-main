@@ -131,6 +131,7 @@ test("execute authenticates semantic authorization before any AWS call", async (
     imageAuthorizationSha256: fixture.imageFixture.authorization.evidenceSha256, reasonCode: "CURRENT_IMAGE_DIGEST_MISSING",
     environmentApprovalSha256: fixture.environmentApproval.evidenceSha256,
     artifactSigningBindingSha256,
+    rollbackProof: null,
     allowedDeltaProfile: "IMAGE_SOURCE_IDENTITY_AND_EXACT_ARTIFACT_SIGNING_BINDINGS",
     approval: { ticket: "INC-1", approvedBy: "security", approverRole: "Security Lead", reason: "backend recovery", verificationRef: "https://example.invalid/1", sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: digest },
   };

@@ -21,6 +21,7 @@ import {
   runLegacyBackendHealthRecovery,
 } from "./production-backend-health-recovery-contract.mjs";
 import { assertProductionBackendReadinessUrl, parseProductionBackendReadiness } from "./production-backend-readiness-contract.mjs";
+import { collectRollbackViability, exactEcrImageResult } from "./production-ecs-rollback-viability.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
@@ -92,16 +93,18 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     catch { throw signingDiscoveryError(ARTIFACT_SIGNING_DISCOVERY_FAILURE.SECRET_VALUE); }
     return { ...resolved, verification };
   });
+  const readRollbackViability = (observationMilliseconds) => (deps.collectRollbackViability || collectRollbackViability)({ aws, sleep: deps.sleep, observationMilliseconds });
 
   if (argv.includes("--prepare")) {
     const approvalFile = required(argv, "--approval");
     const approvalSha = required(argv, "--approval-sha256");
     const approval = readAuthenticatedJson(approvalFile, approvalSha, "Backend recovery approval");
+    const rollbackProof = "rollbackDeploymentArn" in approval.value ? await readRollbackViability(30_000) : null;
     const preliminaryBindingSha256 = "0".repeat(64);
     const preliminary = createLegacyBackendRecoveryAuthorization({
       sourceSha, currentTaskDefinitionArn: required(argv, "--current-task-definition"),
       recoveryImageDigest: required(argv, "--recovery-image-digest"), imageAuthorization: image.value,
-      environmentApproval: environmentApproval.value, artifactSigningBindingSha256: preliminaryBindingSha256, approval: approval.value,
+      environmentApproval: environmentApproval.value, artifactSigningBindingSha256: preliminaryBindingSha256, rollbackProof, approval: approval.value,
     });
     assertLegacyBackendRecoveryAuthorization(preliminary, {
       sourceSha, currentTaskDefinitionArn: preliminary.currentTaskDefinitionArn, recoveryImageDigest: preliminary.recoveryImageDigest,
@@ -117,6 +120,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       imageAuthorization: image.value,
       environmentApproval: environmentApproval.value,
       artifactSigningBindingSha256: artifactSigning.evidenceSha256,
+      rollbackProof,
       approval: approval.value,
     });
     assertLegacyBackendRecoveryAuthorization(authorization, {
@@ -162,6 +166,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     imageAuthorizationFileSha256: image.sha256,
     imageAuthorizationSha256: image.value.evidenceSha256,
     artifactSigningBindingSha256: authorization.value.artifactSigningBindingSha256,
+    rollbackProofSha256: authorization.value.rollbackProof?.proofSha256 || null,
     currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn,
     recoveryImageDigest: authorization.value.recoveryImageDigest,
     imageReleaseSha: authorization.value.imageReleaseSha,
@@ -222,9 +227,12 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   const imageExists = (digest) => {
     try {
       const result = aws(["ecr", "describe-images", "--repository-name", BACKEND_HEALTH_RECOVERY.repository, "--image-ids", `imageDigest=${digest}`]);
-      return result.imageDetails?.length === 1;
+      const classified = exactEcrImageResult({ repository: BACKEND_HEALTH_RECOVERY.repository, digest, response: result });
+      if (classified.exists === "UNKNOWN") throw new Error("ECR image readback did not authenticate the exact digest.");
+      return classified.exists;
     } catch (error) {
-      if (/ImageNotFoundException/.test(String(error.stderr || error.message))) return false;
+      const classified = exactEcrImageResult({ repository: BACKEND_HEALTH_RECOVERY.repository, digest, error });
+      if (classified.exists === false) return false;
       throw error;
     }
   };
@@ -258,6 +266,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     if (response.failures?.length || response.services?.length !== 1) throw new Error("Backend service reconciliation readback failed.");
     return response.services[0];
   };
+  const readFreshRollbackViability = authorization.value.rollbackProof ? async () => readRollbackViability(0) : undefined;
   await runLegacyBackendHealthRecovery({
     sourceSha, service, currentTaskDefinition, currentImageExists: imageExists(currentDigest), stoppedReasons,
     replacementImage: { exists: imageExists(recoveryDigest), immutable: repository?.imageTagMutability === "IMMUTABLE", signatureValid: true, attestationValid: true, provenanceValid: true, criticalFindings: 0, repository: BACKEND_HEALTH_RECOVERY.repository, digest: recoveryDigest },
@@ -269,6 +278,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     describe,
     register: async (payload) => aws(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify(payload)]),
     readService,
+    ...(readFreshRollbackViability ? { readRollbackViability: readFreshRollbackViability } : {}),
     updateService: async (taskDefinition) => aws(["ecs", "update-service", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--service", BACKEND_HEALTH_RECOVERY.service, "--task-definition", taskDefinition]),
     waitStable: async () => run("aws", ["ecs", "wait", "services-stable", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--services", BACKEND_HEALTH_RECOVERY.service, "--region", BACKEND_HEALTH_RECOVERY.region, "--no-cli-pager"]),
     readRunningTasks: async () => {

@@ -13,6 +13,7 @@ import {
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
+import { classifyRollbackViability, exactEcrImageResult } from "../aws/production-ecs-rollback-viability.mjs";
 
 const sourceSha = "565f78be803558feb40a543ead464c5410738960";
 const digest = "sha256:3dbd02136a99d1741fdfa655397a661fa2275812e1cad0675c93fc5c7c4b4477";
@@ -187,6 +188,75 @@ test("failed :48 is never reused as the corrected recovery revision", async () =
     readRunningTasks: async () => [], verifyHealth: async () => healthy,
   }), /newer unknown/);
   assert.equal(unknownMutations, 0);
+});
+
+test("authenticated stalled rollback with an unrecoverable exact target may be superseded once", async () => {
+  const rollbackDeploymentArn = "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/future-N";
+  const rollbackServiceRevisionArn = "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/future-N-minus-1";
+  const rollbackTargetDigest = current.taskDefinition.containerDefinitions[0].image.split("@")[1];
+  const rollbackService = { ...base().service, runningCount: 0, pendingCount: 0, deployments: [{ status: "PRIMARY", taskDefinition: current.taskDefinition.taskDefinitionArn, rolloutState: "IN_PROGRESS", desiredCount: 2, runningCount: 0, pendingCount: 0 }] };
+  const rollbackProof = classifyRollbackViability({
+    service: { ...rollbackService, serviceArn: `arn:aws:ecs:eu-west-2:368992683803:service/${BACKEND_HEALTH_RECOVERY.cluster}/${BACKEND_HEALTH_RECOVERY.service}` },
+    deployment: { serviceDeploymentArn: rollbackDeploymentArn, status: "ROLLBACK_IN_PROGRESS", targetServiceRevision: { arn: rollbackServiceRevisionArn } },
+    rollbackTargetTaskDefinitionArn: current.taskDefinition.taskDefinitionArn,
+    rollbackTargetDigest,
+    imageResult: exactEcrImageResult({ repository: "mscqr-backend", digest: rollbackTargetDigest, error: Object.assign(new Error("ImageNotFoundException"), { name: "ImageNotFoundException" }) }),
+    taskAttempts: [1, 2].map((n) => ({ taskArn: `task-${n}`, taskDefinitionArn: current.taskDefinition.taskDefinitionArn, classification: "CANNOT_PULL_IMAGE", digest: rollbackTargetDigest })),
+    observationStart: "2026-08-24T10:00:00.000Z", observationEnd: "2026-08-24T10:01:00.000Z",
+  });
+  const stalledApproval = { ...approval, rollbackDeploymentArn, rollbackTargetTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, rollbackTargetDigest };
+  const stalledAuthorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, rollbackProof, approval: stalledApproval });
+  const input = { ...base(), service: rollbackService, authorization: stalledAuthorization };
+  assert.equal(assertLegacyBackendRecoveryEligibility(input).rollbackProof.classification, "ROLLBACK_STALLED_UNRECOVERABLE_TARGET");
+  let mutations = 0;
+  await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
+    census: async () => [], register: async () => { mutations += 1; }, describe: async () => ({}), readService: async () => rollbackService,
+    readRollbackViability: async () => ({ ...rollbackProof, rollbackDeploymentArn: rollbackDeploymentArn.replace("future-N", "changed") }),
+    updateService: async () => { mutations += 1; }, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
+  }), /stalled-unrecoverable|changed/);
+  assert.equal(mutations, 0);
+});
+
+test("future failed revision N registers a distinct corrected N+1 after exact N-1 rollback proof", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:998";
+  const currentN = structuredClone(current);
+  Object.assign(currentN.taskDefinition, { taskDefinitionArn: targetArn, revision: 998 });
+  const candidateN = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: currentN, recoveryImageDigest: digest, imageReleaseSha: sourceSha, artifactSigningBindings });
+  const failedN = { taskDefinition: { ...structuredClone(candidateN), taskDefinitionArn: targetArn.replace(":998", ":999"), revision: 999 }, tags: [] };
+  failedN.taskDefinition.containerDefinitions[0].secrets = failedN.taskDefinition.containerDefinitions[0].secrets.filter(({ name }) => !name.startsWith("ARTIFACT_SIGN_"));
+  const correctedN = { taskDefinition: { ...structuredClone(candidateN), taskDefinitionArn: targetArn.replace(":998", ":1000"), revision: 1000 }, tags: [] };
+  const rollbackDeploymentArn = "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/future-N";
+  const rollbackServiceRevisionArn = "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/future-N-minus-1";
+  const rollbackTargetDigest = currentN.taskDefinition.containerDefinitions[0].image.split("@")[1];
+  const rollbackService = { ...base().service, taskDefinition: targetArn, runningCount: 0, pendingCount: 0, deployments: [{ status: "PRIMARY", taskDefinition: targetArn, rolloutState: "IN_PROGRESS", desiredCount: 2, runningCount: 0, pendingCount: 0 }] };
+  const rollbackProof = classifyRollbackViability({
+    service: { ...rollbackService, serviceArn: `arn:aws:ecs:eu-west-2:368992683803:service/${BACKEND_HEALTH_RECOVERY.cluster}/${BACKEND_HEALTH_RECOVERY.service}` },
+    deployment: { serviceDeploymentArn: rollbackDeploymentArn, status: "ROLLBACK_IN_PROGRESS", targetServiceRevision: { arn: rollbackServiceRevisionArn } },
+    rollbackTargetTaskDefinitionArn: targetArn,
+    rollbackTargetDigest,
+    imageResult: exactEcrImageResult({ repository: "mscqr-backend", digest: rollbackTargetDigest, error: Object.assign(new Error("ImageNotFoundException"), { name: "ImageNotFoundException" }) }),
+    taskAttempts: [1, 2].map((index) => ({ taskArn: `future-task-${index}`, taskDefinitionArn: targetArn, classification: "CANNOT_PULL_IMAGE", digest: rollbackTargetDigest })),
+    observationStart: "2026-08-24T10:00:00.000Z", observationEnd: "2026-08-24T10:01:00.000Z",
+  });
+  const approvalN = { ...approval, currentTaskDefinitionArn: targetArn, rollbackDeploymentArn, rollbackTargetTaskDefinitionArn: targetArn, rollbackTargetDigest };
+  const authorizationN = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: targetArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, rollbackProof, approval: approvalN });
+  const input = { ...base(), service: rollbackService, currentTaskDefinition: currentN, candidate: candidateN, authorization: authorizationN, stoppedReasons: [`CannotPullContainerError: image ${currentN.taskDefinition.containerDefinitions[0].image} not found`] };
+  let service = rollbackService;
+  let registrations = 0;
+  const result = await runLegacyBackendHealthRecovery(input, {
+    census: async () => [failedN],
+    register: async () => { registrations += 1; return correctedN; },
+    describe: async () => correctedN,
+    readService: async () => service,
+    readRollbackViability: async () => rollbackProof,
+    updateService: async (arn) => { service = { ...service, taskDefinition: arn, runningCount: 2, pendingCount: 0 }; },
+    waitStable: async () => {},
+    readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: correctedN.taskDefinition.taskDefinitionArn, imageDigest: digest, healthStatus: "HEALTHY" })),
+    verifyHealth: async () => healthy,
+  });
+  assert.equal(registrations, 1);
+  assert.equal(result.targetArn, correctedN.taskDefinition.taskDefinitionArn);
+  assert.notEqual(result.targetArn, failedN.taskDefinition.taskDefinitionArn);
 });
 
 test("eligibility rejects absent approval, wrong bindings, present current image, and invalid image evidence", () => {
@@ -542,6 +612,7 @@ test("partial and complete recovery evidence is self-authenticating", () => {
     environmentApprovalFileSha256: "3".repeat(64), environmentApprovalSha256: "4".repeat(64),
     imageAuthorizationFileSha256: "5".repeat(64), imageAuthorizationSha256: "6".repeat(64),
     artifactSigningBindingSha256,
+    rollbackProofSha256: null,
     imageReleaseSha: sourceSha,
     account: "368992683803", region: "eu-west-2",
   };

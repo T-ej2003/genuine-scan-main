@@ -128,11 +128,51 @@ immediately before `UpdateService`, so a later concurrent change still fails
 closed without an update.
 
 A failed historical recovery revision without the four bindings is not a
-matching candidate and is never reused. Once ECS rollback is authenticated as
-complete on the approved legacy source, a later protected run may register one
-new corrected immutable revision. A service still targeting the failed
-revision, an unknown newer revision, or a still-running rollback stops for live
-reconciliation; task definitions are never modified in place.
+matching candidate and is never reused. Rollback reconciliation distinguishes
+none, progressing, successful, failed, ambiguous, stalled with a recoverable
+target, and stalled with an authenticated unrecoverable target. Elapsed time is
+never authority. Supersession is permitted only for the final state, after two
+bounded authenticated observations bind the exact service deployment, target
+service revision, task-definition ARN, immutable digest, repeated exact-target pull failures, and
+canonical ECR `ImageNotFoundException` for that digest. Access denial, timeout,
+or malformed ECR output is unknown and fails closed.
+
+The operator approval and generated authorization bind that rollback deployment,
+target ARN, and target digest. Immediately before registration and again before
+`UpdateService`, the workflow rereads the same evidence; any independently
+running task, changed deployment, target, count, or image viability stops before
+mutation. A corrected recovery always registers a new immutable revision. A
+failed historical revision is never modified or relabeled.
+
+Every normal or rotation deployment through `deploy-ecs-service.sh` also reads
+the currently running task definition and proves its exact immutable backend
+digest still exists before replacing it. A task-definition record alone is not
+a viable rollback path.
+
+### Assumption graph and retention finding
+
+The incident exposed three connected assumptions: the recovery eligibility
+guard treated every `IN_PROGRESS` rollout as recoverable; the deployment wrapper
+treated a stable task-definition ARN as sufficient rollback evidence; and ECR
+lifecycle controls retain only untagged images by age and release images by
+count. The first two are repaired here. The lifecycle policy in
+`infra/aws/terraform/main.tf` and `scripts/aws/apply-ecr-repository-controls.sh`
+does not protect digests referenced by active or rollback-candidate task
+definitions. That separate retention defect requires a governed design because
+ECR lifecycle policies cannot dynamically express ECS references; this repair
+does not silently broaden retention or mutate AWS.
+
+## Transitive production dependency closure
+
+`npm run stage-b:dependency-closure:verify` is a permanent CI gate backed by
+`MSCQRProductionDependencyClosure-v1.json`. It binds each AWS call introduced
+by this repair to its release mode, release-deployer identity, exact source IAM
+resources, generated manifest capability, administrator simulation, and live
+read preflight. It also verifies the real ECS service-deployment then
+service-revision response chain, the six unchanged workflow transport inputs,
+the exact four artifact-signing bindings, rollback evidence producer/consumer
+joins, and normal/rotation rollback-image checks. An unknown production AWS
+operation or runtime dependency fails Stage-B deployment closure.
 
 ## Operator sequence
 
@@ -142,7 +182,10 @@ reconciliation; task definitions are never modified in place.
 2. Produce exact JSON bytes for canonical image authorization and human
    approval. Record each file's SHA-256. The approval object must contain
    `ticket`, `approvedBy`, `approverRole`, `reason`, `verificationRef`,
-   `sourceSha`, `currentTaskDefinitionArn`, and `recoveryImageDigest`.
+   `sourceSha`, `currentTaskDefinitionArn`, and `recoveryImageDigest`. A stalled
+   rollback supersession additionally requires the exact
+   `rollbackDeploymentArn`, `rollbackTargetTaskDefinitionArn`, and
+   `rollbackTargetDigest` from authenticated reconciliation.
 3. Dispatch through `scripts/aws/dispatch-production-backend-health-recovery.mjs`.
    It serializes each JSON input once and derives the workflow value and SHA-256
    from those exact transport bytes; do not compose byte-sensitive inputs with

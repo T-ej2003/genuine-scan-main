@@ -39,6 +39,7 @@ export const RELEASE_READ_PROBES = Object.freeze([
   ["recovery-backend-revisions", "ecs:ListTaskDefinitions", ["ecs", "list-task-definitions", "--family-prefix", "mscqr-production-rls-green-backend-candidate", "--status", "ACTIVE", "--sort", "DESC"]],
   ["backend-health-recovery-images", "ecr:DescribeImages", ["ecr", "describe-images", "--repository-name", "mscqr-backend", "--max-results", "1"]],
   ["backend-health-recovery-repository", "ecr:DescribeRepositories", ["ecr", "describe-repositories", "--repository-names", "mscqr-backend"]],
+  ["backend-health-recovery-service-deployments", "ecs:ListServiceDeployments", ["ecs", "list-service-deployments", "--cluster", STAGE_B.clusterArn, "--service", "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"]],
   ["audit-broker", "lambda:GetFunctionConfiguration", ["lambda", "get-function-configuration", "--function-name", STAGE_B.brokerFunctionArn]],
   ["audit-broker-alias", "lambda:GetAlias", ["lambda", "get-alias", "--function-name", STAGE_B.brokerFunctionArn, "--name", STAGE_B.brokerAliasQualifier]],
   ["refresh-broker-policy", "iam:GetPolicy", ["iam", "get-policy", "--policy-arn", policyArn]],
@@ -112,6 +113,9 @@ export function runReleaseReadPreflight({
     if (serviceArns.length) dependent.push({ id: "audit-service-details", action: "ecs:DescribeServices", args: ["ecs", "describe-services", "--cluster", STAGE_B.clusterArn, "--services", ...serviceArns] });
     const taskArns = JSON.parse(responses.get("audit-tasks") || "{}").taskArns || [];
     if (taskArns.length) dependent.push({ id: "audit-task-details", action: "ecs:DescribeTasks", args: ["ecs", "describe-tasks", "--cluster", STAGE_B.clusterArn, "--tasks", ...taskArns] });
+    const rollbackDeploymentArns = (JSON.parse(responses.get("backend-health-recovery-service-deployments") || "{}").serviceDeployments || [])
+      .filter(({ status }) => status === "ROLLBACK_IN_PROGRESS").map(({ serviceDeploymentArn }) => serviceDeploymentArn);
+    if (rollbackDeploymentArns.length) dependent.push({ id: "backend-health-recovery-service-deployment-details", action: "ecs:DescribeServiceDeployments", args: ["ecs", "describe-service-deployments", "--service-deployment-arns", ...rollbackDeploymentArns] });
     const defaultVersionId = JSON.parse(responses.get("refresh-broker-policy") || "{}").Policy?.DefaultVersionId;
     if (defaultVersionId) dependent.push({ id: "refresh-broker-policy-version", action: "iam:GetPolicyVersion", args: ["iam", "get-policy-version", "--policy-arn", policyArn, "--version-id", defaultVersionId] });
     const normalActivationVersionId = JSON.parse(responses.get("normal-activation-policy") || "{}").Policy?.DefaultVersionId;
@@ -125,8 +129,20 @@ export function runReleaseReadPreflight({
   }
   for (const probe of dependent) {
     total += 1;
-    try { run(probe.args, probe); if (requiredReads[probe.action] !== "denied") requiredReads[probe.action] = "allowed"; }
+    try { const response = run(probe.args, probe); responses.set(probe.id, response); if (requiredReads[probe.action] !== "denied") requiredReads[probe.action] = "allowed"; }
     catch (error) { requiredReads[probe.action] = "denied"; failed.push({ id: probe.id, action: probe.action, classification: safeError(error) }); }
+  }
+  try {
+    const revisionArns = (JSON.parse(responses.get("backend-health-recovery-service-deployment-details") || "{}").serviceDeployments || [])
+      .map(({ targetServiceRevision }) => targetServiceRevision?.arn).filter(Boolean);
+    if (revisionArns.length) {
+      const probe = { id: "backend-health-recovery-service-revision-details", action: "ecs:DescribeServiceRevisions", args: ["ecs", "describe-service-revisions", "--service-revision-arns", ...revisionArns] };
+      total += 1;
+      try { run(probe.args, probe); if (requiredReads[probe.action] !== "denied") requiredReads[probe.action] = "allowed"; }
+      catch (error) { requiredReads[probe.action] = "denied"; failed.push({ id: probe.id, action: probe.action, classification: safeError(error) }); }
+    }
+  } catch (error) {
+    failed.push({ id: "service-revision-read-discovery", action: "ecs:DescribeServiceRevisions", classification: safeError(error) });
   }
   const status = failed.length === 0 && checkerTrust?.exact === true && checkerTrust?.mfaRequired === true && stageAStateIdentity ? "valid" : "blocked";
   let stageAStateIdentityPath = null;

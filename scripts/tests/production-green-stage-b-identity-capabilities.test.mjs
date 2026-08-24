@@ -53,7 +53,7 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 38, capabilities: 290, uniqueActions: 125, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 38, capabilities: 293, uniqueActions: 128, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
@@ -80,6 +80,7 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecs:UpdateService"));
   assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecr:DescribeImages"));
   assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecr:DescribeRepositories"));
+  assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/production-ecs-rollback-viability.mjs" && action === "ecs:DescribeServiceDeployments"));
   const forward = first.capabilities.filter(({ phase }) => phase === "existing-revision-forward-recovery");
   assert.equal(forward.length, 9);
   assert(forward.every(({ sourceFile, identity }) => sourceFile === "scripts/aws/forward-recover-stage-b-existing-revision.mjs" && identity === "RELEASE_DEPLOYER"));
@@ -133,6 +134,7 @@ test("backend recovery ECR probes are exact read-only repository calls", () => {
   assert.deepEqual(RELEASE_READ_PROBES.filter(({ id }) => id.startsWith("backend-health-recovery-")), [
     { id: "backend-health-recovery-images", action: "ecr:DescribeImages", args: ["ecr", "describe-images", "--repository-name", "mscqr-backend", "--max-results", "1"] },
     { id: "backend-health-recovery-repository", action: "ecr:DescribeRepositories", args: ["ecr", "describe-repositories", "--repository-names", "mscqr-backend"] },
+    { id: "backend-health-recovery-service-deployments", action: "ecs:ListServiceDeployments", args: ["ecs", "list-service-deployments", "--cluster", "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", "--service", "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"] },
   ]);
 });
 
@@ -163,6 +165,21 @@ test("backend recovery ECR denial blocks the release preflight before mutation",
       classification: "AccessDenied",
     }]);
   }
+});
+
+test("active rollback discovery reads the exact deployment details", () => {
+  const calls = [];
+  const deploymentArn = "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/deployment";
+  const revisionArn = "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/revision";
+  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+    calls.push({ args, probe });
+    if (probe.id === "backend-health-recovery-service-deployments") return JSON.stringify({ serviceDeployments: [{ serviceDeploymentArn: deploymentArn, status: "ROLLBACK_IN_PROGRESS" }] });
+    if (probe.id === "backend-health-recovery-service-deployment-details") return JSON.stringify({ serviceDeployments: [{ serviceDeploymentArn: deploymentArn, targetServiceRevision: { arn: revisionArn } }] });
+    return allowed(args);
+  } });
+  assert.equal(report.status, "valid");
+  assert(calls.some(({ args, probe }) => probe.id === "backend-health-recovery-service-deployment-details" && probe.action === "ecs:DescribeServiceDeployments" && args[1] === "describe-service-deployments"));
+  assert(calls.some(({ args, probe }) => probe.id === "backend-health-recovery-service-revision-details" && probe.action === "ecs:DescribeServiceRevisions" && args.includes(revisionArn)));
 });
 
 test("complete release preflight is valid and has no skipped probes", () => {
