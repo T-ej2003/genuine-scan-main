@@ -31,7 +31,9 @@ const awsCliSourceFiles = [
   "scripts/aws/publish-production-green-stage-b-approval.mjs", "scripts/aws/check-production-green-stage-b-approval-publication.mjs",
   "scripts/aws/recover-stage-b-backend-task-definition.mjs", "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
   "scripts/aws/recover-production-backend-health.mjs",
+  "scripts/aws/production-ecs-rollback-viability.mjs",
   "scripts/aws/production-normal-backend-activation.mjs",
+  "scripts/aws/deploy-ecs-service.sh",
   "scripts/aws/production-release-oidc-contract.mjs",
   "scripts/aws/production-root-drop-evidence.mjs", "scripts/aws/produce-production-root-drop-evidence.mjs",
 ];
@@ -163,6 +165,9 @@ const FORWARD_RECOVERY_CAPABILITIES = Object.freeze([
 const PHASE_CAPABILITY_REQUIREMENTS = Object.freeze({
   "canonical-backend-recovery": RECOVERY_CAPABILITIES.map(([id]) => id),
   "backend-health-recovery": [
+    "manifest-backend-health-recovery-list-service-deployments",
+    "manifest-backend-health-recovery-describe-service-deployments",
+    "manifest-backend-health-recovery-describe-service-revisions",
     "manifest-backend-health-recovery-describe-images",
     "manifest-backend-health-recovery-describe-repositories",
     "manifest-backend-health-recovery-register-legacy-task-definition",
@@ -229,12 +234,14 @@ function terraformRuntimeActions() {
     .sort();
 }
 
-function discoverAwsCliActions() {
+export function discoverAwsCliActions() {
   const serviceNames = "sts|iam|kms|ecr|ec2|ecs|rds|lambda|logs|cloudtrail|secretsmanager|dynamodb|s3api";
-  const pattern = new RegExp(`\\[\\s*["'](${serviceNames})["']\\s*,\\s*["']([a-z0-9-]+)["']`, "g");
   const calls = [];
   for (const sourceFile of awsCliSourceFiles) {
     const source = fs.readFileSync(path.join(root, sourceFile), "utf8");
+    const pattern = sourceFile.endsWith(".sh")
+      ? new RegExp(`\\baws\\s+(${serviceNames})\\s+([a-z0-9-]+)`, "g")
+      : new RegExp(`\\[\\s*["'](${serviceNames})["']\\s*,\\s*["']([a-z0-9-]+)["']`, "g");
     for (const match of source.matchAll(pattern)) {
       const service = match[1] === "s3api" ? "s3" : match[1];
       const operation = match[2].split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("").replaceAll("Db", "DB").replaceAll("Vpc", "VPC").replaceAll("Url", "URL");
@@ -253,8 +260,14 @@ export function buildStageBDeploymentCapabilityGraph() {
   const manifest = readJson(manifestPath); const policies = sourcePolicies(); const probesByAction = new Map();
   assertProductionReleaseOidcSourceContract(manifest);
   for (const probe of RELEASE_READ_PROBES) probesByAction.set(probe.action, [...(probesByAction.get(probe.action) || []), probe.id]);
+  for (const probe of [
+    { id: "audit-service-details", action: "ecs:DescribeServices" },
+    { id: "audit-task-details", action: "ecs:DescribeTasks" },
+    { id: "backend-health-recovery-service-deployment-details", action: "ecs:DescribeServiceDeployments" },
+    { id: "backend-health-recovery-service-revision-details", action: "ecs:DescribeServiceRevisions" },
+  ]) probesByAction.set(probe.action, [...(probesByAction.get(probe.action) || []), probe.id]);
   const manifestCapabilities = [[manifest.required, false], [manifest.forbidden, true]].flatMap(([entries, forbidden]) => entries.map((entry) => ({
-    id: `manifest-${entry.id}`, phase: entry.phase === "apply" ? "wrapper-apply" : ["recovery", "recovery-read"].includes(entry.phase) ? "backend-health-recovery" : entry.phase === "reference-audit" ? "reference-audit" : entry.phase === "preflight" ? "release-direct-read-preflight" : "refresh-only",
+    id: `manifest-${entry.id}`, phase: entry.phase === "apply" ? "wrapper-apply" : ["recovery", "recovery-read"].includes(entry.phase) ? "backend-health-recovery" : entry.phase === "normal-activation-read" ? "normal-backend-activation" : entry.phase === "reference-audit" ? "reference-audit" : entry.phase === "preflight" ? "release-direct-read-preflight" : "refresh-only",
     identity: forbidden ? "ADMINISTRATOR" : "RELEASE_DEPLOYER", executor: forbidden ? "iam-simulator" : ["recovery", "recovery-read"].includes(entry.phase) ? "aws-cli" : "terraform-or-aws-cli", sourceFile: manifestPath,
     sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: classification(entry, forbidden),
     probe: forbidden ? "administrator-simulation" : probesByAction.has(entry.action) ? "direct" : entry.phase === "apply" ? "plan-derived-simulation" : "administrator-simulation",
@@ -282,7 +295,7 @@ export function buildStageBDeploymentCapabilityGraph() {
       : action === "sts:GetCallerIdentity"
         ? { sourceFile: "aws-sts", sid: "self-identity", livePolicyArn: null, expectedVersion: "aws-authenticated", expectedPolicySha256: null }
         : authority({ id, action, resources, context: [] }, false, policies);
-    return { id, phase, identity, executor: "aws-cli", sourceFile: "scripts/aws/production-normal-backend-activation.mjs", sourceFunction: id, action, resources, context: { account: NORMAL_ACTIVATION.account, region: NORMAL_ACTIVATION.region, releaseMode: "normal", targetBinding: "authenticated-stage-b-state-exact-revision" }, classification: mutation ? identity === "ADMINISTRATOR" ? "ADMIN_IAM_MUTATION" : "NORMAL_ACTIVATION_MUTATION" : identity === "ADMINISTRATOR" ? "ADMIN_DIRECT_READ" : "RELEASE_DIRECT_READ", probe: identity === "ADMINISTRATOR" ? "administrator-live-read-or-simulation" : "direct-live-read", policy, required: true, mutation };
+    return { id, phase, identity, executor: "aws-cli", sourceFile: "scripts/aws/production-normal-backend-activation.mjs", sourceFunction: id, action, resources, context: { account: NORMAL_ACTIVATION.account, region: NORMAL_ACTIVATION.region, releaseMode: "normal", targetBinding: "authenticated-stage-b-state-exact-revision" }, classification: mutation ? identity === "ADMINISTRATOR" ? "ADMIN_IAM_MUTATION" : "NORMAL_ACTIVATION_MUTATION" : identity === "ADMINISTRATOR" ? "ADMIN_DIRECT_READ" : "RELEASE_DIRECT_READ", probe: identity === "ADMINISTRATOR" ? "administrator-live-read-or-simulation" : "direct-live-read", probeIds: probesByAction.get(action) || [], policy, required: true, mutation };
   });
   const recovery = RECOVERY_CAPABILITIES.map(([id, action, resources]) => {
     const entry = { id, action, resources };
@@ -298,7 +311,11 @@ export function buildStageBDeploymentCapabilityGraph() {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
     identities: ["GITHUB_IMAGE_PUBLISHER", "ADMINISTRATOR", "ROOT_OPERATOR", "BOOTSTRAP_OPERATOR", "RELEASE_DEPLOYER", "INDEPENDENT_CHECKER", "ECS_EXEC_VERIFIER_OPERATOR", "SERVICE_RUNTIME"], capabilities,
-    directProbes: RELEASE_READ_PROBES.map(({ id, action }) => ({ id, action })), sourceScan: discoverAwsCliActions(),
+    directProbes: [...RELEASE_READ_PROBES.map(({ id, action }) => ({ id, action })),
+      { id: "audit-service-details", action: "ecs:DescribeServices" },
+      { id: "audit-task-details", action: "ecs:DescribeTasks" },
+      { id: "backend-health-recovery-service-deployment-details", action: "ecs:DescribeServiceDeployments" },
+      { id: "backend-health-recovery-service-revision-details", action: "ecs:DescribeServiceRevisions" }], sourceScan: discoverAwsCliActions(),
     artifactContracts: ["protected-checkout", "image-impact", "schema-v3-image-evidence", "stage-a-handoff", "tfvars-binding-report", "refresh-only", "saved-plan", "canonical-plan-json", "reference-audit", "plan-capability-manifest", "signed-permission-report"],
     stateContracts: ["stage-a-exact-object-lineage-minimum-serial-sha", "stage-b-direct-key-lineage-minimum-serial-sha", "stage-b-serial-stable-plan-to-apply"],
     freshnessContracts: [{ artifact: "image-evidence", maxAgeSeconds: 86400 }, { artifact: "reference-audit", maxAgeSeconds: STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS }, { artifact: "permission-report", maxAgeSeconds: STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS }],

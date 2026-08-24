@@ -89,6 +89,7 @@ test("live preparation authenticates caller, state, exact policy, target, servic
     if (joined.startsWith("iam get-policy-version")) return { PolicyVersion: { Document: buildNormalActivationTransactionPolicy({ sourceArn, targetArn }) } };
     if (joined.startsWith("ecs describe-task-definition") && joined.includes(targetArn)) return { taskDefinition: { taskDefinitionArn: targetArn, family: NORMAL_ACTIVATION.family, status: "ACTIVE", containerDefinitions: [{ name: "backend", image }] }, tags: [] };
     if (joined.startsWith("ecs describe-task-definition") && joined.includes(sourceArn)) return sourceTask();
+    if (joined.startsWith("ecr describe-images")) return { imageDetails: [{ imageDigest: sourceDigest }] };
     if (joined.startsWith("ecs describe-services")) return { services: [service] };
     if (joined.startsWith("ecs list-tasks")) return listedTasks;
     if (joined.startsWith("ecs describe-tasks")) return describedTasks(service.taskDefinition, runningDigest);

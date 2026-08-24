@@ -134,6 +134,14 @@ function sourceTaskDefinitionIdentity(response, sourceArn) {
   return Object.freeze({ sourceArn, sourceClass, sourceImage: selected[0].image, sourceDigest: match[1] });
 }
 
+function assertRollbackImageAvailable(run, digest) {
+  let response;
+  try { response = parseJson(run, ["ecr", "describe-images", "--repository-name", "mscqr-backend", "--image-ids", `imageDigest=${digest}`]); }
+  catch (error) { throw new Error(`Normal activation rollback image viability is unproven: ${/ImageNotFoundException/.test(`${error?.stderr || error?.message || ""}`) ? "exact source digest is absent" : "ECR lookup failed"}.`); }
+  if (response?.imageDetails?.length !== 1 || response.imageDetails[0]?.imageDigest !== digest) throw new Error("Normal activation rollback image viability response does not match the exact source digest.");
+  return true;
+}
+
 function assertRunningServiceTarget(run, { taskDefinitionArn, digest, desiredCount }) {
   const listed = parseJson(run, ["ecs", "list-tasks", "--cluster", NORMAL_ACTIVATION.cluster, "--service-name", NORMAL_ACTIVATION.service, "--desired-status", "RUNNING"]);
   if (!Array.isArray(listed?.taskArns) || listed.nextToken || listed.taskArns.length !== desiredCount) throw new Error("Normal activation running task list is incomplete.");
@@ -162,10 +170,11 @@ export function collectNormalActivationLiveEvidence({ run, sourceSha, imageAutho
   const current = expectedCurrentTaskDefinitionArn || service?.taskDefinition;
   assertService(service, current);
   const source = sourceTaskDefinitionIdentity(parseJson(run, ["ecs", "describe-task-definition", "--task-definition", current, "--include", "TAGS"]), current);
+  assertRollbackImageAvailable(run, source.sourceDigest);
   assertRunningServiceTarget(run, { taskDefinitionArn: current, digest: source.sourceDigest, desiredCount: service.desiredCount });
   const policy = readLivePolicy(run);
   assertNormalActivationTransactionPolicy(policy.document, { sourceArn: current, targetArn: candidate.targetArn });
-  return Object.freeze({ schemaVersion: 2, releaseMode: "normal", ...candidate, ...source, desiredCount: service.desiredCount, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, expectedCurrentTaskDefinitionArn: current, policyArn: NORMAL_ACTIVATION.policyArn, policyVersionId: policy.defaultVersionId, livePolicySha256: sha256(canonical(policy.document)), ...(runIdentity ? assertRunIdentity(runIdentity) : {}) });
+  return Object.freeze({ schemaVersion: 2, releaseMode: "normal", ...candidate, ...source, rollbackImageVerified: true, desiredCount: service.desiredCount, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, expectedCurrentTaskDefinitionArn: current, policyArn: NORMAL_ACTIVATION.policyArn, policyVersionId: policy.defaultVersionId, livePolicySha256: sha256(canonical(policy.document)), ...(runIdentity ? assertRunIdentity(runIdentity) : {}) });
 }
 
 export function assertNormalActivationBinding(binding, expected) {

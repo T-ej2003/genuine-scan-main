@@ -58,6 +58,48 @@
       }
     },
     {
+      "Sid": "ListExactBackendServiceDeployments",
+      "Effect": "Allow",
+      "Action": "ecs:ListServiceDeployments",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+        }
+      }
+    },
+    {
+      "Sid": "DescribeExactBackendServiceDeployments",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeServiceDeployments",
+      "Resource": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
+        "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+        }
+      }
+    },
+    {
+      "Sid": "DescribeExactBackendServiceRevisions",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeServiceRevisions",
+      "Resource": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
+        "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+        }
+      }
+    },
+    {
       "Sid": "ListStageBTasksReadOnly",
       "Effect": "Allow",
       "Action": "ecs:ListTasks",

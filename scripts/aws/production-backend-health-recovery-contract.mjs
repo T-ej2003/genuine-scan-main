@@ -3,6 +3,7 @@ import { assertImageAuthorization, authorizedBackendDigest } from "./production-
 import { assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmentReviewer } from "./production-github-environment-approval.mjs";
 import { ARTIFACT_SIGNING_BINDINGS } from "./production-artifact-signing-domain.mjs";
 import { loadArtifactSigningBootstrapContract } from "./production-artifact-signing-bootstrap.mjs";
+import { ROLLBACK_VIABILITY, assertFreshRollbackEquivalence, assertRollbackSupersessionProof } from "./production-ecs-rollback-viability.mjs";
 
 export const BACKEND_HEALTH_RECOVERY = Object.freeze({
   kind: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME",
@@ -51,8 +52,9 @@ const IDENTITY_ENV = new Set(["GIT_SHA", "RELEASE_GIT_SHA"]);
 const SIGNING_BINDINGS = new Set(ARTIFACT_SIGNING_BINDINGS);
 const ARTIFACT_SIGNING_SECRET_NAMES = loadArtifactSigningBootstrapContract().names;
 const ARTIFACT_SIGNING_SECRET_ARNS = Object.fromEntries(ARTIFACT_SIGNING_BINDINGS.map((name) => [name, new RegExp(`^arn:aws:secretsmanager:${BACKEND_HEALTH_RECOVERY.region}:${BACKEND_HEALTH_RECOVERY.account}:secret:${ARTIFACT_SIGNING_SECRET_NAMES[name].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-[A-Za-z0-9]{6}$`)]));
-const AUTHORIZATION_FIELDS = new Set(["schemaVersion", "kind", "environment", "account", "region", "cluster", "service", "family", "sourceSha", "imageReleaseSha", "currentTaskDefinitionArn", "recoveryImageDigest", "imageAuthorizationSha256", "environmentApprovalSha256", "artifactSigningBindingSha256", "reasonCode", "allowedDeltaProfile", "approval", "authorizationSha256"]);
-const APPROVAL_FIELDS = new Set(["ticket", "approvedBy", "approverRole", "reason", "verificationRef", "sourceSha", "currentTaskDefinitionArn", "recoveryImageDigest"]);
+const AUTHORIZATION_FIELDS = new Set(["schemaVersion", "kind", "environment", "account", "region", "cluster", "service", "family", "sourceSha", "imageReleaseSha", "currentTaskDefinitionArn", "recoveryImageDigest", "imageAuthorizationSha256", "environmentApprovalSha256", "artifactSigningBindingSha256", "rollbackProof", "reasonCode", "allowedDeltaProfile", "approval", "authorizationSha256"]);
+const BASE_APPROVAL_FIELDS = ["ticket", "approvedBy", "approverRole", "reason", "verificationRef", "sourceSha", "currentTaskDefinitionArn", "recoveryImageDigest"];
+const ROLLBACK_APPROVAL_FIELDS = ["rollbackDeploymentArn", "rollbackTargetTaskDefinitionArn", "rollbackTargetDigest"];
 
 const requiredText = (value, label) => {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required.`);
@@ -63,6 +65,7 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
   sourceSha, currentTaskDefinitionArn, recoveryImageDigest, authorizationFileSha256, authorizationSha256,
   environmentApprovalFileSha256, environmentApprovalSha256, imageAuthorizationFileSha256, imageAuthorizationSha256,
   artifactSigningBindingSha256, imageReleaseSha,
+  rollbackProofSha256,
   account = BACKEND_HEALTH_RECOVERY.account, region = BACKEND_HEALTH_RECOVERY.region,
 } = {}) {
   const { evidenceSha256, ...body } = evidence || {};
@@ -78,6 +81,7 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
     || evidence.environmentApprovalFileSha256 !== environmentApprovalFileSha256 || evidence.environmentApprovalSha256 !== environmentApprovalSha256
     || evidence.imageAuthorizationFileSha256 !== imageAuthorizationFileSha256 || evidence.imageAuthorizationSha256 !== imageAuthorizationSha256
     || !HEX256.test(artifactSigningBindingSha256 || "") || evidence.artifactSigningBindingSha256 !== artifactSigningBindingSha256
+    || evidence.rollbackProofSha256 !== (rollbackProofSha256 || null)
     || !RECOVERY_STATUSES.has(evidence.status)
     || !ARTIFACT_SIGNING_VERIFICATION_STATES.has(evidence.artifactSigningVerification)
     || (evidence.artifactSigningVerification === ARTIFACT_SIGNING_VERIFICATION.FAILED
@@ -110,7 +114,7 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
   return evidence;
 }
 
-export function createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, imageAuthorization, environmentApproval, artifactSigningBindingSha256, approval } = {}) {
+export function createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, imageAuthorization, environmentApproval, artifactSigningBindingSha256, rollbackProof = null, approval } = {}) {
   const body = {
     schemaVersion: BACKEND_HEALTH_RECOVERY.schemaVersion,
     kind: BACKEND_HEALTH_RECOVERY.kind,
@@ -127,6 +131,7 @@ export function createLegacyBackendRecoveryAuthorization({ sourceSha, currentTas
     imageAuthorizationSha256: imageAuthorization?.evidenceSha256,
     environmentApprovalSha256: environmentApproval?.evidenceSha256,
     artifactSigningBindingSha256,
+    rollbackProof: rollbackProof ? structuredClone(rollbackProof) : null,
     reasonCode: "CURRENT_IMAGE_DIGEST_MISSING",
     allowedDeltaProfile: "IMAGE_SOURCE_IDENTITY_AND_EXACT_ARTIFACT_SIGNING_BINDINGS",
     approval: structuredClone(approval),
@@ -224,9 +229,20 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
   assertImageAuthorization(imageAuthorization, sourceSha, imageValidation);
   if (authorizedBackendDigest(imageAuthorization) !== recoveryImageDigest) throw new Error("Recovery digest differs from canonical image authorization.");
   const approval = authorization.approval;
-  if (!approval || Object.keys(approval).some((field) => !APPROVAL_FIELDS.has(field)) || Object.keys(approval).length !== APPROVAL_FIELDS.size) throw new Error("Backend health recovery approval schema is invalid.");
+  const approvalFields = Object.keys(approval || {}).sort().join(",");
+  const baseApprovalFields = [...BASE_APPROVAL_FIELDS].sort().join(",");
+  const rollbackApprovalFields = [...BASE_APPROVAL_FIELDS, ...ROLLBACK_APPROVAL_FIELDS].sort().join(",");
+  if (!approval || (approvalFields !== baseApprovalFields && approvalFields !== rollbackApprovalFields)) throw new Error("Backend health recovery approval schema is invalid.");
   for (const field of ["ticket", "approvedBy", "approverRole", "reason", "verificationRef"]) requiredText(approval?.[field], `approval.${field}`);
   if (approval.sourceSha !== sourceSha || approval.currentTaskDefinitionArn !== currentTaskDefinitionArn || approval.recoveryImageDigest !== recoveryImageDigest) throw new Error("Human approval is bound to a different recovery.");
+  if (authorization.rollbackProof) {
+    assertRollbackSupersessionProof(authorization.rollbackProof, {
+      serviceArn: `arn:aws:ecs:${BACKEND_HEALTH_RECOVERY.region}:${BACKEND_HEALTH_RECOVERY.account}:service/${BACKEND_HEALTH_RECOVERY.cluster}/${BACKEND_HEALTH_RECOVERY.service}`,
+      rollbackDeploymentArn: approval.rollbackDeploymentArn,
+      rollbackTargetTaskDefinitionArn: approval.rollbackTargetTaskDefinitionArn,
+      rollbackTargetDigest: approval.rollbackTargetDigest,
+    });
+  } else if (ROLLBACK_APPROVAL_FIELDS.some((field) => field in approval)) throw new Error("Human rollback approval lacks authenticated live rollback proof.");
   assertProductionEnvironmentReviewer(environmentApproval, { approvedBy: approval.approvedBy, executionActor });
   if (/(BEGIN [A-Z ]+PRIVATE KEY|SecretString|AccessKeyId|SecretAccessKey|SessionToken|DATABASE_URL=|password|token)/i.test(JSON.stringify(approval))) throw new Error("Backend health recovery approval contains prohibited secret material.");
   const { authorizationSha256, ...body } = authorization;
@@ -243,10 +259,9 @@ export function assertLegacyBackendRecoveryEligibility(input = {}) {
     || service?.serviceName !== BACKEND_HEALTH_RECOVERY.service || !TASK_ARN.test(service?.taskDefinition || "")
     || !Number.isInteger(service?.desiredCount) || service.desiredCount < 1) throw new Error("Live ECS service is outside the exact backend recovery boundary.");
   const deployments = Array.isArray(service.deployments) ? service.deployments : [];
-  if (deployments.some((deployment) => deployment?.rolloutState === "IN_PROGRESS"
-    || (deployment?.taskDefinition !== service.taskDefinition && [deployment?.desiredCount, deployment?.runningCount, deployment?.pendingCount].some((count) => Number(count) > 0)))) {
-    throw new Error("Backend service rollback or deployment remains in progress and requires reconciliation.");
-  }
+  const inProgress = deployments.some((deployment) => deployment?.rolloutState === "IN_PROGRESS"
+    || (deployment?.taskDefinition !== service.taskDefinition && [deployment?.desiredCount, deployment?.runningCount, deployment?.pendingCount].some((count) => Number(count) > 0)));
+  if (inProgress && authorization?.rollbackProof?.classification !== ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE) throw new Error("Backend service rollback or deployment remains in progress and requires reconciliation.");
   if (!TASK_ARN.test(currentArn || "") || current.family !== BACKEND_HEALTH_RECOVERY.family || !imageMatch) throw new Error("Current legacy backend task definition identity is invalid.");
   if (currentImageExists !== false) throw new Error("Backend health recovery requires the current immutable digest to be absent from ECR.");
   if (!stoppedReasons.some((reason) => /CannotPullContainerError/i.test(reason) && /not found|does not exist/i.test(reason) && reason.includes(imageMatch[1]))) throw new Error("Backend degradation is not authenticated as the current digest's missing-image pull failure.");
@@ -255,12 +270,16 @@ export function assertLegacyBackendRecoveryEligibility(input = {}) {
     || replacementImage?.repository !== BACKEND_HEALTH_RECOVERY.repository || !SHA256.test(replacementImage?.digest || "")) throw new Error("Replacement image does not satisfy the recovery evidence contract.");
   assertLegacyBackendRecoveryAuthorization(authorization, { sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: replacementImage.digest, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindingSha256, githubContext, executionActor });
   const checked = assertLegacyBackendRecoveryCandidate({ currentTaskDefinition, candidate: input.candidate, recoveryImageDigest: replacementImage.digest, imageReleaseSha: authorization.imageReleaseSha, artifactSigningBindings });
-  return Object.freeze({ ...checked, currentTaskDefinitionArn: currentArn, observedServiceTaskDefinitionArn: service.taskDefinition, currentImageDigest: imageMatch[1], recoveryImageDigest: replacementImage.digest, desiredCount: service.desiredCount, networkConfigurationSha256: canonicalSha256(service.networkConfiguration), loadBalancersSha256: canonicalSha256(service.loadBalancers) });
+  return Object.freeze({ ...checked, currentTaskDefinitionArn: currentArn, observedServiceTaskDefinitionArn: service.taskDefinition, currentImageDigest: imageMatch[1], recoveryImageDigest: replacementImage.digest, desiredCount: service.desiredCount, networkConfigurationSha256: canonicalSha256(service.networkConfiguration), loadBalancersSha256: canonicalSha256(service.loadBalancers), rollbackProof: authorization.rollbackProof });
 }
 
 export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
   for (const name of ["census", "register", "describe", "readService", "updateService", "waitStable", "readRunningTasks", "verifyHealth", "record"]) if (typeof adapters[name] !== "function") throw new Error(`Recovery adapter ${name} is required.`);
   const eligible = assertLegacyBackendRecoveryEligibility(input);
+  if (eligible.rollbackProof) {
+    if (typeof adapters.readRollbackViability !== "function") throw new Error("Recovery rollback viability adapter is required.");
+    assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
+  }
   const revisions = await adapters.census();
   if (!Array.isArray(revisions)) throw new Error("Legacy backend revision census is incomplete.");
   const matches = revisions.filter((item) => taskDefinitionFingerprint(item, item.tags || []) === eligible.fingerprint);
@@ -283,6 +302,7 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
   }
   let registrations = 0;
   if (!targetArn) {
+    if (eligible.rollbackProof) assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
     await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED, targetArn: null, registrations: 0, updates: 0 });
     try {
       const result = await adapters.register(eligible.candidate);
@@ -306,6 +326,7 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     if (live.taskDefinition !== eligible.currentTaskDefinitionArn || eligible.observedServiceTaskDefinitionArn !== eligible.currentTaskDefinitionArn
       || live.desiredCount !== eligible.desiredCount || canonicalSha256(live.networkConfiguration) !== eligible.networkConfigurationSha256
       || canonicalSha256(live.loadBalancers) !== eligible.loadBalancersSha256) throw new Error("Backend service changed concurrently before recovery update.");
+    if (eligible.rollbackProof) assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
     await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, targetArn, registrations, updates: 0 });
     try { await adapters.updateService(targetArn); updates = 1; }
     catch (error) {

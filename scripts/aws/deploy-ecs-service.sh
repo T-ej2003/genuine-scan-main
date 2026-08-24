@@ -172,7 +172,7 @@ const bytes = fs.readFileSync(file);
 if (crypto.createHash("sha256").update(bytes).digest("hex") !== expectedSha) throw new Error("Normal activation binding changed before the existing-task switch.");
 const value = JSON.parse(bytes);
 const sourcePattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/(mscqr-backend|mscqr-production-rls-green-backend-candidate):[1-9][0-9]*$/;
-if (value.schemaVersion !== 2 || value.releaseMode !== "normal" || value.targetArn !== targetArn || value.sourceArn !== currentArn || value.expectedCurrentTaskDefinitionArn !== currentArn || value.digest !== digest || !/^sha256:[a-f0-9]{64}$/.test(value.sourceDigest || "") || !sourcePattern.test(value.sourceArn || "") || !Number.isInteger(value.desiredCount) || value.desiredCount < 1 || value.sourceSha !== sourceSha || value.clusterArn !== "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" || value.serviceArn !== "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2") throw new Error("Normal activation binding does not match the exact SOURCE/TARGET switch inputs.");
+if (value.schemaVersion !== 2 || value.releaseMode !== "normal" || value.targetArn !== targetArn || value.sourceArn !== currentArn || value.expectedCurrentTaskDefinitionArn !== currentArn || value.digest !== digest || !/^sha256:[a-f0-9]{64}$/.test(value.sourceDigest || "") || value.rollbackImageVerified !== true || !sourcePattern.test(value.sourceArn || "") || !Number.isInteger(value.desiredCount) || value.desiredCount < 1 || value.sourceSha !== sourceSha || value.clusterArn !== "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" || value.serviceArn !== "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2") throw new Error("Normal activation binding does not match the exact SOURCE/TARGET switch inputs.");
 NODE
     return
   fi
@@ -277,6 +277,8 @@ EXISTING_TASKS_LIST_FILE="$(mktemp)"
 EXISTING_TASKS_RAW_FILE="$(mktemp)"
 EXISTING_TASKS_FILE="$(mktemp)"
 EXISTING_CALLER_FILE="$(mktemp)"
+ROLLBACK_TASK_DEFINITION_FILE="$(mktemp)"
+ROLLBACK_IMAGE_FILE="$(mktemp)"
 existing_mode_active=false
 existing_switch_started=false
 update_attempted=false
@@ -466,7 +468,9 @@ NODE
     "$EXISTING_TASKS_LIST_FILE" \
     "$EXISTING_TASKS_RAW_FILE" \
     "$EXISTING_TASKS_FILE" \
-    "$EXISTING_CALLER_FILE"
+    "$EXISTING_CALLER_FILE" \
+    "$ROLLBACK_TASK_DEFINITION_FILE" \
+    "$ROLLBACK_IMAGE_FILE"
   exit "$exit_code"
 }
 trap cleanup_and_rollback_on_exit EXIT
@@ -580,6 +584,28 @@ if (deployments.length !== 1 || deployments[0]?.status !== "PRIMARY" || deployme
 process.stdout.write(expectedCurrentArn);
 NODE
   )"
+
+  aws ecs describe-task-definition --region "$AWS_REGION" --task-definition "$PREVIOUS_TASK_DEFINITION_ARN" >"$ROLLBACK_TASK_DEFINITION_FILE"
+  ROLLBACK_IMAGE_DIGEST="$(node --input-type=module - "$ROLLBACK_TASK_DEFINITION_FILE" "$PREVIOUS_TASK_DEFINITION_ARN" "$CONTAINER_NAME" <<'NODE'
+import fs from "node:fs";
+const [file, expectedArn, containerName] = process.argv.slice(2);
+const task = JSON.parse(fs.readFileSync(file, "utf8")).taskDefinition;
+const selected = (task?.containerDefinitions || []).filter(({ name }) => name === containerName);
+const match = selected.length === 1 ? /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@(sha256:[a-f0-9]{64})$/.exec(selected[0].image || "") : null;
+if (task?.taskDefinitionArn !== expectedArn || !match) throw new Error("Rollback candidate is not one exact immutable production backend image.");
+process.stdout.write(match[1]);
+NODE
+)"
+  if ! aws ecr describe-images --region "$AWS_REGION" --repository-name mscqr-backend --image-ids "imageDigest=$ROLLBACK_IMAGE_DIGEST" >"$ROLLBACK_IMAGE_FILE"; then
+    echo "Rollback candidate image viability could not be authenticated; refusing deployment." >&2
+    exit 1
+  fi
+  node --input-type=module - "$ROLLBACK_IMAGE_FILE" "$ROLLBACK_IMAGE_DIGEST" <<'NODE'
+import fs from "node:fs";
+const [file, digest] = process.argv.slice(2);
+const details = JSON.parse(fs.readFileSync(file, "utf8")).imageDetails;
+if (!Array.isArray(details) || details.length !== 1 || details[0]?.imageDigest !== digest) throw new Error("Rollback candidate image readback does not match the exact immutable digest.");
+NODE
 
   if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" || ( "$ENABLE_EXECUTE_COMMAND" == "true" && "$CURRENT_EXECUTE_COMMAND_ENABLED" != "true" ) || ( "$PROPAGATE_TAGS" == "TASK_DEFINITION" && "$CURRENT_PROPAGATE_TAGS" != "TASK_DEFINITION" ) ]]; then
     update_attempted=true

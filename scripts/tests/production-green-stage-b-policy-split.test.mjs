@@ -112,7 +112,7 @@ test("all policy artifacts parse and historical v2/v3 remain byte-stable", () =>
 test("v4 and the companion policy fit the AWS managed-policy document limit", () => {
   assert.equal(awsCharacterCount(policies.v3), 6651);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
-  assert.equal(awsCharacterCount(policies.audit), 2800);
+  assert.equal(awsCharacterCount(policies.audit), 4063);
   assert.ok(awsCharacterCount(policies.finalWrite) < 6144);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.ok(awsCharacterCount(policies.audit) < 6144);
@@ -128,7 +128,7 @@ test("backend recovery tagging is split from the broad provider tag authority", 
 });
 
 test("the split keeps the reviewed policy boundaries and adds exact backend recovery authority", () => {
-  assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, movedSids[0], "ReadNormalActivationPolicy", ...movedSids.slice(1, -1), "ListStageBTaskDefinitionsReadOnly", movedSids.at(-1), ...auditAdditionSids]);
+  assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, movedSids[0], "ReadNormalActivationPolicy", ...movedSids.slice(1, 3), "ListExactBackendServiceDeployments", "DescribeExactBackendServiceDeployments", "DescribeExactBackendServiceRevisions", ...movedSids.slice(3, -1), "ListStageBTaskDefinitionsReadOnly", movedSids.at(-1), ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
   assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["ActivateBackendCandidate", ...finalWriteSids, "BootstrapExactProductionSecretContainers", "TagExactInitialRotationSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets"]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
@@ -558,7 +558,7 @@ test("the runbook targets v4 and the companion policy for the separately authori
 });
 
 test("active read-only companion policy records the bounded signature verifier", () => {
-  assert.equal(sha256(read(paths.audit)), "18fd770dbe4a7ce46da94e6fea1256c1b85e883836112d90524489fe6c458004");
+  assert.equal(sha256(read(paths.audit)), "dcb3ab8e8a472252889cf7528065c1ec45f68249caefa86101ce4072c4c5b333");
 });
 
 test("runbook is companion-first and verifies complete policy attachments before provider mutation", () => {

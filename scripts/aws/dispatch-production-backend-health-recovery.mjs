@@ -16,7 +16,9 @@ const MODE_KIND = BACKEND_HEALTH_RECOVERY.kind;
 const SHA = /^[a-f0-9]{40}$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const TASK_DEFINITION = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-backend:[1-9][0-9]*$/;
+const ROLLBACK_DEPLOYMENT = /^arn:aws:ecs:eu-west-2:368992683803:service-deployment\/mscqr-prod-euw2-main\/mscqr-backend-servi-euw2\/[A-Za-z0-9_-]+$/;
 const APPROVAL_FIELDS = ["ticket", "approvedBy", "approverRole", "reason", "verificationRef", "sourceSha", "currentTaskDefinitionArn", "recoveryImageDigest"];
+const ROLLBACK_APPROVAL_FIELDS = ["rollbackDeploymentArn", "rollbackTargetTaskDefinitionArn", "rollbackTargetDigest"];
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 
@@ -38,9 +40,13 @@ function assertBindings({ sourceSha, currentTaskDefinitionArn, recoveryImageDige
   if (releaseMode !== MODE_KIND) throw new Error("Recovery mode differs from the protected contract.");
   assertImageAuthorization(imageAuthorization, sourceSha, imageValidation);
   if (authorizedBackendDigest(imageAuthorization) !== recoveryImageDigest) throw new Error("Recovery image authorization is bound to a different digest.");
-  if (!approval || JSON.stringify(Object.keys(approval).sort()) !== JSON.stringify([...APPROVAL_FIELDS].sort())
+  const fields = JSON.stringify(Object.keys(approval || {}).sort());
+  if (!approval || (fields !== JSON.stringify([...APPROVAL_FIELDS].sort()) && fields !== JSON.stringify([...APPROVAL_FIELDS, ...ROLLBACK_APPROVAL_FIELDS].sort()))
     || approval.sourceSha !== sourceSha || approval.currentTaskDefinitionArn !== currentTaskDefinitionArn
     || approval.recoveryImageDigest !== recoveryImageDigest) throw new Error("Recovery approval is bound to a different recovery.");
+  if (ROLLBACK_APPROVAL_FIELDS.some((field) => field in approval)
+    && (!ROLLBACK_DEPLOYMENT.test(approval.rollbackDeploymentArn || "") || approval.rollbackTargetTaskDefinitionArn !== currentTaskDefinitionArn
+      || !DIGEST.test(approval.rollbackTargetDigest || ""))) throw new Error("Recovery rollback approval identity is invalid.");
 }
 
 export function buildBackendHealthRecoveryDispatch({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorizationBytes, imageValidation, approvalBytes } = {}) {

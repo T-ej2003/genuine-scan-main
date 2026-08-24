@@ -8,8 +8,8 @@ DO $$ DECLARE failures integer; BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='1e532dfb51eebb6445a1279630999dea94fd2c188a1ac19950d43fc7e9b6eae2'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:1e532dfb51eebb6445a1279630999dea94fd2c188a1ac19950d43fc7e9b6eae2'
+    AND source_contract_sha256='ba9877c814daf7d3fcd5897554d263114ad1430de468c3520cc89b6e1951077d'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:ba9877c814daf7d3fcd5897554d263114ad1430de468c3520cc89b6e1951077d'
     AND administrator_role='certification-administrator'
 
     AND phase='policies-installed'
@@ -24,7 +24,7 @@ DO $$ DECLARE failures integer; BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:1e532dfb51eebb6445a1279630999dea94fd2c188a1ac19950d43fc7e9b6eae2')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:ba9877c814daf7d3fcd5897554d263114ad1430de468c3520cc89b6e1951077d')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
