@@ -266,7 +266,7 @@
       "id": "rollback-proof",
       "producer": "bounded authenticated reconciliation",
       "consumer": "approval authorization and recovery executor",
-      "authority": "live ECS and ECR with exact Task.startedBy deployment ID and rollback-time-bound stopped-task evidence",
+      "authority": "live ECS and ECR with exact DescribeServices deployment id equal to Task.startedBy plus rollback-time-bound stopped-task evidence; the serviceDeploymentArn remains a separate identity",
       "failClosed": true
     },
     {

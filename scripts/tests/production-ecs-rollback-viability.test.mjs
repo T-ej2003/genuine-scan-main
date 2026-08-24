@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { ROLLBACK_VIABILITY, assertFreshRollbackEquivalence, assertRollbackSupersessionProof, classifyRollbackViability, collectRollbackViability, exactEcrImageResult } from "../aws/production-ecs-rollback-viability.mjs";
+import { ROLLBACK_VIABILITY, assertEcsServiceDeploymentIdentity, assertFreshRollbackEquivalence, assertRollbackSupersessionProof, classifyRollbackViability, collectRollbackViability, exactEcrImageResult } from "../aws/production-ecs-rollback-viability.mjs";
 
 const serviceArn = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2";
 const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
@@ -16,7 +16,9 @@ const digest47 = `sha256:${"b".repeat(64)}`;
 const digest48 = `sha256:${"a".repeat(64)}`;
 const digest46 = `sha256:${"c".repeat(64)}`;
 const rollbackStartedAt = "2026-08-24T09:59:00.000Z";
-const service = { serviceArn, clusterArn, taskDefinition: td47, desiredCount: 2, runningCount: 0, pendingCount: 0 };
+const rollbackEcsServiceDeploymentId = "ecs-svc/3599551810517927503";
+const rollbackEcsServiceDeployment = { id: rollbackEcsServiceDeploymentId, status: "PRIMARY", taskDefinition: td47 };
+const service = { serviceArn, clusterArn, taskDefinition: td47, desiredCount: 2, runningCount: 0, pendingCount: 0, deployments: [rollbackEcsServiceDeployment] };
 const deployment = {
   serviceDeploymentArn: deploymentArn,
   status: "ROLLBACK_IN_PROGRESS",
@@ -29,7 +31,7 @@ const forwardTarget = resolved(forwardRevisionArn, td48, digest48, true);
 const rollbackTarget = resolved(rollbackRevisionArn, td47, digest47, false);
 const sourceRevisions = [rollbackTarget];
 const taskArn = (index) => `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${`${index}`.padStart(32, "0")}`;
-const taskAttempts = [1, 2].map((index) => ({ taskArn: taskArn(index), startedBy: "future-deployment-N", taskDefinitionArn: td47, classification: "CANNOT_PULL_IMAGE", errorCode: "CannotPullContainerError", digest: digest47,
+const taskAttempts = [1, 2].map((index) => ({ taskArn: taskArn(index), startedBy: rollbackEcsServiceDeploymentId, taskDefinitionArn: td47, classification: "CANNOT_PULL_IMAGE", errorCode: "CannotPullContainerError", digest: digest47,
   failureReasonSha256: `${index}`.repeat(64), createdAt: `2026-08-24T10:0${index}:00.000Z`, stoppedAt: `2026-08-24T10:0${index}:30.000Z` }));
 const stoppedTasks = taskAttempts.map((attempt) => ({ ...attempt, stoppedReason: `CannotPullContainerError ${digest47} manifest not found` }));
 const classify = (overrides = {}) => classifyRollbackViability({ service, deployment, forwardTarget, sourceRevisions, rollbackTarget, taskAttempts, observationStart: "2026-08-24T10:00:00.000Z", observationEnd: "2026-08-24T10:01:00.000Z", ...overrides });
@@ -89,9 +91,19 @@ test("real AWS rollback shape keeps forward, source, and rollback identities sep
   assert.equal(proof.rollbackServiceRevisionArn, rollbackRevisionArn);
   assert.equal(proof.rollbackTargetTaskDefinitionArn, td47);
   assert.equal(proof.rollbackTargetImageExists, false);
+  assert.equal(proof.rollbackEcsServiceDeploymentId, rollbackEcsServiceDeploymentId);
   assert.equal(assertRollbackSupersessionProof(proof, { serviceArn, rollbackDeploymentArn: deploymentArn, rollbackTargetTaskDefinitionArn: td47, rollbackTargetDigest: digest47 }), proof);
   assert(calls.some((args) => args[0] === "ecs" && args[1] === "describe-service-revisions" && args.includes(forwardRevisionArn)));
   assert(calls.some((args) => args[0] === "ecs" && args[1] === "describe-service-revisions" && args.includes(rollbackRevisionArn)));
+});
+
+test("service deployment ARN, ECS deployment ID, and Task.startedBy stay distinct and exact", () => {
+  assert.deepEqual(assertEcsServiceDeploymentIdentity({ serviceDeploymentArn: deploymentArn, ecsServiceDeploymentId: rollbackEcsServiceDeploymentId, taskStartedBy: rollbackEcsServiceDeploymentId }), {
+    serviceDeploymentArn: deploymentArn, ecsServiceDeploymentId: rollbackEcsServiceDeploymentId, taskStartedBy: rollbackEcsServiceDeploymentId,
+  });
+  for (const ecsServiceDeploymentId of ["3599551810517927503", "foo/3599551810517927503", "ecs-svc/", "ecs-svc/not-numeric", "ecs-svc/0"])
+    assert.throws(() => assertEcsServiceDeploymentIdentity({ serviceDeploymentArn: deploymentArn, ecsServiceDeploymentId }), /identity/);
+  assert.throws(() => assertEcsServiceDeploymentIdentity({ serviceDeploymentArn: deploymentArn, ecsServiceDeploymentId: rollbackEcsServiceDeploymentId, taskStartedBy: "ecs-svc/2159316988915271172" }), /identity/);
 });
 
 test("image viability always belongs to the actual rollback revision", () => {
@@ -128,12 +140,12 @@ test("rollback status and independently resolved source relationships fail close
 });
 
 test("only two failures from the exact current rollback deployment authorize supersession", () => {
-  const historical = taskAttempts.map((attempt) => ({ ...attempt, startedBy: "historical-deployment", createdAt: "2026-08-23T10:00:00.000Z", stoppedAt: "2026-08-23T10:00:30.000Z" }));
+  const historical = taskAttempts.map((attempt) => ({ ...attempt, startedBy: "ecs-svc/2159316988915271172", createdAt: "2026-08-23T10:00:00.000Z", stoppedAt: "2026-08-23T10:00:30.000Z" }));
   assert.equal(classify({ taskAttempts: historical }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
   assert.equal(classify({ taskAttempts: [historical[0], taskAttempts[0]] }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
   assert.equal(classify({ taskAttempts }).classification, ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE);
-  assert.equal(classify({ taskAttempts: taskAttempts.map((attempt) => ({ ...attempt, startedBy: "other-deployment" })) }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
-  for (const startedBy of [undefined, "malformed deployment!"]) assert.equal(classify({ taskAttempts: taskAttempts.map((attempt) => ({ ...attempt, startedBy })) }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
+  assert.equal(classify({ taskAttempts: taskAttempts.map((attempt) => ({ ...attempt, startedBy: "ecs-svc/2159316988915271172" })) }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
+  for (const startedBy of [undefined, "3599551810517927503", "foo/3599551810517927503", "ecs-svc/"]) assert.equal(classify({ taskAttempts: taskAttempts.map((attempt) => ({ ...attempt, startedBy })) }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
   assert.equal(classify({ taskAttempts: taskAttempts.map((attempt) => ({ ...attempt, createdAt: "2026-08-24T09:58:00.000Z" })) }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
   assert.equal(classify({ taskAttempts: [taskAttempts[0]] }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
   assert.equal(classify({ taskAttempts: [taskAttempts[0], taskAttempts[0]] }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
@@ -169,8 +181,9 @@ test("bounded snapshots reject deployment, rollback revision, task definition, d
     [{}, { revisions: { [rollbackRevisionArn]: { taskDefinition: td46, digest: digest46 } } }],
     [{}, { taskDigests: { [td47]: digest46 } }],
   ];
-  for (const snapshots of cases) await assert.rejects(() => collectRollbackViability({ ...awsFixture({ snapshots }), observationMilliseconds: 1, sleep: async () => {} }), /changed|incomplete|boundary/i);
-  await assert.rejects(() => collectRollbackViability({ ...awsFixture({ snapshots: [{ tasks: stoppedTasks }, { tasks: stoppedTasks.map((task, index) => index ? task : { ...task, startedBy: "other-deployment" }) }] }), observationMilliseconds: 1, sleep: async () => {} }), /task-attempt identity changed/);
+  for (const snapshots of cases) await assert.rejects(() => collectRollbackViability({ ...awsFixture({ snapshots }), observationMilliseconds: 1, sleep: async () => {} }), /changed|incomplete|boundary|identity/i);
+  await assert.rejects(() => collectRollbackViability({ ...awsFixture({ snapshots: [{ tasks: stoppedTasks }, { tasks: stoppedTasks.map((task, index) => index ? task : { ...task, startedBy: "ecs-svc/2159316988915271172" }) }] }), observationMilliseconds: 1, sleep: async () => {} }), /task-attempt identity changed/);
+  await assert.rejects(() => collectRollbackViability({ ...awsFixture({ snapshots: [{}, { service: { deployments: [{ ...rollbackEcsServiceDeployment, id: "ecs-svc/2159316988915271172" }] } }] }), observationMilliseconds: 1, sleep: async () => {} }), /changed/);
 });
 
 test("collector ignores unrelated tasks, rejects historical mixing, and deduplicates repeated observations", async () => {
@@ -178,9 +191,9 @@ test("collector ignores unrelated tasks, rejects historical mixing, and deduplic
   const proof = await collectRollbackViability({ ...awsFixture({ tasks: [...stoppedTasks, unrelated] }), observationMilliseconds: 0 });
   assert.equal(proof.classification, ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE);
   assert.equal(proof.taskAttempts.length, 2);
-  const historical = { ...stoppedTasks[0], taskArn: taskArn(8), startedBy: "historical-deployment", createdAt: "2026-08-23T10:00:00.000Z", stoppedAt: "2026-08-23T10:00:30.000Z" };
+  const historical = { ...stoppedTasks[0], taskArn: taskArn(8), startedBy: "ecs-svc/2159316988915271172", createdAt: "2026-08-23T10:00:00.000Z", stoppedAt: "2026-08-23T10:00:30.000Z" };
   assert.equal((await collectRollbackViability({ ...awsFixture({ tasks: [stoppedTasks[0], historical] }), observationMilliseconds: 0 })).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
-  for (const changed of [{ startedBy: undefined }, { startedBy: "malformed deployment!" }, { createdAt: "2026-08-24T09:58:00.000Z" }]) {
+  for (const changed of [{ startedBy: undefined }, { startedBy: "foo/3599551810517927503" }, { createdAt: "2026-08-24T09:58:00.000Z" }]) {
     assert.equal((await collectRollbackViability({ ...awsFixture({ tasks: stoppedTasks.map((task) => ({ ...task, ...changed })) }), observationMilliseconds: 0 })).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
   }
 });
@@ -194,7 +207,16 @@ test("pre-mutation equivalence binds every forward, source, rollback, and servic
     classify({ sourceRevisions: [] }),
     classify({ rollbackTarget: { ...rollbackTarget, taskDefinitionArn: td46 } }),
     classify({ rollbackTarget: { ...rollbackTarget, digest: digest46 } }),
+    classify({ service: { ...service, deployments: [{ ...rollbackEcsServiceDeployment, id: "ecs-svc/2159316988915271172" }] } }),
   ]) assert.throws(() => assertFreshRollbackEquivalence(proof, fresh), /stalled-unrecoverable|changed/);
+});
+
+test("proof serialization cannot substitute another ECS startedBy identity", () => {
+  const proof = classify();
+  const substituted = structuredClone(proof);
+  substituted.rollbackEcsServiceDeploymentId = "ecs-svc/2159316988915271172";
+  substituted.taskAttempts = substituted.taskAttempts.map((attempt) => ({ ...attempt, startedBy: substituted.rollbackEcsServiceDeploymentId }));
+  assert.throws(() => assertRollbackSupersessionProof(substituted, substituted), /proof|integrity/);
 });
 
 test("CI invariant forbids sourcing rollback authority from targetServiceRevision", () => {
@@ -203,7 +225,9 @@ test("CI invariant forbids sourcing rollback authority from targetServiceRevisio
   assert.match(source, /const rollbackArn = deployment\?\.rollback\?\.serviceRevisionArn/);
   assert.doesNotMatch(source, /rollbackArn\s*=\s*deployment\?\.targetServiceRevision/);
   assert.doesNotMatch(source, /rollbackServiceRevisionArn:\s*deployment\?\.targetServiceRevision/);
-  assert.match(source, /attempt\.startedBy === rollbackDeploymentId/);
+  assert.match(source, /attempt\.startedBy === rollbackEcsServiceDeploymentId/);
+  assert.match(source, /ECS_SERVICE_DEPLOYMENT_ID = \/\^ecs-svc/);
+  assert.doesNotMatch(source, /DEPLOYMENT_ARN\.exec\([^\n]+\)\?\.\[1\].*startedBy|startedBy.*DEPLOYMENT_ARN\.exec/);
   assert.match(source, /Date\.parse\(attempt\.createdAt\) >= rollbackStartedAt/);
   assert.doesNotMatch(source, /failures\.length >= 2/);
 });

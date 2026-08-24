@@ -42,7 +42,7 @@ test("documented ECS response shape is represented by the real service-revision 
   assert.doesNotMatch(source, /targetServiceRevision\?\.taskDefinition/);
   assert.equal(assertRollbackSemanticBoundary(source), true);
   assert.throws(() => assertRollbackSemanticBoundary(source.replaceAll("deployment?.rollback?.serviceRevisionArn", "deployment?.targetServiceRevision?.arn")), /semantic boundary|never derive/);
-  assert.throws(() => assertRollbackSemanticBoundary(source.replace("attempt.startedBy === rollbackDeploymentId", "true")), /semantic boundary/);
+  assert.throws(() => assertRollbackSemanticBoundary(source.replace("attempt.startedBy === rollbackEcsServiceDeploymentId", "true")), /semantic boundary/);
   assert.throws(() => assertRollbackSemanticBoundary(`${source}\nconst failures = []; failures.length >= 2;`), /current deployment identity/);
 });
 

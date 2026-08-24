@@ -139,16 +139,19 @@ canonical ECR `ImageNotFoundException` for that digest. Access denial, timeout,
 or malformed ECR output is unknown and fails closed.
 
 Each pull failure counted toward supersession is authorization-bearing ECS
-evidence. Its `Task.startedBy` must equal the exact deployment ID (the final
-component of the authenticated service-deployment ARN), as documented for
-service-started tasks; its task-definition ARN and immutable digest must equal
-the authenticated rollback revision; and its exact `CannotPullContainerError`
+evidence. Its `Task.startedBy` must equal the exact `ecs-svc/<numeric-id>` from
+the single authenticated `DescribeServices.deployments[]` entry for the
+rollback task definition, as documented for service-started tasks. The newer
+`serviceDeploymentArn` is a separate opaque identity and is never suffix-mapped
+to `Task.startedBy`. The task-definition ARN and immutable digest must equal the
+authenticated rollback revision, and the exact `CannotPullContainerError`
 reason is hash-bound. Task creation and stop timestamps must be valid and may
 not predate `rollback.startedAt`. Matching historical, malformed, duplicate, or
 mixed-deployment attempts make the proof ambiguous. Unrelated stopped tasks are
 ignored, while at least two distinct current-deployment task ARNs remain
-mandatory. Bounded and pre-mutation rereads bind the complete attempt set, so a
-task identity changing between observations fails closed.
+mandatory. Bounded and pre-mutation rereads bind both deployment identities and
+the complete attempt set, so any identity change between observations fails
+closed.
 
 ECS deployment identities remain distinct throughout that proof. The
 deployment's `targetServiceRevision` is the attempted forward workload;

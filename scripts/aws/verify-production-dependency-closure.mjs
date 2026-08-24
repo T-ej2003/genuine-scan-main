@@ -62,12 +62,13 @@ export function assertRollbackSemanticBoundary(source = read("scripts/aws/produc
     "const rollbackArn = deployment?.rollback?.serviceRevisionArn",
     "const sourceArns = (deployment?.sourceServiceRevisions || [])",
     "forwardTargetServiceRevisionArn", "rollbackServiceRevisionArn", "sourceServiceRevisions",
-    "attempt.startedBy === rollbackDeploymentId", "Date.parse(attempt.createdAt) >= rollbackStartedAt", "failureReasonSha256",
+    "service?.deployments", "rollbackEcsServiceDeploymentId", "ECS_SERVICE_DEPLOYMENT_ID", "attempt.startedBy === rollbackEcsServiceDeploymentId", "Date.parse(attempt.createdAt) >= rollbackStartedAt", "failureReasonSha256",
   ]) if (!source.includes(token)) throw new Error(`Rollback service-revision semantic boundary is missing: ${token}.`);
   if (/rollbackArn\s*=\s*deployment\?\.targetServiceRevision|rollbackServiceRevisionArn:\s*deployment\?\.targetServiceRevision/.test(source)) {
     throw new Error("Rollback viability must never derive rollback authority from targetServiceRevision.");
   }
   if (/failures\.length\s*>=\s*2/.test(source)) throw new Error("Rollback viability must never count failures without current deployment identity.");
+  if (/DEPLOYMENT_ARN\.exec\([^\n]+\)\?\.\[1\].*startedBy|startedBy.*DEPLOYMENT_ARN\.exec/.test(source)) throw new Error("Task.startedBy must never be derived from a service-deployment ARN suffix.");
   return true;
 }
 
@@ -98,7 +99,11 @@ export function buildProductionDependencyClosure() {
   assertNoUnknownRollbackDependency();
   assertRollbackSemanticBoundary();
   const recoveryTest = read("scripts/tests/production-ecs-rollback-viability.test.mjs");
-  for (const token of ["AccessDeniedException", "request timeout", "future-revision-N-minus-1", "describe-service-revisions", "pre-mutation equivalence", "historical-deployment", "task-attempt identity changed"]) if (!recoveryTest.includes(token)) throw new Error(`Rollback boundary lacks negative coverage: ${token}.`);
+  for (const token of ["AccessDeniedException", "request timeout", "future-revision-N-minus-1", "describe-service-revisions", "pre-mutation equivalence", "ecs-svc/3599551810517927503", "foo/3599551810517927503", "task-attempt identity changed"]) if (!recoveryTest.includes(token)) throw new Error(`Rollback boundary lacks negative coverage: ${token}.`);
+  if (!/const rollbackEcsServiceDeploymentId = "ecs-svc\/[1-9][0-9]*"/.test(recoveryTest)
+    || !/startedBy: rollbackEcsServiceDeploymentId/.test(recoveryTest) || /startedBy: "future-deployment/.test(recoveryTest)) {
+    throw new Error("Authorization-bearing ECS task fixtures must use the real ecs-svc/<numeric-id> Task.startedBy contract.");
+  }
   const futureTest = read("scripts/tests/production-backend-health-recovery-contract.test.mjs");
   for (const token of ["future failed revision N", 'targetArn.replace(":998", ":1000")', "readRollbackViability"]) if (!futureTest.includes(token)) throw new Error(`Future recovery revision closure lacks coverage: ${token}.`);
 
@@ -110,7 +115,7 @@ export function buildProductionDependencyClosure() {
     counters: { unmappedAwsActions: 0, iamActionMismatches: 0, iamResourceMismatches: 0, principalCapabilityMismatches: 0, missingRuntimeBindings: 0, missingWorkflowInputs: 0, missingEvidenceBindings: 0, unsupportedApiFixtures: 0 },
     runtimeDependencies: [
       { id: "ecs-service-deployment-shape", producer: "authenticated ECS API", consumer: "rollback viability collector", authority: "distinct targetServiceRevision, sourceServiceRevisions, and rollback.serviceRevisionArn resolved through DescribeServiceRevisions", failClosed: true },
-      { id: "rollback-proof", producer: "bounded authenticated reconciliation", consumer: "approval authorization and recovery executor", authority: "live ECS and ECR with exact Task.startedBy deployment ID and rollback-time-bound stopped-task evidence", failClosed: true },
+      { id: "rollback-proof", producer: "bounded authenticated reconciliation", consumer: "approval authorization and recovery executor", authority: "live ECS and ECR with exact DescribeServices deployment id equal to Task.startedBy plus rollback-time-bound stopped-task evidence; the serviceDeploymentArn remains a separate identity", failClosed: true },
       { id: "artifact-signing-bindings", producer: "canonical Secrets Manager binding resolver", consumer: "recovery task-definition builder", authority: "exact four protected names and live secret references", failClosed: true },
       { id: "workflow-json-transport", producer: "canonical recovery dispatcher", consumer: "Release Gate recovery preparation", authority: "byte-identical JSON and SHA-256 transport", failClosed: true },
       { id: "rollback-image-viability", producer: "exact ECR digest readback", consumer: "normal, rotation, and recovery pre-mutation gates", authority: "canonical repository plus immutable digest", failClosed: true },
