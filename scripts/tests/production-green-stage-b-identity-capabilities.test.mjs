@@ -170,16 +170,19 @@ test("backend recovery ECR denial blocks the release preflight before mutation",
 test("active rollback discovery reads the exact deployment details", () => {
   const calls = [];
   const deploymentArn = "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/deployment";
-  const revisionArn = "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/revision";
+  const targetRevisionArn = "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/target";
+  const rollbackRevisionArn = "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/rollback";
   const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
     calls.push({ args, probe });
     if (probe.id === "backend-health-recovery-service-deployments") return JSON.stringify({ serviceDeployments: [{ serviceDeploymentArn: deploymentArn, status: "ROLLBACK_IN_PROGRESS" }] });
-    if (probe.id === "backend-health-recovery-service-deployment-details") return JSON.stringify({ serviceDeployments: [{ serviceDeploymentArn: deploymentArn, targetServiceRevision: { arn: revisionArn } }] });
+    if (probe.id === "backend-health-recovery-service-deployment-details") return JSON.stringify({ serviceDeployments: [{ serviceDeploymentArn: deploymentArn, targetServiceRevision: { arn: targetRevisionArn }, sourceServiceRevisions: [{ arn: rollbackRevisionArn }], rollback: { serviceRevisionArn: rollbackRevisionArn } }] });
     return allowed(args);
   } });
   assert.equal(report.status, "valid");
   assert(calls.some(({ args, probe }) => probe.id === "backend-health-recovery-service-deployment-details" && probe.action === "ecs:DescribeServiceDeployments" && args[1] === "describe-service-deployments"));
-  assert(calls.some(({ args, probe }) => probe.id === "backend-health-recovery-service-revision-details" && probe.action === "ecs:DescribeServiceRevisions" && args.includes(revisionArn)));
+  const revisionCall = calls.find(({ probe }) => probe.id === "backend-health-recovery-service-revision-details");
+  assert(revisionCall?.args.includes(targetRevisionArn));
+  assert(revisionCall?.args.includes(rollbackRevisionArn));
 });
 
 test("complete release preflight is valid and has no skipped probes", () => {

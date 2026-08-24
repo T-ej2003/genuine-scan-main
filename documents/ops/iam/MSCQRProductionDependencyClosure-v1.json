@@ -259,7 +259,7 @@
       "id": "ecs-service-deployment-shape",
       "producer": "authenticated ECS API",
       "consumer": "rollback viability collector",
-      "authority": "DescribeServiceDeployments plus DescribeServiceRevisions",
+      "authority": "distinct targetServiceRevision, sourceServiceRevisions, and rollback.serviceRevisionArn resolved through DescribeServiceRevisions",
       "failClosed": true
     },
     {

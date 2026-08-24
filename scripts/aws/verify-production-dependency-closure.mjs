@@ -56,6 +56,19 @@ export function assertNoUnknownRollbackDependency(source = read("scripts/aws/pro
   return true;
 }
 
+export function assertRollbackSemanticBoundary(source = read("scripts/aws/production-ecs-rollback-viability.mjs")) {
+  for (const token of [
+    "const forwardArn = deployment?.targetServiceRevision?.arn",
+    "const rollbackArn = deployment?.rollback?.serviceRevisionArn",
+    "const sourceArns = (deployment?.sourceServiceRevisions || [])",
+    "forwardTargetServiceRevisionArn", "rollbackServiceRevisionArn", "sourceServiceRevisions",
+  ]) if (!source.includes(token)) throw new Error(`Rollback service-revision semantic boundary is missing: ${token}.`);
+  if (/rollbackArn\s*=\s*deployment\?\.targetServiceRevision|rollbackServiceRevisionArn:\s*deployment\?\.targetServiceRevision/.test(source)) {
+    throw new Error("Rollback viability must never derive rollback authority from targetServiceRevision.");
+  }
+  return true;
+}
+
 export function buildProductionDependencyClosure() {
   const graph = JSON.parse(read(CAPABILITY_GRAPH_PATH));
   assertStageBDeploymentCapabilityGraph(graph);
@@ -71,7 +84,7 @@ export function buildProductionDependencyClosure() {
   const expectedInputs = ["backend_recovery_approval_json", "backend_recovery_approval_sha256", "backend_recovery_current_task_definition_arn", "backend_recovery_image_authorization_json", "backend_recovery_image_authorization_sha256", "backend_recovery_image_digest"];
   if (!same(workflowInputs, expectedInputs)) throw new Error("Backend recovery workflow input contract is incomplete or has an unknown input.");
   if (!same([...ARTIFACT_SIGNING_BINDINGS].sort(), ["ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT"])) throw new Error("Artifact-signing runtime dependency set is incomplete.");
-  requireTokens("scripts/aws/production-ecs-rollback-viability.mjs", ["targetServiceRevision?.arn", "describe-service-revisions", "serviceRevisions", "revision?.taskDefinition", "ImageNotFoundException", "ECR_LOOKUP_FAILED"]);
+  requireTokens("scripts/aws/production-ecs-rollback-viability.mjs", ["targetServiceRevision?.arn", "rollback?.serviceRevisionArn", "sourceServiceRevisions", "describe-service-revisions", "serviceRevisions", "revision?.taskDefinition", "ImageNotFoundException", "ECR_LOOKUP_FAILED"]);
   requireTokens("scripts/aws/production-backend-health-recovery-contract.mjs", ["rollbackProof", "rollbackDeploymentArn", "rollbackTargetTaskDefinitionArn", "rollbackTargetDigest", "assertFreshRollbackEquivalence"]);
   requireTokens("scripts/aws/recover-production-backend-health.mjs", ["rollbackProofSha256", "await record();", "resolveArtifactSigning", "readFreshRollbackViability"]);
   requireTokens("scripts/aws/dispatch-production-backend-health-recovery.mjs", ["ROLLBACK_APPROVAL_FIELDS", "backend_recovery_approval_json", "backend_recovery_approval_sha256"]);
@@ -81,8 +94,9 @@ export function buildProductionDependencyClosure() {
   if (!workflow.includes("node scripts/aws/run-production-cutover.mjs") || !workflow.includes("--mode rotation-overlap")) throw new Error("Rotation workflow no longer routes through the governed existing-task cutover.");
   requireTokens("scripts/aws/production-normal-backend-activation.mjs", ["assertRollbackImageAvailable", "rollbackImageVerified: true"]);
   assertNoUnknownRollbackDependency();
+  assertRollbackSemanticBoundary();
   const recoveryTest = read("scripts/tests/production-ecs-rollback-viability.test.mjs");
-  for (const token of ["AccessDeniedException", "request timeout", "future-revision-N-minus-1", "describe-service-revisions", "fresh state equivalence"]) if (!recoveryTest.includes(token)) throw new Error(`Rollback boundary lacks negative coverage: ${token}.`);
+  for (const token of ["AccessDeniedException", "request timeout", "future-revision-N-minus-1", "describe-service-revisions", "pre-mutation equivalence"]) if (!recoveryTest.includes(token)) throw new Error(`Rollback boundary lacks negative coverage: ${token}.`);
   const futureTest = read("scripts/tests/production-backend-health-recovery-contract.test.mjs");
   for (const token of ["future failed revision N", 'targetArn.replace(":998", ":1000")', "readRollbackViability"]) if (!futureTest.includes(token)) throw new Error(`Future recovery revision closure lacks coverage: ${token}.`);
 
@@ -93,7 +107,7 @@ export function buildProductionDependencyClosure() {
     newAwsCalls,
     counters: { unmappedAwsActions: 0, iamActionMismatches: 0, iamResourceMismatches: 0, principalCapabilityMismatches: 0, missingRuntimeBindings: 0, missingWorkflowInputs: 0, missingEvidenceBindings: 0, unsupportedApiFixtures: 0 },
     runtimeDependencies: [
-      { id: "ecs-service-deployment-shape", producer: "authenticated ECS API", consumer: "rollback viability collector", authority: "DescribeServiceDeployments plus DescribeServiceRevisions", failClosed: true },
+      { id: "ecs-service-deployment-shape", producer: "authenticated ECS API", consumer: "rollback viability collector", authority: "distinct targetServiceRevision, sourceServiceRevisions, and rollback.serviceRevisionArn resolved through DescribeServiceRevisions", failClosed: true },
       { id: "rollback-proof", producer: "bounded authenticated reconciliation", consumer: "approval authorization and recovery executor", authority: "live ECS and ECR", failClosed: true },
       { id: "artifact-signing-bindings", producer: "canonical Secrets Manager binding resolver", consumer: "recovery task-definition builder", authority: "exact four protected names and live secret references", failClosed: true },
       { id: "workflow-json-transport", producer: "canonical recovery dispatcher", consumer: "Release Gate recovery preparation", authority: "byte-identical JSON and SHA-256 transport", failClosed: true },

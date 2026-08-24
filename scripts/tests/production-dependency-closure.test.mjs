@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { CAPABILITY_GRAPH_PATH, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
-import { assertChangedAwsCallClosure, assertNoUnknownRollbackDependency, buildProductionDependencyClosure } from "../aws/verify-production-dependency-closure.mjs";
+import { assertChangedAwsCallClosure, assertNoUnknownRollbackDependency, assertRollbackSemanticBoundary, buildProductionDependencyClosure } from "../aws/verify-production-dependency-closure.mjs";
 
 const graph = () => JSON.parse(fs.readFileSync(CAPABILITY_GRAPH_PATH, "utf8"));
 
@@ -34,10 +34,14 @@ test("unknown AWS calls and incomplete exact call classifications fail CI", () =
 test("documented ECS response shape is represented by the real service-revision boundary", () => {
   const source = fs.readFileSync("scripts/aws/production-ecs-rollback-viability.mjs", "utf8");
   assert.match(source, /targetServiceRevision\?\.arn/);
+  assert.match(source, /rollback\?\.serviceRevisionArn/);
+  assert.match(source, /sourceServiceRevisions/);
   assert.match(source, /describe-service-revisions/);
   assert.match(source, /serviceRevisions/);
   assert.match(source, /revision\?\.taskDefinition/);
   assert.doesNotMatch(source, /targetServiceRevision\?\.taskDefinition/);
+  assert.equal(assertRollbackSemanticBoundary(source), true);
+  assert.throws(() => assertRollbackSemanticBoundary(source.replaceAll("deployment?.rollback?.serviceRevisionArn", "deployment?.targetServiceRevision?.arn")), /semantic boundary|never derive/);
 });
 
 test("unknown runtime dependencies fail CI", () => {
