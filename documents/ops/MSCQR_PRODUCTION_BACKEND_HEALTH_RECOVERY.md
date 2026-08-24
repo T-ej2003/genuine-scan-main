@@ -132,10 +132,40 @@ matching candidate and is never reused. Rollback reconciliation distinguishes
 none, progressing, successful, failed, ambiguous, stalled with a recoverable
 target, and stalled with an authenticated unrecoverable target. Elapsed time is
 never authority. Supersession is permitted only for the final state, after two
-bounded authenticated observations bind the exact service deployment, target
-service revision, task-definition ARN, immutable digest, repeated exact-target pull failures, and
+bounded authenticated observations bind the exact service deployment, distinct
+forward/source/rollback revisions, rollback task-definition ARN, immutable
+digest, repeated exact rollback-target pull failures, and
 canonical ECR `ImageNotFoundException` for that digest. Access denial, timeout,
 or malformed ECR output is unknown and fails closed.
+
+Each pull failure counted toward supersession is authorization-bearing ECS
+evidence. Its `Task.startedBy` must equal the exact `ecs-svc/<numeric-id>` from
+the single authenticated `DescribeServices.deployments[]` entry for the
+rollback task definition, as documented for service-started tasks. The newer
+`serviceDeploymentArn` is a separate opaque identity and is never suffix-mapped
+to `Task.startedBy`. The task-definition ARN and immutable digest must equal the
+authenticated rollback revision, and the exact `CannotPullContainerError`
+reason is hash-bound. Task creation and stop timestamps must be valid and may
+not predate `rollback.startedAt`. Matching historical, malformed, duplicate, or
+mixed-deployment attempts make the proof ambiguous. Unrelated stopped tasks are
+ignored, while at least two distinct current-deployment task ARNs remain
+mandatory. Bounded and pre-mutation rereads bind both deployment identities and
+the complete attempt set, so any identity change between observations fails
+closed.
+
+ECS deployment identities remain distinct throughout that proof. The
+deployment's `targetServiceRevision` is the attempted forward workload;
+`sourceServiceRevisions` are independently resolved source workloads; and
+`rollback.serviceRevisionArn` is the authoritative revision ECS deploys during
+rollback. Rollback viability is derived only from the last field. All supplied
+revision ARNs are resolved through `DescribeServiceRevisions`, their exact task
+definitions and immutable backend digests are read independently, and their ECR
+states are recorded without aliasing. A missing or malformed relationship, an
+unknown ECR response, or equality between the failed forward revision and the
+rollback revision is ambiguous and cannot authorize supersession. The failed
+forward task definition is also prohibited from matching or becoming the
+corrected recovery revision; recovery must register a distinct immutable
+revision.
 
 The operator approval and generated authorization bind that rollback deployment,
 target ARN, and target digest. Immediately before registration and again before

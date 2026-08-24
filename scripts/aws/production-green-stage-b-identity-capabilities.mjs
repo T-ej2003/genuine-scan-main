@@ -133,8 +133,8 @@ export function runReleaseReadPreflight({
     catch (error) { requiredReads[probe.action] = "denied"; failed.push({ id: probe.id, action: probe.action, classification: safeError(error) }); }
   }
   try {
-    const revisionArns = (JSON.parse(responses.get("backend-health-recovery-service-deployment-details") || "{}").serviceDeployments || [])
-      .map(({ targetServiceRevision }) => targetServiceRevision?.arn).filter(Boolean);
+    const revisionArns = [...new Set((JSON.parse(responses.get("backend-health-recovery-service-deployment-details") || "{}").serviceDeployments || [])
+      .flatMap(({ targetServiceRevision, sourceServiceRevisions = [], rollback }) => [targetServiceRevision?.arn, ...sourceServiceRevisions.map(({ arn }) => arn), rollback?.serviceRevisionArn]).filter(Boolean))];
     if (revisionArns.length) {
       const probe = { id: "backend-health-recovery-service-revision-details", action: "ecs:DescribeServiceRevisions", args: ["ecs", "describe-service-revisions", "--service-revision-arns", ...revisionArns] };
       total += 1;

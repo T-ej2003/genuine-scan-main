@@ -284,6 +284,10 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
   if (!Array.isArray(revisions)) throw new Error("Legacy backend revision census is incomplete.");
   const matches = revisions.filter((item) => taskDefinitionFingerprint(item, item.tags || []) === eligible.fingerprint);
   if (matches.length > 1) throw new Error("Multiple matching recovery revisions make replay ambiguous.");
+  const failedForwardTaskDefinitionArn = eligible.rollbackProof?.forwardTargetTaskDefinitionArn;
+  if (failedForwardTaskDefinitionArn && matches.some((item) => (item?.taskDefinition?.taskDefinitionArn || item?.taskDefinitionArn) === failedForwardTaskDefinitionArn)) {
+    throw new Error("The failed forward task definition cannot be reused as a corrected recovery revision.");
+  }
   const sourceRevision = Number(TASK_ARN.exec(eligible.currentTaskDefinitionArn)?.[1]);
   const failedPredecessor = buildLegacyImageIdentityOnlyCandidate({ currentTaskDefinition: input.currentTaskDefinition, recoveryImageDigest: eligible.recoveryImageDigest, imageReleaseSha: input.authorization.imageReleaseSha });
   const failedPredecessorFingerprint = taskDefinitionFingerprint(failedPredecessor, failedPredecessor.tags || []);
@@ -317,6 +321,7 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     }
   }
   if (!TASK_ARN.test(targetArn || "")) throw new Error("Recovery registration did not resolve one exact legacy backend revision.");
+  if (targetArn === failedForwardTaskDefinitionArn) throw new Error("Recovery registration reused the failed forward task definition.");
   if (registrations) await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTERED_ONLY, targetArn, registrations, updates: 0 });
   const target = await adapters.describe(targetArn);
   if (taskDefinitionFingerprint(target, target?.tags || []) !== eligible.fingerprint) throw new Error("Recovery target readback does not match the exact authorized candidate.");
