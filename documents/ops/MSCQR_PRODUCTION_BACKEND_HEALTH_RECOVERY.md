@@ -121,6 +121,14 @@ registering or updating, so a failed run cannot create duplicate recovery
 revisions blindly. The mode never deploys frontend/worker workloads, applies
 Stage B, or satisfies/bypasses rotation freshness.
 
+Revision-census reconciliation is a global recovery concurrency boundary, not
+a rollback-only check. Every recovery authenticates an initial census, requires
+the same semantic identities immediately before registration, and then permits
+only the exact target ARN and candidate fingerprint registered by that
+transaction to appear before `UpdateService`. Reordering identical census
+entries is harmless; any other added, removed, duplicated, malformed, or
+changed revision fails closed independently of service-state concurrency.
+
 Before registration, the initially observed service must identify the approved
 legacy source revision unless it already identifies the single exact recovery
 revision authenticated by the candidate fingerprint. The service is read again
@@ -134,8 +142,9 @@ definition ARN and its semantic task-definition fingerprint. That exact
 revision may remain in the ACTIVE revision census without blocking a corrected
 registration even when its image or source SHA predates the current recovery.
 It remains audit evidence, never a candidate. A missing or changed failed
-revision, any additional newer revision, or any revision-census change before
-registration fails closed; the census is checked again before service update.
+revision or any additional newer revision fails closed. Rollback viability
+reads remain conditional on rollback recovery, while census checks apply to
+all recovery transactions.
 
 Rollback reconciliation distinguishes
 none, progressing, successful, failed, ambiguous, stalled with a recoverable

@@ -105,7 +105,7 @@ export function buildProductionDependencyClosure() {
     throw new Error("Authorization-bearing ECS task fixtures must use the real ecs-svc/<numeric-id> Task.startedBy contract.");
   }
   const futureTest = read("scripts/tests/production-backend-health-recovery-contract.test.mjs");
-  for (const token of ["future failed revision N", 'targetArn.replace(":998", ":1000")', "readRollbackViability"]) if (!futureTest.includes(token)) throw new Error(`Future recovery revision closure lacks coverage: ${token}.`);
+  for (const token of ["future failed revision N", 'targetArn.replace(":998", ":1000")', "readRollbackViability", "global revision census admits only this transaction's exact registration", "unknown revision after own registration fails before update"]) if (!futureTest.includes(token)) throw new Error(`Future recovery revision closure lacks coverage: ${token}.`);
 
   return {
     schemaVersion: 1,

@@ -216,12 +216,18 @@ test("authenticated cross-source failed revision is audited but never reused", a
     readService: async () => rollbackService, readRollbackViability: async () => proof, updateService: async () => assert.fail("update called"), waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy }), /newer unknown/);
 
   let censusCalls = 0;
-  await assert.rejects(() => runLegacyBackendHealthRecovery(input, { census: async () => ++censusCalls === 1 ? [failed48] : [failed48, unknown50], register: async () => assert.fail("register called"), describe: async () => unknown50,
-    readService: async () => rollbackService, readRollbackViability: async () => proof, updateService: async () => assert.fail("update called"), waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy }), /newer unknown|census changed/);
+  let preRaceRegistrations = 0;
+  let preRaceUpdates = 0;
+  await assert.rejects(() => runLegacyBackendHealthRecovery(input, { census: async () => ++censusCalls === 1 ? [failed48] : [failed48, unknown50], register: async () => { preRaceRegistrations += 1; }, describe: async () => unknown50,
+    readService: async () => rollbackService, readRollbackViability: async () => proof, updateService: async () => { preRaceUpdates += 1; }, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy }), /newer unknown|census changed/);
+  assert.deepEqual({ registrations: preRaceRegistrations, updates: preRaceUpdates }, { registrations: 0, updates: 0 });
 
   let lateCensusCalls = 0;
-  await assert.rejects(() => runLegacyBackendHealthRecovery(input, { census: async () => ++lateCensusCalls < 4 ? (lateCensusCalls < 3 ? [failed48] : [failed48, corrected49]) : [failed48, corrected49, unknown50], register: async () => corrected49, describe: async () => corrected49,
-    readService: async () => rollbackService, readRollbackViability: async () => proof, updateService: async () => assert.fail("update called"), waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy }), /newer unknown/);
+  let lateRaceRegistrations = 0;
+  let lateRaceUpdates = 0;
+  await assert.rejects(() => runLegacyBackendHealthRecovery(input, { census: async () => ++lateCensusCalls < 4 ? (lateCensusCalls < 3 ? [failed48] : [failed48, corrected49]) : [failed48, corrected49, unknown50], register: async () => { lateRaceRegistrations += 1; return corrected49; }, describe: async () => corrected49,
+    readService: async () => rollbackService, readRollbackViability: async () => proof, updateService: async () => { lateRaceUpdates += 1; }, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy }), /newer unknown/);
+  assert.deepEqual({ registrations: lateRaceRegistrations, updates: lateRaceUpdates }, { registrations: 1, updates: 0 });
 });
 
 test("authenticated stalled rollback with an unrecoverable exact target may be superseded once", async () => {
@@ -405,16 +411,122 @@ test("registration follows initial live revision validation and pre-update concu
   const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
   const input = base();
   const order = [];
+  let registeredLive = false;
   let updates = 0;
   await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
-    census: async () => { order.push("census"); return []; },
-    register: async () => { order.push("register"); return registered; },
+    census: async () => { order.push("census"); return registeredLive ? [registered] : []; },
+    register: async () => { order.push("register"); registeredLive = true; return registered; },
     describe: async () => registered,
     readService: async () => ({ ...input.service, taskDefinition: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:49" }),
     updateService: async () => { updates += 1; }, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => false,
   }), /changed concurrently/);
-  assert.deepEqual(order, ["census", "register"]);
+  assert.deepEqual(order, ["census", "census", "register", "census"]);
   assert.equal(updates, 0);
+});
+
+test("non-rollback recovery rejects concurrent revision registration before its own registration", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const unknownArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:49";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  const unknown = structuredClone(registered);
+  Object.assign(unknown.taskDefinition, { taskDefinitionArn: unknownArn, revision: 49, cpu: "999" });
+  let censusCalls = 0;
+  let registrations = 0;
+  let updates = 0;
+  await assert.rejects(() => runLegacyBackendHealthRecovery(base(), {
+    census: async () => ++censusCalls === 1 ? [] : [unknown],
+    register: async () => { registrations += 1; return registered; },
+    describe: async () => registered,
+    readService: async () => base().service,
+    updateService: async () => { updates += 1; },
+    waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
+  }), /census changed|newer unknown/);
+  assert.equal(registrations, 0);
+  assert.equal(updates, 0);
+});
+
+test("global revision census admits only this transaction's exact registration", async (t) => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  const unknown = structuredClone(registered);
+  Object.assign(unknown.taskDefinition, { taskDefinitionArn: targetArn.replace(":48", ":49"), revision: 49, cpu: "999" });
+  const historical = (revision) => {
+    const item = structuredClone(registered);
+    Object.assign(item.taskDefinition, { taskDefinitionArn: targetArn.replace(":48", `:${revision}`), revision, cpu: `${revision}` });
+    return item;
+  };
+  const run = async (census, { described = registered, serviceChanged = false } = {}) => {
+    let registrations = 0;
+    let updates = 0;
+    let service = base().service;
+    const execute = runLegacyBackendHealthRecovery(base(), {
+      census,
+      register: async () => { registrations += 1; return registered; },
+      describe: async () => described,
+      readService: async () => serviceChanged ? { ...service, taskDefinition: unknown.taskDefinition.taskDefinitionArn } : service,
+      updateService: async (arn) => { updates += 1; service = { ...service, taskDefinition: arn, runningCount: 2, pendingCount: 0 }; },
+      waitStable: async () => {},
+      readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })),
+      verifyHealth: async () => healthy,
+    });
+    return { execute, counts: () => ({ registrations, updates }) };
+  };
+
+  await t.test("unchanged census and exact own registration proceed", async () => {
+    let call = 0;
+    const execution = await run(async () => ++call < 3 ? [] : [registered]);
+    await execution.execute;
+    assert.deepEqual(execution.counts(), { registrations: 1, updates: 1 });
+  });
+
+  await t.test("unknown initial revision fails before mutation", async () => {
+    const execution = await run(async () => [unknown]);
+    await assert.rejects(execution.execute, /newer unknown/);
+    assert.deepEqual(execution.counts(), { registrations: 0, updates: 0 });
+  });
+
+  await t.test("unknown revision after own registration fails before update", async () => {
+    let call = 0;
+    const execution = await run(async () => ++call < 3 ? [] : [registered, unknown]);
+    await assert.rejects(execution.execute, /newer unknown|census changed/);
+    assert.deepEqual(execution.counts(), { registrations: 1, updates: 0 });
+  });
+
+  await t.test("wrong registered payload fails before update", async () => {
+    const changed = structuredClone(registered);
+    changed.taskDefinition.cpu = "999";
+    const execution = await run(async () => [], { described: changed });
+    await assert.rejects(execution.execute, /target readback/);
+    assert.deepEqual(execution.counts(), { registrations: 1, updates: 0 });
+  });
+
+  await t.test("duplicate and malformed census fail before mutation", async () => {
+    for (const census of [[historical(46), historical(46)], [{}]]) {
+      const execution = await run(async () => census);
+      await assert.rejects(execution.execute, /duplicate|invalid/);
+      assert.deepEqual(execution.counts(), { registrations: 0, updates: 0 });
+    }
+  });
+
+  await t.test("semantic reorder is stable", async () => {
+    const old = [historical(45), historical(46)];
+    let call = 0;
+    const execution = await run(async () => {
+      call += 1;
+      if (call === 1) return old;
+      if (call === 2) return [...old].reverse();
+      return call === 3 ? [registered, ...old].reverse() : [old[1], registered, old[0]];
+    });
+    await execution.execute;
+    assert.deepEqual(execution.counts(), { registrations: 1, updates: 1 });
+  });
+
+  await t.test("service movement remains an independent guard", async () => {
+    let call = 0;
+    const execution = await run(async () => ++call < 3 ? [] : [registered], { serviceChanged: true });
+    await assert.rejects(execution.execute, /changed concurrently/);
+    assert.deepEqual(execution.counts(), { registrations: 1, updates: 0 });
+  });
 });
 
 test("authorization hash and human bindings fail closed", () => {
@@ -559,9 +671,12 @@ test("durable recovery states preserve every confirmed partial mutation and term
   const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
   const run = async ({ register = async () => registered, updateService, waitStable = async () => {}, readRunningTasks, verifyHealth }) => {
     const records = [];
+    let registeredLive = false;
     let service = { ...base().service, runningCount: 0, pendingCount: 2 };
     const adapters = {
-      census: async () => [], register, describe: async () => registered, readService: async () => service,
+      census: async () => registeredLive ? [registered] : [],
+      register: async (...args) => { const result = await register(...args); registeredLive = true; return result; },
+      describe: async () => registered, readService: async () => service,
       updateService: updateService || (async (arn) => { service = { ...service, taskDefinition: arn, runningCount: 2, pendingCount: 0 }; }),
       waitStable,
       readRunningTasks: readRunningTasks || (async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" }))),
@@ -662,6 +777,12 @@ test("partial and complete recovery evidence is self-authenticating", () => {
   assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...overcountedBody, evidenceSha256: canonicalSha256(overcountedBody) }, expected), /malformed/);
   const malformedHistory = { ...body, knownFailedRevisions: [{ taskDefinitionArn: body.currentTaskDefinitionArn, taskDefinitionFingerprint: "bad" }] };
   assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...malformedHistory, evidenceSha256: canonicalSha256(malformedHistory) }, expected), /malformed/);
+  const rollbackProofSha256 = "a".repeat(64);
+  const multipleHistory = { ...body, rollbackProofSha256, knownFailedRevisions: [47, 48].map((revision) => ({
+    taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:${revision}`,
+    taskDefinitionFingerprint: `${revision}`.repeat(32),
+  })) };
+  assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...multipleHistory, evidenceSha256: canonicalSha256(multipleHistory) }, { ...expected, rollbackProofSha256 }), /malformed/);
   const incompleteHealthBody = { ...body, status: "RECOVERY_COMPLETE", targetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", artifactSigningVerification: "VERIFIED", backendHealthy: true, rotationRequired: true, health: { healthy: true, success: true, status: "ready" } };
   assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...incompleteHealthBody, evidenceSha256: canonicalSha256(incompleteHealthBody) }, expected), /readiness proof/);
 });
