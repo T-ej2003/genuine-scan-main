@@ -180,6 +180,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     updates: 0,
     artifactSigningVerification: ARTIFACT_SIGNING_VERIFICATION.PENDING,
     artifactSigningFailure: null,
+    knownFailedRevisions: [],
   };
   let lastEvidence;
   const generatedAt = () => new Date(typeof deps.now === "function" ? deps.now() : deps.now || Date.now()).toISOString();

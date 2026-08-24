@@ -128,7 +128,16 @@ immediately before `UpdateService`, so a later concurrent change still fails
 closed without an update.
 
 A failed historical recovery revision without the four bindings is not a
-matching candidate and is never reused. Rollback reconciliation distinguishes
+matching candidate and is never reused. During an authenticated stalled
+rollback, the live rollback proof separately binds the failed forward task
+definition ARN and its semantic task-definition fingerprint. That exact
+revision may remain in the ACTIVE revision census without blocking a corrected
+registration even when its image or source SHA predates the current recovery.
+It remains audit evidence, never a candidate. A missing or changed failed
+revision, any additional newer revision, or any revision-census change before
+registration fails closed; the census is checked again before service update.
+
+Rollback reconciliation distinguishes
 none, progressing, successful, failed, ambiguous, stalled with a recoverable
 target, and stalled with an authenticated unrecoverable target. Elapsed time is
 never authority. Supersession is permitted only for the final state, after two

@@ -10,7 +10,7 @@ import {
   createLegacyBackendRecoveryAuthorization,
   runLegacyBackendHealthRecovery as runRecoveryContract,
 } from "../aws/production-backend-health-recovery-contract.mjs";
-import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
+import { canonicalSha256, taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { classifyRollbackViability } from "../aws/production-ecs-rollback-viability.mjs";
@@ -64,17 +64,17 @@ const base = () => ({
 });
 const healthy = Object.freeze({ healthy: true, success: true, status: "ready" });
 const runLegacyBackendHealthRecovery = (input, adapters) => runRecoveryContract(input, { record: async () => {}, ...adapters });
-const rollbackProof = ({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn, rollbackDigest, forwardTaskDefinitionArn, forwardDigest = digest } = {}) => {
+const rollbackProof = ({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn, rollbackDigest, forwardTaskDefinitionArn, forwardTaskDefinitionFingerprint = "f".repeat(64), forwardDigest = digest } = {}) => {
   const forwardServiceRevisionArn = rollbackServiceRevisionArn.replace("minus-1", "failed-forward");
   const rollbackEcsServiceDeploymentId = "ecs-svc/3599551810517927503";
   const rollbackEcsServiceDeployment = { id: rollbackEcsServiceDeploymentId, status: "PRIMARY", taskDefinition: rollbackTaskDefinitionArn };
   const rollbackStartedAt = "2026-08-24T09:59:00.000Z";
-  const resolved = (serviceRevisionArn, taskDefinitionArn, imageDigest, imageExists) => ({ serviceRevisionArn, taskDefinitionArn, digest: imageDigest, repository: "mscqr-backend", imageExists, imageFailure: null });
+  const resolved = (serviceRevisionArn, taskDefinitionArn, imageDigest, imageExists, fingerprint = "e".repeat(64)) => ({ serviceRevisionArn, taskDefinitionArn, taskDefinitionFingerprint: fingerprint, digest: imageDigest, repository: "mscqr-backend", imageExists, imageFailure: null });
   const rollbackTarget = resolved(rollbackServiceRevisionArn, rollbackTaskDefinitionArn, rollbackDigest, false);
   return classifyRollbackViability({
     service: { serviceArn: `arn:aws:ecs:eu-west-2:368992683803:service/${BACKEND_HEALTH_RECOVERY.cluster}/${BACKEND_HEALTH_RECOVERY.service}`, taskDefinition: rollbackTaskDefinitionArn, desiredCount: 2, runningCount: 0, pendingCount: 0, deployments: [rollbackEcsServiceDeployment] },
     deployment: { serviceDeploymentArn: rollbackDeploymentArn, status: "ROLLBACK_IN_PROGRESS", targetServiceRevision: { arn: forwardServiceRevisionArn }, sourceServiceRevisions: [{ arn: rollbackServiceRevisionArn }], rollback: { serviceRevisionArn: rollbackServiceRevisionArn, startedAt: rollbackStartedAt } },
-    forwardTarget: resolved(forwardServiceRevisionArn, forwardTaskDefinitionArn, forwardDigest, true),
+    forwardTarget: resolved(forwardServiceRevisionArn, forwardTaskDefinitionArn, forwardDigest, true, forwardTaskDefinitionFingerprint),
     sourceRevisions: [rollbackTarget], rollbackTarget,
     taskAttempts: [1, 2].map((n) => ({ taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${`${n}`.padStart(32, "0")}`, startedBy: rollbackEcsServiceDeploymentId,
       taskDefinitionArn: rollbackTaskDefinitionArn, classification: "CANNOT_PULL_IMAGE", errorCode: "CannotPullContainerError", digest: rollbackDigest, failureReasonSha256: `${n}`.repeat(64),
@@ -163,49 +163,65 @@ test("production failure fixture lacks startup prerequisites while corrected can
   }
 });
 
-test("failed :48 is never reused as the corrected recovery revision", async () => {
+test("authenticated cross-source failed revision is audited but never reused", async () => {
+  const oldDigest = `sha256:${"a".repeat(64)}`;
+  const oldSha = "b".repeat(40);
   const oldCandidate = structuredClone(candidate);
-  oldCandidate.containerDefinitions[0].secrets = oldCandidate.containerDefinitions[0].secrets.filter(({ name }) => !name.startsWith("ARTIFACT_SIGN_"));
+  const oldBackend = oldCandidate.containerDefinitions[0];
+  oldBackend.image = oldBackend.image.replace(digest, oldDigest);
+  oldBackend.environment = oldBackend.environment.map((entry) => ["GIT_SHA", "RELEASE_GIT_SHA"].includes(entry.name) ? { ...entry, value: oldSha } : entry);
+  oldBackend.secrets = oldBackend.secrets.filter(({ name }) => !name.startsWith("ARTIFACT_SIGN_"));
   const failed48 = { taskDefinition: { ...oldCandidate, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", revision: 48, status: "ACTIVE" }, tags: [] };
   const corrected49 = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:49", revision: 49, status: "ACTIVE" }, tags: [] };
+  const rollbackDeploymentArn = "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/failed-cross-source";
+  const rollbackServiceRevisionArn = "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/failed-cross-source-minus-1";
+  const rollbackDigest = current.taskDefinition.containerDefinitions[0].image.split("@")[1];
+  const proof = rollbackProof({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, rollbackDigest,
+    forwardTaskDefinitionArn: failed48.taskDefinition.taskDefinitionArn, forwardTaskDefinitionFingerprint: taskDefinitionFingerprint(failed48, failed48.tags), forwardDigest: oldDigest });
+  const rollbackService = { ...base().service, runningCount: 0, pendingCount: 0, deployments: [{ status: "PRIMARY", taskDefinition: current.taskDefinition.taskDefinitionArn, rolloutState: "IN_PROGRESS", desiredCount: 2, runningCount: 0, pendingCount: 0 }] };
+  const stalledApproval = { ...approval, rollbackDeploymentArn, rollbackTargetTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, rollbackTargetDigest: rollbackDigest };
+  const stalledAuthorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, rollbackProof: proof, approval: stalledApproval });
+  const input = { ...base(), service: rollbackService, authorization: stalledAuthorization };
   let registrations = 0;
-  let service = { ...base().service, runningCount: 0, pendingCount: 0 };
-  const recovered = await runLegacyBackendHealthRecovery(base(), {
-    census: async () => [failed48],
+  let service = rollbackService;
+  const records = [];
+  const census = async () => registrations ? [failed48, corrected49] : [failed48];
+  const recovered = await runLegacyBackendHealthRecovery(input, {
+    census,
     register: async () => { registrations += 1; return corrected49; },
-    describe: async (arn) => arn.endsWith(":49") ? corrected49 : failed48,
+    describe: async () => corrected49,
     readService: async () => service,
+    readRollbackViability: async () => proof,
     updateService: async (arn) => { service = { ...service, taskDefinition: arn, runningCount: 2, pendingCount: 0 }; },
     waitStable: async () => {},
     readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: corrected49.taskDefinition.taskDefinitionArn, imageDigest: digest, healthStatus: "HEALTHY" })),
     verifyHealth: async () => healthy,
+    record: async (entry) => { records.push(structuredClone(entry)); },
   });
   assert.equal(registrations, 1);
-  assert.equal(recovered.targetArn.endsWith(":49"), true);
+  assert.equal(recovered.targetArn, corrected49.taskDefinition.taskDefinitionArn);
+  assert.notEqual(recovered.targetArn, failed48.taskDefinition.taskDefinitionArn);
+  assert.deepEqual(records[0].knownFailedRevisions, [{ taskDefinitionArn: failed48.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: taskDefinitionFingerprint(failed48, failed48.tags) }]);
 
-  const rollbackInProgress = base();
-  rollbackInProgress.service.taskDefinition = failed48.taskDefinition.taskDefinitionArn;
-  let mutations = 0;
-  await assert.rejects(() => runLegacyBackendHealthRecovery(rollbackInProgress, {
-    census: async () => [failed48], register: async () => { mutations += 1; }, describe: async () => failed48,
-    readService: async () => rollbackInProgress.service, updateService: async () => { mutations += 1; }, waitStable: async () => {},
-    readRunningTasks: async () => [], verifyHealth: async () => healthy,
-  }), /stale/);
-  assert.equal(mutations, 0);
+  const unauthenticated = structuredClone(failed48);
+  unauthenticated.taskDefinition.cpu = "999";
+  await assert.rejects(() => runLegacyBackendHealthRecovery(input, { census: async () => [unauthenticated], register: async () => assert.fail("register called"), describe: async () => unauthenticated,
+    readService: async () => rollbackService, readRollbackViability: async () => proof, updateService: async () => assert.fail("update called"), waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy }), /failed forward task definition/);
 
-  const rollingBack = base();
-  rollingBack.service.deployments = [{ status: "PRIMARY", taskDefinition: current.taskDefinition.taskDefinitionArn, rolloutState: "IN_PROGRESS", desiredCount: 2, runningCount: 0, pendingCount: 0 }];
-  assert.throws(() => assertLegacyBackendRecoveryEligibility(rollingBack), /rollback or deployment remains in progress/);
+  const unknown50 = structuredClone(corrected49);
+  unknown50.taskDefinition.taskDefinitionArn = unknown50.taskDefinition.taskDefinitionArn.replace(":49", ":50");
+  unknown50.taskDefinition.revision = 50;
+  unknown50.taskDefinition.containerDefinitions[0].cpu = 999;
+  await assert.rejects(() => runLegacyBackendHealthRecovery(input, { census: async () => [failed48, unknown50], register: async () => assert.fail("register called"), describe: async () => unknown50,
+    readService: async () => rollbackService, readRollbackViability: async () => proof, updateService: async () => assert.fail("update called"), waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy }), /newer unknown/);
 
-  const unknown49 = structuredClone(corrected49);
-  unknown49.taskDefinition.containerDefinitions[0].cpu = 999;
-  let unknownMutations = 0;
-  await assert.rejects(() => runLegacyBackendHealthRecovery(base(), {
-    census: async () => [failed48, unknown49], register: async () => { unknownMutations += 1; }, describe: async () => unknown49,
-    readService: async () => base().service, updateService: async () => { unknownMutations += 1; }, waitStable: async () => {},
-    readRunningTasks: async () => [], verifyHealth: async () => healthy,
-  }), /newer unknown/);
-  assert.equal(unknownMutations, 0);
+  let censusCalls = 0;
+  await assert.rejects(() => runLegacyBackendHealthRecovery(input, { census: async () => ++censusCalls === 1 ? [failed48] : [failed48, unknown50], register: async () => assert.fail("register called"), describe: async () => unknown50,
+    readService: async () => rollbackService, readRollbackViability: async () => proof, updateService: async () => assert.fail("update called"), waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy }), /newer unknown|census changed/);
+
+  let lateCensusCalls = 0;
+  await assert.rejects(() => runLegacyBackendHealthRecovery(input, { census: async () => ++lateCensusCalls < 4 ? (lateCensusCalls < 3 ? [failed48] : [failed48, corrected49]) : [failed48, corrected49, unknown50], register: async () => corrected49, describe: async () => corrected49,
+    readService: async () => rollbackService, readRollbackViability: async () => proof, updateService: async () => assert.fail("update called"), waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy }), /newer unknown/);
 });
 
 test("authenticated stalled rollback with an unrecoverable exact target may be superseded once", async () => {
@@ -239,7 +255,8 @@ test("future failed revision N registers a distinct corrected N+1 after exact N-
   const rollbackServiceRevisionArn = "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/future-N-minus-1";
   const rollbackTargetDigest = currentN.taskDefinition.containerDefinitions[0].image.split("@")[1];
   const rollbackService = { ...base().service, taskDefinition: targetArn, runningCount: 0, pendingCount: 0, deployments: [{ status: "PRIMARY", taskDefinition: targetArn, rolloutState: "IN_PROGRESS", desiredCount: 2, runningCount: 0, pendingCount: 0 }] };
-  const proof = rollbackProof({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn: targetArn, rollbackDigest: rollbackTargetDigest, forwardTaskDefinitionArn: failedN.taskDefinition.taskDefinitionArn });
+  const proof = rollbackProof({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn: targetArn, rollbackDigest: rollbackTargetDigest,
+    forwardTaskDefinitionArn: failedN.taskDefinition.taskDefinitionArn, forwardTaskDefinitionFingerprint: taskDefinitionFingerprint(failedN, failedN.tags) });
   const approvalN = { ...approval, currentTaskDefinitionArn: targetArn, rollbackDeploymentArn, rollbackTargetTaskDefinitionArn: targetArn, rollbackTargetDigest };
   const authorizationN = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: targetArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, rollbackProof: proof, approval: approvalN });
   const input = { ...base(), service: rollbackService, currentTaskDefinition: currentN, candidate: candidateN, authorization: authorizationN, stoppedReasons: [`CannotPullContainerError: image ${currentN.taskDefinition.containerDefinitions[0].image} not found`] };
@@ -254,7 +271,7 @@ test("future failed revision N registers a distinct corrected N+1 after exact N-
   let service = rollbackService;
   let registrations = 0;
   const result = await runLegacyBackendHealthRecovery(input, {
-    census: async () => [failedN],
+    census: async () => registrations ? [failedN, correctedN] : [failedN],
     register: async () => { registrations += 1; return correctedN; },
     describe: async () => correctedN,
     readService: async () => service,
@@ -630,7 +647,7 @@ test("partial and complete recovery evidence is self-authenticating", () => {
     schemaVersion: 3, kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE", sourceSha,
     currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
     ...bindings, status: "NO_MUTATION_FAILURE", targetArn: null, registrations: 0, updates: 0,
-    artifactSigningVerification: "PENDING", artifactSigningFailure: null, generatedAt: now.toISOString(),
+    artifactSigningVerification: "PENDING", artifactSigningFailure: null, knownFailedRevisions: [], generatedAt: now.toISOString(),
   };
   const evidence = { ...body, evidenceSha256: canonicalSha256(body) };
   const expected = { sourceSha, currentTaskDefinitionArn: body.currentTaskDefinitionArn, recoveryImageDigest: digest, ...bindings };
@@ -643,6 +660,8 @@ test("partial and complete recovery evidence is self-authenticating", () => {
   assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...incompleteBody, evidenceSha256: canonicalSha256(incompleteBody) }, expected), /malformed/);
   const overcountedBody = { ...body, registrations: 2 };
   assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...overcountedBody, evidenceSha256: canonicalSha256(overcountedBody) }, expected), /malformed/);
+  const malformedHistory = { ...body, knownFailedRevisions: [{ taskDefinitionArn: body.currentTaskDefinitionArn, taskDefinitionFingerprint: "bad" }] };
+  assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...malformedHistory, evidenceSha256: canonicalSha256(malformedHistory) }, expected), /malformed/);
   const incompleteHealthBody = { ...body, status: "RECOVERY_COMPLETE", targetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", artifactSigningVerification: "VERIFIED", backendHealthy: true, rotationRequired: true, health: { healthy: true, success: true, status: "ready" } };
   assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...incompleteHealthBody, evidenceSha256: canonicalSha256(incompleteHealthBody) }, expected), /readiness proof/);
 });
