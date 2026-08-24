@@ -9,6 +9,8 @@ const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const TASK_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/(mscqr-backend):[1-9][0-9]*$/;
 const DEPLOYMENT_ARN = /^arn:aws:ecs:eu-west-2:368992683803:service-deployment\/mscqr-prod-euw2-main\/mscqr-backend-servi-euw2\/([A-Za-z0-9_-]+)$/;
 const REVISION_ARN = /^arn:aws:ecs:eu-west-2:368992683803:service-revision\/mscqr-prod-euw2-main\/mscqr-backend-servi-euw2\/([A-Za-z0-9_-]+)$/;
+const TASK_INSTANCE_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/;
+const DEPLOYMENT_ID = /^[A-Za-z0-9_-]+$/;
 const SERVICE_ARN = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2";
 const CLUSTER_ARN = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
 
@@ -33,6 +35,7 @@ export function classifyRollbackViability({ service, deployment, forwardTarget, 
   const base = {
     serviceArn: service?.serviceArn, serviceTaskDefinitionArn: service?.taskDefinition,
     rollbackDeploymentArn: deployment?.serviceDeploymentArn, rollbackDeploymentId: DEPLOYMENT_ARN.exec(deployment?.serviceDeploymentArn || "")?.[1], rollbackStatus: deployment?.status,
+    rollbackStartedAt: deployment?.rollback?.startedAt,
     forwardTargetServiceRevisionArn: forwardTarget?.serviceRevisionArn, forwardTargetTaskDefinitionArn: forwardTarget?.taskDefinitionArn,
     forwardTargetDigest: forwardTarget?.digest, forwardTargetImageExists: forwardTarget?.imageExists, forwardTargetImageFailure: forwardTarget?.imageFailure,
     sourceServiceRevisions: structuredClone(sourceRevisions),
@@ -43,21 +46,31 @@ export function classifyRollbackViability({ service, deployment, forwardTarget, 
     observationStart, observationEnd, taskAttempts: structuredClone(taskAttempts),
   };
   const serviceValid = service?.serviceArn === SERVICE_ARN && Number.isInteger(service?.desiredCount) && Number.isInteger(service?.runningCount) && Number.isInteger(service?.pendingCount);
+  const rollbackDeploymentId = DEPLOYMENT_ARN.exec(deployment?.serviceDeploymentArn || "")?.[1];
+  const rollbackStartedAt = Date.parse(deployment?.rollback?.startedAt);
+  const matchingAttempts = taskAttempts.filter((attempt) => attempt?.taskDefinitionArn === rollbackTarget?.taskDefinitionArn
+    && attempt?.classification === "CANNOT_PULL_IMAGE" && attempt?.digest === rollbackTarget?.digest);
+  const currentAttempts = matchingAttempts.filter((attempt) => TASK_INSTANCE_ARN.test(attempt?.taskArn || "") && DEPLOYMENT_ID.test(attempt?.startedBy || "")
+    && attempt.startedBy === rollbackDeploymentId && attempt.errorCode === "CannotPullContainerError" && /^[a-f0-9]{64}$/.test(attempt.failureReasonSha256 || "")
+    && Number.isFinite(Date.parse(attempt.createdAt)) && Number.isFinite(Date.parse(attempt.stoppedAt))
+    && Date.parse(attempt.createdAt) >= rollbackStartedAt && Date.parse(attempt.stoppedAt) >= Date.parse(attempt.createdAt));
+  const uniqueCurrentAttempts = new Set(currentAttempts.map(({ taskArn }) => taskArn)).size === currentAttempts.length;
   const valid = serviceValid && DEPLOYMENT_ARN.test(deployment?.serviceDeploymentArn || "")
     && deployment?.rollback?.serviceRevisionArn === rollbackTarget?.serviceRevisionArn && resolvedRevisionValid(rollbackTarget)
     && deployment?.targetServiceRevision?.arn === forwardTarget?.serviceRevisionArn && resolvedRevisionValid(forwardTarget)
     && forwardTarget.serviceRevisionArn !== rollbackTarget.serviceRevisionArn
     && Array.isArray(sourceRevisions) && sourceRevisions.every(resolvedRevisionValid)
     && service.taskDefinition === rollbackTarget.taskDefinitionArn
+    && DEPLOYMENT_ID.test(rollbackDeploymentId || "") && Number.isFinite(rollbackStartedAt)
     && Number.isFinite(Date.parse(observationStart)) && Number.isFinite(Date.parse(observationEnd)) && Date.parse(observationEnd) >= Date.parse(observationStart);
   let classification = ROLLBACK_VIABILITY.AMBIGUOUS;
   if (serviceValid && !deployment && !forwardTarget && sourceRevisions.length === 0 && !rollbackTarget) classification = ROLLBACK_VIABILITY.NONE;
   else if (valid && deployment.status === "ROLLBACK_SUCCESSFUL") classification = ROLLBACK_VIABILITY.SUCCESSFUL;
   else if (valid && deployment.status === "ROLLBACK_FAILED") classification = ROLLBACK_VIABILITY.FAILED;
   else if (valid && deployment.status === "ROLLBACK_IN_PROGRESS") {
-    const failures = taskAttempts.filter((attempt) => attempt?.taskDefinitionArn === rollbackTarget.taskDefinitionArn && attempt?.classification === "CANNOT_PULL_IMAGE" && attempt?.digest === rollbackTarget.digest);
     if (service.runningCount > 0 || service.pendingCount > 0) classification = ROLLBACK_VIABILITY.PROGRESSING;
-    else if (rollbackTarget.imageExists === false && service.desiredCount > 0 && service.runningCount === 0 && failures.length >= 2) classification = ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE;
+    else if (matchingAttempts.length !== currentAttempts.length || !uniqueCurrentAttempts) classification = ROLLBACK_VIABILITY.AMBIGUOUS;
+    else if (rollbackTarget.imageExists === false && service.desiredCount > 0 && service.runningCount === 0 && currentAttempts.length >= 2) classification = ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE;
     else if (rollbackTarget.imageExists === true) classification = ROLLBACK_VIABILITY.STALLED_RECOVERABLE;
   }
   const body = { ...base, classification };
@@ -66,13 +79,20 @@ export function classifyRollbackViability({ service, deployment, forwardTarget, 
 
 export function assertRollbackSupersessionProof(proof, expected = {}) {
   if (proof?.classification !== ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE || proof.serviceArn !== expected.serviceArn || proof.rollbackDeploymentArn !== expected.rollbackDeploymentArn
+    || DEPLOYMENT_ARN.exec(proof.rollbackDeploymentArn || "")?.[1] !== proof.rollbackDeploymentId
     || !REVISION_ARN.test(proof.forwardTargetServiceRevisionArn || "") || !TASK_ARN.test(proof.forwardTargetTaskDefinitionArn || "") || !DIGEST.test(proof.forwardTargetDigest || "")
     || ![true, false].includes(proof.forwardTargetImageExists) || proof.forwardTargetImageFailure !== null || proof.forwardTargetServiceRevisionArn === proof.rollbackServiceRevisionArn
     || !Array.isArray(proof.sourceServiceRevisions) || proof.sourceServiceRevisions.some((revision) => !resolvedRevisionValid(revision)) || !REVISION_ARN.test(proof.rollbackServiceRevisionArn || "")
     || proof.rollbackTargetTaskDefinitionArn !== expected.rollbackTargetTaskDefinitionArn || proof.serviceTaskDefinitionArn !== proof.rollbackTargetTaskDefinitionArn
     || proof.rollbackTargetDigest !== expected.rollbackTargetDigest || proof.rollbackTargetRepository !== "mscqr-backend" || proof.rollbackTargetImageExists !== false || proof.rollbackTargetImageFailure !== null
-    || proof.desiredCount < 1 || proof.runningCount !== 0 || proof.pendingCount !== 0 || proof.rollbackStatus !== "ROLLBACK_IN_PROGRESS"
-    || !Array.isArray(proof.taskAttempts) || proof.taskAttempts.length < 2) throw new Error("Rollback supersession requires an exact authenticated stalled-unrecoverable proof.");
+    || proof.desiredCount < 1 || proof.runningCount !== 0 || proof.pendingCount !== 0 || proof.rollbackStatus !== "ROLLBACK_IN_PROGRESS" || !Number.isFinite(Date.parse(proof.rollbackStartedAt))
+    || !Array.isArray(proof.taskAttempts) || proof.taskAttempts.length < 2
+    || new Set(proof.taskAttempts.map(({ taskArn }) => taskArn)).size !== proof.taskAttempts.length
+    || proof.taskAttempts.some((attempt) => !TASK_INSTANCE_ARN.test(attempt?.taskArn || "") || attempt.startedBy !== proof.rollbackDeploymentId
+      || attempt.taskDefinitionArn !== proof.rollbackTargetTaskDefinitionArn || attempt.digest !== proof.rollbackTargetDigest
+      || attempt.classification !== "CANNOT_PULL_IMAGE" || attempt.errorCode !== "CannotPullContainerError" || !/^[a-f0-9]{64}$/.test(attempt.failureReasonSha256 || "")
+      || !Number.isFinite(Date.parse(attempt.createdAt)) || Date.parse(attempt.createdAt) < Date.parse(proof.rollbackStartedAt)
+      || !Number.isFinite(Date.parse(attempt.stoppedAt)) || Date.parse(attempt.stoppedAt) < Date.parse(attempt.createdAt))) throw new Error("Rollback supersession requires an exact authenticated stalled-unrecoverable proof.");
   const { proofSha256, ...body } = proof;
   if (!/^[a-f0-9]{64}$/.test(proofSha256 || "") || canonicalSha256(body) !== proofSha256) throw new Error("Rollback supersession proof integrity is invalid.");
   return proof;
@@ -80,9 +100,10 @@ export function assertRollbackSupersessionProof(proof, expected = {}) {
 
 export function assertFreshRollbackEquivalence(authorized, fresh) {
   assertRollbackSupersessionProof(authorized, authorized); assertRollbackSupersessionProof(fresh, authorized);
-  for (const field of ["rollbackDeploymentArn", "rollbackStatus", "forwardTargetServiceRevisionArn", "forwardTargetTaskDefinitionArn", "forwardTargetDigest", "forwardTargetImageExists", "rollbackServiceRevisionArn", "serviceTaskDefinitionArn", "rollbackTargetTaskDefinitionArn", "rollbackTargetDigest", "rollbackTargetImageExists", "desiredCount", "runningCount", "pendingCount"])
+  for (const field of ["rollbackDeploymentArn", "rollbackStatus", "rollbackStartedAt", "forwardTargetServiceRevisionArn", "forwardTargetTaskDefinitionArn", "forwardTargetDigest", "forwardTargetImageExists", "rollbackServiceRevisionArn", "serviceTaskDefinitionArn", "rollbackTargetTaskDefinitionArn", "rollbackTargetDigest", "rollbackTargetImageExists", "desiredCount", "runningCount", "pendingCount"])
     if (fresh[field] !== authorized[field]) throw new Error("Rollback state changed before recovery mutation.");
   if (canonicalSha256(fresh.sourceServiceRevisions) !== canonicalSha256(authorized.sourceServiceRevisions)) throw new Error("Rollback source revisions changed before recovery mutation.");
+  if (canonicalSha256(fresh.taskAttempts) !== canonicalSha256(authorized.taskAttempts)) throw new Error("Rollback task-attempt evidence changed before recovery mutation.");
   return true;
 }
 
@@ -109,7 +130,7 @@ const resolveServiceRevision = (aws, service, serviceRevisionArn) => {
   return Object.freeze({ serviceRevisionArn, taskDefinitionArn, digest, repository: image.repository, imageExists: image.exists, imageFailure: image.failure });
 };
 const snapshotIdentity = ({ deployment, forwardTarget, sourceRevisions, rollbackTarget }) => canonicalSha256({
-  deploymentArn: deployment.serviceDeploymentArn, status: deployment.status, targetServiceRevisionArn: deployment.targetServiceRevision.arn,
+  deploymentArn: deployment.serviceDeploymentArn, status: deployment.status, rollbackStartedAt: deployment.rollback.startedAt, targetServiceRevisionArn: deployment.targetServiceRevision.arn,
   sourceServiceRevisionArns: sourceRevisions.map(({ serviceRevisionArn }) => serviceRevisionArn), rollbackServiceRevisionArn: deployment.rollback.serviceRevisionArn,
   forwardTarget, sourceRevisions, rollbackTarget,
 });
@@ -136,15 +157,19 @@ export async function collectRollbackViability({ aws, sleep = (milliseconds) => 
     const sourceRevisions = sourceArns.map((arn) => revisions.get(arn)).sort((a, b) => a.serviceRevisionArn.localeCompare(b.serviceRevisionArn));
     const rollbackTarget = revisions.get(rollbackArn);
     const listedTasks = aws(["ecs", "list-tasks", "--cluster", "mscqr-prod-euw2-main", "--service-name", "mscqr-backend-servi-euw2", "--desired-status", "STOPPED", "--max-results", "100"]);
-    if (!Array.isArray(listedTasks?.taskArns)) throw new Error("Rollback task-attempt census is malformed.");
+    if (!Array.isArray(listedTasks?.taskArns) || listedTasks.nextToken || listedTasks.taskArns.some((arn) => !TASK_INSTANCE_ARN.test(arn)) || new Set(listedTasks.taskArns).size !== listedTasks.taskArns.length)
+      throw new Error("Rollback task-attempt census is malformed or incomplete.");
     const describedTasks = listedTasks.taskArns.length ? aws(["ecs", "describe-tasks", "--cluster", "mscqr-prod-euw2-main", "--tasks", ...listedTasks.taskArns]) : { failures: [], tasks: [] };
-    if ((describedTasks.failures || []).length || !Array.isArray(describedTasks.tasks)) throw new Error("Rollback task-attempt readback is incomplete.");
+    const describedTaskArns = Array.isArray(describedTasks.tasks) ? describedTasks.tasks.map(({ taskArn }) => taskArn) : [];
+    if ((describedTasks.failures || []).length || !Array.isArray(describedTasks.tasks) || new Set(describedTaskArns).size !== describedTaskArns.length
+      || canonicalSha256([...describedTaskArns].sort()) !== canonicalSha256([...listedTasks.taskArns].sort())) throw new Error("Rollback task-attempt readback is incomplete.");
     const tasks = describedTasks.tasks;
     const taskAttempts = tasks.flatMap((task) => {
       if (task.taskDefinitionArn !== rollbackTarget.taskDefinitionArn) return [];
       const text = [task.stoppedReason, ...(task.containers || []).map(({ reason }) => reason)].filter(Boolean).join(" ");
-      return /CannotPullContainerError/i.test(text) && text.includes(rollbackTarget.digest) && /not found|does not exist|manifest unknown/i.test(text)
-        ? [{ taskArn: task.taskArn, taskDefinitionArn: rollbackTarget.taskDefinitionArn, classification: "CANNOT_PULL_IMAGE", digest: rollbackTarget.digest, stoppedAt: task.stoppedAt }] : [];
+      return /\bCannotPullContainerError\b/.test(text) && text.includes(rollbackTarget.digest) && /not found|does not exist|manifest unknown/i.test(text)
+        ? [{ taskArn: task.taskArn, startedBy: task.startedBy, taskDefinitionArn: rollbackTarget.taskDefinitionArn, classification: "CANNOT_PULL_IMAGE", errorCode: "CannotPullContainerError", digest: rollbackTarget.digest,
+          failureReasonSha256: canonicalSha256(text), createdAt: task.createdAt, stoppedAt: task.stoppedAt }] : [];
     });
     return { service, deployment, forwardTarget, sourceRevisions, rollbackTarget, taskAttempts };
   };
@@ -152,6 +177,8 @@ export async function collectRollbackViability({ aws, sleep = (milliseconds) => 
   if (observationMilliseconds) await sleep(observationMilliseconds);
   const second = await observed();
   if (snapshotIdentity(first) !== snapshotIdentity(second)) throw new Error("Rollback identity or artifact viability changed during bounded observation.");
+  const firstAttempts = new Map(first.taskAttempts.map((attempt) => [attempt.taskArn, attempt]));
+  for (const attempt of second.taskAttempts) if (firstAttempts.has(attempt.taskArn) && canonicalSha256(firstAttempts.get(attempt.taskArn)) !== canonicalSha256(attempt)) throw new Error("Rollback task-attempt identity changed during bounded observation.");
   const taskAttempts = [...new Map([...first.taskAttempts, ...second.taskAttempts].map((attempt) => [attempt.taskArn, attempt])).values()];
   return classifyRollbackViability({ ...second, taskAttempts, observationStart, observationEnd: new Date().toISOString() });
 }

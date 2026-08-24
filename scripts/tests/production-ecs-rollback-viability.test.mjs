@@ -15,22 +15,26 @@ const td46 = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:4
 const digest47 = `sha256:${"b".repeat(64)}`;
 const digest48 = `sha256:${"a".repeat(64)}`;
 const digest46 = `sha256:${"c".repeat(64)}`;
+const rollbackStartedAt = "2026-08-24T09:59:00.000Z";
 const service = { serviceArn, clusterArn, taskDefinition: td47, desiredCount: 2, runningCount: 0, pendingCount: 0 };
 const deployment = {
   serviceDeploymentArn: deploymentArn,
   status: "ROLLBACK_IN_PROGRESS",
   targetServiceRevision: { arn: forwardRevisionArn },
   sourceServiceRevisions: [{ arn: rollbackRevisionArn }],
-  rollback: { serviceRevisionArn: rollbackRevisionArn },
+  rollback: { serviceRevisionArn: rollbackRevisionArn, startedAt: rollbackStartedAt },
 };
 const resolved = (serviceRevisionArn, taskDefinitionArn, digest, imageExists, imageFailure = null) => ({ serviceRevisionArn, taskDefinitionArn, digest, repository: "mscqr-backend", imageExists, imageFailure });
 const forwardTarget = resolved(forwardRevisionArn, td48, digest48, true);
 const rollbackTarget = resolved(rollbackRevisionArn, td47, digest47, false);
 const sourceRevisions = [rollbackTarget];
-const taskAttempts = [1, 2].map((index) => ({ taskArn: `task-${index}`, taskDefinitionArn: td47, classification: "CANNOT_PULL_IMAGE", digest: digest47 }));
+const taskArn = (index) => `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${`${index}`.padStart(32, "0")}`;
+const taskAttempts = [1, 2].map((index) => ({ taskArn: taskArn(index), startedBy: "future-deployment-N", taskDefinitionArn: td47, classification: "CANNOT_PULL_IMAGE", errorCode: "CannotPullContainerError", digest: digest47,
+  failureReasonSha256: `${index}`.repeat(64), createdAt: `2026-08-24T10:0${index}:00.000Z`, stoppedAt: `2026-08-24T10:0${index}:30.000Z` }));
+const stoppedTasks = taskAttempts.map((attempt) => ({ ...attempt, stoppedReason: `CannotPullContainerError ${digest47} manifest not found` }));
 const classify = (overrides = {}) => classifyRollbackViability({ service, deployment, forwardTarget, sourceRevisions, rollbackTarget, taskAttempts, observationStart: "2026-08-24T10:00:00.000Z", observationEnd: "2026-08-24T10:01:00.000Z", ...overrides });
 
-function awsFixture({ snapshots = [{}], ecr = {}, sourceArns, deploymentPatch = {}, revisionPatch = {} } = {}) {
+function awsFixture({ snapshots = [{}], ecr = {}, sourceArns, deploymentPatch = {}, revisionPatch = {}, tasks = stoppedTasks, listTasksPatch = {}, describeTasksPatch = {} } = {}) {
   let observation = -1;
   const calls = [];
   const aws = (args) => {
@@ -66,8 +70,9 @@ function awsFixture({ snapshots = [{}], ecr = {}, sourceArns, deploymentPatch = 
       if (result === false) throw { stderr: "An error occurred (ImageNotFoundException) when calling the DescribeImages operation: image not found" };
       throw result;
     }
-    if (command === "ecs list-tasks") return { taskArns: ["task-1", "task-2"] };
-    if (command === "ecs describe-tasks") return { tasks: taskAttempts.map((attempt) => ({ taskArn: attempt.taskArn, taskDefinitionArn: td47, stoppedReason: `CannotPullContainerError ${digest47} manifest not found` })) };
+    const observedTasks = state.tasks || tasks;
+    if (command === "ecs list-tasks") return { taskArns: observedTasks.map(({ taskArn }) => taskArn), ...listTasksPatch };
+    if (command === "ecs describe-tasks") return { failures: [], tasks: observedTasks, ...describeTasksPatch };
     throw new Error(`Unexpected command: ${args.join(" ")}`);
   };
   return { aws, calls };
@@ -122,6 +127,19 @@ test("rollback status and independently resolved source relationships fail close
   ]) assert.equal(classify(invalid).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
 });
 
+test("only two failures from the exact current rollback deployment authorize supersession", () => {
+  const historical = taskAttempts.map((attempt) => ({ ...attempt, startedBy: "historical-deployment", createdAt: "2026-08-23T10:00:00.000Z", stoppedAt: "2026-08-23T10:00:30.000Z" }));
+  assert.equal(classify({ taskAttempts: historical }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
+  assert.equal(classify({ taskAttempts: [historical[0], taskAttempts[0]] }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
+  assert.equal(classify({ taskAttempts }).classification, ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE);
+  assert.equal(classify({ taskAttempts: taskAttempts.map((attempt) => ({ ...attempt, startedBy: "other-deployment" })) }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
+  for (const startedBy of [undefined, "malformed deployment!"]) assert.equal(classify({ taskAttempts: taskAttempts.map((attempt) => ({ ...attempt, startedBy })) }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
+  assert.equal(classify({ taskAttempts: taskAttempts.map((attempt) => ({ ...attempt, createdAt: "2026-08-24T09:58:00.000Z" })) }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
+  assert.equal(classify({ taskAttempts: [taskAttempts[0]] }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
+  assert.equal(classify({ taskAttempts: [taskAttempts[0], taskAttempts[0]] }).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
+  assert.equal(classify({ taskAttempts: [...taskAttempts, { taskArn: taskArn(3), taskDefinitionArn: td46, classification: "OTHER", digest: digest46 }] }).classification, ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE);
+});
+
 test("malformed and cross-boundary service revision responses are rejected", async () => {
   for (const fixture of [
     { revisionPatch: { [rollbackRevisionArn]: { taskDefinition: td47, digest: digest47, serviceArn: serviceArn.replace("backend", "other") } } },
@@ -130,6 +148,11 @@ test("malformed and cross-boundary service revision responses are rejected", asy
     { deploymentPatch: { rollback: { serviceRevisionArn: "malformed" } } },
     { deploymentPatch: { targetServiceRevision: undefined } },
   ]) await assert.rejects(() => collectRollbackViability({ ...awsFixture(fixture), observationMilliseconds: 0 }), /revision|relationships|boundary/i);
+  for (const fixture of [
+    { listTasksPatch: { nextToken: "more" } },
+    { describeTasksPatch: { failures: [{ arn: taskArn(2), reason: "MISSING" }] } },
+    { describeTasksPatch: { tasks: [stoppedTasks[0]] } },
+  ]) await assert.rejects(() => collectRollbackViability({ ...awsFixture(fixture), observationMilliseconds: 0 }), /task-attempt.*incomplete/i);
 });
 
 test("source revisions may be empty or multiple but each supplied identity is authenticated", async () => {
@@ -147,6 +170,19 @@ test("bounded snapshots reject deployment, rollback revision, task definition, d
     [{}, { taskDigests: { [td47]: digest46 } }],
   ];
   for (const snapshots of cases) await assert.rejects(() => collectRollbackViability({ ...awsFixture({ snapshots }), observationMilliseconds: 1, sleep: async () => {} }), /changed|incomplete|boundary/i);
+  await assert.rejects(() => collectRollbackViability({ ...awsFixture({ snapshots: [{ tasks: stoppedTasks }, { tasks: stoppedTasks.map((task, index) => index ? task : { ...task, startedBy: "other-deployment" }) }] }), observationMilliseconds: 1, sleep: async () => {} }), /task-attempt identity changed/);
+});
+
+test("collector ignores unrelated tasks, rejects historical mixing, and deduplicates repeated observations", async () => {
+  const unrelated = { taskArn: taskArn(9), startedBy: "unrelated", taskDefinitionArn: td46, createdAt: "2026-08-23T10:00:00.000Z", stoppedAt: "2026-08-23T10:00:30.000Z", stoppedReason: "EssentialContainerExited" };
+  const proof = await collectRollbackViability({ ...awsFixture({ tasks: [...stoppedTasks, unrelated] }), observationMilliseconds: 0 });
+  assert.equal(proof.classification, ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE);
+  assert.equal(proof.taskAttempts.length, 2);
+  const historical = { ...stoppedTasks[0], taskArn: taskArn(8), startedBy: "historical-deployment", createdAt: "2026-08-23T10:00:00.000Z", stoppedAt: "2026-08-23T10:00:30.000Z" };
+  assert.equal((await collectRollbackViability({ ...awsFixture({ tasks: [stoppedTasks[0], historical] }), observationMilliseconds: 0 })).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
+  for (const changed of [{ startedBy: undefined }, { startedBy: "malformed deployment!" }, { createdAt: "2026-08-24T09:58:00.000Z" }]) {
+    assert.equal((await collectRollbackViability({ ...awsFixture({ tasks: stoppedTasks.map((task) => ({ ...task, ...changed })) }), observationMilliseconds: 0 })).classification, ROLLBACK_VIABILITY.AMBIGUOUS);
+  }
 });
 
 test("pre-mutation equivalence binds every forward, source, rollback, and service identity", () => {
@@ -167,4 +203,7 @@ test("CI invariant forbids sourcing rollback authority from targetServiceRevisio
   assert.match(source, /const rollbackArn = deployment\?\.rollback\?\.serviceRevisionArn/);
   assert.doesNotMatch(source, /rollbackArn\s*=\s*deployment\?\.targetServiceRevision/);
   assert.doesNotMatch(source, /rollbackServiceRevisionArn:\s*deployment\?\.targetServiceRevision/);
+  assert.match(source, /attempt\.startedBy === rollbackDeploymentId/);
+  assert.match(source, /Date\.parse\(attempt\.createdAt\) >= rollbackStartedAt/);
+  assert.doesNotMatch(source, /failures\.length >= 2/);
 });

@@ -66,14 +66,18 @@ const healthy = Object.freeze({ healthy: true, success: true, status: "ready" })
 const runLegacyBackendHealthRecovery = (input, adapters) => runRecoveryContract(input, { record: async () => {}, ...adapters });
 const rollbackProof = ({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn, rollbackDigest, forwardTaskDefinitionArn, forwardDigest = digest } = {}) => {
   const forwardServiceRevisionArn = rollbackServiceRevisionArn.replace("minus-1", "failed-forward");
+  const rollbackDeploymentId = rollbackDeploymentArn.split("/").at(-1);
+  const rollbackStartedAt = "2026-08-24T09:59:00.000Z";
   const resolved = (serviceRevisionArn, taskDefinitionArn, imageDigest, imageExists) => ({ serviceRevisionArn, taskDefinitionArn, digest: imageDigest, repository: "mscqr-backend", imageExists, imageFailure: null });
   const rollbackTarget = resolved(rollbackServiceRevisionArn, rollbackTaskDefinitionArn, rollbackDigest, false);
   return classifyRollbackViability({
     service: { serviceArn: `arn:aws:ecs:eu-west-2:368992683803:service/${BACKEND_HEALTH_RECOVERY.cluster}/${BACKEND_HEALTH_RECOVERY.service}`, taskDefinition: rollbackTaskDefinitionArn, desiredCount: 2, runningCount: 0, pendingCount: 0 },
-    deployment: { serviceDeploymentArn: rollbackDeploymentArn, status: "ROLLBACK_IN_PROGRESS", targetServiceRevision: { arn: forwardServiceRevisionArn }, sourceServiceRevisions: [{ arn: rollbackServiceRevisionArn }], rollback: { serviceRevisionArn: rollbackServiceRevisionArn } },
+    deployment: { serviceDeploymentArn: rollbackDeploymentArn, status: "ROLLBACK_IN_PROGRESS", targetServiceRevision: { arn: forwardServiceRevisionArn }, sourceServiceRevisions: [{ arn: rollbackServiceRevisionArn }], rollback: { serviceRevisionArn: rollbackServiceRevisionArn, startedAt: rollbackStartedAt } },
     forwardTarget: resolved(forwardServiceRevisionArn, forwardTaskDefinitionArn, forwardDigest, true),
     sourceRevisions: [rollbackTarget], rollbackTarget,
-    taskAttempts: [1, 2].map((n) => ({ taskArn: `task-${n}`, taskDefinitionArn: rollbackTaskDefinitionArn, classification: "CANNOT_PULL_IMAGE", digest: rollbackDigest })),
+    taskAttempts: [1, 2].map((n) => ({ taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${`${n}`.padStart(32, "0")}`, startedBy: rollbackDeploymentId,
+      taskDefinitionArn: rollbackTaskDefinitionArn, classification: "CANNOT_PULL_IMAGE", errorCode: "CannotPullContainerError", digest: rollbackDigest, failureReasonSha256: `${n}`.repeat(64),
+      createdAt: `2026-08-24T10:0${n}:00.000Z`, stoppedAt: `2026-08-24T10:0${n}:30.000Z` })),
     observationStart: "2026-08-24T10:00:00.000Z", observationEnd: "2026-08-24T10:01:00.000Z",
   });
 };
