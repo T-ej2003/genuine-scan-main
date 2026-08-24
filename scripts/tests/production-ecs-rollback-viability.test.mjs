@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { ROLLBACK_VIABILITY, assertEcsServiceDeploymentIdentity, assertFreshRollbackEquivalence, assertRollbackSupersessionProof, classifyRollbackViability, collectRollbackViability, exactEcrImageResult } from "../aws/production-ecs-rollback-viability.mjs";
+import { taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 
 const serviceArn = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2";
 const clusterArn = "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main";
@@ -26,7 +27,8 @@ const deployment = {
   sourceServiceRevisions: [{ arn: rollbackRevisionArn }],
   rollback: { serviceRevisionArn: rollbackRevisionArn, startedAt: rollbackStartedAt },
 };
-const resolved = (serviceRevisionArn, taskDefinitionArn, digest, imageExists, imageFailure = null) => ({ serviceRevisionArn, taskDefinitionArn, digest, repository: "mscqr-backend", imageExists, imageFailure });
+const taskReadback = (taskDefinitionArn, digest) => ({ taskDefinition: { taskDefinitionArn, family: "mscqr-backend", containerDefinitions: [{ name: "backend", image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}` }] }, tags: [] });
+const resolved = (serviceRevisionArn, taskDefinitionArn, digest, imageExists, imageFailure = null) => ({ serviceRevisionArn, taskDefinitionArn, taskDefinitionFingerprint: taskDefinitionFingerprint(taskReadback(taskDefinitionArn, digest), []), digest, repository: "mscqr-backend", imageExists, imageFailure });
 const forwardTarget = resolved(forwardRevisionArn, td48, digest48, true);
 const rollbackTarget = resolved(rollbackRevisionArn, td47, digest47, false);
 const sourceRevisions = [rollbackTarget];
@@ -60,10 +62,10 @@ function awsFixture({ snapshots = [{}], ecr = {}, sourceArns, deploymentPatch = 
       return { failures: [], serviceRevisions: [{ serviceRevisionArn: arn, serviceArn: value.serviceArn || serviceArn, clusterArn: value.clusterArn || clusterArn, taskDefinition: value.taskDefinition }] };
     }
     if (command === "ecs describe-task-definition") {
-      const arn = args.at(-1);
+      const arn = args[args.indexOf("--task-definition") + 1];
       const byTask = { [td48]: digest48, [td47]: digest47, [td46]: digest46, ...(state.taskDigests || {}) };
       const family = state.taskFamily?.[arn] || arn;
-      return { taskDefinition: { taskDefinitionArn: state.taskDefinitionReadbackArn?.[arn] || family, containerDefinitions: [{ name: "backend", image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${byTask[arn]}` }] } };
+      return taskReadback(state.taskDefinitionReadbackArn?.[arn] || family, byTask[arn]);
     }
     if (command === "ecr describe-images") {
       const digest = args.find((value) => value.startsWith("imageDigest="))?.slice(12);

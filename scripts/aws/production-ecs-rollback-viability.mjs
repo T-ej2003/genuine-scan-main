@@ -1,4 +1,4 @@
-import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
+import { canonicalSha256, taskDefinitionFingerprint } from "./stage-b-task-definition-recovery-contract.mjs";
 
 export const ROLLBACK_VIABILITY = Object.freeze({
   NONE: "ROLLBACK_NONE", PROGRESSING: "ROLLBACK_PROGRESSING", SUCCESSFUL: "ROLLBACK_SUCCESSFUL", FAILED: "ROLLBACK_FAILED",
@@ -29,6 +29,7 @@ export function exactEcrImageResult({ repository, digest, response, error } = {}
 
 const resolvedRevisionValid = (value) => REVISION_ARN.test(value?.serviceRevisionArn || "")
   && TASK_ARN.test(value?.taskDefinitionArn || "") && DIGEST.test(value?.digest || "")
+  && /^[a-f0-9]{64}$/.test(value?.taskDefinitionFingerprint || "")
   && value?.repository === "mscqr-backend" && [true, false].includes(value?.imageExists) && value?.imageFailure === null;
 
 const ecsServiceDeploymentIdentityValid = ({ serviceDeploymentArn, ecsServiceDeploymentId, taskStartedBy } = {}) => DEPLOYMENT_ARN.test(serviceDeploymentArn || "")
@@ -48,6 +49,7 @@ export function classifyRollbackViability({ service, deployment, forwardTarget, 
     rollbackDeploymentArn: deployment?.serviceDeploymentArn, rollbackEcsServiceDeploymentId: rollbackEcsServiceDeployment?.id, rollbackStatus: deployment?.status,
     rollbackStartedAt: deployment?.rollback?.startedAt,
     forwardTargetServiceRevisionArn: forwardTarget?.serviceRevisionArn, forwardTargetTaskDefinitionArn: forwardTarget?.taskDefinitionArn,
+    forwardTargetTaskDefinitionFingerprint: forwardTarget?.taskDefinitionFingerprint,
     forwardTargetDigest: forwardTarget?.digest, forwardTargetImageExists: forwardTarget?.imageExists, forwardTargetImageFailure: forwardTarget?.imageFailure,
     sourceServiceRevisions: structuredClone(sourceRevisions),
     rollbackServiceRevisionArn: rollbackTarget?.serviceRevisionArn, rollbackTargetTaskDefinitionArn: rollbackTarget?.taskDefinitionArn,
@@ -71,6 +73,7 @@ export function classifyRollbackViability({ service, deployment, forwardTarget, 
     && deployment?.rollback?.serviceRevisionArn === rollbackTarget?.serviceRevisionArn && resolvedRevisionValid(rollbackTarget)
     && deployment?.targetServiceRevision?.arn === forwardTarget?.serviceRevisionArn && resolvedRevisionValid(forwardTarget)
     && forwardTarget.serviceRevisionArn !== rollbackTarget.serviceRevisionArn
+    && forwardTarget.taskDefinitionArn !== rollbackTarget.taskDefinitionArn
     && Array.isArray(sourceRevisions) && sourceRevisions.every(resolvedRevisionValid)
     && service.taskDefinition === rollbackTarget.taskDefinitionArn
     && matchingEcsDeployments.length === 1
@@ -96,8 +99,10 @@ export function assertRollbackSupersessionProof(proof, expected = {}) {
   const deploymentIdentityValid = ecsServiceDeploymentIdentityValid({ serviceDeploymentArn: proof?.rollbackDeploymentArn, ecsServiceDeploymentId: proof?.rollbackEcsServiceDeploymentId });
   if (proof?.classification !== ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE || proof.serviceArn !== expected.serviceArn || proof.rollbackDeploymentArn !== expected.rollbackDeploymentArn
     || !deploymentIdentityValid
-    || !REVISION_ARN.test(proof.forwardTargetServiceRevisionArn || "") || !TASK_ARN.test(proof.forwardTargetTaskDefinitionArn || "") || !DIGEST.test(proof.forwardTargetDigest || "")
+    || !REVISION_ARN.test(proof.forwardTargetServiceRevisionArn || "") || !TASK_ARN.test(proof.forwardTargetTaskDefinitionArn || "")
+    || !/^[a-f0-9]{64}$/.test(proof.forwardTargetTaskDefinitionFingerprint || "") || !DIGEST.test(proof.forwardTargetDigest || "")
     || ![true, false].includes(proof.forwardTargetImageExists) || proof.forwardTargetImageFailure !== null || proof.forwardTargetServiceRevisionArn === proof.rollbackServiceRevisionArn
+    || proof.forwardTargetTaskDefinitionArn === proof.rollbackTargetTaskDefinitionArn
     || !Array.isArray(proof.sourceServiceRevisions) || proof.sourceServiceRevisions.some((revision) => !resolvedRevisionValid(revision)) || !REVISION_ARN.test(proof.rollbackServiceRevisionArn || "")
     || proof.rollbackTargetTaskDefinitionArn !== expected.rollbackTargetTaskDefinitionArn || proof.serviceTaskDefinitionArn !== proof.rollbackTargetTaskDefinitionArn
     || proof.rollbackTargetDigest !== expected.rollbackTargetDigest || proof.rollbackTargetRepository !== "mscqr-backend" || proof.rollbackTargetImageExists !== false || proof.rollbackTargetImageFailure !== null
@@ -116,7 +121,7 @@ export function assertRollbackSupersessionProof(proof, expected = {}) {
 
 export function assertFreshRollbackEquivalence(authorized, fresh) {
   assertRollbackSupersessionProof(authorized, authorized); assertRollbackSupersessionProof(fresh, authorized);
-  for (const field of ["rollbackDeploymentArn", "rollbackEcsServiceDeploymentId", "rollbackStatus", "rollbackStartedAt", "forwardTargetServiceRevisionArn", "forwardTargetTaskDefinitionArn", "forwardTargetDigest", "forwardTargetImageExists", "rollbackServiceRevisionArn", "serviceTaskDefinitionArn", "rollbackTargetTaskDefinitionArn", "rollbackTargetDigest", "rollbackTargetImageExists", "desiredCount", "runningCount", "pendingCount"])
+  for (const field of ["rollbackDeploymentArn", "rollbackEcsServiceDeploymentId", "rollbackStatus", "rollbackStartedAt", "forwardTargetServiceRevisionArn", "forwardTargetTaskDefinitionArn", "forwardTargetTaskDefinitionFingerprint", "forwardTargetDigest", "forwardTargetImageExists", "rollbackServiceRevisionArn", "serviceTaskDefinitionArn", "rollbackTargetTaskDefinitionArn", "rollbackTargetDigest", "rollbackTargetImageExists", "desiredCount", "runningCount", "pendingCount"])
     if (fresh[field] !== authorized[field]) throw new Error("Rollback state changed before recovery mutation.");
   if (canonicalSha256(fresh.sourceServiceRevisions) !== canonicalSha256(authorized.sourceServiceRevisions)) throw new Error("Rollback source revisions changed before recovery mutation.");
   if (canonicalSha256(fresh.taskAttempts) !== canonicalSha256(authorized.taskAttempts)) throw new Error("Rollback task-attempt evidence changed before recovery mutation.");
@@ -141,9 +146,10 @@ const resolveServiceRevision = (aws, service, serviceRevisionArn) => {
   const taskDefinitionArn = revision?.taskDefinition;
   if (!revision || revision.serviceRevisionArn !== serviceRevisionArn || revision.serviceArn !== service.serviceArn || revision.clusterArn !== service.clusterArn || !TASK_ARN.test(taskDefinitionArn || ""))
     throw new Error("Service revision readback is incomplete or outside the backend boundary.");
-  const digest = backendImage(aws(["ecs", "describe-task-definition", "--task-definition", taskDefinitionArn]), taskDefinitionArn);
+  const taskDefinition = aws(["ecs", "describe-task-definition", "--task-definition", taskDefinitionArn, "--include", "TAGS"]);
+  const digest = backendImage(taskDefinition, taskDefinitionArn);
   const image = readImage(aws, digest);
-  return Object.freeze({ serviceRevisionArn, taskDefinitionArn, digest, repository: image.repository, imageExists: image.exists, imageFailure: image.failure });
+  return Object.freeze({ serviceRevisionArn, taskDefinitionArn, taskDefinitionFingerprint: taskDefinitionFingerprint(taskDefinition, taskDefinition.tags || []), digest, repository: image.repository, imageExists: image.exists, imageFailure: image.failure });
 };
 const snapshotIdentity = ({ deployment, rollbackEcsServiceDeployment, forwardTarget, sourceRevisions, rollbackTarget }) => canonicalSha256({
   deploymentArn: deployment.serviceDeploymentArn, status: deployment.status, rollbackStartedAt: deployment.rollback.startedAt, targetServiceRevisionArn: deployment.targetServiceRevision.arn,

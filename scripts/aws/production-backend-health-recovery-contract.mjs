@@ -87,6 +87,10 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
     || (evidence.artifactSigningVerification === ARTIFACT_SIGNING_VERIFICATION.FAILED
       ? !ARTIFACT_SIGNING_DISCOVERY_FAILURES.has(evidence.artifactSigningFailure)
       : evidence.artifactSigningFailure !== null)
+    || !Array.isArray(evidence.knownFailedRevisions)
+    || evidence.knownFailedRevisions.some((item) => !TASK_ARN.test(item?.taskDefinitionArn || "") || !HEX256.test(item?.taskDefinitionFingerprint || ""))
+    || new Set(evidence.knownFailedRevisions.map(({ taskDefinitionArn: arn }) => arn)).size !== evidence.knownFailedRevisions.length
+    || evidence.knownFailedRevisions.length > 1 || (!rollbackProofSha256 && evidence.knownFailedRevisions.length)
     || !Number.isSafeInteger(evidence.registrations) || evidence.registrations < 0 || evidence.registrations > 1
     || !Number.isSafeInteger(evidence.updates) || evidence.updates < 0 || evidence.updates > 1
     || !Number.isFinite(Date.parse(evidence.generatedAt))
@@ -143,6 +147,49 @@ function definition(value) {
   const source = value?.taskDefinition || value;
   if (!source || typeof source !== "object" || Array.isArray(source)) throw new Error("ECS task definition is malformed.");
   return source;
+}
+
+const taskDefinitionArn = (value) => definition(value).taskDefinitionArn;
+
+function classifyRevisionCensus(revisions, eligible) {
+  if (!Array.isArray(revisions)) throw new Error("Legacy backend revision census is incomplete.");
+  const entries = revisions.map((item) => {
+    const arn = taskDefinitionArn(item);
+    const revision = Number(TASK_ARN.exec(arn || "")?.[1]);
+    if (!Number.isSafeInteger(revision)) throw new Error("Recovery census returned an invalid legacy backend revision.");
+    return { item, taskDefinitionArn: arn, revision, fingerprint: taskDefinitionFingerprint(item, item.tags || []) };
+  });
+  if (new Set(entries.map(({ taskDefinitionArn: arn }) => arn)).size !== entries.length) throw new Error("Recovery census contains duplicate task-definition identities.");
+  const matches = entries.filter(({ fingerprint }) => fingerprint === eligible.fingerprint);
+  if (matches.length > 1) throw new Error("Multiple matching recovery revisions make replay ambiguous.");
+  const failedArn = eligible.rollbackProof?.forwardTargetTaskDefinitionArn;
+  const failedFingerprint = eligible.rollbackProof?.forwardTargetTaskDefinitionFingerprint;
+  const knownFailed = failedArn ? entries.filter(({ taskDefinitionArn: arn }) => arn === failedArn) : [];
+  const sourceRevision = Number(TASK_ARN.exec(eligible.currentTaskDefinitionArn)?.[1]);
+  if (failedArn && (knownFailed.length !== 1 || knownFailed[0].fingerprint !== failedFingerprint)) {
+    throw new Error("The authenticated failed forward task definition is absent or differs from live revision history.");
+  }
+  if (knownFailed.some(({ revision }) => revision <= sourceRevision)) throw new Error("The authenticated failed forward task definition is not newer than the rollback source.");
+  if (failedArn && matches.some(({ taskDefinitionArn: arn }) => arn === failedArn)) throw new Error("The failed forward task definition cannot be reused as a corrected recovery revision.");
+  const newerUnknown = entries.filter(({ taskDefinitionArn: arn, revision, fingerprint }) => revision > sourceRevision
+    && fingerprint !== eligible.fingerprint && arn !== failedArn);
+  if (newerUnknown.length) throw new Error("A newer unknown legacy backend revision requires reconciliation before recovery.");
+  const identities = entries.map(({ taskDefinitionArn: arn, fingerprint }) => ({ taskDefinitionArn: arn, taskDefinitionFingerprint: fingerprint }))
+    .sort((a, b) => a.taskDefinitionArn.localeCompare(b.taskDefinitionArn));
+  return Object.freeze({
+    matches,
+    knownFailedRevisions: knownFailed.map(({ taskDefinitionArn: arn, fingerprint }) => ({ taskDefinitionArn: arn, taskDefinitionFingerprint: fingerprint })),
+    identities,
+    identitySha256: canonicalSha256(identities),
+  });
+}
+
+function expectedRevisionCensusSha256(initialCensus, targetArn, fingerprint, registered) {
+  const identities = registered
+    ? [...initialCensus.identities, { taskDefinitionArn: targetArn, taskDefinitionFingerprint: fingerprint }]
+    : [...initialCensus.identities];
+  if (new Set(identities.map(({ taskDefinitionArn: arn }) => arn)).size !== identities.length) throw new Error("Recovery registration reused an existing task-definition identity.");
+  return canonicalSha256(identities.sort((a, b) => a.taskDefinitionArn.localeCompare(b.taskDefinitionArn)));
 }
 
 function backendContainer(value) {
@@ -281,24 +328,11 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
   }
   const revisions = await adapters.census();
-  if (!Array.isArray(revisions)) throw new Error("Legacy backend revision census is incomplete.");
-  const matches = revisions.filter((item) => taskDefinitionFingerprint(item, item.tags || []) === eligible.fingerprint);
-  if (matches.length > 1) throw new Error("Multiple matching recovery revisions make replay ambiguous.");
+  const initialCensus = classifyRevisionCensus(revisions, eligible);
+  const matches = initialCensus.matches;
+  if (initialCensus.knownFailedRevisions.length) await adapters.record({ knownFailedRevisions: initialCensus.knownFailedRevisions });
   const failedForwardTaskDefinitionArn = eligible.rollbackProof?.forwardTargetTaskDefinitionArn;
-  if (failedForwardTaskDefinitionArn && matches.some((item) => (item?.taskDefinition?.taskDefinitionArn || item?.taskDefinitionArn) === failedForwardTaskDefinitionArn)) {
-    throw new Error("The failed forward task definition cannot be reused as a corrected recovery revision.");
-  }
-  const sourceRevision = Number(TASK_ARN.exec(eligible.currentTaskDefinitionArn)?.[1]);
-  const failedPredecessor = buildLegacyImageIdentityOnlyCandidate({ currentTaskDefinition: input.currentTaskDefinition, recoveryImageDigest: eligible.recoveryImageDigest, imageReleaseSha: input.authorization.imageReleaseSha });
-  const failedPredecessorFingerprint = taskDefinitionFingerprint(failedPredecessor, failedPredecessor.tags || []);
-  const newerUnknown = revisions.filter((item) => {
-    const task = definition(item);
-    const revision = Number(TASK_ARN.exec(task.taskDefinitionArn || "")?.[1]);
-    const fingerprint = taskDefinitionFingerprint(item, item.tags || []);
-    return revision > sourceRevision && fingerprint !== eligible.fingerprint && fingerprint !== failedPredecessorFingerprint;
-  });
-  if (newerUnknown.length) throw new Error("A newer unknown legacy backend revision requires reconciliation before recovery.");
-  let targetArn = matches[0]?.taskDefinition?.taskDefinitionArn || matches[0]?.taskDefinitionArn;
+  let targetArn = matches[0]?.taskDefinitionArn;
   if (targetArn && !TASK_ARN.test(targetArn)) throw new Error("Recovery census returned an invalid legacy backend revision.");
   if (eligible.observedServiceTaskDefinitionArn !== eligible.currentTaskDefinitionArn
     && eligible.observedServiceTaskDefinitionArn !== targetArn) {
@@ -307,16 +341,16 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
   let registrations = 0;
   if (!targetArn) {
     if (eligible.rollbackProof) assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
+    if (classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== initialCensus.identitySha256) throw new Error("Legacy backend revision census changed before recovery registration.");
     await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED, targetArn: null, registrations: 0, updates: 0 });
     try {
       const result = await adapters.register(eligible.candidate);
       targetArn = result?.taskDefinition?.taskDefinitionArn || result?.taskDefinitionArn;
       registrations = 1;
     } catch (error) {
-      const after = await adapters.census();
-      const reconciled = after.filter((item) => taskDefinitionFingerprint(item, item.tags || []) === eligible.fingerprint);
+      const reconciled = classifyRevisionCensus(await adapters.census(), eligible).matches;
       if (reconciled.length !== 1) throw error;
-      targetArn = reconciled[0]?.taskDefinition?.taskDefinitionArn || reconciled[0]?.taskDefinitionArn;
+      targetArn = reconciled[0].taskDefinitionArn;
       registrations = 1;
     }
   }
@@ -325,6 +359,8 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
   if (registrations) await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTERED_ONLY, targetArn, registrations, updates: 0 });
   const target = await adapters.describe(targetArn);
   if (taskDefinitionFingerprint(target, target?.tags || []) !== eligible.fingerprint) throw new Error("Recovery target readback does not match the exact authorized candidate.");
+  const expectedCensusSha256 = expectedRevisionCensusSha256(initialCensus, targetArn, eligible.fingerprint, registrations === 1);
+  if (classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== expectedCensusSha256) throw new Error("Legacy backend revision census changed after recovery registration.");
   let live = await adapters.readService();
   let updates = 0;
   if (live.taskDefinition !== targetArn) {
@@ -332,6 +368,7 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
       || live.desiredCount !== eligible.desiredCount || canonicalSha256(live.networkConfiguration) !== eligible.networkConfigurationSha256
       || canonicalSha256(live.loadBalancers) !== eligible.loadBalancersSha256) throw new Error("Backend service changed concurrently before recovery update.");
     if (eligible.rollbackProof) assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
+    if (classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== expectedCensusSha256) throw new Error("Legacy backend revision census changed before recovery service update.");
     await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, targetArn, registrations, updates: 0 });
     try { await adapters.updateService(targetArn); updates = 1; }
     catch (error) {

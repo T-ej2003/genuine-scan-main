@@ -87,9 +87,9 @@ export function buildProductionDependencyClosure() {
   const expectedInputs = ["backend_recovery_approval_json", "backend_recovery_approval_sha256", "backend_recovery_current_task_definition_arn", "backend_recovery_image_authorization_json", "backend_recovery_image_authorization_sha256", "backend_recovery_image_digest"];
   if (!same(workflowInputs, expectedInputs)) throw new Error("Backend recovery workflow input contract is incomplete or has an unknown input.");
   if (!same([...ARTIFACT_SIGNING_BINDINGS].sort(), ["ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT"])) throw new Error("Artifact-signing runtime dependency set is incomplete.");
-  requireTokens("scripts/aws/production-ecs-rollback-viability.mjs", ["targetServiceRevision?.arn", "rollback?.serviceRevisionArn", "sourceServiceRevisions", "describe-service-revisions", "serviceRevisions", "revision?.taskDefinition", "ImageNotFoundException", "ECR_LOOKUP_FAILED"]);
-  requireTokens("scripts/aws/production-backend-health-recovery-contract.mjs", ["rollbackProof", "rollbackDeploymentArn", "rollbackTargetTaskDefinitionArn", "rollbackTargetDigest", "assertFreshRollbackEquivalence"]);
-  requireTokens("scripts/aws/recover-production-backend-health.mjs", ["rollbackProofSha256", "await record();", "resolveArtifactSigning", "readFreshRollbackViability"]);
+  requireTokens("scripts/aws/production-ecs-rollback-viability.mjs", ["targetServiceRevision?.arn", "rollback?.serviceRevisionArn", "sourceServiceRevisions", "describe-service-revisions", "serviceRevisions", "revision?.taskDefinition", "forwardTargetTaskDefinitionFingerprint", "taskDefinitionFingerprint", "ImageNotFoundException", "ECR_LOOKUP_FAILED"]);
+  requireTokens("scripts/aws/production-backend-health-recovery-contract.mjs", ["rollbackProof", "rollbackDeploymentArn", "rollbackTargetTaskDefinitionArn", "rollbackTargetDigest", "forwardTargetTaskDefinitionFingerprint", "knownFailedRevisions", "Legacy backend revision census changed before recovery registration", "assertFreshRollbackEquivalence"]);
+  requireTokens("scripts/aws/recover-production-backend-health.mjs", ["rollbackProofSha256", "knownFailedRevisions", "await record();", "resolveArtifactSigning", "readFreshRollbackViability"]);
   requireTokens("scripts/aws/dispatch-production-backend-health-recovery.mjs", ["ROLLBACK_APPROVAL_FIELDS", "backend_recovery_approval_json", "backend_recovery_approval_sha256"]);
   requireTokens("scripts/aws/deploy-ecs-service.sh", ["ROLLBACK_IMAGE_DIGEST", "ecr describe-images", "Rollback candidate image viability could not be authenticated"]);
   const deploy = read("scripts/aws/deploy-ecs-service.sh");
@@ -105,7 +105,7 @@ export function buildProductionDependencyClosure() {
     throw new Error("Authorization-bearing ECS task fixtures must use the real ecs-svc/<numeric-id> Task.startedBy contract.");
   }
   const futureTest = read("scripts/tests/production-backend-health-recovery-contract.test.mjs");
-  for (const token of ["future failed revision N", 'targetArn.replace(":998", ":1000")', "readRollbackViability"]) if (!futureTest.includes(token)) throw new Error(`Future recovery revision closure lacks coverage: ${token}.`);
+  for (const token of ["future failed revision N", 'targetArn.replace(":998", ":1000")', "readRollbackViability", "global revision census admits only this transaction's exact registration", "unknown revision after own registration fails before update"]) if (!futureTest.includes(token)) throw new Error(`Future recovery revision closure lacks coverage: ${token}.`);
 
   return {
     schemaVersion: 1,
