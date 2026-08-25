@@ -79,8 +79,9 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
   account = BACKEND_HEALTH_RECOVERY.account, region = BACKEND_HEALTH_RECOVERY.region,
 } = {}) {
   const { evidenceSha256, ...body } = evidence || {};
+  const preRuntimeClosureLegacy = evidence?.schemaVersion === 3;
   const crashConsistent = [6, 7].includes(evidence?.schemaVersion);
-  if (![5, 6, 7].includes(evidence?.schemaVersion) || evidence?.kind !== "BACKEND_HEALTH_RECOVERY_EVIDENCE"
+  if (![3, 5, 6, 7].includes(evidence?.schemaVersion) || evidence?.kind !== "BACKEND_HEALTH_RECOVERY_EVIDENCE"
     || evidence.sourceSha !== sourceSha || !SHA.test(sourceSha || "")
     || evidence.currentTaskDefinitionArn !== currentTaskDefinitionArn || !TASK_ARN.test(currentTaskDefinitionArn || "")
     || evidence.recoveryImageDigest !== recoveryImageDigest || !SHA256.test(recoveryImageDigest || "")
@@ -92,7 +93,9 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
     || evidence.environmentApprovalFileSha256 !== environmentApprovalFileSha256 || evidence.environmentApprovalSha256 !== environmentApprovalSha256
     || evidence.imageAuthorizationFileSha256 !== imageAuthorizationFileSha256 || evidence.imageAuthorizationSha256 !== imageAuthorizationSha256
     || !HEX256.test(artifactSigningBindingSha256 || "") || evidence.artifactSigningBindingSha256 !== artifactSigningBindingSha256
-    || !HEX256.test(runtimeConsumabilitySha256 || "") || evidence.runtimeConsumabilitySha256 !== runtimeConsumabilitySha256
+    || (preRuntimeClosureLegacy
+      ? "runtimeConsumabilitySha256" in evidence || runtimeConsumabilitySha256 !== null
+      : !HEX256.test(runtimeConsumabilitySha256 || "") || evidence.runtimeConsumabilitySha256 !== runtimeConsumabilitySha256)
     || evidence.rollbackProofSha256 !== (rollbackProofSha256 || null)
     || ("failedRecoveryEvidenceReferenceSha256" in evidence ? evidence.failedRecoveryEvidenceReferenceSha256 !== failedRecoveryEvidenceReferenceSha256 : failedRecoveryEvidenceReferenceSha256 !== null)
     || !RECOVERY_STATUSES.has(evidence.status)
@@ -253,7 +256,7 @@ export function reconcileAuthenticatedRevisionLineage(revisions, eligible, { all
   } else if (history.length) {
     const legacySourceRevision = Number(TASK_ARN.exec(history[0].currentTaskDefinitionArn || "")?.[1]);
     if (!Number.isSafeInteger(legacySourceRevision)) throw new Error("Legacy recovery history cannot derive its base census.");
-    root = entries.filter(({ revision }) => revision <= legacySourceRevision);
+    root = entries.filter(({ revision, taskDefinitionArn: arn }) => revision <= legacySourceRevision || arn === rollbackForwardArn);
   } else {
     root = entries.filter(({ revision, taskDefinitionArn: arn }) => revision <= sourceRevision || arn === rollbackForwardArn);
   }
@@ -278,7 +281,11 @@ export function reconcileAuthenticatedRevisionLineage(revisions, eligible, { all
   };
   for (let index = 0; index < history.length; index += 1) {
     const record = history[index];
-    if (index === 0 ? record.predecessorHistoryReferenceSha256 !== null : !HEX256.test(record.predecessorHistoryReferenceSha256 || "")) throw new Error("Recovery history predecessor reference chain is missing, reordered, or substituted.");
+    const legacyContinuation = index > 0 && record.evidenceContract === "PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE"
+      && history[index - 1]?.evidenceContract === "PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE"
+      && record.predecessorHistoryReferenceSha256 === null
+      && Date.parse(record.workflowCreatedAt) > Date.parse(history[index - 1].workflowCreatedAt);
+    if (index === 0 ? record.predecessorHistoryReferenceSha256 !== null : !legacyContinuation && !HEX256.test(record.predecessorHistoryReferenceSha256 || "")) throw new Error("Recovery history predecessor reference chain is missing, reordered, or substituted.");
     if (record.taskDefinitionFingerprint !== record.candidateFingerprint || !lineage.some(({ taskDefinitionArn: arn }) => arn === record.currentTaskDefinitionArn)) throw new Error("Recovery history is bound to a different predecessor lineage or candidate identity.");
     const predecessorSha256 = identityHash(lineage);
     let targetArn = record.taskDefinitionArn;
@@ -500,15 +507,20 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
   const history = recoveryHistory;
   const historyViewsMatch = canonicalSha256(history.filter(({ classification }) => classification === "TERMINAL_FAILURE")) === canonicalSha256(knownFailedRevisions)
     && canonicalSha256(history.filter(({ classification }) => classification === "INTERRUPTED_MUTATION")) === canonicalSha256(interruptedRecoveries);
-  if (!Array.isArray(recoveryHistory) || !Array.isArray(knownFailedRevisions) || !Array.isArray(interruptedRecoveries) || !historyViewsMatch || knownFailedRevisions.some((item) => item?.repository !== "T-ej2003/genuine-scan-main" || !TASK_ARN.test(item?.taskDefinitionArn || "")
+  const invalidFailedHistory = !Array.isArray(knownFailedRevisions) || knownFailedRevisions.some((item) => {
+    const legacy = item?.evidenceContract === "PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE";
+    return item?.repository !== "T-ej2003/genuine-scan-main" || !TASK_ARN.test(item?.taskDefinitionArn || "")
     || !HEX256.test(item?.taskDefinitionFingerprint || "") || !HEX256.test(item?.evidenceFileSha256 || "") || !/^[1-9][0-9]*$/.test(String(item?.workflowRunId || ""))
     || ![BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, BACKEND_HEALTH_RECOVERY_STATUS.RUNNING_DIGEST_VERIFICATION_FAILED, BACKEND_HEALTH_RECOVERY_STATUS.HEALTH_VERIFICATION_FAILED].includes(item?.status)
     || item?.classification !== "TERMINAL_FAILURE" || item?.failureClassification !== item.status || !SHA.test(item?.sourceSha || "") || item?.service !== BACKEND_HEALTH_RECOVERY.service
     || item?.releaseMode !== BACKEND_HEALTH_RECOVERY.kind || !SHA256.test(item?.recoveryImageDigest || "") || !HEX256.test(item?.candidateFingerprint || "")
-    || item.candidateFingerprint !== item.taskDefinitionFingerprint || !HEX256.test(item?.artifactSigningBindingSha256 || "") || !HEX256.test(item?.runtimeConsumabilitySha256 || "")
+    || item.candidateFingerprint !== item.taskDefinitionFingerprint || !HEX256.test(item?.artifactSigningBindingSha256 || "")
+    || (legacy ? item.runtimeConsumabilitySha256 !== null || item.requiresLiveFailureReconciliation !== true : !HEX256.test(item?.runtimeConsumabilitySha256 || ""))
     || ![null, undefined].includes(item?.predecessorHistoryReferenceSha256) && !HEX256.test(item.predecessorHistoryReferenceSha256)
     || ![null, undefined].includes(item?.predecessorHistoryLineageSha256) && !HEX256.test(item.predecessorHistoryLineageSha256)
-    || !TASK_ARN.test(item?.currentTaskDefinitionArn || "") || ![0, 1].includes(item?.registrations) || ![0, 1].includes(item?.updates))
+    || !TASK_ARN.test(item?.currentTaskDefinitionArn || "") || ![0, 1].includes(item?.registrations) || ![0, 1].includes(item?.updates);
+  });
+  if (!Array.isArray(recoveryHistory) || !Array.isArray(knownFailedRevisions) || !Array.isArray(interruptedRecoveries) || !historyViewsMatch || invalidFailedHistory
     || interruptedRecoveries.some((item) => item?.repository !== "T-ej2003/genuine-scan-main" || item?.classification !== "INTERRUPTED_MUTATION"
       || ![BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED, BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTERED_ONLY, BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_CONFIRMED].includes(item?.status)
       || item.failureClassification !== null || !SHA.test(item?.sourceSha || "") || item.service !== BACKEND_HEALTH_RECOVERY.service || item.releaseMode !== BACKEND_HEALTH_RECOVERY.kind
@@ -578,7 +590,10 @@ export function assertLegacyBackendRecoveryEligibility(input = {}) {
   const currentFailedRevision = knownFailedRevisions.find(({ taskDefinitionArn: arn }) => arn === service.taskDefinition)
     || (currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.FAILED ? currentInterruption.interruption : null);
   const unavailable = service.runningCount === 0 && service.pendingCount === 0;
-  const unavailableKnownFailure = unavailable && currentFailedRevision;
+  const legacyFailureLive = !currentFailedRevision?.requiresLiveFailureReconciliation || deployments.some((deployment) => deployment?.taskDefinition === service.taskDefinition
+    && deployment?.rolloutState === "FAILED" && Number(deployment?.failedTasks) > 0)
+    && stoppedReasons.some((reason) => /ResourceInitializationError|CannotPullContainerError|TaskFailedToStart/i.test(reason));
+  const unavailableKnownFailure = unavailable && currentFailedRevision && legacyFailureLive;
   const unavailableMissingImage = unavailable && currentImageExists === false && stoppedReasons.some((reason) => /CannotPullContainerError/i.test(reason) && /not found|does not exist/i.test(reason) && reason.includes(imageMatch[1]));
   if (currentInterruption?.result.classification !== INTERRUPTED_RECOVERY_STATE.SUCCEEDED && !unavailableKnownFailure && !unavailableMissingImage) throw new Error("Backend degradation is not authenticated as the current digest's missing-image pull failure or an unavailable approved terminal recovery failure.");
   if (replacementImage?.exists !== true || replacementImage?.immutable !== true || replacementImage?.signatureValid !== true

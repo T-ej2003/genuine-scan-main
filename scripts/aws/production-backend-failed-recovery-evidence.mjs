@@ -7,7 +7,15 @@ import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs
 
 const KIND = "AUTHENTICATED_BACKEND_FAILED_RECOVERY_EVIDENCE";
 const REPOSITORY = "T-ej2003/genuine-scan-main";
+export const PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE = "PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE";
+const LEGACY_WORKFLOW_PATH = ".github/workflows/release-gate.yml";
+const LEGACY_ARTIFACT_NAME = "backend-health-recovery-evidence";
+const NOT_PART_OF_SCHEMA = "NOT_PART_OF_SCHEMA";
+const NOT_PERSISTED = "PRODUCTION_ENVIRONMENT_BOUND_BY_SCHEMA3_WORKFLOW_NO_PERSISTED_APPROVAL_ARTIFACT";
 const HEX = /^[a-f0-9]{64}$/;
+const SHA = /^[a-f0-9]{40}$/;
+const TASK_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-backend:[1-9][0-9]*$/;
+const RUN_ID = /^[1-9][0-9]*$/;
 const MAX_HISTORY_RECORDS = 32;
 const MAX_HISTORY_BYTES = 8 * 1024 * 1024;
 const TERMINAL_FAILURES = new Set([
@@ -23,6 +31,10 @@ const INTERRUPTED_MUTATIONS = new Set([
 ]);
 const TERMINAL_MUTATION_COUNTS = new Set(["0/0", "0/1", "1/0", "1/1"]);
 const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+const exactFields = (value, fields) => value && Object.keys(value).sort().join(",") === [...fields].sort().join(",");
+const LEGACY_RECORD_FIELDS = ["legacyIdentity", "recoveryEvidence", "repository", "workflowRunId"];
+const LEGACY_IDENTITY_FIELDS = ["schemaVersion", "kind", "evidenceContract", "repository", "workflowRunId", "workflowRunAttempt", "workflowPath", "workflowEvent", "workflowHeadSha", "workflowConclusion", "workflowCreatedAt", "workflowDefinitionSha256", "artifactId", "artifactName", "artifactArchiveSizeInBytes", "artifactArchiveDigest", "evidenceByteSize", "evidenceByteSha256", "environmentApprovalEvidence", "runtimeConsumabilityEvidence", "candidateFingerprintEvidence", "sourceSha", "service", "releaseMode", "taskDefinitionArn", "taskDefinitionFingerprint", "recoveryImageDigest", "imageReleaseSha"];
+const LEGACY_EVIDENCE_FIELDS = ["account", "artifactSigningBindingSha256", "artifactSigningFailure", "artifactSigningVerification", "authorizationFileSha256", "authorizationSha256", "currentTaskDefinitionArn", "environmentApprovalFileSha256", "environmentApprovalSha256", "evidenceSha256", "generatedAt", "imageAuthorizationFileSha256", "imageAuthorizationSha256", "imageReleaseSha", "kind", "knownFailedRevisions", "recoveryImageDigest", "region", "registrations", "rollbackProofSha256", "schemaVersion", "sourceSha", "status", "targetArn", "updates"];
 
 function artifact(bytes, label) {
   if (!Buffer.isBuffer(bytes) || !bytes.length) throw new Error(`${label} bytes are required.`);
@@ -40,7 +52,48 @@ function readArtifact(component, label) {
   return artifact(bytes, label);
 }
 
+function validateLegacyRecord(record) {
+  if (!exactFields(record, LEGACY_RECORD_FIELDS) || record.repository !== REPOSITORY || !RUN_ID.test(record.workflowRunId || "")) throw new Error("Legacy historical recovery record schema is invalid.");
+  const recovery = readArtifact(record.recoveryEvidence, "Legacy historical recovery evidence");
+  const evidence = recovery.value;
+  const identity = record.legacyIdentity;
+  if (!exactFields(evidence, LEGACY_EVIDENCE_FIELDS) || !exactFields(identity, LEGACY_IDENTITY_FIELDS)
+    || identity.schemaVersion !== 1 || identity.kind !== "BACKEND_FAILED_RECOVERY_LEGACY_IDENTITY" || identity.evidenceContract !== PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE
+    || identity.repository !== REPOSITORY || identity.workflowRunId !== record.workflowRunId || !RUN_ID.test(identity.workflowRunAttempt || "")
+    || identity.workflowPath !== LEGACY_WORKFLOW_PATH || identity.workflowEvent !== "workflow_dispatch" || identity.workflowHeadSha !== evidence.sourceSha
+    || identity.workflowConclusion !== "failure" || !Number.isFinite(Date.parse(identity.workflowCreatedAt)) || !HEX.test(identity.workflowDefinitionSha256 || "")
+    || !Number.isSafeInteger(identity.artifactId) || identity.artifactId < 1 || identity.artifactName !== LEGACY_ARTIFACT_NAME
+    || !Number.isSafeInteger(identity.artifactArchiveSizeInBytes) || identity.artifactArchiveSizeInBytes < 1 || identity.artifactArchiveDigest !== `sha256:${identity.artifactArchiveDigest?.slice(7)}` || !HEX.test(identity.artifactArchiveDigest?.slice(7) || "")
+    || identity.evidenceByteSize !== Buffer.from(recovery.bytesBase64, "base64").length || identity.evidenceByteSha256 !== recovery.byteSha256 || identity.environmentApprovalEvidence !== NOT_PERSISTED
+    || identity.runtimeConsumabilityEvidence !== NOT_PART_OF_SCHEMA || identity.candidateFingerprintEvidence !== NOT_PART_OF_SCHEMA
+    || identity.sourceSha !== evidence.sourceSha || !SHA.test(identity.sourceSha || "") || identity.service !== BACKEND_HEALTH_RECOVERY.service
+    || identity.releaseMode !== BACKEND_HEALTH_RECOVERY.kind || identity.taskDefinitionArn !== evidence.targetArn || !TASK_ARN.test(identity.taskDefinitionArn || "")
+    || !HEX.test(identity.taskDefinitionFingerprint || "") || identity.recoveryImageDigest !== evidence.recoveryImageDigest
+    || identity.imageReleaseSha !== evidence.imageReleaseSha || !SHA.test(identity.imageReleaseSha || "")) throw new Error("Legacy historical recovery identity is malformed or unbound.");
+  assertLegacyBackendRecoveryEvidence(evidence, {
+    sourceSha: evidence.sourceSha, currentTaskDefinitionArn: evidence.currentTaskDefinitionArn, recoveryImageDigest: evidence.recoveryImageDigest,
+    imageReleaseSha: evidence.imageReleaseSha, authorizationFileSha256: evidence.authorizationFileSha256, authorizationSha256: evidence.authorizationSha256,
+    environmentApprovalFileSha256: evidence.environmentApprovalFileSha256, environmentApprovalSha256: evidence.environmentApprovalSha256,
+    imageAuthorizationFileSha256: evidence.imageAuthorizationFileSha256, imageAuthorizationSha256: evidence.imageAuthorizationSha256,
+    artifactSigningBindingSha256: evidence.artifactSigningBindingSha256, runtimeConsumabilitySha256: null, rollbackProofSha256: evidence.rollbackProofSha256,
+  });
+  if (!TERMINAL_FAILURES.has(evidence.status) || evidence.registrations !== 1 || evidence.updates !== 1 || evidence.backendHealthy === true)
+    throw new Error("Legacy historical recovery evidence is not an authenticated terminal failure.");
+  return Object.freeze({
+    repository: REPOSITORY, workflowRunId: identity.workflowRunId, workflowCreatedAt: identity.workflowCreatedAt,
+    sourceSha: evidence.sourceSha, service: BACKEND_HEALTH_RECOVERY.service, releaseMode: BACKEND_HEALTH_RECOVERY.kind,
+    taskDefinitionArn: evidence.targetArn, candidateFingerprint: identity.taskDefinitionFingerprint, taskDefinitionFingerprint: identity.taskDefinitionFingerprint,
+    recoveryImageDigest: evidence.recoveryImageDigest, imageReleaseSha: evidence.imageReleaseSha, artifactSigningBindingSha256: evidence.artifactSigningBindingSha256,
+    runtimeConsumabilitySha256: null, predecessorHistoryReferenceSha256: null, predecessorHistoryLineageSha256: null,
+    status: evidence.status, classification: "TERMINAL_FAILURE", failureClassification: evidence.status,
+    currentTaskDefinitionArn: evidence.currentTaskDefinitionArn, initialRevisionCensusSha256: null, expectedRevisionCensusSha256: null,
+    registrations: evidence.registrations, updates: evidence.updates, evidenceFileSha256: recovery.byteSha256,
+    evidenceContract: PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE, requiresLiveFailureReconciliation: true,
+  });
+}
+
 function validateRecord(record, verifyRuntime) {
+  if (exactFields(record, LEGACY_RECORD_FIELDS)) return validateLegacyRecord(record);
   if (!record || Object.keys(record).sort().join(",") !== "environmentApproval,recoveryEvidence,repository,runtimeConsumability,workflowRunId") throw new Error("Historical recovery evidence record schema is invalid.");
   const recovery = readArtifact(record.recoveryEvidence, "Historical recovery evidence");
   const environment = readArtifact(record.environmentApproval, "Historical environment approval evidence");
@@ -105,25 +158,28 @@ function validateRecord(record, verifyRuntime) {
 function assertOrderedHistory(summaries) {
   for (let index = 0; index < summaries.length; index += 1) {
     const record = summaries[index];
-    if (index === 0 ? record.predecessorHistoryReferenceSha256 !== null : !HEX.test(record.predecessorHistoryReferenceSha256 || "")) throw new Error("Historical recovery evidence predecessor reference chain is missing or reordered.");
     const previous = summaries[index - 1];
+    const unreferencedLegacyContinuation = index > 0 && record.evidenceContract === PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE
+      && previous?.evidenceContract === PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE && record.predecessorHistoryReferenceSha256 === null
+      && Date.parse(record.workflowCreatedAt) > Date.parse(previous.workflowCreatedAt);
+    if (index === 0 ? record.predecessorHistoryReferenceSha256 !== null : !unreferencedLegacyContinuation && !HEX.test(record.predecessorHistoryReferenceSha256 || "")) throw new Error("Historical recovery evidence predecessor reference chain is missing or reordered.");
     if (previous?.expectedRevisionCensusSha256 && record.initialRevisionCensusSha256 !== previous.expectedRevisionCensusSha256) throw new Error("Historical recovery evidence census lineage is missing, reordered, or forked.");
   }
 }
 
 export function createAuthenticatedFailedRecoveryEvidence({ records, verifyRuntime, sign, signedAt = new Date().toISOString() } = {}) {
   if (!Array.isArray(records) || !records.length || records.length > MAX_HISTORY_RECORDS || typeof verifyRuntime !== "function" || typeof sign !== "function") throw new Error("Historical failed recovery evidence inputs are incomplete or exceed the bounded history limit.");
-  const encoded = records.map(({ recoveryEvidenceBytes, environmentApprovalBytes, runtimeConsumabilityBytes }) => ({
-    recoveryEvidence: artifact(recoveryEvidenceBytes, "Historical recovery evidence"),
-    environmentApproval: artifact(environmentApprovalBytes, "Historical environment approval evidence"),
-    runtimeConsumability: artifact(runtimeConsumabilityBytes, "Historical runtime consumability evidence"),
-  })).map(({ recoveryEvidence, environmentApproval, runtimeConsumability }) => ({
-    repository: environmentApproval.value.repository,
-    workflowRunId: environmentApproval.value.workflowRunId,
-    recoveryEvidence: { bytesBase64: recoveryEvidence.bytesBase64, byteSha256: recoveryEvidence.byteSha256 },
-    environmentApproval: { bytesBase64: environmentApproval.bytesBase64, byteSha256: environmentApproval.byteSha256 },
-    runtimeConsumability: { bytesBase64: runtimeConsumability.bytesBase64, byteSha256: runtimeConsumability.byteSha256 },
-  }));
+  const encoded = records.map((record) => {
+    const recoveryEvidence = artifact(record.recoveryEvidenceBytes, "Historical recovery evidence");
+    if (record.legacyIdentity) return { repository: REPOSITORY, workflowRunId: record.legacyIdentity.workflowRunId,
+      recoveryEvidence: { bytesBase64: recoveryEvidence.bytesBase64, byteSha256: recoveryEvidence.byteSha256 }, legacyIdentity: structuredClone(record.legacyIdentity) };
+    const environmentApproval = artifact(record.environmentApprovalBytes, "Historical environment approval evidence");
+    const runtimeConsumability = artifact(record.runtimeConsumabilityBytes, "Historical runtime consumability evidence");
+    return { repository: environmentApproval.value.repository, workflowRunId: environmentApproval.value.workflowRunId,
+      recoveryEvidence: { bytesBase64: recoveryEvidence.bytesBase64, byteSha256: recoveryEvidence.byteSha256 },
+      environmentApproval: { bytesBase64: environmentApproval.bytesBase64, byteSha256: environmentApproval.byteSha256 },
+      runtimeConsumability: { bytesBase64: runtimeConsumability.bytesBase64, byteSha256: runtimeConsumability.byteSha256 } };
+  });
   const summaries = encoded.map((record) => validateRecord(record, verifyRuntime));
   assertOrderedHistory(summaries);
   recoveryHistoryLineageSha256(summaries);

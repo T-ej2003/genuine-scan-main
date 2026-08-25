@@ -504,6 +504,18 @@ operation or runtime dependency fails Stage-B deployment closure.
    immutable reference. With no history, use a private file containing exactly
    `null`. Bind both the evidence envelope SHA-256 and reference SHA-256 in the
    human approval when history exists.
+
+   Schema-3 recovery evidence created before runtime-consumability closure uses
+   the explicit `PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE` manifest record. The
+   preparer authenticates the completed GitHub run, its protected workflow and
+   production environment binding, the exact `backend-health-recovery-evidence`
+   artifact bytes, and an exact task-definition readback. Runtime-consumability
+   and candidate-fingerprint artifacts are recorded as not part of that schema;
+   they are never fabricated. This compatibility path accepts only schema 3,
+   requires the historical 1/1 terminal mutation shape, and still requires a
+   fresh authoritative ECS failed-deployment/task reconciliation before the
+   revision can be superseded. Schema 5 and later continue to require their
+   complete modern runtime evidence.
 4. Dispatch through `scripts/aws/dispatch-production-backend-health-recovery.mjs`.
    It serializes each JSON input once and derives the workflow value and SHA-256
    from those exact transport bytes; do not compose byte-sensitive inputs with

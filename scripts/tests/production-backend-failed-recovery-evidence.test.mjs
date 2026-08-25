@@ -4,10 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createAuthenticatedFailedRecoveryEvidence, assertAuthenticatedFailedRecoveryEvidence } from "../aws/production-backend-failed-recovery-evidence.mjs";
+import { createAuthenticatedFailedRecoveryEvidence, assertAuthenticatedFailedRecoveryEvidence, PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE } from "../aws/production-backend-failed-recovery-evidence.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { signRuntimeConsumabilityEvidence } from "../aws/production-ecs-runtime-consumability.mjs";
-import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
+import { canonicalSha256, taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { prepareProductionBackendFailedRecoveryEvidence } from "../aws/prepare-production-backend-failed-recovery-evidence.mjs";
 import { assertFailedRecoveryEvidenceReference } from "../aws/production-backend-failed-recovery-evidence-reference.mjs";
 import { publishProductionBackendFailedRecoveryEvidence } from "../aws/publish-production-backend-failed-recovery-evidence.mjs";
@@ -49,6 +49,23 @@ function interruptedArtifacts(status, recovery = {}, overrides = {}) {
 
 const create = (records = [artifacts()]) => createAuthenticatedFailedRecoveryEvidence({ records, verifyRuntime: () => true, sign: () => "AQ==", signedAt: new Date(now).toISOString() });
 const verify = (envelope) => assertAuthenticatedFailedRecoveryEvidence(envelope, { verify: () => true, now });
+
+function legacyArtifacts(overrides = {}) {
+  const body = { schemaVersion: 3, kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE", sourceSha,
+    authorizationFileSha256: "a".repeat(64), authorizationSha256: "b".repeat(64), environmentApprovalFileSha256: "c".repeat(64), environmentApprovalSha256: "d".repeat(64),
+    imageAuthorizationFileSha256: "e".repeat(64), imageAuthorizationSha256: "f".repeat(64), artifactSigningBindingSha256: "1".repeat(64), rollbackProofSha256: "2".repeat(64),
+    currentTaskDefinitionArn: currentArn, recoveryImageDigest: digest, imageReleaseSha: "cfdb6ab34114bea8088fe23136c0716ea8bcafac", account: "368992683803", region: "eu-west-2",
+    status: "SERVICE_STABILIZATION_FAILED", targetArn: failedArn, registrations: 1, updates: 1, artifactSigningVerification: "VERIFIED", artifactSigningFailure: null,
+    knownFailedRevisions: [{ taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", taskDefinitionFingerprint: "3".repeat(64) }], generatedAt: "2026-08-24T18:22:24.096Z", ...overrides };
+  const recoveryEvidenceBytes = bytes({ ...body, evidenceSha256: canonicalSha256(body) });
+  return { recoveryEvidenceBytes, legacyIdentity: { schemaVersion: 1, kind: "BACKEND_FAILED_RECOVERY_LEGACY_IDENTITY", evidenceContract: PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE,
+    repository: "T-ej2003/genuine-scan-main", workflowRunId: "32759665989", workflowRunAttempt: "1", workflowPath: ".github/workflows/release-gate.yml", workflowEvent: "workflow_dispatch",
+    workflowHeadSha: sourceSha, workflowConclusion: "failure", workflowCreatedAt: "2026-08-24T17:53:00.000Z", workflowDefinitionSha256: "4".repeat(64), artifactId: 123,
+    artifactName: "backend-health-recovery-evidence", artifactArchiveSizeInBytes: 1115, artifactArchiveDigest: `sha256:${"5".repeat(64)}`, evidenceByteSize: recoveryEvidenceBytes.length, evidenceByteSha256: hash(recoveryEvidenceBytes),
+    environmentApprovalEvidence: "PRODUCTION_ENVIRONMENT_BOUND_BY_SCHEMA3_WORKFLOW_NO_PERSISTED_APPROVAL_ARTIFACT", runtimeConsumabilityEvidence: "NOT_PART_OF_SCHEMA", candidateFingerprintEvidence: "NOT_PART_OF_SCHEMA",
+    sourceSha, service: "mscqr-backend-servi-euw2", releaseMode: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", taskDefinitionArn: failedArn,
+    taskDefinitionFingerprint: "9".repeat(64), recoveryImageDigest: digest, imageReleaseSha: body.imageReleaseSha } };
+}
 
 class FakeEvidenceRelease {
   constructor(evidenceBytes, state = "ABSENT") {
@@ -247,6 +264,56 @@ test("duplicate or conflicting evidence for one task definition is rejected", ()
 test("a healthy newer revision cannot be admitted by a caller-authored summary", () => {
   const forged = { taskDefinitionArn: failedArn, taskDefinitionFingerprint: "9".repeat(64), evidenceSha256: "f".repeat(64), status: "SERVICE_STABILIZATION_FAILED" };
   assert.throws(() => verify(forged), /signature|tampered/);
+});
+
+test("real schema-3 :49 evidence is admitted only through its explicit authenticated legacy contract", () => {
+  const result = verify(create([legacyArtifacts()]));
+  assert.equal(result.knownFailedRevisions[0].taskDefinitionArn, failedArn);
+  assert.equal(result.knownFailedRevisions[0].runtimeConsumabilitySha256, null);
+  assert.equal(result.knownFailedRevisions[0].requiresLiveFailureReconciliation, true);
+  const tamperedRun = structuredClone(create([legacyArtifacts()])); tamperedRun.records[0].legacyIdentity.workflowRunId = "32759665990";
+  assert.throws(() => verify(tamperedRun), /signature|tampered/);
+  for (const mutate of [
+    (x) => { x.legacyIdentity.repository = "other/repository"; },
+    (x) => { x.legacyIdentity.sourceSha = "a".repeat(40); },
+    (x) => { x.legacyIdentity.service = "other"; },
+    (x) => { x.legacyIdentity.taskDefinitionArn = currentArn; },
+    (x) => { x.legacyIdentity.taskDefinitionFingerprint = "bad"; },
+    (x) => { x.legacyIdentity.recoveryImageDigest = `sha256:${"7".repeat(64)}`; },
+    (x) => { x.legacyIdentity.evidenceByteSha256 = "0".repeat(64); },
+  ]) { const original = legacyArtifacts(); const fixture = { ...original, recoveryEvidenceBytes: Buffer.from(original.recoveryEvidenceBytes), legacyIdentity: structuredClone(original.legacyIdentity) }; mutate(fixture); assert.throws(() => create([fixture]), /Legacy|hash|malformed|unbound/); }
+  for (const recovery of [{ status: "RECOVERY_COMPLETE" }, { registrations: 0 }, { updates: 0 }]) {
+    assert.throws(() => create([legacyArtifacts(recovery)]), /terminal failure|malformed|tampered|Completed/);
+  }
+});
+
+test("modern evidence cannot downgrade by dropping runtime or candidate identity", () => {
+  const modern = artifacts(); const value = JSON.parse(modern.recoveryEvidenceBytes);
+  delete value.runtimeConsumabilitySha256;
+  modern.recoveryEvidenceBytes = bytes(rehash(value));
+  assert.throws(() => create([modern]), /runtime|malformed|tampered/);
+  const interrupted = interruptedArtifacts("SERVICE_UPDATE_CONFIRMED"); const interruptedValue = JSON.parse(interrupted.recoveryEvidenceBytes);
+  delete interruptedValue.candidateFingerprint;
+  interrupted.recoveryEvidenceBytes = bytes(rehash(interruptedValue));
+  assert.throws(() => create([interrupted]), /identity|malformed|tampered/);
+});
+
+test("legacy producer authenticates GitHub identity and exact registered task-definition bytes without invented modern artifacts", (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-schema3-evidence-")); fs.chmodSync(directory, 0o700);
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const legacy = legacyArtifacts(); const evidence = JSON.parse(legacy.recoveryEvidenceBytes);
+  const task = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
+  task.taskDefinition.taskDefinitionArn = failedArn; task.taskDefinition.revision = 49;
+  task.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").image = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`;
+  const taskBytes = bytes(task); const taskFile = path.join(directory, "task.json"); fs.writeFileSync(taskFile, taskBytes, { mode: 0o600 });
+  const manifest = { schemaVersion: 1, records: [{ evidenceContract: PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE, workflowRunId: "32759665989", taskDefinition: { file: taskFile, sha256: hash(taskBytes) } }] };
+  const manifestBytes = bytes(manifest); const manifestFile = path.join(directory, "manifest.json"); fs.writeFileSync(manifestFile, manifestBytes, { mode: 0o600 });
+  const outputFile = path.join(directory, "bundle.json");
+  prepareProductionBackendFailedRecoveryEvidence({ sourceSha, manifestFile, manifestSha256: hash(manifestBytes), outputFile, now, protectedMain: () => {},
+    resolveLegacy: () => ({ workflow: { id: 32759665989, run_attempt: 1, path: ".github/workflows/release-gate.yml", event: "workflow_dispatch", head_sha: sourceSha, conclusion: "failure", created_at: "2026-08-24T17:53:00.000Z" }, workflowDefinitionSha256: "4".repeat(64), artifact: { id: 123, name: "backend-health-recovery-evidence", size_in_bytes: 1115, digest: `sha256:${"5".repeat(64)}` }, evidenceBytes: legacy.recoveryEvidenceBytes }),
+    run: (_command, args) => JSON.stringify(args[1] === "verify" ? { SignatureValid: true } : { Signature: "AQ==" }) });
+  const authenticated = verify(JSON.parse(fs.readFileSync(outputFile)));
+  assert.equal(authenticated.knownFailedRevisions[0].taskDefinitionFingerprint, taskDefinitionFingerprint(task, task.tags));
 });
 
 test("canonical producer persists the exact self-contained evidence bundle", (context) => {
