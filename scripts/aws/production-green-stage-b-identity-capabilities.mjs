@@ -9,7 +9,7 @@ import { RELEASE_CALLER_PATTERN } from "./validate-production-green-stage-b-perm
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { CHECKER_SOURCE_ROLE_NAME, assertRoleATrustResponse } from "./production-checker-chain-contract.mjs";
-import { isEcrRepositoryPolicyNotFound } from "./production-ecs-runtime-consumability.mjs";
+import { assertEcrRepositoryPolicyResponse, isEcrRepositoryPolicyNotFound } from "./production-ecs-runtime-consumability.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const IDENTITY_CAPABILITY_MATRIX_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -96,6 +96,10 @@ export function runReleaseReadPreflight({
     const args = probe.args.map((value) => value === "{output}" ? outputPath : value);
     try {
       const response = run(args, probe);
+      if (probe.action === "ecr:GetRepositoryPolicy") {
+        const repositoryName = args[args.indexOf("--repository-name") + 1];
+        assertEcrRepositoryPolicyResponse(response, { repositoryName, registryId: STAGE_B.account });
+      }
       if (probe.id === "stage-a-state" || probe.id === "stage-b-state") {
         ensureStageBPrivateFile({ filePath: outputPath, repositoryRoot: root, normalize: true, label: `${probe.id} backup` });
         if (probe.id === "stage-a-state") {
@@ -111,7 +115,8 @@ export function runReleaseReadPreflight({
       if (probe.id === "checker-role-a-trust") checkerTrust = assertRoleATrustResponse(JSON.parse(response));
       if (requiredReads[probe.action] !== "denied") requiredReads[probe.action] = "allowed";
     } catch (error) {
-      if (probe.action === "ecr:GetRepositoryPolicy" && isEcrRepositoryPolicyNotFound(error)) {
+      const repositoryName = args[args.indexOf("--repository-name") + 1];
+      if (probe.action === "ecr:GetRepositoryPolicy" && isEcrRepositoryPolicyNotFound(error, { repositoryName, registryId: STAGE_B.account })) {
         responses.set(probe.id, JSON.stringify({ repositoryPolicyState: "NO_POLICY" }));
         if (requiredReads[probe.action] !== "denied") requiredReads[probe.action] = "allowed";
         continue;

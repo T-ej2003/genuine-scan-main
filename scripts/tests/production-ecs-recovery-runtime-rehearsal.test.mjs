@@ -25,6 +25,11 @@ const bindings = Object.fromEntries(["PRIVATE_KEY_CURRENT", "PUBLIC_KEY_CURRENT"
 const image = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: sourceSha });
 const hashFile = (file) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 const writeJson = (file, value) => fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+const noRepositoryPolicy = () => {
+  const error = new Error("AWS CLI failed");
+  error.stderr = Buffer.from("\naws: [ERROR]: An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: Repository policy does not exist for the repository with name 'mscqr-backend' in the registry with id '368992683803'\n");
+  return error;
+};
 
 test("real file boundaries support inventory, CAS convergence, post-convergence closure, and recovery candidate consumption", async (context) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-recovery-runtime-rehearsal-")); fs.chmodSync(directory, 0o700);
@@ -42,7 +47,7 @@ test("real file boundaries support inventory, CAS convergence, post-convergence 
     const operation = args.slice(0, 2).join(" "); const valueAfter = (flag) => args[args.indexOf(flag) + 1];
     if (operation === "sts get-caller-identity") return { Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-bootstrap-mfa/operator" };
     if (operation === "ecr describe-images") return { imageDetails: [{ registryId: "368992683803", repositoryName: valueAfter("--repository-name"), imageDigest: valueAfter("--image-ids").slice("imageDigest=".length) }] };
-    if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
+    if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "secretsmanager describe-secret") return { ARN: valueAfter("--secret-id"), KmsKeyId: null, VersionIdsToStages: { [`fixture_version_${"0".repeat(16)}`]: ["AWSCURRENT"] } };
     if (operation === "secretsmanager list-secret-version-ids") return { Versions: [{ VersionId: `fixture_version_${"0".repeat(16)}`, VersionStages: ["AWSCURRENT"] }] };
     if (operation === "secretsmanager get-secret-value") return { ARN: valueAfter("--secret-id"), VersionId: valueAfter("--version-id"), SecretString: JSON.stringify({ DATABASE_URL: "fixture-present", REDIS_URL: "fixture-present" }) };

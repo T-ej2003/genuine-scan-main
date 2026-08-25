@@ -263,12 +263,23 @@ Runtime image closure authenticates the exact candidate ECR repository-policy
 state and immutable image-digest availability in addition to execution-role
 identity simulation. Account, repository, and digest come from the selected
 `DescribeImages.imageDetails[]` entry, matching the AWS CLI response contract.
-`RepositoryPolicyNotFoundException`
-is the only accepted no-policy result; read errors, malformed responses, and
-any repository policy semantics fail closed. Secret metadata is likewise bound
-to an explicit available/not-scheduled-for-deletion state. Repository policy
-and secret availability metadata are refreshed before registration and again
-before `UpdateService`.
+`RepositoryPolicyNotFoundException` is the only accepted no-policy result. Its
+complete legacy or enhanced AWS CLI text envelope must identify exactly ECR
+`GetRepositoryPolicy` and the repository/account supplied to that call;
+structured JSON, mixed errors, read errors, malformed responses, and any
+repository policy semantics fail closed. Successful policy documents require
+a non-empty, structurally valid statement list and then pass a service-specific
+contract. ECR repository-scoped statements may omit `Resource`; Secrets Manager
+resource policies retain their resource binding; and KMS key policies require
+positive `Principal`, `Action`, and `Resource: "*"` fields. This follows the
+AWS service contracts rather than applying one invented resource-policy grammar.
+Runtime ECR action evaluation uses IAM's complete, case-insensitive `*` and `?`
+glob semantics and applies matching explicit denies before accepting all required
+pull actions; condition and inverse forms remain unsupported and fail closed.
+Secret metadata is
+likewise bound to an explicit available/not-scheduled-for-deletion state.
+Repository policy and secret availability metadata are refreshed before
+registration and again before `UpdateService`.
 
 The same candidate parser is mandatory for normal Stage-B backend/worker/
 executor/canary definitions, rotation overlap and cleanup definitions, and

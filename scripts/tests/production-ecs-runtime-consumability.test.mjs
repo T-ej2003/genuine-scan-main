@@ -22,10 +22,13 @@ import {
   RUNTIME_AUTHORIZATION_MAX_AGE_MS,
   LIVE_RUNTIME_EVIDENCE_MAX_AGE_MS,
   RUNTIME_CONSUMABILITY,
+  assertEcrRepositoryPolicyResponse,
+  isEcrRepositoryPolicyNotFound,
 } from "../aws/production-ecs-runtime-consumability.mjs";
 import { buildLegacyBackendRecoveryCandidate } from "../aws/production-backend-health-recovery-contract.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { prepareProductionEcsRuntimeConsumability, prepareProductionEcsRuntimeInventory } from "../aws/prepare-production-ecs-runtime-consumability.mjs";
+import { ECR_DOCUMENTED_NO_RESOURCE_POLICY, MALFORMED_ECR_REPOSITORY_POLICIES, VALID_ECR_REPOSITORY_POLICIES } from "./fixtures/ecr-repository-policy-fixtures.mjs";
 
 const sourceSha = "b64274e155434ae9390d28762d40a37801be5362";
 const digest = "sha256:6ce8e4eae1a9243c94368e95259a19446fb6c7241e127cf010b66d0611a17189";
@@ -65,6 +68,85 @@ const startupAws = (value, aws) => async (args) => {
   return aws(args);
 };
 const collectRuntimeResourceMetadata = (value, aws, options) => collectRuntimeResourceMetadataCore(value, startupAws(value, aws), options);
+const repositoryName = "mscqr-backend";
+const registryId = "368992683803";
+const noRepositoryPolicyStderr = (prefix = "aws: [ERROR]: ") => `${prefix}An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: Repository policy does not exist for the repository with name '${repositoryName}' in the registry with id '${registryId}'`;
+const noRepositoryPolicy = (prefix = "aws: [ERROR]: ") => {
+  const error = new Error("AWS CLI failed");
+  error.stderr = Buffer.from(`\n${noRepositoryPolicyStderr(prefix)}\n`);
+  return error;
+};
+const ecrPolicyResponse = (policy) => ({ registryId, repositoryName, policyText: JSON.stringify(policy) });
+const ecrRawPolicyResponse = (policyText) => ({ registryId, repositoryName, policyText });
+
+test("ECR no-policy classification accepts only complete observed CLI envelopes", () => {
+  const classify = (error) => isEcrRepositoryPolicyNotFound(error, { repositoryName, registryId });
+  assert.equal(classify(noRepositoryPolicy()), true);
+  assert.equal(classify(noRepositoryPolicy("")), true);
+  assert.equal(classify(Object.assign(new Error("AWS CLI failed"), { stderr: noRepositoryPolicyStderr() })), true);
+  const valid = noRepositoryPolicyStderr();
+  for (const stderr of [
+    '{"Code":"RepositoryPolicyNotFoundException"}',
+    '{"Code":"RepositoryPolicyNotFoundException","Message":null}',
+    '{"Code":"RepositoryPolicyNotFoundException","Message":""}',
+    '{"Code":"RepositoryPolicyNotFoundException","Message":"missing"} trailing',
+    'prefix {"Code":"RepositoryPolicyNotFoundException","Message":"missing"}',
+    `${valid} AccessDeniedException: denied`,
+    `${valid}\nAccessDeniedException: denied`,
+    `AccessDeniedException: denied ${valid}`,
+    `AccessDeniedException: denied\n${valid}`,
+    `${valid} {"Code":"AccessDeniedException"}`,
+    `{"Code":"AccessDeniedException"} ${valid}`,
+    `${valid} {}`,
+    `${valid} arbitrary text`,
+    `${valid} An error occurred (AccessDeniedException) when calling the GetRepositoryPolicy operation: denied`,
+    `${valid}\rAn error occurred (AccessDeniedException) when calling the GetRepositoryPolicy operation: denied`,
+    'An error occurred (RepositoryNotFoundException) when calling the GetRepositoryPolicy operation: Repository does not exist',
+    'An error occurred (ServerException) when calling the GetRepositoryPolicy operation: unavailable',
+    'An error occurred (InvalidParameterException) when calling the GetRepositoryPolicy operation: invalid',
+    'An error occurred (AccessDeniedException) when calling the GetRepositoryPolicy operation: denied',
+    noRepositoryPolicyStderr().replace("GetRepositoryPolicy operation", "DeleteRepositoryPolicy operation"),
+    noRepositoryPolicyStderr().replace("RepositoryPolicyNotFoundException", "AccessDeniedException"),
+    'arbitrary RepositoryPolicyNotFoundException text',
+    'arbitrary GetRepositoryPolicy text',
+    '',
+    '   ',
+    '{malformed',
+    '{"Code":"RepositoryPolicyNotFoundException","Message":"one"}{"Code":"AccessDeniedException","Message":"two"}',
+    noRepositoryPolicyStderr("aws: [ERROR]: aws: [ERROR]: "),
+    `garbage ${valid}`,
+    `${valid} garbage`,
+    `${valid}${valid}`,
+    valid.slice(0, -1),
+    valid.replace(": Repository policy", ":"),
+    valid.replace("operation:", "operation;"),
+    `${valid}\u001b[31m`,
+  ]) {
+    const error = new Error("AWS CLI failed"); error.stderr = Buffer.from(stderr);
+    assert.equal(classify(error), false, stderr);
+  }
+  const namedOnly = new Error("missing"); namedOnly.name = "RepositoryPolicyNotFoundException";
+  assert.equal(classify(namedOnly), false);
+  assert.equal(classify({ stderr: { toString: () => noRepositoryPolicyStderr() } }), false);
+  assert.equal(classify({ registryId, repositoryName, policyText: "{}" }), false);
+  assert.equal(isEcrRepositoryPolicyNotFound(noRepositoryPolicy(), { repositoryName: "mscqr-worker", registryId }), false);
+  assert.equal(isEcrRepositoryPolicyNotFound(noRepositoryPolicy(), { repositoryName, registryId: "000000000000" }), false);
+});
+
+test("ECR successful policy responses require service-aware repository-policy structure", () => {
+  for (const policy of VALID_ECR_REPOSITORY_POLICIES) assert.deepEqual(assertEcrRepositoryPolicyResponse(ecrPolicyResponse(policy), { repositoryName, registryId }).repositoryName, repositoryName);
+  for (const [label, policy] of MALFORMED_ECR_REPOSITORY_POLICIES) assert.throws(() => assertEcrRepositoryPolicyResponse(ecrPolicyResponse(policy), { repositoryName, registryId }), /malformed/, label);
+  for (const policyText of ["{", `${JSON.stringify(VALID_ECR_REPOSITORY_POLICIES[0])} trailing`]) {
+    assert.throws(() => assertEcrRepositoryPolicyResponse(ecrRawPolicyResponse(policyText), { repositoryName, registryId }));
+  }
+  for (const response of [
+    { ...ecrPolicyResponse(VALID_ECR_REPOSITORY_POLICIES[0]), registryId: "000000000000" },
+    { ...ecrPolicyResponse(VALID_ECR_REPOSITORY_POLICIES[0]), repositoryName: "mscqr-worker" },
+    { registryId, repositoryName },
+    { registryId, repositoryName, policyText: VALID_ECR_REPOSITORY_POLICIES[0] },
+    { ...ecrPolicyResponse(VALID_ECR_REPOSITORY_POLICIES[0]), extra: true },
+  ]) assert.throws(() => assertEcrRepositoryPolicyResponse(response, { repositoryName, registryId }), /incomplete|malformed/);
+});
 const metadata = (value) => Object.fromEntries(deriveEcsRuntimeDependencies(value).flatMap(({ action, resource }) => {
   if (action === "secretsmanager:GetSecretValue") {
     const selector = deriveEcsRuntimeDependencies(value).find((dependency) => dependency.action === action && dependency.resource === resource).context.secretSelector;
@@ -224,11 +306,11 @@ test("signed read-only inventory binds file bytes, semantic candidate, dependenc
 test("secret resource policy and customer-managed KMS authority are authenticated without secret values", async () => {
   const value = candidate();
   const keyArn = "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478";
-  const exactRolePolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt", Resource: keyArn }] });
+  const exactRolePolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Sid: "Exact runtime role", Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt", Resource: "*" }] });
   const aws = async (args) => {
     const operation = args.slice(0, 2).join(" "); const resource = args.at(-1);
     if (operation === "ecr describe-images") return describeImagesResponse(args);
-    if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
+    if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource, { KmsKeyId: resource === bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT ? keyArn : null });
     if (operation === "secretsmanager list-secret-version-ids") return listSecretVersionsResponse();
     if (operation === "secretsmanager get-resource-policy") return { ARN: resource, ResourcePolicy: null };
@@ -257,13 +339,30 @@ test("secret resource policy and customer-managed KMS authority are authenticate
     ? { ARN: args.at(-1), ResourcePolicy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "secretsmanager:GetSecretValue", Resource: args.at(-1) }] }) }
     : aws(args);
   await assert.rejects(() => collectRuntimeResourceMetadata(value, allowResourcePolicyAws, { readKmsKey }), /unsupported/);
+  const malformedResourcePolicyAws = async (args) => args[1] === "get-resource-policy"
+    ? { ARN: args.at(-1), ResourcePolicy: JSON.stringify({ Version: "2012-10-17", Statement: [null] }) }
+    : aws(args);
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, malformedResourcePolicyAws, { readKmsKey }), /malformed/);
+  const missingSecretResourceAws = async (args) => args[1] === "get-resource-policy"
+    ? { ARN: args.at(-1), ResourcePolicy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "secretsmanager:GetSecretValue" }] }) }
+    : aws(args);
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, missingSecretResourceAws, { readKmsKey }), /malformed/);
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: JSON.stringify({ Version: "2012-10-17", Statement: [null] }) }) }), /malformed/);
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt" }] }) }) }), /malformed/);
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt", Resource: keyArn }] }) }) }), /malformed/);
 
   const delegatedPolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:root" }, Action: "kms:Decrypt", Resource: "*" }] });
   const delegatedReadKmsKey = async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: delegatedPolicy });
   const delegated = await collectRuntimeResourceMetadata(value, aws, { readKmsKey: delegatedReadKmsKey });
   assert.equal(delegated[bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].kmsKeyPolicyAccess, "ACCOUNT_IAM_DELEGATED");
+  const shortAccountPolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: registryId }, Action: "KMS:Decr?pt", Resource: "*" }] });
+  const shortAccount = await collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: shortAccountPolicy }) });
+  assert.equal(shortAccount[bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].kmsKeyPolicyAccess, "ACCOUNT_IAM_DELEGATED");
+  const wildcardRolePolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "KMS:Decr*", Resource: "*" }] });
+  const wildcardRole = await collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: wildcardRolePolicy }) });
+  assert.equal(wildcardRole[bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].kmsKeyPolicyAccess, "EXACT_ROLE");
   await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Disabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: exactRolePolicy }) }), /KMS key is unavailable/);
-  const denyPolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt", Resource: keyArn }] });
+  const denyPolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt", Resource: "*" }] });
   await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: denyPolicy }) }), /unsupported deny/);
 
   const foreignKey = "arn:aws:kms:eu-west-2:368992683803:key/11111111-2222-3333-4444-555555555555";
@@ -276,7 +375,7 @@ test("real DescribeImages detail identity and ECR policy state fail closed on ev
   const baseAws = async (args) => {
     const operation = args.slice(0, 2).join(" "); const resource = args.at(-1);
     if (operation === "ecr describe-images") return describeImagesResponse(args);
-    if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
+    if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource);
     if (operation === "secretsmanager list-secret-version-ids") return listSecretVersionsResponse();
     if (operation === "secretsmanager get-resource-policy") return { ARN: resource, ResourcePolicy: null };
@@ -287,19 +386,86 @@ test("real DescribeImages detail identity and ECR policy state fail closed on ev
   assert.equal(authenticated[repository].repositoryPolicyState, "NO_POLICY");
   assert.doesNotThrow(() => passing(value, authenticated));
 
+  for (const policy of [ECR_DOCUMENTED_NO_RESOURCE_POLICY, VALID_ECR_REPOSITORY_POLICIES[1]]) {
+    const policyAws = async (args) => args[1] === "get-repository-policy" ? ecrPolicyResponse(policy) : baseAws(args);
+    const policyAuthenticated = await collectRuntimeResourceMetadata(value, policyAws);
+    assert.equal(policyAuthenticated[repository].repositoryPolicyState, "ALLOWS_RUNTIME");
+    assert.doesNotThrow(() => passing(value, policyAuthenticated));
+    await assert.doesNotReject(() => refreshRuntimeResourceMetadata(value, policyAuthenticated, startupAws(value, policyAws)));
+  }
+
+  const allowPull = (Action = ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]) => ({ Effect: "Allow", Principal: "*", Action });
+  const policyWith = (...statements) => ({ Version: "2012-10-17", Statement: statements });
+  const policyAws = (policy) => async (args) => args[1] === "get-repository-policy" ? ecrPolicyResponse(policy) : baseAws(args);
+  for (const Action of [
+    "*",
+    "ecr:*",
+    "ecr:Batch*",
+    "ecr:*GetImage",
+    "ecr:Batch*Image",
+    "ecr:B*tch*Image",
+    "ecr:BatchGetIma?e",
+    "ECR:batchgetimage",
+    "ecr:Batch*GetImage",
+    "ecr:B*tchGetIma?e",
+    "ecr:Batch???Image",
+    ["s3:*", "ecr:Batch*Image"],
+  ]) {
+    await assert.rejects(() => collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(), { Effect: "Deny", Principal: "*", Action }))), /does not authorize/, JSON.stringify(Action));
+  }
+  for (const Action of [
+    "ecr:Batch?Image",
+    "ecr:Get*Image",
+    "s3:*",
+    "ecr:BatchGetImageExtra",
+    "ecr:Batch.GetImage",
+    "ecr:Batch(Get)Image",
+    "ecr:Batch[Get]Image",
+    "ecr:BatchGetIma??e",
+  ]) {
+    const aws = policyAws(policyWith(allowPull(), { Effect: "Deny", Principal: "*", Action }));
+    const allowed = await collectRuntimeResourceMetadata(value, aws);
+    assert.equal(allowed[repository].repositoryPolicyState, "ALLOWS_RUNTIME", JSON.stringify(Action));
+    await assert.doesNotReject(() => refreshRuntimeResourceMetadata(value, allowed, startupAws(value, aws)), JSON.stringify(Action));
+  }
+  for (const Action of ["ECR:*", ["ecr:BatchCheck*", "ECR:batchgetima?e", "ecr:Get*Layer"]]) {
+    const allowed = await collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(Action))));
+    assert.equal(allowed[repository].repositoryPolicyState, "ALLOWS_RUNTIME", JSON.stringify(Action));
+  }
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull("ecr:*"), { Effect: "Deny", Principal: "*", Action: "ECR:batchgetima?e" }))), /does not authorize/);
+  for (const Principal of [{ AWS: "*" }, { AWS: registryId }, { AWS: ["arn:aws:iam::000000000000:root", `arn:aws:iam::${registryId}:root`] }]) {
+    await assert.rejects(() => collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(), { Effect: "Deny", Principal, Action: "ecr:Batch*Image" }))), /does not authorize/, JSON.stringify(Principal));
+  }
+  const accountAllow = await collectRuntimeResourceMetadata(value, policyAws(policyWith({ ...allowPull(), Principal: { AWS: registryId } })));
+  assert.equal(accountAllow[repository].repositoryPolicyState, "ALLOWS_RUNTIME");
+  const foreignDeny = await collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(), { Effect: "Deny", Principal: { AWS: "arn:aws:iam::000000000000:root" }, Action: "ecr:*" })));
+  assert.equal(foreignDeny[repository].repositoryPolicyState, "ALLOWS_RUNTIME");
+  for (const Resource of [`${repository.slice(0, -7)}*`, `${repository.slice(0, -1)}?`, ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker", repository]]) {
+    const allowed = await collectRuntimeResourceMetadata(value, policyAws(policyWith({ ...allowPull(), Resource })));
+    assert.equal(allowed[repository].repositoryPolicyState, "ALLOWS_RUNTIME", JSON.stringify(Resource));
+  }
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(), { Effect: "Deny", Principal: "*", Action: "ecr:Batch*Image", Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-*" }))), /does not authorize/);
+  const unrelatedResourceDeny = await collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(), { Effect: "Deny", Principal: "*", Action: "ecr:*", Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker" })));
+  assert.equal(unrelatedResourceDeny[repository].repositoryPolicyState, "ALLOWS_RUNTIME");
+
   for (const policy of [
     { Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: { AWS: value.executionRoleArn }, Action: "ecr:BatchGetImage", Resource: repository }] },
     { Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: "*", Action: ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"], Resource: repository }] },
     { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "ecr:BatchGetImage", Resource: repository, Condition: { StringLike: { "aws:PrincipalArn": "*" } } }] },
   ]) {
     const withPolicy = async (args) => args[1] === "get-repository-policy" ? { registryId: "368992683803", repositoryName: "mscqr-backend", policyText: JSON.stringify(policy) } : baseAws(args);
-    await assert.rejects(() => collectRuntimeResourceMetadata(value, withPolicy), /unsupported/);
-    await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, startupAws(value, withPolicy)), /unsupported/);
+    await assert.rejects(() => collectRuntimeResourceMetadata(value, withPolicy), /does not authorize|unsupported/);
+    await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, startupAws(value, withPolicy)), /does not authorize|unsupported/);
   }
   await assert.rejects(() => collectRuntimeResourceMetadata(value, async (args) => {
     if (args[1] === "get-repository-policy") return { registryId: "368992683803", repositoryName: "mscqr-worker", policyText: "{" };
     return baseAws(args);
   }), /incomplete|valid JSON/);
+  for (const [label, policy] of MALFORMED_ECR_REPOSITORY_POLICIES) {
+    await assert.rejects(() => collectRuntimeResourceMetadata(value, async (args) => args[1] === "get-repository-policy"
+      ? ecrPolicyResponse(policy) : baseAws(args)), /malformed/, label);
+  }
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, async (args) => args[1] === "get-repository-policy" ? {} : baseAws(args)), /incomplete/);
   await assert.rejects(() => collectRuntimeResourceMetadata(value, async (args) => {
     if (args[1] === "get-repository-policy") { const error = new Error("access denied"); error.name = "AccessDeniedException"; throw error; }
     return baseAws(args);
@@ -328,7 +494,7 @@ test("scheduled secret deletion and availability TOCTOU fail before runtime muta
   const aws = async (args) => {
     const operation = args.slice(0, 2).join(" "); const resource = args.at(-1);
     if (operation === "ecr describe-images") return describeImagesResponse(args);
-    if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
+    if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource, resource === bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT && deletedDate ? { DeletedDate: deletedDate } : {});
     if (operation === "secretsmanager list-secret-version-ids") return listSecretVersionsResponse();
     if (operation === "secretsmanager get-resource-policy") return { ARN: resource, ResourcePolicy: null };
@@ -351,7 +517,7 @@ test("Secrets Manager JSON keys are proven in the exact selected version without
   const aws = async (args) => {
     const operation = args.slice(0, 2).join(" "); const resource = args[args.indexOf("--secret-id") + 1] || args.at(-1);
     if (operation === "ecr describe-images") return describeImagesResponse(args);
-    if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
+    if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "logs describe-log-groups") { const logGroupName = args[args.indexOf("--log-group-name-prefix") + 1]; return { logGroups: [{ logGroupName, logGroupArn: `arn:aws:logs:eu-west-2:368992683803:log-group:${logGroupName}` }] }; }
     if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource);
     if (operation === "secretsmanager list-secret-version-ids") return listSecretVersionsResponse();
@@ -382,7 +548,7 @@ test("awslogs groups are exact, paginated, create-aware, and refreshed before mu
   const aws = async (args) => {
     const operation = args.slice(0, 2).join(" "); const resource = args[args.indexOf("--secret-id") + 1] || args.at(-1);
     if (operation === "ecr describe-images") return describeImagesResponse(args);
-    if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
+    if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource);
     if (operation === "secretsmanager list-secret-version-ids") return listSecretVersionsResponse();
     if (operation === "secretsmanager get-resource-policy") return { ARN: resource, ResourcePolicy: null };
@@ -423,7 +589,7 @@ test("Secrets Manager selectors resolve complete real version metadata and refre
   const awsFor = (versions = baseVersions, arnPatch, listedVersions = listSecretVersionsResponse(versions)) => async (args) => {
     const operation = args.slice(0, 2).join(" "); const resource = args.at(-1);
     if (operation === "ecr describe-images") return describeImagesResponse(args);
-    if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
+    if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "secretsmanager describe-secret") return describeSecretResponse(arnPatch || resource, { VersionIdsToStages: versions });
     if (operation === "secretsmanager list-secret-version-ids") return listedVersions;
     if (operation === "secretsmanager get-resource-policy") return { ARN: resource, ResourcePolicy: null };
@@ -465,7 +631,7 @@ test("secret version enumeration is complete, bounded, and cycle-safe", async ()
   const aws = async (args) => {
     calls.push(args); const operation = args.slice(0, 2).join(" "); const resource = args[args.indexOf("--secret-id") + 1] || args.at(-1);
     if (operation === "ecr describe-images") return describeImagesResponse(args);
-    if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
+    if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource);
     if (operation === "secretsmanager list-secret-version-ids") return args.includes("--starting-token")
       ? { Versions: [{ VersionId: unlabeled }] }
@@ -483,7 +649,7 @@ test("secret version enumeration is complete, bounded, and cycle-safe", async ()
   const failing = (page) => collectRuntimeResourceMetadata(value, async (args) => {
     const operation = args.slice(0, 2).join(" "); const resource = args[args.indexOf("--secret-id") + 1] || args.at(-1);
     if (operation === "ecr describe-images") return describeImagesResponse(args);
-    if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
+    if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource);
     if (operation === "secretsmanager list-secret-version-ids") return page(args);
     if (operation === "secretsmanager get-resource-policy") return { ARN: resource, ResourcePolicy: null };
@@ -516,7 +682,7 @@ test("exact SSM parameter version metadata is authenticated and refreshed", asyn
   const aws = async (args) => {
     const operation = args.slice(0, 2).join(" "); const resource = args.at(-1);
     if (operation === "ecr describe-images") return describeImagesResponse(args);
-    if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
+    if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource);
     if (operation === "secretsmanager list-secret-version-ids") return listSecretVersionsResponse();
     if (operation === "secretsmanager get-resource-policy") return { ARN: resource, ResourcePolicy: null };

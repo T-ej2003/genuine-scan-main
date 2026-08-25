@@ -15,6 +15,7 @@ import { buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDI
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
+import { ECR_DOCUMENTED_NO_RESOURCE_POLICY, MALFORMED_ECR_REPOSITORY_POLICIES } from "./fixtures/ecr-repository-policy-fixtures.mjs";
 
 const caller = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test";
 const stageAState = JSON.stringify({ lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: 35, resources: [] });
@@ -25,6 +26,10 @@ const shapedPolicyEvidence = () => {
 const temp = () => fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-release-preflight-test-"));
 const allowed = (args) => {
   if (args[0] === "sts") return JSON.stringify({ Arn: caller });
+  if (args[0] === "ecr" && args[1] === "get-repository-policy") {
+    const repositoryName = args[args.indexOf("--repository-name") + 1];
+    return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role" }, Action: ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"], Resource: `arn:aws:ecr:eu-west-2:368992683803:repository/${repositoryName}` }] }) });
+  }
   if (args[0] === "iam" && args[1] === "get-role" && args.includes("mscqr-production-independent-checker")) return JSON.stringify({ Role: { Arn: CHECKER_SOURCE_ROLE_ARN, AssumeRolePolicyDocument: { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: CHECKER_USER_ARN }, Action: "sts:AssumeRole", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }] } } });
   if (args[0] === "s3api" && args[1] === "get-object") {
     fs.writeFileSync(args.at(-1), args.includes("mscqr/production/rls-green/stage-a/terraform.tfstate") ? stageAState : JSON.stringify({ lineage: "fixture", serial: 1 }), { mode: 0o644 });
@@ -164,6 +169,62 @@ test("backend recovery ECR denial blocks the release preflight before mutation",
       action: deniedAction,
       classification: "AccessDenied",
     }]);
+  }
+});
+
+test("release preflight treats current AWS CLI no-policy errors as authenticated absence", () => {
+  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+    if (probe.action === "ecr:GetRepositoryPolicy") {
+      const error = new Error("no repository policy");
+      const repositoryName = args[args.indexOf("--repository-name") + 1];
+      error.stderr = Buffer.from(`\naws: [ERROR]: An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: Repository policy does not exist for the repository with name '${repositoryName}' in the registry with id '368992683803'\n`);
+      throw error;
+    }
+    return allowed(args);
+  } });
+  assert.equal(report.status, "valid");
+  assert.equal(report.requiredReads["ecr:GetRepositoryPolicy"], "allowed");
+});
+
+test("release preflight accepts the documented repository-scoped ECR policy without Resource", () => {
+  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+    if (probe.action === "ecr:GetRepositoryPolicy") {
+      const repositoryName = args[args.indexOf("--repository-name") + 1];
+      return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify(ECR_DOCUMENTED_NO_RESOURCE_POLICY) });
+    }
+    return allowed(args);
+  } });
+  assert.equal(report.status, "valid");
+  assert.equal(report.requiredReads["ecr:GetRepositoryPolicy"], "allowed");
+});
+
+test("release preflight accepts structurally valid ECR action wildcard policies", () => {
+  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+    if (probe.action === "ecr:GetRepositoryPolicy") {
+      const repositoryName = args[args.indexOf("--repository-name") + 1];
+      const policy = { Version: "2012-10-17", Statement: [
+        { Effect: "Allow", Principal: "*", Action: "ECR:*" },
+        { Effect: "Deny", Principal: "*", Action: ["ecr:Batch*Image", "ecr:BatchGetIma?e"] },
+      ] };
+      return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify(policy) });
+    }
+    return allowed(args);
+  } });
+  assert.equal(report.status, "valid");
+  assert.equal(report.requiredReads["ecr:GetRepositoryPolicy"], "allowed");
+});
+
+test("release preflight rejects malformed successful ECR policy responses", () => {
+  for (const [label, policy] of MALFORMED_ECR_REPOSITORY_POLICIES) {
+    const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+      if (probe.action === "ecr:GetRepositoryPolicy") {
+        const repositoryName = args[args.indexOf("--repository-name") + 1];
+        return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify(policy) });
+      }
+      return allowed(args);
+    } });
+    assert.equal(report.status, "blocked", label);
+    assert.equal(report.failed.filter(({ action }) => action === "ecr:GetRepositoryPolicy").length, 3, label);
   }
 });
 
