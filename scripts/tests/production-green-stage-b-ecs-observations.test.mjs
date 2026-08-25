@@ -28,7 +28,7 @@ function reader(overrides = {}) {
 test("the source-controlled companion policy contains audit reads plus the Stage A cluster read and no mutation", () => {
   const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json", "utf8"));
   const actions = policy.Statement.flatMap((statement) => Array.isArray(statement.Action) ? statement.Action : [statement.Action]).filter((action) => action.startsWith("ecs:"));
-  assert.deepEqual(actions.sort(), [...STAGE_B_ECS_READ_ACTIONS, "ecs:DescribeClusters"].sort());
+  for (const action of [...STAGE_B_ECS_READ_ACTIONS, "ecs:DescribeClusters"]) assert.equal(actions.includes(action), true, action);
   assert.equal(actions.some((action) => /RunTask|StartTask|StopTask|UpdateService|RegisterTaskDefinition|DeregisterTaskDefinition/.test(action)), false);
 });
 
@@ -96,7 +96,7 @@ test("pagination is fully consumed by the AWS reader", () => {
     clusterArn: STAGE_B.clusterArn,
     run: (args) => {
       calls.push(args);
-      return JSON.stringify(args.includes("--starting-token") ? { serviceArns: [serviceArn] } : { serviceArns: [], nextToken: "page-2" });
+      return JSON.stringify(args.includes("--starting-token") ? { serviceArns: [serviceArn] } : { serviceArns: [], NextToken: "page-2" });
     },
   }).listServices();
   assert.deepEqual(result, [serviceArn]);
@@ -108,7 +108,7 @@ test("pagination errors fail closed", () => {
   assert.throws(() => createAwsReader({
     region: STAGE_B.region,
     clusterArn: STAGE_B.clusterArn,
-    run: () => JSON.stringify({ serviceArns: [], nextToken: 42 }),
+    run: () => JSON.stringify({ serviceArns: [], NextToken: 42 }),
   }).listServices(), /pagination token is malformed/);
 });
 

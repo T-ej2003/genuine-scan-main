@@ -106,91 +106,101 @@
     },
     {
       "order": 21,
+      "id": "runtime-consumability-evidence",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs"
+    },
+    {
+      "order": 22,
+      "id": "runtime-consumability-convergence",
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs"
+    },
+    {
+      "order": 23,
       "id": "existing-revision-forward-recovery",
       "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs"
     },
     {
-      "order": 22,
+      "order": 24,
       "id": "stage-b-state-pull",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 23,
+      "order": 25,
       "id": "stage-a-state-read",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 24,
+      "order": 26,
       "id": "stage-a-handoff-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"
     },
     {
-      "order": 25,
+      "order": 27,
       "id": "root-drop-evidence-signing",
       "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs"
     },
     {
-      "order": 26,
+      "order": 28,
       "id": "tfvars-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-tfvars.mjs"
     },
     {
-      "order": 27,
+      "order": 29,
       "id": "refresh-only",
       "sourceFile": "scripts/refresh-production-green-stage-b.mjs"
     },
     {
-      "order": 28,
+      "order": 30,
       "id": "saved-plan-generation",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 29,
+      "order": 31,
       "id": "plan-json-canonicalization",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 30,
+      "order": 32,
       "id": "reference-audit",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs"
     },
     {
-      "order": 31,
+      "order": 33,
       "id": "plan-bound-permission-report",
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs"
     },
     {
-      "order": 32,
+      "order": 34,
       "id": "production-closure",
       "sourceFile": "scripts/aws/validate-stage-b-deployment-closure.mjs"
     },
     {
-      "order": 33,
+      "order": 35,
       "id": "validator",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 34,
+      "order": 36,
       "id": "wrapper-verify-only",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 35,
+      "order": 37,
       "id": "wrapper-apply",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 36,
+      "order": 38,
       "id": "post-apply-verification",
       "sourceFile": "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs"
     },
     {
-      "order": 37,
+      "order": 39,
       "id": "runtime-activation-boundary",
       "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs"
     },
     {
-      "order": 38,
+      "order": 40,
       "id": "normal-backend-activation",
       "sourceFile": "scripts/aws/production-normal-backend-activation.mjs"
     }
@@ -223,6 +233,7 @@
       },
       "classification": "ADMIN_DIRECT_READ",
       "probe": "structural",
+      "probeIds": [],
       "policy": {
         "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
         "sid": "identity-boundary",
@@ -250,6 +261,9 @@
       },
       "classification": "ADMIN_DIRECT_READ",
       "probe": "structural",
+      "probeIds": [
+        "backend-health-recovery-images"
+      ],
       "policy": {
         "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs",
         "sid": "identity-boundary",
@@ -277,6 +291,9 @@
       },
       "classification": "ADMIN_DIRECT_READ",
       "probe": "structural",
+      "probeIds": [
+        "backend-health-recovery-repository"
+      ],
       "policy": {
         "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs",
         "sid": "identity-boundary",
@@ -304,6 +321,11 @@
       },
       "classification": "ADMIN_DIRECT_READ",
       "probe": "structural",
+      "probeIds": [
+        "refresh-broker-policy",
+        "normal-activation-policy",
+        "runtime-ecs-managed-policy"
+      ],
       "policy": {
         "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
         "sid": "identity-boundary",
@@ -331,6 +353,9 @@
       },
       "classification": "ADMIN_DIRECT_READ",
       "probe": "structural",
+      "probeIds": [
+        "runtime-ecs-managed-policy-version"
+      ],
       "policy": {
         "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
         "sid": "identity-boundary",
@@ -358,6 +383,9 @@
       },
       "classification": "ADMIN_DIRECT_READ",
       "probe": "structural",
+      "probeIds": [
+        "caller"
+      ],
       "policy": {
         "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
         "sid": "identity-boundary",
@@ -385,6 +413,12 @@
       },
       "classification": "ADMIN_DIRECT_READ",
       "probe": "structural",
+      "probeIds": [
+        "runtime-legacy-execution-role",
+        "checker-role-a-trust",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
+      ],
       "policy": {
         "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
         "sid": "identity-boundary",
@@ -412,6 +446,7 @@
       },
       "classification": "ADMIN_IAM_MUTATION",
       "probe": "structural",
+      "probeIds": [],
       "policy": {
         "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
         "sid": "identity-boundary",
@@ -439,6 +474,12 @@
       },
       "classification": "ADMIN_DIRECT_READ",
       "probe": "structural",
+      "probeIds": [
+        "runtime-legacy-execution-role",
+        "checker-role-a-trust",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
+      ],
       "policy": {
         "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
         "sid": "identity-boundary",
@@ -466,6 +507,12 @@
       },
       "classification": "ADMIN_DIRECT_READ",
       "probe": "structural",
+      "probeIds": [
+        "runtime-legacy-attached-policies",
+        "refresh-broker-attachments",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-attached-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
+      ],
       "policy": {
         "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
         "sid": "identity-boundary",
@@ -493,6 +540,11 @@
       },
       "classification": "ADMIN_DIRECT_READ",
       "probe": "structural",
+      "probeIds": [
+        "runtime-legacy-inline-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-inline-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-inline-policies"
+      ],
       "policy": {
         "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
         "sid": "identity-boundary",
@@ -520,6 +572,9 @@
       },
       "classification": "ADMIN_DIRECT_READ",
       "probe": "structural",
+      "probeIds": [
+        "runtime-legacy-inline-policy"
+      ],
       "policy": {
         "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
         "sid": "identity-boundary",
@@ -547,6 +602,7 @@
       },
       "classification": "ADMIN_SIGN",
       "probe": "structural",
+      "probeIds": [],
       "policy": {
         "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
         "sid": "identity-boundary",
@@ -574,6 +630,7 @@
       },
       "classification": "ADMIN_SIMULATION",
       "probe": "administrator-simulation",
+      "probeIds": [],
       "policy": {
         "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
         "sid": "identity-boundary",
@@ -601,6 +658,7 @@
       },
       "classification": "BOOTSTRAP_SESSION",
       "probe": "structural",
+      "probeIds": [],
       "policy": {
         "sourceFile": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md",
         "sid": "identity-boundary",
@@ -628,6 +686,9 @@
       },
       "classification": "BOOTSTRAP_SESSION",
       "probe": "structural",
+      "probeIds": [
+        "caller"
+      ],
       "policy": {
         "sourceFile": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md",
         "sid": "identity-boundary",
@@ -655,6 +716,7 @@
       },
       "classification": "BOOTSTRAP_SESSION",
       "probe": "structural",
+      "probeIds": [],
       "policy": {
         "sourceFile": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md",
         "sid": "identity-boundary",
@@ -749,7 +811,7 @@
         "sid": "DescribeStageBTaskDefinitionsReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -777,7 +839,7 @@
         "sid": "ListStageBTaskDefinitionsReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -917,7 +979,7 @@
         "sid": "VerifyExactStageBPermissionReportSignature",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -1565,8 +1627,10 @@
         }
       ],
       "classification": "RELEASE_DIRECT_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-secret-metadata"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageASecretMetadata",
@@ -1598,14 +1662,16 @@
         }
       ],
       "classification": "RELEASE_DIRECT_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-secret-json-key"
+      ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
-        "sid": "ManageExactProductionSecretValues",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeCandidateRuntimeSecrets",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -1665,7 +1731,9 @@
       ],
       "classification": "FORBIDDEN",
       "probe": "administrator-simulation",
-      "probeIds": [],
+      "probeIds": [
+        "runtime-candidate-secret-json-key"
+      ],
       "policy": {
         "sourceFile": null,
         "sid": "implicit-deny",
@@ -2042,7 +2110,7 @@
         "sid": "DescribeExactBackendServiceDeployments",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -2085,7 +2153,7 @@
         "sid": "DescribeExactBackendServiceRevisions",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -2127,7 +2195,7 @@
         "sid": "ListExactBackendServiceDeployments",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -2192,6 +2260,361 @@
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "manifest-backend-health-recovery-runtime-describe-secrets",
+      "phase": "backend-health-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "backend-health-recovery-runtime-describe-secrets",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-secret-metadata"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageASecretMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-backend-health-recovery-runtime-get-inline",
+      "phase": "backend-health-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "backend-health-recovery-runtime-get-inline",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-legacy-inline-policy"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadExactLegacyExecutionRoleRuntimePolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-backend-health-recovery-runtime-get-managed",
+      "phase": "backend-health-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "backend-health-recovery-runtime-get-managed",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "refresh-broker-policy",
+        "normal-activation-policy",
+        "runtime-ecs-managed-policy"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadEcsManagedExecutionPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-backend-health-recovery-runtime-get-managed-version",
+      "phase": "backend-health-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "backend-health-recovery-runtime-get-managed-version",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-ecs-managed-policy-version"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadEcsManagedExecutionPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-backend-health-recovery-runtime-get-role",
+      "phase": "backend-health-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "backend-health-recovery-runtime-get-role",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-legacy-execution-role",
+        "checker-role-a-trust",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadExactLegacyExecutionRoleRuntimePolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-backend-health-recovery-runtime-get-secret-values",
+      "phase": "backend-health-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "backend-health-recovery-runtime-get-secret-values",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-secret-json-key"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeCandidateRuntimeSecrets",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-backend-health-recovery-runtime-list-attached",
+      "phase": "backend-health-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "backend-health-recovery-runtime-list-attached",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "*"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-legacy-attached-policies",
+        "refresh-broker-attachments",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-attached-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ListAttachedRolePoliciesReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-backend-health-recovery-runtime-list-inline",
+      "phase": "backend-health-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "backend-health-recovery-runtime-list-inline",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-legacy-inline-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-inline-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-inline-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadExactLegacyExecutionRoleRuntimePolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-backend-health-recovery-runtime-list-secret-versions",
+      "phase": "backend-health-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "backend-health-recovery-runtime-list-secret-versions",
+      "action": "secretsmanager:ListSecretVersionIds",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-secret-versions"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeCandidateRuntimeSecrets",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-backend-health-recovery-runtime-repository-policy",
+      "phase": "backend-health-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "backend-health-recovery-runtime-repository-policy",
+      "action": "ecr:GetRepositoryPolicy",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-mscqr-backend-repository-policy",
+        "runtime-mscqr-web-repository-policy",
+        "runtime-mscqr-worker-repository-policy"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadCandidateRuntimeRepositoryPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-backend-health-recovery-runtime-secret-resource-policy",
+      "phase": "backend-health-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "backend-health-recovery-runtime-secret-resource-policy",
+      "action": "secretsmanager:GetResourcePolicy",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-secret-resource-policy"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageASecretMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
     },
     {
       "id": "manifest-backend-health-recovery-update-service",
@@ -2563,7 +2986,7 @@
         "sid": "ReadStageALivePrerequisites",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -2633,7 +3056,7 @@
         "sid": "ReadStageALivePrerequisites",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -2703,7 +3126,7 @@
         "sid": "ReadStageALivePrerequisites",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -2957,7 +3380,7 @@
         "sid": "DescribeStageBTaskDefinitionsReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": true
@@ -3294,8 +3717,10 @@
         }
       ],
       "classification": "RELEASE_DIRECT_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-secret-metadata"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageASecretMetadata",
@@ -3333,14 +3758,16 @@
         }
       ],
       "classification": "RELEASE_DIRECT_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-secret-json-key"
+      ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
-        "sid": "ManageExactProductionSecretValues",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeCandidateRuntimeSecrets",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -3664,14 +4091,15 @@
       "probe": "direct",
       "probeIds": [
         "refresh-broker-policy",
-        "normal-activation-policy"
+        "normal-activation-policy",
+        "runtime-ecs-managed-policy"
       ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
         "sid": "ReadNormalActivationPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -3689,14 +4117,16 @@
       ],
       "context": [],
       "classification": "RELEASE_DIRECT_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-ecs-managed-policy-version"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
         "sid": "ReadNormalActivationPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -3877,7 +4307,7 @@
         "sid": "ReadStageBBrokerConfiguration",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -3954,7 +4384,7 @@
         "sid": "DescribeStageBServicesReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -3996,7 +4426,7 @@
         "sid": "ListStageBServicesReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -4031,7 +4461,7 @@
         "sid": "DescribeStageBTaskDefinitionsReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -4073,7 +4503,7 @@
         "sid": "DescribeStageBTasksReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -4115,7 +4545,7 @@
         "sid": "ListStageBTasksReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -4190,6 +4620,7 @@
       "classification": "TERRAFORM_REFRESH_READ",
       "probe": "direct",
       "probeIds": [
+        "runtime-legacy-attached-policies",
         "refresh-broker-attachments",
         "refresh-mscqr-production-full-rls-green-read-only-canary-execution-attached-policies",
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
@@ -4217,8 +4648,10 @@
       ],
       "context": [],
       "classification": "TERRAFORM_REFRESH_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-legacy-inline-policy"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
         "sid": "ReadExactStageBReadOnlyCanaryExecutionRolePolicy",
@@ -4245,6 +4678,7 @@
       "classification": "TERRAFORM_REFRESH_READ",
       "probe": "direct",
       "probeIds": [
+        "runtime-legacy-inline-policies",
         "refresh-mscqr-production-full-rls-green-read-only-canary-execution-inline-policies",
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-inline-policies"
       ],
@@ -4274,6 +4708,7 @@
       "classification": "TERRAFORM_REFRESH_READ",
       "probe": "direct",
       "probeIds": [
+        "runtime-legacy-execution-role",
         "checker-role-a-trust",
         "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
@@ -4302,8 +4737,10 @@
       ],
       "context": [],
       "classification": "TERRAFORM_REFRESH_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-legacy-inline-policy"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageACheckerRolePolicy",
@@ -4329,6 +4766,7 @@
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct",
       "probeIds": [
+        "runtime-legacy-execution-role",
         "checker-role-a-trust",
         "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
@@ -4397,8 +4835,10 @@
         }
       ],
       "classification": "TERRAFORM_REFRESH_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-log-group"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageAProviderLogGroups",
@@ -4463,6 +4903,7 @@
       "classification": "TERRAFORM_REFRESH_READ",
       "probe": "direct",
       "probeIds": [
+        "runtime-legacy-attached-policies",
         "refresh-broker-attachments",
         "refresh-mscqr-production-full-rls-green-read-only-canary-execution-attached-policies",
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
@@ -4492,6 +4933,7 @@
       "classification": "TERRAFORM_REFRESH_READ",
       "probe": "direct",
       "probeIds": [
+        "runtime-legacy-execution-role",
         "checker-role-a-trust",
         "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
@@ -4521,6 +4963,7 @@
       "classification": "TERRAFORM_REFRESH_READ",
       "probe": "direct",
       "probeIds": [
+        "runtime-legacy-inline-policies",
         "refresh-mscqr-production-full-rls-green-read-only-canary-execution-inline-policies",
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-inline-policies"
       ],
@@ -4576,8 +5019,10 @@
         }
       ],
       "classification": "TERRAFORM_REFRESH_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-secret-metadata"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageASecretMetadata",
@@ -4630,8 +5075,10 @@
         }
       ],
       "classification": "TERRAFORM_REFRESH_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-secret-resource-policy"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageASecretMetadata",
@@ -4817,8 +5264,10 @@
         }
       ],
       "classification": "TERRAFORM_REFRESH_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-kms-key"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
         "sid": "ReadExactStageARootDropProviderKey",
@@ -4871,8 +5320,10 @@
         }
       ],
       "classification": "TERRAFORM_REFRESH_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-kms-key-policy"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
         "sid": "ReadExactStageARootDropProviderKey",
@@ -5046,8 +5497,10 @@
         }
       ],
       "classification": "TERRAFORM_REFRESH_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-kms-key"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageAStorageKeys",
@@ -5080,8 +5533,10 @@
         }
       ],
       "classification": "TERRAFORM_REFRESH_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-kms-key-policy"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageAStorageKeys",
@@ -5330,7 +5785,8 @@
       "probe": "direct",
       "probeIds": [
         "refresh-broker-policy",
-        "normal-activation-policy"
+        "normal-activation-policy",
+        "runtime-ecs-managed-policy"
       ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
@@ -5355,8 +5811,10 @@
       ],
       "context": [],
       "classification": "TERRAFORM_REFRESH_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-ecs-managed-policy-version"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
         "sid": "ReadExactStageBBrokerManagedPolicy",
@@ -5409,6 +5867,7 @@
       "classification": "TERRAFORM_REFRESH_READ",
       "probe": "direct",
       "probeIds": [
+        "runtime-legacy-attached-policies",
         "refresh-broker-attachments",
         "refresh-mscqr-production-full-rls-green-read-only-canary-execution-attached-policies",
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
@@ -5717,6 +6176,7 @@
       "classification": "TERRAFORM_REFRESH_READ",
       "probe": "direct",
       "probeIds": [
+        "runtime-legacy-attached-policies",
         "refresh-broker-attachments",
         "refresh-mscqr-production-full-rls-green-read-only-canary-execution-attached-policies",
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
@@ -5754,6 +6214,7 @@
       "classification": "TERRAFORM_REFRESH_READ",
       "probe": "direct",
       "probeIds": [
+        "runtime-legacy-execution-role",
         "checker-role-a-trust",
         "refresh-mscqr-production-full-rls-green-read-only-canary-execution-role",
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-role"
@@ -5789,8 +6250,10 @@
       ],
       "context": [],
       "classification": "TERRAFORM_REFRESH_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-legacy-inline-policy"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
         "sid": "ReadExactStageBRoles",
@@ -5824,6 +6287,7 @@
       "classification": "TERRAFORM_REFRESH_READ",
       "probe": "direct",
       "probeIds": [
+        "runtime-legacy-inline-policies",
         "refresh-mscqr-production-full-rls-green-read-only-canary-execution-inline-policies",
         "refresh-mscqr-production-full-rls-green-read-only-canary-task-inline-policies"
       ],
@@ -6105,14 +6569,16 @@
         }
       ],
       "classification": "RELEASE_DIRECT_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "runtime-candidate-secret-json-key"
+      ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
-        "sid": "ManageExactLegacyCurrentRotationSecrets",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeCandidateRuntimeSecrets",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -6853,7 +7319,8 @@
       "probe": "administrator-live-read-or-simulation",
       "probeIds": [
         "refresh-broker-policy",
-        "normal-activation-policy"
+        "normal-activation-policy",
+        "runtime-ecs-managed-policy"
       ],
       "policy": {
         "sourceFile": "scripts/aws/production-normal-backend-activation-policy.mjs",
@@ -6884,7 +7351,9 @@
       },
       "classification": "ADMIN_DIRECT_READ",
       "probe": "administrator-live-read-or-simulation",
-      "probeIds": [],
+      "probeIds": [
+        "runtime-ecs-managed-policy-version"
+      ],
       "policy": {
         "sourceFile": "scripts/aws/production-normal-backend-activation-policy.mjs",
         "sid": "normal-activation-admin-read-policy-version",
@@ -6985,7 +7454,7 @@
         "sid": "DescribeStageBTaskDefinitionsReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -7017,7 +7486,7 @@
         "sid": "DescribeStageBServicesReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -7049,7 +7518,7 @@
         "sid": "DescribeStageBTasksReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -7113,7 +7582,7 @@
         "sid": "ListStageBTasksReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -7139,14 +7608,15 @@
       "probe": "direct-live-read",
       "probeIds": [
         "refresh-broker-policy",
-        "normal-activation-policy"
+        "normal-activation-policy",
+        "runtime-ecs-managed-policy"
       ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
         "sid": "ReadNormalActivationPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -7170,13 +7640,15 @@
       },
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct-live-read",
-      "probeIds": [],
+      "probeIds": [
+        "runtime-ecs-managed-policy-version"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
         "sid": "ReadNormalActivationPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -8402,6 +8874,7 @@
       },
       "classification": "GITHUB_IMAGE_MUTATION",
       "probe": "structural",
+      "probeIds": [],
       "policy": {
         "sourceFile": ".github/workflows/production-green-stage-b-image-build.yml",
         "sid": "identity-boundary",
@@ -8760,7 +9233,7 @@
         "sid": "DescribeStageBTaskDefinitionsReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -8788,7 +9261,7 @@
         "sid": "ListStageBTaskDefinitionsReadOnly",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "6d648af2a49aaf35b1b32ccb2e9c2f5229f3f07d4f74b82620f8bc7c461e12f7"
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
       },
       "required": true,
       "mutation": false
@@ -9034,6 +9507,9 @@
       },
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct",
+      "probeIds": [
+        "caller"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
         "sid": "identity-boundary",
@@ -9053,7 +9529,7 @@
       "sourceFunction": "release-verify-signature",
       "action": "kms:Verify",
       "resources": [
-        "reviewed-exact-resource"
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
       ],
       "context": {
         "account": "368992683803",
@@ -9061,6 +9537,9 @@
       },
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct",
+      "probeIds": [
+        "runtime-consumability-signature"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
         "sid": "identity-boundary",
@@ -9097,6 +9576,606 @@
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "runtime-admin-converge-inline",
+      "phase": "runtime-consumability-convergence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "sourceFunction": "runtime-admin-converge-inline",
+      "action": "iam:PutRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_IAM_OR_SIGNING_MUTATION",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+        "sid": "runtime-admin-converge-inline",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "runtime-admin-describe-log-groups",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-describe-log-groups",
+      "action": "logs:DescribeLogGroups",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-describe-log-groups",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-describe-runtime-image",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-describe-runtime-image",
+      "action": "ecr:DescribeImages",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-describe-runtime-image",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-describe-runtime-key",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-describe-runtime-key",
+      "action": "kms:DescribeKey",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-describe-runtime-key",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-describe-secret",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-describe-secret",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-describe-secret",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-get-inline",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-get-inline",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
+        "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-get-inline",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-get-managed",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-get-managed",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-get-managed",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-get-managed-version",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-get-managed-version",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-get-managed-version",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-get-role",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-get-role",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
+        "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-get-role",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-get-secret-value",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-get-secret-value",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-get-secret-value",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-identify",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-identify",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-list-attached",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-list-attached",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-list-attached",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-list-inline",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-list-inline",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
+        "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-list-inline",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-list-secret-versions",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-list-secret-versions",
+      "action": "secretsmanager:ListSecretVersionIds",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-list-secret-versions",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-read-repository-policy",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-read-repository-policy",
+      "action": "ecr:GetRepositoryPolicy",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-read-repository-policy",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-read-runtime-key-policy",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-read-runtime-key-policy",
+      "action": "kms:GetKeyPolicy",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-read-runtime-key-policy",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-read-secret-resource-policy",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-read-secret-resource-policy",
+      "action": "secretsmanager:GetResourcePolicy",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-read-secret-resource-policy",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-sign",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-sign",
+      "action": "kms:Sign",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_IAM_OR_SIGNING_MUTATION",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-sign",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "runtime-admin-simulate",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-simulate",
+      "action": "iam:SimulatePrincipalPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
+        "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-simulate",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-verify-inventory-convergence",
+      "phase": "runtime-consumability-convergence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "sourceFunction": "runtime-admin-verify-inventory-convergence",
+      "action": "kms:Verify",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+        "sid": "runtime-admin-verify-inventory-convergence",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "runtime-admin-verify-inventory-evidence",
+      "phase": "runtime-consumability-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFunction": "runtime-admin-verify-inventory-evidence",
+      "action": "kms:Verify",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RUNTIME_CLOSURE_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+        "sid": "runtime-admin-verify-inventory-evidence",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
     },
     {
       "id": "runtime-dynamodb-deleteitem",
@@ -9809,6 +10888,18 @@
       "action": "ecr:DescribeRepositories"
     },
     {
+      "id": "runtime-mscqr-backend-repository-policy",
+      "action": "ecr:GetRepositoryPolicy"
+    },
+    {
+      "id": "runtime-mscqr-web-repository-policy",
+      "action": "ecr:GetRepositoryPolicy"
+    },
+    {
+      "id": "runtime-mscqr-worker-repository-policy",
+      "action": "ecr:GetRepositoryPolicy"
+    },
+    {
       "id": "backend-health-recovery-service-deployments",
       "action": "ecs:ListServiceDeployments"
     },
@@ -9826,6 +10917,22 @@
     },
     {
       "id": "normal-activation-policy",
+      "action": "iam:GetPolicy"
+    },
+    {
+      "id": "runtime-legacy-execution-role",
+      "action": "iam:GetRole"
+    },
+    {
+      "id": "runtime-legacy-inline-policies",
+      "action": "iam:ListRolePolicies"
+    },
+    {
+      "id": "runtime-legacy-attached-policies",
+      "action": "iam:ListAttachedRolePolicies"
+    },
+    {
+      "id": "runtime-ecs-managed-policy",
       "action": "iam:GetPolicy"
     },
     {
@@ -9895,6 +11002,10 @@
     {
       "id": "backend-health-recovery-service-revision-details",
       "action": "ecs:DescribeServiceRevisions"
+    },
+    {
+      "id": "runtime-candidate-secret-resource-policy",
+      "action": "secretsmanager:GetResourcePolicy"
     }
   ],
   "sourceScan": [
@@ -9916,6 +11027,30 @@
     },
     {
       "sourceFile": "scripts/aws/check-production-green-stage-b-approval-publication.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "action": "iam:GetRole"
+    },
+    {
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "action": "iam:GetRolePolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "action": "iam:ListAttachedRolePolicies"
+    },
+    {
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "action": "iam:PutRolePolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "action": "kms:Verify"
+    },
+    {
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
       "action": "sts:GetCallerIdentity"
     },
     {
@@ -9991,6 +11126,26 @@
       "action": "rds:DescribeDBInstances"
     },
     {
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "action": "kms:DescribeKey"
+    },
+    {
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "action": "kms:GetKeyPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "action": "kms:Sign"
+    },
+    {
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "action": "kms:Verify"
+    },
+    {
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
       "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs",
       "sourceFunction": "produce-production-root-drop-evidence",
       "phase": "root-drop-evidence-signing",
@@ -10035,14 +11190,70 @@
     },
     {
       "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
-      "action": "ecs:DescribeTasks"
-    },
-    {
-      "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
       "action": "ecs:ListServiceDeployments"
     },
     {
-      "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "ecr:DescribeImages"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "ecr:GetRepositoryPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:GetPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:GetPolicyVersion"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:GetRole"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:GetRolePolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:ListAttachedRolePolicies"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:ListRolePolicies"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:SimulatePrincipalPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "logs:DescribeLogGroups"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "secretsmanager:DescribeSecret"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "secretsmanager:GetResourcePolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "secretsmanager:GetSecretValue"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "secretsmanager:ListSecretVersionIds"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-task-census.mjs",
+      "action": "ecs:DescribeTasks"
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-task-census.mjs",
       "action": "ecs:ListTasks"
     },
     {
@@ -10096,6 +11307,10 @@
     {
       "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
       "action": "ecr:DescribeRepositories"
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
+      "action": "ecr:GetRepositoryPolicy"
     },
     {
       "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
@@ -10307,15 +11522,7 @@
     },
     {
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
-      "action": "ecs:DescribeTasks"
-    },
-    {
-      "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
       "action": "ecs:ListTaskDefinitions"
-    },
-    {
-      "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
-      "action": "ecs:ListTasks"
     },
     {
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
@@ -10324,6 +11531,18 @@
     {
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
       "action": "ecs:UpdateService"
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
+      "action": "kms:DescribeKey"
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
+      "action": "kms:GetKeyPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
+      "action": "kms:Verify"
     },
     {
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs",

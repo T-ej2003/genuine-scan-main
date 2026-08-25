@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
 
 const TEMPLATE_PATH = path.resolve("infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-rotation-inventory.json");
 const FAMILY = "mscqr-production-rls-green-predeployment-inventory";
@@ -29,6 +30,7 @@ export function buildPreDeploymentInventoryTaskDefinition({ backendImage, releas
   const definition = replace(JSON.parse(fs.readFileSync(TEMPLATE_PATH, "utf8")), { BACKEND_IMAGE: backendImage, RELEASE_SHA: releaseSha, DATABASE_URL: databaseUrl, ROTATION_INVENTORY_RLS_ROLE: rotationInventoryRlsRole, INVENTORY_LOG_GROUP: inventoryLogGroup, INVENTORY_TASK_ROLE_ARN: inventoryTaskRoleArn, INVENTORY_EXECUTION_ROLE_ARN: inventoryExecutionRoleArn });
   const container = definition.containerDefinitions?.[0];
   if (definition.family !== FAMILY || definition.networkMode !== "awsvpc" || definition.requiresCompatibilities?.join(",") !== "FARGATE" || definition.cpu !== "256" || definition.memory !== "512" || definition.executionRoleArn !== inventoryExecutionRoleArn || definition.taskRoleArn !== inventoryTaskRoleArn || !container || container.name !== "inventory" || container.image !== backendImage || JSON.stringify(container.entryPoint) !== JSON.stringify(["node"]) || JSON.stringify(container.command) !== JSON.stringify(PREDEPLOYMENT_INVENTORY_COMMAND) || container.portMappings || container.privileged !== false || container.interactive !== false || container.pseudoTerminal !== false || container.secrets?.length !== 1 || container.secrets[0].name !== "DATABASE_URL" || container.secrets[0].valueFrom !== databaseUrl || container.environment?.find(({ name }) => name === "ROTATION_INVENTORY_APPROVED")?.value !== "true" || !container.logConfiguration?.options?.["awslogs-group"] || JSON.stringify(definition).includes("{{")) throw new Error("Pre-deployment inventory task definition is outside the reviewed contract.");
+  deriveEcsRuntimeDependencies(definition);
   return { taskDefinition: definition, tags: PREDEPLOYMENT_INVENTORY_TAGS };
 }
 

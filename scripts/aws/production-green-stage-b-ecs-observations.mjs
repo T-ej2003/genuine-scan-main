@@ -205,14 +205,17 @@ function createAwsReader({ region, clusterArn, run = (args) => execFileSync("aws
     }
   };
   const listAll = (name, args, key) => {
-    const values = [];
-    let nextToken;
+    const values = []; const seen = new Set(); let nextToken; let pageCount = 0;
     do {
-      const response = call(name, nextToken ? [...args, "--starting-token", nextToken] : args);
+      if (++pageCount > 100) throw new Error(`AWS ${name} pagination exceeded its bounded page limit.`);
+      const pageArgs = [...args, "--page-size", "100", "--max-items", "100", ...(nextToken ? ["--starting-token", nextToken] : [])];
+      const response = call(name, pageArgs);
       values.push(...requireArray(response[key], `AWS ${name} ${key}`));
-      const next = response.nextToken;
+      if (Object.hasOwn(response, "nextToken")) throw new Error(`AWS ${name} pagination token uses an invalid response shape.`);
+      const next = response.NextToken;
       if (next !== undefined && (typeof next !== "string" || !next)) throw new Error(`AWS ${name} pagination token is malformed.`);
-      if (nextToken && next === nextToken) throw new Error(`AWS ${name} pagination did not advance.`);
+      if (next && seen.has(next)) throw new Error(`AWS ${name} pagination did not advance.`);
+      if (next) seen.add(next);
       nextToken = next;
     } while (nextToken);
     return values;

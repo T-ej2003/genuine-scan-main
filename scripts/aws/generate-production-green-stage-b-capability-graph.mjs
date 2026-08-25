@@ -31,7 +31,11 @@ const awsCliSourceFiles = [
   "scripts/aws/publish-production-green-stage-b-approval.mjs", "scripts/aws/check-production-green-stage-b-approval-publication.mjs",
   "scripts/aws/recover-stage-b-backend-task-definition.mjs", "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
   "scripts/aws/recover-production-backend-health.mjs",
+  "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+  "scripts/aws/production-ecs-runtime-consumability.mjs",
+  "scripts/aws/converge-production-ecs-runtime-policy.mjs",
   "scripts/aws/production-ecs-rollback-viability.mjs",
+  "scripts/aws/production-ecs-task-census.mjs",
   "scripts/aws/production-normal-backend-activation.mjs",
   "scripts/aws/deploy-ecs-service.sh",
   "scripts/aws/production-release-oidc-contract.mjs",
@@ -63,6 +67,8 @@ const PHASES = Object.freeze([
   ["workspace-validation", "scripts/aws/stage-b-terraform-workspace.mjs"],
   ["canonical-backend-recovery", "scripts/aws/recover-stage-b-backend-task-definition.mjs"],
   ["backend-health-recovery", "scripts/aws/recover-production-backend-health.mjs"],
+  ["runtime-consumability-evidence", "scripts/aws/prepare-production-ecs-runtime-consumability.mjs"],
+  ["runtime-consumability-convergence", "scripts/aws/converge-production-ecs-runtime-policy.mjs"],
   ["existing-revision-forward-recovery", "scripts/aws/forward-recover-stage-b-existing-revision.mjs"],
   ["stage-b-state-pull", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["stage-a-state-read", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
@@ -136,6 +142,30 @@ const ROOT_DROP_SIGNING = Object.freeze({
   action: "kms:Sign", resources: [ROOT_DROP_SIGNING_KEY_ARN], context: { account: STAGE_B.account, region: STAGE_B.region },
   classification: "ROOT_DROP_SIGN", probe: "structural", policy: { sourceFile: "scripts/aws/produce-production-root-drop-evidence.mjs", sid: "root-drop-signing-boundary", livePolicyArn: null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: true,
 });
+
+const RUNTIME_ADMIN_CAPABILITIES = Object.freeze([
+  ["runtime-admin-identify", "runtime-consumability-evidence", "sts:GetCallerIdentity", ["*"] , false],
+  ["runtime-admin-get-role", "runtime-consumability-evidence", "iam:GetRole", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role", "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"], false],
+  ["runtime-admin-list-inline", "runtime-consumability-evidence", "iam:ListRolePolicies", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role", "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"], false],
+  ["runtime-admin-get-inline", "runtime-consumability-evidence", "iam:GetRolePolicy", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role", "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"], false],
+  ["runtime-admin-list-attached", "runtime-consumability-evidence", "iam:ListAttachedRolePolicies", ["*"], false],
+  ["runtime-admin-get-managed", "runtime-consumability-evidence", "iam:GetPolicy", ["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"], false],
+  ["runtime-admin-get-managed-version", "runtime-consumability-evidence", "iam:GetPolicyVersion", ["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"], false],
+  ["runtime-admin-describe-secret", "runtime-consumability-evidence", "secretsmanager:DescribeSecret", ["arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"], false],
+  ["runtime-admin-get-secret-value", "runtime-consumability-evidence", "secretsmanager:GetSecretValue", ["arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"], false],
+  ["runtime-admin-list-secret-versions", "runtime-consumability-evidence", "secretsmanager:ListSecretVersionIds", ["arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"], false],
+  ["runtime-admin-read-secret-resource-policy", "runtime-consumability-evidence", "secretsmanager:GetResourcePolicy", ["arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"], false],
+  ["runtime-admin-read-repository-policy", "runtime-consumability-evidence", "ecr:GetRepositoryPolicy", ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"], false],
+  ["runtime-admin-describe-log-groups", "runtime-consumability-evidence", "logs:DescribeLogGroups", ["*"], false],
+  ["runtime-admin-describe-runtime-image", "runtime-consumability-evidence", "ecr:DescribeImages", ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"], false],
+  ["runtime-admin-describe-runtime-key", "runtime-consumability-evidence", "kms:DescribeKey", [STAGE_B.approvalKmsKeyArn], false],
+  ["runtime-admin-read-runtime-key-policy", "runtime-consumability-evidence", "kms:GetKeyPolicy", [STAGE_B.approvalKmsKeyArn], false],
+  ["runtime-admin-simulate", "runtime-consumability-evidence", "iam:SimulatePrincipalPolicy", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role", "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"], false],
+  ["runtime-admin-sign", "runtime-consumability-evidence", "kms:Sign", [STAGE_B.approvalKmsKeyArn], true],
+  ["runtime-admin-verify-inventory-evidence", "runtime-consumability-evidence", "kms:Verify", [STAGE_B.approvalKmsKeyArn], false],
+  ["runtime-admin-verify-inventory-convergence", "runtime-consumability-convergence", "kms:Verify", [STAGE_B.approvalKmsKeyArn], false],
+  ["runtime-admin-converge-inline", "runtime-consumability-convergence", "iam:PutRolePolicy", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"], true],
+]);
 
 const RECOVERY_CAPABILITIES = Object.freeze([
   ["recovery-list-backend-revisions", "ecs:ListTaskDefinitions", ["*"]],
@@ -265,6 +295,16 @@ export function buildStageBDeploymentCapabilityGraph() {
     { id: "audit-task-details", action: "ecs:DescribeTasks" },
     { id: "backend-health-recovery-service-deployment-details", action: "ecs:DescribeServiceDeployments" },
     { id: "backend-health-recovery-service-revision-details", action: "ecs:DescribeServiceRevisions" },
+    { id: "runtime-candidate-secret-metadata", action: "secretsmanager:DescribeSecret" },
+    { id: "runtime-candidate-secret-json-key", action: "secretsmanager:GetSecretValue" },
+    { id: "runtime-candidate-secret-versions", action: "secretsmanager:ListSecretVersionIds" },
+    { id: "runtime-candidate-secret-resource-policy", action: "secretsmanager:GetResourcePolicy" },
+    { id: "runtime-candidate-log-group", action: "logs:DescribeLogGroups" },
+    { id: "runtime-candidate-kms-key", action: "kms:DescribeKey" },
+    { id: "runtime-candidate-kms-key-policy", action: "kms:GetKeyPolicy" },
+    { id: "runtime-legacy-inline-policy", action: "iam:GetRolePolicy" },
+    { id: "runtime-ecs-managed-policy-version", action: "iam:GetPolicyVersion" },
+    { id: "runtime-consumability-signature", action: "kms:Verify" },
   ]) probesByAction.set(probe.action, [...(probesByAction.get(probe.action) || []), probe.id]);
   const manifestCapabilities = [[manifest.required, false], [manifest.forbidden, true]].flatMap(([entries, forbidden]) => entries.map((entry) => ({
     id: `manifest-${entry.id}`, phase: entry.phase === "apply" ? "wrapper-apply" : ["recovery", "recovery-read"].includes(entry.phase) ? "backend-health-recovery" : entry.phase === "normal-activation-read" ? "normal-backend-activation" : entry.phase === "reference-audit" ? "reference-audit" : entry.phase === "preflight" ? "release-direct-read-preflight" : "refresh-only",
@@ -288,7 +328,7 @@ export function buildStageBDeploymentCapabilityGraph() {
     sourceFile: publisherPolicyPath, sourceFunction: statement.Sid, action, resources: asArray(statement.Resource), context: statement.Condition || {}, classification: statement.Effect === "Deny" ? "FORBIDDEN" : "GITHUB_IMAGE_MUTATION",
     probe: "structural", policy: { sourceFile: publisherPolicyPath, sid: statement.Sid, livePolicyArn: "github-oidc-role-policy", expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(readJson(publisherPolicyPath)))) }, required: true, mutation: statement.Effect !== "Deny",
   })));
-  const fixed = FIXED.map(([id, phase, identity, action, actionClass, sourceFile]) => ({ id, phase, identity, executor: sourceFile.endsWith(".yml") ? "github-actions" : "aws-cli", sourceFile, sourceFunction: id, action, resources: id === "admin-release-oidc-identify" ? ["*"] : id.startsWith("admin-release-oidc-trust-") ? [PRODUCTION_RELEASE_ROLE_ARN] : ["reviewed-exact-resource"], context: { account: "368992683803", region: "eu-west-2" }, classification: actionClass, probe: actionClass === "RELEASE_DIRECT_READ" ? "direct" : actionClass === "ADMIN_SIMULATION" ? "administrator-simulation" : "structural", policy: { sourceFile: identity === "RELEASE_DEPLOYER" ? manifestPath : sourceFile, sid: "identity-boundary", livePolicyArn: identity === "RELEASE_DEPLOYER" ? "signed-administrator-evidence" : null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: ["ADMIN_SIGN", "ADMIN_IAM_MUTATION", "GITHUB_IMAGE_MUTATION"].includes(actionClass) }));
+  const fixed = FIXED.map(([id, phase, identity, action, actionClass, sourceFile]) => ({ id, phase, identity, executor: sourceFile.endsWith(".yml") ? "github-actions" : "aws-cli", sourceFile, sourceFunction: id, action, resources: id === "admin-release-oidc-identify" ? ["*"] : id.startsWith("admin-release-oidc-trust-") ? [PRODUCTION_RELEASE_ROLE_ARN] : id === "release-verify-signature" ? [IMAGE_EVIDENCE_SIGNING_KEY_ARN] : ["reviewed-exact-resource"], context: { account: "368992683803", region: "eu-west-2" }, classification: actionClass, probe: actionClass === "RELEASE_DIRECT_READ" ? "direct" : actionClass === "ADMIN_SIMULATION" ? "administrator-simulation" : "structural", probeIds: probesByAction.get(action) || [], policy: { sourceFile: identity === "RELEASE_DEPLOYER" ? manifestPath : sourceFile, sid: "identity-boundary", livePolicyArn: identity === "RELEASE_DEPLOYER" ? "signed-administrator-evidence" : null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: ["ADMIN_SIGN", "ADMIN_IAM_MUTATION", "GITHUB_IMAGE_MUTATION"].includes(actionClass) }));
   const normalActivation = NORMAL_ACTIVATION_CAPABILITIES.map(([id, phase, identity, action, resources, mutation]) => {
     const policy = identity === "ADMINISTRATOR" || action === "ecs:UpdateService"
       ? { sourceFile: "scripts/aws/production-normal-backend-activation-policy.mjs", sid: id, livePolicyArn: action === "ecs:UpdateService" ? NORMAL_ACTIVATION.policyArn : null, expectedVersion: "state-derived-exact-revision", expectedPolicySha256: null }
@@ -306,7 +346,8 @@ export function buildStageBDeploymentCapabilityGraph() {
     return { id, phase: "existing-revision-forward-recovery", identity: "RELEASE_DEPLOYER", executor: "terraform", sourceFile: "scripts/aws/forward-recover-stage-b-existing-revision.mjs", sourceFunction: id, action, resources, context: { account: "368992683803", region: "eu-west-2" }, classification: /^(?:s3:PutObject|s3:DeleteObject)$/.test(action) ? "FORWARD_RECOVERY_IMPORT_MUTATION" : "FORWARD_RECOVERY_READ", probe: "administrator-simulation", probeIds: [], policy: authority(entry, false, policies), required: true, mutation: /^(?:s3:PutObject|s3:DeleteObject)$/.test(action) };
   });
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: !/^(?:ecr:|kms:Verify|secretsmanager:Get|s3:Get)/.test(action) }));
-  const capabilities = [...fixed, ...normalActivation, ROOT_DROP_SIGNING, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const runtimeAdmin = RUNTIME_ADMIN_CAPABILITIES.map(([id, phase, action, resources, mutation]) => ({ id, phase, identity: "ADMINISTRATOR", executor: "aws-cli", sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/prepare-production-ecs-runtime-consumability.mjs", sourceFunction: id, action, resources, context: { account: STAGE_B.account, region: STAGE_B.region }, classification: mutation ? "ADMIN_IAM_OR_SIGNING_MUTATION" : "ADMIN_RUNTIME_CLOSURE_READ", probe: action === "iam:SimulatePrincipalPolicy" ? "administrator-simulation" : "administrator-live-read", probeIds: [], policy: { sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/production-ecs-runtime-consumability.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation }));
+  const capabilities = [...fixed, ...normalActivation, ROOT_DROP_SIGNING, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
@@ -315,7 +356,8 @@ export function buildStageBDeploymentCapabilityGraph() {
       { id: "audit-service-details", action: "ecs:DescribeServices" },
       { id: "audit-task-details", action: "ecs:DescribeTasks" },
       { id: "backend-health-recovery-service-deployment-details", action: "ecs:DescribeServiceDeployments" },
-      { id: "backend-health-recovery-service-revision-details", action: "ecs:DescribeServiceRevisions" }], sourceScan: discoverAwsCliActions(),
+      { id: "backend-health-recovery-service-revision-details", action: "ecs:DescribeServiceRevisions" },
+      { id: "runtime-candidate-secret-resource-policy", action: "secretsmanager:GetResourcePolicy" }], sourceScan: discoverAwsCliActions(),
     artifactContracts: ["protected-checkout", "image-impact", "schema-v3-image-evidence", "stage-a-handoff", "tfvars-binding-report", "refresh-only", "saved-plan", "canonical-plan-json", "reference-audit", "plan-capability-manifest", "signed-permission-report"],
     stateContracts: ["stage-a-exact-object-lineage-minimum-serial-sha", "stage-b-direct-key-lineage-minimum-serial-sha", "stage-b-serial-stable-plan-to-apply"],
     freshnessContracts: [{ artifact: "image-evidence", maxAgeSeconds: 86400 }, { artifact: "reference-audit", maxAgeSeconds: STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS }, { artifact: "permission-report", maxAgeSeconds: STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS }],
@@ -326,7 +368,7 @@ export function buildStageBDeploymentCapabilityGraph() {
 export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILITY_GRAPH_PATH)) {
   const expected = buildStageBDeploymentCapabilityGraph();
   if (canonicalizeJson(graph) !== canonicalizeJson(expected)) throw new Error("Stage B deployment capability graph is stale or incomplete.");
-  if (graph.phases.length !== 38 || new Set(graph.phases.map(({ id }) => id)).size !== 38) throw new Error("Stage B capability graph phase coverage is incomplete.");
+  if (graph.phases.length !== PHASES.length || new Set(graph.phases.map(({ id }) => id)).size !== PHASES.length) throw new Error("Stage B capability graph phase coverage is incomplete.");
   if (new Set(graph.capabilities.map(({ id }) => id)).size !== graph.capabilities.length) throw new Error("Stage B capability IDs are not unique.");
   if (graph.capabilities.some(({ identity, action }) => !identity || !action)) throw new Error("Stage B capability identity is ambiguous.");
   for (const [phase, ids] of Object.entries(PHASE_CAPABILITY_REQUIREMENTS)) {

@@ -45,12 +45,14 @@ export async function collectCanonicalBackendRecoveryCensus({ list, describe } =
   if (typeof list !== "function" || typeof describe !== "function") throw new Error("Canonical backend recovery census adapters are required.");
   const arns = [];
   const seenTokens = new Set();
-  let nextToken;
+  let nextToken; let pageCount = 0;
   do {
+    if (++pageCount > 100) throw new Error("ACTIVE backend candidate revision census exceeded its bounded page limit.");
     const result = await list(nextToken);
     if (!Array.isArray(result?.taskDefinitionArns)) throw new Error("ACTIVE backend candidate revision census was incomplete.");
     arns.push(...result.taskDefinitionArns);
     nextToken = result.nextToken;
+    if (nextToken !== undefined && (typeof nextToken !== "string" || !nextToken)) throw new Error("ACTIVE backend candidate revision census pagination token was malformed.");
     if (nextToken && seenTokens.has(nextToken)) throw new Error("ACTIVE backend candidate revision census pagination repeated a token.");
     if (nextToken) seenTokens.add(nextToken);
   } while (nextToken);
@@ -162,9 +164,10 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   const register = async ({ taskDefinition, tags }) => aws(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify({ ...taskDefinition, tags })]);
   const describe = async (arn) => aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]);
   const census = () => collectCanonicalBackendRecoveryCensus({ list: (nextToken) => {
-    const args = ["ecs", "list-task-definitions", "--family-prefix", STAGE_B_BACKEND_RECOVERY.family, "--status", "ACTIVE", "--sort", "DESC"];
-    if (nextToken) args.push("--next-token", nextToken);
-    return aws(args);
+    const args = ["ecs", "list-task-definitions", "--family-prefix", STAGE_B_BACKEND_RECOVERY.family, "--status", "ACTIVE", "--sort", "DESC", "--page-size", "100", "--max-items", "100"];
+    if (nextToken) args.push("--starting-token", nextToken);
+    const response = aws(args);
+    return { ...response, nextToken: response.NextToken };
   }, describe });
   const removeState = async ({ address, expectedArn }) => {
     if (address !== STAGE_B_BACKEND_RECOVERY.address || expectedArn !== STAGE_B_BACKEND_RECOVERY.predecessorArn) throw new Error("Recovery attempted an unreviewed Terraform state removal.");

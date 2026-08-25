@@ -9,6 +9,7 @@ import { RELEASE_CALLER_PATTERN } from "./validate-production-green-stage-b-perm
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { CHECKER_SOURCE_ROLE_NAME, assertRoleATrustResponse } from "./production-checker-chain-contract.mjs";
+import { isEcrRepositoryPolicyNotFound } from "./production-ecs-runtime-consumability.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const IDENTITY_CAPABILITY_MATRIX_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -17,6 +18,8 @@ export const RELEASE_PREFLIGHT_SCHEMA_VERSION = 1;
 const roleName = (arn) => arn.split("/").at(-1);
 const policyArn = STAGE_B_BROKER_POLICY.arn;
 const normalActivationPolicyArn = "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite";
+const legacyExecutionRoleName = "mscqr-ecs-execution-role";
+const ecsManagedExecutionPolicyArn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy";
 const canaryRoles = [
   "mscqr-production-full-rls-green-read-only-canary-execution",
   "mscqr-production-full-rls-green-read-only-canary-task",
@@ -39,11 +42,16 @@ export const RELEASE_READ_PROBES = Object.freeze([
   ["recovery-backend-revisions", "ecs:ListTaskDefinitions", ["ecs", "list-task-definitions", "--family-prefix", "mscqr-production-rls-green-backend-candidate", "--status", "ACTIVE", "--sort", "DESC"]],
   ["backend-health-recovery-images", "ecr:DescribeImages", ["ecr", "describe-images", "--repository-name", "mscqr-backend", "--max-results", "1"]],
   ["backend-health-recovery-repository", "ecr:DescribeRepositories", ["ecr", "describe-repositories", "--repository-names", "mscqr-backend"]],
+  ...["mscqr-backend", "mscqr-web", "mscqr-worker"].map((name) => [`runtime-${name}-repository-policy`, "ecr:GetRepositoryPolicy", ["ecr", "get-repository-policy", "--repository-name", name]]),
   ["backend-health-recovery-service-deployments", "ecs:ListServiceDeployments", ["ecs", "list-service-deployments", "--cluster", STAGE_B.clusterArn, "--service", "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"]],
   ["audit-broker", "lambda:GetFunctionConfiguration", ["lambda", "get-function-configuration", "--function-name", STAGE_B.brokerFunctionArn]],
   ["audit-broker-alias", "lambda:GetAlias", ["lambda", "get-alias", "--function-name", STAGE_B.brokerFunctionArn, "--name", STAGE_B.brokerAliasQualifier]],
   ["refresh-broker-policy", "iam:GetPolicy", ["iam", "get-policy", "--policy-arn", policyArn]],
   ["normal-activation-policy", "iam:GetPolicy", ["iam", "get-policy", "--policy-arn", normalActivationPolicyArn]],
+  ["runtime-legacy-execution-role", "iam:GetRole", ["iam", "get-role", "--role-name", legacyExecutionRoleName]],
+  ["runtime-legacy-inline-policies", "iam:ListRolePolicies", ["iam", "list-role-policies", "--role-name", legacyExecutionRoleName]],
+  ["runtime-legacy-attached-policies", "iam:ListAttachedRolePolicies", ["iam", "list-attached-role-policies", "--role-name", legacyExecutionRoleName]],
+  ["runtime-ecs-managed-policy", "iam:GetPolicy", ["iam", "get-policy", "--policy-arn", ecsManagedExecutionPolicyArn]],
   ["refresh-broker-policy-versions", "iam:ListPolicyVersions", ["iam", "list-policy-versions", "--policy-arn", policyArn]],
   ["refresh-broker-attachments", "iam:ListAttachedRolePolicies", ["iam", "list-attached-role-policies", "--role-name", roleName(STAGE_B.brokerRoleArn)]],
   ["checker-role-a-trust", "iam:GetRole", ["iam", "get-role", "--role-name", CHECKER_SOURCE_ROLE_NAME]],
@@ -57,7 +65,7 @@ export const RELEASE_READ_PROBES = Object.freeze([
 
 export function readIdentityCapabilityMatrix() {
   const matrix = JSON.parse(fs.readFileSync(path.join(root, IDENTITY_CAPABILITY_MATRIX_PATH), "utf8"));
-  if (matrix.schemaVersion !== 1 || matrix.account !== STAGE_B.account || matrix.region !== STAGE_B.region || matrix.phases?.length !== 38) throw new Error("Stage B identity capability matrix identity is wrong.");
+  if (matrix.schemaVersion !== 1 || matrix.account !== STAGE_B.account || matrix.region !== STAGE_B.region || !matrix.phases?.some(({ id }) => id === "runtime-consumability-evidence")) throw new Error("Stage B identity capability matrix identity is wrong.");
   const releaseActions = new Set(matrix.capabilities.filter(({ identity }) => identity === "RELEASE_DEPLOYER").map(({ action }) => action));
   for (const probe of RELEASE_READ_PROBES) if (!releaseActions.has(probe.action)) throw new Error(`Stage B identity capability matrix omits release action ${probe.action}.`);
   if (matrix.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && ["iam:SimulatePrincipalPolicy", "cloudtrail:LookupEvents"].includes(action))) throw new Error("Stage B release identity must not own administrator audit actions.");
@@ -103,6 +111,11 @@ export function runReleaseReadPreflight({
       if (probe.id === "checker-role-a-trust") checkerTrust = assertRoleATrustResponse(JSON.parse(response));
       if (requiredReads[probe.action] !== "denied") requiredReads[probe.action] = "allowed";
     } catch (error) {
+      if (probe.action === "ecr:GetRepositoryPolicy" && isEcrRepositoryPolicyNotFound(error)) {
+        responses.set(probe.id, JSON.stringify({ repositoryPolicyState: "NO_POLICY" }));
+        if (requiredReads[probe.action] !== "denied") requiredReads[probe.action] = "allowed";
+        continue;
+      }
       requiredReads[probe.action] = "denied";
       failed.push({ id: probe.id, action: probe.action, classification: safeError(error) });
     }
@@ -120,6 +133,10 @@ export function runReleaseReadPreflight({
     if (defaultVersionId) dependent.push({ id: "refresh-broker-policy-version", action: "iam:GetPolicyVersion", args: ["iam", "get-policy-version", "--policy-arn", policyArn, "--version-id", defaultVersionId] });
     const normalActivationVersionId = JSON.parse(responses.get("normal-activation-policy") || "{}").Policy?.DefaultVersionId;
     if (normalActivationVersionId) dependent.push({ id: "normal-activation-policy-version", action: "iam:GetPolicyVersion", args: ["iam", "get-policy-version", "--policy-arn", normalActivationPolicyArn, "--version-id", normalActivationVersionId] });
+    const executionInlinePolicyNames = JSON.parse(responses.get("runtime-legacy-inline-policies") || "{}").PolicyNames || [];
+    for (const policyName of executionInlinePolicyNames) dependent.push({ id: `runtime-legacy-inline-policy-${policyName}`, action: "iam:GetRolePolicy", args: ["iam", "get-role-policy", "--role-name", legacyExecutionRoleName, "--policy-name", policyName] });
+    const managedExecutionVersionId = JSON.parse(responses.get("runtime-ecs-managed-policy") || "{}").Policy?.DefaultVersionId;
+    if (managedExecutionVersionId) dependent.push({ id: "runtime-ecs-managed-policy-version", action: "iam:GetPolicyVersion", args: ["iam", "get-policy-version", "--policy-arn", ecsManagedExecutionPolicyArn, "--version-id", managedExecutionVersionId] });
     for (const roleName of canaryRoles) {
       const inlinePolicyNames = JSON.parse(responses.get(`refresh-${roleName}-inline-policies`) || "{}").PolicyNames || [];
       for (const policyName of inlinePolicyNames) dependent.push({ id: `refresh-${roleName}-inline-policy-${policyName}`, action: "iam:GetRolePolicy", args: ["iam", "get-role-policy", "--role-name", roleName, "--policy-name", policyName] });

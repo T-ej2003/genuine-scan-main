@@ -32,6 +32,7 @@ const artifactSigningBindings = Object.freeze({
   ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-AbCd12",
 });
 const artifactSigningBindingSha256 = "7".repeat(64);
+const runtimeConsumabilitySha256 = "8".repeat(64);
 const imageFixture = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: sourceSha, imageDigests: {
   backend: digest,
   worker: "sha256:949a4f25d9cc5d67358722c7af75e91bd9a944e75496c76fa36b4677fd152cfe",
@@ -42,12 +43,13 @@ const approval = {
   ticket: "INC-BACKEND-IMAGE-0001", approvedBy: "security-reviewer", approverRole: "Security Lead",
   reason: "Restore backend health so canonical dual-slot rotation can run", verificationRef: "https://example.invalid/recovery/1",
   sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
+  runtimeConsumabilitySha256,
 };
-const authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, approval });
+const authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, approval });
 const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: digest, imageReleaseSha: imageFixture.imageReleaseSha, artifactSigningBindings });
 const base = () => ({
   sourceSha,
-  service: { clusterArn: `arn:aws:ecs:eu-west-2:368992683803:cluster/${BACKEND_HEALTH_RECOVERY.cluster}`, serviceName: BACKEND_HEALTH_RECOVERY.service, taskDefinition: current.taskDefinition.taskDefinitionArn, desiredCount: 2, networkConfiguration: { awsvpcConfiguration: { subnets: ["subnet-fixture"], securityGroups: ["sg-fixture"], assignPublicIp: "DISABLED" } }, loadBalancers: [{ targetGroupArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/fixture/123", containerName: "backend", containerPort: 4000 }] },
+  service: { clusterArn: `arn:aws:ecs:eu-west-2:368992683803:cluster/${BACKEND_HEALTH_RECOVERY.cluster}`, serviceName: BACKEND_HEALTH_RECOVERY.service, taskDefinition: current.taskDefinition.taskDefinitionArn, desiredCount: 2, runningCount: 0, pendingCount: 0, networkConfiguration: { awsvpcConfiguration: { subnets: ["subnet-fixture"], securityGroups: ["sg-fixture"], assignPublicIp: "DISABLED" } }, loadBalancers: [{ targetGroupArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/fixture/123", containerName: "backend", containerPort: 4000 }] },
   currentTaskDefinition: structuredClone(current),
   currentImageExists: false,
   stoppedReasons: [`TaskFailedToStart: CannotPullContainerError: image ${current.taskDefinition.containerDefinitions[0].image} not found`],
@@ -58,12 +60,14 @@ const base = () => ({
   environmentApproval,
   artifactSigningBindings,
   artifactSigningBindingSha256,
+  runtimeConsumabilitySha256,
   githubContext: { ...githubContext },
   executionActor: "release-operator",
   candidate: structuredClone(candidate),
 });
 const healthy = Object.freeze({ healthy: true, success: true, status: "ready" });
-const runLegacyBackendHealthRecovery = (input, adapters) => runRecoveryContract(input, { record: async () => {}, ...adapters });
+const runtimeClosure = Object.freeze({ status: "PASS", evidenceSha256: runtimeConsumabilitySha256, liveVerifiedAt: new Date().toISOString() });
+const runLegacyBackendHealthRecovery = (input, adapters) => runRecoveryContract(input, { record: async () => {}, verifyRuntimeClosure: async () => runtimeClosure, ...adapters });
 const rollbackProof = ({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn, rollbackDigest, forwardTaskDefinitionArn, forwardTaskDefinitionFingerprint = "f".repeat(64), forwardDigest = digest } = {}) => {
   const forwardServiceRevisionArn = rollbackServiceRevisionArn.replace("minus-1", "failed-forward");
   const rollbackEcsServiceDeploymentId = "ecs-svc/3599551810517927503";
@@ -163,6 +167,186 @@ test("production failure fixture lacks startup prerequisites while corrected can
   }
 });
 
+test("authenticated terminal :49-style runtime failure is reconciled but never reused", async () => {
+  const failed = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:49", revision: 49, status: "ACTIVE" }, tags: [] };
+  const failedRecoveryEvidenceSha256 = "c".repeat(64);
+  const failedRecoveryEvidenceReferenceSha256 = "d".repeat(64);
+  const failedFingerprint = taskDefinitionFingerprint(failed, []);
+  const knownFailedRevisions = [{ repository: "T-ej2003/genuine-scan-main", taskDefinitionArn: failed.taskDefinition.taskDefinitionArn, candidateFingerprint: failedFingerprint, taskDefinitionFingerprint: failedFingerprint, evidenceFileSha256: "a".repeat(64), workflowRunId: "32759665989", status: "SERVICE_STABILIZATION_FAILED", classification: "TERMINAL_FAILURE", failureClassification: "SERVICE_STABILIZATION_FAILED", sourceSha: "b".repeat(40), service: BACKEND_HEALTH_RECOVERY.service, releaseMode: BACKEND_HEALTH_RECOVERY.kind, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, artifactSigningBindingSha256, runtimeConsumabilitySha256, predecessorHistoryReferenceSha256: null, initialRevisionCensusSha256: null, expectedRevisionCensusSha256: null, registrations: 1, updates: 1 }];
+  const boundApproval = { ...approval, failedRecoveryEvidenceSha256, failedRecoveryEvidenceReferenceSha256 };
+  const boundAuthorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256, failedRecoveryEvidenceReferenceSha256, approval: boundApproval });
+  const input = base(); input.authorization = boundAuthorization; input.authenticatedFailedRecoveryEvidence = { envelopeSha256: failedRecoveryEvidenceSha256, referenceSha256: failedRecoveryEvidenceReferenceSha256, recoveryHistory: knownFailedRevisions, knownFailedRevisions, interruptedRecoveries: [] }; input.service.taskDefinition = failed.taskDefinition.taskDefinitionArn; input.currentImageExists = true; input.stoppedReasons = ["ResourceInitializationError: execution role denied exact runtime secret"];
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50";
+  const target = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 50, status: "ACTIVE" }, tags: [] };
+  let registered = 0; let updated = 0; let serviceTarget = failed.taskDefinition.taskDefinitionArn;
+  const result = await runLegacyBackendHealthRecovery(input, {
+    census: async () => [current, failed, ...(registered ? [target] : [])],
+    register: async () => { registered += 1; return target; }, describe: async () => target,
+    readService: async () => ({ ...input.service, taskDefinition: serviceTarget, runningCount: serviceTarget === targetArn ? 2 : 0, pendingCount: 0 }),
+    updateService: async (arn) => { updated += 1; serviceTarget = arn; }, waitStable: async () => {},
+    readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy,
+  });
+  assert.equal(result.targetArn, targetArn); assert.equal(registered, 1); assert.equal(updated, 1); assert.notEqual(result.targetArn, failed.taskDefinition.taskDefinitionArn);
+
+  for (const state of [{ runningCount: 1, pendingCount: 0 }, { runningCount: 0, pendingCount: 1 }]) {
+    const unsafe = { ...input, service: { ...input.service, ...state } };
+    await assert.rejects(() => runLegacyBackendHealthRecovery(unsafe, {
+      census: async () => [current, failed], verifyRuntimeClosure: async () => runtimeClosure,
+      register: async () => {}, describe: async () => target, readService: async () => unsafe.service,
+      updateService: async () => {}, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy, record: async () => {},
+    }), /unavailable approved terminal recovery failure/);
+  }
+});
+
+test("authenticated mutation interruptions are reconciled from live ECS state before eligibility", async (t) => {
+  const interruptedArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:49";
+  const recoveredArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50";
+  const interrupted = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: interruptedArn, revision: 49, status: "ACTIVE" }, tags: [] };
+  const recovered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: recoveredArn, revision: 50, status: "ACTIVE" }, tags: [] };
+  const identities = (items) => items.map((item) => ({ taskDefinitionArn: item.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: taskDefinitionFingerprint(item, item.tags || []) })).sort((a, b) => a.taskDefinitionArn.localeCompare(b.taskDefinitionArn));
+  const initialRevisionCensusSha256 = canonicalSha256(identities([current]));
+  const expectedRevisionCensusSha256 = canonicalSha256(identities([current, interrupted]));
+  const failedRecoveryEvidenceSha256 = "c".repeat(64);
+  const failedRecoveryEvidenceReferenceSha256 = "d".repeat(64);
+  const makeInterruption = (status = "SERVICE_UPDATE_CONFIRMED") => ({
+    repository: "T-ej2003/genuine-scan-main", workflowRunId: "32759665989", sourceSha, service: BACKEND_HEALTH_RECOVERY.service,
+    releaseMode: BACKEND_HEALTH_RECOVERY.kind, taskDefinitionArn: interruptedArn, candidateFingerprint: taskDefinitionFingerprint(interrupted, []), taskDefinitionFingerprint: taskDefinitionFingerprint(interrupted, []),
+    recoveryImageDigest: digest, artifactSigningBindingSha256, runtimeConsumabilitySha256, predecessorHistoryReferenceSha256: null, status, classification: "INTERRUPTED_MUTATION", failureClassification: null,
+    currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, initialRevisionCensusSha256, expectedRevisionCensusSha256,
+    registrations: 1, updates: status === "SERVICE_UPDATE_CONFIRMED" ? 1 : 0, evidenceFileSha256: "a".repeat(64),
+  });
+  const makeInput = (service, interruption = makeInterruption()) => {
+    const boundApproval = { ...approval, failedRecoveryEvidenceSha256, failedRecoveryEvidenceReferenceSha256 };
+    const boundAuthorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256, failedRecoveryEvidenceReferenceSha256, approval: boundApproval });
+    return { ...base(), service, currentImageExists: true, authorization: boundAuthorization,
+      authenticatedFailedRecoveryEvidence: { envelopeSha256: failedRecoveryEvidenceSha256, referenceSha256: failedRecoveryEvidenceReferenceSha256, recoveryHistory: [interruption], knownFailedRevisions: [], interruptedRecoveries: [interruption] } };
+  };
+  const deployment = (rolloutState) => ({ id: "ecs-svc/3599551810517927503", taskDefinition: interruptedArn, rolloutState, createdAt: "2026-08-24T18:00:00.000Z" });
+  const failedTasks = [1, 2].map((n) => ({ taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${String(n).padStart(32, "0")}`, startedBy: "ecs-svc/3599551810517927503", taskDefinitionArn: interruptedArn,
+    createdAt: `2026-08-24T18:0${n}:00.000Z`, stoppedAt: `2026-08-24T18:0${n}:30.000Z`, stoppedReason: "ResourceInitializationError: execution role denied secretsmanager:GetSecretValue",
+    containers: [{ name: "backend", image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`, imageDigest: digest }] }));
+  const snapshot = (service, overrides = {}) => ({ service, census: [current, interrupted], runningTasks: [], stoppedTasks: [], health: null, ...overrides });
+
+  await t.test("healthy candidate is recognized as success and never superseded", async () => {
+    const service = { ...base().service, taskDefinition: interruptedArn, runningCount: 2, pendingCount: 0, deployments: [deployment("COMPLETED")] };
+    let registrations = 0; let updates = 0;
+    const result = await runLegacyBackendHealthRecovery(makeInput(service), {
+      readInterruptedRecoveryState: async () => snapshot(service, { runningTasks: [1, 2].map(() => ({ taskDefinitionArn: interruptedArn, imageDigest: digest, healthStatus: "HEALTHY" })), health: healthy }),
+      census: async () => [current, interrupted], register: async () => { registrations += 1; }, describe: async () => interrupted,
+      readService: async () => service, updateService: async () => { updates += 1; }, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
+    });
+    assert.equal(result.reconciledInterruption, true); assert.deepEqual({ registrations, updates }, { registrations: 0, updates: 0 });
+  });
+
+  await t.test("progressing candidate blocks another recovery", async () => {
+    const service = { ...base().service, taskDefinition: interruptedArn, runningCount: 1, pendingCount: 1, deployments: [deployment("IN_PROGRESS")] };
+    let mutations = 0;
+    await assert.rejects(() => runLegacyBackendHealthRecovery(makeInput(service), {
+      readInterruptedRecoveryState: async () => snapshot(service), census: async () => [current, interrupted], register: async () => { mutations += 1; }, describe: async () => interrupted,
+      readService: async () => service, updateService: async () => { mutations += 1; }, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
+    }), /still progressing|remains in progress/);
+    assert.equal(mutations, 0);
+  });
+
+  await t.test("two current exact startup failures authorize a fresh revision without reusing the interrupted candidate", async () => {
+    let service = { ...base().service, taskDefinition: interruptedArn, deployments: [deployment("FAILED")] };
+    let registered = 0; let updated = 0;
+    const readSnapshot = async () => snapshot(service, { census: [current, interrupted, ...(registered ? [recovered] : [])], stoppedTasks: failedTasks });
+    const result = await runLegacyBackendHealthRecovery(makeInput(service), {
+      readInterruptedRecoveryState: readSnapshot, census: async () => [current, interrupted, ...(registered ? [recovered] : [])],
+      register: async () => { registered += 1; return recovered; }, describe: async () => recovered,
+      readService: async () => service, updateService: async (arn) => { updated += 1; service = { ...service, taskDefinition: arn, runningCount: 2, deployments: [] }; },
+      waitStable: async () => {}, readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: recoveredArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy,
+    });
+    assert.equal(result.targetArn, recoveredArn); assert.deepEqual({ registered, updated }, { registered: 1, updated: 1 });
+  });
+
+  await t.test("attempted update on the old service resumes, while confirmed or concurrent service state fails closed", async () => {
+    const oldService = { ...base().service, deployments: [] };
+    const attempted = makeInterruption("SERVICE_UPDATE_ATTEMPTED");
+    let service = oldService; let updates = 0;
+    const resumable = makeInput(service, attempted); resumable.currentImageExists = false;
+    const result = await runLegacyBackendHealthRecovery(resumable, {
+      readInterruptedRecoveryState: async () => snapshot(service), census: async () => [current, interrupted], register: async () => assert.fail("registered candidate must be reused"), describe: async () => interrupted,
+      readService: async () => service, updateService: async (arn) => { updates += 1; service = { ...service, taskDefinition: arn, runningCount: 2 }; }, waitStable: async () => {},
+      readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: interruptedArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy,
+    });
+    assert.equal(result.targetArn, interruptedArn); assert.equal(updates, 1);
+    await assert.rejects(() => runLegacyBackendHealthRecovery(makeInput(oldService), {
+      readInterruptedRecoveryState: async () => snapshot(oldService), census: async () => [current, interrupted], register: async () => {}, describe: async () => interrupted,
+      readService: async () => oldService, updateService: async () => {}, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
+    }), /Confirmed interrupted service update disagrees/);
+    const foreign = { ...oldService, taskDefinition: recoveredArn };
+    await assert.rejects(() => runLegacyBackendHealthRecovery(makeInput(foreign), {
+      readInterruptedRecoveryState: async () => snapshot(foreign), census: async () => [current, interrupted], register: async () => {}, describe: async () => interrupted,
+      readService: async () => foreign, updateService: async () => {}, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
+    }), /unauthenticated revision/);
+  });
+
+  await t.test("historical, mixed, duplicated, or changing task-attempt proof cannot authorize supersession", async () => {
+    const failedService = { ...base().service, taskDefinition: interruptedArn, deployments: [deployment("FAILED")] };
+    const historical = { ...failedTasks[0], taskArn: failedTasks[0].taskArn.replace(/1$/, "a"), createdAt: "2026-08-24T17:59:00.000Z", stoppedAt: "2026-08-24T17:59:30.000Z" };
+    for (const stoppedTasks of [[historical, failedTasks[0]], [failedTasks[0], failedTasks[0]], [{ ...failedTasks[0], startedBy: "ecs-svc/999" }, failedTasks[1]]]) {
+      let mutations = 0;
+      await assert.rejects(() => runLegacyBackendHealthRecovery(makeInput(failedService), {
+        readInterruptedRecoveryState: async () => snapshot(failedService, { stoppedTasks }), census: async () => [current, interrupted],
+        register: async () => { mutations += 1; }, describe: async () => interrupted, readService: async () => failedService,
+        updateService: async () => { mutations += 1; }, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
+      }), /outcome is ambiguous/);
+      assert.equal(mutations, 0);
+    }
+    let reads = 0; let registrations = 0;
+    await assert.rejects(() => runLegacyBackendHealthRecovery(makeInput(failedService), {
+      readInterruptedRecoveryState: async () => snapshot(failedService, { stoppedTasks: ++reads === 1 ? failedTasks : [failedTasks[0]] }),
+      census: async () => [current, interrupted], register: async () => { registrations += 1; }, describe: async () => interrupted,
+      readService: async () => failedService, updateService: async () => {}, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
+    }), /outcome is ambiguous|live state changed|did not converge/);
+    assert.equal(registrations, 0);
+
+    reads = 0;
+    const replacementFailures = failedTasks.map((task, index) => ({ ...task, taskArn: task.taskArn.replace(/[12]$/, String(index + 3)) }));
+    await assert.rejects(() => runLegacyBackendHealthRecovery(makeInput(failedService), {
+      readInterruptedRecoveryState: async () => snapshot(failedService, { stoppedTasks: ++reads === 1 ? failedTasks : replacementFailures }),
+      census: async () => [current, interrupted], register: async () => { registrations += 1; }, describe: async () => interrupted,
+      readService: async () => failedService, updateService: async () => {}, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
+    }), /live state changed|did not converge/);
+    assert.equal(registrations, 0);
+  });
+
+  await t.test("registration intent reconciles both no-effect and response-loss outcomes", async () => {
+    const intent = { ...makeInterruption("TASK_DEFINITION_REGISTRATION_ATTEMPTED"), taskDefinitionArn: null, registrations: 0, updates: 0, expectedRevisionCensusSha256: null };
+    for (const responseLost of [false, true]) {
+      let service = { ...base().service, deployments: [] }; let registered = 0; let updated = 0;
+      const input = makeInput(service, intent); input.currentImageExists = false;
+      const liveCandidate = responseLost ? interrupted : recovered;
+      const existing = responseLost ? [interrupted] : [];
+      const result = await runLegacyBackendHealthRecovery(input, {
+        readInterruptedRecoveryState: async () => snapshot(service, { census: [current, ...existing, ...(registered ? [recovered] : [])] }),
+        census: async () => [current, ...existing, ...(registered ? [recovered] : [])],
+        register: async () => { registered += 1; return recovered; }, describe: async () => liveCandidate,
+        readService: async () => service, updateService: async (arn) => { updated += 1; service = { ...service, taskDefinition: arn, runningCount: 2 }; },
+        waitStable: async () => {}, readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: liveCandidate.taskDefinition.taskDefinitionArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy,
+      });
+      assert.deepEqual({ target: result.targetArn, registered, updated }, { target: liveCandidate.taskDefinition.taskDefinitionArn, registered: responseLost ? 0 : 1, updated: 1 });
+    }
+  });
+});
+
+test("a forged failed-revision summary cannot bless a healthy newer revision", async () => {
+  const healthyNewer = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:49", revision: 49, status: "ACTIVE" }, tags: [] };
+  const forged = structuredClone(authorization);
+  delete forged.failedRecoveryEvidenceSha256;
+  forged.knownFailedRevisions = [{ taskDefinitionArn: healthyNewer.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: taskDefinitionFingerprint(healthyNewer, []), evidenceSha256: "f".repeat(64), workflowRunId: "32759665989", status: "SERVICE_STABILIZATION_FAILED", sourceSha, service: BACKEND_HEALTH_RECOVERY.service, recoveryImageDigest: digest }];
+  forged.authorizationSha256 = canonicalSha256(Object.fromEntries(Object.entries(forged).filter(([key]) => key !== "authorizationSha256")));
+  const input = base(); input.authorization = forged; input.service.taskDefinition = healthyNewer.taskDefinition.taskDefinitionArn; input.stoppedReasons = ["ResourceInitializationError"];
+  let registrations = 0; let updates = 0;
+  await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
+    census: async () => [current, healthyNewer], register: async () => { registrations += 1; }, describe: async () => healthyNewer,
+    readService: async () => input.service, updateService: async () => { updates += 1; }, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
+  }), /authorization schema|degradation is not authenticated/);
+  assert.equal(registrations, 0); assert.equal(updates, 0);
+});
+
 test("authenticated cross-source failed revision is audited but never reused", async () => {
   const oldDigest = `sha256:${"a".repeat(64)}`;
   const oldSha = "b".repeat(40);
@@ -180,7 +364,7 @@ test("authenticated cross-source failed revision is audited but never reused", a
     forwardTaskDefinitionArn: failed48.taskDefinition.taskDefinitionArn, forwardTaskDefinitionFingerprint: taskDefinitionFingerprint(failed48, failed48.tags), forwardDigest: oldDigest });
   const rollbackService = { ...base().service, runningCount: 0, pendingCount: 0, deployments: [{ status: "PRIMARY", taskDefinition: current.taskDefinition.taskDefinitionArn, rolloutState: "IN_PROGRESS", desiredCount: 2, runningCount: 0, pendingCount: 0 }] };
   const stalledApproval = { ...approval, rollbackDeploymentArn, rollbackTargetTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, rollbackTargetDigest: rollbackDigest };
-  const stalledAuthorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, rollbackProof: proof, approval: stalledApproval });
+  const stalledAuthorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, rollbackProof: proof, approval: stalledApproval });
   const input = { ...base(), service: rollbackService, authorization: stalledAuthorization };
   let registrations = 0;
   let service = rollbackService;
@@ -235,14 +419,15 @@ test("authenticated stalled rollback with an unrecoverable exact target may be s
   const rollbackServiceRevisionArn = "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/future-N-minus-1";
   const rollbackTargetDigest = current.taskDefinition.containerDefinitions[0].image.split("@")[1];
   const rollbackService = { ...base().service, runningCount: 0, pendingCount: 0, deployments: [{ status: "PRIMARY", taskDefinition: current.taskDefinition.taskDefinitionArn, rolloutState: "IN_PROGRESS", desiredCount: 2, runningCount: 0, pendingCount: 0 }] };
-  const proof = rollbackProof({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, rollbackDigest: rollbackTargetDigest, forwardTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48" });
+  const forward = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", revision: 48, status: "ACTIVE" }, tags: [] };
+  const proof = rollbackProof({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, rollbackDigest: rollbackTargetDigest, forwardTaskDefinitionArn: forward.taskDefinition.taskDefinitionArn, forwardTaskDefinitionFingerprint: taskDefinitionFingerprint(forward, []) });
   const stalledApproval = { ...approval, rollbackDeploymentArn, rollbackTargetTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, rollbackTargetDigest };
-  const stalledAuthorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, rollbackProof: proof, approval: stalledApproval });
+  const stalledAuthorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, rollbackProof: proof, approval: stalledApproval });
   const input = { ...base(), service: rollbackService, authorization: stalledAuthorization };
   assert.equal(assertLegacyBackendRecoveryEligibility(input).rollbackProof.classification, "ROLLBACK_STALLED_UNRECOVERABLE_TARGET");
   let mutations = 0;
   await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
-    census: async () => [], register: async () => { mutations += 1; }, describe: async () => ({}), readService: async () => rollbackService,
+    census: async () => [current, forward], register: async () => { mutations += 1; }, describe: async () => ({}), readService: async () => rollbackService,
     readRollbackViability: async () => ({ ...proof, rollbackDeploymentArn: rollbackDeploymentArn.replace("future-N", "changed") }),
     updateService: async () => { mutations += 1; }, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
   }), /stalled-unrecoverable|changed/);
@@ -264,7 +449,7 @@ test("future failed revision N registers a distinct corrected N+1 after exact N-
   const proof = rollbackProof({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn: targetArn, rollbackDigest: rollbackTargetDigest,
     forwardTaskDefinitionArn: failedN.taskDefinition.taskDefinitionArn, forwardTaskDefinitionFingerprint: taskDefinitionFingerprint(failedN, failedN.tags) });
   const approvalN = { ...approval, currentTaskDefinitionArn: targetArn, rollbackDeploymentArn, rollbackTargetTaskDefinitionArn: targetArn, rollbackTargetDigest };
-  const authorizationN = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: targetArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, rollbackProof: proof, approval: approvalN });
+  const authorizationN = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: targetArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, rollbackProof: proof, approval: approvalN });
   const input = { ...base(), service: rollbackService, currentTaskDefinition: currentN, candidate: candidateN, authorization: authorizationN, stoppedReasons: [`CannotPullContainerError: image ${currentN.taskDefinition.containerDefinitions[0].image} not found`] };
   const matchingFailedForward = { taskDefinition: { ...structuredClone(candidateN), taskDefinitionArn: failedN.taskDefinition.taskDefinitionArn, revision: 999 }, tags: [] };
   let prohibitedReuseMutations = 0;
@@ -295,7 +480,7 @@ test("future failed revision N registers a distinct corrected N+1 after exact N-
 test("eligibility rejects absent approval, wrong bindings, present current image, and invalid image evidence", () => {
   for (const [input, pattern] of [
     [mutate("authorization", undefined), /authorization/],
-    [mutate("currentImageExists", true), /absent/],
+    [mutate("currentImageExists", true), /degradation is not authenticated/],
     [mutate("service.serviceName", "mscqr-frontend-servi-euw2"), /boundary/],
     [mutate("currentTaskDefinition.taskDefinition.family", "mscqr-production-rls-green-backend-candidate"), /legacy backend|identity/],
     [mutate("replacementImage.repository", "mscqr-web"), /image/],
@@ -307,7 +492,7 @@ test("eligibility rejects absent approval, wrong bindings, present current image
     [mutate("stoppedReasons", ["CannotPullContainerError: image sha256:" + "f".repeat(64) + " not found"]), /missing-image/],
   ]) assert.throws(() => assertLegacyBackendRecoveryEligibility(input), pattern);
   const wrongApproval = base();
-  wrongApproval.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: "sha256:" + "a".repeat(64), imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, approval: { ...approval, recoveryImageDigest: "sha256:" + "a".repeat(64) } });
+  wrongApproval.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: "sha256:" + "a".repeat(64), imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, approval: { ...approval, recoveryImageDigest: "sha256:" + "a".repeat(64) } });
   assert.throws(() => assertLegacyBackendRecoveryEligibility(wrongApproval), /different incident|digest/);
 });
 
@@ -422,6 +607,43 @@ test("registration follows initial live revision validation and pre-update concu
   }), /changed concurrently/);
   assert.deepEqual(order, ["census", "census", "register", "census"]);
   assert.equal(updates, 0);
+});
+
+test("runtime resource availability changes fail at both ECS mutation boundaries", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  for (const [failureCheck, expected] of [[2, { registrations: 0, updates: 0 }], [3, { registrations: 1, updates: 0 }]]) {
+    let checks = 0; let registrations = 0; let updates = 0;
+    await assert.rejects(() => runRecoveryContract(base(), {
+      verifyRuntimeClosure: async () => { if (++checks === failureCheck) throw new Error("runtime resource became unavailable"); return runtimeClosure; },
+      census: async () => registrations ? [registered] : [],
+      register: async () => { registrations += 1; return registered; },
+      describe: async () => registered,
+      readService: async () => base().service,
+      updateService: async () => { updates += 1; },
+      waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy, record: async () => {},
+    }), /runtime resource became unavailable/);
+    assert.deepEqual({ registrations, updates }, expected);
+  }
+});
+
+test("stale live runtime verification fails at the final mutation handoff", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  for (const [staleCheck, expected] of [[2, { registrations: 0, updates: 0 }], [3, { registrations: 1, updates: 0 }]]) {
+    let checks = 0; let registrations = 0; let updates = 0; let clock = Date.now();
+    await assert.rejects(() => runRecoveryContract(base(), {
+      now: () => clock,
+      verifyRuntimeClosure: async () => ({ ...runtimeClosure, liveVerifiedAt: new Date(++checks === staleCheck ? clock - 60_001 : clock).toISOString() }),
+      census: async () => registrations ? [registered] : [],
+      register: async () => { registrations += 1; return registered; },
+      describe: async () => registered,
+      readService: async () => base().service,
+      updateService: async () => { updates += 1; },
+      waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy, record: async () => {},
+    }), /live runtime dependency verification is stale/);
+    assert.deepEqual({ registrations, updates }, expected);
+  }
 });
 
 test("non-rollback recovery rejects concurrent revision registration before its own registration", async () => {
@@ -551,7 +773,7 @@ test("authorization hash and human bindings fail closed", () => {
   });
   const selfApproved = base();
   selfApproved.environmentApproval = selfEnvironmentApproval;
-  selfApproved.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval: selfEnvironmentApproval, artifactSigningBindingSha256, approval: { ...approval, approvedBy: "Release-Operator" } });
+  selfApproved.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval: selfEnvironmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, approval: { ...approval, approvedBy: "Release-Operator" } });
   assert.throws(() => assertLegacyBackendRecoveryEligibility(selfApproved), /prevents self-review/);
 });
 
@@ -566,7 +788,7 @@ test("configured solo operator may dispatch and approve when GitHub allows self-
   input.environmentApproval = soloEnvironmentApproval;
   input.authorization = createLegacyBackendRecoveryAuthorization({
     sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
-    imageAuthorization: imageFixture.authorization, environmentApproval: soloEnvironmentApproval, artifactSigningBindingSha256, approval: { ...approval, approvedBy: "T-ej2003" },
+    imageAuthorization: imageFixture.authorization, environmentApproval: soloEnvironmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, approval: { ...approval, approvedBy: "T-ej2003" },
   });
   assert.equal(assertLegacyBackendRecoveryEligibility(input).recoveryImageDigest, digest);
 });
@@ -582,7 +804,7 @@ test("fabricated human metadata cannot replace authenticated GitHub environment 
     const input = base();
     input.authorization = createLegacyBackendRecoveryAuthorization({
       sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
-      imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, approval: { ...approval, approvedBy: "fabricated-reviewer", approverRole: "fabricated-role" },
+      imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, approval: { ...approval, approvedBy: "fabricated-reviewer", approverRole: "fabricated-role" },
     });
     change(input);
     let calls = 0;
@@ -601,9 +823,9 @@ test("invalid evidence makes zero mutation adapter calls", async () => {
   let calls = 0;
   const forbidden = async () => { calls += 1; };
   await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
-    census: forbidden, register: forbidden, describe: forbidden, readService: forbidden, updateService: forbidden,
+    census: async () => [current], register: forbidden, describe: forbidden, readService: forbidden, updateService: forbidden,
     waitStable: forbidden, readRunningTasks: forbidden, verifyHealth: forbidden,
-  }), /absent/);
+  }), /degradation is not authenticated/);
   assert.equal(calls, 0);
 });
 
@@ -683,7 +905,7 @@ test("durable recovery states preserve every confirmed partial mutation and term
       verifyHealth: verifyHealth || (async () => healthy),
       record: async (entry) => { records.push(structuredClone(entry)); },
     };
-    return { records, execute: () => runRecoveryContract(base(), adapters), setService: (value) => { service = value; } };
+    return { records, execute: () => runRecoveryContract(base(), { verifyRuntimeClosure: async () => runtimeClosure, ...adapters }), setService: (value) => { service = value; } };
   };
 
   const updateFailure = await run({ updateService: async () => { throw new Error("update rejected"); } });
@@ -723,6 +945,7 @@ test("already-recovered replay records completion without fake mutations", async
   input.service.taskDefinition = targetArn;
   const records = [];
   await runRecoveryContract(input, {
+    verifyRuntimeClosure: async () => runtimeClosure,
     census: async () => [registered], register: async () => assert.fail("register called"), describe: async () => registered,
     readService: async () => ({ ...input.service, runningCount: 2, pendingCount: 0 }), updateService: async () => assert.fail("update called"),
     waitStable: async () => {}, readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })),
@@ -733,11 +956,28 @@ test("already-recovered replay records completion without fake mutations", async
   assert.equal(records[0].updates, 0);
 });
 
+test("fresh registration followed by an already-pointing service preserves terminal 1/0 evidence", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  const records = []; let registeredLive = false;
+  await assert.rejects(() => runRecoveryContract(base(), {
+    verifyRuntimeClosure: async () => runtimeClosure,
+    census: async () => registeredLive ? [registered] : [],
+    register: async () => { registeredLive = true; return registered; }, describe: async () => registered,
+    readService: async () => ({ ...base().service, taskDefinition: targetArn, runningCount: 0, pendingCount: 2 }),
+    updateService: async () => assert.fail("update called"), waitStable: async () => { throw new Error("stabilization failed"); },
+    readRunningTasks: async () => [], verifyHealth: async () => healthy, record: async (entry) => { records.push(structuredClone(entry)); },
+  }), /stabilization failed/);
+  assert.deepEqual({ registrations: records.at(-1).registrations, updates: records.at(-1).updates }, { registrations: 1, updates: 0 });
+  assert.equal(records.at(-1).status, "SERVICE_STABILIZATION_FAILED");
+});
+
 test("reused orphan revision preserves zero-mutation update-failure evidence", async () => {
   const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
   const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
   const records = [];
   await assert.rejects(() => runRecoveryContract(base(), {
+    verifyRuntimeClosure: async () => runtimeClosure,
     census: async () => [registered], register: async () => assert.fail("register called"), describe: async () => registered,
     readService: async () => base().service, updateService: async () => { throw new Error("update rejected"); },
     waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
@@ -753,13 +993,13 @@ test("partial and complete recovery evidence is self-authenticating", () => {
     authorizationFileSha256: "1".repeat(64), authorizationSha256: "2".repeat(64),
     environmentApprovalFileSha256: "3".repeat(64), environmentApprovalSha256: "4".repeat(64),
     imageAuthorizationFileSha256: "5".repeat(64), imageAuthorizationSha256: "6".repeat(64),
-    artifactSigningBindingSha256,
+    artifactSigningBindingSha256, runtimeConsumabilitySha256,
     rollbackProofSha256: null,
     imageReleaseSha: sourceSha,
     account: "368992683803", region: "eu-west-2",
   };
   const body = {
-    schemaVersion: 3, kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE", sourceSha,
+    schemaVersion: 5, kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE", sourceSha,
     currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
     ...bindings, status: "NO_MUTATION_FAILURE", targetArn: null, registrations: 0, updates: 0,
     artifactSigningVerification: "PENDING", artifactSigningFailure: null, knownFailedRevisions: [], generatedAt: now.toISOString(),
@@ -782,7 +1022,7 @@ test("partial and complete recovery evidence is self-authenticating", () => {
     taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:${revision}`,
     taskDefinitionFingerprint: `${revision}`.repeat(32),
   })) };
-  assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...multipleHistory, evidenceSha256: canonicalSha256(multipleHistory) }, { ...expected, rollbackProofSha256 }), /malformed/);
+  assert.equal(assertLegacyBackendRecoveryEvidence({ ...multipleHistory, evidenceSha256: canonicalSha256(multipleHistory) }, { ...expected, rollbackProofSha256 }).knownFailedRevisions.length, 2);
   const incompleteHealthBody = { ...body, status: "RECOVERY_COMPLETE", targetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", artifactSigningVerification: "VERIFIED", backendHealthy: true, rotationRequired: true, health: { healthy: true, success: true, status: "ready" } };
   assert.throws(() => assertLegacyBackendRecoveryEvidence({ ...incompleteHealthBody, evidenceSha256: canonicalSha256(incompleteHealthBody) }, expected), /readiness proof/);
 });

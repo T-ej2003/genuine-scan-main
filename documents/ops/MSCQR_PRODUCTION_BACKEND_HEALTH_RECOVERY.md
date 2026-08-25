@@ -78,10 +78,187 @@ validation failures persist only a fixed `FAILED` classification. Provider
 errors and secret material are never copied into recovery evidence or recovery
 CLI errors.
 
-Because recovery preserves the legacy execution role, that role must already
-permit `secretsmanager:GetSecretValue` for each of the four exact resolved
-secret ARNs (and `kms:Decrypt` only when the secret uses a customer-managed
-KMS key). This repair does not add, replace, or broaden execution-role IAM.
+Because recovery preserves the legacy execution role, the final candidate is
+now the authority for runtime dependency closure. Before registration, the
+governed administrator path derives every dependency from container images,
+`secrets`, log `secretOptions`, repository credentials, S3 environment files,
+log configuration, and IAM-enabled EFS volumes. Each dependency is bound to
+the ECS execution role or application task role that actually consumes it,
+the exact AWS action and resource, source policy ownership, the complete live
+role-policy identity, and an exact-principal IAM simulation. The signed result
+is rechecked against the same candidate, current resource metadata, current
+role-policy identity, exact ECS-tasks trust, secret resource policies, and any customer-managed KMS
+key policy immediately before registration and again before `UpdateService`.
+Changing the candidate, execution role, secret reference, encryption key,
+resource policy, role policy, or dependency set stops before the next ECS
+mutation.
+
+The administrator signature is durable transaction authorization, not a cache
+of live AWS availability. Its 35-day maximum age matches GitHub's maximum
+workflow-run lifetime, including environment approval, so queue and reviewer
+latency cannot consume a 15-minute mutation-safety window. The signed source,
+candidate fingerprint, roles, dependency set, resource-policy identities, and
+live-policy identities remain immutable. KMS signs the binding that includes
+the authorization timestamp, so its lifetime cannot be extended by rewriting
+an unkeyed envelope checksum. After production approval, the
+release-deployer independently refreshes those exact resources and policies;
+that result has a separate 60-second maximum handoff to each ECS mutation.
+The contract checks the fresh timestamp after the final census/evidence write
+and immediately before `RegisterTaskDefinition` or `UpdateService`. The release
+role can confirm the signed identities remain live but cannot redefine them.
+GitHub documents a 35-day workflow-run ceiling (including waits and approvals)
+and a 30-day environment-approval ceiling; those platform bounds, plus the
+workflow's source-controlled 180-minute job timeout, are exercised by the
+deterministic freshness tests rather than replaced by an arbitrary TTL.
+
+- [GitHub Actions limits](https://docs.github.com/en/actions/reference/limits)
+- [GitHub deployment approvals](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments)
+
+The adjacent signed-evidence freshness audit found no second conflated
+recovery lifetime. GitHub environment evidence is run-bound and generated
+after the environment gate. Stage-B permission, reference-audit, and partial-
+apply evidence is live-plan-bound and regenerated in its governed apply chain.
+Image evidence retains its separate 24-hour revocation/verification model;
+recovery also rechecks the exact digest in ECR. Root-drop and Stage-A recovery
+evidence are operation-local, not pre-dispatch runtime authorization. Their
+short lifetimes continue to protect the live operation they describe.
+
+Secrets with no resource policy are supported. A non-empty Secrets Manager
+resource policy fails closed until its full condition and principal semantics
+are represented by the canonical evaluator; it is never reduced to a
+substring or partial-deny heuristic. Customer-managed KMS key policies permit
+only an unconditional exact-role grant or unconditional account-IAM
+delegation, reject deny/inverse semantics, and still require exact IAM
+simulation. S3 environment files derive both `s3:GetObject` and
+`s3:GetBucketLocation`; because no current source-owned production execution
+policy owns those actions, introducing one fails CI/preflight instead of
+silently becoming a runnable dependency.
+
+Runtime secret proof resolves the complete ECS `valueFrom` selector, not just
+the base secret ARN. Metadata binds the canonical `VersionIdsToStages` map, the
+complete paginated version census (including unlabeled/deprecated versions), and
+the exact resolved version for default `AWSCURRENT`, explicit version stage,
+explicit version ID, or a consistent stage-and-ID pair. Missing, duplicated,
+malformed, deleted, or changed version metadata fails closed without reading
+secret material unless an ECS JSON-key selector requires proving that key in
+the exact selected version. In that case `GetSecretValue` is scoped to the
+candidate secret and resolved version; plaintext remains process-local and is
+never logged, persisted, hashed, signed, emitted, or copied into an error. Only
+the non-secret `PRESENT` result is bound into evidence. The same selector/key
+proof is repeated at both runtime-consumability mutation boundaries, so
+rotation, key removal, or deletion cannot hide behind older signed metadata.
+
+Every candidate `awslogs` dependency is also explicit. When
+`awslogs-create-group` is disabled, the release preflight exhaustively resolves
+the exact region-bound log-group ARN and records `EXISTENCE_PROVEN`; a missing,
+renamed, or disappearing group fails before ECS mutation. When the candidate
+explicitly enables runtime group creation, evidence records
+`INTENTIONALLY_CREATED_BY_RUNTIME` and still requires the candidate-derived
+execution-role authority. Validation never creates a log group.
+
+Failed-recovery lineage uses the explicit version-1 summary projection that
+predates `imageReleaseSha`. The release SHA remains authenticated by the
+immutable recovery-evidence bytes and is retained for interrupted health
+reconciliation, but it is intentionally excluded from the stable lineage
+projection so strengthening evidence does not fork existing history.
+
+The legacy execution-role correction is generated from the final candidate.
+It grants `secretsmanager:GetSecretValue` only for the candidate's exact secret
+ARNs, `logs:CreateLogGroup` only where the candidate explicitly requests it,
+and `kms:Decrypt` only for exact customer-managed keys with an exact
+`kms:ViaService` condition. `Resource="*"`, caller-supplied additions, task-role
+substitution, release-deployer substitution, and administrator substitution
+are rejected. The convergence command defaults to plan-only and requires a
+separate source-, candidate-, and exact live-to-source policy-transition human
+authorization before its sole `iam:PutRolePolicy` operation. IAM policy hashes
+use decoded, canonical JSON semantics rather than transport bytes. Immediately
+before the write, the executor performs a final `GetRolePolicy` and requires
+its hash to equal the approval-bound expected-live hash; the next network call
+is `PutRolePolicy`. A mismatch is `LIVE_POLICY_CHANGED_SINCE_APPROVAL` with zero
+IAM writes. The post-write `GetRolePolicy` must equal the protected-source hash
+and policy semantics, while attachments and trust must read back unchanged.
+`PutRolePolicy` has no response body on success; the executor treats only empty
+successful stdout as bodyless success, still rejects malformed non-empty JSON,
+and then reaches the authenticated post-write readback.
+This is application-level optimistic concurrency because IAM has no conditional
+`PutRolePolicy`; the final read/write pair minimizes but cannot eliminate that
+service-side race window.
+
+Production incident `mscqr-backend:49` is the regression fixture for this
+boundary. Its six tasks failed before container start because
+`mscqr-ecs-execution-role` lacked `secretsmanager:GetSecretValue` for the newly
+materialized artifact-signing private-key reference. A terminal failed
+recovery revision may be reconciled only when operator-bound evidence names
+the exact workflow, service, source, digest, evidence hash, task-definition
+fingerprint, and terminal status. It remains visible in evidence, can never be
+selected as the corrected candidate, and does not weaken rejection of any
+other newer revision. Its image may still exist; that path is eligible only
+when the exact historical evidence authenticates the service's current
+revision and the current service has both zero running and zero pending tasks.
+A healthy or progressing revision remains ineligible. Revision census and
+runtime-consumability checks are both repeated at the pre-registration and
+pre-update TOCTOU boundaries.
+
+Runtime closure is a four-phase transaction with two distinct candidate
+hashes. `candidateFileSha256` is the SHA-256 of the exact persisted,
+pretty-printed bytes, including the trailing newline, and protects every file
+handoff. `candidateCanonicalSha256` is the canonical semantic JSON identity;
+`candidateFingerprint` is the task-definition fingerprint used by ECS revision
+reconciliation. These names are not interchangeable.
+
+1. `prepare-production-backend-recovery-candidate.mjs` writes the candidate and
+   reports all three identities.
+2. `prepare-production-ecs-runtime-consumability.mjs --mode inventory` performs
+   read-only candidate-derived resource discovery and signs a deterministic
+   inventory. It deliberately does not require IAM simulation to pass, so a
+   missing execution-role permission is convergence-plan data rather than a
+   circular prerequisite.
+3. `converge-production-ecs-runtime-policy.mjs` verifies the signed inventory,
+   plans the exact source policy, and requires operator authorization binding
+   source SHA, candidate identities, inventory SHA, expected live-policy SHA,
+   and desired source-policy SHA. Its final `GetRolePolicy` immediately
+   precedes the single application-level compare-and-swap `PutRolePolicy`.
+4. `prepare-production-ecs-runtime-consumability.mjs --mode consumability`
+   reauthenticates the inventory, recollects resource metadata, re-reads live
+   role policies, and requires every candidate-derived simulation to pass
+   before emitting the signed artifact transportable to Release Gate.
+
+The post-convergence artifact remains durable across legitimate workflow queue
+and production-environment approval latency. Release Gate independently
+refreshes secret deletion state, KMS state and policy, ECR repository-policy
+state, live IAM policy identity, and candidate dependency closure immediately
+before registration and again before `UpdateService`; the short live-verification
+age never starts before long build, certification, queue, or reviewer waits.
+
+Release Gate transports image authorization, operator approval, signed runtime
+consumability evidence, and known-failed-revision evidence in one canonical
+transaction-bound dispatch bundle plus its byte hash. The repository extractor
+authenticates the outer transaction, every embedded canonical JSON value, and
+every component hash before producing private runner files. This keeps the
+workflow below GitHub's 25-input limit without dropping an authorization edge.
+
+Runtime image closure authenticates the exact candidate ECR repository-policy
+state and immutable image-digest availability in addition to execution-role
+identity simulation. Account, repository, and digest come from the selected
+`DescribeImages.imageDetails[]` entry, matching the AWS CLI response contract.
+`RepositoryPolicyNotFoundException`
+is the only accepted no-policy result; read errors, malformed responses, and
+any repository policy semantics fail closed. Secret metadata is likewise bound
+to an explicit available/not-scheduled-for-deletion state. Repository policy
+and secret availability metadata are refreshed before registration and again
+before `UpdateService`.
+
+The same candidate parser is mandatory for normal Stage-B backend/worker/
+executor/canary definitions, rotation overlap and cleanup definitions, and
+pre-deployment inventory definitions. Terraform derives each Stage-B
+execution-role secret resource set from the same rendered candidate secret
+references, while direct legacy recovery additionally requires signed live
+consumability evidence. Normal activation registers no task definition and
+must activate only an already authenticated Stage-B candidate; rollback and
+post-deploy paths retain their independent image-viability and runtime-health
+checks. CI rejects an unknown production AWS call, workflow input, candidate
+runtime reference type, consumer principal, source-policy owner, or production
+mode dependency.
 
 The IAM model follows the AWS ECS service-authorization reference: the
 registration write stays scoped to the `mscqr-backend:*` task-definition
@@ -129,6 +306,31 @@ transaction to appear before `UpdateService`. Reordering identical census
 entries is harmless; any other added, removed, duplicated, malformed, or
 changed revision fails closed independently of service-state concurrency.
 
+Accumulated recovery history is reconciled as an ordered, monotonic lineage.
+The first signed record must have no predecessor-history reference; every later
+record must bind a prior immutable-history reference, its initial census must
+equal the lineage produced by the preceding authenticated generation, and a
+confirmed registration may add only its exact task-definition ARN and semantic
+fingerprint. A historical record is never compared directly with the final
+census: later authenticated generations may extend it. Missing, reordered,
+forked, duplicated, conflicting, or skipped generations and any live revision
+without exactly one lineage provenance fail closed. The final lineage may have
+only the current transaction's one exact candidate extension.
+
+Schema 7 evidence also commits each generation to the canonical hash of every
+preceding authenticated history record. Once present, this rolling binding
+cannot be omitted by a later record, so histories cannot be reordered,
+truncated, duplicated, or forked even when two generations observed the same
+ECS revision census.
+
+A later authenticated generation closes live reconciliation for every earlier
+interruption in its predecessor lineage. Only an interrupted final generation
+is compared with current ECS service/task health; older interrupted candidates
+remain fingerprint-checked lineage entries but cannot authorize supersession.
+The live health comparison uses that interruption record's authenticated
+`imageReleaseSha`, never a newer retry authorization's release identity, so a
+protected-main advance cannot misclassify and supersede a healthy candidate.
+
 Before registration, the initially observed service must identify the approved
 legacy source revision unless it already identifies the single exact recovery
 revision authenticated by the candidate fingerprint. The service is read again
@@ -146,6 +348,62 @@ revision or any additional newer revision fails closed. Rollback viability
 reads remain conditional on rollback recovery, while census checks apply to
 all recovery transactions.
 
+Known failed revisions are not accepted as caller-authored summaries. Before
+dispatch, `prepare-production-backend-failed-recovery-evidence.mjs`
+authenticates the exact prior recovery-evidence, GitHub production-environment
+evidence, and signed runtime-consumability bytes in one KMS-signed,
+self-contained bundle. The producer verifies every component byte hash and the
+chain from repository/workflow run through source, mode, service, recovery
+digest, terminal failure status, target task definition, candidate fingerprint,
+and the governed zero-or-one registration/update counts.
+
+`publish-production-backend-failed-recovery-evidence.mjs` stores that bundle as
+a content-addressed asset in an immutable GitHub release and emits a bounded
+reference containing the exact repository, protected source, release and asset
+IDs, asset digest, byte hash, and envelope hash. Only that reference is carried
+in `workflow_dispatch`; the dispatcher measures the complete serialized input
+map and rejects it above the protected 60,000-character budget (below GitHub's
+65,535-character platform limit). The production job resolves the asset using
+its existing `contents: read` permission, requires immutable release and asset
+readback, verifies the exact bytes, then verifies the KMS-signed bundle before
+any history can influence revision census. Immutable releases have no workflow
+artifact-expiry dependency. Missing, mutable, unavailable, malformed,
+substituted, duplicate, or conflicting history therefore fails before recovery
+mutation eligibility.
+
+The immutable bundle admits at most 32 records and 8 MiB. These limits apply to
+the authenticated release asset, while workflow dispatch continues to carry
+only the bounded content-addressed reference. Exceeding either limit requires
+operator archival/reconciliation under a newly reviewed contract; it cannot be
+silently truncated or converted back into caller-authored summaries.
+
+Signed historical evidence distinguishes terminal failure from interrupted
+mutation intent. Registration/update attempted or confirmed records are never
+treated as failed revisions by themselves. A retry re-authenticates their
+candidate fingerprint and initial/expected revision censuses, then resolves
+the exact candidate against fresh ECS service, deployment, running-task,
+stopped-task, digest, and readiness state. An old service may resume the exact
+orphan candidate after an ambiguous update attempt; a healthy current candidate
+is accepted as completed; a progressing candidate blocks supersession; and a
+failed candidate requires at least two unique current-deployment startup
+failures bound by `ecs-svc/<numeric-id>`, task definition, deployment timing,
+and error reason. Any foreign service revision, changed census, historical task,
+or ambiguous state fails closed. The same proof is re-read immediately before
+registration and `UpdateService`, allowing only this transaction's exact new
+registration at the latter boundary.
+
+Publication is an idempotent remote transaction. Before each mutation the
+publisher re-reads the deterministic tag and accepts only absence, the exact
+mutable draft without an asset, the exact mutable draft with one downloaded and
+byte-authenticated asset, or the exact immutable published release. It creates,
+uploads, and publishes only the missing next state and performs authoritative
+readback after every mutation. An already-valid immutable release is reused,
+including after local reference persistence failed; the local bounded reference
+is recreated without remote mutation. A wrong source, title, notes, tag, asset
+name, asset count, size, digest, downloaded bytes, mutable published release, or
+concurrent state transition fails closed. The publisher never deletes,
+overwrites, retags, or replaces remote historical evidence.
+
 Rollback reconciliation distinguishes
 none, progressing, successful, failed, ambiguous, stalled with a recoverable
 target, and stalled with an authenticated unrecoverable target. Elapsed time is
@@ -155,6 +413,12 @@ forward/source/rollback revisions, rollback task-definition ARN, immutable
 digest, repeated exact rollback-target pull failures, and
 canonical ECR `ImageNotFoundException` for that digest. Access denial, timeout,
 or malformed ECR output is unknown and fails closed.
+
+Stopped-task evidence exhausts the AWS CLI paginator using opaque continuation
+tokens, deduplicates and canonically orders task ARNs, and describes every task
+in batches of at most 100. Token cycles, malformed pages, later-page errors,
+incomplete `DescribeTasks` batches, or the configured 1,000-task bound fail
+closed; current rollback failures therefore cannot depend on page position.
 
 Each pull failure counted toward supersession is authorization-bearing ECS
 evidence. Its `Task.startedBy` must equal the exact `ecs-svc/<numeric-id>` from
@@ -234,7 +498,13 @@ operation or runtime dependency fails Stage-B deployment closure.
    rollback supersession additionally requires the exact
    `rollbackDeploymentArn`, `rollbackTargetTaskDefinitionArn`, and
    `rollbackTargetDigest` from authenticated reconciliation.
-3. Dispatch through `scripts/aws/dispatch-production-backend-health-recovery.mjs`.
+3. If authenticated failed-recovery history exists, produce its KMS-signed
+   bundle and publish it with
+   `publish-production-backend-failed-recovery-evidence.mjs`; use the emitted
+   immutable reference. With no history, use a private file containing exactly
+   `null`. Bind both the evidence envelope SHA-256 and reference SHA-256 in the
+   human approval when history exists.
+4. Dispatch through `scripts/aws/dispatch-production-backend-health-recovery.mjs`.
    It serializes each JSON input once and derives the workflow value and SHA-256
    from those exact transport bytes; do not compose byte-sensitive inputs with
    shell command substitution. The dispatcher authenticates both canonical image
@@ -252,15 +522,17 @@ operation or runtime dependency fails Stage-B deployment closure.
      --service mscqr-backend-servi-euw2 \
      --release-mode BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME \
      --image-authorization /secure/operator/image-authorization.json \
-     --approval /secure/operator/recovery-approval.json
+     --approval /secure/operator/recovery-approval.json \
+     --runtime-consumability /secure/operator/runtime-consumability.json \
+     --failed-recovery-evidence-reference /secure/operator/failed-recovery-evidence-reference.json
    ```
-4. Have an authorized reviewer approve the GitHub `production` environment
+5. Have an authorized reviewer approve the GitHub `production` environment
    deployment. Repository administrators must first configure that environment
    with required reviewers and administrator bypass disabled. Configure
    `Prevent self-review` to match the repository's actual multi-operator or
    solo-operator governance model.
-5. Retain the uploaded `backend-health-recovery-evidence` artifact.
-6. After backend health is proven, resume the canonical dual-slot rotation.
+6. Retain the uploaded `backend-health-recovery-evidence` artifact.
+7. After backend health is proven, resume the canonical dual-slot rotation.
    This recovery does not create or refresh rotation evidence.
 
 Do not use this mode when the current digest still exists, for frontend or

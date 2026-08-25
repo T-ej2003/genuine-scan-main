@@ -38,7 +38,7 @@ const taskAttempts = [1, 2].map((index) => ({ taskArn: taskArn(index), startedBy
 const stoppedTasks = taskAttempts.map((attempt) => ({ ...attempt, stoppedReason: `CannotPullContainerError ${digest47} manifest not found` }));
 const classify = (overrides = {}) => classifyRollbackViability({ service, deployment, forwardTarget, sourceRevisions, rollbackTarget, taskAttempts, observationStart: "2026-08-24T10:00:00.000Z", observationEnd: "2026-08-24T10:01:00.000Z", ...overrides });
 
-function awsFixture({ snapshots = [{}], ecr = {}, sourceArns, deploymentPatch = {}, revisionPatch = {}, tasks = stoppedTasks, listTasksPatch = {}, describeTasksPatch = {} } = {}) {
+function awsFixture({ snapshots = [{}], ecr = {}, sourceArns, deploymentPatch = {}, revisionPatch = {}, tasks = stoppedTasks, taskPages, listTasksPatch = {}, describeTasksPatch = {} } = {}) {
   let observation = -1;
   const calls = [];
   const aws = (args) => {
@@ -75,8 +75,15 @@ function awsFixture({ snapshots = [{}], ecr = {}, sourceArns, deploymentPatch = 
       throw result;
     }
     const observedTasks = state.tasks || tasks;
-    if (command === "ecs list-tasks") return { taskArns: observedTasks.map(({ taskArn }) => taskArn), ...listTasksPatch };
-    if (command === "ecs describe-tasks") return { failures: [], tasks: observedTasks, ...describeTasksPatch };
+    if (command === "ecs list-tasks") {
+      if (!taskPages) return { taskArns: observedTasks.map(({ taskArn }) => taskArn), ...listTasksPatch };
+      const token = args[args.indexOf("--starting-token") + 1];
+      return taskPages[token ? Number(token.slice(5)) : 0];
+    }
+    if (command === "ecs describe-tasks") {
+      const requested = new Set(args.slice(args.indexOf("--tasks") + 1));
+      return { failures: [], tasks: observedTasks.filter(({ taskArn }) => requested.has(taskArn)), ...describeTasksPatch };
+    }
     throw new Error(`Unexpected command: ${args.join(" ")}`);
   };
   return { aws, calls };
@@ -97,6 +104,19 @@ test("real AWS rollback shape keeps forward, source, and rollback identities sep
   assert.equal(assertRollbackSupersessionProof(proof, { serviceArn, rollbackDeploymentArn: deploymentArn, rollbackTargetTaskDefinitionArn: td47, rollbackTargetDigest: digest47 }), proof);
   assert(calls.some((args) => args[0] === "ecs" && args[1] === "describe-service-revisions" && args.includes(forwardRevisionArn)));
   assert(calls.some((args) => args[0] === "ecs" && args[1] === "describe-service-revisions" && args.includes(rollbackRevisionArn)));
+});
+
+test("current rollback failures on the final stopped-task page authorize identically", async () => {
+  const unrelated = Array.from({ length: 100 }, (_, index) => ({
+    ...stoppedTasks[0], taskArn: taskArn(index + 100), taskDefinitionArn: td48,
+  }));
+  const taskPages = [
+    { taskArns: unrelated.map(({ taskArn }) => taskArn), NextToken: "token1" },
+    { taskArns: stoppedTasks.map(({ taskArn }) => taskArn) },
+  ];
+  const proof = await collectRollbackViability({ ...awsFixture({ tasks: [...unrelated, ...stoppedTasks], taskPages }), observationMilliseconds: 0 });
+  assert.equal(proof.classification, ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE);
+  assert.deepEqual(proof.taskAttempts.map(({ taskArn }) => taskArn), stoppedTasks.map(({ taskArn }) => taskArn));
 });
 
 test("service deployment ARN, ECS deployment ID, and Task.startedBy stay distinct and exact", () => {
@@ -163,10 +183,10 @@ test("malformed and cross-boundary service revision responses are rejected", asy
     { deploymentPatch: { targetServiceRevision: undefined } },
   ]) await assert.rejects(() => collectRollbackViability({ ...awsFixture(fixture), observationMilliseconds: 0 }), /revision|relationships|boundary/i);
   for (const fixture of [
-    { listTasksPatch: { nextToken: "more" } },
+    { listTasksPatch: { NextToken: "more" } },
     { describeTasksPatch: { failures: [{ arn: taskArn(2), reason: "MISSING" }] } },
     { describeTasksPatch: { tasks: [stoppedTasks[0]] } },
-  ]) await assert.rejects(() => collectRollbackViability({ ...awsFixture(fixture), observationMilliseconds: 0 }), /task-attempt.*incomplete/i);
+  ]) await assert.rejects(() => collectRollbackViability({ ...awsFixture(fixture), observationMilliseconds: 0 }), /task (?:census|description)|task-attempt.*incomplete/i);
 });
 
 test("source revisions may be empty or multiple but each supplied identity is authenticated", async () => {

@@ -78,24 +78,37 @@ export function createProductionEnvironmentApprovalEvidence({ environmentConfig,
 }
 
 export function assertProductionEnvironmentApprovalEvidence(evidence, { sourceSha, repository, environment, workflowRef, eventName, workflowRunId, workflowRunAttempt, executionActor, githubActions, now = new Date() } = {}) {
-  if (!evidence || Object.keys(evidence).length !== FIELDS.size || Object.keys(evidence).some((field) => !FIELDS.has(field))) throw new Error("GitHub environment approval evidence schema is invalid.");
+  assertProductionEnvironmentApprovalIdentity(evidence, { sourceSha, repository });
   const actor = requiredText(evidence.executionActor, "evidence.executionActor");
   const reviewers = assertEvidenceReviewers(evidence.configuredReviewers);
-  if (evidence.schemaVersion !== PRODUCTION_ENVIRONMENT_APPROVAL.schemaVersion || evidence.kind !== PRODUCTION_ENVIRONMENT_APPROVAL.kind
-    || repository !== PRODUCTION_ENVIRONMENT_APPROVAL.repository || evidence.repository !== repository
-    || environment !== PRODUCTION_ENVIRONMENT_APPROVAL.environment || evidence.environment !== environment
-    || evidence.sourceSha !== sourceSha || !SHA.test(sourceSha || "")
+  if (environment !== PRODUCTION_ENVIRONMENT_APPROVAL.environment || evidence.environment !== environment
     || githubActions !== "true" || workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.workflowRef || evidence.workflowRef !== workflowRef
     || eventName !== PRODUCTION_ENVIRONMENT_APPROVAL.eventName || evidence.eventName !== eventName
     || evidence.workflowRunId !== String(workflowRunId || "") || !RUN_ID.test(evidence.workflowRunId)
     || evidence.workflowRunAttempt !== String(workflowRunAttempt || "") || !RUN_ID.test(evidence.workflowRunAttempt)
     || actor.toLowerCase() !== requiredText(executionActor, "executionActor").toLowerCase()
+    || !Number.isSafeInteger(evidence.requiredReviewerCount) || evidence.requiredReviewerCount !== reviewers.length) throw new Error("GitHub environment approval evidence is not bound to this protected recovery run.");
+  const observed = new Date(evidence.observedAt);
+  const age = now.getTime() - observed.getTime();
+  if (!Number.isFinite(observed.getTime()) || observed.toISOString() !== evidence.observedAt || age < 0 || age > PRODUCTION_ENVIRONMENT_APPROVAL.maxAgeMs) throw new Error("GitHub environment approval evidence is stale or malformed.");
+  return evidence;
+}
+
+export function assertProductionEnvironmentApprovalIdentity(evidence, { sourceSha, repository } = {}) {
+  if (!evidence || Object.keys(evidence).length !== FIELDS.size || Object.keys(evidence).some((field) => !FIELDS.has(field))) throw new Error("GitHub environment approval evidence schema is invalid.");
+  requiredText(evidence.executionActor, "evidence.executionActor");
+  const reviewers = assertEvidenceReviewers(evidence.configuredReviewers);
+  if (evidence.schemaVersion !== PRODUCTION_ENVIRONMENT_APPROVAL.schemaVersion || evidence.kind !== PRODUCTION_ENVIRONMENT_APPROVAL.kind
+    || repository !== PRODUCTION_ENVIRONMENT_APPROVAL.repository || evidence.repository !== repository
+    || evidence.environment !== PRODUCTION_ENVIRONMENT_APPROVAL.environment
+    || evidence.sourceSha !== sourceSha || !SHA.test(sourceSha || "")
+    || evidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.workflowRef || evidence.eventName !== PRODUCTION_ENVIRONMENT_APPROVAL.eventName
+    || !RUN_ID.test(evidence.workflowRunId) || !RUN_ID.test(evidence.workflowRunAttempt)
     || !Number.isSafeInteger(evidence.environmentId) || evidence.environmentId < 1
     || !Number.isSafeInteger(evidence.requiredReviewerCount) || evidence.requiredReviewerCount !== reviewers.length
     || typeof evidence.preventSelfReview !== "boolean" || evidence.canAdminsBypass !== false) throw new Error("GitHub environment approval evidence is not bound to this protected recovery run.");
   const observed = new Date(evidence.observedAt);
-  const age = now.getTime() - observed.getTime();
-  if (!Number.isFinite(observed.getTime()) || observed.toISOString() !== evidence.observedAt || age < 0 || age > PRODUCTION_ENVIRONMENT_APPROVAL.maxAgeMs) throw new Error("GitHub environment approval evidence is stale or malformed.");
+  if (!Number.isFinite(observed.getTime()) || observed.toISOString() !== evidence.observedAt) throw new Error("GitHub environment approval evidence is stale or malformed.");
   const { evidenceSha256, ...body } = evidence;
   if (!/^[a-f0-9]{64}$/.test(evidenceSha256 || "") || canonicalSha256(body) !== evidenceSha256) throw new Error("GitHub environment approval evidence hash is invalid.");
   return evidence;
