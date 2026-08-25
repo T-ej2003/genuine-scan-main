@@ -326,10 +326,9 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   };
   const repository = aws(["ecr", "describe-repositories", "--repository-names", BACKEND_HEALTH_RECOVERY.repository]).repositories?.[0];
   const stoppedTasks = await collectEcsServiceTasks({ aws, cluster: BACKEND_HEALTH_RECOVERY.cluster, service: BACKEND_HEALTH_RECOVERY.service, desiredStatus: "STOPPED" });
-  const stoppedReasons = [
-    ...(service.events || []).map(({ message }) => message),
-    ...stoppedTasks.flatMap((task) => [task.stoppedReason, ...(task.containers || []).map(({ reason }) => reason)]),
-  ].filter(Boolean);
+  const stoppedTaskFailures = stoppedTasks.map((task) => ({ taskArn: task.taskArn, taskDefinitionArn: task.taskDefinitionArn, startedBy: task.startedBy,
+    desiredStatus: task.desiredStatus, lastStatus: task.lastStatus, stopCode: task.stopCode, stoppedReason: task.stoppedReason,
+    containerReasons: (task.containers || []).map(({ reason }) => reason).filter(Boolean), createdAt: task.createdAt, startedAt: task.startedAt || null, stoppedAt: task.stoppedAt }));
   const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition, recoveryImageDigest: recoveryDigest, imageReleaseSha: image.value.imageReleaseSha, artifactSigningBindings: artifactSigning.bindings });
   const imageValidation = { verifyImageEvidence };
   const describe = async (arn) => aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]);
@@ -374,7 +373,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   };
   const readFreshRollbackViability = authorization.value.rollbackProof ? async () => readRollbackViability(0) : undefined;
   await runLegacyBackendHealthRecovery({
-    sourceSha, service, currentTaskDefinition, currentImageExists: imageExists(currentDigest), stoppedReasons,
+    sourceSha, service, currentTaskDefinition, currentImageExists: imageExists(currentDigest), stoppedTaskFailures,
     replacementImage: { exists: imageExists(recoveryDigest), immutable: repository?.imageTagMutability === "IMMUTABLE", signatureValid: true, attestationValid: true, provenanceValid: true, criticalFindings: 0, repository: BACKEND_HEALTH_RECOVERY.repository, digest: recoveryDigest },
     authorization: authorization.value, imageAuthorization: image.value, imageValidation, environmentApproval: environmentApproval.value,
     artifactSigningBindings: artifactSigning.bindings, artifactSigningBindingSha256: artifactSigning.evidenceSha256,

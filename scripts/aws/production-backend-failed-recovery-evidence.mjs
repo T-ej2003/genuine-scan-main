@@ -11,7 +11,7 @@ export const PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE = "PRE_RUNTIME_CLOSURE_LEGACY_E
 const LEGACY_WORKFLOW_PATH = ".github/workflows/release-gate.yml";
 const LEGACY_ARTIFACT_NAME = "backend-health-recovery-evidence";
 const NOT_PART_OF_SCHEMA = "NOT_PART_OF_SCHEMA";
-const NOT_PERSISTED = "PRODUCTION_ENVIRONMENT_BOUND_BY_SCHEMA3_WORKFLOW_NO_PERSISTED_APPROVAL_ARTIFACT";
+const LEGACY_APPROVAL_PROOF = "AUTHENTICATED_GITHUB_PRODUCTION_ENVIRONMENT_APPROVAL_HISTORY";
 const HEX = /^[a-f0-9]{64}$/;
 const SHA = /^[a-f0-9]{40}$/;
 const TASK_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-backend:[1-9][0-9]*$/;
@@ -33,7 +33,7 @@ const TERMINAL_MUTATION_COUNTS = new Set(["0/0", "0/1", "1/0", "1/1"]);
 const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const exactFields = (value, fields) => value && Object.keys(value).sort().join(",") === [...fields].sort().join(",");
 const LEGACY_RECORD_FIELDS = ["legacyIdentity", "recoveryEvidence", "repository", "workflowRunId"];
-const LEGACY_IDENTITY_FIELDS = ["schemaVersion", "kind", "evidenceContract", "repository", "workflowRunId", "workflowRunAttempt", "workflowPath", "workflowEvent", "workflowHeadSha", "workflowConclusion", "workflowCreatedAt", "workflowDefinitionSha256", "artifactId", "artifactName", "artifactArchiveSizeInBytes", "artifactArchiveDigest", "evidenceByteSize", "evidenceByteSha256", "environmentApprovalEvidence", "runtimeConsumabilityEvidence", "candidateFingerprintEvidence", "sourceSha", "service", "releaseMode", "taskDefinitionArn", "taskDefinitionFingerprint", "recoveryImageDigest", "imageReleaseSha"];
+const LEGACY_IDENTITY_FIELDS = ["schemaVersion", "kind", "evidenceContract", "repository", "workflowRunId", "workflowRunAttempt", "workflowPath", "workflowEvent", "workflowHeadSha", "workflowHeadBranch", "workflowConclusion", "workflowCreatedAt", "workflowDefinitionSha256", "productionJobId", "productionJobName", "productionJobConclusion", "productionJobProofSha256", "productionEnvironmentId", "productionDeploymentId", "productionDeploymentProofSha256", "productionApprovalProofSha256", "productionApprover", "artifactId", "artifactName", "artifactCreatedAt", "artifactArchiveSizeInBytes", "artifactArchiveDigest", "evidenceByteSize", "evidenceByteSha256", "environmentApprovalEvidence", "runtimeConsumabilityEvidence", "candidateFingerprintEvidence", "sourceSha", "service", "releaseMode", "taskDefinitionArn", "taskDefinitionFingerprint", "recoveryImageDigest", "imageReleaseSha"];
 const LEGACY_EVIDENCE_FIELDS = ["account", "artifactSigningBindingSha256", "artifactSigningFailure", "artifactSigningVerification", "authorizationFileSha256", "authorizationSha256", "currentTaskDefinitionArn", "environmentApprovalFileSha256", "environmentApprovalSha256", "evidenceSha256", "generatedAt", "imageAuthorizationFileSha256", "imageAuthorizationSha256", "imageReleaseSha", "kind", "knownFailedRevisions", "recoveryImageDigest", "region", "registrations", "rollbackProofSha256", "schemaVersion", "sourceSha", "status", "targetArn", "updates"];
 
 function artifact(bytes, label) {
@@ -60,11 +60,14 @@ function validateLegacyRecord(record) {
   if (!exactFields(evidence, LEGACY_EVIDENCE_FIELDS) || !exactFields(identity, LEGACY_IDENTITY_FIELDS)
     || identity.schemaVersion !== 1 || identity.kind !== "BACKEND_FAILED_RECOVERY_LEGACY_IDENTITY" || identity.evidenceContract !== PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE
     || identity.repository !== REPOSITORY || identity.workflowRunId !== record.workflowRunId || !RUN_ID.test(identity.workflowRunAttempt || "")
-    || identity.workflowPath !== LEGACY_WORKFLOW_PATH || identity.workflowEvent !== "workflow_dispatch" || identity.workflowHeadSha !== evidence.sourceSha
+    || identity.workflowPath !== LEGACY_WORKFLOW_PATH || identity.workflowEvent !== "workflow_dispatch" || identity.workflowHeadSha !== evidence.sourceSha || identity.workflowHeadBranch !== "main"
     || identity.workflowConclusion !== "failure" || !Number.isFinite(Date.parse(identity.workflowCreatedAt)) || !HEX.test(identity.workflowDefinitionSha256 || "")
+    || !Number.isSafeInteger(identity.productionJobId) || identity.productionJobId < 1 || identity.productionJobName !== "Deploy production ECS" || identity.productionJobConclusion !== "failure" || !HEX.test(identity.productionJobProofSha256 || "")
+    || !Number.isSafeInteger(identity.productionEnvironmentId) || identity.productionEnvironmentId < 1 || !Number.isSafeInteger(identity.productionDeploymentId) || identity.productionDeploymentId < 1
+    || !HEX.test(identity.productionDeploymentProofSha256 || "") || !HEX.test(identity.productionApprovalProofSha256 || "") || typeof identity.productionApprover !== "string" || !identity.productionApprover
     || !Number.isSafeInteger(identity.artifactId) || identity.artifactId < 1 || identity.artifactName !== LEGACY_ARTIFACT_NAME
     || !Number.isSafeInteger(identity.artifactArchiveSizeInBytes) || identity.artifactArchiveSizeInBytes < 1 || identity.artifactArchiveDigest !== `sha256:${identity.artifactArchiveDigest?.slice(7)}` || !HEX.test(identity.artifactArchiveDigest?.slice(7) || "")
-    || identity.evidenceByteSize !== Buffer.from(recovery.bytesBase64, "base64").length || identity.evidenceByteSha256 !== recovery.byteSha256 || identity.environmentApprovalEvidence !== NOT_PERSISTED
+    || !Number.isFinite(Date.parse(identity.artifactCreatedAt)) || identity.evidenceByteSize !== Buffer.from(recovery.bytesBase64, "base64").length || identity.evidenceByteSha256 !== recovery.byteSha256 || identity.environmentApprovalEvidence !== LEGACY_APPROVAL_PROOF
     || identity.runtimeConsumabilityEvidence !== NOT_PART_OF_SCHEMA || identity.candidateFingerprintEvidence !== NOT_PART_OF_SCHEMA
     || identity.sourceSha !== evidence.sourceSha || !SHA.test(identity.sourceSha || "") || identity.service !== BACKEND_HEALTH_RECOVERY.service
     || identity.releaseMode !== BACKEND_HEALTH_RECOVERY.kind || identity.taskDefinitionArn !== evidence.targetArn || !TASK_ARN.test(identity.taskDefinitionArn || "")

@@ -47,12 +47,20 @@ const approval = {
 };
 const authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, approval });
 const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: digest, imageReleaseSha: imageFixture.imageReleaseSha, artifactSigningBindings });
+const failedDeploymentId = "ecs-svc/3599551810517927503";
+const stoppedTaskFailure = ({ taskDefinitionArn = current.taskDefinition.taskDefinitionArn, startedBy = failedDeploymentId,
+  reason = `TaskFailedToStart: CannotPullContainerError: image ${current.taskDefinition.containerDefinitions[0].image} not found`, suffix = "1" } = {}) => ({
+  taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${suffix.padStart(32, "0")}`,
+  taskDefinitionArn, startedBy, desiredStatus: "STOPPED", lastStatus: "STOPPED", stopCode: "TaskFailedToStart",
+  stoppedReason: reason, containerReasons: [reason], createdAt: "2026-08-24T18:00:00.000Z",
+  startedAt: "2026-08-24T18:00:01.000Z", stoppedAt: "2026-08-24T18:00:02.000Z",
+});
 const base = () => ({
   sourceSha,
-  service: { clusterArn: `arn:aws:ecs:eu-west-2:368992683803:cluster/${BACKEND_HEALTH_RECOVERY.cluster}`, serviceName: BACKEND_HEALTH_RECOVERY.service, taskDefinition: current.taskDefinition.taskDefinitionArn, desiredCount: 2, runningCount: 0, pendingCount: 0, networkConfiguration: { awsvpcConfiguration: { subnets: ["subnet-fixture"], securityGroups: ["sg-fixture"], assignPublicIp: "DISABLED" } }, loadBalancers: [{ targetGroupArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/fixture/123", containerName: "backend", containerPort: 4000 }] },
+  service: { clusterArn: `arn:aws:ecs:eu-west-2:368992683803:cluster/${BACKEND_HEALTH_RECOVERY.cluster}`, serviceName: BACKEND_HEALTH_RECOVERY.service, taskDefinition: current.taskDefinition.taskDefinitionArn, desiredCount: 2, runningCount: 0, pendingCount: 0, deployments: [{ id: failedDeploymentId, taskDefinition: current.taskDefinition.taskDefinitionArn, rolloutState: "FAILED", failedTasks: 2, createdAt: "2026-08-24T17:59:00.000Z" }], networkConfiguration: { awsvpcConfiguration: { subnets: ["subnet-fixture"], securityGroups: ["sg-fixture"], assignPublicIp: "DISABLED" } }, loadBalancers: [{ targetGroupArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/fixture/123", containerName: "backend", containerPort: 4000 }] },
   currentTaskDefinition: structuredClone(current),
   currentImageExists: false,
-  stoppedReasons: [`TaskFailedToStart: CannotPullContainerError: image ${current.taskDefinition.containerDefinitions[0].image} not found`],
+  stoppedTaskFailures: [stoppedTaskFailure()],
   replacementImage: { exists: true, immutable: true, signatureValid: true, attestationValid: true, provenanceValid: true, criticalFindings: 0, repository: "mscqr-backend", digest },
   authorization,
   imageAuthorization: imageFixture.authorization,
@@ -175,7 +183,7 @@ test("authenticated terminal :49-style runtime failure is reconciled but never r
   const knownFailedRevisions = [{ repository: "T-ej2003/genuine-scan-main", taskDefinitionArn: failed.taskDefinition.taskDefinitionArn, candidateFingerprint: failedFingerprint, taskDefinitionFingerprint: failedFingerprint, evidenceFileSha256: "a".repeat(64), workflowRunId: "32759665989", workflowCreatedAt: "2026-08-24T17:53:00.000Z", status: "SERVICE_STABILIZATION_FAILED", classification: "TERMINAL_FAILURE", failureClassification: "SERVICE_STABILIZATION_FAILED", sourceSha: "b".repeat(40), service: BACKEND_HEALTH_RECOVERY.service, releaseMode: BACKEND_HEALTH_RECOVERY.kind, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageReleaseSha: "b".repeat(40), artifactSigningBindingSha256, runtimeConsumabilitySha256: null, predecessorHistoryReferenceSha256: null, predecessorHistoryLineageSha256: null, initialRevisionCensusSha256: null, expectedRevisionCensusSha256: null, registrations: 1, updates: 1, evidenceContract: "PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE", requiresLiveFailureReconciliation: true }];
   const boundApproval = { ...approval, failedRecoveryEvidenceSha256, failedRecoveryEvidenceReferenceSha256 };
   const boundAuthorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256, failedRecoveryEvidenceReferenceSha256, approval: boundApproval });
-  const input = base(); input.authorization = boundAuthorization; input.authenticatedFailedRecoveryEvidence = { envelopeSha256: failedRecoveryEvidenceSha256, referenceSha256: failedRecoveryEvidenceReferenceSha256, recoveryHistory: knownFailedRevisions, knownFailedRevisions, interruptedRecoveries: [] }; input.service.taskDefinition = failed.taskDefinition.taskDefinitionArn; input.service.deployments = [{ taskDefinition: failed.taskDefinition.taskDefinitionArn, rolloutState: "FAILED", failedTasks: 6 }]; input.currentImageExists = true; input.stoppedReasons = ["ResourceInitializationError: execution role denied exact runtime secret"];
+  const input = base(); input.authorization = boundAuthorization; input.authenticatedFailedRecoveryEvidence = { envelopeSha256: failedRecoveryEvidenceSha256, referenceSha256: failedRecoveryEvidenceReferenceSha256, recoveryHistory: knownFailedRevisions, knownFailedRevisions, interruptedRecoveries: [] }; input.service.taskDefinition = failed.taskDefinition.taskDefinitionArn; input.service.deployments = [{ id: failedDeploymentId, taskDefinition: failed.taskDefinition.taskDefinitionArn, rolloutState: "FAILED", failedTasks: 6, createdAt: "2026-08-24T17:59:00.000Z" }]; input.currentImageExists = true; input.stoppedTaskFailures = [stoppedTaskFailure({ taskDefinitionArn: failed.taskDefinition.taskDefinitionArn, reason: "ResourceInitializationError: execution role denied exact runtime secret" })];
   const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50";
   const target = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 50, status: "ACTIVE" }, tags: [] };
   let registered = 0; let updated = 0; let serviceTarget = failed.taskDefinition.taskDefinitionArn;
@@ -187,6 +195,14 @@ test("authenticated terminal :49-style runtime failure is reconciled but never r
     readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy,
   });
   assert.equal(result.targetArn, targetArn); assert.equal(registered, 1); assert.equal(updated, 1); assert.notEqual(result.targetArn, failed.taskDefinition.taskDefinitionArn);
+
+  for (const changed of [
+    { stoppedTaskFailures: [stoppedTaskFailure({ taskDefinitionArn: current.taskDefinition.taskDefinitionArn, reason: "ResourceInitializationError: old :47 failure" })] },
+    { stoppedTaskFailures: [stoppedTaskFailure({ taskDefinitionArn: failed.taskDefinition.taskDefinitionArn, startedBy: "ecs-svc/999", reason: "ResourceInitializationError: wrong deployment" })] },
+    { stoppedTaskFailures: [], serviceEvents: [{ message: "ResourceInitializationError: historical event" }] },
+  ]) assert.throws(() => assertLegacyBackendRecoveryEligibility({ ...input, ...changed }), /degradation is not authenticated/);
+
+  assert.throws(() => assertLegacyBackendRecoveryEligibility({ ...input, service: { ...input.service, runningCount: 2 }, stoppedTaskFailures: [stoppedTaskFailure({ taskDefinitionArn: current.taskDefinition.taskDefinitionArn, reason: "ResourceInitializationError: historical" })] }), /degradation is not authenticated/);
 
   await assert.rejects(() => runLegacyBackendHealthRecovery({ ...input, service: { ...input.service, deployments: [] } }, {
     census: async () => [current, failed], register: async () => {}, describe: async () => target, readService: async () => input.service,
@@ -343,7 +359,7 @@ test("a forged failed-revision summary cannot bless a healthy newer revision", a
   delete forged.failedRecoveryEvidenceSha256;
   forged.knownFailedRevisions = [{ taskDefinitionArn: healthyNewer.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: taskDefinitionFingerprint(healthyNewer, []), evidenceSha256: "f".repeat(64), workflowRunId: "32759665989", status: "SERVICE_STABILIZATION_FAILED", sourceSha, service: BACKEND_HEALTH_RECOVERY.service, recoveryImageDigest: digest }];
   forged.authorizationSha256 = canonicalSha256(Object.fromEntries(Object.entries(forged).filter(([key]) => key !== "authorizationSha256")));
-  const input = base(); input.authorization = forged; input.service.taskDefinition = healthyNewer.taskDefinition.taskDefinitionArn; input.stoppedReasons = ["ResourceInitializationError"];
+  const input = base(); input.authorization = forged; input.service.taskDefinition = healthyNewer.taskDefinition.taskDefinitionArn; input.stoppedTaskFailures = [stoppedTaskFailure({ taskDefinitionArn: healthyNewer.taskDefinition.taskDefinitionArn, reason: "ResourceInitializationError" })];
   let registrations = 0; let updates = 0;
   await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
     census: async () => [current, healthyNewer], register: async () => { registrations += 1; }, describe: async () => healthyNewer,
@@ -450,12 +466,12 @@ test("future failed revision N registers a distinct corrected N+1 after exact N-
   const rollbackDeploymentArn = "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/future-N";
   const rollbackServiceRevisionArn = "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/future-N-minus-1";
   const rollbackTargetDigest = currentN.taskDefinition.containerDefinitions[0].image.split("@")[1];
-  const rollbackService = { ...base().service, taskDefinition: targetArn, runningCount: 0, pendingCount: 0, deployments: [{ status: "PRIMARY", taskDefinition: targetArn, rolloutState: "IN_PROGRESS", desiredCount: 2, runningCount: 0, pendingCount: 0 }] };
+  const rollbackService = { ...base().service, taskDefinition: targetArn, runningCount: 0, pendingCount: 0, deployments: [{ id: failedDeploymentId, status: "PRIMARY", taskDefinition: targetArn, rolloutState: "FAILED", failedTasks: 2, createdAt: "2026-08-24T17:59:00.000Z", desiredCount: 2, runningCount: 0, pendingCount: 0 }] };
   const proof = rollbackProof({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn: targetArn, rollbackDigest: rollbackTargetDigest,
     forwardTaskDefinitionArn: failedN.taskDefinition.taskDefinitionArn, forwardTaskDefinitionFingerprint: taskDefinitionFingerprint(failedN, failedN.tags) });
   const approvalN = { ...approval, currentTaskDefinitionArn: targetArn, rollbackDeploymentArn, rollbackTargetTaskDefinitionArn: targetArn, rollbackTargetDigest };
   const authorizationN = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: targetArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, rollbackProof: proof, approval: approvalN });
-  const input = { ...base(), service: rollbackService, currentTaskDefinition: currentN, candidate: candidateN, authorization: authorizationN, stoppedReasons: [`CannotPullContainerError: image ${currentN.taskDefinition.containerDefinitions[0].image} not found`] };
+  const input = { ...base(), service: rollbackService, currentTaskDefinition: currentN, candidate: candidateN, authorization: authorizationN, stoppedTaskFailures: [stoppedTaskFailure({ taskDefinitionArn: targetArn, reason: `CannotPullContainerError: image ${currentN.taskDefinition.containerDefinitions[0].image} not found` })] };
   const matchingFailedForward = { taskDefinition: { ...structuredClone(candidateN), taskDefinitionArn: failedN.taskDefinition.taskDefinitionArn, revision: 999 }, tags: [] };
   let prohibitedReuseMutations = 0;
   await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
@@ -493,8 +509,8 @@ test("eligibility rejects absent approval, wrong bindings, present current image
     [mutate("replacementImage.attestationValid", false), /image/],
     [mutate("replacementImage.provenanceValid", false), /image/],
     [mutate("replacementImage.criticalFindings", 1), /image/],
-    [mutate("stoppedReasons", ["ResourceInitializationError: secrets unavailable"]), /missing-image/],
-    [mutate("stoppedReasons", ["CannotPullContainerError: image sha256:" + "f".repeat(64) + " not found"]), /missing-image/],
+    [mutate("stoppedTaskFailures", [stoppedTaskFailure({ reason: "ResourceInitializationError: secrets unavailable" })]), /missing-image/],
+    [mutate("stoppedTaskFailures", [stoppedTaskFailure({ reason: "CannotPullContainerError: image sha256:" + "f".repeat(64) + " not found" })]), /missing-image/],
   ]) assert.throws(() => assertLegacyBackendRecoveryEligibility(input), pattern);
   const wrongApproval = base();
   wrongApproval.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: "sha256:" + "a".repeat(64), imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, approval: { ...approval, recoveryImageDigest: "sha256:" + "a".repeat(64) } });

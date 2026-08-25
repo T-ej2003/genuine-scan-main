@@ -55,6 +55,8 @@ const SHA = /^[a-f0-9]{40}$/;
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX256 = /^[a-f0-9]{64}$/;
 const TASK_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-backend:([1-9][0-9]*)$/;
+const TASK_INSTANCE_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[A-Za-z0-9_-]+$/;
+const SERVICE_DEPLOYMENT_ID = /^ecs-svc\/[1-9][0-9]*$/;
 const IMAGE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@(sha256:[a-f0-9]{64})$/;
 const IDENTITY_ENV = new Set(["GIT_SHA", "RELEASE_GIT_SHA"]);
 const SIGNING_BINDINGS = new Set(ARTIFACT_SIGNING_BINDINGS);
@@ -563,7 +565,7 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
 }
 
 export function assertLegacyBackendRecoveryEligibility(input = {}) {
-  const { sourceSha, service, currentTaskDefinition, currentImageExists, replacementImage, stoppedReasons = [], authorization, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindings, artifactSigningBindingSha256, runtimeConsumabilitySha256, authenticatedFailedRecoveryEvidence, githubContext, executionActor } = input;
+  const { sourceSha, service, currentTaskDefinition, currentImageExists, replacementImage, stoppedTaskFailures = [], authorization, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindings, artifactSigningBindingSha256, runtimeConsumabilitySha256, authenticatedFailedRecoveryEvidence, githubContext, executionActor } = input;
   const knownFailedRevisions = authenticatedFailedRecoveryEvidence?.knownFailedRevisions || [];
   const interruptedRecoveries = authenticatedFailedRecoveryEvidence?.interruptedRecoveries || [];
   const recoveryHistory = authenticatedFailedRecoveryEvidence?.recoveryHistory || [];
@@ -590,12 +592,27 @@ export function assertLegacyBackendRecoveryEligibility(input = {}) {
   const currentFailedRevision = knownFailedRevisions.find(({ taskDefinitionArn: arn }) => arn === service.taskDefinition)
     || (currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.FAILED ? currentInterruption.interruption : null);
   const unavailable = service.runningCount === 0 && service.pendingCount === 0;
-  const legacyFailureLive = !currentFailedRevision?.requiresLiveFailureReconciliation || deployments.some((deployment) => deployment?.taskDefinition === service.taskDefinition
-    && deployment?.rolloutState === "FAILED" && Number(deployment?.failedTasks) > 0)
-    && stoppedReasons.some((reason) => /ResourceInitializationError|CannotPullContainerError|TaskFailedToStart/i.test(reason));
+  const exactFailedDeployments = (taskDefinitionArn) => deployments.filter((deployment) => deployment?.taskDefinition === taskDefinitionArn && deployment?.rolloutState === "FAILED"
+    && SERVICE_DEPLOYMENT_ID.test(deployment?.id || "") && Number(deployment?.failedTasks) > 0 && Number.isFinite(Date.parse(deployment?.createdAt)));
+  const exactFailures = (taskDefinitionArn, matchingDeployments) => matchingDeployments.length === 1 && Array.isArray(stoppedTaskFailures) ? stoppedTaskFailures.filter((task) => {
+    const createdAt = Date.parse(task?.createdAt); const startedAt = task?.startedAt == null ? createdAt : Date.parse(task.startedAt); const stoppedAt = Date.parse(task?.stoppedAt);
+    return TASK_INSTANCE_ARN.test(task?.taskArn || "") && task.taskDefinitionArn === taskDefinitionArn && task.startedBy === matchingDeployments[0].id
+      && task.desiredStatus === "STOPPED" && task.lastStatus === "STOPPED" && typeof task.stopCode === "string"
+      && typeof task.stoppedReason === "string" && Array.isArray(task.containerReasons) && task.containerReasons.every((reason) => typeof reason === "string")
+      && Number.isFinite(createdAt) && Number.isFinite(startedAt) && Number.isFinite(stoppedAt) && createdAt >= Date.parse(matchingDeployments[0].createdAt)
+      && startedAt >= createdAt && stoppedAt >= startedAt;
+  }) : [];
+  const failedDeployments = exactFailedDeployments(service.taskDefinition);
+  const currentFailureReasons = exactFailures(service.taskDefinition, failedDeployments).flatMap((task) => [task.stoppedReason, ...task.containerReasons]);
+  const sourceFailureReasons = exactFailures(currentArn, exactFailedDeployments(currentArn)).flatMap((task) => [task.stoppedReason, ...task.containerReasons]);
+  const legacyFailureLive = !currentFailedRevision?.requiresLiveFailureReconciliation || failedDeployments.length === 1
+    && currentFailureReasons.some((reason) => /ResourceInitializationError|CannotPullContainerError|TaskFailedToStart/i.test(reason));
   const unavailableKnownFailure = unavailable && currentFailedRevision && legacyFailureLive;
-  const unavailableMissingImage = unavailable && currentImageExists === false && stoppedReasons.some((reason) => /CannotPullContainerError/i.test(reason) && /not found|does not exist/i.test(reason) && reason.includes(imageMatch[1]));
-  if (currentInterruption?.result.classification !== INTERRUPTED_RECOVERY_STATE.SUCCEEDED && !unavailableKnownFailure && !unavailableMissingImage) throw new Error("Backend degradation is not authenticated as the current digest's missing-image pull failure or an unavailable approved terminal recovery failure.");
+  const unavailableMissingImage = currentImageExists === false && sourceFailureReasons.some((reason) => /CannotPullContainerError/i.test(reason) && /not found|does not exist/i.test(reason) && reason.includes(imageMatch[1]));
+  const reconciledInterruption = currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.SUCCEEDED
+    || interruptionReconciliations.some(({ result }) => [INTERRUPTED_RECOVERY_STATE.NO_EFFECT, INTERRUPTED_RECOVERY_STATE.RESUMABLE].includes(result.classification));
+  const stalledRollback = authorization?.rollbackProof?.classification === ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE;
+  if (!reconciledInterruption && !stalledRollback && !unavailableKnownFailure && !unavailableMissingImage) throw new Error("Backend degradation is not authenticated as the current digest's missing-image pull failure or an unavailable approved terminal recovery failure.");
   if (replacementImage?.exists !== true || replacementImage?.immutable !== true || replacementImage?.signatureValid !== true
     || replacementImage?.attestationValid !== true || replacementImage?.provenanceValid !== true || replacementImage?.criticalFindings !== 0
     || replacementImage?.repository !== BACKEND_HEALTH_RECOVERY.repository || !SHA256.test(replacementImage?.digest || "")) throw new Error("Replacement image does not satisfy the recovery evidence contract.");

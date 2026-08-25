@@ -357,6 +357,22 @@ chain from repository/workflow run through source, mode, service, recovery
 digest, terminal failure status, target task definition, candidate fingerprint,
 and the governed zero-or-one registration/update counts.
 
+Pre-runtime-closure schema-3 history is accepted only through its explicit
+legacy contract. The producer authenticates the historical GitHub run and
+attempt, protected-main commit, executed `Deploy production ECS` job and upload
+step, production deployment/status history, required reviewer approval, and the
+artifact metadata bound to that exact run. Workflow YAML is checked only as a
+structural invariant; it is never execution or approval proof. Because schema 3
+did not persist modern runtime-consumability or candidate-fingerprint artifacts,
+those fields remain explicitly `NOT_PART_OF_SCHEMA` and cannot be omitted from
+modern records.
+
+Legacy terminal failure also requires fresh ECS evidence for the exact current
+task-definition ARN and exact `ecs-svc/<numeric-id>` deployment. Structured
+stopped-task observations retain task ARN, task definition, `startedBy`, status,
+stop code/reasons, and timestamps. Service-wide historical event text remains
+diagnostic only and cannot authorize revision reconciliation.
+
 `publish-production-backend-failed-recovery-evidence.mjs` stores that bundle as
 a content-addressed asset in an immutable GitHub release and emits a bounded
 reference containing the exact repository, protected source, release and asset
