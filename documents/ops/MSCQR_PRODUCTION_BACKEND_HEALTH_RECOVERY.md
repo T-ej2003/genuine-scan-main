@@ -268,9 +268,10 @@ complete legacy or enhanced AWS CLI text envelope must identify exactly ECR
 `GetRepositoryPolicy` and the repository/account supplied to that call;
 structured JSON, mixed errors, read errors, malformed responses, and any
 repository policy semantics fail closed. Successful policy documents require
-a non-empty IAM statement list with structurally valid effect, action,
-resource, principal, condition, and Sid fields before they can satisfy even a
-read-capability preflight. Secret metadata is
+a non-empty IAM statement list with structurally valid effect and exactly one
+action/inverse, resource/inverse, and principal/inverse plus valid condition
+and Sid fields before they can satisfy even a read-capability preflight.
+Secret metadata is
 likewise bound to an explicit available/not-scheduled-for-deletion state.
 Repository policy and secret availability metadata are refreshed before
 registration and again before `UpdateService`.

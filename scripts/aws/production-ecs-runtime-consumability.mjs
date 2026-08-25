@@ -44,10 +44,10 @@ const isPolicyStatement = (statement) => {
   const action = Object.hasOwn(statement, "Action"); const notAction = Object.hasOwn(statement, "NotAction");
   const resource = Object.hasOwn(statement, "Resource"); const notResource = Object.hasOwn(statement, "NotResource");
   const principal = Object.hasOwn(statement, "Principal"); const notPrincipal = Object.hasOwn(statement, "NotPrincipal");
-  return action !== notAction && resource !== notResource && !(principal && notPrincipal)
+  return action !== notAction && resource !== notResource && principal !== notPrincipal
     && isStringOrStringList(statement[action ? "Action" : "NotAction"])
     && isStringOrStringList(statement[resource ? "Resource" : "NotResource"])
-    && (!principal && !notPrincipal || isPrincipal(statement[principal ? "Principal" : "NotPrincipal"]))
+    && isPrincipal(statement[principal ? "Principal" : "NotPrincipal"])
     && (!Object.hasOwn(statement, "Sid") || isNonEmptyString(statement.Sid) && /^[A-Za-z0-9]+$/.test(statement.Sid))
     && (!Object.hasOwn(statement, "Condition") || isCondition(statement.Condition));
 };

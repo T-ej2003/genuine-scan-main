@@ -15,6 +15,7 @@ import { buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDI
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
+import { MALFORMED_ECR_REPOSITORY_POLICIES } from "./fixtures/ecr-repository-policy-fixtures.mjs";
 
 const caller = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test";
 const stageAState = JSON.stringify({ lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: 35, resources: [] });
@@ -186,15 +187,17 @@ test("release preflight treats current AWS CLI no-policy errors as authenticated
 });
 
 test("release preflight rejects malformed successful ECR policy responses", () => {
-  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
-    if (probe.action === "ecr:GetRepositoryPolicy") {
-      const repositoryName = args[args.indexOf("--repository-name") + 1];
-      return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify({ Version: "2012-10-17", Statement: [null] }) });
-    }
-    return allowed(args);
-  } });
-  assert.equal(report.status, "blocked");
-  assert.equal(report.failed.filter(({ action }) => action === "ecr:GetRepositoryPolicy").length, 3);
+  for (const [label, policy] of MALFORMED_ECR_REPOSITORY_POLICIES) {
+    const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+      if (probe.action === "ecr:GetRepositoryPolicy") {
+        const repositoryName = args[args.indexOf("--repository-name") + 1];
+        return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify(policy) });
+      }
+      return allowed(args);
+    } });
+    assert.equal(report.status, "blocked", label);
+    assert.equal(report.failed.filter(({ action }) => action === "ecr:GetRepositoryPolicy").length, 3, label);
+  }
 });
 
 test("active rollback discovery reads the exact deployment details", () => {
