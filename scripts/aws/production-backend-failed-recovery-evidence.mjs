@@ -35,6 +35,7 @@ const exactFields = (value, fields) => value && Object.keys(value).sort().join("
 const LEGACY_RECORD_FIELDS = ["legacyIdentity", "recoveryEvidence", "repository", "workflowRunId"];
 const LEGACY_IDENTITY_FIELDS = ["schemaVersion", "kind", "evidenceContract", "repository", "workflowRunId", "workflowRunAttempt", "workflowPath", "workflowEvent", "workflowHeadSha", "workflowHeadBranch", "workflowConclusion", "workflowCreatedAt", "workflowDefinitionSha256", "productionJobId", "productionJobName", "productionJobConclusion", "productionJobProofSha256", "productionEnvironmentId", "productionDeploymentId", "productionDeploymentProofSha256", "productionApprovalProofSha256", "productionApproverId", "productionApprover", "artifactId", "artifactName", "artifactCreatedAt", "artifactArchiveSizeInBytes", "artifactArchiveDigest", "evidenceByteSize", "evidenceByteSha256", "environmentApprovalEvidence", "runtimeConsumabilityEvidence", "candidateFingerprintEvidence", "sourceSha", "service", "releaseMode", "taskDefinitionArn", "taskDefinitionFingerprint", "recoveryImageDigest", "imageReleaseSha"];
 const LEGACY_EVIDENCE_FIELDS = ["account", "artifactSigningBindingSha256", "artifactSigningFailure", "artifactSigningVerification", "authorizationFileSha256", "authorizationSha256", "currentTaskDefinitionArn", "environmentApprovalFileSha256", "environmentApprovalSha256", "evidenceSha256", "generatedAt", "imageAuthorizationFileSha256", "imageAuthorizationSha256", "imageReleaseSha", "kind", "knownFailedRevisions", "recoveryImageDigest", "region", "registrations", "rollbackProofSha256", "schemaVersion", "sourceSha", "status", "targetArn", "updates"];
+const LEGACY_PREDECESSOR_CLASSIFICATION = "AUTHENTICATED_LEGACY_PREDECESSOR";
 
 function artifact(bytes, label) {
   if (!Buffer.isBuffer(bytes) || !bytes.length) throw new Error(`${label} bytes are required.`);
@@ -82,6 +83,25 @@ function validateLegacyRecord(record) {
   });
   if (!TERMINAL_FAILURES.has(evidence.status) || evidence.registrations !== 1 || evidence.updates !== 1 || evidence.backendHealthy === true)
     throw new Error("Legacy historical recovery evidence is not an authenticated terminal failure.");
+  const sourceRevision = Number(evidence.currentTaskDefinitionArn.split(":").at(-1));
+  const terminalRevision = Number(evidence.targetArn.split(":").at(-1));
+  let previousRevision = sourceRevision;
+  const fingerprints = new Set([identity.taskDefinitionFingerprint]);
+  const authenticatedLegacyPredecessors = evidence.knownFailedRevisions.map(({ taskDefinitionArn, taskDefinitionFingerprint }) => {
+    const revision = Number(taskDefinitionArn.split(":").at(-1));
+    if (!Number.isSafeInteger(revision) || revision <= previousRevision || revision >= terminalRevision || fingerprints.has(taskDefinitionFingerprint)) {
+      throw new Error("Legacy historical recovery predecessor lineage is reordered, aliased, or conflicting.");
+    }
+    previousRevision = revision;
+    fingerprints.add(taskDefinitionFingerprint);
+    return Object.freeze({
+      repository: REPOSITORY, workflowRunId: identity.workflowRunId, sourceSha: evidence.sourceSha,
+      service: BACKEND_HEALTH_RECOVERY.service, releaseMode: BACKEND_HEALTH_RECOVERY.kind,
+      taskDefinitionArn, taskDefinitionFingerprint, classification: LEGACY_PREDECESSOR_CLASSIFICATION,
+      evidenceContract: PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE, evidenceFileSha256: recovery.byteSha256,
+      terminalTaskDefinitionArn: evidence.targetArn,
+    });
+  });
   return Object.freeze({
     repository: REPOSITORY, workflowRunId: identity.workflowRunId, workflowCreatedAt: identity.workflowCreatedAt,
     sourceSha: evidence.sourceSha, service: BACKEND_HEALTH_RECOVERY.service, releaseMode: BACKEND_HEALTH_RECOVERY.kind,
@@ -92,6 +112,7 @@ function validateLegacyRecord(record) {
     currentTaskDefinitionArn: evidence.currentTaskDefinitionArn, initialRevisionCensusSha256: null, expectedRevisionCensusSha256: null,
     registrations: evidence.registrations, updates: evidence.updates, evidenceFileSha256: recovery.byteSha256,
     evidenceContract: PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE, requiresLiveFailureReconciliation: true,
+    authenticatedLegacyPredecessors: Object.freeze(authenticatedLegacyPredecessors),
   });
 }
 
@@ -170,6 +191,16 @@ function assertOrderedHistory(summaries) {
   }
 }
 
+function projectedKnownFailedRevisions(summaries) {
+  const projected = summaries.flatMap((record) => [
+    ...(record.authenticatedLegacyPredecessors || []),
+    ...(record.classification === "TERMINAL_FAILURE" ? [record] : []),
+  ]);
+  const arns = projected.map(({ taskDefinitionArn }) => taskDefinitionArn);
+  if (new Set(arns).size !== arns.length) throw new Error("Historical failed recovery predecessor evidence is duplicated or conflicting.");
+  return projected;
+}
+
 export function createAuthenticatedFailedRecoveryEvidence({ records, verifyRuntime, sign, signedAt = new Date().toISOString() } = {}) {
   if (!Array.isArray(records) || !records.length || records.length > MAX_HISTORY_RECORDS || typeof verifyRuntime !== "function" || typeof sign !== "function") throw new Error("Historical failed recovery evidence inputs are incomplete or exceed the bounded history limit.");
   const encoded = records.map((record) => {
@@ -186,7 +217,8 @@ export function createAuthenticatedFailedRecoveryEvidence({ records, verifyRunti
   const summaries = encoded.map((record) => validateRecord(record, verifyRuntime));
   assertOrderedHistory(summaries);
   recoveryHistoryLineageSha256(summaries);
-  const identities = summaries.map(({ taskDefinitionArn, taskDefinitionFingerprint }) => taskDefinitionArn || `pending:${taskDefinitionFingerprint}`);
+  const identities = [...projectedKnownFailedRevisions(summaries), ...summaries.filter(({ classification }) => classification === "INTERRUPTED_MUTATION")]
+    .map(({ taskDefinitionArn, taskDefinitionFingerprint }) => taskDefinitionArn || `pending:${taskDefinitionFingerprint}`);
   if (new Set(identities).size !== identities.length
     || new Set(summaries.map(({ workflowRunId }) => workflowRunId)).size !== summaries.length) throw new Error("Historical failed recovery evidence is duplicated or conflicting.");
   const body = { schemaVersion: 1, kind: KIND, repository: REPOSITORY, records: encoded, signedAt, keyArn: STAGE_B.approvalKmsKeyArn, signingAlgorithm: STAGE_B_APPROVAL_ALGORITHM };
@@ -215,14 +247,16 @@ export function assertAuthenticatedFailedRecoveryEvidence(envelope, { verify, no
   const summaries = envelope.records.map((record) => validateRecord(record, verify));
   assertOrderedHistory(summaries);
   const lineageSha256 = recoveryHistoryLineageSha256(summaries);
-  const identities = summaries.map(({ taskDefinitionArn, taskDefinitionFingerprint }) => taskDefinitionArn || `pending:${taskDefinitionFingerprint}`);
+  const knownFailedRevisions = projectedKnownFailedRevisions(summaries);
+  const identities = [...knownFailedRevisions, ...summaries.filter(({ classification }) => classification === "INTERRUPTED_MUTATION")]
+    .map(({ taskDefinitionArn, taskDefinitionFingerprint }) => taskDefinitionArn || `pending:${taskDefinitionFingerprint}`);
   if (new Set(identities).size !== identities.length
     || new Set(summaries.map(({ workflowRunId }) => workflowRunId)).size !== summaries.length) throw new Error("Historical failed recovery evidence is duplicated or conflicting.");
   return Object.freeze({
     envelopeSha256,
     lineageSha256,
     recoveryHistory: Object.freeze(summaries),
-    knownFailedRevisions: Object.freeze(summaries.filter(({ classification }) => classification === "TERMINAL_FAILURE")),
+    knownFailedRevisions: Object.freeze(knownFailedRevisions),
     interruptedRecoveries: Object.freeze(summaries.filter(({ classification }) => classification === "INTERRUPTED_MUTATION")),
   });
 }

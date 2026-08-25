@@ -189,6 +189,8 @@ export function openInterruptedRecoveryHistory(history) {
 }
 export const EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256 = canonicalSha256([]);
 export const RECOVERY_HISTORY_LINEAGE_PROJECTION_VERSION = 1;
+const LEGACY_PREDECESSOR_CLASSIFICATION = "AUTHENTICATED_LEGACY_PREDECESSOR";
+const LEGACY_PREDECESSOR_FIELDS = ["classification", "evidenceContract", "evidenceFileSha256", "releaseMode", "repository", "service", "sourceSha", "taskDefinitionArn", "taskDefinitionFingerprint", "terminalTaskDefinitionArn", "workflowRunId"];
 export function recoveryHistoryLineageRecord(record) {
   return {
     repository: record.repository,
@@ -214,6 +216,13 @@ export function recoveryHistoryLineageRecord(record) {
     updates: record.updates,
     evidenceFileSha256: record.evidenceFileSha256,
   };
+}
+
+function projectedKnownFailedRevisions(history) {
+  return history.flatMap((record) => [
+    ...(record.authenticatedLegacyPredecessors || []),
+    ...(record.classification === "TERMINAL_FAILURE" ? [record] : []),
+  ]);
 }
 export function recoveryHistoryLineageSha256(history) {
   if (!Array.isArray(history)) throw new Error("Recovery history lineage is malformed.");
@@ -289,6 +298,15 @@ export function reconcileAuthenticatedRevisionLineage(revisions, eligible, { all
       && Date.parse(record.workflowCreatedAt) > Date.parse(history[index - 1].workflowCreatedAt);
     if (index === 0 ? record.predecessorHistoryReferenceSha256 !== null : !legacyContinuation && !HEX256.test(record.predecessorHistoryReferenceSha256 || "")) throw new Error("Recovery history predecessor reference chain is missing, reordered, or substituted.");
     if (record.taskDefinitionFingerprint !== record.candidateFingerprint || !lineage.some(({ taskDefinitionArn: arn }) => arn === record.currentTaskDefinitionArn)) throw new Error("Recovery history is bound to a different predecessor lineage or candidate identity.");
+    for (const predecessor of record.authenticatedLegacyPredecessors || []) {
+      const target = entryByArn.get(predecessor.taskDefinitionArn);
+      const next = entries.find(({ taskDefinitionArn: arn }) => !lineage.some((item) => item.taskDefinitionArn === arn));
+      if (record.evidenceContract !== "PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE" || predecessor.classification !== LEGACY_PREDECESSOR_CLASSIFICATION
+        || !target || target.fingerprint !== predecessor.taskDefinitionFingerprint || next?.taskDefinitionArn !== predecessor.taskDefinitionArn) {
+        throw new Error("Authenticated legacy predecessor is absent, changed, reordered, or unknown.");
+      }
+      lineage.push({ taskDefinitionArn: target.taskDefinitionArn, taskDefinitionFingerprint: target.fingerprint });
+    }
     const predecessorSha256 = identityHash(lineage);
     let targetArn = record.taskDefinitionArn;
     let introduced = false;
@@ -507,10 +525,14 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
   if (!HEX256.test(artifactSigningBindingSha256 || "") || authorization.artifactSigningBindingSha256 !== artifactSigningBindingSha256) throw new Error("Backend health recovery artifact-signing binding is stale or unauthenticated.");
   if (!HEX256.test(runtimeConsumabilitySha256 || "") || authorization.runtimeConsumabilitySha256 !== runtimeConsumabilitySha256) throw new Error("Backend health recovery runtime-consumability evidence is stale or unauthenticated.");
   const history = recoveryHistory;
-  const historyViewsMatch = canonicalSha256(history.filter(({ classification }) => classification === "TERMINAL_FAILURE")) === canonicalSha256(knownFailedRevisions)
+  const historyViewsMatch = canonicalSha256(projectedKnownFailedRevisions(history)) === canonicalSha256(knownFailedRevisions)
     && canonicalSha256(history.filter(({ classification }) => classification === "INTERRUPTED_MUTATION")) === canonicalSha256(interruptedRecoveries);
   const invalidFailedHistory = !Array.isArray(knownFailedRevisions) || knownFailedRevisions.some((item) => {
     const legacy = item?.evidenceContract === "PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE";
+    if (item?.classification === LEGACY_PREDECESSOR_CLASSIFICATION) return !legacy || Object.keys(item).sort().join(",") !== [...LEGACY_PREDECESSOR_FIELDS].sort().join(",")
+      || item.repository !== "T-ej2003/genuine-scan-main" || !/^[1-9][0-9]*$/.test(String(item.workflowRunId || "")) || !SHA.test(item.sourceSha || "")
+      || item.service !== BACKEND_HEALTH_RECOVERY.service || item.releaseMode !== BACKEND_HEALTH_RECOVERY.kind || !TASK_ARN.test(item.taskDefinitionArn || "")
+      || !HEX256.test(item.taskDefinitionFingerprint || "") || !TASK_ARN.test(item.terminalTaskDefinitionArn || "") || !HEX256.test(item.evidenceFileSha256 || "");
     return item?.repository !== "T-ej2003/genuine-scan-main" || !TASK_ARN.test(item?.taskDefinitionArn || "")
     || !HEX256.test(item?.taskDefinitionFingerprint || "") || !HEX256.test(item?.evidenceFileSha256 || "") || !/^[1-9][0-9]*$/.test(String(item?.workflowRunId || ""))
     || ![BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, BACKEND_HEALTH_RECOVERY_STATUS.RUNNING_DIGEST_VERIFICATION_FAILED, BACKEND_HEALTH_RECOVERY_STATUS.HEALTH_VERIFICATION_FAILED].includes(item?.status)
@@ -616,7 +638,7 @@ export function assertLegacyBackendRecoveryEligibility(input = {}) {
     || result.networkConfigurationSha256 !== canonicalSha256(service.networkConfiguration) || result.loadBalancersSha256 !== canonicalSha256(service.loadBalancers))) throw new Error("Interrupted recovery live reconciliation changed from the execution service snapshot.");
   const currentInterruption = interruptionReconciliations.find(({ result }) => result.targetArn === service.taskDefinition);
   if (currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.PROGRESSING) throw new Error("Interrupted backend recovery is still progressing and must not be superseded.");
-  const currentFailedRevision = knownFailedRevisions.find(({ taskDefinitionArn: arn }) => arn === service.taskDefinition)
+  const currentFailedRevision = knownFailedRevisions.find(({ taskDefinitionArn: arn, classification }) => arn === service.taskDefinition && classification === "TERMINAL_FAILURE")
     || (currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.FAILED ? currentInterruption.interruption : null);
   const unavailable = service.runningCount === 0 && service.pendingCount === 0;
   const exactFailedDeployments = (taskDefinitionArn) => deployments.filter((deployment) => deployment?.taskDefinition === taskDefinitionArn && deployment?.rolloutState === "FAILED"

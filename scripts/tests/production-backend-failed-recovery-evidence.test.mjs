@@ -12,7 +12,7 @@ import { prepareProductionBackendFailedRecoveryEvidence, resolveLegacyWorkflowEv
 import { assertFailedRecoveryEvidenceReference } from "../aws/production-backend-failed-recovery-evidence-reference.mjs";
 import { publishProductionBackendFailedRecoveryEvidence } from "../aws/publish-production-backend-failed-recovery-evidence.mjs";
 import { resolveProductionBackendFailedRecoveryEvidence } from "../aws/resolve-production-backend-failed-recovery-evidence.mjs";
-import { EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256, RECOVERY_HISTORY_LINEAGE_PROJECTION_VERSION } from "../aws/production-backend-health-recovery-contract.mjs";
+import { classifyRevisionCensus, EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256, recoveryHistoryLineageRecord, RECOVERY_HISTORY_LINEAGE_PROJECTION_VERSION } from "../aws/production-backend-health-recovery-contract.mjs";
 
 const sourceSha = "b64274e155434ae9390d28762d40a37801be5362";
 const digest = `sha256:${"6".repeat(64)}`;
@@ -50,7 +50,7 @@ function interruptedArtifacts(status, recovery = {}, overrides = {}) {
 const create = (records = [artifacts()]) => createAuthenticatedFailedRecoveryEvidence({ records, verifyRuntime: () => true, sign: () => "AQ==", signedAt: new Date(now).toISOString() });
 const verify = (envelope) => assertAuthenticatedFailedRecoveryEvidence(envelope, { verify: () => true, now });
 
-function legacyArtifacts(overrides = {}) {
+function legacyArtifacts(overrides = {}, identityOverrides = {}) {
   const body = { schemaVersion: 3, kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE", sourceSha,
     authorizationFileSha256: "a".repeat(64), authorizationSha256: "b".repeat(64), environmentApprovalFileSha256: "c".repeat(64), environmentApprovalSha256: "d".repeat(64),
     imageAuthorizationFileSha256: "e".repeat(64), imageAuthorizationSha256: "f".repeat(64), artifactSigningBindingSha256: "1".repeat(64), rollbackProofSha256: "2".repeat(64),
@@ -66,7 +66,7 @@ function legacyArtifacts(overrides = {}) {
     artifactName: "backend-health-recovery-evidence", artifactCreatedAt: "2026-08-24T18:22:25.000Z", artifactArchiveSizeInBytes: 1115, artifactArchiveDigest: `sha256:${"5".repeat(64)}`, evidenceByteSize: recoveryEvidenceBytes.length, evidenceByteSha256: hash(recoveryEvidenceBytes),
     environmentApprovalEvidence: "AUTHENTICATED_GITHUB_PRODUCTION_ENVIRONMENT_APPROVAL_HISTORY", runtimeConsumabilityEvidence: "NOT_PART_OF_SCHEMA", candidateFingerprintEvidence: "NOT_PART_OF_SCHEMA",
     sourceSha, service: "mscqr-backend-servi-euw2", releaseMode: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", taskDefinitionArn: failedArn,
-    taskDefinitionFingerprint: "9".repeat(64), recoveryImageDigest: digest, imageReleaseSha: body.imageReleaseSha } };
+    taskDefinitionFingerprint: "9".repeat(64), recoveryImageDigest: digest, imageReleaseSha: body.imageReleaseSha, ...identityOverrides } };
 }
 
 class FakeEvidenceRelease {
@@ -276,9 +276,14 @@ test("a healthy newer revision cannot be admitted by a caller-authored summary",
 
 test("real schema-3 :49 evidence is admitted only through its explicit authenticated legacy contract", () => {
   const result = verify(create([legacyArtifacts()]));
-  assert.equal(result.knownFailedRevisions[0].taskDefinitionArn, failedArn);
-  assert.equal(result.knownFailedRevisions[0].runtimeConsumabilitySha256, null);
-  assert.equal(result.knownFailedRevisions[0].requiresLiveFailureReconciliation, true);
+  assert.deepEqual(result.knownFailedRevisions.map(({ taskDefinitionArn, classification }) => ({ taskDefinitionArn, classification })), [
+    { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", classification: "AUTHENTICATED_LEGACY_PREDECESSOR" },
+    { taskDefinitionArn: failedArn, classification: "TERMINAL_FAILURE" },
+  ]);
+  const terminal = result.knownFailedRevisions.at(-1);
+  assert.equal(terminal.runtimeConsumabilitySha256, null);
+  assert.equal(terminal.requiresLiveFailureReconciliation, true);
+  assert.equal("authenticatedLegacyPredecessors" in recoveryHistoryLineageRecord(result.recoveryHistory[0]), false);
   const tamperedRun = structuredClone(create([legacyArtifacts()])); tamperedRun.records[0].legacyIdentity.workflowRunId = "32759665990";
   assert.throws(() => verify(tamperedRun), /signature|tampered/);
   for (const mutate of [
@@ -293,6 +298,111 @@ test("real schema-3 :49 evidence is admitted only through its explicit authentic
   for (const recovery of [{ status: "RECOVERY_COMPLETE" }, { registrations: 0 }, { updates: 0 }]) {
     assert.throws(() => create([legacyArtifacts(recovery)]), /terminal failure|malformed|tampered|Completed/);
   }
+});
+
+test("legacy predecessors compose deterministically with later failed and interrupted generations", () => {
+  const fixture = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
+  const revision = (number) => {
+    const value = structuredClone(fixture);
+    value.taskDefinition.taskDefinitionArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:${number}`;
+    value.taskDefinition.revision = number;
+    value.taskDefinition.containerDefinitions[0].cpu = number;
+    return value;
+  };
+  const [source, predecessor, legacyTerminal, modernTarget, nextCandidate] = [47, 48, 49, 50, 51].map(revision);
+  const fingerprint = (value) => taskDefinitionFingerprint(value, value.tags);
+  const legacy = legacyArtifacts({ knownFailedRevisions: [{ taskDefinitionArn: predecessor.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: fingerprint(predecessor) }] }, { taskDefinitionFingerprint: fingerprint(legacyTerminal) });
+  const legacyAuthenticated = verify(create([legacy]));
+  const identities = (values) => canonicalSha256(values.map((value) => ({ taskDefinitionArn: value.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: fingerprint(value) })).sort((a, b) => a.taskDefinitionArn.localeCompare(b.taskDefinitionArn)));
+
+  const modernFailed = artifacts({
+    environment: { workflowRunId: "32759665990" }, runtime: { candidateFingerprint: fingerprint(modernTarget) },
+    recovery: { currentTaskDefinitionArn: legacyTerminal.taskDefinition.taskDefinitionArn, targetArn: modernTarget.taskDefinition.taskDefinitionArn,
+      failedRecoveryEvidenceReferenceSha256: "f".repeat(64), knownFailedRevisions: [], registrations: 1, updates: 1 },
+  });
+  const failedHistory = verify(create([legacy, modernFailed]));
+  const failedCensus = classifyRevisionCensus([source, predecessor, legacyTerminal, modernTarget], {
+    currentTaskDefinitionArn: source.taskDefinition.taskDefinitionArn, fingerprint: fingerprint(nextCandidate), recoveryHistory: failedHistory.recoveryHistory,
+    knownFailedRevisions: failedHistory.knownFailedRevisions, interruptedRecoveries: failedHistory.interruptedRecoveries,
+  });
+  assert.deepEqual(failedCensus.knownFailedRevisions.map(({ taskDefinitionArn }) => taskDefinitionArn), [48, 49, 50].map((number) => `arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:${number}`));
+
+  const interrupted = interruptedArtifacts("SERVICE_UPDATE_CONFIRMED", {
+    schemaVersion: 7, currentTaskDefinitionArn: legacyTerminal.taskDefinition.taskDefinitionArn, targetArn: modernTarget.taskDefinition.taskDefinitionArn,
+    candidateFingerprint: fingerprint(modernTarget), initialRevisionCensusSha256: identities([source, predecessor, legacyTerminal]),
+    expectedRevisionCensusSha256: identities([source, predecessor, legacyTerminal, modernTarget]), failedRecoveryEvidenceReferenceSha256: "e".repeat(64),
+    predecessorHistoryLineageSha256: legacyAuthenticated.lineageSha256,
+  }, { environment: { workflowRunId: "32759665991" }, runtime: { candidateFingerprint: fingerprint(modernTarget) } });
+  const interruptedHistory = verify(create([legacy, interrupted]));
+  const interruptedCensus = classifyRevisionCensus([source, predecessor, legacyTerminal, modernTarget], {
+    currentTaskDefinitionArn: source.taskDefinition.taskDefinitionArn, fingerprint: fingerprint(nextCandidate), recoveryHistory: interruptedHistory.recoveryHistory,
+    knownFailedRevisions: interruptedHistory.knownFailedRevisions, interruptedRecoveries: interruptedHistory.interruptedRecoveries,
+  });
+  assert.deepEqual(interruptedCensus.interruptedRevisions.map(({ taskDefinitionArn }) => taskDefinitionArn), [modernTarget.taskDefinition.taskDefinitionArn]);
+
+  const multiLegacyTerminal = revision(50);
+  const multi = legacyArtifacts({
+    targetArn: multiLegacyTerminal.taskDefinition.taskDefinitionArn,
+    knownFailedRevisions: [predecessor, legacyTerminal].map((value) => ({ taskDefinitionArn: value.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: fingerprint(value) })),
+  }, { taskDefinitionArn: multiLegacyTerminal.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: fingerprint(multiLegacyTerminal) });
+  const multiAuthenticated = verify(create([multi]));
+  assert.deepEqual(classifyRevisionCensus([source, predecessor, legacyTerminal, multiLegacyTerminal], {
+    currentTaskDefinitionArn: source.taskDefinition.taskDefinitionArn, fingerprint: fingerprint(nextCandidate), recoveryHistory: multiAuthenticated.recoveryHistory,
+    knownFailedRevisions: multiAuthenticated.knownFailedRevisions, interruptedRecoveries: [],
+  }).knownFailedRevisions.length, 3);
+
+  const reversed = legacyArtifacts({ knownFailedRevisions: [legacyTerminal, predecessor].map((value) => ({ taskDefinitionArn: value.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: fingerprint(value) })), targetArn: multiLegacyTerminal.taskDefinition.taskDefinitionArn }, { taskDefinitionArn: multiLegacyTerminal.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: fingerprint(multiLegacyTerminal) });
+  assert.throws(() => create([reversed]), /reordered/);
+});
+
+test("real schema-3 :49 evidence closes the global :47 -> :48 -> :49 revision census", () => {
+  const fixture = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
+  const revision = (number, cpu) => {
+    const value = structuredClone(fixture);
+    value.taskDefinition.taskDefinitionArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:${number}`;
+    value.taskDefinition.revision = number;
+    value.taskDefinition.containerDefinitions[0].cpu = cpu;
+    return value;
+  };
+  const source = revision(47, 47); const predecessor = revision(48, 48); const terminal = revision(49, 49); const candidate = revision(50, 50);
+  const predecessorFingerprint = taskDefinitionFingerprint(predecessor, predecessor.tags);
+  const terminalFingerprint = taskDefinitionFingerprint(terminal, terminal.tags);
+  const legacy = legacyArtifacts({ knownFailedRevisions: [{ taskDefinitionArn: predecessor.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: predecessorFingerprint }] }, { taskDefinitionFingerprint: terminalFingerprint });
+  const authenticated = verify(create([legacy]));
+  const eligible = { currentTaskDefinitionArn: source.taskDefinition.taskDefinitionArn, fingerprint: taskDefinitionFingerprint(candidate, candidate.tags), recoveryHistory: authenticated.recoveryHistory, knownFailedRevisions: authenticated.knownFailedRevisions, interruptedRecoveries: [] };
+  const census = classifyRevisionCensus([source, predecessor, terminal], eligible);
+  assert.deepEqual(census.knownFailedRevisions.map(({ taskDefinitionArn }) => taskDefinitionArn), [predecessor.taskDefinition.taskDefinitionArn, terminal.taskDefinition.taskDefinitionArn]);
+  assert.throws(() => classifyRevisionCensus([source, terminal], eligible), /predecessor|absent|reordered|unknown/);
+  const missingPredecessorEvidence = verify(create([legacyArtifacts({ knownFailedRevisions: [] }, { taskDefinitionFingerprint: terminalFingerprint })]));
+  assert.throws(() => classifyRevisionCensus([source, predecessor, terminal], {
+    ...eligible, recoveryHistory: missingPredecessorEvidence.recoveryHistory, knownFailedRevisions: missingPredecessorEvidence.knownFailedRevisions,
+  }), /missing|reordered|unknown|concurrent/);
+  const forgedPredecessor = structuredClone(predecessor); forgedPredecessor.taskDefinition.containerDefinitions[0].cpu = 480;
+  assert.throws(() => classifyRevisionCensus([source, forgedPredecessor, terminal], eligible), /predecessor|changed|candidate/);
+  const unknown = revision(51, 51);
+  assert.throws(() => classifyRevisionCensus([source, predecessor, terminal, unknown], eligible), /unknown|concurrent/);
+
+  for (const knownFailedRevisions of [
+    [
+      { taskDefinitionArn: predecessor.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: predecessorFingerprint },
+      { taskDefinitionArn: predecessor.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: predecessorFingerprint },
+    ],
+    [
+      { taskDefinitionArn: predecessor.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: predecessorFingerprint },
+      { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", taskDefinitionFingerprint: terminalFingerprint },
+    ],
+    [{ taskDefinitionArn: source.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: predecessorFingerprint }],
+    [{ taskDefinitionArn: terminal.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: predecessorFingerprint }],
+    [{ taskDefinitionArn: predecessor.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: terminalFingerprint }],
+  ]) assert.throws(() => create([legacyArtifacts({ knownFailedRevisions }, { taskDefinitionFingerprint: terminalFingerprint })]), /duplicated|malformed|predecessor|aliased|conflicting/);
+
+  const tampered = structuredClone(create([legacy]));
+  const component = tampered.records[0].recoveryEvidence;
+  const body = JSON.parse(Buffer.from(component.bytesBase64, "base64"));
+  body.knownFailedRevisions[0].taskDefinitionFingerprint = "0".repeat(64);
+  const changed = bytes(rehash(body));
+  component.bytesBase64 = changed.toString("base64"); component.byteSha256 = hash(changed);
+  assert.throws(() => verify(tampered), /signature|tampered/);
 });
 
 test("modern evidence cannot downgrade by dropping runtime or candidate identity", () => {
@@ -433,7 +543,7 @@ test("legacy producer authenticates GitHub identity and exact registered task-de
     describeTaskDefinition: () => structuredClone(task),
     run: (_command, args) => JSON.stringify(args[1] === "verify" ? { SignatureValid: true } : { Signature: "AQ==" }) });
   const authenticated = verify(JSON.parse(fs.readFileSync(outputFile)));
-  assert.equal(authenticated.knownFailedRevisions[0].taskDefinitionFingerprint, taskDefinitionFingerprint(task, task.tags));
+  assert.equal(authenticated.knownFailedRevisions.at(-1).taskDefinitionFingerprint, taskDefinitionFingerprint(task, task.tags));
 });
 
 test("legacy producer derives trust from ECS DescribeTaskDefinition with tags and rejects every local semantic mismatch", (context) => {

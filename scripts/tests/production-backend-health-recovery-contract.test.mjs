@@ -182,21 +182,26 @@ test("production failure fixture lacks startup prerequisites while corrected can
 
 test("authenticated terminal :49-style runtime failure is reconciled but never reused", async () => {
   const failed = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:49", revision: 49, status: "ACTIVE" }, tags: [] };
+  const predecessor = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48", revision: 48, status: "ACTIVE", cpu: "1024" }, tags: [] };
   const failedRecoveryEvidenceSha256 = "c".repeat(64);
   const failedRecoveryEvidenceReferenceSha256 = "d".repeat(64);
   const failedFingerprint = taskDefinitionFingerprint(failed, []);
-  const knownFailedRevisions = [{ repository: "T-ej2003/genuine-scan-main", taskDefinitionArn: failed.taskDefinition.taskDefinitionArn, candidateFingerprint: failedFingerprint, taskDefinitionFingerprint: failedFingerprint, evidenceFileSha256: "a".repeat(64), workflowRunId: "32759665989", workflowCreatedAt: "2026-08-24T17:53:00.000Z", status: "SERVICE_STABILIZATION_FAILED", classification: "TERMINAL_FAILURE", failureClassification: "SERVICE_STABILIZATION_FAILED", sourceSha: "b".repeat(40), service: BACKEND_HEALTH_RECOVERY.service, releaseMode: BACKEND_HEALTH_RECOVERY.kind, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageReleaseSha: "b".repeat(40), artifactSigningBindingSha256, runtimeConsumabilitySha256: null, predecessorHistoryReferenceSha256: null, predecessorHistoryLineageSha256: null, initialRevisionCensusSha256: null, expectedRevisionCensusSha256: null, registrations: 1, updates: 1, evidenceContract: "PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE", requiresLiveFailureReconciliation: true }];
+  const predecessorRevision = { repository: "T-ej2003/genuine-scan-main", workflowRunId: "32759665989", sourceSha: "b".repeat(40), service: BACKEND_HEALTH_RECOVERY.service, releaseMode: BACKEND_HEALTH_RECOVERY.kind,
+    taskDefinitionArn: predecessor.taskDefinition.taskDefinitionArn, taskDefinitionFingerprint: taskDefinitionFingerprint(predecessor, []), classification: "AUTHENTICATED_LEGACY_PREDECESSOR",
+    evidenceContract: "PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE", evidenceFileSha256: "a".repeat(64), terminalTaskDefinitionArn: failed.taskDefinition.taskDefinitionArn };
+  const terminalRevision = { repository: "T-ej2003/genuine-scan-main", taskDefinitionArn: failed.taskDefinition.taskDefinitionArn, candidateFingerprint: failedFingerprint, taskDefinitionFingerprint: failedFingerprint, evidenceFileSha256: "a".repeat(64), workflowRunId: "32759665989", workflowCreatedAt: "2026-08-24T17:53:00.000Z", status: "SERVICE_STABILIZATION_FAILED", classification: "TERMINAL_FAILURE", failureClassification: "SERVICE_STABILIZATION_FAILED", sourceSha: "b".repeat(40), service: BACKEND_HEALTH_RECOVERY.service, releaseMode: BACKEND_HEALTH_RECOVERY.kind, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageReleaseSha: "b".repeat(40), artifactSigningBindingSha256, runtimeConsumabilitySha256: null, predecessorHistoryReferenceSha256: null, predecessorHistoryLineageSha256: null, initialRevisionCensusSha256: null, expectedRevisionCensusSha256: null, registrations: 1, updates: 1, evidenceContract: "PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE", requiresLiveFailureReconciliation: true, authenticatedLegacyPredecessors: [predecessorRevision] };
+  const knownFailedRevisions = [predecessorRevision, terminalRevision];
   const boundApproval = { ...approval, failedRecoveryEvidenceSha256, failedRecoveryEvidenceReferenceSha256 };
   const boundAuthorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest, imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256, failedRecoveryEvidenceReferenceSha256, approval: boundApproval });
-  const input = base(); input.authorization = boundAuthorization; input.authenticatedFailedRecoveryEvidence = { envelopeSha256: failedRecoveryEvidenceSha256, referenceSha256: failedRecoveryEvidenceReferenceSha256, recoveryHistory: knownFailedRevisions, knownFailedRevisions, interruptedRecoveries: [] }; input.service.taskDefinition = failed.taskDefinition.taskDefinitionArn; input.service.deployments = [{ id: failedDeploymentId, status: "PRIMARY", taskDefinition: failed.taskDefinition.taskDefinitionArn, rolloutState: "FAILED", failedTasks: 6, createdAt: "2026-08-24T17:59:00.000Z" }]; input.currentImageExists = true; input.stoppedTaskFailures = [stoppedTaskFailure({ taskDefinitionArn: failed.taskDefinition.taskDefinitionArn, reason: "ResourceInitializationError: execution role denied exact runtime secret" })];
+  const input = base(); input.authorization = boundAuthorization; input.authenticatedFailedRecoveryEvidence = { envelopeSha256: failedRecoveryEvidenceSha256, referenceSha256: failedRecoveryEvidenceReferenceSha256, recoveryHistory: [terminalRevision], knownFailedRevisions, interruptedRecoveries: [] }; input.service.taskDefinition = failed.taskDefinition.taskDefinitionArn; input.service.deployments = [{ id: failedDeploymentId, status: "PRIMARY", taskDefinition: failed.taskDefinition.taskDefinitionArn, rolloutState: "FAILED", failedTasks: 6, createdAt: "2026-08-24T17:59:00.000Z" }]; input.currentImageExists = true; input.stoppedTaskFailures = [stoppedTaskFailure({ taskDefinitionArn: failed.taskDefinition.taskDefinitionArn, reason: "ResourceInitializationError: execution role denied exact runtime secret" })];
   const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50";
   const target = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 50, status: "ACTIVE" }, tags: [] };
   let registered = 0; let updated = 0; let serviceTarget = failed.taskDefinition.taskDefinitionArn;
   const result = await runLegacyBackendHealthRecovery(input, {
-    census: async () => [current, failed, ...(registered ? [target] : [])],
+    census: async () => [current, predecessor, failed, ...(registered ? [target] : [])],
     register: async () => { registered += 1; return target; }, describe: async () => target,
     readService: async () => ({ ...input.service, taskDefinition: serviceTarget, runningCount: serviceTarget === targetArn ? 2 : 0, pendingCount: 0 }),
-    readLegacyFailureState: async () => ({ service: input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: [current, failed, ...(registered ? [target] : [])] }),
+    readLegacyFailureState: async () => ({ service: input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: [current, predecessor, failed, ...(registered ? [target] : [])] }),
     updateService: async (arn) => { updated += 1; serviceTarget = arn; }, waitStable: async () => {},
     readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy,
   });
@@ -206,13 +211,13 @@ test("authenticated terminal :49-style runtime failure is reconciled but never r
     let attempts = 0; let registrations = 0; let updates = 0;
     const changedDeployment = { ...input.service, deployments: [{ ...input.service.deployments[0], id: "ecs-svc/4599551810517927504", createdAt: "2026-08-24T18:01:00.000Z" }] };
     await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
-      census: async () => [current, failed, ...(registrations ? [target] : [])],
+      census: async () => [current, predecessor, failed, ...(registrations ? [target] : [])],
       register: async () => { registrations += 1; return target; }, describe: async () => target,
       readService: async () => input.service,
       readLegacyFailureState: async () => {
         attempts += 1;
         const changed = boundary === "registration" || attempts > 1;
-        return { service: changed ? changedDeployment : input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: [current, failed, ...(registrations ? [target] : [])] };
+        return { service: changed ? changedDeployment : input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: [current, predecessor, failed, ...(registrations ? [target] : [])] };
       },
       updateService: async () => { updates += 1; }, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
     }), /deployment proof changed|degradation is not authenticated/);
@@ -221,17 +226,17 @@ test("authenticated terminal :49-style runtime failure is reconciled but never r
   let forceDeploymentRegistrations = 0;
   const forceDeployment = { ...input.service, deployments: [...input.service.deployments, { ...input.service.deployments[0], id: "ecs-svc/5599551810517927505", status: "PRIMARY", rolloutState: "IN_PROGRESS", failedTasks: 0, createdAt: "2026-08-24T18:02:00.000Z" }] };
   await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
-    census: async () => [current, failed], register: async () => { forceDeploymentRegistrations += 1; return target; }, describe: async () => target,
+    census: async () => [current, predecessor, failed], register: async () => { forceDeploymentRegistrations += 1; return target; }, describe: async () => target,
     readService: async () => input.service,
-    readLegacyFailureState: async () => ({ service: forceDeployment, stoppedTaskFailures: input.stoppedTaskFailures, census: [current, failed] }),
+    readLegacyFailureState: async () => ({ service: forceDeployment, stoppedTaskFailures: input.stoppedTaskFailures, census: [current, predecessor, failed] }),
     updateService: async () => {}, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
   }), /deployment proof changed/);
   assert.equal(forceDeploymentRegistrations, 0);
   let disappearedRegistrations = 0;
   await assert.rejects(() => runLegacyBackendHealthRecovery(input, {
-    census: async () => [current, failed], register: async () => { disappearedRegistrations += 1; return target; }, describe: async () => target,
+    census: async () => [current, predecessor, failed], register: async () => { disappearedRegistrations += 1; return target; }, describe: async () => target,
     readService: async () => input.service,
-    readLegacyFailureState: async () => ({ service: input.service, stoppedTaskFailures: [], census: [current, failed] }),
+    readLegacyFailureState: async () => ({ service: input.service, stoppedTaskFailures: [], census: [current, predecessor, failed] }),
     updateService: async () => {}, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
   }), /degradation is not authenticated|deployment proof changed/);
   assert.equal(disappearedRegistrations, 0);
@@ -245,14 +250,14 @@ test("authenticated terminal :49-style runtime failure is reconciled but never r
   assert.throws(() => assertLegacyBackendRecoveryEligibility({ ...input, service: { ...input.service, runningCount: 2 }, stoppedTaskFailures: [stoppedTaskFailure({ taskDefinitionArn: current.taskDefinition.taskDefinitionArn, reason: "ResourceInitializationError: historical" })] }), /degradation is not authenticated/);
 
   await assert.rejects(() => runLegacyBackendHealthRecovery({ ...input, service: { ...input.service, deployments: [] } }, {
-    census: async () => [current, failed], register: async () => {}, describe: async () => target, readService: async () => input.service,
+    census: async () => [current, predecessor, failed], register: async () => {}, describe: async () => target, readService: async () => input.service,
     updateService: async () => {}, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
   }), /unavailable approved terminal recovery failure/);
 
   for (const state of [{ runningCount: 1, pendingCount: 0 }, { runningCount: 0, pendingCount: 1 }]) {
     const unsafe = { ...input, service: { ...input.service, ...state } };
     await assert.rejects(() => runLegacyBackendHealthRecovery(unsafe, {
-      census: async () => [current, failed], verifyRuntimeClosure: async () => runtimeClosure,
+      census: async () => [current, predecessor, failed], verifyRuntimeClosure: async () => runtimeClosure,
       register: async () => {}, describe: async () => target, readService: async () => unsafe.service,
       updateService: async () => {}, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy, record: async () => {},
     }), /unavailable approved terminal recovery failure/);

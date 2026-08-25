@@ -214,6 +214,13 @@ record (including disabled administrator bypass) remain bound in the signed
 legacy identity; current-schema recovery continues to use the fresh protected
 environment contract.
 
+Schema-3 `knownFailedRevisions` entries remain byte-hash and signature bound to
+their immutable historical artifact. They are projected as bounded legacy
+predecessor identities for revision-census closure and reuse prohibition, while
+the established recovery-history lineage hash continues to cover transaction
+records only. A predecessor cannot authorize service supersession, impersonate
+the source or terminal revision, or bypass exact live failure reconciliation.
+
 Runtime closure is a four-phase transaction with two distinct candidate
 hashes. `candidateFileSha256` is the SHA-256 of the exact persisted,
 pretty-printed bytes, including the trailing newline, and protects every file
