@@ -199,6 +199,28 @@ A healthy or progressing revision remains ineligible. Revision census and
 runtime-consumability checks are both repeated at the pre-registration and
 pre-update TOCTOU boundaries.
 
+Missing-image recovery uses the same canonical unavailable predicate: zero
+running and zero pending tasks. The exact current task definition, failed ECS
+deployment, and stopped-task pull failure are authenticated again before each
+ECS mutation; a healthy, partially serving, progressing, or newly redeployed
+service cannot be superseded by retained pull-failure history.
+
+Schema-3 historical production approval is authenticated from GitHub's exact
+workflow-run approval history, attempt-1 production job, correlated deployment
+status history, and run-bound artifact. Current environment reviewer settings
+are intentionally not historical proof because reviewers can rotate. The
+authenticated historical approver user ID/login and the production environment
+record (including disabled administrator bypass) remain bound in the signed
+legacy identity; current-schema recovery continues to use the fresh protected
+environment contract.
+
+Schema-3 `knownFailedRevisions` entries remain byte-hash and signature bound to
+their immutable historical artifact. They are projected as bounded legacy
+predecessor identities for revision-census closure and reuse prohibition, while
+the established recovery-history lineage hash continues to cover transaction
+records only. A predecessor cannot authorize service supersession, impersonate
+the source or terminal revision, or bypass exact live failure reconciliation.
+
 Runtime closure is a four-phase transaction with two distinct candidate
 hashes. `candidateFileSha256` is the SHA-256 of the exact persisted,
 pretty-printed bytes, including the trailing newline, and protects every file
@@ -357,6 +379,33 @@ chain from repository/workflow run through source, mode, service, recovery
 digest, terminal failure status, target task definition, candidate fingerprint,
 and the governed zero-or-one registration/update counts.
 
+Pre-runtime-closure schema-3 history is accepted only through its explicit
+legacy contract. The producer authenticates the historical GitHub run and
+attempt, protected-main commit, executed `Deploy production ECS` job and upload
+step, production deployment/status history whose `log_url` identifies that
+exact run-attempt job, required reviewer approval, and the artifact metadata
+bound to that exact run. Other production deployments for the same source SHA
+are ignored rather than treated as proof or ambiguity. Workflow YAML is checked
+only as a structural invariant; it is never execution or approval proof. The
+legacy task-definition fingerprint is derived from authoritative
+`DescribeTaskDefinition --include TAGS` readback; the operator file is only a
+byte-bound corroborating capture and must match the complete canonical ECS
+semantics and tags. Because schema 3
+did not persist modern runtime-consumability or candidate-fingerprint artifacts,
+those fields remain explicitly `NOT_PART_OF_SCHEMA` and cannot be omitted from
+modern records.
+
+Legacy terminal failure also requires fresh ECS evidence for the exact current
+task-definition ARN and exact `ecs-svc/<numeric-id>` deployment. Structured
+stopped-task observations retain task ARN, task definition, `startedBy`, status,
+stop code/reasons, and timestamps. Service-wide historical event text remains
+diagnostic only and cannot authorize revision reconciliation. The complete
+deployment set, exact failed deployment, stopped-task set, and revision census are collected again before
+task-definition registration and before `UpdateService`. A force-new-deployment
+that keeps the same task definition still changes the `ecs-svc` identity and
+fails closed. This transaction's own task-definition registration is the only
+permitted census extension between those boundaries.
+
 `publish-production-backend-failed-recovery-evidence.mjs` stores that bundle as
 a content-addressed asset in an immutable GitHub release and emits a bounded
 reference containing the exact repository, protected source, release and asset
@@ -504,6 +553,19 @@ operation or runtime dependency fails Stage-B deployment closure.
    immutable reference. With no history, use a private file containing exactly
    `null`. Bind both the evidence envelope SHA-256 and reference SHA-256 in the
    human approval when history exists.
+
+   Schema-3 recovery evidence created before runtime-consumability closure uses
+   the explicit `PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE` manifest record. The
+   preparer authenticates the completed GitHub run, exact attempt/job-correlated
+   production deployment, protected workflow and production environment binding,
+   the exact `backend-health-recovery-evidence` artifact bytes, and authoritative
+   ECS task-definition plus tag readback. Runtime-consumability
+   and candidate-fingerprint artifacts are recorded as not part of that schema;
+   they are never fabricated. This compatibility path accepts only schema 3,
+   requires the historical 1/1 terminal mutation shape, and still requires a
+   fresh authoritative ECS failed-deployment/task reconciliation before the
+   revision can be superseded. Schema 5 and later continue to require their
+   complete modern runtime evidence.
 4. Dispatch through `scripts/aws/dispatch-production-backend-health-recovery.mjs`.
    It serializes each JSON input once and derives the workflow value and SHA-256
    from those exact transport bytes; do not compose byte-sensitive inputs with
