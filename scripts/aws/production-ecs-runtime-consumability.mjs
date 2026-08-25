@@ -22,6 +22,7 @@ const SECRET_VERSION_ID = /^[A-Za-z0-9_-]{32,64}$/;
 const SECRET_STAGE = /^[A-Za-z0-9/_+=.@-]{1,256}$/;
 const SECRET_RESOURCE = new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:[A-Za-z0-9/_+=.@-]+$`);
 const LOG_GROUP_ARN = new RegExp(`^arn:aws:logs:${REGION}:${ACCOUNT}:log-group:(/[^*]+)$`);
+const ECR_REPOSITORY_POLICY_NOT_FOUND = /^(?:aws: \[ERROR\]: )?An error occurred \(RepositoryPolicyNotFoundException\) when calling the GetRepositoryPolicy operation: [^\r\n]*\S[^\r\n]*$/;
 const actionMatches = (value, expected) => [value].flat().some((action) => action === "*" || action === expected || (action?.endsWith("*") && expected.startsWith(action.slice(0, -1))));
 const patternMatches = (pattern, value) => typeof pattern === "string" && new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*").replaceAll("?", ".")}$`).test(value);
 const principalValues = (value) => [value].flatMap((principal) => typeof principal === "object" && principal ? [principal.AWS].flat() : [principal]);
@@ -42,13 +43,8 @@ function assertResourcePolicyAllowsRuntime({ policy, principalArn, action, resou
 }
 
 export const isEcrRepositoryPolicyNotFound = (error) => {
-  const code = error?.name || error?.Code || error?.code;
-  if (code === "RepositoryPolicyNotFoundException") return true;
   const stderr = Buffer.isBuffer(error?.stderr) ? error.stderr.toString("utf8") : String(error?.stderr || "");
-  const value = stderr.trim();
-  if (/^(?:aws: \[ERROR\]: )?An error occurred \(RepositoryPolicyNotFoundException\) when calling the GetRepositoryPolicy operation:/.test(value)) return true;
-  try { return JSON.parse(value)?.Code === "RepositoryPolicyNotFoundException"; }
-  catch { return false; }
+  return ECR_REPOSITORY_POLICY_NOT_FOUND.test(stderr.trim());
 };
 
 async function collectEcrRepositoryPolicyMetadata(dependency, aws, readEcrRepositoryPolicy) {
