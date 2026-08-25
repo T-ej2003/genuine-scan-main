@@ -156,6 +156,12 @@ explicitly enables runtime group creation, evidence records
 `INTENTIONALLY_CREATED_BY_RUNTIME` and still requires the candidate-derived
 execution-role authority. Validation never creates a log group.
 
+Failed-recovery lineage uses the explicit version-1 summary projection that
+predates `imageReleaseSha`. The release SHA remains authenticated by the
+immutable recovery-evidence bytes and is retained for interrupted health
+reconciliation, but it is intentionally excluded from the stable lineage
+projection so strengthening evidence does not fork existing history.
+
 The legacy execution-role correction is generated from the final candidate.
 It grants `secretsmanager:GetSecretValue` only for the candidate's exact secret
 ARNs, `logs:CreateLogGroup` only where the candidate explicitly requests it,

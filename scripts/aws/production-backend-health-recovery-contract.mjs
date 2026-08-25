@@ -183,6 +183,33 @@ export function openInterruptedRecoveryHistory(history) {
   return current?.classification === "INTERRUPTED_MUTATION" ? [current] : [];
 }
 export const EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256 = canonicalSha256([]);
+export const RECOVERY_HISTORY_LINEAGE_PROJECTION_VERSION = 1;
+export function recoveryHistoryLineageRecord(record) {
+  return {
+    repository: record.repository,
+    workflowRunId: record.workflowRunId,
+    sourceSha: record.sourceSha,
+    service: record.service,
+    releaseMode: record.releaseMode,
+    currentTaskDefinitionArn: record.currentTaskDefinitionArn,
+    taskDefinitionArn: record.taskDefinitionArn,
+    candidateFingerprint: record.candidateFingerprint,
+    taskDefinitionFingerprint: record.taskDefinitionFingerprint,
+    recoveryImageDigest: record.recoveryImageDigest,
+    artifactSigningBindingSha256: record.artifactSigningBindingSha256,
+    runtimeConsumabilitySha256: record.runtimeConsumabilitySha256,
+    predecessorHistoryReferenceSha256: record.predecessorHistoryReferenceSha256,
+    predecessorHistoryLineageSha256: record.predecessorHistoryLineageSha256,
+    status: record.status,
+    classification: record.classification,
+    failureClassification: record.failureClassification,
+    initialRevisionCensusSha256: record.initialRevisionCensusSha256,
+    expectedRevisionCensusSha256: record.expectedRevisionCensusSha256,
+    registrations: record.registrations,
+    updates: record.updates,
+    evidenceFileSha256: record.evidenceFileSha256,
+  };
+}
 export function recoveryHistoryLineageSha256(history) {
   if (!Array.isArray(history)) throw new Error("Recovery history lineage is malformed.");
   let lineageSha256 = EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256;
@@ -193,7 +220,7 @@ export function recoveryHistoryLineageSha256(history) {
       if (!HEX256.test(bound) || bound !== lineageSha256) throw new Error("Recovery history lineage predecessor hash is missing, reordered, or forked.");
       strengthened = true;
     } else if (strengthened) throw new Error("Recovery history lineage cannot downgrade after a bound generation.");
-    lineageSha256 = canonicalSha256({ predecessorLineageSha256: lineageSha256, record });
+    lineageSha256 = canonicalSha256({ predecessorLineageSha256: lineageSha256, record: recoveryHistoryLineageRecord(record) });
   }
   return lineageSha256;
 }

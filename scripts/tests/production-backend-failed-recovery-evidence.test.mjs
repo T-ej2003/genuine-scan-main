@@ -12,6 +12,7 @@ import { prepareProductionBackendFailedRecoveryEvidence } from "../aws/prepare-p
 import { assertFailedRecoveryEvidenceReference } from "../aws/production-backend-failed-recovery-evidence-reference.mjs";
 import { publishProductionBackendFailedRecoveryEvidence } from "../aws/publish-production-backend-failed-recovery-evidence.mjs";
 import { resolveProductionBackendFailedRecoveryEvidence } from "../aws/resolve-production-backend-failed-recovery-evidence.mjs";
+import { EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256, RECOVERY_HISTORY_LINEAGE_PROJECTION_VERSION } from "../aws/production-backend-health-recovery-contract.mjs";
 
 const sourceSha = "b64274e155434ae9390d28762d40a37801be5362";
 const digest = `sha256:${"6".repeat(64)}`;
@@ -137,7 +138,12 @@ test("historical evidence count and bytes remain operationally bounded", () => {
 
 test("authenticated records preserve ordered predecessor reference and census continuity", () => {
   const first = interruptedArtifacts("SERVICE_UPDATE_CONFIRMED");
-  const predecessorHistoryLineageSha256 = verify(create([first])).lineageSha256;
+  const firstResult = verify(create([first]));
+  const legacyFirst = { ...firstResult.recoveryHistory[0] }; delete legacyFirst.imageReleaseSha;
+  const predecessorHistoryLineageSha256 = canonicalSha256({ predecessorLineageSha256: EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256, record: legacyFirst });
+  assert.equal(RECOVERY_HISTORY_LINEAGE_PROJECTION_VERSION, 1);
+  assert.equal(firstResult.lineageSha256, predecessorHistoryLineageSha256);
+  assert.equal(firstResult.interruptedRecoveries[0].imageReleaseSha, sourceSha);
   const second = interruptedArtifacts("SERVICE_UPDATE_CONFIRMED", {
     schemaVersion: 7,
     currentTaskDefinitionArn: failedArn,
@@ -149,6 +155,8 @@ test("authenticated records preserve ordered predecessor reference and census co
     predecessorHistoryLineageSha256,
   }, { environment: { workflowRunId: "32759665990" }, runtime: { candidateFingerprint: "8".repeat(64) } });
   const result = verify(create([first, second]));
+  assert.equal(result.recoveryHistory[1].imageReleaseSha, sourceSha);
+  assert.equal(result.lineageSha256, verify(create([first, second])).lineageSha256);
   assert.deepEqual(result.recoveryHistory.map(({ predecessorHistoryReferenceSha256 }) => predecessorHistoryReferenceSha256), [null, "f".repeat(64)]);
   assert.throws(() => create([second]), /predecessor reference chain/);
   assert.throws(() => create([second, first]), /predecessor reference chain|reordered/);
@@ -163,6 +171,16 @@ test("authenticated records preserve ordered predecessor reference and census co
     predecessorHistoryLineageSha256: "0".repeat(64),
   }, { environment: { workflowRunId: "32759665990" }, runtime: { candidateFingerprint: "8".repeat(64) } });
   assert.throws(() => create([first, forked]), /census lineage/);
+});
+
+test("image release identity remains authenticated outside the stable lineage projection", () => {
+  const envelope = structuredClone(create([interruptedArtifacts("SERVICE_UPDATE_CONFIRMED")]));
+  const component = envelope.records[0].recoveryEvidence;
+  const evidence = JSON.parse(Buffer.from(component.bytesBase64, "base64"));
+  evidence.imageReleaseSha = "a".repeat(40);
+  const changed = bytes(evidence);
+  component.bytesBase64 = changed.toString("base64"); component.byteSha256 = hash(changed);
+  assert.throws(() => verify(envelope), /signature|tampered/);
 });
 
 test("every governed terminal mutation combination is admitted and impossible counts fail closed", () => {
