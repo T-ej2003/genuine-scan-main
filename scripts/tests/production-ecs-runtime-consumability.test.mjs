@@ -355,6 +355,12 @@ test("secret resource policy and customer-managed KMS authority are authenticate
   const delegatedReadKmsKey = async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: delegatedPolicy });
   const delegated = await collectRuntimeResourceMetadata(value, aws, { readKmsKey: delegatedReadKmsKey });
   assert.equal(delegated[bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].kmsKeyPolicyAccess, "ACCOUNT_IAM_DELEGATED");
+  const shortAccountPolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: registryId }, Action: "KMS:Decr?pt", Resource: "*" }] });
+  const shortAccount = await collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: shortAccountPolicy }) });
+  assert.equal(shortAccount[bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].kmsKeyPolicyAccess, "ACCOUNT_IAM_DELEGATED");
+  const wildcardRolePolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "KMS:Decr*", Resource: "*" }] });
+  const wildcardRole = await collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: wildcardRolePolicy }) });
+  assert.equal(wildcardRole[bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].kmsKeyPolicyAccess, "EXACT_ROLE");
   await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Disabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: exactRolePolicy }) }), /KMS key is unavailable/);
   const denyPolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt", Resource: "*" }] });
   await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: denyPolicy }) }), /unsupported deny/);
@@ -387,6 +393,60 @@ test("real DescribeImages detail identity and ECR policy state fail closed on ev
     assert.doesNotThrow(() => passing(value, policyAuthenticated));
     await assert.doesNotReject(() => refreshRuntimeResourceMetadata(value, policyAuthenticated, startupAws(value, policyAws)));
   }
+
+  const allowPull = (Action = ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]) => ({ Effect: "Allow", Principal: "*", Action });
+  const policyWith = (...statements) => ({ Version: "2012-10-17", Statement: statements });
+  const policyAws = (policy) => async (args) => args[1] === "get-repository-policy" ? ecrPolicyResponse(policy) : baseAws(args);
+  for (const Action of [
+    "*",
+    "ecr:*",
+    "ecr:Batch*",
+    "ecr:*GetImage",
+    "ecr:Batch*Image",
+    "ecr:B*tch*Image",
+    "ecr:BatchGetIma?e",
+    "ECR:batchgetimage",
+    "ecr:Batch*GetImage",
+    "ecr:B*tchGetIma?e",
+    "ecr:Batch???Image",
+    ["s3:*", "ecr:Batch*Image"],
+  ]) {
+    await assert.rejects(() => collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(), { Effect: "Deny", Principal: "*", Action }))), /does not authorize/, JSON.stringify(Action));
+  }
+  for (const Action of [
+    "ecr:Batch?Image",
+    "ecr:Get*Image",
+    "s3:*",
+    "ecr:BatchGetImageExtra",
+    "ecr:Batch.GetImage",
+    "ecr:Batch(Get)Image",
+    "ecr:Batch[Get]Image",
+    "ecr:BatchGetIma??e",
+  ]) {
+    const aws = policyAws(policyWith(allowPull(), { Effect: "Deny", Principal: "*", Action }));
+    const allowed = await collectRuntimeResourceMetadata(value, aws);
+    assert.equal(allowed[repository].repositoryPolicyState, "ALLOWS_RUNTIME", JSON.stringify(Action));
+    await assert.doesNotReject(() => refreshRuntimeResourceMetadata(value, allowed, startupAws(value, aws)), JSON.stringify(Action));
+  }
+  for (const Action of ["ECR:*", ["ecr:BatchCheck*", "ECR:batchgetima?e", "ecr:Get*Layer"]]) {
+    const allowed = await collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(Action))));
+    assert.equal(allowed[repository].repositoryPolicyState, "ALLOWS_RUNTIME", JSON.stringify(Action));
+  }
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull("ecr:*"), { Effect: "Deny", Principal: "*", Action: "ECR:batchgetima?e" }))), /does not authorize/);
+  for (const Principal of [{ AWS: "*" }, { AWS: registryId }, { AWS: ["arn:aws:iam::000000000000:root", `arn:aws:iam::${registryId}:root`] }]) {
+    await assert.rejects(() => collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(), { Effect: "Deny", Principal, Action: "ecr:Batch*Image" }))), /does not authorize/, JSON.stringify(Principal));
+  }
+  const accountAllow = await collectRuntimeResourceMetadata(value, policyAws(policyWith({ ...allowPull(), Principal: { AWS: registryId } })));
+  assert.equal(accountAllow[repository].repositoryPolicyState, "ALLOWS_RUNTIME");
+  const foreignDeny = await collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(), { Effect: "Deny", Principal: { AWS: "arn:aws:iam::000000000000:root" }, Action: "ecr:*" })));
+  assert.equal(foreignDeny[repository].repositoryPolicyState, "ALLOWS_RUNTIME");
+  for (const Resource of [`${repository.slice(0, -7)}*`, `${repository.slice(0, -1)}?`, ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker", repository]]) {
+    const allowed = await collectRuntimeResourceMetadata(value, policyAws(policyWith({ ...allowPull(), Resource })));
+    assert.equal(allowed[repository].repositoryPolicyState, "ALLOWS_RUNTIME", JSON.stringify(Resource));
+  }
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(), { Effect: "Deny", Principal: "*", Action: "ecr:Batch*Image", Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-*" }))), /does not authorize/);
+  const unrelatedResourceDeny = await collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(), { Effect: "Deny", Principal: "*", Action: "ecr:*", Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker" })));
+  assert.equal(unrelatedResourceDeny[repository].repositoryPolicyState, "ALLOWS_RUNTIME");
 
   for (const policy of [
     { Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: { AWS: value.executionRoleArn }, Action: "ecr:BatchGetImage", Resource: repository }] },

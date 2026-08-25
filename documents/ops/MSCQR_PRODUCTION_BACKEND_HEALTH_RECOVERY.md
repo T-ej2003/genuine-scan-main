@@ -273,6 +273,9 @@ contract. ECR repository-scoped statements may omit `Resource`; Secrets Manager
 resource policies retain their resource binding; and KMS key policies require
 positive `Principal`, `Action`, and `Resource: "*"` fields. This follows the
 AWS service contracts rather than applying one invented resource-policy grammar.
+Runtime ECR action evaluation uses IAM's complete, case-insensitive `*` and `?`
+glob semantics and applies matching explicit denies before accepting all required
+pull actions; condition and inverse forms remain unsupported and fail closed.
 Secret metadata is
 likewise bound to an explicit available/not-scheduled-for-deletion state.
 Repository policy and secret availability metadata are refreshed before

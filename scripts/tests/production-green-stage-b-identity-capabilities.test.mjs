@@ -198,6 +198,22 @@ test("release preflight accepts the documented repository-scoped ECR policy with
   assert.equal(report.requiredReads["ecr:GetRepositoryPolicy"], "allowed");
 });
 
+test("release preflight accepts structurally valid ECR action wildcard policies", () => {
+  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+    if (probe.action === "ecr:GetRepositoryPolicy") {
+      const repositoryName = args[args.indexOf("--repository-name") + 1];
+      const policy = { Version: "2012-10-17", Statement: [
+        { Effect: "Allow", Principal: "*", Action: "ECR:*" },
+        { Effect: "Deny", Principal: "*", Action: ["ecr:Batch*Image", "ecr:BatchGetIma?e"] },
+      ] };
+      return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify(policy) });
+    }
+    return allowed(args);
+  } });
+  assert.equal(report.status, "valid");
+  assert.equal(report.requiredReads["ecr:GetRepositoryPolicy"], "allowed");
+});
+
 test("release preflight rejects malformed successful ECR policy responses", () => {
   for (const [label, policy] of MALFORMED_ECR_REPOSITORY_POLICIES) {
     const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {

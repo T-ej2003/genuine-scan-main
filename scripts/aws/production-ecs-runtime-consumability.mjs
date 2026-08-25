@@ -66,8 +66,8 @@ const isKmsPolicyStatement = (statement) => isPolicyStatementShape(statement)
   && Object.hasOwn(statement, "Action") && !Object.hasOwn(statement, "NotAction")
   && Object.hasOwn(statement, "Principal") && !Object.hasOwn(statement, "NotPrincipal")
   && statement.Resource === "*" && !Object.hasOwn(statement, "NotResource");
-const actionMatches = (value, expected) => [value].flat().some((action) => action === "*" || action === expected || (action?.endsWith("*") && expected.startsWith(action.slice(0, -1))));
-const patternMatches = (pattern, value) => typeof pattern === "string" && new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*").replaceAll("?", ".")}$`).test(value);
+const patternMatches = (pattern, value, flags = "") => typeof pattern === "string" && new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*").replaceAll("?", ".")}$`, flags).test(value);
+const actionMatches = (value, expected) => [value].flat().some((action) => patternMatches(action, expected, "i"));
 const principalValues = (value) => [value].flatMap((principal) => typeof principal === "object" && principal ? [principal.AWS].flat() : [principal]);
 const resourceMatches = (value, resource) => [value].flat().some((candidate) => patternMatches(candidate, resource));
 const policyStatements = (value, label, { versions, statement }) => {
@@ -111,8 +111,9 @@ export const assertEcrRepositoryPolicyResponse = (response, { repositoryName, re
   return value;
 };
 
-const ecrStatementMatches = (statement, { principalArn, action, resource }) => (statement.Principal === "*"
-  || principalValues(statement.Principal).some((principal) => principal === principalArn || principal === `arn:aws:iam::${ACCOUNT}:root`))
+const ecrPrincipalMatches = (principal, principalArn) => principal === "*" || [principal?.AWS].flat().some((value) => value === "*"
+  || value === principalArn || value === ACCOUNT || value === `arn:aws:iam::${ACCOUNT}:root`);
+const ecrStatementMatches = (statement, { principalArn, action, resource }) => ecrPrincipalMatches(statement.Principal, principalArn)
   && actionMatches(statement.Action, action) && (!Object.hasOwn(statement, "Resource") || resourceMatches(statement.Resource, resource));
 
 async function collectEcrRepositoryPolicyMetadata(dependency, runtimeDependencies, aws, readEcrRepositoryPolicy) {
@@ -154,7 +155,7 @@ function assertKmsKeyPolicyAllowsRuntime({ policy, principalArn, keyArn }) {
   if (parsed.statements.some((statement) => statement?.Effect === "Deny" || statement?.NotPrincipal || statement?.NotAction || statement?.NotResource)) throw new Error(`Runtime KMS key policy contains unsupported deny or inverse semantics for ${principalArn}.`);
   const access = parsed.statements.some((statement) => statement?.Effect === "Allow" && !statement.Condition && principalValues(statement.Principal).includes(principalArn)
     && actionMatches(statement.Action, "kms:Decrypt") && resourceMatches(statement.Resource, keyArn)) ? "EXACT_ROLE"
-    : parsed.statements.some((statement) => statement?.Effect === "Allow" && [statement.Principal?.AWS].flat().includes(`arn:aws:iam::${ACCOUNT}:root`)
+    : parsed.statements.some((statement) => statement?.Effect === "Allow" && [statement.Principal?.AWS].flat().some((value) => value === ACCOUNT || value === `arn:aws:iam::${ACCOUNT}:root`)
       && !statement.Condition && actionMatches(statement.Action, "kms:Decrypt") && resourceMatches(statement.Resource, keyArn)) ? "ACCOUNT_IAM_DELEGATED" : null;
   if (!access) throw new Error(`Runtime KMS key policy does not authorize IAM policy delegation or the exact runtime principal.`);
   return { kmsKeyPolicySha256: canonicalSha256(parsed.policy), kmsKeyPolicyAccess: access };
