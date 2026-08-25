@@ -26,7 +26,8 @@ export function resolveLegacyWorkflowEvidence({ workflowRunId, run }) {
   const workflow = JSON.parse(run("gh", ["api", `repos/${repository}/actions/runs/${workflowRunId}`]));
   if (String(workflow.id) !== workflowRunId || workflow.repository?.full_name !== repository || workflow.head_repository?.full_name !== repository
     || !/^[a-f0-9]{40}$/.test(workflow.head_sha || "") || workflow.event !== "workflow_dispatch"
-    || workflow.head_branch !== "main" || workflow.path !== ".github/workflows/release-gate.yml" || workflow.status !== "completed" || workflow.conclusion !== "failure") throw new Error("Legacy recovery workflow identity is not authentic.");
+    || workflow.head_branch !== "main" || workflow.path !== ".github/workflows/release-gate.yml" || workflow.status !== "completed" || workflow.conclusion !== "failure"
+    || workflow.run_attempt !== 1) throw new Error("Legacy recovery workflow identity or run-attempt approval binding is not authentic.");
   run("git", ["merge-base", "--is-ancestor", workflow.head_sha, "origin/main"]);
   const workflowBytes = Buffer.from(run("git", ["show", `${workflow.head_sha}:${workflow.path}`]));
   const definition = yaml.load(workflowBytes.toString("utf8"));
@@ -57,14 +58,16 @@ export function resolveLegacyWorkflowEvidence({ workflowRunId, run }) {
   }).filter(({ statuses }) => ["waiting", "in_progress", "failure"].every((state) => statuses.some((item) => item.state === state)));
   if (correlated.length !== 1) throw new Error("Legacy recovery production environment deployment is not authentic for the exact workflow job.");
   const { deployment, statuses } = correlated[0];
-  const environment = JSON.parse(run("gh", ["api", `repos/${repository}/environments/production`]));
   const approvalPages = JSON.parse(run("gh", ["api", `repos/${repository}/actions/runs/${workflowRunId}/approvals`, "--paginate", "--slurp"]));
   if (!Array.isArray(approvalPages) || approvalPages.some((page) => !Array.isArray(page))) throw new Error("Legacy recovery approval response is malformed.");
   const approvals = approvalPages.flat();
-  const reviewers = environment.protection_rules?.filter(({ type }) => type === "required_reviewers").flatMap(({ reviewers: values }) => values || []) || [];
-  const matchingApprovals = approvals.filter((item) => item.state === "approved" && item.environments?.some((value) => value.id === environment.id && value.name === "production" && value.can_admins_bypass === false)
-    && reviewers.some((reviewer) => reviewer.type === "User" && reviewer.reviewer?.id === item.user?.id && reviewer.reviewer?.login === item.user?.login));
-  if (environment.name !== "production" || environment.can_admins_bypass !== false || matchingApprovals.length !== 1) throw new Error("Legacy recovery production environment approval is not authentic.");
+  const matchingApprovals = approvals.filter((item) => item.state === "approved" && Array.isArray(item.environments)
+    && item.environments.length === 1 && item.environments[0]?.name === "production" && Number.isSafeInteger(item.environments[0]?.id)
+    && item.environments[0].id > 0 && item.environments[0].can_admins_bypass === false && Number.isSafeInteger(item.user?.id)
+    && item.user.id > 0 && typeof item.user.login === "string" && item.user.login && item.user.type === "User" && item.user.site_admin === false);
+  if (matchingApprovals.length !== 1) throw new Error("Legacy recovery production environment approval history is not authentic.");
+  const approval = matchingApprovals[0];
+  const approvalEnvironment = approval.environments[0];
   const listed = JSON.parse(run("gh", ["api", `repos/${repository}/actions/runs/${workflowRunId}/artifacts`, "--paginate", "--slurp"]));
   if (!Array.isArray(listed) || listed.some((page) => !page || !Array.isArray(page.artifacts))) throw new Error("Legacy recovery artifact response is malformed.");
   const artifacts = listed.flatMap((page) => page.artifacts || []);
@@ -78,7 +81,7 @@ export function resolveLegacyWorkflowEvidence({ workflowRunId, run }) {
     run("gh", ["run", "download", workflowRunId, "--repo", repository, "--name", "backend-health-recovery-evidence", "--dir", directory]);
     const evidenceBytes = fs.readFileSync(path.join(directory, "evidence.json"));
     if (!/^sha256:[a-f0-9]{64}$/.test(matches[0].digest || "")) throw new Error("Legacy recovery artifact lacks its GitHub digest.");
-    return { workflow, workflowDefinitionSha256: crypto.createHash("sha256").update(workflowBytes).digest("hex"), job, deployment, statuses, environment, approval: matchingApprovals[0], artifact: matches[0], evidenceBytes };
+    return { workflow, workflowDefinitionSha256: crypto.createHash("sha256").update(workflowBytes).digest("hex"), job, deployment, statuses, approvalEnvironment, approval, artifact: matches[0], evidenceBytes };
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 
@@ -111,8 +114,8 @@ export function prepareProductionBackendFailedRecoveryEvidence({ sourceSha, mani
         workflowEvent: resolved.workflow.event, workflowHeadSha: resolved.workflow.head_sha, workflowConclusion: resolved.workflow.conclusion,
         workflowHeadBranch: resolved.workflow.head_branch, workflowCreatedAt: resolved.workflow.created_at, workflowDefinitionSha256: resolved.workflowDefinitionSha256,
         productionJobId: resolved.job.id, productionJobName: resolved.job.name, productionJobConclusion: resolved.job.conclusion, productionJobProofSha256: canonicalSha256(resolved.job),
-        productionEnvironmentId: resolved.environment.id, productionDeploymentId: resolved.deployment.id,
-        productionDeploymentProofSha256: canonicalSha256({ deployment: resolved.deployment, statuses: resolved.statuses }), productionApprovalProofSha256: canonicalSha256(resolved.approval), productionApprover: resolved.approval.user.login,
+        productionEnvironmentId: resolved.approvalEnvironment.id, productionDeploymentId: resolved.deployment.id,
+        productionDeploymentProofSha256: canonicalSha256({ deployment: resolved.deployment, statuses: resolved.statuses }), productionApprovalProofSha256: canonicalSha256(resolved.approval), productionApproverId: resolved.approval.user.id, productionApprover: resolved.approval.user.login,
         artifactId: resolved.artifact.id, artifactName: resolved.artifact.name, artifactCreatedAt: resolved.artifact.created_at,
         artifactArchiveSizeInBytes: resolved.artifact.size_in_bytes, artifactArchiveDigest: resolved.artifact.digest, evidenceByteSize: resolved.evidenceBytes.length, evidenceByteSha256: crypto.createHash("sha256").update(resolved.evidenceBytes).digest("hex"),
         environmentApprovalEvidence: "AUTHENTICATED_GITHUB_PRODUCTION_ENVIRONMENT_APPROVAL_HISTORY", runtimeConsumabilityEvidence: "NOT_PART_OF_SCHEMA", candidateFingerprintEvidence: "NOT_PART_OF_SCHEMA",

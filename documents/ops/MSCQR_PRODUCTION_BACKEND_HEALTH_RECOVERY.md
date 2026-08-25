@@ -199,6 +199,21 @@ A healthy or progressing revision remains ineligible. Revision census and
 runtime-consumability checks are both repeated at the pre-registration and
 pre-update TOCTOU boundaries.
 
+Missing-image recovery uses the same canonical unavailable predicate: zero
+running and zero pending tasks. The exact current task definition, failed ECS
+deployment, and stopped-task pull failure are authenticated again before each
+ECS mutation; a healthy, partially serving, progressing, or newly redeployed
+service cannot be superseded by retained pull-failure history.
+
+Schema-3 historical production approval is authenticated from GitHub's exact
+workflow-run approval history, attempt-1 production job, correlated deployment
+status history, and run-bound artifact. Current environment reviewer settings
+are intentionally not historical proof because reviewers can rotate. The
+authenticated historical approver user ID/login and the production environment
+record (including disabled administrator bypass) remain bound in the signed
+legacy identity; current-schema recovery continues to use the fresh protected
+environment contract.
+
 Runtime closure is a four-phase transaction with two distinct candidate
 hashes. `candidateFileSha256` is the SHA-256 of the exact persisted,
 pretty-printed bytes, including the trailing newline, and protects every file

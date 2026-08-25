@@ -75,7 +75,12 @@ const base = () => ({
 });
 const healthy = Object.freeze({ healthy: true, success: true, status: "ready" });
 const runtimeClosure = Object.freeze({ status: "PASS", evidenceSha256: runtimeConsumabilitySha256, liveVerifiedAt: new Date().toISOString() });
-const runLegacyBackendHealthRecovery = (input, adapters) => runRecoveryContract(input, { record: async () => {}, verifyRuntimeClosure: async () => runtimeClosure, ...adapters });
+const runLegacyBackendHealthRecovery = (input, adapters) => runRecoveryContract(input, {
+  record: async () => {}, verifyRuntimeClosure: async () => runtimeClosure,
+  readLegacyFailureState: async () => ({ service: input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: await adapters.census() }),
+  ...adapters,
+});
+const readMissingImageFailureState = (input, census) => async () => ({ service: input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: await census() });
 const rollbackProof = ({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn, rollbackDigest, forwardTaskDefinitionArn, forwardTaskDefinitionFingerprint = "f".repeat(64), forwardDigest = digest } = {}) => {
   const forwardServiceRevisionArn = rollbackServiceRevisionArn.replace("minus-1", "failed-forward");
   const rollbackEcsServiceDeploymentId = "ecs-svc/3599551810517927503";
@@ -328,6 +333,12 @@ test("authenticated mutation interruptions are reconciled from live ECS state be
       readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: interruptedArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy,
     });
     assert.equal(result.targetArn, interruptedArn); assert.equal(updates, 1);
+    const healthyOldService = { ...oldService, runningCount: 2, pendingCount: 0 };
+    const healthyOld = makeInput(healthyOldService, attempted); healthyOld.currentImageExists = false;
+    await assert.rejects(() => runLegacyBackendHealthRecovery(healthyOld, {
+      readInterruptedRecoveryState: async () => snapshot(healthyOldService), census: async () => [current, interrupted], register: async () => assert.fail("register called"), describe: async () => interrupted,
+      readService: async () => healthyOldService, updateService: async () => assert.fail("update called"), waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
+    }), /degradation is not authenticated/);
     await assert.rejects(() => runLegacyBackendHealthRecovery(makeInput(oldService), {
       readInterruptedRecoveryState: async () => snapshot(oldService), census: async () => [current, interrupted], register: async () => {}, describe: async () => interrupted,
       readService: async () => oldService, updateService: async () => {}, waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
@@ -552,6 +563,34 @@ test("eligibility rejects absent approval, wrong bindings, present current image
   assert.throws(() => assertLegacyBackendRecoveryEligibility(wrongApproval), /different incident|digest/);
 });
 
+test("missing-image recovery requires the canonical unavailable service state and exact current failure", () => {
+  assert.doesNotThrow(() => assertLegacyBackendRecoveryEligibility(base()));
+  for (const [input, label] of [
+    [mutate("service.runningCount", 2), "healthy"],
+    [mutate("service.runningCount", 1), "partially serving"],
+    [mutate("service.pendingCount", 1), "progressing"],
+    [mutate("stoppedTaskFailures.0.taskDefinitionArn", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:46"), "old revision"],
+    [mutate("stoppedTaskFailures", []), "missing authoritative task failure"],
+  ]) assert.throws(() => assertLegacyBackendRecoveryEligibility(input), /degradation is not authenticated/, label);
+});
+
+test("missing-image availability and exact deployment failure are refreshed at both mutation boundaries", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  for (const [changeAt, expected] of [[1, { registrations: 0, updates: 0 }], [2, { registrations: 1, updates: 0 }]]) {
+    const input = base(); let checks = 0; let registrations = 0; let updates = 0;
+    const census = async () => registrations ? [registered] : [];
+    await assert.rejects(() => runRecoveryContract(input, {
+      verifyRuntimeClosure: async () => runtimeClosure, census,
+      readLegacyFailureState: async () => ({ service: ++checks === changeAt ? { ...input.service, runningCount: 2 } : input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: await census() }),
+      register: async () => { registrations += 1; return registered; }, describe: async () => registered,
+      readService: async () => input.service, updateService: async () => { updates += 1; }, waitStable: async () => {},
+      readRunningTasks: async () => [], verifyHealth: async () => healthy, record: async () => {},
+    }), /deployment proof changed/);
+    assert.deepEqual({ registrations, updates }, expected);
+  }
+});
+
 test("hybrid green semantics and every protected legacy field fail closed", () => {
   const mutations = [
     (x) => { x.taskRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"; },
@@ -582,7 +621,7 @@ test("runtime source identity is bound to the authenticated image release, not e
 test("runner reconciles registration and update partial success without duplicate mutation", async () => {
   const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
   const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
-  let service = { ...base().service, runningCount: 0, pendingCount: 2 };
+  let service = base().service;
   let registrationCalls = 0;
   let updateCalls = 0;
   const result = await runLegacyBackendHealthRecovery(base(), {
@@ -670,9 +709,10 @@ test("runtime resource availability changes fail at both ECS mutation boundaries
   const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
   for (const [failureCheck, expected] of [[2, { registrations: 0, updates: 0 }], [3, { registrations: 1, updates: 0 }]]) {
     let checks = 0; let registrations = 0; let updates = 0;
-    await assert.rejects(() => runRecoveryContract(base(), {
+    const input = base(); const census = async () => registrations ? [registered] : [];
+    await assert.rejects(() => runRecoveryContract(input, {
       verifyRuntimeClosure: async () => { if (++checks === failureCheck) throw new Error("runtime resource became unavailable"); return runtimeClosure; },
-      census: async () => registrations ? [registered] : [],
+      census, readLegacyFailureState: readMissingImageFailureState(input, census),
       register: async () => { registrations += 1; return registered; },
       describe: async () => registered,
       readService: async () => base().service,
@@ -688,10 +728,11 @@ test("stale live runtime verification fails at the final mutation handoff", asyn
   const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
   for (const [staleCheck, expected] of [[2, { registrations: 0, updates: 0 }], [3, { registrations: 1, updates: 0 }]]) {
     let checks = 0; let registrations = 0; let updates = 0; let clock = Date.now();
-    await assert.rejects(() => runRecoveryContract(base(), {
+    const input = base(); const census = async () => registrations ? [registered] : [];
+    await assert.rejects(() => runRecoveryContract(input, {
       now: () => clock,
       verifyRuntimeClosure: async () => ({ ...runtimeClosure, liveVerifiedAt: new Date(++checks === staleCheck ? clock - 60_001 : clock).toISOString() }),
-      census: async () => registrations ? [registered] : [],
+      census, readLegacyFailureState: readMissingImageFailureState(input, census),
       register: async () => { registrations += 1; return registered; },
       describe: async () => registered,
       readService: async () => base().service,
@@ -950,7 +991,7 @@ test("durable recovery states preserve every confirmed partial mutation and term
   const run = async ({ register = async () => registered, updateService, waitStable = async () => {}, readRunningTasks, verifyHealth }) => {
     const records = [];
     let registeredLive = false;
-    let service = { ...base().service, runningCount: 0, pendingCount: 2 };
+    const input = base(); let service = input.service;
     const adapters = {
       census: async () => registeredLive ? [registered] : [],
       register: async (...args) => { const result = await register(...args); registeredLive = true; return result; },
@@ -961,7 +1002,8 @@ test("durable recovery states preserve every confirmed partial mutation and term
       verifyHealth: verifyHealth || (async () => healthy),
       record: async (entry) => { records.push(structuredClone(entry)); },
     };
-    return { records, execute: () => runRecoveryContract(base(), { verifyRuntimeClosure: async () => runtimeClosure, ...adapters }), setService: (value) => { service = value; } };
+    adapters.readLegacyFailureState = readMissingImageFailureState(input, adapters.census);
+    return { records, execute: () => runRecoveryContract(input, { verifyRuntimeClosure: async () => runtimeClosure, ...adapters }), setService: (value) => { service = value; } };
   };
 
   const updateFailure = await run({ updateService: async () => { throw new Error("update rejected"); } });
@@ -1016,9 +1058,10 @@ test("fresh registration followed by an already-pointing service preserves termi
   const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
   const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
   const records = []; let registeredLive = false;
-  await assert.rejects(() => runRecoveryContract(base(), {
+  const input = base(); const census = async () => registeredLive ? [registered] : [];
+  await assert.rejects(() => runRecoveryContract(input, {
     verifyRuntimeClosure: async () => runtimeClosure,
-    census: async () => registeredLive ? [registered] : [],
+    census, readLegacyFailureState: readMissingImageFailureState(input, census),
     register: async () => { registeredLive = true; return registered; }, describe: async () => registered,
     readService: async () => ({ ...base().service, taskDefinition: targetArn, runningCount: 0, pendingCount: 2 }),
     updateService: async () => assert.fail("update called"), waitStable: async () => { throw new Error("stabilization failed"); },
@@ -1032,9 +1075,10 @@ test("reused orphan revision preserves zero-mutation update-failure evidence", a
   const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
   const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
   const records = [];
-  await assert.rejects(() => runRecoveryContract(base(), {
+  const input = base(); const census = async () => [registered];
+  await assert.rejects(() => runRecoveryContract(input, {
     verifyRuntimeClosure: async () => runtimeClosure,
-    census: async () => [registered], register: async () => assert.fail("register called"), describe: async () => registered,
+    census, readLegacyFailureState: readMissingImageFailureState(input, census), register: async () => assert.fail("register called"), describe: async () => registered,
     readService: async () => base().service, updateService: async () => { throw new Error("update rejected"); },
     waitStable: async () => {}, readRunningTasks: async () => [], verifyHealth: async () => healthy,
     record: async (entry) => { records.push(structuredClone(entry)); },

@@ -630,12 +630,14 @@ export function assertLegacyBackendRecoveryEligibility(input = {}) {
       && startedAt >= createdAt && stoppedAt >= startedAt;
   }) : [];
   const sourceFailureReasons = exactFailures(currentArn, exactFailedDeployments(currentArn)).flatMap((task) => [task.stoppedReason, ...task.containerReasons]);
-  const legacyFailureProof = currentFailedRevision?.requiresLiveFailureReconciliation === true ? legacyFailedDeploymentProof(service, stoppedTaskFailures, service.taskDefinition) : null;
-  const legacyFailureLive = !currentFailedRevision?.requiresLiveFailureReconciliation || legacyFailureProof !== null;
+  const historicalLegacyFailureProof = currentFailedRevision?.requiresLiveFailureReconciliation === true ? legacyFailedDeploymentProof(service, stoppedTaskFailures, service.taskDefinition) : null;
+  const legacyFailureLive = !currentFailedRevision?.requiresLiveFailureReconciliation || historicalLegacyFailureProof !== null;
   const unavailableKnownFailure = unavailable && currentFailedRevision && legacyFailureLive;
-  const unavailableMissingImage = currentImageExists === false && sourceFailureReasons.some((reason) => /CannotPullContainerError/i.test(reason) && /not found|does not exist/i.test(reason) && reason.includes(imageMatch[1]));
+  const unavailableMissingImage = unavailable && currentImageExists === false && sourceFailureReasons.some((reason) => /CannotPullContainerError/i.test(reason) && /not found|does not exist/i.test(reason) && reason.includes(imageMatch[1]));
+  const missingImageFailureProof = unavailableMissingImage && service.taskDefinition === currentArn ? legacyFailedDeploymentProof(service, stoppedTaskFailures, currentArn) : null;
+  if (unavailableMissingImage && service.taskDefinition === currentArn && !missingImageFailureProof) throw new Error("Missing-image recovery lacks an exact mutation-bound deployment failure proof.");
   const reconciledInterruption = currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.SUCCEEDED
-    || interruptionReconciliations.some(({ result }) => [INTERRUPTED_RECOVERY_STATE.NO_EFFECT, INTERRUPTED_RECOVERY_STATE.RESUMABLE].includes(result.classification));
+    || unavailable && interruptionReconciliations.some(({ result }) => [INTERRUPTED_RECOVERY_STATE.NO_EFFECT, INTERRUPTED_RECOVERY_STATE.RESUMABLE].includes(result.classification));
   const stalledRollback = authorization?.rollbackProof?.classification === ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE;
   if (!reconciledInterruption && !stalledRollback && !unavailableKnownFailure && !unavailableMissingImage) throw new Error("Backend degradation is not authenticated as the current digest's missing-image pull failure or an unavailable approved terminal recovery failure.");
   if (replacementImage?.exists !== true || replacementImage?.immutable !== true || replacementImage?.signatureValid !== true
@@ -644,7 +646,7 @@ export function assertLegacyBackendRecoveryEligibility(input = {}) {
   assertLegacyBackendRecoveryAuthorization(authorization, { sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: replacementImage.digest, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256: authenticatedFailedRecoveryEvidence?.envelopeSha256 || null, failedRecoveryEvidenceReferenceSha256: authenticatedFailedRecoveryEvidence?.referenceSha256 || null, recoveryHistory, knownFailedRevisions, interruptedRecoveries, githubContext, executionActor });
   const checked = assertLegacyBackendRecoveryCandidate({ currentTaskDefinition, candidate: input.candidate, recoveryImageDigest: replacementImage.digest, imageReleaseSha: authorization.imageReleaseSha, artifactSigningBindings });
   const reconciledFailedRevisions = interruptionReconciliations.filter(({ result }) => result.classification === INTERRUPTED_RECOVERY_STATE.FAILED).map(({ interruption }) => interruption);
-  return Object.freeze({ ...checked, currentTaskDefinitionArn: currentArn, observedServiceTaskDefinitionArn: service.taskDefinition, currentImageDigest: imageMatch[1], recoveryImageDigest: replacementImage.digest, desiredCount: service.desiredCount, networkConfigurationSha256: canonicalSha256(service.networkConfiguration), loadBalancersSha256: canonicalSha256(service.loadBalancers), rollbackProof: authorization.rollbackProof, recoveryHistory, knownFailedRevisions: [...knownFailedRevisions, ...reconciledFailedRevisions], interruptedRecoveries, interruptionReconciliations, currentInterruption, legacyFailureProof, legacyFailureProofSha256: legacyFailureProof ? canonicalSha256(legacyFailureProof) : null });
+  return Object.freeze({ ...checked, currentTaskDefinitionArn: currentArn, observedServiceTaskDefinitionArn: service.taskDefinition, currentImageDigest: imageMatch[1], recoveryImageDigest: replacementImage.digest, desiredCount: service.desiredCount, networkConfigurationSha256: canonicalSha256(service.networkConfiguration), loadBalancersSha256: canonicalSha256(service.loadBalancers), rollbackProof: authorization.rollbackProof, recoveryHistory, knownFailedRevisions: [...knownFailedRevisions, ...reconciledFailedRevisions], interruptedRecoveries, interruptionReconciliations, currentInterruption, legacyFailureProof: historicalLegacyFailureProof, legacyFailureProofSha256: historicalLegacyFailureProof ? canonicalSha256(historicalLegacyFailureProof) : null, missingImageFailureProof, missingImageFailureProofSha256: missingImageFailureProof ? canonicalSha256(missingImageFailureProof) : null });
 }
 
 export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
@@ -665,7 +667,6 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
   }));
   const interruptionReconciliations = await reconcileInterruptions();
   const eligible = assertLegacyBackendRecoveryEligibility({ ...input, interruptionReconciliations });
-  if (eligible.legacyFailureProof && typeof adapters.readLegacyFailureState !== "function") throw new Error("Legacy failed-revision mutation-bound reconciliation adapter is required.");
   const initialCensus = classifyRevisionCensus(revisions, eligible);
   const assertFreshInterruptions = async (allowedRevision = null) => {
     if (!interruptions.length) return;
@@ -673,12 +674,15 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     if (fresh.some(({ result }, index) => result.proofSha256 !== interruptionReconciliations[index].result.proofSha256)) throw new Error("Interrupted recovery live state changed before mutation.");
   };
   const assertFreshLegacyFailure = async (expectedCensusSha256, allowedRevision = null) => {
-    if (!eligible.legacyFailureProof) return null;
+    const expectedProof = eligible.legacyFailureProof || eligible.missingImageFailureProof;
+    const expectedProofSha256 = eligible.legacyFailureProofSha256 || eligible.missingImageFailureProofSha256;
+    if (!expectedProof) return null;
+    if (typeof adapters.readLegacyFailureState !== "function") throw new Error("Legacy failed-revision mutation-bound reconciliation adapter is required.");
     const snapshot = await adapters.readLegacyFailureState();
     const lineage = classifyRevisionCensus(snapshot?.census, eligible);
     if (lineage.identitySha256 !== expectedCensusSha256) throw new Error("Legacy backend revision census changed at the failed-deployment mutation boundary.");
     const freshProof = legacyFailedDeploymentProof(snapshot?.service, snapshot?.stoppedTaskFailures, eligible.observedServiceTaskDefinitionArn);
-    if (!freshProof || canonicalSha256(freshProof) !== eligible.legacyFailureProofSha256) throw new Error("Legacy failed backend deployment proof changed before mutation.");
+    if (!freshProof || canonicalSha256(freshProof) !== expectedProofSha256) throw new Error("Legacy failed backend deployment proof changed before mutation.");
     if (allowedRevision && !lineage.matches.some(({ taskDefinitionArn, fingerprint }) => taskDefinitionArn === allowedRevision.taskDefinitionArn && fingerprint === allowedRevision.taskDefinitionFingerprint)) throw new Error("Recovery registration is absent from the authenticated mutation-bound census.");
     return snapshot.service;
   };
@@ -711,7 +715,7 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     if (eligible.rollbackProof) assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
     const freshRuntimeClosure = await adapters.verifyRuntimeClosure(eligible.candidate);
     if (freshRuntimeClosure?.evidenceSha256 !== initialRuntimeClosure.evidenceSha256) throw new Error("Recovery candidate runtime dependency closure changed before registration.");
-    if (!eligible.legacyFailureProof && classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== initialCensus.identitySha256) throw new Error("Legacy backend revision census changed before recovery registration.");
+    if (!eligible.legacyFailureProof && !eligible.missingImageFailureProof && classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== initialCensus.identitySha256) throw new Error("Legacy backend revision census changed before recovery registration.");
     await assertFreshInterruptions();
     await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED, targetArn: null, registrations: 0, updates: 0, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: null });
     assertFreshRuntimeConsumabilityVerification(freshRuntimeClosure, { evidenceSha256: initialRuntimeClosure.evidenceSha256, now: now() });
@@ -743,7 +747,7 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     if (eligible.rollbackProof) assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
     const freshRuntimeClosure = await adapters.verifyRuntimeClosure(eligible.candidate);
     if (freshRuntimeClosure?.status !== "PASS" || freshRuntimeClosure.evidenceSha256 !== initialRuntimeClosure.evidenceSha256) throw new Error("Recovery candidate runtime dependency closure changed before service update.");
-    if (!eligible.legacyFailureProof && classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== expectedCensusSha256) throw new Error("Legacy backend revision census changed before recovery service update.");
+    if (!eligible.legacyFailureProof && !eligible.missingImageFailureProof && classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== expectedCensusSha256) throw new Error("Legacy backend revision census changed before recovery service update.");
     await assertFreshInterruptions(registrations ? { taskDefinitionArn: targetArn, taskDefinitionFingerprint: eligible.fingerprint } : null);
     await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, targetArn, registrations, updates: 0, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
     assertFreshRuntimeConsumabilityVerification(freshRuntimeClosure, { evidenceSha256: initialRuntimeClosure.evidenceSha256, now: now() });

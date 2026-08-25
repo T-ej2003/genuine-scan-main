@@ -62,7 +62,7 @@ function legacyArtifacts(overrides = {}) {
     repository: "T-ej2003/genuine-scan-main", workflowRunId: "32759665989", workflowRunAttempt: "1", workflowPath: ".github/workflows/release-gate.yml", workflowEvent: "workflow_dispatch",
     workflowHeadSha: sourceSha, workflowHeadBranch: "main", workflowConclusion: "failure", workflowCreatedAt: "2026-08-24T17:53:00.000Z", workflowDefinitionSha256: "4".repeat(64),
     productionJobId: 97535369483, productionJobName: "Deploy production ECS", productionJobConclusion: "failure", productionJobProofSha256: "6".repeat(64),
-    productionEnvironmentId: 14514600120, productionDeploymentId: 6068378460, productionDeploymentProofSha256: "7".repeat(64), productionApprovalProofSha256: "8".repeat(64), productionApprover: "T-ej2003", artifactId: 123,
+    productionEnvironmentId: 14514600120, productionDeploymentId: 6068378460, productionDeploymentProofSha256: "7".repeat(64), productionApprovalProofSha256: "8".repeat(64), productionApproverId: 183396573, productionApprover: "T-ej2003", artifactId: 123,
     artifactName: "backend-health-recovery-evidence", artifactCreatedAt: "2026-08-24T18:22:25.000Z", artifactArchiveSizeInBytes: 1115, artifactArchiveDigest: `sha256:${"5".repeat(64)}`, evidenceByteSize: recoveryEvidenceBytes.length, evidenceByteSha256: hash(recoveryEvidenceBytes),
     environmentApprovalEvidence: "AUTHENTICATED_GITHUB_PRODUCTION_ENVIRONMENT_APPROVAL_HISTORY", runtimeConsumabilityEvidence: "NOT_PART_OF_SCHEMA", candidateFingerprintEvidence: "NOT_PART_OF_SCHEMA",
     sourceSha, service: "mscqr-backend-servi-euw2", releaseMode: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", taskDefinitionArn: failedArn,
@@ -243,6 +243,12 @@ test("every historical transaction binding and terminal status is authenticated"
   for (const changed of cases) assert.throws(() => create([artifacts(changed)]), /evidence|terminal|invalid|different|malformed|tampered/i);
 });
 
+test("legacy verifier enforces the resolver's exact run-attempt approval boundary", () => {
+  const record = legacyArtifacts();
+  record.legacyIdentity.workflowRunAttempt = "2";
+  assert.throws(() => create([record]), /identity|unbound/);
+});
+
 test("signed mutation interruptions remain distinct from terminal failed revisions", () => {
   for (const status of ["TASK_DEFINITION_REGISTRATION_ATTEMPTED", "TASK_DEFINITION_REGISTERED_ONLY", "SERVICE_UPDATE_ATTEMPTED", "SERVICE_UPDATE_CONFIRMED"]) {
     const result = verify(create([interruptedArtifacts(status)]));
@@ -311,7 +317,7 @@ function githubLegacyExecutionFixture(evidenceBytes) {
   const job = { id: 97535369483, run_id: workflow.id, run_attempt: 1, head_sha: sourceSha, name: "Deploy production ECS", status: "completed", conclusion: "failure", steps };
   const deployment = { id: 6068378460, sha: sourceSha, ref: "main", task: "deploy", environment: "production", performed_via_github_app: { slug: "github-actions" } };
   const environment = { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", reviewers: [{ type: "User", reviewer: { id: 183396573, login: "T-ej2003" } }] }] };
-  const approval = { state: "approved", user: { id: 183396573, login: "T-ej2003" }, environments: [{ id: environment.id, name: "production", can_admins_bypass: false }] };
+  const approval = { state: "approved", user: { id: 183396573, login: "T-ej2003", type: "User", site_admin: false }, environments: [{ id: environment.id, name: "production", can_admins_bypass: false }] };
   const artifact = { id: 9533026859, name: "backend-health-recovery-evidence", size_in_bytes: 1115, digest: `sha256:${"5".repeat(64)}`, expired: false, created_at: "2026-08-24T18:22:25.000Z", workflow_run: { id: workflow.id, head_sha: sourceSha, head_branch: "main", repository_id: repository.id, head_repository_id: repository.id } };
   return { workflow, job, deployment, deployments: [deployment], environment, approval, artifact, evidenceBytes };
 }
@@ -329,8 +335,8 @@ function resolveLegacyFixture(fixture) {
     if (endpoint.includes("/deployments?")) return JSON.stringify(fixture.deploymentPages || [fixture.deployments]);
     const deploymentId = fixture.deployments.find(({ id }) => endpoint.endsWith(`/deployments/${id}/statuses`))?.id;
     if (deploymentId) return JSON.stringify(fixture.statusPagesByDeployment?.[deploymentId] || [fixture.statusesByDeployment?.[deploymentId] || (deploymentId === fixture.deployment.id ? statuses : [])]);
-    if (endpoint.endsWith("/environments/production")) return JSON.stringify(fixture.environment);
-    if (endpoint.endsWith(`/actions/runs/${fixture.workflow.id}/approvals`)) return JSON.stringify([[fixture.approval]]);
+    if (endpoint.endsWith("/environments/production")) throw new Error("current environment configuration must not authenticate historical approval");
+    if (endpoint.endsWith(`/actions/runs/${fixture.workflow.id}/approvals`)) return JSON.stringify([fixture.approvalPages || [fixture.approval]]);
     if (endpoint.endsWith(`/actions/runs/${fixture.workflow.id}/artifacts`)) return JSON.stringify([{ artifacts: [fixture.artifact] }]);
     throw new Error(`unexpected fixture endpoint ${endpoint}`);
   };
@@ -354,6 +360,24 @@ test("legacy schema-3 provenance authenticates the executed production job, appr
   ]) {
     const changed = structuredClone(original); mutate(changed);
     assert.throws(() => resolveLegacyFixture(changed), /authentic|artifact|boundary|digest|protected|execution/i);
+  }
+});
+
+test("legacy approval is authenticated from run history and survives current reviewer rotation", () => {
+  const fixture = githubLegacyExecutionFixture(legacyArtifacts().recoveryEvidenceBytes);
+  fixture.environment.protection_rules[0].reviewers = [{ type: "User", reviewer: { id: 999, login: "replacement-reviewer" } }];
+  assert.equal(resolveLegacyFixture(fixture).approval.user.id, 183396573);
+  for (const mutate of [
+    (x) => { x.approval.user.id = 0; },
+    (x) => { x.approval.user.type = "Bot"; },
+    (x) => { x.approval.user.site_admin = true; },
+    (x) => { x.approval.environments[0].can_admins_bypass = true; },
+    (x) => { x.approval.environments[0].name = "staging"; },
+    (x) => { x.approvalPages = [x.approval, structuredClone(x.approval)]; },
+    (x) => { x.workflow.run_attempt = 2; x.job.run_attempt = 2; },
+  ]) {
+    const changed = structuredClone(fixture); mutate(changed);
+    assert.throws(() => resolveLegacyFixture(changed), /approval|run-attempt/i);
   }
 });
 
@@ -403,9 +427,9 @@ test("legacy producer authenticates GitHub identity and exact registered task-de
   const job = { id: 97535369483, run_id: 32759665989, run_attempt: 1, head_sha: sourceSha, name: "Deploy production ECS", status: "completed", conclusion: "failure" };
   const deployment = { id: 6068378460, sha: sourceSha, ref: "main", task: "deploy", environment: "production" };
   const environment = { id: 14514600120, name: "production", can_admins_bypass: false };
-  const approvalRecord = { state: "approved", user: { id: 183396573, login: "T-ej2003" }, environments: [{ id: environment.id, name: "production", can_admins_bypass: false }] };
+  const approvalRecord = { state: "approved", user: { id: 183396573, login: "T-ej2003", type: "User", site_admin: false }, environments: [{ id: environment.id, name: "production", can_admins_bypass: false }] };
   prepareProductionBackendFailedRecoveryEvidence({ sourceSha, manifestFile, manifestSha256: hash(manifestBytes), outputFile, now, protectedMain: () => {},
-    resolveLegacy: () => ({ workflow: { id: 32759665989, run_attempt: 1, path: ".github/workflows/release-gate.yml", event: "workflow_dispatch", head_sha: sourceSha, head_branch: "main", conclusion: "failure", created_at: "2026-08-24T17:53:00.000Z" }, workflowDefinitionSha256: "4".repeat(64), job, deployment, statuses: [{ state: "failure" }], environment, approval: approvalRecord, artifact: { id: 123, name: "backend-health-recovery-evidence", created_at: "2026-08-24T18:22:25.000Z", size_in_bytes: 1115, digest: `sha256:${"5".repeat(64)}` }, evidenceBytes: legacy.recoveryEvidenceBytes }),
+    resolveLegacy: () => ({ workflow: { id: 32759665989, run_attempt: 1, path: ".github/workflows/release-gate.yml", event: "workflow_dispatch", head_sha: sourceSha, head_branch: "main", conclusion: "failure", created_at: "2026-08-24T17:53:00.000Z" }, workflowDefinitionSha256: "4".repeat(64), job, deployment, statuses: [{ state: "failure" }], approvalEnvironment: approvalRecord.environments[0], approval: approvalRecord, artifact: { id: 123, name: "backend-health-recovery-evidence", created_at: "2026-08-24T18:22:25.000Z", size_in_bytes: 1115, digest: `sha256:${"5".repeat(64)}` }, evidenceBytes: legacy.recoveryEvidenceBytes }),
     describeTaskDefinition: () => structuredClone(task),
     run: (_command, args) => JSON.stringify(args[1] === "verify" ? { SignatureValid: true } : { Signature: "AQ==" }) });
   const authenticated = verify(JSON.parse(fs.readFileSync(outputFile)));
