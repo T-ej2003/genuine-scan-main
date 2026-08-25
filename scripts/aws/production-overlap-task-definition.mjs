@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { assertFixedTaskDefinition } from "./production-green-stage-b-task-definitions.mjs";
+import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
 
 const ROOT = path.resolve("infra/aws/terraform/production-green-stage-b/task-definitions");
 const TEMPLATE_PATH = path.join(ROOT, "green-backend-rotation-candidate.json");
@@ -59,6 +60,7 @@ export function buildOverlapTaskDefinition({ backendImage, releaseSha, backendLo
     ...secretBindings,
   });
   assertUniqueSecretBindingNames(definition);
+  deriveEcsRuntimeDependencies(definition);
   if (/{{[A-Z0-9_]+}}/.test(JSON.stringify(definition)) || definition.family !== FAMILY) throw new Error("Overlap task definition is unresolved or has the wrong family.");
   assertFixedTaskDefinition(definition);
   const backend = definition.containerDefinitions?.find(({ name }) => name === "backend");

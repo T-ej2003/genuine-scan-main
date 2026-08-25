@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
@@ -14,6 +15,7 @@ import {
   BACKEND_HEALTH_RECOVERY_STATUS,
   ARTIFACT_SIGNING_DISCOVERY_FAILURE,
   ARTIFACT_SIGNING_VERIFICATION,
+  EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256,
   assertLegacyBackendRecoveryEvidence,
   assertLegacyBackendRecoveryAuthorization,
   buildLegacyBackendRecoveryCandidate,
@@ -22,6 +24,10 @@ import {
 } from "./production-backend-health-recovery-contract.mjs";
 import { assertProductionBackendReadinessUrl, parseProductionBackendReadiness } from "./production-backend-readiness-contract.mjs";
 import { collectRollbackViability, exactEcrImageResult } from "./production-ecs-rollback-viability.mjs";
+import { assertSignedRuntimeConsumabilityEvidence, collectLiveRolePolicyIdentity, refreshRuntimeResourceMetadata, deriveEcsRuntimeDependencies } from "./production-ecs-runtime-consumability.mjs";
+import { assertAuthenticatedFailedRecoveryEvidence } from "./production-backend-failed-recovery-evidence.mjs";
+import { assertFailedRecoveryEvidenceReference } from "./production-backend-failed-recovery-evidence-reference.mjs";
+import { collectEcsServiceTasks } from "./production-ecs-task-census.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
@@ -68,12 +74,27 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   let verifiedImageEvidence;
   const verifyImageEvidence = (input) => verifiedImageEvidence ??= verifyImageEvidenceSource(input);
   const image = readAuthenticatedJson(imageFile, imageSha, "Backend recovery image authorization");
+  const runtimeClosure = readAuthenticatedJson(required(argv, "--runtime-consumability"), required(argv, "--runtime-consumability-sha256"), "ECS runtime consumability evidence");
+  const failedRecoveryEvidenceReference = readAuthenticatedJson(required(argv, "--failed-recovery-evidence-reference"), required(argv, "--failed-recovery-evidence-reference-sha256"), "Immutable failed recovery evidence reference");
+  const failedRecoveryEvidence = readAuthenticatedJson(required(argv, "--failed-recovery-evidence"), required(argv, "--failed-recovery-evidence-sha256"), "Authenticated failed recovery evidence");
+  assertFailedRecoveryEvidenceReference(failedRecoveryEvidenceReference.value, { sourceSha, evidenceBytes: failedRecoveryEvidence.bytes });
   const protectedMain = (deps.readProtectedMain || readFreshProtectedMainIdentity)({ cwd: root, expectedSourceSha: sourceSha, ...(deps.git ? { run: deps.git } : {}) });
   if (protectedMain.headSha !== sourceSha || protectedMain.freshRemoteMainSha !== sourceSha) throw new Error("Backend recovery requires the exact fresh protected-main source.");
   if (!deps.readProtectedMain && execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }).trim()) throw new Error("Backend recovery requires a clean protected-main checkout.");
   const run = deps.exec || ((command, args) => execFileSync(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   const awsText = (args) => run("aws", [...args, "--region", BACKEND_HEALTH_RECOVERY.region, "--output", "json", "--no-cli-pager"]);
   const aws = (args) => JSON.parse(awsText(args));
+  const verifyFailedRecoveryEvidence = deps.verifyFailedRecoveryEvidence || (({ digest, signature, keyArn, signingAlgorithm }) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-failed-recovery-verify-"));
+    try {
+      const digestFile = path.join(directory, "digest"); const signatureFile = path.join(directory, "signature");
+      fs.writeFileSync(digestFile, digest, { mode: 0o600, flag: "wx" }); fs.writeFileSync(signatureFile, signature, { mode: 0o600, flag: "wx" });
+      return aws(["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestFile}`, "--message-type", "DIGEST", "--signature", `fileb://${signatureFile}`, "--signing-algorithm", signingAlgorithm]).SignatureValid === true;
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  });
+  const authenticateFailedRecoveryEvidence = () => failedRecoveryEvidence.value === null
+    ? Object.freeze({ envelopeSha256: null, referenceSha256: null, lineageSha256: EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256, recoveryHistory: Object.freeze([]), knownFailedRevisions: Object.freeze([]), interruptedRecoveries: Object.freeze([]) })
+    : Object.freeze({ ...assertAuthenticatedFailedRecoveryEvidence(failedRecoveryEvidence.value, { verify: verifyFailedRecoveryEvidence, now: typeof deps.now === "function" ? deps.now() : deps.now || Date.now() }), referenceSha256: failedRecoveryEvidenceReference.value.referenceSha256 });
   const resolveArtifactSigning = deps.resolveArtifactSigning || (async () => {
     let caller;
     try { caller = aws(["sts", "get-caller-identity"]); }
@@ -94,25 +115,50 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     return { ...resolved, verification };
   });
   const readRollbackViability = (observationMilliseconds) => (deps.collectRollbackViability || collectRollbackViability)({ aws, sleep: deps.sleep, observationMilliseconds });
+  const verifyRuntimeClosure = deps.verifyRuntimeClosure || (async (candidate) => {
+    const readKmsKey = async (keyArn) => ({
+      metadata: aws(["kms", "describe-key", "--key-id", keyArn])?.KeyMetadata,
+      policy: aws(["kms", "get-key-policy", "--key-id", keyArn, "--policy-name", "default"])?.Policy,
+    });
+    const resourceMetadata = deps.collectRuntimeResourceMetadata
+      ? await deps.collectRuntimeResourceMetadata(candidate, aws)
+      : await refreshRuntimeResourceMetadata(candidate, runtimeClosure.value?.evidence?.resourceMetadata, aws, readKmsKey);
+    const dependencies = deriveEcsRuntimeDependencies(candidate);
+    const livePolicyIdentity = await (deps.collectLiveRolePolicyIdentity || collectLiveRolePolicyIdentity)(dependencies.map(({ principalArn }) => principalArn), aws);
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-runtime-closure-verify-"));
+    try {
+      const digest = path.join(directory, "digest"); const signature = path.join(directory, "signature");
+      return assertSignedRuntimeConsumabilityEvidence(runtimeClosure.value, { sourceSha, candidate, livePolicyIdentity, resourceMetadata, now: typeof deps.now === "function" ? deps.now() : deps.now || Date.now(), verify: ({ digest: digestBytes, signature: signatureBytes, keyArn, signingAlgorithm }) => {
+        fs.writeFileSync(digest, digestBytes, { mode: 0o600, flag: "wx" });
+        fs.writeFileSync(signature, signatureBytes, { mode: 0o600, flag: "wx" });
+        return aws(["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digest}`, "--message-type", "DIGEST", "--signature", `fileb://${signature}`, "--signing-algorithm", signingAlgorithm]).SignatureValid === true;
+      } });
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  });
 
   if (argv.includes("--prepare")) {
+    const authenticatedFailedRecoveryEvidence = authenticateFailedRecoveryEvidence();
     const approvalFile = required(argv, "--approval");
     const approvalSha = required(argv, "--approval-sha256");
     const approval = readAuthenticatedJson(approvalFile, approvalSha, "Backend recovery approval");
     const rollbackProof = "rollbackDeploymentArn" in approval.value ? await readRollbackViability(30_000) : null;
     const preliminaryBindingSha256 = "0".repeat(64);
+    const runtimeConsumabilitySha256 = runtimeClosure.value?.evidence?.evidenceSha256;
     const preliminary = createLegacyBackendRecoveryAuthorization({
       sourceSha, currentTaskDefinitionArn: required(argv, "--current-task-definition"),
       recoveryImageDigest: required(argv, "--recovery-image-digest"), imageAuthorization: image.value,
-      environmentApproval: environmentApproval.value, artifactSigningBindingSha256: preliminaryBindingSha256, rollbackProof, approval: approval.value,
+      environmentApproval: environmentApproval.value, artifactSigningBindingSha256: preliminaryBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256: authenticatedFailedRecoveryEvidence.envelopeSha256, failedRecoveryEvidenceReferenceSha256: authenticatedFailedRecoveryEvidence.referenceSha256, rollbackProof, approval: approval.value,
     });
     assertLegacyBackendRecoveryAuthorization(preliminary, {
       sourceSha, currentTaskDefinitionArn: preliminary.currentTaskDefinitionArn, recoveryImageDigest: preliminary.recoveryImageDigest,
       imageAuthorization: image.value, imageValidation: { verifyImageEvidence }, environmentApproval: environmentApproval.value,
-      artifactSigningBindingSha256: preliminaryBindingSha256, githubContext, executionActor: env.GITHUB_ACTOR,
+      artifactSigningBindingSha256: preliminaryBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256: authenticatedFailedRecoveryEvidence.envelopeSha256, failedRecoveryEvidenceReferenceSha256: authenticatedFailedRecoveryEvidence.referenceSha256, recoveryHistory: authenticatedFailedRecoveryEvidence.recoveryHistory, knownFailedRevisions: authenticatedFailedRecoveryEvidence.knownFailedRevisions, interruptedRecoveries: authenticatedFailedRecoveryEvidence.interruptedRecoveries, githubContext, executionActor: env.GITHUB_ACTOR,
     });
     const artifactSigning = await resolveArtifactSigning();
     if (artifactSigning?.verification?.valid !== true || artifactSigning?.created?.length || artifactSigning?.uninitializedSecretRefs?.length) throw new Error("Existing canonical artifact-signing bindings are not fully initialized and verified.");
+    const currentTaskDefinition = await (deps.readCurrentTaskDefinition || (async (arn) => aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"])))(preliminary.currentTaskDefinitionArn);
+    const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition, recoveryImageDigest: preliminary.recoveryImageDigest, imageReleaseSha: image.value.imageReleaseSha, artifactSigningBindings: artifactSigning.bindings });
+    const runtimeVerification = await verifyRuntimeClosure(candidate);
     const authorization = createLegacyBackendRecoveryAuthorization({
       sourceSha,
       currentTaskDefinitionArn: preliminary.currentTaskDefinitionArn,
@@ -120,6 +166,9 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       imageAuthorization: image.value,
       environmentApproval: environmentApproval.value,
       artifactSigningBindingSha256: artifactSigning.evidenceSha256,
+      runtimeConsumabilitySha256: runtimeVerification.evidenceSha256,
+      failedRecoveryEvidenceSha256: authenticatedFailedRecoveryEvidence.envelopeSha256,
+      failedRecoveryEvidenceReferenceSha256: authenticatedFailedRecoveryEvidence.referenceSha256,
       rollbackProof,
       approval: approval.value,
     });
@@ -131,6 +180,12 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       imageValidation: { verifyImageEvidence },
       environmentApproval: environmentApproval.value,
       artifactSigningBindingSha256: artifactSigning.evidenceSha256,
+      runtimeConsumabilitySha256: runtimeVerification.evidenceSha256,
+      failedRecoveryEvidenceSha256: authenticatedFailedRecoveryEvidence.envelopeSha256,
+      failedRecoveryEvidenceReferenceSha256: authenticatedFailedRecoveryEvidence.referenceSha256,
+      recoveryHistory: authenticatedFailedRecoveryEvidence.recoveryHistory,
+      knownFailedRevisions: authenticatedFailedRecoveryEvidence.knownFailedRevisions,
+      interruptedRecoveries: authenticatedFailedRecoveryEvidence.interruptedRecoveries,
       githubContext,
       executionActor: env.GITHUB_ACTOR,
     });
@@ -141,22 +196,17 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
 
   if (!argv.includes("--execute")) throw new Error("Backend health recovery requires --prepare or --execute.");
   const authorization = readAuthenticatedJson(required(argv, "--authorization"), required(argv, "--authorization-sha256"), "Backend recovery authorization");
-  assertLegacyBackendRecoveryAuthorization(authorization.value, {
-    sourceSha,
-    currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn,
-    recoveryImageDigest: authorization.value.recoveryImageDigest,
-    imageReleaseSha: authorization.value.imageReleaseSha,
-    imageAuthorization: image.value,
-    imageValidation: { verifyImageEvidence },
-    environmentApproval: environmentApproval.value,
-    artifactSigningBindingSha256: authorization.value.artifactSigningBindingSha256,
-    githubContext,
-    executionActor: env.GITHUB_ACTOR,
+  if (failedRecoveryEvidence.value === null) assertLegacyBackendRecoveryAuthorization(authorization.value, {
+    sourceSha, currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn, recoveryImageDigest: authorization.value.recoveryImageDigest,
+    imageReleaseSha: authorization.value.imageReleaseSha, imageAuthorization: image.value, imageValidation: { verifyImageEvidence },
+    environmentApproval: environmentApproval.value, artifactSigningBindingSha256: authorization.value.artifactSigningBindingSha256,
+    runtimeConsumabilitySha256: authorization.value.runtimeConsumabilitySha256, failedRecoveryEvidenceSha256: null, failedRecoveryEvidenceReferenceSha256: null, recoveryHistory: [], knownFailedRevisions: [], interruptedRecoveries: [],
+    githubContext, executionActor: env.GITHUB_ACTOR,
   });
   const evidenceOut = path.resolve(required(argv, "--evidence-out"));
   const healthUrl = assertProductionBackendReadinessUrl(required(argv, "--health-url"));
   const evidenceBase = {
-    schemaVersion: 3,
+    schemaVersion: 7,
     kind: "BACKEND_HEALTH_RECOVERY_EVIDENCE",
     sourceSha,
     authorizationFileSha256: authorization.sha256,
@@ -166,7 +216,9 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     imageAuthorizationFileSha256: image.sha256,
     imageAuthorizationSha256: image.value.evidenceSha256,
     artifactSigningBindingSha256: authorization.value.artifactSigningBindingSha256,
+    runtimeConsumabilitySha256: authorization.value.runtimeConsumabilitySha256,
     rollbackProofSha256: authorization.value.rollbackProof?.proofSha256 || null,
+    failedRecoveryEvidenceReferenceSha256: authorization.value.failedRecoveryEvidenceReferenceSha256,
     currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn,
     recoveryImageDigest: authorization.value.recoveryImageDigest,
     imageReleaseSha: authorization.value.imageReleaseSha,
@@ -181,6 +233,10 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     artifactSigningVerification: ARTIFACT_SIGNING_VERIFICATION.PENDING,
     artifactSigningFailure: null,
     knownFailedRevisions: [],
+    predecessorHistoryLineageSha256: null,
+    candidateFingerprint: runtimeClosure.value.evidence.candidateFingerprint,
+    initialRevisionCensusSha256: null,
+    expectedRevisionCensusSha256: null,
   };
   let lastEvidence;
   const generatedAt = () => new Date(typeof deps.now === "function" ? deps.now() : deps.now || Date.now()).toISOString();
@@ -194,6 +250,26 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     return evidence;
   };
   await record();
+  const authenticatedFailedRecoveryEvidence = authenticateFailedRecoveryEvidence();
+  await record({ predecessorHistoryLineageSha256: authenticatedFailedRecoveryEvidence.lineageSha256 });
+  assertLegacyBackendRecoveryAuthorization(authorization.value, {
+    sourceSha,
+    currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn,
+    recoveryImageDigest: authorization.value.recoveryImageDigest,
+    imageReleaseSha: authorization.value.imageReleaseSha,
+    imageAuthorization: image.value,
+    imageValidation: { verifyImageEvidence },
+    environmentApproval: environmentApproval.value,
+    artifactSigningBindingSha256: authorization.value.artifactSigningBindingSha256,
+    runtimeConsumabilitySha256: authorization.value.runtimeConsumabilitySha256,
+    failedRecoveryEvidenceSha256: authenticatedFailedRecoveryEvidence.envelopeSha256,
+    failedRecoveryEvidenceReferenceSha256: authenticatedFailedRecoveryEvidence.referenceSha256,
+    recoveryHistory: authenticatedFailedRecoveryEvidence.recoveryHistory,
+    knownFailedRevisions: authenticatedFailedRecoveryEvidence.knownFailedRevisions,
+    interruptedRecoveries: authenticatedFailedRecoveryEvidence.interruptedRecoveries,
+    githubContext,
+    executionActor: env.GITHUB_ACTOR,
+  });
   let artifactSigning;
   try {
     artifactSigning = await resolveArtifactSigning();
@@ -205,6 +281,12 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       sourceSha, currentTaskDefinitionArn: authorization.value.currentTaskDefinitionArn, recoveryImageDigest: authorization.value.recoveryImageDigest,
       imageReleaseSha: authorization.value.imageReleaseSha, imageAuthorization: image.value, imageValidation: { verifyImageEvidence },
       environmentApproval: environmentApproval.value, artifactSigningBindingSha256: artifactSigning.evidenceSha256,
+      runtimeConsumabilitySha256: authorization.value.runtimeConsumabilitySha256,
+      failedRecoveryEvidenceSha256: authenticatedFailedRecoveryEvidence.envelopeSha256,
+      failedRecoveryEvidenceReferenceSha256: authenticatedFailedRecoveryEvidence.referenceSha256,
+      recoveryHistory: authenticatedFailedRecoveryEvidence.recoveryHistory,
+      knownFailedRevisions: authenticatedFailedRecoveryEvidence.knownFailedRevisions,
+      interruptedRecoveries: authenticatedFailedRecoveryEvidence.interruptedRecoveries,
       githubContext, executionActor: env.GITHUB_ACTOR,
     });
   } catch (error) {
@@ -238,8 +320,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     }
   };
   const repository = aws(["ecr", "describe-repositories", "--repository-names", BACKEND_HEALTH_RECOVERY.repository]).repositories?.[0];
-  const stopped = aws(["ecs", "list-tasks", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--service-name", BACKEND_HEALTH_RECOVERY.service, "--desired-status", "STOPPED", "--max-results", "100"]);
-  const stoppedTasks = stopped.taskArns?.length ? aws(["ecs", "describe-tasks", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--tasks", ...stopped.taskArns]).tasks || [] : [];
+  const stoppedTasks = await collectEcsServiceTasks({ aws, cluster: BACKEND_HEALTH_RECOVERY.cluster, service: BACKEND_HEALTH_RECOVERY.service, desiredStatus: "STOPPED" });
   const stoppedReasons = [
     ...(service.events || []).map(({ message }) => message),
     ...stoppedTasks.flatMap((task) => [task.stoppedReason, ...(task.containers || []).map(({ reason }) => reason)]),
@@ -248,15 +329,16 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   const imageValidation = { verifyImageEvidence };
   const describe = async (arn) => aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]);
   const census = async () => {
-    const revisions = [];
-    const seen = new Set();
-    let nextToken;
+    const revisions = []; const seen = new Set(); let nextToken; let pageCount = 0;
     do {
-      const args = ["ecs", "list-task-definitions", "--family-prefix", BACKEND_HEALTH_RECOVERY.family, "--status", "ACTIVE", "--sort", "DESC"];
-      if (nextToken) args.push("--next-token", nextToken);
+      if (++pageCount > 100) throw new Error("Legacy backend revision census exceeded its bounded page limit.");
+      const args = ["ecs", "list-task-definitions", "--family-prefix", BACKEND_HEALTH_RECOVERY.family, "--status", "ACTIVE", "--sort", "DESC", "--page-size", "100", "--max-items", "100"];
+      if (nextToken) args.push("--starting-token", nextToken);
       const page = aws(args);
+      if (!Array.isArray(page?.taskDefinitionArns)) throw new Error("Legacy backend revision census response is malformed.");
       for (const arn of page.taskDefinitionArns || []) revisions.push(await describe(arn));
-      nextToken = page.nextToken;
+      nextToken = page.NextToken;
+      if (nextToken !== undefined && (typeof nextToken !== "string" || !nextToken)) throw new Error("Legacy backend revision census pagination token is malformed.");
       if (nextToken && seen.has(nextToken)) throw new Error("Legacy backend revision census repeated a pagination token.");
       if (nextToken) seen.add(nextToken);
     } while (nextToken);
@@ -267,27 +349,45 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     if (response.failures?.length || response.services?.length !== 1) throw new Error("Backend service reconciliation readback failed.");
     return response.services[0];
   };
+  const readTasks = (desiredStatus) => collectEcsServiceTasks({ aws, cluster: BACKEND_HEALTH_RECOVERY.cluster, service: BACKEND_HEALTH_RECOVERY.service, desiredStatus });
+  const readInterruptedRecoveryState = async (interruption) => {
+    const live = await readService();
+    const runningTasks = (await readTasks("RUNNING")).map((task) => ({ taskDefinitionArn: task.taskDefinitionArn, imageDigest: task.containers?.find(({ name }) => name === BACKEND_HEALTH_RECOVERY.container)?.imageDigest, healthStatus: task.healthStatus }));
+    let health = null;
+    if (live.taskDefinition === interruption.taskDefinitionArn && live.runningCount === live.desiredCount && live.pendingCount === 0) {
+      try { health = verifyProductionBackendHealth(healthUrl, run, authorization.value.imageReleaseSha); }
+      catch { health = { healthy: false, success: false, status: "unavailable" }; }
+    }
+    const revisionCensus = await census();
+    const stoppedTasks = await readTasks("STOPPED");
+    const confirmed = await readService();
+    const identity = (value) => canonicalSha256({ taskDefinition: value.taskDefinition, desiredCount: value.desiredCount, runningCount: value.runningCount, pendingCount: value.pendingCount,
+      deployments: (value.deployments || []).map(({ id, taskDefinition, rolloutState, desiredCount, runningCount, pendingCount }) => ({ id, taskDefinition, rolloutState, desiredCount, runningCount, pendingCount })).sort((a, b) => String(a.id).localeCompare(String(b.id))),
+      networkConfiguration: value.networkConfiguration, loadBalancers: value.loadBalancers });
+    if (identity(live) !== identity(confirmed)) throw new Error("Interrupted recovery service changed during authoritative reconciliation.");
+    return { service: confirmed, census: revisionCensus, runningTasks, stoppedTasks, health };
+  };
   const readFreshRollbackViability = authorization.value.rollbackProof ? async () => readRollbackViability(0) : undefined;
   await runLegacyBackendHealthRecovery({
     sourceSha, service, currentTaskDefinition, currentImageExists: imageExists(currentDigest), stoppedReasons,
     replacementImage: { exists: imageExists(recoveryDigest), immutable: repository?.imageTagMutability === "IMMUTABLE", signatureValid: true, attestationValid: true, provenanceValid: true, criticalFindings: 0, repository: BACKEND_HEALTH_RECOVERY.repository, digest: recoveryDigest },
     authorization: authorization.value, imageAuthorization: image.value, imageValidation, environmentApproval: environmentApproval.value,
     artifactSigningBindings: artifactSigning.bindings, artifactSigningBindingSha256: artifactSigning.evidenceSha256,
+    runtimeConsumabilitySha256: authorization.value.runtimeConsumabilitySha256,
+    authenticatedFailedRecoveryEvidence,
     githubContext, executionActor: env.GITHUB_ACTOR, candidate,
   }, {
     census,
+    now: typeof deps.now === "function" ? deps.now : () => deps.now || Date.now(),
+    verifyRuntimeClosure,
     describe,
     register: async (payload) => aws(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify(payload)]),
     readService,
+    ...(authenticatedFailedRecoveryEvidence.interruptedRecoveries.length ? { readInterruptedRecoveryState } : {}),
     ...(readFreshRollbackViability ? { readRollbackViability: readFreshRollbackViability } : {}),
     updateService: async (taskDefinition) => aws(["ecs", "update-service", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--service", BACKEND_HEALTH_RECOVERY.service, "--task-definition", taskDefinition]),
     waitStable: async () => run("aws", ["ecs", "wait", "services-stable", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--services", BACKEND_HEALTH_RECOVERY.service, "--region", BACKEND_HEALTH_RECOVERY.region, "--no-cli-pager"]),
-    readRunningTasks: async () => {
-      const listed = aws(["ecs", "list-tasks", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--service-name", BACKEND_HEALTH_RECOVERY.service, "--desired-status", "RUNNING"]);
-      if (!listed.taskArns?.length) return [];
-      const tasks = aws(["ecs", "describe-tasks", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--tasks", ...listed.taskArns]).tasks || [];
-      return tasks.map((task) => ({ taskDefinitionArn: task.taskDefinitionArn, imageDigest: task.containers?.find(({ name }) => name === BACKEND_HEALTH_RECOVERY.container)?.imageDigest, healthStatus: task.healthStatus }));
-    },
+    readRunningTasks: async () => (await readTasks("RUNNING")).map((task) => ({ taskDefinitionArn: task.taskDefinitionArn, imageDigest: task.containers?.find(({ name }) => name === BACKEND_HEALTH_RECOVERY.container)?.imageDigest, healthStatus: task.healthStatus })),
     verifyHealth: async () => {
       return verifyProductionBackendHealth(healthUrl, run, authorization.value.imageReleaseSha);
     },

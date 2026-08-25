@@ -22,6 +22,8 @@ const artifactSigningBindings = Object.freeze({
   ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-AbCd12",
 });
 const artifactSigningBindingSha256 = "7".repeat(64);
+const runtimeConsumabilitySha256 = "8".repeat(64);
+const currentTaskDefinition = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url), "utf8"));
 
 function privateFixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backend-health-recovery-"));
@@ -32,7 +34,7 @@ function privateFixture() {
     "rls-executor": "sha256:6a06c2435f7330c0b5efacce91e526aa0cca9f3f1df02efaec2c8f993b6fde37",
     "rls-canary": "sha256:f26b3c87ef6b7d1545936e50a41a049e5d02b3f11ef81bd41946ca1c967b05ab",
   } });
-  const approval = { ticket: "INC-1", approvedBy: "security", approverRole: "Security Lead", reason: "backend recovery", verificationRef: "https://example.invalid/1", sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: digest };
+  const approval = { ticket: "INC-1", approvedBy: "security", approverRole: "Security Lead", reason: "backend recovery", verificationRef: "https://example.invalid/1", sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: digest, runtimeConsumabilitySha256 };
   const imageBytes = Buffer.from(JSON.stringify(imageFixture.authorization));
   const approvalBytes = Buffer.from(JSON.stringify(approval));
   const environmentApproval = createProductionEnvironmentApprovalEvidence({
@@ -41,20 +43,31 @@ function privateFixture() {
     environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 1, login: "security" } }] }] },
   });
   const environmentBytes = Buffer.from(JSON.stringify(environmentApproval));
+  const runtimeBytes = Buffer.from(JSON.stringify({ evidence: { evidenceSha256: runtimeConsumabilitySha256, candidateFingerprint: "9".repeat(64) } }));
+  const failedReferenceBytes = Buffer.from("null");
+  const failedBytes = Buffer.from("null");
   const image = path.join(dir, "image.json");
   const approvalPath = path.join(dir, "approval.json");
   const environmentPath = path.join(dir, "environment-approval.json");
+  const runtimePath = path.join(dir, "runtime-consumability.json");
+  const failedReferencePath = path.join(dir, "failed-recovery-evidence-reference.json");
+  const failedPath = path.join(dir, "failed-recovery-evidence.json");
   fs.writeFileSync(image, imageBytes, { mode: 0o600 });
   fs.writeFileSync(approvalPath, approvalBytes, { mode: 0o600 });
   fs.writeFileSync(environmentPath, environmentBytes, { mode: 0o600 });
-  return { dir, image, imageBytes, approvalPath, approvalBytes, environmentApproval, environmentPath, environmentBytes, imageFixture };
+  fs.writeFileSync(runtimePath, runtimeBytes, { mode: 0o600 });
+  fs.writeFileSync(failedReferencePath, failedReferenceBytes, { mode: 0o600 });
+  fs.writeFileSync(failedPath, failedBytes, { mode: 0o600 });
+  return { dir, image, imageBytes, approvalPath, approvalBytes, environmentApproval, environmentPath, environmentBytes, runtimePath, runtimeBytes, failedReferencePath, failedReferenceBytes, failedPath, failedBytes, imageFixture };
 }
 
-const environmentArgs = (fixture) => ["--environment-approval", fixture.environmentPath, "--environment-approval-sha256", sha(fixture.environmentBytes)];
+const environmentArgs = (fixture) => ["--environment-approval", fixture.environmentPath, "--environment-approval-sha256", sha(fixture.environmentBytes), "--runtime-consumability", fixture.runtimePath, "--runtime-consumability-sha256", sha(fixture.runtimeBytes), "--failed-recovery-evidence-reference", fixture.failedReferencePath, "--failed-recovery-evidence-reference-sha256", sha(fixture.failedReferenceBytes), "--failed-recovery-evidence", fixture.failedPath, "--failed-recovery-evidence-sha256", sha(fixture.failedBytes)];
 const deps = (fixture, overrides = {}) => ({
   baseEnv: githubEnv, now, readProtectedMain: () => ({ headSha: sourceSha, freshRemoteMainSha: sourceSha }),
   verifyImageEvidence: fixture.imageFixture.verifyImageEvidence,
   resolveArtifactSigning: async () => ({ bindings: artifactSigningBindings, evidenceSha256: artifactSigningBindingSha256, created: [], uninitializedSecretRefs: [], verification: { valid: true } }),
+  verifyRuntimeClosure: async () => ({ status: "PASS", evidenceSha256: runtimeConsumabilitySha256, liveVerifiedAt: now.toISOString() }),
+  readCurrentTaskDefinition: async () => currentTaskDefinition,
   ...overrides,
 });
 const readiness = (overrides = {}) => JSON.stringify({ success: true, status: "ready", timestamp: now.toISOString(), release: { gitSha: sourceSha }, dependencies: { database: { configured: true, ready: true }, redis: { configured: true, ready: true }, objectStorage: { configured: true, ready: true } }, ...overrides });
@@ -125,15 +138,18 @@ test("execute authenticates semantic authorization before any AWS call", async (
   const fixture = privateFixture();
   t.after(() => fs.rmSync(fixture.dir, { recursive: true, force: true }));
   const authorization = {
-    schemaVersion: 2, kind: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", environment: "production",
+    schemaVersion: 4, kind: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", environment: "production",
     account: "368992683803", region: "eu-west-2", cluster: "mscqr-prod-euw2-main", service: "wrong-service", family: "mscqr-backend",
     sourceSha, imageReleaseSha: fixture.imageFixture.imageReleaseSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: digest,
     imageAuthorizationSha256: fixture.imageFixture.authorization.evidenceSha256, reasonCode: "CURRENT_IMAGE_DIGEST_MISSING",
     environmentApprovalSha256: fixture.environmentApproval.evidenceSha256,
     artifactSigningBindingSha256,
+    runtimeConsumabilitySha256,
+    failedRecoveryEvidenceSha256: null,
+    failedRecoveryEvidenceReferenceSha256: null,
     rollbackProof: null,
     allowedDeltaProfile: "IMAGE_SOURCE_IDENTITY_AND_EXACT_ARTIFACT_SIGNING_BINDINGS",
-    approval: { ticket: "INC-1", approvedBy: "security", approverRole: "Security Lead", reason: "backend recovery", verificationRef: "https://example.invalid/1", sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: digest },
+    approval: { ticket: "INC-1", approvedBy: "security", approverRole: "Security Lead", reason: "backend recovery", verificationRef: "https://example.invalid/1", sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: digest, runtimeConsumabilitySha256 },
   };
   authorization.authorizationSha256 = canonicalSha256(authorization);
   const authorizationBytes = Buffer.from(JSON.stringify(authorization));

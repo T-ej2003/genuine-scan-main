@@ -1,4 +1,5 @@
 import { canonicalSha256, taskDefinitionFingerprint } from "./stage-b-task-definition-recovery-contract.mjs";
+import { collectEcsServiceTasks } from "./production-ecs-task-census.mjs";
 
 export const ROLLBACK_VIABILITY = Object.freeze({
   NONE: "ROLLBACK_NONE", PROGRESSING: "ROLLBACK_PROGRESSING", SUCCESSFUL: "ROLLBACK_SUCCESSFUL", FAILED: "ROLLBACK_FAILED",
@@ -181,14 +182,7 @@ export async function collectRollbackViability({ aws, sleep = (milliseconds) => 
     const matchingEcsDeployments = (Array.isArray(service.deployments) ? service.deployments : []).filter(({ taskDefinition }) => taskDefinition === rollbackTarget.taskDefinitionArn);
     const rollbackEcsServiceDeployment = matchingEcsDeployments.length === 1 ? matchingEcsDeployments[0] : null;
     assertEcsServiceDeploymentIdentity({ serviceDeploymentArn: deployment.serviceDeploymentArn, ecsServiceDeploymentId: rollbackEcsServiceDeployment?.id });
-    const listedTasks = aws(["ecs", "list-tasks", "--cluster", "mscqr-prod-euw2-main", "--service-name", "mscqr-backend-servi-euw2", "--desired-status", "STOPPED", "--max-results", "100"]);
-    if (!Array.isArray(listedTasks?.taskArns) || listedTasks.nextToken || listedTasks.taskArns.some((arn) => !TASK_INSTANCE_ARN.test(arn)) || new Set(listedTasks.taskArns).size !== listedTasks.taskArns.length)
-      throw new Error("Rollback task-attempt census is malformed or incomplete.");
-    const describedTasks = listedTasks.taskArns.length ? aws(["ecs", "describe-tasks", "--cluster", "mscqr-prod-euw2-main", "--tasks", ...listedTasks.taskArns]) : { failures: [], tasks: [] };
-    const describedTaskArns = Array.isArray(describedTasks.tasks) ? describedTasks.tasks.map(({ taskArn }) => taskArn) : [];
-    if ((describedTasks.failures || []).length || !Array.isArray(describedTasks.tasks) || new Set(describedTaskArns).size !== describedTaskArns.length
-      || canonicalSha256([...describedTaskArns].sort()) !== canonicalSha256([...listedTasks.taskArns].sort())) throw new Error("Rollback task-attempt readback is incomplete.");
-    const tasks = describedTasks.tasks;
+    const tasks = await collectEcsServiceTasks({ aws, cluster: "mscqr-prod-euw2-main", service: "mscqr-backend-servi-euw2", desiredStatus: "STOPPED" });
     const taskAttempts = tasks.flatMap((task) => {
       if (task.taskDefinitionArn !== rollbackTarget.taskDefinitionArn) return [];
       const text = [task.stoppedReason, ...(task.containers || []).map(({ reason }) => reason)].filter(Boolean).join(" ");

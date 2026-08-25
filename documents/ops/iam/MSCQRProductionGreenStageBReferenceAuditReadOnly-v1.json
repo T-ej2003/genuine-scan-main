@@ -25,6 +25,58 @@
       "Resource": "*"
     },
     {
+      "Sid": "ReadExactLegacyExecutionRoleRuntimePolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+    },
+    {
+      "Sid": "ReadEcsManagedExecutionPolicy",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion"
+      ],
+      "Resource": "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+    },
+    {
+      "Sid": "DescribeCandidateRuntimeSecrets",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetResourcePolicy",
+        "secretsmanager:ListSecretVersionIds"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadCandidateRuntimeRepositoryPolicies",
+      "Effect": "Allow",
+      "Action": "ecr:GetRepositoryPolicy",
+      "Resource": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
       "Sid": "ReadNormalActivationPolicy",
       "Effect": "Allow",
       "Action": [
@@ -32,6 +84,20 @@
         "iam:GetPolicyVersion"
       ],
       "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite"
+    },
+    {
+      "Sid": "ReadCandidateRuntimeKmsPolicy",
+      "Effect": "Allow",
+      "Action": [
+        "kms:DescribeKey",
+        "kms:GetKeyPolicy"
+      ],
+      "Resource": "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
     },
     {
       "Sid": "ListStageBServicesReadOnly",

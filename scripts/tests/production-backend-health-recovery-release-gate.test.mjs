@@ -197,6 +197,7 @@ test("governed administrator convergence requires live readback before source en
   const steps = parsedWorkflow.jobs["deploy-production-ecs"].steps;
   assert.ok(steps.findIndex(({ name }) => name === "Require enabled production OIDC source phase") < steps.findIndex(({ uses }) => uses === "aws-actions/configure-aws-credentials@v6"));
   assert.deepEqual(parsedWorkflow.on.workflow_dispatch.inputs.release_mode.options, ["normal", "backend-health-recovery", "rotation-overlap", "rotation-cleanup"]);
+  assert.ok(Object.keys(parsedWorkflow.on.workflow_dispatch.inputs).length <= 25, "Release Gate must remain within GitHub's hard 25-input workflow_dispatch limit.");
   assert.equal(rollout.status, PRODUCTION_RELEASE_ROLLOUT_ENABLED);
   assert.match(JSON.stringify(permissionManifest.principalContracts.releaseDeployer), /production:release-oidc-trust/);
   const convergenceCli = fs.readFileSync("scripts/aws/converge-production-release-oidc-trust.mjs", "utf8");
@@ -207,13 +208,18 @@ test("governed administrator convergence requires live readback before source en
 
 test("release gate exposes one bounded backend health recovery mode", () => {
   assert.match(workflow, /- backend-health-recovery/);
-  assert.match(workflow, /backend-health-recovery\)[\s\S]*BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN[\s\S]*BACKEND_RECOVERY_IMAGE_AUTHORIZATION_SHA256[\s\S]*BACKEND_RECOVERY_APPROVAL_SHA256/);
+  assert.match(workflow, /backend-health-recovery\)[\s\S]*BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN[\s\S]*BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON[\s\S]*BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256/);
   const recoveryCase = workflow.match(/backend-health-recovery\)([\s\S]*?)\n\s*;;/u)?.[1] || "";
   assert.doesNotMatch(recoveryCase, /check:rotation-evidence-freshness/);
   assert.match(workflow, /Execute governed legacy backend health recovery[\s\S]*recover-production-backend-health\.mjs[\s\S]*--execute/);
+  assert.match(workflow, /extract-production-backend-recovery-dispatch-bundle\.mjs[\s\S]*--bundle-sha256[\s\S]*--current-task-definition[\s\S]*--recovery-image-digest/);
   assert.match(workflow, /Upload backend health recovery evidence\n\s*if: \$\{\{ always\(\) && inputs\.release_mode == 'backend-health-recovery' \}\}[\s\S]*backend-health-recovery-evidence[\s\S]*if-no-files-found: ignore/);
   assert.match(workflow, /--health-url "\$\{\{ env\.PUBLIC_BASE_URL \}\}\/api\/health\/ready"/);
   assert.match(workflow, /deploy-production-ecs:[\s\S]*environment: production/);
+  const recoverySteps = parsedWorkflow.jobs["deploy-production-ecs"].steps.map(({ name }) => name).filter(Boolean);
+  assert.ok(recoverySteps.indexOf("Full RLS verification and PostgreSQL 18.4 certification") < recoverySteps.indexOf("Authenticate production environment approval boundary"));
+  assert.ok(recoverySteps.indexOf("Configure AWS credentials via OIDC") < recoverySteps.indexOf("Prepare governed legacy backend health recovery"));
+  assert.ok(recoverySteps.indexOf("Prepare governed legacy backend health recovery") < recoverySteps.indexOf("Execute governed legacy backend health recovery"));
   assert.match(workflow, /Authenticate production environment approval boundary[\s\S]*approval_dir="\$RUNNER_TEMP\/production-environment-approval"[\s\S]*! -d "\$approval_dir" \|\| -L "\$approval_dir"[\s\S]*install -d -m 700 -- "\$approval_dir"[\s\S]*stat -c '%a'[\s\S]*stat -c '%u'[\s\S]*production-github-environment-approval\.mjs[\s\S]*--environment production[\s\S]*--workflow-ref "\$GITHUB_WORKFLOW_REF"[\s\S]*--event-name "\$GITHUB_EVENT_NAME"[\s\S]*--workflow-run-id "\$GITHUB_RUN_ID"/);
   assert.doesNotMatch(workflow, /evidence_file="\$RUNNER_TEMP\/production-environment-approval\.json"/);
   assert.match(workflow, /Verify checksum-bound production RLS package[\s\S]*npm run rls:full-verify[\s\S]*stageBApprovalIdForReleaseSha/);
@@ -427,19 +433,21 @@ test("release gate heredocs parse and backend recovery lifecycle validation exec
   }
 
   const lifecycle = parsedWorkflow.jobs["resolve-deploy-target"].steps.find((step) => step.name === "Validate production release lifecycle mode").run;
-  const image = JSON.stringify({ valid: true });
-  const approval = JSON.stringify({ approvedBy: "T-ej2003" });
+  const sourceSha = "b".repeat(40);
+  const currentTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47";
+  const recoveryImageDigest = `sha256:${"a".repeat(64)}`;
+  const component = (value) => { const json = JSON.stringify(value); return { json, sha256: createHash("sha256").update(json).digest("hex") }; };
+  const bundle = JSON.stringify({ schemaVersion: 3, kind: "BACKEND_HEALTH_RECOVERY_DISPATCH_BUNDLE", sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service: "mscqr-backend-servi-euw2", releaseMode: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", components: { imageAuthorization: component({ valid: true }), approval: component({ approvedBy: "T-ej2003" }), runtimeConsumability: component({ evidence: true }), failedRecoveryEvidenceReference: component(null) } });
   const env = {
     ...process.env,
     RELEASE_MODE: "backend-health-recovery",
-    BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47",
-    BACKEND_RECOVERY_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
-    BACKEND_RECOVERY_IMAGE_AUTHORIZATION_JSON: image,
-    BACKEND_RECOVERY_IMAGE_AUTHORIZATION_SHA256: createHash("sha256").update(image).digest("hex"),
-    BACKEND_RECOVERY_APPROVAL_JSON: approval,
-    BACKEND_RECOVERY_APPROVAL_SHA256: createHash("sha256").update(approval).digest("hex"),
+    SOURCE_SHA: sourceSha,
+    BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN: currentTaskDefinitionArn,
+    BACKEND_RECOVERY_IMAGE_DIGEST: recoveryImageDigest,
+    BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON: bundle,
+    BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256: createHash("sha256").update(bundle).digest("hex"),
   };
   assert.equal(spawnSync("bash", ["-e"], { input: lifecycle, env }).status, 0);
-  assert.notEqual(spawnSync("bash", ["-e"], { input: lifecycle, env: { ...env, BACKEND_RECOVERY_APPROVAL_SHA256: "0".repeat(64) } }).status, 0);
+  assert.notEqual(spawnSync("bash", ["-e"], { input: lifecycle, env: { ...env, BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256: "0".repeat(64) } }).status, 0);
   assert.notEqual(spawnSync("bash", ["-e"], { input: lifecycle, env: { ...env, RELEASE_MODE: "unsupported" } }).status, 0);
 });

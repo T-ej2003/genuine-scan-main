@@ -7,6 +7,7 @@
       "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
       "action": "ecr:DescribeImages",
       "capabilityId": "manifest-backend-health-recovery-describe-images",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
       ],
@@ -25,6 +26,7 @@
       "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
       "action": "ecs:DescribeServiceDeployments",
       "capabilityId": "manifest-backend-health-recovery-describe-service-deployments",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
         "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"
@@ -44,6 +46,7 @@
       "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
       "action": "ecs:DescribeServiceRevisions",
       "capabilityId": "manifest-backend-health-recovery-describe-service-revisions",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
         "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"
@@ -63,6 +66,7 @@
       "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
       "action": "ecs:DescribeServices",
       "capabilityId": "manifest-reference-audit-ecs-service-details",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
       ],
@@ -81,6 +85,7 @@
       "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
       "action": "ecs:DescribeTaskDefinition",
       "capabilityId": "manifest-reference-audit-ecs-task-definitions",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "*"
       ],
@@ -96,9 +101,10 @@
       "negativeTestPresent": true
     },
     {
-      "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
+      "sourceFile": "scripts/aws/production-ecs-task-census.mjs",
       "action": "ecs:DescribeTasks",
       "capabilityId": "manifest-reference-audit-ecs-task-details",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "*"
       ],
@@ -117,6 +123,7 @@
       "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
       "action": "ecs:ListServiceDeployments",
       "capabilityId": "manifest-backend-health-recovery-list-service-deployments",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
       ],
@@ -132,9 +139,10 @@
       "negativeTestPresent": true
     },
     {
-      "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
+      "sourceFile": "scripts/aws/production-ecs-task-census.mjs",
       "action": "ecs:ListTasks",
       "capabilityId": "manifest-reference-audit-ecs-tasks",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "*"
       ],
@@ -153,6 +161,7 @@
       "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
       "action": "ecs:DescribeServiceDeployments",
       "capabilityId": "manifest-backend-health-recovery-describe-service-deployments",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
         "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"
@@ -172,6 +181,7 @@
       "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
       "action": "ecs:DescribeServiceRevisions",
       "capabilityId": "manifest-backend-health-recovery-describe-service-revisions",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
         "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"
@@ -191,8 +201,30 @@
       "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
       "action": "ecs:ListServiceDeployments",
       "capabilityId": "manifest-backend-health-recovery-list-service-deployments",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
+      "action": "ecr:GetRepositoryPolicy",
+      "capabilityId": "manifest-backend-health-recovery-runtime-repository-policy",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
       ],
       "reachableMode": [
         "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
@@ -209,6 +241,7 @@
       "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
       "action": "ecr:DescribeImages",
       "capabilityId": "manifest-backend-health-recovery-describe-images",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
       ],
@@ -227,6 +260,7 @@
       "sourceFile": "scripts/aws/deploy-ecs-service.sh",
       "action": "ecr:DescribeImages",
       "capabilityId": "manifest-backend-health-recovery-describe-images",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
         "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
       ],
@@ -234,6 +268,507 @@
         "NORMAL",
         "ROTATION_OVERLAP",
         "ROTATION_CLEANUP"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "action": "iam:GetRole",
+      "capabilityId": "runtime-admin-get-role",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "action": "iam:GetRolePolicy",
+      "capabilityId": "runtime-admin-get-inline",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "action": "iam:ListAttachedRolePolicies",
+      "capabilityId": "runtime-admin-list-attached",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "action": "iam:PutRolePolicy",
+      "capabilityId": "runtime-admin-converge-inline",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "action": "kms:Verify",
+      "capabilityId": "runtime-admin-verify-inventory-convergence",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "runtime-admin-identify",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "action": "kms:Sign",
+      "capabilityId": "runtime-admin-sign",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "action": "kms:Verify",
+      "capabilityId": "runtime-admin-verify-inventory-evidence",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "runtime-admin-identify",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:GetPolicy",
+      "capabilityId": "manifest-backend-health-recovery-runtime-get-managed",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:GetPolicyVersion",
+      "capabilityId": "manifest-backend-health-recovery-runtime-get-managed-version",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:GetRole",
+      "capabilityId": "manifest-backend-health-recovery-runtime-get-role",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:GetRolePolicy",
+      "capabilityId": "manifest-backend-health-recovery-runtime-get-inline",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:ListAttachedRolePolicies",
+      "capabilityId": "manifest-backend-health-recovery-runtime-list-attached",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:ListRolePolicies",
+      "capabilityId": "manifest-backend-health-recovery-runtime-list-inline",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "iam:SimulatePrincipalPolicy",
+      "capabilityId": "runtime-admin-simulate",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "secretsmanager:DescribeSecret",
+      "capabilityId": "manifest-backend-health-recovery-runtime-describe-secrets",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "secretsmanager:ListSecretVersionIds",
+      "capabilityId": "manifest-backend-health-recovery-runtime-list-secret-versions",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "secretsmanager:GetResourcePolicy",
+      "capabilityId": "manifest-backend-health-recovery-runtime-secret-resource-policy",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "ecr:DescribeImages",
+      "capabilityId": "runtime-admin-describe-runtime-image",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "ecr:GetRepositoryPolicy",
+      "capabilityId": "manifest-backend-health-recovery-runtime-repository-policy",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "action": "kms:DescribeKey",
+      "capabilityId": "runtime-admin-describe-runtime-key",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "action": "kms:GetKeyPolicy",
+      "capabilityId": "runtime-admin-read-runtime-key-policy",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
+      "action": "kms:DescribeKey",
+      "capabilityId": "manifest-refresh-stage-a-storage-approval-key-describe",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
+      "action": "kms:GetKeyPolicy",
+      "capabilityId": "manifest-refresh-stage-a-storage-approval-key-policy",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
+      "action": "kms:Verify",
+      "capabilityId": "release-verify-signature",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",
       "sourcePolicyPresent": true,
@@ -277,6 +812,13 @@
       "failClosed": true
     },
     {
+      "id": "ecs-final-candidate-runtime-consumability",
+      "producer": "final candidate-derived runtime dependency graph plus governed administrator simulation",
+      "consumer": "every production ECS candidate builder and the recovery executor before registration and service update",
+      "authority": "exact execution/task role, action, resource, source policy, live policy identity, resource/key policy, and IAM simulation",
+      "failClosed": true
+    },
+    {
       "id": "workflow-json-transport",
       "producer": "canonical recovery dispatcher",
       "consumer": "Release Gate recovery preparation",
@@ -298,6 +840,14 @@
     "ROTATION_CLEANUP": "PASS",
     "ROLLBACK_RECONCILIATION": "PASS",
     "POST_DEPLOY_VERIFY": "PASS"
+  },
+  "runtimeModeClosure": {
+    "NORMAL": "Terraform-rendered final candidates and exact execution policies are jointly authenticated by Stage-B plan/closure before apply; normal activation registers nothing",
+    "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME": "signed candidate-derived closure is re-read before RegisterTaskDefinition and before UpdateService",
+    "ROTATION_OVERLAP": "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
+    "ROTATION_CLEANUP": "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
+    "ROLLBACK_RECONCILIATION": "rollback viability uses immutable image/resource identity and performs no candidate registration",
+    "POST_DEPLOY_VERIFY": "post-deploy verification consumes the authenticated running task definition and registers nothing"
   },
   "pathClosure": {
     "forward": "PASS",

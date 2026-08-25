@@ -4,10 +4,11 @@ import { assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmen
 import { ARTIFACT_SIGNING_BINDINGS } from "./production-artifact-signing-domain.mjs";
 import { loadArtifactSigningBootstrapContract } from "./production-artifact-signing-bootstrap.mjs";
 import { ROLLBACK_VIABILITY, assertFreshRollbackEquivalence, assertRollbackSupersessionProof } from "./production-ecs-rollback-viability.mjs";
+import { assertFreshRuntimeConsumabilityVerification } from "./production-ecs-runtime-consumability.mjs";
 
 export const BACKEND_HEALTH_RECOVERY = Object.freeze({
   kind: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME",
-  schemaVersion: 2,
+  schemaVersion: 4,
   account: "368992683803",
   region: "eu-west-2",
   cluster: "mscqr-prod-euw2-main",
@@ -27,6 +28,13 @@ export const BACKEND_HEALTH_RECOVERY_STATUS = Object.freeze({
   RUNNING_DIGEST_VERIFICATION_FAILED: "RUNNING_DIGEST_VERIFICATION_FAILED",
   HEALTH_VERIFICATION_FAILED: "HEALTH_VERIFICATION_FAILED",
   RECOVERY_COMPLETE: "RECOVERY_COMPLETE",
+});
+export const INTERRUPTED_RECOVERY_STATE = Object.freeze({
+  NO_EFFECT: "NO_EFFECT",
+  RESUMABLE: "RESUMABLE",
+  PROGRESSING: "PROGRESSING",
+  FAILED: "FAILED",
+  SUCCEEDED: "SUCCEEDED",
 });
 export const ARTIFACT_SIGNING_VERIFICATION = Object.freeze({
   PENDING: "PENDING",
@@ -52,9 +60,11 @@ const IDENTITY_ENV = new Set(["GIT_SHA", "RELEASE_GIT_SHA"]);
 const SIGNING_BINDINGS = new Set(ARTIFACT_SIGNING_BINDINGS);
 const ARTIFACT_SIGNING_SECRET_NAMES = loadArtifactSigningBootstrapContract().names;
 const ARTIFACT_SIGNING_SECRET_ARNS = Object.fromEntries(ARTIFACT_SIGNING_BINDINGS.map((name) => [name, new RegExp(`^arn:aws:secretsmanager:${BACKEND_HEALTH_RECOVERY.region}:${BACKEND_HEALTH_RECOVERY.account}:secret:${ARTIFACT_SIGNING_SECRET_NAMES[name].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-[A-Za-z0-9]{6}$`)]));
-const AUTHORIZATION_FIELDS = new Set(["schemaVersion", "kind", "environment", "account", "region", "cluster", "service", "family", "sourceSha", "imageReleaseSha", "currentTaskDefinitionArn", "recoveryImageDigest", "imageAuthorizationSha256", "environmentApprovalSha256", "artifactSigningBindingSha256", "rollbackProof", "reasonCode", "allowedDeltaProfile", "approval", "authorizationSha256"]);
-const BASE_APPROVAL_FIELDS = ["ticket", "approvedBy", "approverRole", "reason", "verificationRef", "sourceSha", "currentTaskDefinitionArn", "recoveryImageDigest"];
+const AUTHORIZATION_FIELDS = new Set(["schemaVersion", "kind", "environment", "account", "region", "cluster", "service", "family", "sourceSha", "imageReleaseSha", "currentTaskDefinitionArn", "recoveryImageDigest", "imageAuthorizationSha256", "environmentApprovalSha256", "artifactSigningBindingSha256", "runtimeConsumabilitySha256", "failedRecoveryEvidenceSha256", "failedRecoveryEvidenceReferenceSha256", "rollbackProof", "reasonCode", "allowedDeltaProfile", "approval", "authorizationSha256"]);
+const BASE_APPROVAL_FIELDS = ["ticket", "approvedBy", "approverRole", "reason", "verificationRef", "sourceSha", "currentTaskDefinitionArn", "recoveryImageDigest", "runtimeConsumabilitySha256"];
 const ROLLBACK_APPROVAL_FIELDS = ["rollbackDeploymentArn", "rollbackTargetTaskDefinitionArn", "rollbackTargetDigest"];
+const FAILED_HISTORY_APPROVAL_FIELD = "failedRecoveryEvidenceSha256";
+const FAILED_HISTORY_REFERENCE_APPROVAL_FIELD = "failedRecoveryEvidenceReferenceSha256";
 
 const requiredText = (value, label) => {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required.`);
@@ -64,12 +74,13 @@ const requiredText = (value, label) => {
 export function assertLegacyBackendRecoveryEvidence(evidence, {
   sourceSha, currentTaskDefinitionArn, recoveryImageDigest, authorizationFileSha256, authorizationSha256,
   environmentApprovalFileSha256, environmentApprovalSha256, imageAuthorizationFileSha256, imageAuthorizationSha256,
-  artifactSigningBindingSha256, imageReleaseSha,
-  rollbackProofSha256,
+  artifactSigningBindingSha256, runtimeConsumabilitySha256, imageReleaseSha,
+  rollbackProofSha256, failedRecoveryEvidenceReferenceSha256 = null,
   account = BACKEND_HEALTH_RECOVERY.account, region = BACKEND_HEALTH_RECOVERY.region,
 } = {}) {
   const { evidenceSha256, ...body } = evidence || {};
-  if (evidence?.schemaVersion !== 3 || evidence?.kind !== "BACKEND_HEALTH_RECOVERY_EVIDENCE"
+  const crashConsistent = [6, 7].includes(evidence?.schemaVersion);
+  if (![5, 6, 7].includes(evidence?.schemaVersion) || evidence?.kind !== "BACKEND_HEALTH_RECOVERY_EVIDENCE"
     || evidence.sourceSha !== sourceSha || !SHA.test(sourceSha || "")
     || evidence.currentTaskDefinitionArn !== currentTaskDefinitionArn || !TASK_ARN.test(currentTaskDefinitionArn || "")
     || evidence.recoveryImageDigest !== recoveryImageDigest || !SHA256.test(recoveryImageDigest || "")
@@ -81,7 +92,9 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
     || evidence.environmentApprovalFileSha256 !== environmentApprovalFileSha256 || evidence.environmentApprovalSha256 !== environmentApprovalSha256
     || evidence.imageAuthorizationFileSha256 !== imageAuthorizationFileSha256 || evidence.imageAuthorizationSha256 !== imageAuthorizationSha256
     || !HEX256.test(artifactSigningBindingSha256 || "") || evidence.artifactSigningBindingSha256 !== artifactSigningBindingSha256
+    || !HEX256.test(runtimeConsumabilitySha256 || "") || evidence.runtimeConsumabilitySha256 !== runtimeConsumabilitySha256
     || evidence.rollbackProofSha256 !== (rollbackProofSha256 || null)
+    || ("failedRecoveryEvidenceReferenceSha256" in evidence ? evidence.failedRecoveryEvidenceReferenceSha256 !== failedRecoveryEvidenceReferenceSha256 : failedRecoveryEvidenceReferenceSha256 !== null)
     || !RECOVERY_STATUSES.has(evidence.status)
     || !ARTIFACT_SIGNING_VERIFICATION_STATES.has(evidence.artifactSigningVerification)
     || (evidence.artifactSigningVerification === ARTIFACT_SIGNING_VERIFICATION.FAILED
@@ -90,12 +103,16 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
     || !Array.isArray(evidence.knownFailedRevisions)
     || evidence.knownFailedRevisions.some((item) => !TASK_ARN.test(item?.taskDefinitionArn || "") || !HEX256.test(item?.taskDefinitionFingerprint || ""))
     || new Set(evidence.knownFailedRevisions.map(({ taskDefinitionArn: arn }) => arn)).size !== evidence.knownFailedRevisions.length
-    || evidence.knownFailedRevisions.length > 1 || (!rollbackProofSha256 && evidence.knownFailedRevisions.length)
     || !Number.isSafeInteger(evidence.registrations) || evidence.registrations < 0 || evidence.registrations > 1
     || !Number.isSafeInteger(evidence.updates) || evidence.updates < 0 || evidence.updates > 1
     || !Number.isFinite(Date.parse(evidence.generatedAt))
     || !HEX256.test(evidenceSha256 || "") || canonicalSha256(body) !== evidenceSha256) {
     throw new Error("Backend health recovery evidence is malformed, stale, or tampered.");
+  }
+  if (crashConsistent && (!HEX256.test(evidence.candidateFingerprint || "")
+    || ![null, undefined].includes(evidence.initialRevisionCensusSha256) && !HEX256.test(evidence.initialRevisionCensusSha256)
+    || ![null, undefined].includes(evidence.expectedRevisionCensusSha256) && !HEX256.test(evidence.expectedRevisionCensusSha256))) {
+    throw new Error("Backend health recovery crash-reconciliation identity is malformed.");
   }
   if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE && (evidence.registrations !== 0 || evidence.updates !== 0)) throw new Error("No-mutation recovery evidence records a mutation.");
   if (evidence.status !== BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE
@@ -108,6 +125,9 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
   if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_CONFIRMED && evidence.updates !== 1) throw new Error("Service-update confirmation lacks its mutation count.");
   if ([BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE, BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED].includes(evidence.status) && evidence.targetArn !== null) throw new Error("Pre-registration recovery evidence records a target revision.");
   if (![BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE, BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED].includes(evidence.status) && !TASK_ARN.test(evidence.targetArn || "")) throw new Error("Post-registration recovery evidence lacks the authenticated target revision.");
+  if (crashConsistent && evidence.status !== BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE && !HEX256.test(evidence.initialRevisionCensusSha256 || "")) throw new Error("Mutation-capable recovery evidence lacks its initial revision census.");
+  if (crashConsistent && evidence.targetArn && !HEX256.test(evidence.expectedRevisionCensusSha256 || "")) throw new Error("Post-registration recovery evidence lacks its expected revision census.");
+  if (evidence.schemaVersion === 7 && evidence.status !== BACKEND_HEALTH_RECOVERY_STATUS.NO_MUTATION_FAILURE && !HEX256.test(evidence.predecessorHistoryLineageSha256 || "")) throw new Error("Mutation-capable recovery evidence lacks its authenticated predecessor history lineage.");
   if (evidence.status === BACKEND_HEALTH_RECOVERY_STATUS.RECOVERY_COMPLETE
     && (evidence.backendHealthy !== true || evidence.health?.healthy !== true || evidence.health?.success !== true || evidence.health?.status !== "ready"
       || evidence.health?.dependencies?.database !== "ready" || evidence.health?.dependencies?.redis !== "ready" || evidence.health?.dependencies?.objectStorage !== "ready"
@@ -118,7 +138,7 @@ export function assertLegacyBackendRecoveryEvidence(evidence, {
   return evidence;
 }
 
-export function createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, imageAuthorization, environmentApproval, artifactSigningBindingSha256, rollbackProof = null, approval } = {}) {
+export function createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, imageAuthorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256 = null, failedRecoveryEvidenceReferenceSha256 = null, rollbackProof = null, approval } = {}) {
   const body = {
     schemaVersion: BACKEND_HEALTH_RECOVERY.schemaVersion,
     kind: BACKEND_HEALTH_RECOVERY.kind,
@@ -135,6 +155,9 @@ export function createLegacyBackendRecoveryAuthorization({ sourceSha, currentTas
     imageAuthorizationSha256: imageAuthorization?.evidenceSha256,
     environmentApprovalSha256: environmentApproval?.evidenceSha256,
     artifactSigningBindingSha256,
+    runtimeConsumabilitySha256,
+    failedRecoveryEvidenceSha256,
+    failedRecoveryEvidenceReferenceSha256,
     rollbackProof: rollbackProof ? structuredClone(rollbackProof) : null,
     reasonCode: "CURRENT_IMAGE_DIGEST_MISSING",
     allowedDeltaProfile: "IMAGE_SOURCE_IDENTITY_AND_EXACT_ARTIFACT_SIGNING_BINDINGS",
@@ -151,7 +174,31 @@ function definition(value) {
 
 const taskDefinitionArn = (value) => definition(value).taskDefinitionArn;
 
-function classifyRevisionCensus(revisions, eligible) {
+const historyOf = (eligible) => eligible.recoveryHistory || [];
+const historyKey = (item) => `${item.workflowRunId}:${item.evidenceFileSha256}`;
+const identityHash = (identities) => canonicalSha256([...identities].sort((a, b) => a.taskDefinitionArn.localeCompare(b.taskDefinitionArn)));
+export function openInterruptedRecoveryHistory(history) {
+  if (!Array.isArray(history)) throw new Error("Recovery history is malformed.");
+  const current = history.at(-1);
+  return current?.classification === "INTERRUPTED_MUTATION" ? [current] : [];
+}
+export const EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256 = canonicalSha256([]);
+export function recoveryHistoryLineageSha256(history) {
+  if (!Array.isArray(history)) throw new Error("Recovery history lineage is malformed.");
+  let lineageSha256 = EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256;
+  let strengthened = false;
+  for (const record of history) {
+    const bound = record.predecessorHistoryLineageSha256;
+    if (bound !== null && bound !== undefined) {
+      if (!HEX256.test(bound) || bound !== lineageSha256) throw new Error("Recovery history lineage predecessor hash is missing, reordered, or forked.");
+      strengthened = true;
+    } else if (strengthened) throw new Error("Recovery history lineage cannot downgrade after a bound generation.");
+    lineageSha256 = canonicalSha256({ predecessorLineageSha256: lineageSha256, record });
+  }
+  return lineageSha256;
+}
+
+function revisionEntries(revisions) {
   if (!Array.isArray(revisions)) throw new Error("Legacy backend revision census is incomplete.");
   const entries = revisions.map((item) => {
     const arn = taskDefinitionArn(item);
@@ -160,28 +207,178 @@ function classifyRevisionCensus(revisions, eligible) {
     return { item, taskDefinitionArn: arn, revision, fingerprint: taskDefinitionFingerprint(item, item.tags || []) };
   });
   if (new Set(entries.map(({ taskDefinitionArn: arn }) => arn)).size !== entries.length) throw new Error("Recovery census contains duplicate task-definition identities.");
-  const matches = entries.filter(({ fingerprint }) => fingerprint === eligible.fingerprint);
-  if (matches.length > 1) throw new Error("Multiple matching recovery revisions make replay ambiguous.");
-  const failedArn = eligible.rollbackProof?.forwardTargetTaskDefinitionArn;
-  const failedFingerprint = eligible.rollbackProof?.forwardTargetTaskDefinitionFingerprint;
-  const knownFailed = failedArn ? entries.filter(({ taskDefinitionArn: arn }) => arn === failedArn) : [];
-  const sourceRevision = Number(TASK_ARN.exec(eligible.currentTaskDefinitionArn)?.[1]);
-  if (failedArn && (knownFailed.length !== 1 || knownFailed[0].fingerprint !== failedFingerprint)) {
-    throw new Error("The authenticated failed forward task definition is absent or differs from live revision history.");
+  return entries;
+}
+
+export function reconcileAuthenticatedRevisionLineage(revisions, eligible, { allowedRevision = null } = {}) {
+  const entries = revisionEntries(revisions).sort((a, b) => a.revision - b.revision);
+  const sourceRevision = Number(TASK_ARN.exec(eligible.currentTaskDefinitionArn || "")?.[1]);
+  if (!Number.isSafeInteger(sourceRevision)) throw new Error("Recovery lineage source task definition is invalid.");
+  const history = historyOf(eligible);
+  recoveryHistoryLineageSha256(history);
+  const rollbackForwardArn = eligible.rollbackProof?.forwardTargetTaskDefinitionArn || null;
+  let root;
+  if (history[0]?.initialRevisionCensusSha256) {
+    const roots = Array.from({ length: entries.length + 1 }, (_, length) => entries.slice(0, length))
+      .filter((candidate) => identityHash(candidate.map(({ taskDefinitionArn: arn, fingerprint }) => ({ taskDefinitionArn: arn, taskDefinitionFingerprint: fingerprint }))) === history[0].initialRevisionCensusSha256);
+    if (roots.length !== 1) throw new Error("Recovery history cannot derive one authenticated base census.");
+    [root] = roots;
+  } else if (history.length) {
+    const legacySourceRevision = Number(TASK_ARN.exec(history[0].currentTaskDefinitionArn || "")?.[1]);
+    if (!Number.isSafeInteger(legacySourceRevision)) throw new Error("Legacy recovery history cannot derive its base census.");
+    root = entries.filter(({ revision }) => revision <= legacySourceRevision);
+  } else {
+    root = entries.filter(({ revision, taskDefinitionArn: arn }) => revision <= sourceRevision || arn === rollbackForwardArn);
   }
-  if (knownFailed.some(({ revision }) => revision <= sourceRevision)) throw new Error("The authenticated failed forward task definition is not newer than the rollback source.");
-  if (failedArn && matches.some(({ taskDefinitionArn: arn }) => arn === failedArn)) throw new Error("The failed forward task definition cannot be reused as a corrected recovery revision.");
-  const newerUnknown = entries.filter(({ taskDefinitionArn: arn, revision, fingerprint }) => revision > sourceRevision
-    && fingerprint !== eligible.fingerprint && arn !== failedArn);
-  if (newerUnknown.length) throw new Error("A newer unknown legacy backend revision requires reconciliation before recovery.");
-  const identities = entries.map(({ taskDefinitionArn: arn, fingerprint }) => ({ taskDefinitionArn: arn, taskDefinitionFingerprint: fingerprint }))
-    .sort((a, b) => a.taskDefinitionArn.localeCompare(b.taskDefinitionArn));
+  if (rollbackForwardArn && !history.some(({ taskDefinitionArn: arn }) => arn === rollbackForwardArn)) {
+    const rollback = root.find(({ taskDefinitionArn: arn }) => arn === rollbackForwardArn);
+    if (!rollback || rollback.fingerprint !== eligible.rollbackProof.forwardTargetTaskDefinitionFingerprint) throw new Error("Authenticated failed forward task definition is absent or differs from live rollback history.");
+  }
+  const lineage = root.map(({ taskDefinitionArn: arn, fingerprint }) => ({ taskDefinitionArn: arn, taskDefinitionFingerprint: fingerprint }));
+  const resolutions = [];
+  const finalIdentities = entries.map(({ taskDefinitionArn: arn, fingerprint }) => ({ taskDefinitionArn: arn, taskDefinitionFingerprint: fingerprint }));
+  const historicalFinalIdentities = allowedRevision
+    ? finalIdentities.filter(({ taskDefinitionArn: arn, taskDefinitionFingerprint: fingerprint }) => arn !== allowedRevision.taskDefinitionArn || fingerprint !== allowedRevision.taskDefinitionFingerprint)
+    : finalIdentities;
+  const entryByArn = new Map(entries.map((entry) => [entry.taskDefinitionArn, entry]));
+  const addCandidate = (record, targetArn, expectedHash) => {
+    const target = entryByArn.get(targetArn);
+    if (!target || target.fingerprint !== record.taskDefinitionFingerprint || target.fingerprint !== record.candidateFingerprint) throw new Error("Recovery lineage candidate differs from authenticated historical evidence.");
+    const next = entries.find(({ taskDefinitionArn: arn }) => !lineage.some((item) => item.taskDefinitionArn === arn));
+    if (next?.taskDefinitionArn !== targetArn) throw new Error("Recovery history has a missing, reordered, or concurrently inserted revision.");
+    lineage.push({ taskDefinitionArn: targetArn, taskDefinitionFingerprint: target.fingerprint });
+    if (expectedHash && identityHash(lineage) !== expectedHash) throw new Error("Recovery history candidate does not produce its authenticated successor lineage.");
+  };
+  for (let index = 0; index < history.length; index += 1) {
+    const record = history[index];
+    if (index === 0 ? record.predecessorHistoryReferenceSha256 !== null : !HEX256.test(record.predecessorHistoryReferenceSha256 || "")) throw new Error("Recovery history predecessor reference chain is missing, reordered, or substituted.");
+    if (record.taskDefinitionFingerprint !== record.candidateFingerprint || !lineage.some(({ taskDefinitionArn: arn }) => arn === record.currentTaskDefinitionArn)) throw new Error("Recovery history is bound to a different predecessor lineage or candidate identity.");
+    const predecessorSha256 = identityHash(lineage);
+    let targetArn = record.taskDefinitionArn;
+    let introduced = false;
+    if (record.initialRevisionCensusSha256 === null) {
+      if (!targetArn || record.registrations !== 1) throw new Error("Legacy recovery history cannot establish predecessor continuity.");
+      if (!lineage.some(({ taskDefinitionArn: arn }) => arn === targetArn)) {
+        addCandidate(record, targetArn, null); introduced = true;
+      } else if (targetArn !== rollbackForwardArn) throw new Error("Legacy recovery history conflicts with its authenticated lineage.");
+    } else {
+      if (record.initialRevisionCensusSha256 !== predecessorSha256) throw new Error("Recovery history predecessor lineage is missing, reordered, or forked.");
+      if (record.registrations === 1) {
+        if (!targetArn) throw new Error("Registered recovery generation lacks its candidate revision.");
+        addCandidate(record, targetArn, record.expectedRevisionCensusSha256); introduced = true;
+      } else if (targetArn === null) {
+        const successorSha256 = history[index + 1]?.initialRevisionCensusSha256 || identityHash(historicalFinalIdentities);
+        if (successorSha256 !== predecessorSha256) {
+          const candidates = entries.filter(({ taskDefinitionArn: arn, fingerprint }) => !lineage.some((item) => item.taskDefinitionArn === arn) && fingerprint === record.candidateFingerprint
+            && identityHash([...lineage, { taskDefinitionArn: arn, taskDefinitionFingerprint: fingerprint }]) === successorSha256);
+          if (candidates.length !== 1) throw new Error("Ambiguous registration response cannot establish one authenticated lineage extension.");
+          targetArn = candidates[0].taskDefinitionArn; addCandidate(record, targetArn, successorSha256); introduced = true;
+        }
+      } else {
+        const target = lineage.find(({ taskDefinitionArn: arn }) => arn === targetArn);
+        if (!target || target.taskDefinitionFingerprint !== record.taskDefinitionFingerprint || record.expectedRevisionCensusSha256 !== predecessorSha256) throw new Error("Recovery history reuse does not match its authenticated predecessor lineage.");
+      }
+    }
+    resolutions.push(Object.freeze({ key: historyKey(record), index, targetArn, introduced, predecessorSha256, successorSha256: identityHash(lineage) }));
+  }
+  const historicalIdentitySha256 = identityHash(lineage);
+  const remaining = entries.filter(({ taskDefinitionArn: arn }) => !lineage.some((item) => item.taskDefinitionArn === arn));
+  const expectedCurrent = allowedRevision
+    ? remaining.filter(({ taskDefinitionArn: arn, fingerprint }) => arn === allowedRevision.taskDefinitionArn && fingerprint === allowedRevision.taskDefinitionFingerprint)
+    : remaining.filter(({ fingerprint }) => fingerprint === eligible.fingerprint);
+  if (remaining.length > 1 || remaining.length !== expectedCurrent.length) throw new Error("Authoritative revision census contains a newer unknown or concurrent lineage revision.");
+  if (remaining.length) lineage.push({ taskDefinitionArn: remaining[0].taskDefinitionArn, taskDefinitionFingerprint: remaining[0].fingerprint });
+  const currentSha256 = identityHash(finalIdentities);
+  if (identityHash(lineage) !== currentSha256) throw new Error("Authoritative revision census differs from its authenticated lineage.");
+  return Object.freeze({ identities: Object.freeze(finalIdentities.sort((a, b) => a.taskDefinitionArn.localeCompare(b.taskDefinitionArn))), identitySha256: currentSha256, historicalIdentitySha256, historyResolutions: Object.freeze(resolutions) });
+}
+
+export function classifyRevisionCensus(revisions, eligible, options = {}) {
+  const entries = revisionEntries(revisions);
+  const lineage = reconcileAuthenticatedRevisionLineage(revisions, eligible, options);
+  const approvedFailed = new Map((eligible.knownFailedRevisions || []).map((item) => [item.taskDefinitionArn, item]));
+  const resolutionByKey = new Map(lineage.historyResolutions.map((item) => [item.key, item]));
+  const approvedInterrupted = new Map((eligible.interruptedRecoveries || []).map((item) => [resolutionByKey.get(historyKey(item))?.targetArn, item]).filter(([arn]) => arn));
+  const failedArn = eligible.rollbackProof?.forwardTargetTaskDefinitionArn;
+  if (failedArn) approvedFailed.set(failedArn, { taskDefinitionArn: failedArn, taskDefinitionFingerprint: eligible.rollbackProof.forwardTargetTaskDefinitionFingerprint });
+  const matches = entries.filter(({ taskDefinitionArn: arn, fingerprint }) => fingerprint === eligible.fingerprint && !approvedFailed.has(arn));
+  if (matches.length > 1) throw new Error("Multiple matching recovery revisions make replay ambiguous.");
+  const knownFailed = entries.filter(({ taskDefinitionArn: arn }) => approvedFailed.has(arn));
+  if (knownFailed.length !== approvedFailed.size || knownFailed.some(({ taskDefinitionArn: arn, fingerprint }) => approvedFailed.get(arn).taskDefinitionFingerprint !== fingerprint)) throw new Error("An authenticated failed forward task definition or failed recovery revision is absent or differs from live revision history.");
+  const interrupted = entries.filter(({ taskDefinitionArn: arn }) => approvedInterrupted.has(arn));
+  if (interrupted.length !== approvedInterrupted.size || interrupted.some(({ taskDefinitionArn: arn, fingerprint }) => approvedInterrupted.get(arn).taskDefinitionFingerprint !== fingerprint)) throw new Error("An authenticated interrupted recovery revision is absent or differs from live revision history.");
+  if (matches.some(({ taskDefinitionArn: arn }) => approvedFailed.has(arn))) throw new Error("A failed recovery task definition cannot be reused as a corrected recovery revision.");
+  const identities = lineage.identities;
   return Object.freeze({
     matches,
     knownFailedRevisions: knownFailed.map(({ taskDefinitionArn: arn, fingerprint }) => ({ taskDefinitionArn: arn, taskDefinitionFingerprint: fingerprint })),
+    interruptedRevisions: interrupted.map(({ taskDefinitionArn: arn, fingerprint }) => ({ taskDefinitionArn: arn, taskDefinitionFingerprint: fingerprint })),
     identities,
-    identitySha256: canonicalSha256(identities),
+    identitySha256: lineage.identitySha256,
+    historyResolutions: lineage.historyResolutions,
   });
+}
+
+const taskFailureReason = (task) => [task?.stoppedReason, ...(task?.containers || []).map(({ reason }) => reason)].filter(Boolean).join("\n");
+const interruptedResult = (classification, targetArn, identitySha256, snapshot, extra = {}) => Object.freeze({
+  classification, targetArn, identitySha256, ...extra,
+  serviceTaskDefinitionArn: snapshot.service.taskDefinition,
+  desiredCount: snapshot.service.desiredCount,
+  runningCount: snapshot.service.runningCount,
+  pendingCount: snapshot.service.pendingCount,
+  networkConfigurationSha256: canonicalSha256(snapshot.service.networkConfiguration),
+  loadBalancersSha256: canonicalSha256(snapshot.service.loadBalancers),
+  proofSha256: canonicalSha256({ classification, targetArn, identitySha256, taskDefinition: snapshot.service.taskDefinition,
+    desiredCount: snapshot.service.desiredCount, runningCount: snapshot.service.runningCount, pendingCount: snapshot.service.pendingCount,
+    deployments: (snapshot.service.deployments || []).map(({ id, taskDefinition, rolloutState, desiredCount, runningCount, pendingCount, createdAt }) => ({ id, taskDefinition, rolloutState, desiredCount, runningCount, pendingCount, createdAt })).sort((a, b) => String(a.id).localeCompare(String(b.id))),
+    evidence: extra }),
+});
+
+export function classifyInterruptedRecoveryState(interruption, snapshot, { lineage } = {}) {
+  if (interruption?.classification !== "INTERRUPTED_MUTATION" || !HEX256.test(interruption?.taskDefinitionFingerprint || "")
+    || !snapshot?.service || !lineage) throw new Error("Interrupted recovery evidence, lineage, or live snapshot is incomplete.");
+  const resolution = lineage.historyResolutions.find(({ key }) => key === historyKey(interruption));
+  if (!resolution) throw new Error("Interrupted recovery is absent from the authenticated revision lineage.");
+  const targetArn = resolution.targetArn;
+  if (targetArn === null) return interruptedResult(INTERRUPTED_RECOVERY_STATE.NO_EFFECT, null, lineage.historicalIdentitySha256, snapshot);
+  const service = snapshot.service;
+  if (service.serviceName !== BACKEND_HEALTH_RECOVERY.service || service.taskDefinition === interruption.currentTaskDefinitionArn) {
+    if (service.serviceName !== BACKEND_HEALTH_RECOVERY.service || interruption.status === BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_CONFIRMED) throw new Error("Confirmed interrupted service update disagrees with authoritative ECS state.");
+    return interruptedResult(INTERRUPTED_RECOVERY_STATE.RESUMABLE, targetArn, lineage.historicalIdentitySha256, snapshot);
+  }
+  if (service.taskDefinition !== targetArn) throw new Error("Interrupted recovery service moved to an unauthenticated revision.");
+  if (![BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_CONFIRMED].includes(interruption.status)) throw new Error("Pre-update interruption cannot authenticate a service mutation.");
+  if (!Number.isInteger(service.desiredCount) || service.desiredCount < 1 || !Number.isInteger(service.runningCount) || !Number.isInteger(service.pendingCount)) throw new Error("Interrupted recovery service counts are malformed.");
+  const deployments = (service.deployments || []).filter(({ taskDefinition }) => taskDefinition === targetArn);
+  if (deployments.length !== 1 || !/^ecs-svc\/[1-9][0-9]*$/.test(deployments[0]?.id || "") || !Number.isFinite(Date.parse(deployments[0]?.createdAt))) throw new Error("Interrupted recovery current deployment identity is ambiguous.");
+  const deployment = deployments[0];
+  const runningTasks = Array.isArray(snapshot.runningTasks) ? snapshot.runningTasks : [];
+  const healthy = service.runningCount === service.desiredCount && service.pendingCount === 0 && runningTasks.length === service.desiredCount
+    && runningTasks.every((task) => task.taskDefinitionArn === targetArn && task.imageDigest === interruption.recoveryImageDigest && task.healthStatus === "HEALTHY")
+    && snapshot.health?.healthy === true && snapshot.health?.success === true && snapshot.health?.status === "ready";
+  if (healthy) return interruptedResult(INTERRUPTED_RECOVERY_STATE.SUCCEEDED, targetArn, lineage.historicalIdentitySha256, snapshot, { health: snapshot.health });
+  const seen = new Set();
+  const failures = (Array.isArray(snapshot.stoppedTasks) ? snapshot.stoppedTasks : []).filter((task) => {
+    const containers = (task?.containers || []).filter(({ name }) => name === BACKEND_HEALTH_RECOVERY.container);
+    if (!/^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/.test(task?.taskArn || "") || seen.has(task.taskArn)
+      || task.startedBy !== deployment.id || task.taskDefinitionArn !== targetArn || !Number.isFinite(Date.parse(task.createdAt))
+      || !Number.isFinite(Date.parse(task.stoppedAt)) || Date.parse(task.createdAt) < Date.parse(deployment.createdAt) || Date.parse(task.stoppedAt) < Date.parse(task.createdAt)
+      || containers.length !== 1 || containers[0].image !== `${BACKEND_HEALTH_RECOVERY.account}.dkr.ecr.${BACKEND_HEALTH_RECOVERY.region}.amazonaws.com/${BACKEND_HEALTH_RECOVERY.repository}@${interruption.recoveryImageDigest}`
+      || (containers[0].imageDigest != null && containers[0].imageDigest !== interruption.recoveryImageDigest)
+      || !/(CannotPullContainerError|ResourceInitializationError|EssentialContainerExited|essential container.*exited)/i.test(taskFailureReason(task))) return false;
+    seen.add(task.taskArn); return true;
+  });
+  if (failures.length >= 2 && service.runningCount === 0 && service.pendingCount === 0) {
+    const failureEvidenceSha256 = canonicalSha256(failures.map((task) => ({
+      taskArn: task.taskArn, startedBy: task.startedBy, taskDefinitionArn: task.taskDefinitionArn,
+      createdAt: task.createdAt, stoppedAt: task.stoppedAt, reason: taskFailureReason(task),
+      image: task.containers.find(({ name }) => name === BACKEND_HEALTH_RECOVERY.container).image,
+      imageDigest: task.containers.find(({ name }) => name === BACKEND_HEALTH_RECOVERY.container).imageDigest || null,
+    })).sort((a, b) => a.taskArn.localeCompare(b.taskArn)));
+    return interruptedResult(INTERRUPTED_RECOVERY_STATE.FAILED, targetArn, lineage.historicalIdentitySha256, snapshot, { failures: failures.length, failureEvidenceSha256 });
+  }
+  if (deployment.rolloutState === "IN_PROGRESS" || service.pendingCount > 0 || service.runningCount > 0) return interruptedResult(INTERRUPTED_RECOVERY_STATE.PROGRESSING, targetArn, lineage.historicalIdentitySha256, snapshot);
+  throw new Error("Interrupted recovery live outcome is ambiguous.");
 }
 
 function expectedRevisionCensusSha256(initialCensus, targetArn, fingerprint, registered) {
@@ -255,7 +452,7 @@ export function assertLegacyBackendRecoveryCandidate({ currentTaskDefinition, ca
 }
 
 export function assertLegacyBackendRecoveryAuthorization(authorization, {
-  sourceSha, currentTaskDefinitionArn, recoveryImageDigest, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindingSha256, githubContext, executionActor,
+  sourceSha, currentTaskDefinitionArn, recoveryImageDigest, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256 = null, failedRecoveryEvidenceReferenceSha256 = null, recoveryHistory = [], knownFailedRevisions = [], interruptedRecoveries = [], githubContext, executionActor,
 } = {}) {
   if (!authorization || Object.keys(authorization).some((field) => !AUTHORIZATION_FIELDS.has(field)) || Object.keys(authorization).length !== AUTHORIZATION_FIELDS.size) throw new Error("Backend health recovery authorization schema is invalid.");
   if (authorization?.schemaVersion !== BACKEND_HEALTH_RECOVERY.schemaVersion || authorization?.kind !== BACKEND_HEALTH_RECOVERY.kind
@@ -272,16 +469,45 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
     throw new Error("Backend health recovery authorization is incomplete or bound to a different incident.");
   }
   if (!HEX256.test(artifactSigningBindingSha256 || "") || authorization.artifactSigningBindingSha256 !== artifactSigningBindingSha256) throw new Error("Backend health recovery artifact-signing binding is stale or unauthenticated.");
+  if (!HEX256.test(runtimeConsumabilitySha256 || "") || authorization.runtimeConsumabilitySha256 !== runtimeConsumabilitySha256) throw new Error("Backend health recovery runtime-consumability evidence is stale or unauthenticated.");
+  const history = recoveryHistory;
+  const historyViewsMatch = canonicalSha256(history.filter(({ classification }) => classification === "TERMINAL_FAILURE")) === canonicalSha256(knownFailedRevisions)
+    && canonicalSha256(history.filter(({ classification }) => classification === "INTERRUPTED_MUTATION")) === canonicalSha256(interruptedRecoveries);
+  if (!Array.isArray(recoveryHistory) || !Array.isArray(knownFailedRevisions) || !Array.isArray(interruptedRecoveries) || !historyViewsMatch || knownFailedRevisions.some((item) => item?.repository !== "T-ej2003/genuine-scan-main" || !TASK_ARN.test(item?.taskDefinitionArn || "")
+    || !HEX256.test(item?.taskDefinitionFingerprint || "") || !HEX256.test(item?.evidenceFileSha256 || "") || !/^[1-9][0-9]*$/.test(String(item?.workflowRunId || ""))
+    || ![BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, BACKEND_HEALTH_RECOVERY_STATUS.RUNNING_DIGEST_VERIFICATION_FAILED, BACKEND_HEALTH_RECOVERY_STATUS.HEALTH_VERIFICATION_FAILED].includes(item?.status)
+    || item?.classification !== "TERMINAL_FAILURE" || item?.failureClassification !== item.status || !SHA.test(item?.sourceSha || "") || item?.service !== BACKEND_HEALTH_RECOVERY.service
+    || item?.releaseMode !== BACKEND_HEALTH_RECOVERY.kind || !SHA256.test(item?.recoveryImageDigest || "") || !HEX256.test(item?.candidateFingerprint || "")
+    || item.candidateFingerprint !== item.taskDefinitionFingerprint || !HEX256.test(item?.artifactSigningBindingSha256 || "") || !HEX256.test(item?.runtimeConsumabilitySha256 || "")
+    || ![null, undefined].includes(item?.predecessorHistoryReferenceSha256) && !HEX256.test(item.predecessorHistoryReferenceSha256)
+    || ![null, undefined].includes(item?.predecessorHistoryLineageSha256) && !HEX256.test(item.predecessorHistoryLineageSha256)
+    || !TASK_ARN.test(item?.currentTaskDefinitionArn || "") || ![0, 1].includes(item?.registrations) || ![0, 1].includes(item?.updates))
+    || interruptedRecoveries.some((item) => item?.repository !== "T-ej2003/genuine-scan-main" || item?.classification !== "INTERRUPTED_MUTATION"
+      || ![BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED, BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTERED_ONLY, BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_CONFIRMED].includes(item?.status)
+      || item.failureClassification !== null || !SHA.test(item?.sourceSha || "") || item.service !== BACKEND_HEALTH_RECOVERY.service || item.releaseMode !== BACKEND_HEALTH_RECOVERY.kind
+      || !HEX256.test(item?.taskDefinitionFingerprint || "") || item.taskDefinitionFingerprint !== item.candidateFingerprint || !HEX256.test(item?.initialRevisionCensusSha256 || "") || !HEX256.test(item?.evidenceFileSha256 || "")
+      || !/^[1-9][0-9]*$/.test(String(item?.workflowRunId || "")) || !SHA256.test(item?.recoveryImageDigest || "") || !HEX256.test(item?.artifactSigningBindingSha256 || "") || !HEX256.test(item?.runtimeConsumabilitySha256 || "") || !TASK_ARN.test(item?.currentTaskDefinitionArn || "")
+      || ![null, undefined].includes(item?.predecessorHistoryReferenceSha256) && !HEX256.test(item.predecessorHistoryReferenceSha256)
+      || ![null, undefined].includes(item?.predecessorHistoryLineageSha256) && !HEX256.test(item.predecessorHistoryLineageSha256)
+      || (item.taskDefinitionArn === null ? item.status !== BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED || item.expectedRevisionCensusSha256 !== null : !TASK_ARN.test(item.taskDefinitionArn) || !HEX256.test(item.expectedRevisionCensusSha256 || "")))
+    || new Set(history.map(({ workflowRunId }) => workflowRunId)).size !== history.length
+    || new Set(history.map(({ taskDefinitionArn, taskDefinitionFingerprint }) => taskDefinitionArn || `pending:${taskDefinitionFingerprint}`)).size !== history.length
+    || (history.length ? !HEX256.test(failedRecoveryEvidenceSha256 || "") || !HEX256.test(failedRecoveryEvidenceReferenceSha256 || "") || authorization.failedRecoveryEvidenceSha256 !== failedRecoveryEvidenceSha256 || authorization.failedRecoveryEvidenceReferenceSha256 !== failedRecoveryEvidenceReferenceSha256 : authorization.failedRecoveryEvidenceSha256 !== null || authorization.failedRecoveryEvidenceReferenceSha256 !== null)) throw new Error("Authenticated recovery history is malformed, missing, or duplicated.");
+  recoveryHistoryLineageSha256(history);
   assertProductionEnvironmentApprovalEvidence(environmentApproval, { sourceSha, repository: githubContext?.repository, environment: "production", workflowRef: githubContext?.workflowRef, eventName: githubContext?.eventName, workflowRunId: githubContext?.workflowRunId, workflowRunAttempt: githubContext?.workflowRunAttempt, executionActor, githubActions: githubContext?.githubActions, now: githubContext?.now });
   assertImageAuthorization(imageAuthorization, sourceSha, imageValidation);
   if (authorizedBackendDigest(imageAuthorization) !== recoveryImageDigest) throw new Error("Recovery digest differs from canonical image authorization.");
   const approval = authorization.approval;
   const approvalFields = Object.keys(approval || {}).sort().join(",");
   const baseApprovalFields = [...BASE_APPROVAL_FIELDS].sort().join(",");
+  const failedHistoryApprovalFields = [...BASE_APPROVAL_FIELDS, FAILED_HISTORY_APPROVAL_FIELD, FAILED_HISTORY_REFERENCE_APPROVAL_FIELD].sort().join(",");
   const rollbackApprovalFields = [...BASE_APPROVAL_FIELDS, ...ROLLBACK_APPROVAL_FIELDS].sort().join(",");
-  if (!approval || (approvalFields !== baseApprovalFields && approvalFields !== rollbackApprovalFields)) throw new Error("Backend health recovery approval schema is invalid.");
+  const rollbackHistoryApprovalFields = [...BASE_APPROVAL_FIELDS, ...ROLLBACK_APPROVAL_FIELDS, FAILED_HISTORY_APPROVAL_FIELD, FAILED_HISTORY_REFERENCE_APPROVAL_FIELD].sort().join(",");
+  if (!approval || ![baseApprovalFields, failedHistoryApprovalFields, rollbackApprovalFields, rollbackHistoryApprovalFields].includes(approvalFields)) throw new Error("Backend health recovery approval schema is invalid.");
   for (const field of ["ticket", "approvedBy", "approverRole", "reason", "verificationRef"]) requiredText(approval?.[field], `approval.${field}`);
-  if (approval.sourceSha !== sourceSha || approval.currentTaskDefinitionArn !== currentTaskDefinitionArn || approval.recoveryImageDigest !== recoveryImageDigest) throw new Error("Human approval is bound to a different recovery.");
+  if (approval.sourceSha !== sourceSha || approval.currentTaskDefinitionArn !== currentTaskDefinitionArn || approval.recoveryImageDigest !== recoveryImageDigest || approval.runtimeConsumabilitySha256 !== runtimeConsumabilitySha256) throw new Error("Human approval is bound to a different recovery.");
+  if (history.length ? approval[FAILED_HISTORY_APPROVAL_FIELD] !== failedRecoveryEvidenceSha256 : FAILED_HISTORY_APPROVAL_FIELD in approval) throw new Error("Human approval is not bound to the exact authenticated recovery history.");
+  if (history.length ? approval[FAILED_HISTORY_REFERENCE_APPROVAL_FIELD] !== failedRecoveryEvidenceReferenceSha256 : FAILED_HISTORY_REFERENCE_APPROVAL_FIELD in approval) throw new Error("Human approval is not bound to the immutable recovery-history reference.");
   if (authorization.rollbackProof) {
     assertRollbackSupersessionProof(authorization.rollbackProof, {
       serviceArn: `arn:aws:ecs:${BACKEND_HEALTH_RECOVERY.region}:${BACKEND_HEALTH_RECOVERY.account}:service/${BACKEND_HEALTH_RECOVERY.cluster}/${BACKEND_HEALTH_RECOVERY.service}`,
@@ -298,51 +524,102 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
 }
 
 export function assertLegacyBackendRecoveryEligibility(input = {}) {
-  const { sourceSha, service, currentTaskDefinition, currentImageExists, replacementImage, stoppedReasons = [], authorization, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindings, artifactSigningBindingSha256, githubContext, executionActor } = input;
+  const { sourceSha, service, currentTaskDefinition, currentImageExists, replacementImage, stoppedReasons = [], authorization, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindings, artifactSigningBindingSha256, runtimeConsumabilitySha256, authenticatedFailedRecoveryEvidence, githubContext, executionActor } = input;
+  const knownFailedRevisions = authenticatedFailedRecoveryEvidence?.knownFailedRevisions || [];
+  const interruptedRecoveries = authenticatedFailedRecoveryEvidence?.interruptedRecoveries || [];
+  const recoveryHistory = authenticatedFailedRecoveryEvidence?.recoveryHistory || [];
+  const openInterruptions = openInterruptedRecoveryHistory(recoveryHistory);
+  const interruptionReconciliations = input.interruptionReconciliations || [];
   const current = definition(currentTaskDefinition);
   const currentArn = current.taskDefinitionArn;
   const imageMatch = IMAGE.exec(backendContainer(current).image || "");
   if (service?.clusterArn !== `arn:aws:ecs:${BACKEND_HEALTH_RECOVERY.region}:${BACKEND_HEALTH_RECOVERY.account}:cluster/${BACKEND_HEALTH_RECOVERY.cluster}`
     || service?.serviceName !== BACKEND_HEALTH_RECOVERY.service || !TASK_ARN.test(service?.taskDefinition || "")
-    || !Number.isInteger(service?.desiredCount) || service.desiredCount < 1) throw new Error("Live ECS service is outside the exact backend recovery boundary.");
+    || !Number.isInteger(service?.desiredCount) || service.desiredCount < 1 || !Number.isInteger(service?.runningCount) || service.runningCount < 0
+    || !Number.isInteger(service?.pendingCount) || service.pendingCount < 0) throw new Error("Live ECS service is outside the exact backend recovery boundary.");
   const deployments = Array.isArray(service.deployments) ? service.deployments : [];
   const inProgress = deployments.some((deployment) => deployment?.rolloutState === "IN_PROGRESS"
     || (deployment?.taskDefinition !== service.taskDefinition && [deployment?.desiredCount, deployment?.runningCount, deployment?.pendingCount].some((count) => Number(count) > 0)));
   if (inProgress && authorization?.rollbackProof?.classification !== ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE) throw new Error("Backend service rollback or deployment remains in progress and requires reconciliation.");
   if (!TASK_ARN.test(currentArn || "") || current.family !== BACKEND_HEALTH_RECOVERY.family || !imageMatch) throw new Error("Current legacy backend task definition identity is invalid.");
-  if (currentImageExists !== false) throw new Error("Backend health recovery requires the current immutable digest to be absent from ECR.");
-  if (!stoppedReasons.some((reason) => /CannotPullContainerError/i.test(reason) && /not found|does not exist/i.test(reason) && reason.includes(imageMatch[1]))) throw new Error("Backend degradation is not authenticated as the current digest's missing-image pull failure.");
+  if (!Array.isArray(interruptionReconciliations) || interruptionReconciliations.length !== openInterruptions.length) throw new Error("The current authenticated interrupted recovery requires authoritative live reconciliation.");
+  if (interruptionReconciliations.some(({ result }) => result.serviceTaskDefinitionArn !== service.taskDefinition || result.desiredCount !== service.desiredCount
+    || result.runningCount !== service.runningCount || result.pendingCount !== service.pendingCount
+    || result.networkConfigurationSha256 !== canonicalSha256(service.networkConfiguration) || result.loadBalancersSha256 !== canonicalSha256(service.loadBalancers))) throw new Error("Interrupted recovery live reconciliation changed from the execution service snapshot.");
+  const currentInterruption = interruptionReconciliations.find(({ result }) => result.targetArn === service.taskDefinition);
+  if (currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.PROGRESSING) throw new Error("Interrupted backend recovery is still progressing and must not be superseded.");
+  const currentFailedRevision = knownFailedRevisions.find(({ taskDefinitionArn: arn }) => arn === service.taskDefinition)
+    || (currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.FAILED ? currentInterruption.interruption : null);
+  const unavailable = service.runningCount === 0 && service.pendingCount === 0;
+  const unavailableKnownFailure = unavailable && currentFailedRevision;
+  const unavailableMissingImage = unavailable && currentImageExists === false && stoppedReasons.some((reason) => /CannotPullContainerError/i.test(reason) && /not found|does not exist/i.test(reason) && reason.includes(imageMatch[1]));
+  if (currentInterruption?.result.classification !== INTERRUPTED_RECOVERY_STATE.SUCCEEDED && !unavailableKnownFailure && !unavailableMissingImage) throw new Error("Backend degradation is not authenticated as the current digest's missing-image pull failure or an unavailable approved terminal recovery failure.");
   if (replacementImage?.exists !== true || replacementImage?.immutable !== true || replacementImage?.signatureValid !== true
     || replacementImage?.attestationValid !== true || replacementImage?.provenanceValid !== true || replacementImage?.criticalFindings !== 0
     || replacementImage?.repository !== BACKEND_HEALTH_RECOVERY.repository || !SHA256.test(replacementImage?.digest || "")) throw new Error("Replacement image does not satisfy the recovery evidence contract.");
-  assertLegacyBackendRecoveryAuthorization(authorization, { sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: replacementImage.digest, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindingSha256, githubContext, executionActor });
+  assertLegacyBackendRecoveryAuthorization(authorization, { sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: replacementImage.digest, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256: authenticatedFailedRecoveryEvidence?.envelopeSha256 || null, failedRecoveryEvidenceReferenceSha256: authenticatedFailedRecoveryEvidence?.referenceSha256 || null, recoveryHistory, knownFailedRevisions, interruptedRecoveries, githubContext, executionActor });
   const checked = assertLegacyBackendRecoveryCandidate({ currentTaskDefinition, candidate: input.candidate, recoveryImageDigest: replacementImage.digest, imageReleaseSha: authorization.imageReleaseSha, artifactSigningBindings });
-  return Object.freeze({ ...checked, currentTaskDefinitionArn: currentArn, observedServiceTaskDefinitionArn: service.taskDefinition, currentImageDigest: imageMatch[1], recoveryImageDigest: replacementImage.digest, desiredCount: service.desiredCount, networkConfigurationSha256: canonicalSha256(service.networkConfiguration), loadBalancersSha256: canonicalSha256(service.loadBalancers), rollbackProof: authorization.rollbackProof });
+  const reconciledFailedRevisions = interruptionReconciliations.filter(({ result }) => result.classification === INTERRUPTED_RECOVERY_STATE.FAILED).map(({ interruption }) => interruption);
+  return Object.freeze({ ...checked, currentTaskDefinitionArn: currentArn, observedServiceTaskDefinitionArn: service.taskDefinition, currentImageDigest: imageMatch[1], recoveryImageDigest: replacementImage.digest, desiredCount: service.desiredCount, networkConfigurationSha256: canonicalSha256(service.networkConfiguration), loadBalancersSha256: canonicalSha256(service.loadBalancers), rollbackProof: authorization.rollbackProof, recoveryHistory, knownFailedRevisions: [...knownFailedRevisions, ...reconciledFailedRevisions], interruptedRecoveries, interruptionReconciliations, currentInterruption });
 }
 
 export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
-  for (const name of ["census", "register", "describe", "readService", "updateService", "waitStable", "readRunningTasks", "verifyHealth", "record"]) if (typeof adapters[name] !== "function") throw new Error(`Recovery adapter ${name} is required.`);
-  const eligible = assertLegacyBackendRecoveryEligibility(input);
+  for (const name of ["census", "verifyRuntimeClosure", "register", "describe", "readService", "updateService", "waitStable", "readRunningTasks", "verifyHealth", "record"]) if (typeof adapters[name] !== "function") throw new Error(`Recovery adapter ${name} is required.`);
+  const recoveryHistory = input.authenticatedFailedRecoveryEvidence?.recoveryHistory || [];
+  const authenticatedInterruptions = input.authenticatedFailedRecoveryEvidence?.interruptedRecoveries || [];
+  const interruptions = openInterruptedRecoveryHistory(recoveryHistory);
+  if (interruptions.length && typeof adapters.readInterruptedRecoveryState !== "function") throw new Error("Interrupted recovery live reconciliation adapter is required.");
+  const candidateIdentity = assertLegacyBackendRecoveryCandidate({ currentTaskDefinition: input.currentTaskDefinition, candidate: input.candidate, recoveryImageDigest: input.replacementImage?.digest, imageReleaseSha: input.authorization?.imageReleaseSha, artifactSigningBindings: input.artifactSigningBindings });
+  const lineageEligible = { currentTaskDefinitionArn: input.authorization?.currentTaskDefinitionArn, fingerprint: candidateIdentity.fingerprint, rollbackProof: input.authorization?.rollbackProof, recoveryHistory, knownFailedRevisions: input.authenticatedFailedRecoveryEvidence?.knownFailedRevisions || [], interruptedRecoveries: authenticatedInterruptions };
+  assertLegacyBackendRecoveryAuthorization(input.authorization, { sourceSha: input.sourceSha, currentTaskDefinitionArn: input.authorization?.currentTaskDefinitionArn, recoveryImageDigest: input.replacementImage?.digest, imageAuthorization: input.imageAuthorization, imageValidation: input.imageValidation, environmentApproval: input.environmentApproval, artifactSigningBindingSha256: input.artifactSigningBindingSha256, runtimeConsumabilitySha256: input.runtimeConsumabilitySha256, failedRecoveryEvidenceSha256: input.authenticatedFailedRecoveryEvidence?.envelopeSha256 || null, failedRecoveryEvidenceReferenceSha256: input.authenticatedFailedRecoveryEvidence?.referenceSha256 || null, recoveryHistory, knownFailedRevisions: lineageEligible.knownFailedRevisions, interruptedRecoveries: authenticatedInterruptions, githubContext: input.githubContext, executionActor: input.executionActor });
+  const revisions = await adapters.census();
+  reconcileAuthenticatedRevisionLineage(revisions, lineageEligible);
+  const reconcileInterruptions = async (allowedRevision = null) => Promise.all(interruptions.map(async (interruption) => {
+    const snapshot = await adapters.readInterruptedRecoveryState(interruption);
+    const lineage = reconcileAuthenticatedRevisionLineage(snapshot.census, lineageEligible, { allowedRevision });
+    return { interruption, result: classifyInterruptedRecoveryState(interruption, snapshot, { lineage }) };
+  }));
+  const interruptionReconciliations = await reconcileInterruptions();
+  const eligible = assertLegacyBackendRecoveryEligibility({ ...input, interruptionReconciliations });
+  const initialCensus = classifyRevisionCensus(revisions, eligible);
+  const assertFreshInterruptions = async (allowedRevision = null) => {
+    if (!interruptions.length) return;
+    const fresh = await reconcileInterruptions(allowedRevision);
+    if (fresh.some(({ result }, index) => result.proofSha256 !== interruptionReconciliations[index].result.proofSha256)) throw new Error("Interrupted recovery live state changed before mutation.");
+  };
+  if (eligible.currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.SUCCEEDED) {
+    const result = Object.freeze({ mode: BACKEND_HEALTH_RECOVERY.kind, targetArn: eligible.currentInterruption.result.targetArn, recoveryImageDigest: eligible.recoveryImageDigest, registrations: 0, updates: 0, backendHealthy: true, health: eligible.currentInterruption.result.health, rotationRequired: true, stageBApplied: false, frontendDeployed: false, reconciledInterruption: true });
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.RECOVERY_COMPLETE, ...result,
+      initialRevisionCensusSha256: eligible.currentInterruption.interruption.initialRevisionCensusSha256,
+      expectedRevisionCensusSha256: eligible.currentInterruption.interruption.expectedRevisionCensusSha256 });
+    return result;
+  }
   if (eligible.rollbackProof) {
     if (typeof adapters.readRollbackViability !== "function") throw new Error("Recovery rollback viability adapter is required.");
     assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
   }
-  const revisions = await adapters.census();
-  const initialCensus = classifyRevisionCensus(revisions, eligible);
+  if (eligible.fingerprint !== candidateIdentity.fingerprint) throw new Error("Recovery candidate identity changed during eligibility validation.");
+  const initialRuntimeClosure = await adapters.verifyRuntimeClosure(eligible.candidate);
+  const now = () => typeof adapters.now === "function" ? adapters.now() : adapters.now ?? Date.now();
+  assertFreshRuntimeConsumabilityVerification(initialRuntimeClosure, { evidenceSha256: input.runtimeConsumabilitySha256, now: now() });
   const matches = initialCensus.matches;
   if (initialCensus.knownFailedRevisions.length) await adapters.record({ knownFailedRevisions: initialCensus.knownFailedRevisions });
-  const failedForwardTaskDefinitionArn = eligible.rollbackProof?.forwardTargetTaskDefinitionArn;
+  const failedRevisionArns = new Set(initialCensus.knownFailedRevisions.map(({ taskDefinitionArn }) => taskDefinitionArn));
   let targetArn = matches[0]?.taskDefinitionArn;
   if (targetArn && !TASK_ARN.test(targetArn)) throw new Error("Recovery census returned an invalid legacy backend revision.");
-  if (eligible.observedServiceTaskDefinitionArn !== eligible.currentTaskDefinitionArn
+  if (eligible.observedServiceTaskDefinitionArn !== eligible.currentTaskDefinitionArn && !failedRevisionArns.has(eligible.observedServiceTaskDefinitionArn)
     && eligible.observedServiceTaskDefinitionArn !== targetArn) {
     throw new Error("Backend service current task definition is stale and does not match an authenticated completed recovery.");
   }
   let registrations = 0;
   if (!targetArn) {
     if (eligible.rollbackProof) assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
+    const freshRuntimeClosure = await adapters.verifyRuntimeClosure(eligible.candidate);
+    if (freshRuntimeClosure?.evidenceSha256 !== initialRuntimeClosure.evidenceSha256) throw new Error("Recovery candidate runtime dependency closure changed before registration.");
     if (classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== initialCensus.identitySha256) throw new Error("Legacy backend revision census changed before recovery registration.");
-    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED, targetArn: null, registrations: 0, updates: 0 });
+    await assertFreshInterruptions();
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED, targetArn: null, registrations: 0, updates: 0, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: null });
+    assertFreshRuntimeConsumabilityVerification(freshRuntimeClosure, { evidenceSha256: initialRuntimeClosure.evidenceSha256, now: now() });
     try {
       const result = await adapters.register(eligible.candidate);
       targetArn = result?.taskDefinition?.taskDefinitionArn || result?.taskDefinitionArn;
@@ -355,73 +632,77 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     }
   }
   if (!TASK_ARN.test(targetArn || "")) throw new Error("Recovery registration did not resolve one exact legacy backend revision.");
-  if (targetArn === failedForwardTaskDefinitionArn) throw new Error("Recovery registration reused the failed forward task definition.");
-  if (registrations) await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTERED_ONLY, targetArn, registrations, updates: 0 });
+  if (failedRevisionArns.has(targetArn)) throw new Error("Recovery registration reused a failed recovery task definition.");
   const target = await adapters.describe(targetArn);
   if (taskDefinitionFingerprint(target, target?.tags || []) !== eligible.fingerprint) throw new Error("Recovery target readback does not match the exact authorized candidate.");
   const expectedCensusSha256 = expectedRevisionCensusSha256(initialCensus, targetArn, eligible.fingerprint, registrations === 1);
+  if (registrations) await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTERED_ONLY, targetArn, registrations, updates: 0, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
   if (classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== expectedCensusSha256) throw new Error("Legacy backend revision census changed after recovery registration.");
   let live = await adapters.readService();
   let updates = 0;
   if (live.taskDefinition !== targetArn) {
-    if (live.taskDefinition !== eligible.currentTaskDefinitionArn || eligible.observedServiceTaskDefinitionArn !== eligible.currentTaskDefinitionArn
+    if (live.taskDefinition !== eligible.observedServiceTaskDefinitionArn || (eligible.observedServiceTaskDefinitionArn !== eligible.currentTaskDefinitionArn && !failedRevisionArns.has(eligible.observedServiceTaskDefinitionArn))
       || live.desiredCount !== eligible.desiredCount || canonicalSha256(live.networkConfiguration) !== eligible.networkConfigurationSha256
       || canonicalSha256(live.loadBalancers) !== eligible.loadBalancersSha256) throw new Error("Backend service changed concurrently before recovery update.");
     if (eligible.rollbackProof) assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
+    const freshRuntimeClosure = await adapters.verifyRuntimeClosure(eligible.candidate);
+    if (freshRuntimeClosure?.status !== "PASS" || freshRuntimeClosure.evidenceSha256 !== initialRuntimeClosure.evidenceSha256) throw new Error("Recovery candidate runtime dependency closure changed before service update.");
     if (classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== expectedCensusSha256) throw new Error("Legacy backend revision census changed before recovery service update.");
-    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, targetArn, registrations, updates: 0 });
+    await assertFreshInterruptions(registrations ? { taskDefinitionArn: targetArn, taskDefinitionFingerprint: eligible.fingerprint } : null);
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, targetArn, registrations, updates: 0, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
+    assertFreshRuntimeConsumabilityVerification(freshRuntimeClosure, { evidenceSha256: initialRuntimeClosure.evidenceSha256, now: now() });
     try { await adapters.updateService(targetArn); updates = 1; }
     catch (error) {
       live = await adapters.readService();
       if (live.taskDefinition !== targetArn) {
         await adapters.record({ status: registrations
           ? BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTERED_ONLY
-          : BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, targetArn, registrations, updates: 0 });
+          : BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, targetArn, registrations, updates: 0, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
         throw error;
       }
       updates = 1;
     }
-    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_CONFIRMED, targetArn, registrations, updates });
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_CONFIRMED, targetArn, registrations, updates, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
   }
   try { await adapters.waitStable(targetArn); }
   catch (error) {
-    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, targetArn, registrations, updates });
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, targetArn, registrations, updates, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
     throw error;
   }
   try { live = await adapters.readService(); }
   catch (error) {
-    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, targetArn, registrations, updates });
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, targetArn, registrations, updates, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
     throw error;
   }
   if (live.taskDefinition !== targetArn || live.desiredCount !== eligible.desiredCount || live.runningCount !== eligible.desiredCount || live.pendingCount !== 0) {
-    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, targetArn, registrations, updates });
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, targetArn, registrations, updates, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
     throw new Error("Backend service did not converge on the recovery revision.");
   }
   let tasks;
   try { tasks = await adapters.readRunningTasks(); }
   catch (error) {
-    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.RUNNING_DIGEST_VERIFICATION_FAILED, targetArn, registrations, updates });
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.RUNNING_DIGEST_VERIFICATION_FAILED, targetArn, registrations, updates, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
     throw error;
   }
   if (!Array.isArray(tasks) || tasks.length !== eligible.desiredCount || tasks.some((task) => task.taskDefinitionArn !== targetArn || task.imageDigest !== eligible.recoveryImageDigest)) {
-    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.RUNNING_DIGEST_VERIFICATION_FAILED, targetArn, registrations, updates });
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.RUNNING_DIGEST_VERIFICATION_FAILED, targetArn, registrations, updates, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
     throw new Error("Running backend tasks do not match the approved recovery digest.");
   }
   if (tasks.some((task) => task.healthStatus !== "HEALTHY")) {
-    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, targetArn, registrations, updates });
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_STABILIZATION_FAILED, targetArn, registrations, updates, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
     throw new Error("Every running backend task must report HEALTHY before recovery completion.");
   }
   let health;
   try { health = await adapters.verifyHealth(); }
   catch (error) {
-    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.HEALTH_VERIFICATION_FAILED, targetArn, registrations, updates });
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.HEALTH_VERIFICATION_FAILED, targetArn, registrations, updates, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
     throw error;
   }
   if (health?.healthy !== true || health?.success !== true || health?.status !== "ready") {
-    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.HEALTH_VERIFICATION_FAILED, targetArn, registrations, updates });
+    await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.HEALTH_VERIFICATION_FAILED, targetArn, registrations, updates, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
     throw new Error("Backend health did not recover after the governed image replacement.");
   }
   const result = Object.freeze({ mode: BACKEND_HEALTH_RECOVERY.kind, targetArn, recoveryImageDigest: eligible.recoveryImageDigest, registrations, updates, backendHealthy: true, health, rotationRequired: true, stageBApplied: false, frontendDeployed: false });
-  await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.RECOVERY_COMPLETE, ...result });
+  await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.RECOVERY_COMPLETE, ...result, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
   return result;
 }

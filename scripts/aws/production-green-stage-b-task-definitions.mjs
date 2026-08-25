@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { canonicalSha256, assertImmutableImage, STAGE_B, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS } from "./production-green-stage-b-contract.mjs";
+import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b/task-definitions";
 const files = Object.freeze(Object.fromEntries(STAGE_B_TASK_TEMPLATE_KEYS.map((key) => [key, {
@@ -72,6 +73,7 @@ export function assertFixedTaskDefinition(definition) {
   if (definition.networkMode === "host" || JSON.stringify(definition).match(/hostPath|sourcePath|privileged\s*:\s*true/)) {
     throw new Error("Stage B task definition permits a prohibited host boundary.");
   }
+  deriveEcsRuntimeDependencies(definition);
   return definition;
 }
 

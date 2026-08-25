@@ -83,20 +83,12 @@ on:
         description: "Exact approved immutable backend recovery digest."
         required: false
         type: string
-      backend_recovery_image_authorization_json:
-        description: "Canonical signed-image authorization JSON."
+      backend_recovery_evidence_bundle_json:
+        description: "Canonical transaction-bound backend recovery evidence bundle."
         required: false
         type: string
-      backend_recovery_image_authorization_sha256:
-        description: "SHA-256 of the exact image authorization JSON bytes."
-        required: false
-        type: string
-      backend_recovery_approval_json:
-        description: "Human approval metadata bound to this recovery."
-        required: false
-        type: string
-      backend_recovery_approval_sha256:
-        description: "SHA-256 of the exact approval JSON bytes."
+      backend_recovery_evidence_bundle_sha256:
+        description: "SHA-256 of the exact recovery evidence bundle bytes."
         required: false
         type: string
 
@@ -179,10 +171,8 @@ jobs:
           ROTATION_READINESS_EVIDENCE_SHA256: ${{ inputs.rotation_readiness_evidence_sha256 }}
           BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN: ${{ inputs.backend_recovery_current_task_definition_arn }}
           BACKEND_RECOVERY_IMAGE_DIGEST: ${{ inputs.backend_recovery_image_digest }}
-          BACKEND_RECOVERY_IMAGE_AUTHORIZATION_JSON: ${{ inputs.backend_recovery_image_authorization_json }}
-          BACKEND_RECOVERY_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.backend_recovery_image_authorization_sha256 }}
-          BACKEND_RECOVERY_APPROVAL_JSON: ${{ inputs.backend_recovery_approval_json }}
-          BACKEND_RECOVERY_APPROVAL_SHA256: ${{ inputs.backend_recovery_approval_sha256 }}
+          BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON: ${{ inputs.backend_recovery_evidence_bundle_json }}
+          BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256: ${{ inputs.backend_recovery_evidence_bundle_sha256 }}
           NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
           PRESERVE_CURRENT_FRONTEND: ${{ inputs.preserve_current_frontend }}
@@ -209,22 +199,21 @@ jobs:
               npm run check:rotation-evidence-freshness
               ;;
             backend-health-recovery)
-              for name in BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN BACKEND_RECOVERY_IMAGE_DIGEST BACKEND_RECOVERY_IMAGE_AUTHORIZATION_JSON BACKEND_RECOVERY_IMAGE_AUTHORIZATION_SHA256 BACKEND_RECOVERY_APPROVAL_JSON BACKEND_RECOVERY_APPROVAL_SHA256; do
+              for name in BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN BACKEND_RECOVERY_IMAGE_DIGEST BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256; do
                 if [ -z "${!name:-}" ]; then
                   echo "::error::${name} is required for ${RELEASE_MODE}."
                   exit 1
                 fi
               done
           node --input-type=module - <<'NODE'
-          import { createHash } from "node:crypto";
-          const inputs = [
-            [process.env.BACKEND_RECOVERY_IMAGE_AUTHORIZATION_JSON, process.env.BACKEND_RECOVERY_IMAGE_AUTHORIZATION_SHA256, "image authorization"],
-            [process.env.BACKEND_RECOVERY_APPROVAL_JSON, process.env.BACKEND_RECOVERY_APPROVAL_SHA256, "approval"],
-          ];
-          for (const [bytes, expected, label] of inputs) {
-            if (!/^[a-f0-9]{64}$/.test(expected) || createHash("sha256").update(bytes).digest("hex") !== expected) throw new Error(`Backend recovery ${label} bytes do not match their SHA-256.`);
-            JSON.parse(bytes);
-          }
+          import { parseBackendHealthRecoveryDispatchBundle } from "./scripts/aws/dispatch-production-backend-health-recovery.mjs";
+          parseBackendHealthRecoveryDispatchBundle(Buffer.from(process.env.BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON), process.env.BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256, {
+            sourceSha: process.env.SOURCE_SHA,
+            currentTaskDefinitionArn: process.env.BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN,
+            recoveryImageDigest: process.env.BACKEND_RECOVERY_IMAGE_DIGEST,
+            service: "mscqr-backend-servi-euw2",
+            releaseMode: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME",
+          });
           NODE
               ;;
             rotation-overlap|rotation-cleanup)
@@ -682,21 +671,43 @@ jobs:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           CURRENT_TASK_DEFINITION_ARN: ${{ inputs.backend_recovery_current_task_definition_arn }}
           RECOVERY_IMAGE_DIGEST: ${{ inputs.backend_recovery_image_digest }}
-          IMAGE_AUTHORIZATION_JSON: ${{ inputs.backend_recovery_image_authorization_json }}
-          IMAGE_AUTHORIZATION_SHA256: ${{ inputs.backend_recovery_image_authorization_sha256 }}
-          APPROVAL_JSON: ${{ inputs.backend_recovery_approval_json }}
-          APPROVAL_SHA256: ${{ inputs.backend_recovery_approval_sha256 }}
+          RECOVERY_EVIDENCE_BUNDLE_JSON: ${{ inputs.backend_recovery_evidence_bundle_json }}
+          RECOVERY_EVIDENCE_BUNDLE_SHA256: ${{ inputs.backend_recovery_evidence_bundle_sha256 }}
           GITHUB_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           recovery_dir="$RUNNER_TEMP/backend-health-recovery"
           install -d -m 700 "$recovery_dir"
+          bundle_file="$recovery_dir/dispatch-bundle.json"
+          authorization_file="$recovery_dir/authorization.json"
+          printf '%s' "$RECOVERY_EVIDENCE_BUNDLE_JSON" > "$bundle_file"
+          chmod 600 "$bundle_file"
+          bundle_result="$(node scripts/aws/extract-production-backend-recovery-dispatch-bundle.mjs \
+            --bundle "$bundle_file" \
+            --bundle-sha256 "$RECOVERY_EVIDENCE_BUNDLE_SHA256" \
+            --source-sha "$SOURCE_SHA" \
+            --current-task-definition "$CURRENT_TASK_DEFINITION_ARN" \
+            --recovery-image-digest "$RECOVERY_IMAGE_DIGEST" \
+            --service mscqr-backend-servi-euw2 \
+            --release-mode BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME \
+            --output-directory "$recovery_dir")"
+          manifest_file="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).manifestFile)' "$bundle_result")"
           image_file="$recovery_dir/image-authorization.json"
           approval_file="$recovery_dir/approval.json"
-          authorization_file="$recovery_dir/authorization.json"
-          printf '%s' "$IMAGE_AUTHORIZATION_JSON" > "$image_file"
-          printf '%s' "$APPROVAL_JSON" > "$approval_file"
-          chmod 600 "$image_file" "$approval_file"
+          runtime_file="$recovery_dir/runtime-consumability.json"
+          failed_reference_file="$recovery_dir/failed-recovery-evidence-reference.json"
+          failed_file="$recovery_dir/failed-recovery-evidence.json"
+          image_sha="$(node -e 'process.stdout.write(require(process.argv[1]).components.imageAuthorization.sha256)' "$manifest_file")"
+          approval_sha="$(node -e 'process.stdout.write(require(process.argv[1]).components.approval.sha256)' "$manifest_file")"
+          runtime_sha="$(node -e 'process.stdout.write(require(process.argv[1]).components.runtimeConsumability.sha256)' "$manifest_file")"
+          failed_reference_sha="$(node -e 'process.stdout.write(require(process.argv[1]).components.failedRecoveryEvidenceReference.sha256)' "$manifest_file")"
+          failed_result="$(node scripts/aws/resolve-production-backend-failed-recovery-evidence.mjs \
+            --source-sha "$SOURCE_SHA" \
+            --reference "$failed_reference_file" \
+            --reference-sha256 "$failed_reference_sha" \
+            --output "$failed_file")"
+          failed_sha="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).evidenceSha256)' "$failed_result")"
           node scripts/aws/recover-production-backend-health.mjs \
             --prepare \
             --source-sha "$SOURCE_SHA" \
@@ -705,12 +716,25 @@ jobs:
             --current-task-definition "$CURRENT_TASK_DEFINITION_ARN" \
             --recovery-image-digest "$RECOVERY_IMAGE_DIGEST" \
             --image-authorization "$image_file" \
-            --image-authorization-sha256 "$IMAGE_AUTHORIZATION_SHA256" \
+            --image-authorization-sha256 "$image_sha" \
             --approval "$approval_file" \
-            --approval-sha256 "$APPROVAL_SHA256" \
+            --approval-sha256 "$approval_sha" \
+            --runtime-consumability "$runtime_file" \
+            --runtime-consumability-sha256 "$runtime_sha" \
+            --failed-recovery-evidence-reference "$failed_reference_file" \
+            --failed-recovery-evidence-reference-sha256 "$failed_reference_sha" \
+            --failed-recovery-evidence "$failed_file" \
+            --failed-recovery-evidence-sha256 "$failed_sha" \
             --output "$authorization_file"
           echo "image_file=$image_file" >> "$GITHUB_OUTPUT"
           echo "authorization_file=$authorization_file" >> "$GITHUB_OUTPUT"
+          echo "runtime_file=$runtime_file" >> "$GITHUB_OUTPUT"
+          echo "failed_reference_file=$failed_reference_file" >> "$GITHUB_OUTPUT"
+          echo "failed_file=$failed_file" >> "$GITHUB_OUTPUT"
+          echo "image_sha256=$image_sha" >> "$GITHUB_OUTPUT"
+          echo "runtime_sha256=$runtime_sha" >> "$GITHUB_OUTPUT"
+          echo "failed_reference_sha256=$failed_reference_sha" >> "$GITHUB_OUTPUT"
+          echo "failed_sha256=$failed_sha" >> "$GITHUB_OUTPUT"
           echo "authorization_sha256=$(sha256sum "$authorization_file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Execute governed legacy backend health recovery
@@ -726,7 +750,13 @@ jobs:
             --environment-approval "${{ steps.production-environment-approval.outputs.evidence_file }}" \
             --environment-approval-sha256 "${{ steps.production-environment-approval.outputs.evidence_sha256 }}" \
             --image-authorization "${{ steps.backend-recovery.outputs.image_file }}" \
-            --image-authorization-sha256 "${{ inputs.backend_recovery_image_authorization_sha256 }}" \
+            --image-authorization-sha256 "${{ steps.backend-recovery.outputs.image_sha256 }}" \
+            --runtime-consumability "${{ steps.backend-recovery.outputs.runtime_file }}" \
+            --runtime-consumability-sha256 "${{ steps.backend-recovery.outputs.runtime_sha256 }}" \
+            --failed-recovery-evidence-reference "${{ steps.backend-recovery.outputs.failed_reference_file }}" \
+            --failed-recovery-evidence-reference-sha256 "${{ steps.backend-recovery.outputs.failed_reference_sha256 }}" \
+            --failed-recovery-evidence "${{ steps.backend-recovery.outputs.failed_file }}" \
+            --failed-recovery-evidence-sha256 "${{ steps.backend-recovery.outputs.failed_sha256 }}" \
             --authorization "${{ steps.backend-recovery.outputs.authorization_file }}" \
             --authorization-sha256 "${{ steps.backend-recovery.outputs.authorization_sha256 }}" \
             --health-url "${{ env.PUBLIC_BASE_URL }}/api/health/ready" \

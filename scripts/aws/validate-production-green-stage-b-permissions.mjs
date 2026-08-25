@@ -106,7 +106,7 @@ const taskDefinitionTagContext = (context) => context
   .map((entry) => entry.key === "aws:TagKeys" ? { ...entry, values: Object.keys(TASK_DEFINITION_TAGS) } : entry);
 const stageBRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const STAGE_A_PROVIDER_REFRESH_CONTRACT_PATH = "documents/ops/iam/MSCQRProductionGreenStageAProviderRefreshContract-v1.json";
-const arnPattern = /^(?:arn:aws:[^:]+:[^:]*:368992683803:.+|arn:aws:s3:::[^/]+(?:\/.*)?)$/;
+const arnPattern = /^(?:arn:aws:[^:]+:[^:]*:368992683803:.+|arn:aws:s3:::[^/]+(?:\/.*)?|arn:aws:iam::aws:policy\/service-role\/AmazonECSTaskExecutionRolePolicy)$/;
 
 export const RELEASE_POLICY_SOURCES = Object.freeze([
   ["MSCQRProductionGreenStageARelease", "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json"],

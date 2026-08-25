@@ -10,11 +10,13 @@ import { canonicalizeJson } from "./validate-production-green-stage-b-permission
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const PRODUCTION_DEPENDENCY_CLOSURE_PATH = "documents/ops/iam/MSCQRProductionDependencyClosure-v1.json";
 const BASE_PROTECTED_SHA = "e35c0bd0447eff85ec78ab46b18ab2d2e018cbcb";
-const BASE_CALL_COUNT = 109;
-const BASE_CALL_SHA256 = "6573e88760ace0c3448d26c627fc9fcacfbc88022e53ffbf1369944374714ad6";
+const BASE_CALL_COUNT = 107;
+const BASE_CALL_SHA256 = "b5d706d0bbcef12cd259553281068dff82e5d92f5f347a1634ab8f89c1109c39";
 const SERVICE = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2";
 const REPOSITORY = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend";
+const RUNTIME_REPOSITORIES = [REPOSITORY, "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"];
 const TASKS = "*";
+const RUNTIME_KMS_KEY = "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478";
 
 const CALLS = Object.freeze([
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecr:DescribeImages", "manifest-backend-health-recovery-describe-images", [REPOSITORY]],
@@ -22,21 +24,48 @@ const CALLS = Object.freeze([
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:DescribeServiceRevisions", "manifest-backend-health-recovery-describe-service-revisions", [SERVICE, "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"]],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:DescribeServices", "manifest-reference-audit-ecs-service-details", [SERVICE]],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:DescribeTaskDefinition", "manifest-reference-audit-ecs-task-definitions", [TASKS]],
-  ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:DescribeTasks", "manifest-reference-audit-ecs-task-details", [TASKS]],
+  ["scripts/aws/production-ecs-task-census.mjs", "ecs:DescribeTasks", "manifest-reference-audit-ecs-task-details", [TASKS]],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:ListServiceDeployments", "manifest-backend-health-recovery-list-service-deployments", [SERVICE]],
-  ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:ListTasks", "manifest-reference-audit-ecs-tasks", [TASKS]],
+  ["scripts/aws/production-ecs-task-census.mjs", "ecs:ListTasks", "manifest-reference-audit-ecs-tasks", [TASKS]],
   ["scripts/aws/production-green-stage-b-identity-capabilities.mjs", "ecs:DescribeServiceDeployments", "manifest-backend-health-recovery-describe-service-deployments", [SERVICE, "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"]],
   ["scripts/aws/production-green-stage-b-identity-capabilities.mjs", "ecs:DescribeServiceRevisions", "manifest-backend-health-recovery-describe-service-revisions", [SERVICE, "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"]],
   ["scripts/aws/production-green-stage-b-identity-capabilities.mjs", "ecs:ListServiceDeployments", "manifest-backend-health-recovery-list-service-deployments", [SERVICE]],
+  ["scripts/aws/production-green-stage-b-identity-capabilities.mjs", "ecr:GetRepositoryPolicy", "manifest-backend-health-recovery-runtime-repository-policy", RUNTIME_REPOSITORIES],
   ["scripts/aws/production-normal-backend-activation.mjs", "ecr:DescribeImages", "manifest-backend-health-recovery-describe-images", [REPOSITORY]],
   ["scripts/aws/deploy-ecs-service.sh", "ecr:DescribeImages", "manifest-backend-health-recovery-describe-images", [REPOSITORY]],
-].map(([sourceFile, action, capabilityId, resources]) => Object.freeze({ sourceFile, action, capabilityId, resources: Object.freeze(resources) })));
+  ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "iam:GetRole", "runtime-admin-get-role", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"], "ADMINISTRATOR"],
+  ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "iam:GetRolePolicy", "runtime-admin-get-inline", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"], "ADMINISTRATOR"],
+  ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "iam:ListAttachedRolePolicies", "runtime-admin-list-attached", ["*"], "ADMINISTRATOR"],
+  ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "iam:PutRolePolicy", "runtime-admin-converge-inline", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"], "ADMINISTRATOR"],
+  ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "kms:Verify", "runtime-admin-verify-inventory-convergence", [RUNTIME_KMS_KEY], "ADMINISTRATOR"],
+  ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "sts:GetCallerIdentity", "runtime-admin-identify", ["*"], "ADMINISTRATOR"],
+  ["scripts/aws/prepare-production-ecs-runtime-consumability.mjs", "kms:Sign", "runtime-admin-sign", ["arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"], "ADMINISTRATOR"],
+  ["scripts/aws/prepare-production-ecs-runtime-consumability.mjs", "kms:Verify", "runtime-admin-verify-inventory-evidence", [RUNTIME_KMS_KEY], "ADMINISTRATOR"],
+  ["scripts/aws/prepare-production-ecs-runtime-consumability.mjs", "sts:GetCallerIdentity", "runtime-admin-identify", ["*"], "ADMINISTRATOR"],
+  ["scripts/aws/production-ecs-runtime-consumability.mjs", "iam:GetPolicy", "manifest-backend-health-recovery-runtime-get-managed", ["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"]],
+  ["scripts/aws/production-ecs-runtime-consumability.mjs", "iam:GetPolicyVersion", "manifest-backend-health-recovery-runtime-get-managed-version", ["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"]],
+  ["scripts/aws/production-ecs-runtime-consumability.mjs", "iam:GetRole", "manifest-backend-health-recovery-runtime-get-role", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"]],
+  ["scripts/aws/production-ecs-runtime-consumability.mjs", "iam:GetRolePolicy", "manifest-backend-health-recovery-runtime-get-inline", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"]],
+  ["scripts/aws/production-ecs-runtime-consumability.mjs", "iam:ListAttachedRolePolicies", "manifest-backend-health-recovery-runtime-list-attached", ["*"]],
+  ["scripts/aws/production-ecs-runtime-consumability.mjs", "iam:ListRolePolicies", "manifest-backend-health-recovery-runtime-list-inline", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"]],
+  ["scripts/aws/production-ecs-runtime-consumability.mjs", "iam:SimulatePrincipalPolicy", "runtime-admin-simulate", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"], "ADMINISTRATOR"],
+  ["scripts/aws/production-ecs-runtime-consumability.mjs", "secretsmanager:DescribeSecret", "manifest-backend-health-recovery-runtime-describe-secrets", ["arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"]],
+  ["scripts/aws/production-ecs-runtime-consumability.mjs", "secretsmanager:ListSecretVersionIds", "manifest-backend-health-recovery-runtime-list-secret-versions", ["arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"]],
+  ["scripts/aws/production-ecs-runtime-consumability.mjs", "secretsmanager:GetResourcePolicy", "manifest-backend-health-recovery-runtime-secret-resource-policy", ["arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"]],
+  ["scripts/aws/production-ecs-runtime-consumability.mjs", "ecr:DescribeImages", "runtime-admin-describe-runtime-image", RUNTIME_REPOSITORIES, "ADMINISTRATOR"],
+  ["scripts/aws/production-ecs-runtime-consumability.mjs", "ecr:GetRepositoryPolicy", "manifest-backend-health-recovery-runtime-repository-policy", RUNTIME_REPOSITORIES],
+  ["scripts/aws/prepare-production-ecs-runtime-consumability.mjs", "kms:DescribeKey", "runtime-admin-describe-runtime-key", [RUNTIME_KMS_KEY], "ADMINISTRATOR"],
+  ["scripts/aws/prepare-production-ecs-runtime-consumability.mjs", "kms:GetKeyPolicy", "runtime-admin-read-runtime-key-policy", [RUNTIME_KMS_KEY], "ADMINISTRATOR"],
+  ["scripts/aws/recover-production-backend-health.mjs", "kms:DescribeKey", "manifest-refresh-stage-a-storage-approval-key-describe", [RUNTIME_KMS_KEY]],
+  ["scripts/aws/recover-production-backend-health.mjs", "kms:GetKeyPolicy", "manifest-refresh-stage-a-storage-approval-key-policy", [RUNTIME_KMS_KEY]],
+  ["scripts/aws/recover-production-backend-health.mjs", "kms:Verify", "release-verify-signature", ["arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"]],
+].map(([sourceFile, action, capabilityId, resources, identity = "RELEASE_DEPLOYER"]) => Object.freeze({ sourceFile, action, capabilityId, identity, resources: Object.freeze(resources) })));
 
 const MODE_CAPABILITIES = Object.freeze({
-  NORMAL: ["manifest-backend-health-recovery-describe-images", "normal-activation-release-describe-candidate", "normal-activation-release-describe-service", "normal-activation-release-list-tasks", "normal-activation-release-describe-tasks", "normal-activation-release-update-service"],
-  BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-describe-repositories", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-backend-health-recovery-list-service-deployments", "manifest-backend-health-recovery-describe-service-deployments", "manifest-backend-health-recovery-describe-service-revisions", "manifest-artifact-signing-bootstrap-describe-secret", "manifest-artifact-signing-bootstrap-get-secret-value", "manifest-backend-health-recovery-register-legacy-task-definition", "manifest-backend-health-recovery-update-service"],
-  ROTATION_OVERLAP: ["manifest-backend-health-recovery-describe-images", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-activate-exact-ecs-service", "manifest-rollback-exact-ecs-service"],
-  ROTATION_CLEANUP: ["manifest-backend-health-recovery-describe-images", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-activate-exact-ecs-service", "manifest-rollback-exact-ecs-service"],
+  NORMAL: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-runtime-repository-policy", "normal-activation-release-describe-candidate", "normal-activation-release-describe-service", "normal-activation-release-list-tasks", "normal-activation-release-describe-tasks", "normal-activation-release-update-service"],
+  BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-describe-repositories", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-backend-health-recovery-list-service-deployments", "manifest-backend-health-recovery-describe-service-deployments", "manifest-backend-health-recovery-describe-service-revisions", "manifest-artifact-signing-bootstrap-describe-secret", "manifest-artifact-signing-bootstrap-get-secret-value", "manifest-backend-health-recovery-runtime-get-role", "manifest-backend-health-recovery-runtime-list-inline", "manifest-backend-health-recovery-runtime-get-inline", "manifest-backend-health-recovery-runtime-list-attached", "manifest-backend-health-recovery-runtime-get-managed", "manifest-backend-health-recovery-runtime-get-managed-version", "manifest-backend-health-recovery-runtime-describe-secrets", "manifest-backend-health-recovery-runtime-list-secret-versions", "manifest-backend-health-recovery-runtime-secret-resource-policy", "manifest-backend-health-recovery-runtime-repository-policy", "manifest-refresh-stage-a-storage-approval-key-describe", "manifest-refresh-stage-a-storage-approval-key-policy", "release-verify-signature", "manifest-backend-health-recovery-register-legacy-task-definition", "manifest-backend-health-recovery-update-service"],
+  ROTATION_OVERLAP: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-runtime-repository-policy", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-activate-exact-ecs-service", "manifest-rollback-exact-ecs-service"],
+  ROTATION_CLEANUP: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-runtime-repository-policy", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-activate-exact-ecs-service", "manifest-rollback-exact-ecs-service"],
   ROLLBACK_RECONCILIATION: ["manifest-backend-health-recovery-list-service-deployments", "manifest-backend-health-recovery-describe-service-deployments", "manifest-backend-health-recovery-describe-service-revisions", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-backend-health-recovery-describe-images"],
   POST_DEPLOY_VERIFY: ["operator-operator-describe-production-backend-service", "operator-operator-list-production-backend-tasks", "operator-operator-describe-production-backend-tasks", "operator-operator-describe-production-task-definition", "operator-operator-execute-production-backend"],
 });
@@ -83,14 +112,31 @@ export function buildProductionDependencyClosure() {
     if (!capability || !capability.identity || !capability.action || !capability.resources?.length || !capability.policy?.sourceFile) throw new Error(`Production mode ${mode} lacks exact capability ${id}.`);
   }
   const workflow = read(".github/workflows/release-gate.yml");
+  const workflowDispatchInputCount = [...workflow.matchAll(/^      [a-z0-9_]+:$/gm)].length;
+  if (workflowDispatchInputCount > 25) throw new Error(`Release Gate exceeds GitHub's 25-input workflow_dispatch limit: ${workflowDispatchInputCount}.`);
   const workflowInputs = [...workflow.matchAll(/^      (backend_recovery_[a-z0-9_]+):$/gm)].map((match) => match[1]).sort();
-  const expectedInputs = ["backend_recovery_approval_json", "backend_recovery_approval_sha256", "backend_recovery_current_task_definition_arn", "backend_recovery_image_authorization_json", "backend_recovery_image_authorization_sha256", "backend_recovery_image_digest"];
+  const expectedInputs = ["backend_recovery_current_task_definition_arn", "backend_recovery_evidence_bundle_json", "backend_recovery_evidence_bundle_sha256", "backend_recovery_image_digest"];
   if (!same(workflowInputs, expectedInputs)) throw new Error("Backend recovery workflow input contract is incomplete or has an unknown input.");
   if (!same([...ARTIFACT_SIGNING_BINDINGS].sort(), ["ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT"])) throw new Error("Artifact-signing runtime dependency set is incomplete.");
   requireTokens("scripts/aws/production-ecs-rollback-viability.mjs", ["targetServiceRevision?.arn", "rollback?.serviceRevisionArn", "sourceServiceRevisions", "describe-service-revisions", "serviceRevisions", "revision?.taskDefinition", "forwardTargetTaskDefinitionFingerprint", "taskDefinitionFingerprint", "ImageNotFoundException", "ECR_LOOKUP_FAILED"]);
-  requireTokens("scripts/aws/production-backend-health-recovery-contract.mjs", ["rollbackProof", "rollbackDeploymentArn", "rollbackTargetTaskDefinitionArn", "rollbackTargetDigest", "forwardTargetTaskDefinitionFingerprint", "knownFailedRevisions", "Legacy backend revision census changed before recovery registration", "assertFreshRollbackEquivalence"]);
-  requireTokens("scripts/aws/recover-production-backend-health.mjs", ["rollbackProofSha256", "knownFailedRevisions", "await record();", "resolveArtifactSigning", "readFreshRollbackViability"]);
-  requireTokens("scripts/aws/dispatch-production-backend-health-recovery.mjs", ["ROLLBACK_APPROVAL_FIELDS", "backend_recovery_approval_json", "backend_recovery_approval_sha256"]);
+  requireTokens("scripts/aws/production-backend-health-recovery-contract.mjs", ["rollbackProof", "rollbackDeploymentArn", "rollbackTargetTaskDefinitionArn", "rollbackTargetDigest", "forwardTargetTaskDefinitionFingerprint", "recoveryHistory", "predecessorHistoryReferenceSha256", "predecessorHistoryLineageSha256", "recoveryHistoryLineageSha256", "reconcileAuthenticatedRevisionLineage", "openInterruptedRecoveryHistory", "knownFailedRevisions", "interruptedRecoveries", "classifyInterruptedRecoveryState", "Interrupted recovery live state changed before mutation", "Legacy backend revision census changed before recovery registration", "assertFreshRollbackEquivalence", "assertFreshRuntimeConsumabilityVerification", "TASK_DEFINITION_REGISTRATION_ATTEMPTED", "SERVICE_UPDATE_ATTEMPTED"]);
+  requireTokens("scripts/aws/production-backend-failed-recovery-evidence.mjs", ["AUTHENTICATED_BACKEND_FAILED_RECOVERY_EVIDENCE", "recoveryEvidence", "environmentApproval", "runtimeConsumability", "evidenceFileSha256", "workflowRunId", "taskDefinitionFingerprint", "SERVICE_STABILIZATION_FAILED", "assertRuntimeConsumabilityEnvelopeSignature"]);
+  requireTokens("scripts/aws/recover-production-backend-health.mjs", ["rollbackProofSha256", "authenticatedFailedRecoveryEvidence", "assertAuthenticatedFailedRecoveryEvidence", "await record();", "resolveArtifactSigning", "readFreshRollbackViability"]);
+  requireTokens("scripts/aws/dispatch-production-backend-health-recovery.mjs", ["failedRecoveryEvidenceReference", "failedRecoveryEvidenceReferenceSha256", "schemaVersion: 3", "WORKFLOW_DISPATCH_INTERNAL_BUDGET", "measureWorkflowDispatchInputs"]);
+  requireTokens("scripts/aws/production-backend-failed-recovery-evidence-reference.mjs", ["IMMUTABLE_GITHUB_RELEASE_FAILED_RECOVERY_EVIDENCE", "immutable", "assetDigest", "evidenceByteSha256", "referenceSha256"]);
+  requireTokens("scripts/aws/publish-production-backend-failed-recovery-evidence.mjs", ["inspectRemote", "ABSENT", "MUTABLE_DRAFT_EMPTY", "MUTABLE_DRAFT_READY", "IMMUTABLE_PUBLISHED", "release", "create", "release", "upload", "release", "edit", "--draft=false"]);
+  requireTokens("scripts/aws/resolve-production-backend-failed-recovery-evidence.mjs", ["assertFailedRecoveryEvidenceReleaseReadback", "Accept: application/octet-stream"]);
+  requireTokens("scripts/aws/dispatch-production-backend-health-recovery.mjs", ["ROLLBACK_APPROVAL_FIELDS", "BACKEND_HEALTH_RECOVERY_DISPATCH_BUNDLE", "backend_recovery_evidence_bundle_json", "backend_recovery_evidence_bundle_sha256"]);
+  requireTokens(".github/workflows/release-gate.yml", ["contents: read", "resolve-production-backend-failed-recovery-evidence.mjs", "failed-recovery-evidence-reference-sha256"]);
+  requireTokens("scripts/aws/production-ecs-runtime-dependencies.mjs", ["deriveEcsRuntimeDependencies", "parseEcsSecretsManagerReference", "secretSelector", "EXECUTION_ROLE", "TASK_ROLE", "secretsmanager:GetSecretValue"]);
+  requireTokens("scripts/aws/production-ecs-runtime-consumability.mjs", ["kms:Decrypt", "assertSignedRuntimeDependencyInventory", "buildRuntimeDependencyInventory", "assertSignedRuntimeConsumabilityEvidence", "assertFreshRuntimeConsumabilityVerification", "RUNTIME_AUTHORIZATION_MAX_AGE_MS", "LIVE_RUNTIME_EVIDENCE_MAX_AGE_MS", "signedBindingSha256", "simulateRuntimeDependencies", "secretsmanager", "get-resource-policy", "get-repository-policy", "list-secret-version-ids", "--include-deprecated", "DeletedDate", "VersionIdsToStages", "secretVersions", "selectorResolutions", "refreshRuntimeResourceMetadata"]);
+  requireTokens("scripts/aws/production-ecs-task-census.mjs", ["--starting-token", "NextToken", "maxPages", "describeBatchSize", "collectEcsServiceTasks"]);
+  requireTokens("scripts/aws/converge-production-ecs-runtime-policy.mjs", ["candidateFileSha256", "candidateCanonicalSha256", "runtimeInventorySha256", "expectedLivePolicySha256", "LIVE_POLICY_CHANGED_SINCE_APPROVAL", "Final prewrite runtime policy", "POSTWRITE_POLICY_READBACK_MISMATCH"]);
+  requireTokens("scripts/aws/prepare-production-backend-recovery-candidate.mjs", ["candidateFileSha256", "candidateCanonicalSha256", "candidateFingerprint"]);
+  requireTokens("scripts/aws/prepare-production-ecs-runtime-consumability.mjs", ["prepareProductionEcsRuntimeInventory", "prepareProductionEcsRuntimeConsumability", "--candidate-file-sha256", "--runtime-inventory"]);
+  requireTokens("package.json", ["production-ecs-recovery-runtime-rehearsal.test.mjs"]);
+  for (const file of ["scripts/aws/production-green-stage-b-task-definitions.mjs", "scripts/aws/production-overlap-task-definition.mjs", "scripts/aws/production-predeployment-inventory-task.mjs"]) requireTokens(file, ["deriveEcsRuntimeDependencies"]);
+  requireTokens("scripts/aws/recover-production-backend-health.mjs", ["verifyRuntimeClosure", "refreshRuntimeResourceMetadata", "collectLiveRolePolicyIdentity"]);
   requireTokens("scripts/aws/deploy-ecs-service.sh", ["ROLLBACK_IMAGE_DIGEST", "ecr describe-images", "Rollback candidate image viability could not be authenticated"]);
   const deploy = read("scripts/aws/deploy-ecs-service.sh");
   if (deploy.indexOf("aws ecr describe-images") > deploy.indexOf("update_args=(aws ecs update-service")) throw new Error("Existing-task deployment can mutate before rollback image viability is authenticated.");
@@ -117,10 +163,19 @@ export function buildProductionDependencyClosure() {
       { id: "ecs-service-deployment-shape", producer: "authenticated ECS API", consumer: "rollback viability collector", authority: "distinct targetServiceRevision, sourceServiceRevisions, and rollback.serviceRevisionArn resolved through DescribeServiceRevisions", failClosed: true },
       { id: "rollback-proof", producer: "bounded authenticated reconciliation", consumer: "approval authorization and recovery executor", authority: "live ECS and ECR with exact DescribeServices deployment id equal to Task.startedBy plus rollback-time-bound stopped-task evidence; the serviceDeploymentArn remains a separate identity", failClosed: true },
       { id: "artifact-signing-bindings", producer: "canonical Secrets Manager binding resolver", consumer: "recovery task-definition builder", authority: "exact four protected names and live secret references", failClosed: true },
+      { id: "ecs-final-candidate-runtime-consumability", producer: "final candidate-derived runtime dependency graph plus governed administrator simulation", consumer: "every production ECS candidate builder and the recovery executor before registration and service update", authority: "exact execution/task role, action, resource, source policy, live policy identity, resource/key policy, and IAM simulation", failClosed: true },
       { id: "workflow-json-transport", producer: "canonical recovery dispatcher", consumer: "Release Gate recovery preparation", authority: "byte-identical JSON and SHA-256 transport", failClosed: true },
       { id: "rollback-image-viability", producer: "exact ECR digest readback", consumer: "normal, rotation, and recovery pre-mutation gates", authority: "canonical repository plus immutable digest", failClosed: true },
     ],
     modes: Object.fromEntries(Object.keys(MODE_CAPABILITIES).map((mode) => [mode, "PASS"])),
+    runtimeModeClosure: {
+      NORMAL: "Terraform-rendered final candidates and exact execution policies are jointly authenticated by Stage-B plan/closure before apply; normal activation registers nothing",
+      BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: "signed candidate-derived closure is re-read before RegisterTaskDefinition and before UpdateService",
+      ROTATION_OVERLAP: "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
+      ROTATION_CLEANUP: "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
+      ROLLBACK_RECONCILIATION: "rollback viability uses immutable image/resource identity and performs no candidate registration",
+      POST_DEPLOY_VERIFY: "post-deploy verification consumes the authenticated running task definition and registers nothing",
+    },
     pathClosure: { forward: "PASS", rollback: "PASS", reconciliation: "PASS" },
   };
 }
@@ -138,8 +193,9 @@ export function assertChangedAwsCallClosure(scanned, graph) {
     const capability = capabilityById.get(contract.capabilityId);
     const resourcesCompatible = contract.resources.every((resource) => capability?.resources?.includes(resource)
       || (resource === SERVICE && capability?.resources?.includes("arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/*")));
-    if (!capability || capability.action !== contract.action || capability.identity !== "RELEASE_DEPLOYER" || !resourcesCompatible
-      || !capability.policy?.sourceFile || !["direct", "direct-live-read"].includes(capability.probe) || !capability.probeIds?.length) {
+    const releaseProbe = contract.identity !== "RELEASE_DEPLOYER" || ["direct", "direct-live-read"].includes(capability?.probe) && capability?.probeIds?.length;
+    if (!capability || capability.action !== contract.action || capability.identity !== contract.identity || !resourcesCompatible
+      || !capability.policy?.sourceFile || !releaseProbe) {
       throw new Error(`Production AWS call lacks exact IAM/capability/preflight closure: ${contract.sourceFile} ${contract.action}.`);
     }
     if (contract.sourceFile.endsWith("deploy-ecs-service.sh")) {
@@ -149,7 +205,7 @@ export function assertChangedAwsCallClosure(scanned, graph) {
     const reachableMode = contract.sourceFile.endsWith("deploy-ecs-service.sh")
       ? ["NORMAL", "ROTATION_OVERLAP", "ROTATION_CLEANUP"]
       : contract.sourceFile.endsWith("production-normal-backend-activation.mjs") ? ["NORMAL"] : ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"];
-    return { ...contract, reachableMode, executionPrincipal: "RELEASE_DEPLOYER", sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true, administratorPreflightPresent: true, runtimePreflightPresent: true, negativeTestPresent: true };
+    return { ...contract, reachableMode, executionPrincipal: contract.identity, sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true, administratorPreflightPresent: true, runtimePreflightPresent: true, negativeTestPresent: true };
   });
 }
 

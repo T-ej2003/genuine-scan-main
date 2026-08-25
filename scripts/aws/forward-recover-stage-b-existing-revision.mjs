@@ -199,9 +199,10 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const readState = async () => { validateBackend(); return terraform(["state", "pull"]); };
   const describe = async (arn) => aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]);
   const census = () => collectCanonicalBackendRecoveryCensus({ list: (nextToken) => {
-    const args = ["ecs", "list-task-definitions", "--family-prefix", STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.family, "--status", "ACTIVE", "--sort", "DESC"];
-    if (nextToken) args.push("--next-token", nextToken);
-    return aws(args);
+    const args = ["ecs", "list-task-definitions", "--family-prefix", STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY.family, "--status", "ACTIVE", "--sort", "DESC", "--page-size", "100", "--max-items", "100"];
+    if (nextToken) args.push("--starting-token", nextToken);
+    const response = aws(args);
+    return { ...response, nextToken: response.NextToken };
   }, describe });
   const importState = async ({ address, arn }) => {
     validateBackend();
