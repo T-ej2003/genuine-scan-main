@@ -27,7 +27,7 @@ const hashFile = (file) => crypto.createHash("sha256").update(fs.readFileSync(fi
 const writeJson = (file, value) => fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
 const noRepositoryPolicy = () => {
   const error = new Error("AWS CLI failed");
-  error.stderr = Buffer.from("aws: [ERROR]: An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: Repository policy does not exist\n");
+  error.stderr = Buffer.from("\naws: [ERROR]: An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: Repository policy does not exist for the repository with name 'mscqr-backend' in the registry with id '368992683803'\n");
   return error;
 };
 

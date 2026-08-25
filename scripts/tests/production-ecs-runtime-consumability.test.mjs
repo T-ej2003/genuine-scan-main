@@ -66,38 +66,67 @@ const startupAws = (value, aws) => async (args) => {
   return aws(args);
 };
 const collectRuntimeResourceMetadata = (value, aws, options) => collectRuntimeResourceMetadataCore(value, startupAws(value, aws), options);
+const repositoryName = "mscqr-backend";
+const registryId = "368992683803";
+const noRepositoryPolicyStderr = (prefix = "aws: [ERROR]: ") => `${prefix}An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: Repository policy does not exist for the repository with name '${repositoryName}' in the registry with id '${registryId}'`;
 const noRepositoryPolicy = (prefix = "aws: [ERROR]: ") => {
   const error = new Error("AWS CLI failed");
-  error.stderr = Buffer.from(`${prefix}An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: Repository policy does not exist\n`);
+  error.stderr = Buffer.from(`\n${noRepositoryPolicyStderr(prefix)}\n`);
   return error;
 };
 
 test("ECR no-policy classification accepts only complete observed CLI envelopes", () => {
-  assert.equal(isEcrRepositoryPolicyNotFound(noRepositoryPolicy()), true);
-  assert.equal(isEcrRepositoryPolicyNotFound(noRepositoryPolicy("")), true);
+  const classify = (error) => isEcrRepositoryPolicyNotFound(error, { repositoryName, registryId });
+  assert.equal(classify(noRepositoryPolicy()), true);
+  assert.equal(classify(noRepositoryPolicy("")), true);
+  assert.equal(classify(Object.assign(new Error("AWS CLI failed"), { stderr: noRepositoryPolicyStderr() })), true);
+  const valid = noRepositoryPolicyStderr();
   for (const stderr of [
     '{"Code":"RepositoryPolicyNotFoundException"}',
     '{"Code":"RepositoryPolicyNotFoundException","Message":null}',
     '{"Code":"RepositoryPolicyNotFoundException","Message":""}',
     '{"Code":"RepositoryPolicyNotFoundException","Message":"missing"} trailing',
     'prefix {"Code":"RepositoryPolicyNotFoundException","Message":"missing"}',
-    'aws: [ERROR]: An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: missing\nAccessDeniedException',
-    'AccessDeniedException\nAn error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: missing',
-    'An error occurred (RepositoryNotFoundException) when calling the GetRepositoryPolicy operation: missing',
+    `${valid} AccessDeniedException: denied`,
+    `${valid}\nAccessDeniedException: denied`,
+    `AccessDeniedException: denied ${valid}`,
+    `AccessDeniedException: denied\n${valid}`,
+    `${valid} {"Code":"AccessDeniedException"}`,
+    `{"Code":"AccessDeniedException"} ${valid}`,
+    `${valid} {}`,
+    `${valid} arbitrary text`,
+    `${valid} An error occurred (AccessDeniedException) when calling the GetRepositoryPolicy operation: denied`,
+    `${valid}\rAn error occurred (AccessDeniedException) when calling the GetRepositoryPolicy operation: denied`,
+    'An error occurred (RepositoryNotFoundException) when calling the GetRepositoryPolicy operation: Repository does not exist',
     'An error occurred (ServerException) when calling the GetRepositoryPolicy operation: unavailable',
     'An error occurred (InvalidParameterException) when calling the GetRepositoryPolicy operation: invalid',
-    'An error occurred (RepositoryPolicyNotFoundException) when calling the DeleteRepositoryPolicy operation: missing',
+    'An error occurred (AccessDeniedException) when calling the GetRepositoryPolicy operation: denied',
+    noRepositoryPolicyStderr().replace("GetRepositoryPolicy operation", "DeleteRepositoryPolicy operation"),
+    noRepositoryPolicyStderr().replace("RepositoryPolicyNotFoundException", "AccessDeniedException"),
     'arbitrary RepositoryPolicyNotFoundException text',
+    'arbitrary GetRepositoryPolicy text',
     '',
     '   ',
     '{malformed',
     '{"Code":"RepositoryPolicyNotFoundException","Message":"one"}{"Code":"AccessDeniedException","Message":"two"}',
+    noRepositoryPolicyStderr("aws: [ERROR]: aws: [ERROR]: "),
+    `garbage ${valid}`,
+    `${valid} garbage`,
+    `${valid}${valid}`,
+    valid.slice(0, -1),
+    valid.replace(": Repository policy", ":"),
+    valid.replace("operation:", "operation;"),
+    `${valid}\u001b[31m`,
   ]) {
     const error = new Error("AWS CLI failed"); error.stderr = Buffer.from(stderr);
-    assert.equal(isEcrRepositoryPolicyNotFound(error), false, stderr);
+    assert.equal(classify(error), false, stderr);
   }
   const namedOnly = new Error("missing"); namedOnly.name = "RepositoryPolicyNotFoundException";
-  assert.equal(isEcrRepositoryPolicyNotFound(namedOnly), false);
+  assert.equal(classify(namedOnly), false);
+  assert.equal(classify({ stderr: { toString: () => noRepositoryPolicyStderr() } }), false);
+  assert.equal(classify({ registryId, repositoryName, policyText: "{}" }), false);
+  assert.equal(isEcrRepositoryPolicyNotFound(noRepositoryPolicy(), { repositoryName: "mscqr-worker", registryId }), false);
+  assert.equal(isEcrRepositoryPolicyNotFound(noRepositoryPolicy(), { repositoryName, registryId: "000000000000" }), false);
 });
 const metadata = (value) => Object.fromEntries(deriveEcsRuntimeDependencies(value).flatMap(({ action, resource }) => {
   if (action === "secretsmanager:GetSecretValue") {

@@ -25,6 +25,10 @@ const shapedPolicyEvidence = () => {
 const temp = () => fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-release-preflight-test-"));
 const allowed = (args) => {
   if (args[0] === "sts") return JSON.stringify({ Arn: caller });
+  if (args[0] === "ecr" && args[1] === "get-repository-policy") {
+    const repositoryName = args[args.indexOf("--repository-name") + 1];
+    return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify({ Version: "2012-10-17", Statement: [] }) });
+  }
   if (args[0] === "iam" && args[1] === "get-role" && args.includes("mscqr-production-independent-checker")) return JSON.stringify({ Role: { Arn: CHECKER_SOURCE_ROLE_ARN, AssumeRolePolicyDocument: { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: CHECKER_USER_ARN }, Action: "sts:AssumeRole", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }] } } });
   if (args[0] === "s3api" && args[1] === "get-object") {
     fs.writeFileSync(args.at(-1), args.includes("mscqr/production/rls-green/stage-a/terraform.tfstate") ? stageAState : JSON.stringify({ lineage: "fixture", serial: 1 }), { mode: 0o644 });
@@ -171,13 +175,23 @@ test("release preflight treats current AWS CLI no-policy errors as authenticated
   const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
     if (probe.action === "ecr:GetRepositoryPolicy") {
       const error = new Error("no repository policy");
-      error.stderr = Buffer.from("aws: [ERROR]: An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: Repository policy does not exist\n");
+      const repositoryName = args[args.indexOf("--repository-name") + 1];
+      error.stderr = Buffer.from(`\naws: [ERROR]: An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: Repository policy does not exist for the repository with name '${repositoryName}' in the registry with id '368992683803'\n`);
       throw error;
     }
     return allowed(args);
   } });
   assert.equal(report.status, "valid");
   assert.equal(report.requiredReads["ecr:GetRepositoryPolicy"], "allowed");
+});
+
+test("release preflight rejects malformed successful ECR policy responses", () => {
+  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+    if (probe.action === "ecr:GetRepositoryPolicy") return "{}";
+    return allowed(args);
+  } });
+  assert.equal(report.status, "blocked");
+  assert.equal(report.failed.filter(({ action }) => action === "ecr:GetRepositoryPolicy").length, 3);
 });
 
 test("active rollback discovery reads the exact deployment details", () => {

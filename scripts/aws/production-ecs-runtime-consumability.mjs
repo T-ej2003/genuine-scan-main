@@ -22,7 +22,8 @@ const SECRET_VERSION_ID = /^[A-Za-z0-9_-]{32,64}$/;
 const SECRET_STAGE = /^[A-Za-z0-9/_+=.@-]{1,256}$/;
 const SECRET_RESOURCE = new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:[A-Za-z0-9/_+=.@-]+$`);
 const LOG_GROUP_ARN = new RegExp(`^arn:aws:logs:${REGION}:${ACCOUNT}:log-group:(/[^*]+)$`);
-const ECR_REPOSITORY_POLICY_NOT_FOUND = /^(?:aws: \[ERROR\]: )?An error occurred \(RepositoryPolicyNotFoundException\) when calling the GetRepositoryPolicy operation: [^\r\n]*\S[^\r\n]*$/;
+const AWS_CLI_ENHANCED_ERROR_PREFIX = "aws: [ERROR]: ";
+const ECR_REPOSITORY_POLICY_NOT_FOUND_PREFIX = "An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: ";
 const actionMatches = (value, expected) => [value].flat().some((action) => action === "*" || action === expected || (action?.endsWith("*") && expected.startsWith(action.slice(0, -1))));
 const patternMatches = (pattern, value) => typeof pattern === "string" && new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*").replaceAll("?", ".")}$`).test(value);
 const principalValues = (value) => [value].flatMap((principal) => typeof principal === "object" && principal ? [principal.AWS].flat() : [principal]);
@@ -42,9 +43,23 @@ function assertResourcePolicyAllowsRuntime({ policy, principalArn, action, resou
   throw new Error(`${label} is unsupported for production runtime authorization and fails closed.`);
 }
 
-export const isEcrRepositoryPolicyNotFound = (error) => {
-  const stderr = Buffer.isBuffer(error?.stderr) ? error.stderr.toString("utf8") : String(error?.stderr || "");
-  return ECR_REPOSITORY_POLICY_NOT_FOUND.test(stderr.trim());
+export const isEcrRepositoryPolicyNotFound = (error, { repositoryName, registryId } = {}) => {
+  if (!ECR_REPOSITORY_ARN.test(`arn:aws:ecr:${REGION}:${registryId}:repository/${repositoryName}`)) return false;
+  const stderr = Buffer.isBuffer(error?.stderr) ? error.stderr.toString("utf8") : typeof error?.stderr === "string" ? error.stderr : "";
+  const normalized = stderr.startsWith("\n") && stderr.endsWith("\n") ? stderr.slice(1, -1) : stderr;
+  const envelope = normalized.startsWith(AWS_CLI_ENHANCED_ERROR_PREFIX) ? normalized.slice(AWS_CLI_ENHANCED_ERROR_PREFIX.length) : normalized;
+  return envelope === `${ECR_REPOSITORY_POLICY_NOT_FOUND_PREFIX}Repository policy does not exist for the repository with name '${repositoryName}' in the registry with id '${registryId}'`;
+};
+
+export const assertEcrRepositoryPolicyResponse = (response, { repositoryName, registryId } = {}) => {
+  const value = typeof response === "string" ? JSON.parse(response) : response;
+  if (!value || Object.getPrototypeOf(value) !== Object.prototype
+    || Object.keys(value).sort().join(",") !== "policyText,registryId,repositoryName"
+    || value.registryId !== registryId || value.repositoryName !== repositoryName || typeof value.policyText !== "string") {
+    throw new Error("ECR repository-policy response is incomplete or malformed.");
+  }
+  policyStatements(value.policyText, `ECR repository policy for ${repositoryName}`);
+  return value;
 };
 
 async function collectEcrRepositoryPolicyMetadata(dependency, aws, readEcrRepositoryPolicy) {
@@ -63,12 +78,11 @@ async function collectEcrRepositoryPolicyMetadata(dependency, aws, readEcrReposi
   try {
     response = await (readEcrRepositoryPolicy ? readEcrRepositoryPolicy(repositoryName) : aws(["ecr", "get-repository-policy", "--repository-name", repositoryName]));
   } catch (error) {
-    if (!isEcrRepositoryPolicyNotFound(error)) throw new Error(`Runtime ECR repository-policy state is unavailable for ${dependency.resource}.`);
+    if (!isEcrRepositoryPolicyNotFound(error, { repositoryName, registryId: ACCOUNT })) throw new Error(`Runtime ECR repository-policy state is unavailable for ${dependency.resource}.`);
     const state = { resource: dependency.resource, repositoryName, imageDigest, imageAvailability: "EXISTS", repositoryPolicyState: "NO_POLICY", repositoryPolicySha256: canonicalSha256(null) };
     return Object.freeze({ ...state, metadataSha256: canonicalSha256(state) });
   }
-  if (response?.registryId !== ACCOUNT || response?.repositoryName !== repositoryName || typeof response.policyText !== "string") throw new Error(`Runtime ECR repository-policy readback is incomplete for ${dependency.resource}.`);
-  policyStatements(response.policyText, `Runtime ECR repository policy for ${dependency.resource}`);
+  assertEcrRepositoryPolicyResponse(response, { repositoryName, registryId: ACCOUNT });
   throw new Error(`Runtime ECR repository policy semantics are unsupported for ${dependency.resource} and fail closed.`);
 }
 

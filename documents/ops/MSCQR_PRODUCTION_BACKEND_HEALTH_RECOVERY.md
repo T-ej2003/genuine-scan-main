@@ -265,8 +265,9 @@ identity simulation. Account, repository, and digest come from the selected
 `DescribeImages.imageDetails[]` entry, matching the AWS CLI response contract.
 `RepositoryPolicyNotFoundException` is the only accepted no-policy result. Its
 complete legacy or enhanced AWS CLI text envelope must identify exactly ECR
-`GetRepositoryPolicy`; structured JSON, mixed errors, read errors, malformed
-responses, and any repository policy semantics fail closed. Secret metadata is
+`GetRepositoryPolicy` and the repository/account supplied to that call;
+structured JSON, mixed errors, read errors, malformed responses, and any
+repository policy semantics fail closed. Secret metadata is
 likewise bound to an explicit available/not-scheduled-for-deletion state.
 Repository policy and secret availability metadata are refreshed before
 registration and again before `UpdateService`.
