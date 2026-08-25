@@ -8,7 +8,7 @@ import {
   buildRuntimeDependencyInventory,
   buildLegacyExecutionRuntimePolicy,
   buildRuntimeConsumabilityEvidence,
-  collectRuntimeResourceMetadata,
+  collectRuntimeResourceMetadata as collectRuntimeResourceMetadataCore,
   collectLiveRolePolicyIdentity,
   deriveEcsRuntimeDependencies,
   refreshRuntimeResourceMetadata,
@@ -48,17 +48,39 @@ const describeImagesResponse = (args, detail = {}) => ({
     ...detail,
   }],
 });
+const jsonKeysBySecret = (value) => deriveEcsRuntimeDependencies(value)
+  .filter(({ action, context }) => action === "secretsmanager:GetSecretValue" && context.secretSelector.jsonKey)
+  .reduce((grouped, dependency) => ({ ...grouped, [dependency.resource]: [...(grouped[dependency.resource] || []), dependency] }), {});
+const startupAws = (value, aws) => async (args) => {
+  const operation = args.slice(0, 2).join(" ");
+  if (operation === "logs describe-log-groups") {
+    const logGroupName = args[args.indexOf("--log-group-name-prefix") + 1];
+    return { logGroups: [{ logGroupName, logGroupArn: `arn:aws:logs:eu-west-2:368992683803:log-group:${logGroupName}`, creationTime: 1, storedBytes: 0 }] };
+  }
+  if (operation === "secretsmanager get-secret-value") {
+    const resource = args[args.indexOf("--secret-id") + 1]; const versionId = args[args.indexOf("--version-id") + 1];
+    const keys = (jsonKeysBySecret(value)[resource] || []).map(({ context }) => context.secretSelector.jsonKey);
+    return { ARN: resource, VersionId: versionId, SecretString: JSON.stringify(Object.fromEntries(keys.map((key) => [key, "fixture-present"]))) };
+  }
+  return aws(args);
+};
+const collectRuntimeResourceMetadata = (value, aws, options) => collectRuntimeResourceMetadataCore(value, startupAws(value, aws), options);
 const metadata = (value) => Object.fromEntries(deriveEcsRuntimeDependencies(value).flatMap(({ action, resource }) => {
   if (action === "secretsmanager:GetSecretValue") {
     const selector = deriveEcsRuntimeDependencies(value).find((dependency) => dependency.action === action && dependency.resource === resource).context.secretSelector;
     const versionIdsToStages = { [secretVersionId]: ["AWSCURRENT"] }; const secretVersions = [{ versionId: secretVersionId, versionStages: ["AWSCURRENT"] }];
-    const selectorResolutions = [{ selector, resolvedVersionId: secretVersionId, resolvedVersionStage: "AWSCURRENT" }];
+    const selectorResolutions = [{ selector, resolvedVersionId: secretVersionId, resolvedVersionStage: "AWSCURRENT", jsonKeyState: selector.jsonKey ? "PRESENT" : "NOT_REQUESTED" }];
     const state = { ARN: resource, KmsKeyId: null, availability: "AVAILABLE", deletedDate: null, versionIdsToStages, secretVersions, selectorResolutions };
     return [[resource, { resource, encryption: "AWS_MANAGED", kmsKeyArn: null, availability: state.availability, deletedDate: state.deletedDate, versionIdsToStages, secretVersions, selectorResolutions, resourcePolicySha256: canonicalSha256(null), resourcePolicyAccess: "NO_RESOURCE_POLICY", metadataSha256: canonicalSha256(state) }]];
   }
   if (action.startsWith("ecr:") && resource !== "*") {
     const state = { resource, repositoryName: resource.split("repository/")[1], imageDigest: value.containerDefinitions[0].image.split("@")[1], imageAvailability: "EXISTS", repositoryPolicyState: "NO_POLICY", repositoryPolicySha256: canonicalSha256(null) };
     return [[resource, { ...state, metadataSha256: canonicalSha256(state) }]];
+  }
+  if (action.startsWith("logs:")) {
+    const groupArn = resource.split(":log-stream:")[0]; const logGroupName = groupArn.split(":log-group:")[1];
+    const state = { resource: groupArn, logGroupName, availability: "EXISTENCE_PROVEN", createGroup: deriveEcsRuntimeDependencies(value).some((dependency) => dependency.action === "logs:CreateLogGroup" && dependency.resource === groupArn) };
+    return [[groupArn, { ...state, metadataSha256: canonicalSha256(state) }]];
   }
   return [];
 }));
@@ -217,7 +239,7 @@ test("secret resource policy and customer-managed KMS authority are authenticate
   const readKmsKey = async (keyArnValue) => ({ metadata: (await aws(["kms", "describe-key", "--key-id", keyArnValue])).KeyMetadata, policy: (await aws(["kms", "get-key-policy", "--key-id", keyArnValue, "--policy-name", "default"])).Policy });
   const authenticated = await collectRuntimeResourceMetadata(value, aws, { readKmsKey });
   assert.equal(authenticated[bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].kmsKeyPolicyAccess, "EXACT_ROLE");
-  const refreshed = await refreshRuntimeResourceMetadata(value, authenticated, aws, readKmsKey);
+  const refreshed = await refreshRuntimeResourceMetadata(value, authenticated, startupAws(value, aws), readKmsKey);
   assert.deepEqual(refreshed, authenticated);
   assert.equal(JSON.stringify(authenticated).includes("SecretString"), false);
 
@@ -272,7 +294,7 @@ test("real DescribeImages detail identity and ECR policy state fail closed on ev
   ]) {
     const withPolicy = async (args) => args[1] === "get-repository-policy" ? { registryId: "368992683803", repositoryName: "mscqr-backend", policyText: JSON.stringify(policy) } : baseAws(args);
     await assert.rejects(() => collectRuntimeResourceMetadata(value, withPolicy), /unsupported/);
-    await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, withPolicy), /unsupported/);
+    await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, startupAws(value, withPolicy)), /unsupported/);
   }
   await assert.rejects(() => collectRuntimeResourceMetadata(value, async (args) => {
     if (args[1] === "get-repository-policy") return { registryId: "368992683803", repositoryName: "mscqr-worker", policyText: "{" };
@@ -317,9 +339,81 @@ test("scheduled secret deletion and availability TOCTOU fail before runtime muta
   assert.equal(authenticated[bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].deletedDate, null);
   deletedDate = "2026-08-25T00:00:00.000Z";
   await assert.rejects(() => collectRuntimeResourceMetadata(value, aws), /unavailable/);
-  await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, aws), /unavailable/);
+  await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, startupAws(value, aws)), /unavailable/);
   const tampered = structuredClone(authenticated); tampered[bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].availability = "AVAILABLE"; tampered[bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].deletedDate = deletedDate;
   assert.throws(() => passing(value, tampered), /availability or selector metadata/);
+});
+
+test("Secrets Manager JSON keys are proven in the exact selected version without persisting plaintext", async () => {
+  const value = candidate(); const selectedSecret = bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT; const selectedVersion = secretVersionId;
+  value.containerDefinitions[0].secrets[0].valueFrom = `${selectedSecret}:REDIS_URL::`;
+  let secretString = JSON.stringify({ REDIS_URL: "process-local-fixture-value", unrelated: true });
+  const aws = async (args) => {
+    const operation = args.slice(0, 2).join(" "); const resource = args[args.indexOf("--secret-id") + 1] || args.at(-1);
+    if (operation === "ecr describe-images") return describeImagesResponse(args);
+    if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
+    if (operation === "logs describe-log-groups") { const logGroupName = args[args.indexOf("--log-group-name-prefix") + 1]; return { logGroups: [{ logGroupName, logGroupArn: `arn:aws:logs:eu-west-2:368992683803:log-group:${logGroupName}` }] }; }
+    if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource);
+    if (operation === "secretsmanager list-secret-version-ids") return listSecretVersionsResponse();
+    if (operation === "secretsmanager get-secret-value") return { ARN: resource, VersionId: args[args.indexOf("--version-id") + 1], SecretString: secretString };
+    if (operation === "secretsmanager get-resource-policy") return { ARN: resource, ResourcePolicy: null };
+    throw new Error(operation);
+  };
+  const authenticated = await collectRuntimeResourceMetadataCore(value, aws);
+  const resolution = authenticated[selectedSecret].selectorResolutions.find(({ selector }) => selector.jsonKey === "REDIS_URL");
+  assert.deepEqual({ version: resolution.resolvedVersionId, key: resolution.jsonKeyState }, { version: selectedVersion, key: "PRESENT" });
+  const serialized = JSON.stringify(authenticated);
+  assert.equal(serialized.includes("process-local-fixture-value"), false); assert.equal(serialized.includes("SecretString"), false); assert.equal(serialized.includes("SecretBinary"), false);
+  for (const invalidValue of [JSON.stringify({ OTHER_KEY: true }), "not-json", JSON.stringify(["REDIS_URL"])]) {
+    secretString = invalidValue;
+    await assert.rejects(() => collectRuntimeResourceMetadataCore(value, aws), /JSON-key consumability|JSON object|JSON key/);
+  }
+  secretString = JSON.stringify({ REDIS_URL: "restored" });
+  const initial = await collectRuntimeResourceMetadataCore(value, aws);
+  secretString = JSON.stringify({ OTHER_KEY: "rotated-away" });
+  await assert.rejects(() => refreshRuntimeResourceMetadata(value, initial, aws), /JSON-key consumability|JSON key/);
+});
+
+test("awslogs groups are exact, paginated, create-aware, and refreshed before mutation", async () => {
+  const value = candidate(); const option = value.containerDefinitions[0].logConfiguration.options;
+  option["awslogs-create-group"] = "false";
+  const logGroupName = option["awslogs-group"]; const logGroupArn = `arn:aws:logs:eu-west-2:368992683803:log-group:${logGroupName}`;
+  let state = "PAGINATED"; const calls = [];
+  const aws = async (args) => {
+    const operation = args.slice(0, 2).join(" "); const resource = args[args.indexOf("--secret-id") + 1] || args.at(-1);
+    if (operation === "ecr describe-images") return describeImagesResponse(args);
+    if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
+    if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource);
+    if (operation === "secretsmanager list-secret-version-ids") return listSecretVersionsResponse();
+    if (operation === "secretsmanager get-resource-policy") return { ARN: resource, ResourcePolicy: null };
+    if (operation === "logs describe-log-groups") {
+      calls.push(args);
+      if (state === "MISSING") return { logGroups: [] };
+      if (state === "WRONG") return { logGroups: [{ logGroupName: `${logGroupName}-other`, logGroupArn: `${logGroupArn}-other` }] };
+      if (state === "CYCLE") return { logGroups: [], nextToken: "cycle" };
+      if (!args.includes("--starting-token")) return { logGroups: [{ logGroupName: `${logGroupName}-other`, logGroupArn: `${logGroupArn}-other` }], nextToken: "next-page" };
+      return { logGroups: [{ logGroupName, logGroupArn, creationTime: 1, storedBytes: 0 }] };
+    }
+    throw new Error(operation);
+  };
+  const authenticated = await collectRuntimeResourceMetadataCore(value, aws);
+  assert.equal(authenticated[logGroupArn].availability, "EXISTENCE_PROVEN"); assert.equal(calls.length, 2);
+  const fabricatedCreate = structuredClone(authenticated); const fabricatedState = { resource: logGroupArn, logGroupName, availability: "INTENTIONALLY_CREATED_BY_RUNTIME", createGroup: true };
+  fabricatedCreate[logGroupArn] = { ...fabricatedState, metadataSha256: canonicalSha256(fabricatedState) };
+  assert.throws(() => passing(value, fabricatedCreate), /awslogs group metadata/);
+  state = "MISSING";
+  await assert.rejects(() => collectRuntimeResourceMetadataCore(value, aws), /does not exist/);
+  await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, aws), /does not exist/);
+  state = "WRONG"; await assert.rejects(() => collectRuntimeResourceMetadataCore(value, aws), /does not exist/);
+  state = "CYCLE"; await assert.rejects(() => collectRuntimeResourceMetadataCore(value, aws), /cyclic/);
+  const createValue = candidate(); createValue.containerDefinitions[0].logConfiguration.options["awslogs-create-group"] = "true";
+  state = "MISSING";
+  const created = await collectRuntimeResourceMetadataCore(createValue, aws);
+  assert.equal(created[logGroupArn].availability, "INTENTIONALLY_CREATED_BY_RUNTIME");
+  const wrongRegion = candidate(); wrongRegion.containerDefinitions[0].logConfiguration.options["awslogs-region"] = "us-east-1";
+  assert.throws(() => deriveEcsRuntimeDependencies(wrongRegion), /awslogs configuration/);
+  const malformedCreate = candidate(); malformedCreate.containerDefinitions[0].logConfiguration.options["awslogs-create-group"] = "yes";
+  assert.throws(() => deriveEcsRuntimeDependencies(malformedCreate), /awslogs configuration/);
 });
 
 test("Secrets Manager selectors resolve complete real version metadata and refresh fail closed", async () => {
@@ -357,9 +451,9 @@ test("Secrets Manager selectors resolve complete real version metadata and refre
 
   const value = selected(base); const authenticated = await collectRuntimeResourceMetadata(value, awsFor());
   const moved = { [previous]: ["AWSCURRENT"], [secretVersionId]: ["AWSPREVIOUS"], [custom]: ["CUSTOM"] };
-  await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, awsFor(moved)), /changed after administrator authorization/);
+  await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, startupAws(value, awsFor(moved))), /changed after administrator authorization/);
   const removed = { [previous]: ["AWSPREVIOUS"], [custom]: ["CUSTOM"] };
-  await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, awsFor(removed)), /not resolvable/);
+  await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, startupAws(value, awsFor(removed))), /not resolvable/);
   assert.equal(JSON.stringify(authenticated).includes("SecretString"), false);
   assert.equal(JSON.stringify(authenticated).includes("SecretBinary"), false);
 });
@@ -431,9 +525,9 @@ test("exact SSM parameter version metadata is authenticated and refreshed", asyn
   };
   const authenticated = await collectRuntimeResourceMetadata(value, aws);
   assert.equal(authenticated[parameterArn].parameterVersion, 7);
-  assert.deepEqual(await refreshRuntimeResourceMetadata(value, authenticated, aws), authenticated);
+  assert.deepEqual(await refreshRuntimeResourceMetadata(value, authenticated, startupAws(value, aws)), authenticated);
   version = 8;
-  await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, aws), /changed after administrator authorization/);
+  await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, startupAws(value, aws)), /changed after administrator authorization/);
   await assert.rejects(() => collectRuntimeResourceMetadata(value, async (args) => args[1] === "describe-parameters"
     ? { Parameters: [{ Name: "mscqr/runtime/path-with.dots_and/slashes", ARN: parameterArn, Type: "String", Version: 7 }], NextToken: "more" } : aws(args)), /SSM metadata is incomplete/);
 });

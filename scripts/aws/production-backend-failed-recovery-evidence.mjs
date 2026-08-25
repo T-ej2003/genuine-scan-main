@@ -52,6 +52,7 @@ function validateRecord(record, verifyRuntime) {
     sourceSha: evidence.sourceSha,
     currentTaskDefinitionArn: evidence.currentTaskDefinitionArn,
     recoveryImageDigest: evidence.recoveryImageDigest,
+    imageReleaseSha: evidence.imageReleaseSha,
     authorizationFileSha256: evidence.authorizationFileSha256,
     authorizationSha256: evidence.authorizationSha256,
     environmentApprovalFileSha256: evidence.environmentApprovalFileSha256,
@@ -60,7 +61,6 @@ function validateRecord(record, verifyRuntime) {
     imageAuthorizationSha256: evidence.imageAuthorizationSha256,
     artifactSigningBindingSha256: evidence.artifactSigningBindingSha256,
     runtimeConsumabilitySha256: evidence.runtimeConsumabilitySha256,
-    imageReleaseSha: evidence.imageReleaseSha,
     rollbackProofSha256: evidence.rollbackProofSha256,
     failedRecoveryEvidenceReferenceSha256: evidence.failedRecoveryEvidenceReferenceSha256 || null,
   });
@@ -85,6 +85,7 @@ function validateRecord(record, verifyRuntime) {
     candidateFingerprint: runtime.value.evidence.candidateFingerprint,
     taskDefinitionFingerprint: runtime.value.evidence.candidateFingerprint,
     recoveryImageDigest: evidence.recoveryImageDigest,
+    imageReleaseSha: evidence.imageReleaseSha,
     artifactSigningBindingSha256: evidence.artifactSigningBindingSha256,
     runtimeConsumabilitySha256: evidence.runtimeConsumabilitySha256,
     predecessorHistoryReferenceSha256: evidence.failedRecoveryEvidenceReferenceSha256 || null,

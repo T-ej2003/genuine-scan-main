@@ -603,6 +603,26 @@
     },
     {
       "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "secretsmanager:GetSecretValue",
+      "capabilityId": "manifest-backend-health-recovery-runtime-get-secret-values",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
       "action": "secretsmanager:ListSecretVersionIds",
       "capabilityId": "manifest-backend-health-recovery-runtime-list-secret-versions",
       "identity": "RELEASE_DEPLOYER",
@@ -671,6 +691,25 @@
         "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
         "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
         "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-ecs-runtime-consumability.mjs",
+      "action": "logs:DescribeLogGroups",
+      "capabilityId": "manifest-refresh-stage-a-provider-log-groups",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
       ],
       "reachableMode": [
         "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"

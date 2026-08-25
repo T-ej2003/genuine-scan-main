@@ -45,7 +45,9 @@ test("real file boundaries support inventory, CAS convergence, post-convergence 
     if (operation === "ecr get-repository-policy") { const error = new Error("no policy"); error.name = "RepositoryPolicyNotFoundException"; throw error; }
     if (operation === "secretsmanager describe-secret") return { ARN: valueAfter("--secret-id"), KmsKeyId: null, VersionIdsToStages: { [`fixture_version_${"0".repeat(16)}`]: ["AWSCURRENT"] } };
     if (operation === "secretsmanager list-secret-version-ids") return { Versions: [{ VersionId: `fixture_version_${"0".repeat(16)}`, VersionStages: ["AWSCURRENT"] }] };
+    if (operation === "secretsmanager get-secret-value") return { ARN: valueAfter("--secret-id"), VersionId: valueAfter("--version-id"), SecretString: JSON.stringify({ DATABASE_URL: "fixture-present", REDIS_URL: "fixture-present" }) };
     if (operation === "secretsmanager get-resource-policy") return { ARN: valueAfter("--secret-id"), ResourcePolicy: null };
+    if (operation === "logs describe-log-groups") { const logGroupName = valueAfter("--log-group-name-prefix"); return { logGroups: [{ logGroupName, logGroupArn: `arn:aws:logs:eu-west-2:368992683803:log-group:${logGroupName}`, creationTime: 1, storedBytes: 0 }] }; }
     if (operation === "kms sign") return { Signature: "AQ==" };
     if (operation === "kms verify") return { SignatureValid: true };
     if (operation === "iam get-role") return { Role: { Arn: prepared.candidate.executionRoleArn, AssumeRolePolicyDocument: RUNTIME_CONSUMABILITY.ecsTaskTrust } };

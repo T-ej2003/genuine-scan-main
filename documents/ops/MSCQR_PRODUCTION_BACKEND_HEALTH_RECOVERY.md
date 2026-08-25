@@ -140,9 +140,21 @@ complete paginated version census (including unlabeled/deprecated versions), and
 the exact resolved version for default `AWSCURRENT`, explicit version stage,
 explicit version ID, or a consistent stage-and-ID pair. Missing, duplicated,
 malformed, deleted, or changed version metadata fails closed without reading
-`SecretString` or `SecretBinary`. The same metadata is reread at both runtime
-consumability mutation boundaries, so rotation or deletion cannot hide behind
-an older signed resource identity.
+secret material unless an ECS JSON-key selector requires proving that key in
+the exact selected version. In that case `GetSecretValue` is scoped to the
+candidate secret and resolved version; plaintext remains process-local and is
+never logged, persisted, hashed, signed, emitted, or copied into an error. Only
+the non-secret `PRESENT` result is bound into evidence. The same selector/key
+proof is repeated at both runtime-consumability mutation boundaries, so
+rotation, key removal, or deletion cannot hide behind older signed metadata.
+
+Every candidate `awslogs` dependency is also explicit. When
+`awslogs-create-group` is disabled, the release preflight exhaustively resolves
+the exact region-bound log-group ARN and records `EXISTENCE_PROVEN`; a missing,
+renamed, or disappearing group fails before ECS mutation. When the candidate
+explicitly enables runtime group creation, evidence records
+`INTENTIONALLY_CREATED_BY_RUNTIME` and still requires the candidate-derived
+execution-role authority. Validation never creates a log group.
 
 The legacy execution-role correction is generated from the final candidate.
 It grants `secretsmanager:GetSecretValue` only for the candidate's exact secret
@@ -309,6 +321,9 @@ A later authenticated generation closes live reconciliation for every earlier
 interruption in its predecessor lineage. Only an interrupted final generation
 is compared with current ECS service/task health; older interrupted candidates
 remain fingerprint-checked lineage entries but cannot authorize supersession.
+The live health comparison uses that interruption record's authenticated
+`imageReleaseSha`, never a newer retry authorization's release identity, so a
+protected-main advance cannot misclassify and supersede a healthy candidate.
 
 Before registration, the initially observed service must identify the approved
 legacy source revision unless it already identifies the single exact recovery

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { runBackendHealthRecoveryCli, verifyProductionBackendHealth } from "../aws/recover-production-backend-health.mjs";
+import { runBackendHealthRecoveryCli, verifyInterruptedProductionBackendHealth, verifyProductionBackendHealth } from "../aws/recover-production-backend-health.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
@@ -87,6 +87,14 @@ test("health verifier rejects HTTP failure, timeout, malformed JSON, and HTTP-20
   assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", run(readiness(), 302)), /HTTP 302/);
   assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", run(readiness(), 503)), /HTTP 503/);
   assert.throws(() => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready", () => { throw new Error("curl: operation timed out"); }), /operation timed out/);
+});
+
+test("interrupted health verification is bound to its authenticated historical release identity", () => {
+  const historicalSha = "a".repeat(40); const retrySha = "b".repeat(40);
+  const run = () => `${readiness({ release: { gitSha: historicalSha } })}\n200`;
+  assert.equal(verifyInterruptedProductionBackendHealth("https://www.mscqr.com/api/health/ready", run, { imageReleaseSha: historicalSha }).healthy, true);
+  assert.throws(() => verifyInterruptedProductionBackendHealth("https://www.mscqr.com/api/health/ready", run, { imageReleaseSha: retrySha }), /release identity/);
+  assert.throws(() => verifyInterruptedProductionBackendHealth("https://www.mscqr.com/api/health/ready", run, {}), /release identity/);
 });
 
 test("prepare authenticates private input bytes and writes a bound private authorization", async (t) => {

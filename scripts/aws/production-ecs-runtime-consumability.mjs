@@ -21,6 +21,7 @@ const SECRET_VERSION_MAX_RESULTS = SECRET_VERSION_PAGE_SIZE * SECRET_VERSION_MAX
 const SECRET_VERSION_ID = /^[A-Za-z0-9_-]{32,64}$/;
 const SECRET_STAGE = /^[A-Za-z0-9/_+=.@-]{1,256}$/;
 const SECRET_RESOURCE = new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:[A-Za-z0-9/_+=.@-]+$`);
+const LOG_GROUP_ARN = new RegExp(`^arn:aws:logs:${REGION}:${ACCOUNT}:log-group:(/[^*]+)$`);
 const actionMatches = (value, expected) => [value].flat().some((action) => action === "*" || action === expected || (action?.endsWith("*") && expected.startsWith(action.slice(0, -1))));
 const patternMatches = (pattern, value) => typeof pattern === "string" && new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*").replaceAll("?", ".")}$`).test(value);
 const principalValues = (value) => [value].flatMap((principal) => typeof principal === "object" && principal ? [principal.AWS].flat() : [principal]);
@@ -156,6 +157,13 @@ export function addEncryptionDependencies(candidate, dependencies, resourceMetad
       || metadata.repositoryName !== dependency.context?.repositoryName || metadata.imageDigest !== dependency.context?.imageDigest || metadata.imageAvailability !== "EXISTS"
       || metadata.repositoryPolicySha256 !== canonicalSha256(null) || metadata.metadataSha256 !== expected) throw new Error(`Runtime ECR image or repository-policy metadata is missing or stale for ${dependency.resource}.`);
   }
+  for (const dependency of dependencies.filter(({ action }) => action.startsWith("logs:"))) {
+    const groupArn = dependency.resource.split(":log-stream:")[0]; const metadata = resourceMetadata?.[groupArn];
+    const createGroup = dependencies.some(({ action, resource }) => action === "logs:CreateLogGroup" && resource === groupArn);
+    const expected = metadata && canonicalSha256({ resource: groupArn, logGroupName: metadata.logGroupName, availability: metadata.availability, createGroup: metadata.createGroup });
+    if (!metadata || metadata.resource !== groupArn || metadata.metadataSha256 !== expected || metadata.createGroup !== createGroup
+      || (metadata.availability !== "EXISTENCE_PROVEN" && !(createGroup && metadata.availability === "INTENTIONALLY_CREATED_BY_RUNTIME"))) throw new Error(`Runtime awslogs group metadata is missing or stale for ${groupArn}.`);
+  }
   const expanded = new Map(dependencies.map((dependency) => [dependency.dependencyId, dependency]));
   for (const dependency of dependencies.filter(({ action }) => ["secretsmanager:GetSecretValue", "ssm:GetParameters"].includes(action))) {
     const metadata = resourceMetadata?.[dependency.resource];
@@ -167,7 +175,8 @@ export function addEncryptionDependencies(candidate, dependencies, resourceMetad
         versionIdsToStages: metadata.versionIdsToStages, secretVersions: metadata.secretVersions, selectorResolutions: metadata.selectorResolutions });
       const selector = dependency.context?.secretSelector;
       const resolution = metadata.selectorResolutions?.find((value) => canonicalSha256(value.selector) === canonicalSha256(selector));
-      if (metadata.availability !== "AVAILABLE" || metadata.deletedDate !== null || metadata.metadataSha256 !== expected || !resolution?.resolvedVersionId)
+      if (metadata.availability !== "AVAILABLE" || metadata.deletedDate !== null || metadata.metadataSha256 !== expected || !resolution?.resolvedVersionId
+        || resolution.jsonKeyState !== (selector?.jsonKey ? "PRESENT" : "NOT_REQUESTED"))
         throw new Error(`Runtime secret availability or selector metadata is missing or stale for ${dependency.resource}.`);
     } else {
       const name = dependency.resource.split(":parameter/")[1];
@@ -322,12 +331,39 @@ async function collectSecretVersions(secretArn, aws) {
   throw new Error(`Secrets Manager version census exceeds its bounded page limit for ${secretArn}.`);
 }
 
+async function collectLogGroup(groupArn, createGroup, aws) {
+  const match = LOG_GROUP_ARN.exec(groupArn); if (!match) throw new Error(`Runtime awslogs group identity is invalid for ${groupArn}.`);
+  const logGroupName = match[1]; const groups = new Map(); const tokens = new Set(); let nextToken;
+  for (let page = 0; page < 20; page += 1) {
+    const args = ["logs", "describe-log-groups", "--log-group-name-prefix", logGroupName, "--page-size", "50", "--max-items", "50", ...(nextToken ? ["--starting-token", nextToken] : [])];
+    const response = await aws(args);
+    if (!response || !Array.isArray(response.logGroups) || Object.hasOwn(response, "NextToken")) throw new Error(`Runtime awslogs group census is malformed for ${groupArn}.`);
+    for (const group of response.logGroups) {
+      if (typeof group?.logGroupName !== "string" || typeof group?.logGroupArn !== "string" || groups.has(group.logGroupName)) throw new Error(`Runtime awslogs group census is malformed or conflicting for ${groupArn}.`);
+      groups.set(group.logGroupName, group.logGroupArn);
+    }
+    const token = response.nextToken;
+    if (token == null) break;
+    if (typeof token !== "string" || !token || tokens.has(token)) throw new Error(`Runtime awslogs pagination token is malformed or cyclic for ${groupArn}.`);
+    tokens.add(token); nextToken = token;
+    if (page === 19) throw new Error(`Runtime awslogs group census exceeds its bounded page limit for ${groupArn}.`);
+  }
+  const exists = groups.get(logGroupName) === groupArn;
+  if (!exists && !createGroup) throw new Error(`Runtime awslogs group does not exist for ${groupArn}.`);
+  const state = { resource: groupArn, logGroupName, availability: exists ? "EXISTENCE_PROVEN" : "INTENTIONALLY_CREATED_BY_RUNTIME", createGroup };
+  return Object.freeze({ ...state, metadataSha256: canonicalSha256(state) });
+}
+
 export async function collectRuntimeResourceMetadata(candidate, aws, { readKmsKey, readEcrRepositoryPolicy } = {}) {
   if (typeof aws !== "function") throw new Error("Runtime closure requires an authenticated AWS reader.");
   const metadata = {};
   const dependencies = deriveEcsRuntimeDependencies(candidate);
   for (const dependency of dependencies.filter(({ action, resource }) => action.startsWith("ecr:") && resource !== "*")) {
     if (!metadata[dependency.resource]) metadata[dependency.resource] = await collectEcrRepositoryPolicyMetadata(dependency, aws, readEcrRepositoryPolicy);
+  }
+  for (const dependency of dependencies.filter(({ action }) => action.startsWith("logs:"))) {
+    const groupArn = dependency.resource.split(":log-stream:")[0];
+    if (!metadata[groupArn]) metadata[groupArn] = await collectLogGroup(groupArn, dependencies.some(({ action, resource }) => action === "logs:CreateLogGroup" && resource === groupArn), aws);
   }
   for (const dependency of dependencies) {
     if (metadata[dependency.resource] || !["secretsmanager:GetSecretValue", "ssm:GetParameters"].includes(dependency.action)) continue;
@@ -348,7 +384,8 @@ export async function collectRuntimeResourceMetadata(candidate, aws, { readKmsKe
       if (canonicalSha256(listedLabels) !== canonicalSha256(versionIdsToStages)) throw new Error(`Secrets Manager version metadata sources disagree for ${dependency.resource}.`);
       const existingVersionIds = new Set(secretVersions.map(({ versionId }) => versionId));
       const selectorDependencies = dependencies.filter((value) => value.action === "secretsmanager:GetSecretValue" && value.resource === dependency.resource);
-      const selectorResolutions = selectorDependencies.map(({ context }) => {
+      const selectorResolutions = [];
+      for (const { context } of selectorDependencies) {
         const selector = context?.secretSelector;
         if (!selector) throw new Error(`Secrets Manager selector metadata is missing for ${dependency.resource}.`);
         const stage = selector.versionStage || (selector.selectorMode === "AWSCURRENT" ? "AWSCURRENT" : null);
@@ -357,8 +394,20 @@ export async function collectRuntimeResourceMetadata(candidate, aws, { readKmsKe
         const resolvedVersionId = selector.versionId || stageVersion;
         if ((stage && !stageVersion) || (selector.versionId && !idExists) || (stageVersion && selector.versionId && stageVersion !== selector.versionId) || !resolvedVersionId)
           throw new Error(`Secrets Manager selector is not resolvable for ${dependency.resource}.`);
-        return { selector, resolvedVersionId, resolvedVersionStage: stage };
-      }).sort((left, right) => canonicalSha256(left.selector).localeCompare(canonicalSha256(right.selector)));
+        let jsonKeyState = "NOT_REQUESTED";
+        if (selector.jsonKey) {
+          let selected;
+          try { selected = await aws(["secretsmanager", "get-secret-value", "--secret-id", dependency.resource, "--version-id", resolvedVersionId]); }
+          catch { throw new Error(`Secrets Manager JSON-key consumability is unproven for ${dependency.resource}.`); }
+          let parsed;
+          try { parsed = typeof selected?.SecretString === "string" ? JSON.parse(selected.SecretString) : null; } catch { throw new Error(`Secrets Manager JSON-key consumability is unproven for ${dependency.resource}.`); }
+          if (selected?.ARN !== dependency.resource || selected.VersionId !== resolvedVersionId || !parsed || Array.isArray(parsed) || typeof parsed !== "object" || !Object.hasOwn(parsed, selector.jsonKey))
+            throw new Error(`Secrets Manager JSON-key consumability is unproven for ${dependency.resource}.`);
+          jsonKeyState = "PRESENT";
+        }
+        selectorResolutions.push({ selector, resolvedVersionId, resolvedVersionStage: stage, jsonKeyState });
+      }
+      selectorResolutions.sort((left, right) => canonicalSha256(left.selector).localeCompare(canonicalSha256(right.selector)));
       const resourcePolicyResponse = await aws(["secretsmanager", "get-resource-policy", "--secret-id", dependency.resource]);
       if (resourcePolicyResponse?.ARN !== dependency.resource) throw new Error(`Secrets Manager resource-policy readback is incomplete for ${dependency.resource}.`);
       const resourcePolicy = assertResourcePolicyAllowsRuntime({ policy: resourcePolicyResponse.ResourcePolicy || null, principalArn: dependency.principalArn, action: dependency.action, resource: dependency.resource, label: `Secrets Manager resource policy for ${dependency.resource}` });

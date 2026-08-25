@@ -212,7 +212,10 @@ test("signed mutation interruptions remain distinct from terminal failed revisio
     assert.equal(result.knownFailedRevisions.length, 0);
     assert.equal(result.interruptedRecoveries[0].status, status);
     assert.equal(result.interruptedRecoveries[0].classification, "INTERRUPTED_MUTATION");
+    assert.equal(result.interruptedRecoveries[0].imageReleaseSha, sourceSha);
   }
+  assert.throws(() => create([interruptedArtifacts("SERVICE_UPDATE_CONFIRMED", { imageReleaseSha: undefined })]), /release|malformed/);
+  assert.equal(verify(create([interruptedArtifacts("SERVICE_UPDATE_CONFIRMED", { imageReleaseSha: "a".repeat(40) })])).interruptedRecoveries[0].imageReleaseSha, "a".repeat(40));
   assert.throws(() => create([interruptedArtifacts("SERVICE_UPDATE_CONFIRMED", { expectedRevisionCensusSha256: null })]), /crash-reconcilable|census|malformed/);
 });
 

@@ -48,6 +48,11 @@ export function verifyProductionBackendHealth(healthUrl, run, expectedReleaseSha
   return parseProductionBackendReadiness(response.subarray(0, separator), { expectedReleaseSha });
 }
 
+export function verifyInterruptedProductionBackendHealth(healthUrl, run, interruption) {
+  if (!interruption || typeof interruption.imageReleaseSha !== "string") throw new Error("Interrupted recovery release identity is unavailable.");
+  return verifyProductionBackendHealth(healthUrl, run, interruption.imageReleaseSha);
+}
+
 function readAuthenticatedJson(filePath, expectedSha256, label) {
   if (!hex256.test(expectedSha256 || "")) throw new Error(`${label} expected SHA-256 is invalid.`);
   const captured = readStageBPrivateFileBytes({ filePath: path.resolve(filePath), repositoryRoot: root, label });
@@ -355,7 +360,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     const runningTasks = (await readTasks("RUNNING")).map((task) => ({ taskDefinitionArn: task.taskDefinitionArn, imageDigest: task.containers?.find(({ name }) => name === BACKEND_HEALTH_RECOVERY.container)?.imageDigest, healthStatus: task.healthStatus }));
     let health = null;
     if (live.taskDefinition === interruption.taskDefinitionArn && live.runningCount === live.desiredCount && live.pendingCount === 0) {
-      try { health = verifyProductionBackendHealth(healthUrl, run, authorization.value.imageReleaseSha); }
+      try { health = verifyInterruptedProductionBackendHealth(healthUrl, run, interruption); }
       catch { health = { healthy: false, success: false, status: "unavailable" }; }
     }
     const revisionCensus = await census();

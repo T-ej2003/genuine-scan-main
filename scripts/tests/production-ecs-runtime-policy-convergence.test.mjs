@@ -16,13 +16,18 @@ const metadata = Object.fromEntries(deriveEcsRuntimeDependencies(candidate).flat
   if (action === "secretsmanager:GetSecretValue") {
     const selector = deriveEcsRuntimeDependencies(candidate).find((dependency) => dependency.action === action && dependency.resource === resource).context.secretSelector;
     const versionIdsToStages = { [secretVersionId]: ["AWSCURRENT"] }; const secretVersions = [{ versionId: secretVersionId, versionStages: ["AWSCURRENT"] }];
-    const selectorResolutions = [{ selector, resolvedVersionId: secretVersionId, resolvedVersionStage: "AWSCURRENT" }];
+    const selectorResolutions = [{ selector, resolvedVersionId: secretVersionId, resolvedVersionStage: "AWSCURRENT", jsonKeyState: selector.jsonKey ? "PRESENT" : "NOT_REQUESTED" }];
     const state = { ARN: resource, KmsKeyId: null, availability: "AVAILABLE", deletedDate: null, versionIdsToStages, secretVersions, selectorResolutions };
     return [[resource, { resource, encryption: "AWS_MANAGED", kmsKeyArn: null, availability: state.availability, deletedDate: state.deletedDate, versionIdsToStages, secretVersions, selectorResolutions, resourcePolicySha256: canonicalSha256(null), resourcePolicyAccess: "NO_RESOURCE_POLICY", metadataSha256: canonicalSha256(state) }]];
   }
   if (action.startsWith("ecr:") && resource !== "*") {
     const state = { resource, repositoryName: resource.split("repository/")[1], imageDigest: candidate.containerDefinitions[0].image.split("@")[1], imageAvailability: "EXISTS", repositoryPolicyState: "NO_POLICY", repositoryPolicySha256: canonicalSha256(null) };
     return [[resource, { ...state, metadataSha256: canonicalSha256(state) }]];
+  }
+  if (action.startsWith("logs:")) {
+    const groupArn = resource.split(":log-stream:")[0]; const logGroupName = groupArn.split(":log-group:")[1];
+    const state = { resource: groupArn, logGroupName, availability: "EXISTENCE_PROVEN", createGroup: deriveEcsRuntimeDependencies(candidate).some((dependency) => dependency.action === "logs:CreateLogGroup" && dependency.resource === groupArn) };
+    return [[groupArn, { ...state, metadataSha256: canonicalSha256(state) }]];
   }
   return [];
 }));

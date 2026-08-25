@@ -48,6 +48,7 @@
       "Effect": "Allow",
       "Action": [
         "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue",
         "secretsmanager:GetResourcePolicy",
         "secretsmanager:ListSecretVersionIds"
       ],

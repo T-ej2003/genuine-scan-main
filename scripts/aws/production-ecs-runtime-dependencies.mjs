@@ -56,10 +56,12 @@ export function deriveEcsRuntimeDependencies(candidate) {
     const logs = container.logConfiguration;
     if (logs?.logDriver === "awslogs") {
       const group = logs.options?.["awslogs-group"];
-      if (typeof group !== "string" || !group.startsWith("/") || group.includes("*") || logs.options?.["awslogs-region"] !== RUNTIME_REGION) throw new Error(`Production awslogs configuration is not exact at ${source}.logConfiguration.`);
+      const createGroup = logs.options?.["awslogs-create-group"];
+      if (typeof group !== "string" || group.length > 512 || !/^\/[._/#A-Za-z0-9-]+$/.test(group) || logs.options?.["awslogs-region"] !== RUNTIME_REGION
+        || (createGroup !== undefined && !["true", "false"].includes(createGroup))) throw new Error(`Production awslogs configuration is not exact at ${source}.logConfiguration.`);
       const groupArn = `arn:aws:logs:${RUNTIME_REGION}:${RUNTIME_ACCOUNT}:log-group:${group}`;
       for (const action of ["logs:CreateLogStream", "logs:PutLogEvents"]) add(dependencies, { consumer: "EXECUTION_ROLE", principalArn: executionRoleArn, action, resource: `${groupArn}:log-stream:*`, source: `${source}.logConfiguration` });
-      if (logs.options?.["awslogs-create-group"] === "true") add(dependencies, { consumer: "EXECUTION_ROLE", principalArn: executionRoleArn, action: "logs:CreateLogGroup", resource: groupArn, source: `${source}.logConfiguration` });
+      if (createGroup === "true") add(dependencies, { consumer: "EXECUTION_ROLE", principalArn: executionRoleArn, action: "logs:CreateLogGroup", resource: groupArn, source: `${source}.logConfiguration` });
     } else if (logs?.secretOptions?.length) throw new Error(`Secret log options require a supported production log driver at ${source}.logConfiguration.`);
   }
   for (const [index, volume] of (candidate.volumes || []).entries()) {
