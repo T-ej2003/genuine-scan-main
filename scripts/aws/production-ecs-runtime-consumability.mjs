@@ -45,7 +45,10 @@ export const isEcrRepositoryPolicyNotFound = (error) => {
   const code = error?.name || error?.Code || error?.code;
   if (code === "RepositoryPolicyNotFoundException") return true;
   const stderr = Buffer.isBuffer(error?.stderr) ? error.stderr.toString("utf8") : String(error?.stderr || "");
-  return /^An error occurred \(RepositoryPolicyNotFoundException\) when calling the GetRepositoryPolicy operation:/.test(stderr.trim());
+  const value = stderr.trim();
+  if (/^(?:aws: \[ERROR\]: )?An error occurred \(RepositoryPolicyNotFoundException\) when calling the GetRepositoryPolicy operation:/.test(value)) return true;
+  try { return JSON.parse(value)?.Code === "RepositoryPolicyNotFoundException"; }
+  catch { return false; }
 };
 
 async function collectEcrRepositoryPolicyMetadata(dependency, aws, readEcrRepositoryPolicy) {

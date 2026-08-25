@@ -263,12 +263,12 @@ Runtime image closure authenticates the exact candidate ECR repository-policy
 state and immutable image-digest availability in addition to execution-role
 identity simulation. Account, repository, and digest come from the selected
 `DescribeImages.imageDetails[]` entry, matching the AWS CLI response contract.
-`RepositoryPolicyNotFoundException`
-is the only accepted no-policy result; read errors, malformed responses, and
-any repository policy semantics fail closed. Secret metadata is likewise bound
-to an explicit available/not-scheduled-for-deletion state. Repository policy
-and secret availability metadata are refreshed before registration and again
-before `UpdateService`.
+`RepositoryPolicyNotFoundException` is the only accepted no-policy result,
+including current AWS CLI text and JSON error envelopes; read errors, malformed
+responses, and any repository policy semantics fail closed. Secret metadata is
+likewise bound to an explicit available/not-scheduled-for-deletion state.
+Repository policy and secret availability metadata are refreshed before
+registration and again before `UpdateService`.
 
 The same candidate parser is mandatory for normal Stage-B backend/worker/
 executor/canary definitions, rotation overlap and cleanup definitions, and

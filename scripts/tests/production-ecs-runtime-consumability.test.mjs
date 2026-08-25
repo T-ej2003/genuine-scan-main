@@ -22,6 +22,7 @@ import {
   RUNTIME_AUTHORIZATION_MAX_AGE_MS,
   LIVE_RUNTIME_EVIDENCE_MAX_AGE_MS,
   RUNTIME_CONSUMABILITY,
+  isEcrRepositoryPolicyNotFound,
 } from "../aws/production-ecs-runtime-consumability.mjs";
 import { buildLegacyBackendRecoveryCandidate } from "../aws/production-backend-health-recovery-contract.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
@@ -65,6 +66,17 @@ const startupAws = (value, aws) => async (args) => {
   return aws(args);
 };
 const collectRuntimeResourceMetadata = (value, aws, options) => collectRuntimeResourceMetadataCore(value, startupAws(value, aws), options);
+
+test("ECR no-policy classification accepts current AWS CLI text and JSON errors only", () => {
+  const textError = new Error("no policy");
+  textError.stderr = Buffer.from("aws: [ERROR]: An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: Repository policy does not exist\n");
+  const jsonError = new Error("no policy");
+  jsonError.stderr = Buffer.from('{"Code":"RepositoryPolicyNotFoundException","Message":"Repository policy does not exist"}\n');
+  assert.equal(isEcrRepositoryPolicyNotFound(textError), true);
+  assert.equal(isEcrRepositoryPolicyNotFound(jsonError), true);
+  const denied = new Error("denied"); denied.stderr = Buffer.from("aws: [ERROR]: AccessDeniedException\n");
+  assert.equal(isEcrRepositoryPolicyNotFound(denied), false);
+});
 const metadata = (value) => Object.fromEntries(deriveEcsRuntimeDependencies(value).flatMap(({ action, resource }) => {
   if (action === "secretsmanager:GetSecretValue") {
     const selector = deriveEcsRuntimeDependencies(value).find((dependency) => dependency.action === action && dependency.resource === resource).context.secretSelector;

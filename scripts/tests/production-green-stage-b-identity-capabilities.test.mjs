@@ -167,6 +167,19 @@ test("backend recovery ECR denial blocks the release preflight before mutation",
   }
 });
 
+test("release preflight treats current AWS CLI no-policy errors as authenticated absence", () => {
+  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+    if (probe.action === "ecr:GetRepositoryPolicy") {
+      const error = new Error("no repository policy");
+      error.stderr = Buffer.from("aws: [ERROR]: An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: Repository policy does not exist\n");
+      throw error;
+    }
+    return allowed(args);
+  } });
+  assert.equal(report.status, "valid");
+  assert.equal(report.requiredReads["ecr:GetRepositoryPolicy"], "allowed");
+});
+
 test("active rollback discovery reads the exact deployment details", () => {
   const calls = [];
   const deploymentArn = "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/deployment";
