@@ -40,7 +40,7 @@ const verifyInventory = ({ digest }) => Buffer.from(digest).equals(inventorySign
 const convergenceContext = { sourceSha, candidate, candidateFileSha256, runtimeInventoryEnvelope, verifyInventory, now: Date.parse("2026-08-24T18:01:00.000Z") };
 const planContext = { candidate, candidateFileSha256, runtimeInventory };
 const expectedPlan = planProductionEcsRuntimePolicyConvergence({ ...planContext, livePolicyDocument: oldPolicy });
-const role = { Arn: PRODUCTION_ECS_RUNTIME_POLICY.roleArn, AssumeRolePolicyDocument: RUNTIME_CONSUMABILITY.ecsTaskTrust };
+const role = { Arn: PRODUCTION_ECS_RUNTIME_POLICY.roleArn, AssumeRolePolicyDocument: { ...RUNTIME_CONSUMABILITY.ecsTaskTrust, Statement: [{ ...RUNTIME_CONSUMABILITY.ecsTaskTrust.Statement[0], Sid: "" }] } };
 const attachments = [{ PolicyName: "AmazonECSTaskExecutionRolePolicy", PolicyArn: "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy" }];
 const convergenceAuthorization = () => {
   return createRuntimePolicyConvergenceAuthorization({ sourceSha, plan: expectedPlan, ticket: "INC-49", approvedBy: "operator", approverRole: "Production Operator", reason: "candidate-derived runtime closure", verificationRef: "https://example.invalid/49" });

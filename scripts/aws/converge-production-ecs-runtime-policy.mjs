@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertSignedRuntimeDependencyInventory, buildLegacyExecutionRuntimePolicy, runtimeCandidateIdentity, RUNTIME_CONSUMABILITY } from "./production-ecs-runtime-consumability.mjs";
+import { assertSignedRuntimeDependencyInventory, buildLegacyExecutionRuntimePolicy, ecsTaskTrustSha256, runtimeCandidateIdentity, RUNTIME_CONSUMABILITY } from "./production-ecs-runtime-consumability.mjs";
 import { canonicalJson, canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
@@ -94,7 +94,7 @@ export async function convergeProductionEcsRuntimePolicy({ sourceSha, candidate,
   const roleBefore = (await aws(["iam", "get-role", "--role-name", ROLE_NAME]))?.Role;
   const inlineBefore = await aws(["iam", "get-role-policy", "--role-name", ROLE_NAME, "--policy-name", POLICY_NAME]);
   const attachmentsBefore = await aws(["iam", "list-attached-role-policies", "--role-name", ROLE_NAME]);
-  if (roleBefore?.Arn !== ROLE_ARN || !roleBefore.AssumeRolePolicyDocument || canonicalSha256(roleBefore.AssumeRolePolicyDocument) !== RUNTIME_CONSUMABILITY.ecsTaskTrustSha256 || inlineBefore?.RoleName !== ROLE_NAME || inlineBefore?.PolicyName !== POLICY_NAME || !inlineBefore.PolicyDocument || !Array.isArray(attachmentsBefore?.AttachedPolicies)) throw new Error("Legacy execution-role IAM census or ECS task trust is incomplete.");
+  if (roleBefore?.Arn !== ROLE_ARN || !roleBefore.AssumeRolePolicyDocument || ecsTaskTrustSha256(roleBefore.AssumeRolePolicyDocument) !== RUNTIME_CONSUMABILITY.ecsTaskTrustSha256 || inlineBefore?.RoleName !== ROLE_NAME || inlineBefore?.PolicyName !== POLICY_NAME || !inlineBefore.PolicyDocument || !Array.isArray(attachmentsBefore?.AttachedPolicies)) throw new Error("Legacy execution-role IAM census or ECS task trust is incomplete.");
   const plan = planProductionEcsRuntimePolicyConvergence({ candidate, candidateFileSha256, runtimeInventory, livePolicyDocument: inlineBefore.PolicyDocument });
   if (!execute || !plan.convergenceRequired) return { ...plan, applied: false };
   assertRuntimePolicyConvergenceAuthorization(authorization, { sourceSha, plan });
@@ -109,7 +109,7 @@ export async function convergeProductionEcsRuntimePolicy({ sourceSha, candidate,
   const roleAfter = (await aws(["iam", "get-role", "--role-name", ROLE_NAME]))?.Role;
   const attachmentsAfter = await aws(["iam", "list-attached-role-policies", "--role-name", ROLE_NAME]);
   const attachmentIdentity = (value) => [...(value?.AttachedPolicies || [])].sort((left, right) => left.PolicyArn.localeCompare(right.PolicyArn));
-  if (roleAfter?.Arn !== ROLE_ARN || !roleAfter.AssumeRolePolicyDocument || canonicalSha256(roleAfter.AssumeRolePolicyDocument) !== RUNTIME_CONSUMABILITY.ecsTaskTrustSha256
+  if (roleAfter?.Arn !== ROLE_ARN || !roleAfter.AssumeRolePolicyDocument || ecsTaskTrustSha256(roleAfter.AssumeRolePolicyDocument) !== RUNTIME_CONSUMABILITY.ecsTaskTrustSha256
     || !Array.isArray(attachmentsAfter?.AttachedPolicies) || canonicalSha256(attachmentIdentity(attachmentsAfter)) !== canonicalSha256(attachmentIdentity(attachmentsBefore))) throw new RuntimePolicyConvergenceError("POSTWRITE_ROLE_BOUNDARY_READBACK_MISMATCH", "Runtime inline policy write completed but role trust or attachments changed.", { iamWrites: 1, roleArn: ROLE_ARN, policyName: POLICY_NAME, expectedLivePolicySha256: authorization.expectedLivePolicySha256, sourcePolicySha256: plan.sourcePolicySha256, livePolicySha256After: inlineAfter.sha256 });
   return { ...plan, applied: true, livePolicySha256After: inlineAfter.sha256, attachmentsChanged: false, trustChanged: false };
 }
