@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { APPROVED_PREFLIGHT_GENERATOR_ARNS } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_PLAN_PROFILES } from "./stage-b-plan-approval-contract.mjs";
-import { STAGE_B_IMPORTED_BACKEND_ROLLOVER_ACTIONS, assertStageBImportedBackendRolloverActions, STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
+import { STAGE_B_IMPORTED_BACKEND_ROLLOVER_ACTIONS, assertStageBImportedBackendRolloverActions, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBImportedBackendMetadataNormalization, isStageBPartialApplyDeposedTaskDefinitionCleanup, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
 import { assertStageBImagePublicationIdentity, publicationIdentitySha256, readStageBImagePublicationIdentity } from "./stage-b-image-publication-identity.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
@@ -100,9 +100,11 @@ export function assertStageBPlanImageEvidenceBinding({ plan, imageEvidence, plan
       && change.address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS
       && JSON.stringify(actions) === JSON.stringify(STAGE_B_IMPORTED_BACKEND_ROLLOVER_ACTIONS);
     const freshRotation = planProfile === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" && JSON.stringify(actions) === JSON.stringify(["create", "delete"]);
+    const reviewedRotation = planProfile === "ECS_TASK_DEFINITION_ROTATION" && isStageBTaskDefinitionRotationActionsValue(actions);
     if (!actions.length || (!actions.every((action) => action === "create" || action === "no-op")
       && !importedRollover
       && !freshRotation
+      && !reviewedRotation
       && !(change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(actions) === JSON.stringify(["update"])))) throw new Error(`Stage B current task-definition actions are invalid: ${change.address}`);
     if (change.address === STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS && JSON.stringify(actions) === JSON.stringify(["update"])) {
       assertStageBImportedBackendMetadataNormalization(change, { terraformConfiguration });

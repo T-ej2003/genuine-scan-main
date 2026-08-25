@@ -369,6 +369,19 @@ test("fresh-image recovery binds current rotations while ignoring reviewed depos
   assert.doesNotThrow(() => assertStageBPlanImageEvidenceBinding({ plan, imageEvidence: reportFixture(), planProfile: "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" }));
 });
 
+test("reviewed task-definition rotations reuse the shared action contract", () => {
+  for (const actions of [["create", "delete"], ["delete", "create"]]) {
+    const plan = imagePlan();
+    plan.resource_changes = plan.resource_changes.map((change) => ({ ...change, change: { ...change.change, actions } }));
+    assert.doesNotThrow(() => assertStageBPlanImageEvidenceBinding({ plan, imageEvidence: reportFixture(), planProfile: "ECS_TASK_DEFINITION_ROTATION" }));
+  }
+  for (const actions of [["delete"], ["create", "update"], ["create", "delete", "create"]]) {
+    const plan = imagePlan();
+    plan.resource_changes[0].change.actions = actions;
+    assert.throws(() => assertStageBPlanImageEvidenceBinding({ plan, imageEvidence: reportFixture(), planProfile: "ECS_TASK_DEFINITION_ROTATION" }), /current task-definition actions are invalid/);
+  }
+});
+
 test("normal image binding rejects zero or incomplete current task-definition sets", () => {
   for (const plan of [
     imagePlan({ resource_changes: [] }),
