@@ -313,21 +313,22 @@ function githubLegacyExecutionFixture(evidenceBytes) {
   const environment = { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", reviewers: [{ type: "User", reviewer: { id: 183396573, login: "T-ej2003" } }] }] };
   const approval = { state: "approved", user: { id: 183396573, login: "T-ej2003" }, environments: [{ id: environment.id, name: "production", can_admins_bypass: false }] };
   const artifact = { id: 9533026859, name: "backend-health-recovery-evidence", size_in_bytes: 1115, digest: `sha256:${"5".repeat(64)}`, expired: false, created_at: "2026-08-24T18:22:25.000Z", workflow_run: { id: workflow.id, head_sha: sourceSha, head_branch: "main", repository_id: repository.id, head_repository_id: repository.id } };
-  return { workflow, job, deployment, environment, approval, artifact, evidenceBytes };
+  return { workflow, job, deployment, deployments: [deployment], environment, approval, artifact, evidenceBytes };
 }
 
 function resolveLegacyFixture(fixture) {
   const logUrl = `https://github.com/T-ej2003/genuine-scan-main/actions/runs/${fixture.workflow.id}/job/${fixture.job.id}`;
-  const statuses = ["waiting", "in_progress", "failure"].map((state) => ({ state, environment: "production", log_url: logUrl }));
+  const statuses = fixture.statuses || ["waiting", "in_progress", "failure"].map((state) => ({ state, environment: "production", log_url: logUrl }));
   const workflowYaml = `jobs:\n  deploy-production-ecs:\n    environment: production\n    steps:\n      - uses: actions/upload-artifact@v7\n        if: \${{ always() && inputs.release_mode == 'backend-health-recovery' }}\n        with:\n          name: backend-health-recovery-evidence\n`;
   const run = (_command, args) => {
     if (_command === "git") return args[0] === "show" ? workflowYaml : "";
     if (args[0] === "run") { const directory = args[args.indexOf("--dir") + 1]; fs.writeFileSync(path.join(directory, "evidence.json"), fixture.evidenceBytes); return ""; }
     const endpoint = args[1];
     if (endpoint.endsWith(`/actions/runs/${fixture.workflow.id}`)) return JSON.stringify(fixture.workflow);
-    if (endpoint.endsWith(`/actions/runs/${fixture.workflow.id}/jobs`)) return JSON.stringify([{ jobs: [fixture.job] }]);
-    if (endpoint.includes("/deployments?")) return JSON.stringify([[fixture.deployment]]);
-    if (endpoint.endsWith(`/deployments/${fixture.deployment.id}/statuses`)) return JSON.stringify([statuses]);
+    if (endpoint.endsWith(`/actions/runs/${fixture.workflow.id}/attempts/${fixture.workflow.run_attempt}/jobs`)) return JSON.stringify([{ jobs: [fixture.job] }]);
+    if (endpoint.includes("/deployments?")) return JSON.stringify(fixture.deploymentPages || [fixture.deployments]);
+    const deploymentId = fixture.deployments.find(({ id }) => endpoint.endsWith(`/deployments/${id}/statuses`))?.id;
+    if (deploymentId) return JSON.stringify(fixture.statusPagesByDeployment?.[deploymentId] || [fixture.statusesByDeployment?.[deploymentId] || (deploymentId === fixture.deployment.id ? statuses : [])]);
     if (endpoint.endsWith("/environments/production")) return JSON.stringify(fixture.environment);
     if (endpoint.endsWith(`/actions/runs/${fixture.workflow.id}/approvals`)) return JSON.stringify([[fixture.approval]]);
     if (endpoint.endsWith(`/actions/runs/${fixture.workflow.id}/artifacts`)) return JSON.stringify([{ artifacts: [fixture.artifact] }]);
@@ -356,6 +357,38 @@ test("legacy schema-3 provenance authenticates the executed production job, appr
   }
 });
 
+test("legacy deployment provenance selects the exact run-attempt job among same-SHA deployments", () => {
+  const fixture = githubLegacyExecutionFixture(legacyArtifacts().recoveryEvidenceBytes);
+  const other = { ...fixture.deployment, id: 6068378459 };
+  fixture.deployments = [other, fixture.deployment];
+  fixture.statusesByDeployment = {
+    [other.id]: ["waiting", "in_progress", "failure"].map((state) => ({ state, environment: "production", log_url: `https://github.com/T-ej2003/genuine-scan-main/actions/runs/32759665000/job/97535360000` })),
+  };
+  assert.equal(resolveLegacyFixture(fixture).deployment.id, fixture.deployment.id);
+
+  fixture.statusesByDeployment[other.id] = ["waiting", "in_progress", "failure"].map((state) => ({ state, environment: "production", log_url: `https://github.com/T-ej2003/genuine-scan-main/actions/runs/${fixture.workflow.id}/job/${fixture.job.id}` }));
+  assert.throws(() => resolveLegacyFixture(fixture), /exact workflow job/);
+
+  fixture.statuses = ["waiting", "in_progress", "failure"].map((state) => ({ state, environment: "production", log_url: `https://github.com/T-ej2003/genuine-scan-main/actions/runs/${fixture.workflow.id}/job/1` }));
+  fixture.statusesByDeployment[other.id] = [];
+  assert.throws(() => resolveLegacyFixture(fixture), /exact workflow job/);
+});
+
+test("legacy GitHub deployment and status pagination remains complete", () => {
+  const fixture = githubLegacyExecutionFixture(legacyArtifacts().recoveryEvidenceBytes);
+  const other = { ...fixture.deployment, id: 6068378459 };
+  fixture.deployments = [other, fixture.deployment];
+  fixture.deploymentPages = [[other], [fixture.deployment]];
+  fixture.statusPagesByDeployment = {
+    [other.id]: [[]],
+    [fixture.deployment.id]: [
+      [{ state: "waiting", environment: "production", log_url: `https://github.com/T-ej2003/genuine-scan-main/actions/runs/${fixture.workflow.id}/job/${fixture.job.id}` }],
+      ["in_progress", "failure"].map((state) => ({ state, environment: "production", log_url: `https://github.com/T-ej2003/genuine-scan-main/actions/runs/${fixture.workflow.id}/job/${fixture.job.id}` })),
+    ],
+  };
+  assert.equal(resolveLegacyFixture(fixture).deployment.id, fixture.deployment.id);
+});
+
 test("legacy producer authenticates GitHub identity and exact registered task-definition bytes without invented modern artifacts", (context) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-schema3-evidence-")); fs.chmodSync(directory, 0o700);
   context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -373,9 +406,37 @@ test("legacy producer authenticates GitHub identity and exact registered task-de
   const approvalRecord = { state: "approved", user: { id: 183396573, login: "T-ej2003" }, environments: [{ id: environment.id, name: "production", can_admins_bypass: false }] };
   prepareProductionBackendFailedRecoveryEvidence({ sourceSha, manifestFile, manifestSha256: hash(manifestBytes), outputFile, now, protectedMain: () => {},
     resolveLegacy: () => ({ workflow: { id: 32759665989, run_attempt: 1, path: ".github/workflows/release-gate.yml", event: "workflow_dispatch", head_sha: sourceSha, head_branch: "main", conclusion: "failure", created_at: "2026-08-24T17:53:00.000Z" }, workflowDefinitionSha256: "4".repeat(64), job, deployment, statuses: [{ state: "failure" }], environment, approval: approvalRecord, artifact: { id: 123, name: "backend-health-recovery-evidence", created_at: "2026-08-24T18:22:25.000Z", size_in_bytes: 1115, digest: `sha256:${"5".repeat(64)}` }, evidenceBytes: legacy.recoveryEvidenceBytes }),
+    describeTaskDefinition: () => structuredClone(task),
     run: (_command, args) => JSON.stringify(args[1] === "verify" ? { SignatureValid: true } : { Signature: "AQ==" }) });
   const authenticated = verify(JSON.parse(fs.readFileSync(outputFile)));
   assert.equal(authenticated.knownFailedRevisions[0].taskDefinitionFingerprint, taskDefinitionFingerprint(task, task.tags));
+});
+
+test("legacy producer derives trust from ECS DescribeTaskDefinition with tags and rejects every local semantic mismatch", (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-schema3-task-auth-")); fs.chmodSync(directory, 0o700);
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const legacy = legacyArtifacts(); const authoritative = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
+  authoritative.taskDefinition.taskDefinitionArn = failedArn; authoritative.taskDefinition.revision = 49;
+  authoritative.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").image = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`;
+  const mutations = [
+    (value) => { value.taskDefinition.executionRoleArn += "-tampered"; },
+    (value) => { value.taskDefinition.taskRoleArn += "-tampered"; },
+    (value) => { value.taskDefinition.containerDefinitions[0].secrets[0].valueFrom += "-tampered"; },
+    (value) => { value.taskDefinition.containerDefinitions[0].environment[0].value += "-tampered"; },
+    (value) => { value.taskDefinition.containerDefinitions[0].logConfiguration.options["awslogs-group"] += "-tampered"; },
+    (value) => { value.taskDefinition.runtimePlatform.cpuArchitecture = "ARM64"; },
+    (value) => { value.taskDefinition.volumes.push({ name: "tampered" }); },
+    (value) => { value.tags.push({ key: "tampered", value: "true" }); },
+  ];
+  for (const mutate of mutations) {
+    const local = structuredClone(authoritative); mutate(local);
+    const taskBytes = bytes(local); const taskFile = path.join(directory, "task.json"); fs.writeFileSync(taskFile, taskBytes, { mode: 0o600 }); fs.chmodSync(taskFile, 0o600);
+    const manifest = { schemaVersion: 1, records: [{ evidenceContract: PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE, workflowRunId: "32759665989", taskDefinition: { file: taskFile, sha256: hash(taskBytes) } }] };
+    const manifestBytes = bytes(manifest); const manifestFile = path.join(directory, "manifest.json"); fs.writeFileSync(manifestFile, manifestBytes, { mode: 0o600 }); fs.chmodSync(manifestFile, 0o600);
+    assert.throws(() => prepareProductionBackendFailedRecoveryEvidence({ sourceSha, manifestFile, manifestSha256: hash(manifestBytes), outputFile: path.join(directory, "bundle.json"), now, protectedMain: () => {},
+      resolveLegacy: () => ({ ...githubLegacyExecutionFixture(legacy.recoveryEvidenceBytes), workflowDefinitionSha256: "4".repeat(64), statuses: [{ state: "failure" }] }),
+      describeTaskDefinition: () => authoritative, run: () => JSON.stringify({ SignatureValid: true }) }), /authoritative ECS semantics/);
+  }
 });
 
 test("canonical producer persists the exact self-contained evidence bundle", (context) => {

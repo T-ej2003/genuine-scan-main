@@ -360,9 +360,15 @@ and the governed zero-or-one registration/update counts.
 Pre-runtime-closure schema-3 history is accepted only through its explicit
 legacy contract. The producer authenticates the historical GitHub run and
 attempt, protected-main commit, executed `Deploy production ECS` job and upload
-step, production deployment/status history, required reviewer approval, and the
-artifact metadata bound to that exact run. Workflow YAML is checked only as a
-structural invariant; it is never execution or approval proof. Because schema 3
+step, production deployment/status history whose `log_url` identifies that
+exact run-attempt job, required reviewer approval, and the artifact metadata
+bound to that exact run. Other production deployments for the same source SHA
+are ignored rather than treated as proof or ambiguity. Workflow YAML is checked
+only as a structural invariant; it is never execution or approval proof. The
+legacy task-definition fingerprint is derived from authoritative
+`DescribeTaskDefinition --include TAGS` readback; the operator file is only a
+byte-bound corroborating capture and must match the complete canonical ECS
+semantics and tags. Because schema 3
 did not persist modern runtime-consumability or candidate-fingerprint artifacts,
 those fields remain explicitly `NOT_PART_OF_SCHEMA` and cannot be omitted from
 modern records.
@@ -371,7 +377,12 @@ Legacy terminal failure also requires fresh ECS evidence for the exact current
 task-definition ARN and exact `ecs-svc/<numeric-id>` deployment. Structured
 stopped-task observations retain task ARN, task definition, `startedBy`, status,
 stop code/reasons, and timestamps. Service-wide historical event text remains
-diagnostic only and cannot authorize revision reconciliation.
+diagnostic only and cannot authorize revision reconciliation. The complete
+deployment set, exact failed deployment, stopped-task set, and revision census are collected again before
+task-definition registration and before `UpdateService`. A force-new-deployment
+that keeps the same task definition still changes the `ecs-svc` identity and
+fails closed. This transaction's own task-definition registration is the only
+permitted census extension between those boundaries.
 
 `publish-production-backend-failed-recovery-evidence.mjs` stores that bundle as
 a content-addressed asset in an immutable GitHub release and emits a bounded
@@ -523,9 +534,10 @@ operation or runtime dependency fails Stage-B deployment closure.
 
    Schema-3 recovery evidence created before runtime-consumability closure uses
    the explicit `PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE` manifest record. The
-   preparer authenticates the completed GitHub run, its protected workflow and
-   production environment binding, the exact `backend-health-recovery-evidence`
-   artifact bytes, and an exact task-definition readback. Runtime-consumability
+   preparer authenticates the completed GitHub run, exact attempt/job-correlated
+   production deployment, protected workflow and production environment binding,
+   the exact `backend-health-recovery-evidence` artifact bytes, and authoritative
+   ECS task-definition plus tag readback. Runtime-consumability
    and candidate-fingerprint artifacts are recorded as not part of that schema;
    they are never fabricated. This compatibility path accepts only schema 3,
    requires the historical 1/1 terminal mutation shape, and still requires a

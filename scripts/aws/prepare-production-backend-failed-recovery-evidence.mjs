@@ -16,6 +16,12 @@ const required = (argv, name) => { const index = argv.indexOf(name); const value
 const sha = /^[a-f0-9]{64}$/;
 const repository = "T-ej2003/genuine-scan-main";
 
+function describeAuthoritativeTaskDefinition({ taskDefinitionArn, run }) {
+  const response = JSON.parse(run("aws", ["ecs", "describe-task-definition", "--task-definition", taskDefinitionArn, "--include", "TAGS", "--region", "eu-west-2", "--output", "json", "--no-cli-pager"]));
+  if (response?.taskDefinition?.taskDefinitionArn !== taskDefinitionArn || !Array.isArray(response?.tags)) throw new Error("Authoritative legacy task-definition readback is malformed.");
+  return response;
+}
+
 export function resolveLegacyWorkflowEvidence({ workflowRunId, run }) {
   const workflow = JSON.parse(run("gh", ["api", `repos/${repository}/actions/runs/${workflowRunId}`]));
   if (String(workflow.id) !== workflowRunId || workflow.repository?.full_name !== repository || workflow.head_repository?.full_name !== repository
@@ -28,11 +34,11 @@ export function resolveLegacyWorkflowEvidence({ workflowRunId, run }) {
   if ((typeof productionJob?.environment === "string" ? productionJob.environment : productionJob?.environment?.name) !== "production"
     || productionJob?.steps?.some?.((step) => step?.uses === "actions/upload-artifact@v7" && step?.with?.name === "backend-health-recovery-evidence"
       && step?.if === "${{ always() && inputs.release_mode == 'backend-health-recovery' }}") !== true) throw new Error("Legacy recovery workflow did not bind production approval and durable recovery evidence.");
-  const jobPages = JSON.parse(run("gh", ["api", `repos/${repository}/actions/runs/${workflowRunId}/jobs`, "--paginate", "--slurp"]));
+  const jobPages = JSON.parse(run("gh", ["api", `repos/${repository}/actions/runs/${workflowRunId}/attempts/${workflow.run_attempt}/jobs`, "--paginate", "--slurp"]));
   if (!Array.isArray(jobPages) || jobPages.some((page) => !page || !Array.isArray(page.jobs))) throw new Error("Legacy recovery job response is malformed.");
   const jobs = jobPages.flatMap((page) => page.jobs || []);
   const expectedSteps = ["Authenticate production environment approval boundary", "Execute governed legacy backend health recovery", "Upload backend health recovery evidence"];
-  const matchingJobs = jobs.filter((job) => job.name === "Deploy production ECS" && String(job.run_id) === workflowRunId && String(job.run_attempt) === String(workflow.run_attempt)
+  const matchingJobs = jobs.filter((job) => Number.isSafeInteger(job.id) && job.id > 0 && job.name === "Deploy production ECS" && String(job.run_id) === workflowRunId && String(job.run_attempt) === String(workflow.run_attempt)
     && job.head_sha === workflow.head_sha && job.status === "completed" && job.conclusion === "failure" && expectedSteps.every((name) => job.steps?.some((step) => step.name === name && step.status === "completed")));
   if (matchingJobs.length !== 1) throw new Error("Legacy recovery production job execution is not authentic.");
   const job = matchingJobs[0];
@@ -42,13 +48,15 @@ export function resolveLegacyWorkflowEvidence({ workflowRunId, run }) {
   if (!Array.isArray(deploymentPages) || deploymentPages.some((page) => !Array.isArray(page))) throw new Error("Legacy recovery deployment response is malformed.");
   const deployments = deploymentPages.flat();
   const deploymentLogUrl = `https://github.com/${repository}/actions/runs/${workflowRunId}/job/${job.id}`;
-  const matchingDeployments = deployments.filter((item) => item.sha === workflow.head_sha && item.ref === "main" && item.task === "deploy" && item.environment === "production" && item.performed_via_github_app?.slug === "github-actions");
-  if (matchingDeployments.length !== 1) throw new Error("Legacy recovery production environment deployment is not authentic.");
-  const deployment = matchingDeployments[0];
-  const statusPages = JSON.parse(run("gh", ["api", `repos/${repository}/deployments/${deployment.id}/statuses`, "--paginate", "--slurp"]));
-  if (!Array.isArray(statusPages) || statusPages.some((page) => !Array.isArray(page))) throw new Error("Legacy recovery deployment status response is malformed.");
-  const statuses = statusPages.flat().filter((item) => item.environment === "production" && item.log_url === deploymentLogUrl);
-  if (!["waiting", "in_progress", "failure"].every((state) => statuses.some((item) => item.state === state))) throw new Error("Legacy recovery deployment status history is incomplete or belongs to another job.");
+  const candidates = deployments.filter((item) => Number.isSafeInteger(item.id) && item.id > 0 && item.sha === workflow.head_sha && item.ref === "main" && item.task === "deploy" && item.environment === "production" && item.performed_via_github_app?.slug === "github-actions");
+  const correlated = candidates.map((deployment) => {
+    const pages = JSON.parse(run("gh", ["api", `repos/${repository}/deployments/${deployment.id}/statuses`, "--paginate", "--slurp"]));
+    if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) throw new Error("Legacy recovery deployment status response is malformed.");
+    const statuses = pages.flat().filter((item) => item.environment === "production" && item.log_url === deploymentLogUrl);
+    return { deployment, statuses };
+  }).filter(({ statuses }) => ["waiting", "in_progress", "failure"].every((state) => statuses.some((item) => item.state === state)));
+  if (correlated.length !== 1) throw new Error("Legacy recovery production environment deployment is not authentic for the exact workflow job.");
+  const { deployment, statuses } = correlated[0];
   const environment = JSON.parse(run("gh", ["api", `repos/${repository}/environments/production`]));
   const approvalPages = JSON.parse(run("gh", ["api", `repos/${repository}/actions/runs/${workflowRunId}/approvals`, "--paginate", "--slurp"]));
   if (!Array.isArray(approvalPages) || approvalPages.some((page) => !Array.isArray(page))) throw new Error("Legacy recovery approval response is malformed.");
@@ -74,7 +82,7 @@ export function resolveLegacyWorkflowEvidence({ workflowRunId, run }) {
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 
-export function prepareProductionBackendFailedRecoveryEvidence({ sourceSha, manifestFile, manifestSha256, outputFile, run, protectedMain = readFreshProtectedMainIdentity, resolveLegacy = resolveLegacyWorkflowEvidence, now } = {}) {
+export function prepareProductionBackendFailedRecoveryEvidence({ sourceSha, manifestFile, manifestSha256, outputFile, run, protectedMain = readFreshProtectedMainIdentity, resolveLegacy = resolveLegacyWorkflowEvidence, describeTaskDefinition = describeAuthoritativeTaskDefinition, now } = {}) {
   protectedMain({ cwd: root, expectedSourceSha: sourceSha });
   const manifestArtifact = readStageBPrivateFileBytes({ filePath: path.resolve(manifestFile), repositoryRoot: root, label: "Historical failed recovery manifest" });
   if (manifestArtifact.sha256 !== manifestSha256) throw new Error("Historical failed recovery manifest bytes changed.");
@@ -90,9 +98,13 @@ export function prepareProductionBackendFailedRecoveryEvidence({ sourceSha, mani
       const taskDefinition = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(taskArtifact.bytes));
       const resolved = resolveLegacy({ workflowRunId: record.workflowRunId, run });
       const evidence = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(resolved.evidenceBytes));
-      const definition = taskDefinition.taskDefinition || taskDefinition;
-      const fingerprint = taskDefinitionFingerprint(definition, taskDefinition.tags || []);
-      if (definition.taskDefinitionArn !== evidence.targetArn || definition.containerDefinitions?.find(({ name }) => name === "backend")?.image?.split("@")[1] !== evidence.recoveryImageDigest) throw new Error("Legacy task definition differs from its recovery evidence.");
+      const localDefinition = taskDefinition.taskDefinition || taskDefinition;
+      const authoritative = describeTaskDefinition({ taskDefinitionArn: evidence.targetArn, run });
+      const definition = authoritative.taskDefinition;
+      const fingerprint = taskDefinitionFingerprint(definition, authoritative.tags);
+      if (localDefinition.taskDefinitionArn !== evidence.targetArn || definition.taskDefinitionArn !== evidence.targetArn
+        || definition.containerDefinitions?.find(({ name }) => name === "backend")?.image?.split("@")[1] !== evidence.recoveryImageDigest
+        || taskDefinitionFingerprint(localDefinition, taskDefinition.tags || []) !== fingerprint) throw new Error("Legacy task definition differs from authoritative ECS semantics or its recovery evidence.");
       return { recoveryEvidenceBytes: resolved.evidenceBytes, legacyIdentity: {
         schemaVersion: 1, kind: "BACKEND_FAILED_RECOVERY_LEGACY_IDENTITY", evidenceContract: PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE,
         repository, workflowRunId: String(resolved.workflow.id), workflowRunAttempt: String(resolved.workflow.run_attempt), workflowPath: resolved.workflow.path,

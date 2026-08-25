@@ -564,6 +564,33 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
   return authorization;
 }
 
+function legacyFailedDeploymentProof(service, stoppedTaskFailures, taskDefinitionArn) {
+  const expectedServiceArn = `arn:aws:ecs:${BACKEND_HEALTH_RECOVERY.region}:${BACKEND_HEALTH_RECOVERY.account}:service/${BACKEND_HEALTH_RECOVERY.cluster}/${BACKEND_HEALTH_RECOVERY.service}`;
+  if (service?.serviceArn !== expectedServiceArn
+    || service?.clusterArn !== `arn:aws:ecs:${BACKEND_HEALTH_RECOVERY.region}:${BACKEND_HEALTH_RECOVERY.account}:cluster/${BACKEND_HEALTH_RECOVERY.cluster}`
+    || service?.serviceName !== BACKEND_HEALTH_RECOVERY.service || service?.taskDefinition !== taskDefinitionArn || service.runningCount !== 0 || service.pendingCount !== 0) return null;
+  const deployments = (service.deployments || []).filter((deployment) => deployment?.status === "PRIMARY" && deployment?.taskDefinition === taskDefinitionArn && deployment?.rolloutState === "FAILED"
+    && SERVICE_DEPLOYMENT_ID.test(deployment?.id || "") && Number(deployment?.failedTasks) > 0 && Number.isFinite(Date.parse(deployment?.createdAt)));
+  if (deployments.length !== 1 || !Array.isArray(stoppedTaskFailures)) return null;
+  const deployment = deployments[0];
+  const failures = stoppedTaskFailures.filter((task) => {
+    const createdAt = Date.parse(task?.createdAt); const startedAt = task?.startedAt == null ? createdAt : Date.parse(task.startedAt); const stoppedAt = Date.parse(task?.stoppedAt);
+    return TASK_INSTANCE_ARN.test(task?.taskArn || "") && task.taskDefinitionArn === taskDefinitionArn && task.startedBy === deployment.id
+      && task.desiredStatus === "STOPPED" && task.lastStatus === "STOPPED" && typeof task.stopCode === "string"
+      && typeof task.stoppedReason === "string" && Array.isArray(task.containerReasons) && task.containerReasons.every((reason) => typeof reason === "string")
+      && Number.isFinite(createdAt) && Number.isFinite(startedAt) && Number.isFinite(stoppedAt) && createdAt >= Date.parse(deployment.createdAt)
+      && startedAt >= createdAt && stoppedAt >= startedAt;
+  });
+  if (!failures.flatMap((task) => [task.stoppedReason, ...task.containerReasons]).some((reason) => /ResourceInitializationError|CannotPullContainerError|TaskFailedToStart/i.test(reason))) return null;
+  return Object.freeze({
+    serviceArn: service.serviceArn,
+    clusterArn: service.clusterArn, serviceName: service.serviceName, taskDefinitionArn, deploymentId: deployment.id,
+    rolloutState: deployment.rolloutState, failedTasks: deployment.failedTasks, deploymentCreatedAt: deployment.createdAt,
+    deployments: service.deployments.map(({ id, status, taskDefinition, rolloutState, failedTasks, desiredCount, runningCount, pendingCount, createdAt, updatedAt }) => ({ id, status, taskDefinition, rolloutState, failedTasks, desiredCount, runningCount, pendingCount, createdAt, updatedAt })).sort((a, b) => String(a.id).localeCompare(String(b.id))),
+    stoppedTasks: failures.map(({ taskArn, taskDefinitionArn: arn, startedBy, desiredStatus, lastStatus, stopCode, stoppedReason, containerReasons, createdAt, startedAt, stoppedAt }) => ({ taskArn, taskDefinitionArn: arn, startedBy, desiredStatus, lastStatus, stopCode, stoppedReason, containerReasons, createdAt, startedAt, stoppedAt })).sort((a, b) => a.taskArn.localeCompare(b.taskArn)),
+  });
+}
+
 export function assertLegacyBackendRecoveryEligibility(input = {}) {
   const { sourceSha, service, currentTaskDefinition, currentImageExists, replacementImage, stoppedTaskFailures = [], authorization, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindings, artifactSigningBindingSha256, runtimeConsumabilitySha256, authenticatedFailedRecoveryEvidence, githubContext, executionActor } = input;
   const knownFailedRevisions = authenticatedFailedRecoveryEvidence?.knownFailedRevisions || [];
@@ -602,11 +629,9 @@ export function assertLegacyBackendRecoveryEligibility(input = {}) {
       && Number.isFinite(createdAt) && Number.isFinite(startedAt) && Number.isFinite(stoppedAt) && createdAt >= Date.parse(matchingDeployments[0].createdAt)
       && startedAt >= createdAt && stoppedAt >= startedAt;
   }) : [];
-  const failedDeployments = exactFailedDeployments(service.taskDefinition);
-  const currentFailureReasons = exactFailures(service.taskDefinition, failedDeployments).flatMap((task) => [task.stoppedReason, ...task.containerReasons]);
   const sourceFailureReasons = exactFailures(currentArn, exactFailedDeployments(currentArn)).flatMap((task) => [task.stoppedReason, ...task.containerReasons]);
-  const legacyFailureLive = !currentFailedRevision?.requiresLiveFailureReconciliation || failedDeployments.length === 1
-    && currentFailureReasons.some((reason) => /ResourceInitializationError|CannotPullContainerError|TaskFailedToStart/i.test(reason));
+  const legacyFailureProof = currentFailedRevision?.requiresLiveFailureReconciliation === true ? legacyFailedDeploymentProof(service, stoppedTaskFailures, service.taskDefinition) : null;
+  const legacyFailureLive = !currentFailedRevision?.requiresLiveFailureReconciliation || legacyFailureProof !== null;
   const unavailableKnownFailure = unavailable && currentFailedRevision && legacyFailureLive;
   const unavailableMissingImage = currentImageExists === false && sourceFailureReasons.some((reason) => /CannotPullContainerError/i.test(reason) && /not found|does not exist/i.test(reason) && reason.includes(imageMatch[1]));
   const reconciledInterruption = currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.SUCCEEDED
@@ -619,7 +644,7 @@ export function assertLegacyBackendRecoveryEligibility(input = {}) {
   assertLegacyBackendRecoveryAuthorization(authorization, { sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: replacementImage.digest, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256: authenticatedFailedRecoveryEvidence?.envelopeSha256 || null, failedRecoveryEvidenceReferenceSha256: authenticatedFailedRecoveryEvidence?.referenceSha256 || null, recoveryHistory, knownFailedRevisions, interruptedRecoveries, githubContext, executionActor });
   const checked = assertLegacyBackendRecoveryCandidate({ currentTaskDefinition, candidate: input.candidate, recoveryImageDigest: replacementImage.digest, imageReleaseSha: authorization.imageReleaseSha, artifactSigningBindings });
   const reconciledFailedRevisions = interruptionReconciliations.filter(({ result }) => result.classification === INTERRUPTED_RECOVERY_STATE.FAILED).map(({ interruption }) => interruption);
-  return Object.freeze({ ...checked, currentTaskDefinitionArn: currentArn, observedServiceTaskDefinitionArn: service.taskDefinition, currentImageDigest: imageMatch[1], recoveryImageDigest: replacementImage.digest, desiredCount: service.desiredCount, networkConfigurationSha256: canonicalSha256(service.networkConfiguration), loadBalancersSha256: canonicalSha256(service.loadBalancers), rollbackProof: authorization.rollbackProof, recoveryHistory, knownFailedRevisions: [...knownFailedRevisions, ...reconciledFailedRevisions], interruptedRecoveries, interruptionReconciliations, currentInterruption });
+  return Object.freeze({ ...checked, currentTaskDefinitionArn: currentArn, observedServiceTaskDefinitionArn: service.taskDefinition, currentImageDigest: imageMatch[1], recoveryImageDigest: replacementImage.digest, desiredCount: service.desiredCount, networkConfigurationSha256: canonicalSha256(service.networkConfiguration), loadBalancersSha256: canonicalSha256(service.loadBalancers), rollbackProof: authorization.rollbackProof, recoveryHistory, knownFailedRevisions: [...knownFailedRevisions, ...reconciledFailedRevisions], interruptedRecoveries, interruptionReconciliations, currentInterruption, legacyFailureProof, legacyFailureProofSha256: legacyFailureProof ? canonicalSha256(legacyFailureProof) : null });
 }
 
 export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
@@ -640,11 +665,22 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
   }));
   const interruptionReconciliations = await reconcileInterruptions();
   const eligible = assertLegacyBackendRecoveryEligibility({ ...input, interruptionReconciliations });
+  if (eligible.legacyFailureProof && typeof adapters.readLegacyFailureState !== "function") throw new Error("Legacy failed-revision mutation-bound reconciliation adapter is required.");
   const initialCensus = classifyRevisionCensus(revisions, eligible);
   const assertFreshInterruptions = async (allowedRevision = null) => {
     if (!interruptions.length) return;
     const fresh = await reconcileInterruptions(allowedRevision);
     if (fresh.some(({ result }, index) => result.proofSha256 !== interruptionReconciliations[index].result.proofSha256)) throw new Error("Interrupted recovery live state changed before mutation.");
+  };
+  const assertFreshLegacyFailure = async (expectedCensusSha256, allowedRevision = null) => {
+    if (!eligible.legacyFailureProof) return null;
+    const snapshot = await adapters.readLegacyFailureState();
+    const lineage = classifyRevisionCensus(snapshot?.census, eligible);
+    if (lineage.identitySha256 !== expectedCensusSha256) throw new Error("Legacy backend revision census changed at the failed-deployment mutation boundary.");
+    const freshProof = legacyFailedDeploymentProof(snapshot?.service, snapshot?.stoppedTaskFailures, eligible.observedServiceTaskDefinitionArn);
+    if (!freshProof || canonicalSha256(freshProof) !== eligible.legacyFailureProofSha256) throw new Error("Legacy failed backend deployment proof changed before mutation.");
+    if (allowedRevision && !lineage.matches.some(({ taskDefinitionArn, fingerprint }) => taskDefinitionArn === allowedRevision.taskDefinitionArn && fingerprint === allowedRevision.taskDefinitionFingerprint)) throw new Error("Recovery registration is absent from the authenticated mutation-bound census.");
+    return snapshot.service;
   };
   if (eligible.currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.SUCCEEDED) {
     const result = Object.freeze({ mode: BACKEND_HEALTH_RECOVERY.kind, targetArn: eligible.currentInterruption.result.targetArn, recoveryImageDigest: eligible.recoveryImageDigest, registrations: 0, updates: 0, backendHealthy: true, health: eligible.currentInterruption.result.health, rotationRequired: true, stageBApplied: false, frontendDeployed: false, reconciledInterruption: true });
@@ -675,10 +711,11 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     if (eligible.rollbackProof) assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
     const freshRuntimeClosure = await adapters.verifyRuntimeClosure(eligible.candidate);
     if (freshRuntimeClosure?.evidenceSha256 !== initialRuntimeClosure.evidenceSha256) throw new Error("Recovery candidate runtime dependency closure changed before registration.");
-    if (classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== initialCensus.identitySha256) throw new Error("Legacy backend revision census changed before recovery registration.");
+    if (!eligible.legacyFailureProof && classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== initialCensus.identitySha256) throw new Error("Legacy backend revision census changed before recovery registration.");
     await assertFreshInterruptions();
     await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.TASK_DEFINITION_REGISTRATION_ATTEMPTED, targetArn: null, registrations: 0, updates: 0, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: null });
     assertFreshRuntimeConsumabilityVerification(freshRuntimeClosure, { evidenceSha256: initialRuntimeClosure.evidenceSha256, now: now() });
+    await assertFreshLegacyFailure(initialCensus.identitySha256);
     try {
       const result = await adapters.register(eligible.candidate);
       targetArn = result?.taskDefinition?.taskDefinitionArn || result?.taskDefinitionArn;
@@ -706,10 +743,13 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     if (eligible.rollbackProof) assertFreshRollbackEquivalence(eligible.rollbackProof, await adapters.readRollbackViability());
     const freshRuntimeClosure = await adapters.verifyRuntimeClosure(eligible.candidate);
     if (freshRuntimeClosure?.status !== "PASS" || freshRuntimeClosure.evidenceSha256 !== initialRuntimeClosure.evidenceSha256) throw new Error("Recovery candidate runtime dependency closure changed before service update.");
-    if (classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== expectedCensusSha256) throw new Error("Legacy backend revision census changed before recovery service update.");
+    if (!eligible.legacyFailureProof && classifyRevisionCensus(await adapters.census(), eligible).identitySha256 !== expectedCensusSha256) throw new Error("Legacy backend revision census changed before recovery service update.");
     await assertFreshInterruptions(registrations ? { taskDefinitionArn: targetArn, taskDefinitionFingerprint: eligible.fingerprint } : null);
     await adapters.record({ status: BACKEND_HEALTH_RECOVERY_STATUS.SERVICE_UPDATE_ATTEMPTED, targetArn, registrations, updates: 0, initialRevisionCensusSha256: initialCensus.identitySha256, expectedRevisionCensusSha256: expectedCensusSha256 });
     assertFreshRuntimeConsumabilityVerification(freshRuntimeClosure, { evidenceSha256: initialRuntimeClosure.evidenceSha256, now: now() });
+    live = await assertFreshLegacyFailure(expectedCensusSha256, registrations ? { taskDefinitionArn: targetArn, taskDefinitionFingerprint: eligible.fingerprint } : null) || await adapters.readService();
+    if (live.taskDefinition !== eligible.observedServiceTaskDefinitionArn || live.desiredCount !== eligible.desiredCount
+      || canonicalSha256(live.networkConfiguration) !== eligible.networkConfigurationSha256 || canonicalSha256(live.loadBalancers) !== eligible.loadBalancersSha256) throw new Error("Backend service changed concurrently at the recovery update boundary.");
     try { await adapters.updateService(targetArn); updates = 1; }
     catch (error) {
       live = await adapters.readService();

@@ -354,6 +354,20 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     return response.services[0];
   };
   const readTasks = (desiredStatus) => collectEcsServiceTasks({ aws, cluster: BACKEND_HEALTH_RECOVERY.cluster, service: BACKEND_HEALTH_RECOVERY.service, desiredStatus });
+  const serviceIdentity = (value) => canonicalSha256({ taskDefinition: value.taskDefinition, desiredCount: value.desiredCount, runningCount: value.runningCount, pendingCount: value.pendingCount,
+    deployments: (value.deployments || []).map(({ id, taskDefinition, rolloutState, failedTasks, desiredCount, runningCount, pendingCount, createdAt }) => ({ id, taskDefinition, rolloutState, failedTasks, desiredCount, runningCount, pendingCount, createdAt })).sort((a, b) => String(a.id).localeCompare(String(b.id))),
+    networkConfiguration: value.networkConfiguration, loadBalancers: value.loadBalancers });
+  const stoppedFailureObservations = async () => (await readTasks("STOPPED")).map((task) => ({ taskArn: task.taskArn, taskDefinitionArn: task.taskDefinitionArn, startedBy: task.startedBy,
+    desiredStatus: task.desiredStatus, lastStatus: task.lastStatus, stopCode: task.stopCode, stoppedReason: task.stoppedReason,
+    containerReasons: (task.containers || []).map(({ reason }) => reason).filter(Boolean), createdAt: task.createdAt, startedAt: task.startedAt || null, stoppedAt: task.stoppedAt }));
+  const readLegacyFailureState = async () => {
+    const before = await readService();
+    const failures = await stoppedFailureObservations();
+    const revisionCensus = await census();
+    const after = await readService();
+    if (serviceIdentity(before) !== serviceIdentity(after)) throw new Error("Legacy failed backend deployment changed during mutation-bound reconciliation.");
+    return { service: after, stoppedTaskFailures: failures, census: revisionCensus };
+  };
   const readInterruptedRecoveryState = async (interruption) => {
     const live = await readService();
     const runningTasks = (await readTasks("RUNNING")).map((task) => ({ taskDefinitionArn: task.taskDefinitionArn, imageDigest: task.containers?.find(({ name }) => name === BACKEND_HEALTH_RECOVERY.container)?.imageDigest, healthStatus: task.healthStatus }));
@@ -365,10 +379,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     const revisionCensus = await census();
     const stoppedTasks = await readTasks("STOPPED");
     const confirmed = await readService();
-    const identity = (value) => canonicalSha256({ taskDefinition: value.taskDefinition, desiredCount: value.desiredCount, runningCount: value.runningCount, pendingCount: value.pendingCount,
-      deployments: (value.deployments || []).map(({ id, taskDefinition, rolloutState, desiredCount, runningCount, pendingCount }) => ({ id, taskDefinition, rolloutState, desiredCount, runningCount, pendingCount })).sort((a, b) => String(a.id).localeCompare(String(b.id))),
-      networkConfiguration: value.networkConfiguration, loadBalancers: value.loadBalancers });
-    if (identity(live) !== identity(confirmed)) throw new Error("Interrupted recovery service changed during authoritative reconciliation.");
+    if (serviceIdentity(live) !== serviceIdentity(confirmed)) throw new Error("Interrupted recovery service changed during authoritative reconciliation.");
     return { service: confirmed, census: revisionCensus, runningTasks, stoppedTasks, health };
   };
   const readFreshRollbackViability = authorization.value.rollbackProof ? async () => readRollbackViability(0) : undefined;
@@ -387,6 +398,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     describe,
     register: async (payload) => aws(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify(payload)]),
     readService,
+    readLegacyFailureState,
     ...(authenticatedFailedRecoveryEvidence.interruptedRecoveries.length ? { readInterruptedRecoveryState } : {}),
     ...(readFreshRollbackViability ? { readRollbackViability: readFreshRollbackViability } : {}),
     updateService: async (taskDefinition) => aws(["ecs", "update-service", "--cluster", BACKEND_HEALTH_RECOVERY.cluster, "--service", BACKEND_HEALTH_RECOVERY.service, "--task-definition", taskDefinition]),
