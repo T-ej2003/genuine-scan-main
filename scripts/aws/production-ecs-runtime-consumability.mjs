@@ -14,6 +14,11 @@ const LEGACY_RUNTIME_POLICY_NAME = "mscqr-ecs-secrets-read";
 const ECR_REPOSITORY_ARN = new RegExp(`^arn:aws:ecr:${REGION}:${ACCOUNT}:repository/([a-z0-9][a-z0-9._/-]*)$`);
 const ECS_TASK_TRUST = Object.freeze({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Service: "ecs-tasks.amazonaws.com" }, Action: "sts:AssumeRole" }] });
 const ECS_TASK_TRUST_SHA256 = canonicalSha256(ECS_TASK_TRUST);
+export const ecsTaskTrustSha256 = (value) => {
+  const document = structuredClone(value);
+  if (document?.Statement?.length === 1 && document.Statement[0]?.Sid === "") delete document.Statement[0].Sid;
+  return canonicalSha256(document);
+};
 const SOURCE_OWNED_RUNTIME_KMS_KEYS = new Set([STAGE_B.approvalKmsKeyArn]);
 const SECRET_VERSION_PAGE_SIZE = 100;
 const SECRET_VERSION_MAX_PAGES = 100;
@@ -390,7 +395,7 @@ async function collectSecretVersions(secretArn, aws) {
   const versions = new Map(); const tokens = new Set(); let nextToken;
   for (let page = 0; page < SECRET_VERSION_MAX_PAGES; page += 1) {
     const args = ["secretsmanager", "list-secret-version-ids", "--secret-id", secretArn, "--include-deprecated",
-      "--page-size", String(SECRET_VERSION_PAGE_SIZE), "--max-items", String(SECRET_VERSION_PAGE_SIZE), ...(nextToken ? ["--starting-token", nextToken] : [])];
+      "--max-results", String(SECRET_VERSION_PAGE_SIZE), ...(nextToken ? ["--next-token", nextToken] : [])];
     const response = await aws(args);
     if (!response || typeof response !== "object" || Array.isArray(response) || !Array.isArray(response.Versions) || Object.hasOwn(response, "nextToken"))
       throw new Error(`Secrets Manager version census is malformed for ${secretArn}.`);
@@ -538,7 +543,7 @@ export async function collectLiveRolePolicyIdentity(principalArns, aws) {
     if (!ROLE_ARN.test(principalArn || "")) throw new Error("Runtime closure principal ARN is invalid.");
     const roleName = principalArn.split("/").at(-1);
     const role = (await aws(["iam", "get-role", "--role-name", roleName]))?.Role;
-    if (role?.Arn !== principalArn || canonicalSha256(role.AssumeRolePolicyDocument) !== ECS_TASK_TRUST_SHA256) throw new Error(`Runtime role identity or ECS task trust is incomplete for ${principalArn}.`);
+    if (role?.Arn !== principalArn || ecsTaskTrustSha256(role.AssumeRolePolicyDocument) !== ECS_TASK_TRUST_SHA256) throw new Error(`Runtime role identity or ECS task trust is incomplete for ${principalArn}.`);
     const inlineNames = (await aws(["iam", "list-role-policies", "--role-name", roleName]))?.PolicyNames;
     const attached = (await aws(["iam", "list-attached-role-policies", "--role-name", roleName]))?.AttachedPolicies;
     if (!Array.isArray(inlineNames) || !Array.isArray(attached)) throw new Error(`Runtime role policy census is incomplete for ${principalArn}.`);

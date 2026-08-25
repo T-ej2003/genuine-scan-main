@@ -633,7 +633,7 @@ test("secret version enumeration is complete, bounded, and cycle-safe", async ()
     if (operation === "ecr describe-images") return describeImagesResponse(args);
     if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource);
-    if (operation === "secretsmanager list-secret-version-ids") return args.includes("--starting-token")
+    if (operation === "secretsmanager list-secret-version-ids") return args.includes("--next-token")
       ? { Versions: [{ VersionId: unlabeled }] }
       : { Versions: [{ VersionId: secretVersionId, VersionStages: ["AWSCURRENT"] }], NextToken: "fixture-next-page" };
     if (operation === "secretsmanager get-resource-policy") return { ARN: resource, ResourcePolicy: null };
@@ -645,6 +645,7 @@ test("secret version enumeration is complete, bounded, and cycle-safe", async ()
   const secretCount = new Set(deriveEcsRuntimeDependencies(value).filter(({ action }) => action === "secretsmanager:GetSecretValue").map(({ resource }) => resource)).size;
   assert.equal(listCalls.length, secretCount * 2);
   assert.equal(listCalls.every((args) => args.includes("--include-deprecated")), true);
+  assert.equal(listCalls.every((args) => args.includes("--max-results") && !args.includes("--page-size") && !args.includes("--max-items") && !args.includes("--starting-token")), true);
 
   const failing = (page) => collectRuntimeResourceMetadata(value, async (args) => {
     const operation = args.slice(0, 2).join(" "); const resource = args[args.indexOf("--secret-id") + 1] || args.at(-1);
@@ -657,7 +658,7 @@ test("secret version enumeration is complete, bounded, and cycle-safe", async ()
   });
   await assert.rejects(() => failing(() => ({ Versions: null })), /version census is malformed/);
   await assert.rejects(() => failing(() => ({ Versions: [{ VersionId: secretVersionId, VersionStages: ["AWSCURRENT"] }] })), /selector is not resolvable/);
-  await assert.rejects(() => failing((args) => args.includes("--starting-token")
+  await assert.rejects(() => failing((args) => args.includes("--next-token")
     ? { Versions: [{ VersionId: secretVersionId, VersionStages: ["AWSCURRENT"] }] }
     : { Versions: [{ VersionId: secretVersionId, VersionStages: ["AWSCURRENT"] }], NextToken: "fixture-next-page" }), /conflicting/);
   await assert.rejects(() => failing(() => ({ Versions: [], NextToken: "fixture-cycle" })), /cyclic/);
@@ -747,6 +748,13 @@ test("live role identity requires the exact ECS tasks trust before policy eviden
   };
   const identity = await collectLiveRolePolicyIdentity([principalArn], aws);
   assert.equal(identity.roles[0].trustPolicySha256, RUNTIME_CONSUMABILITY.ecsTaskTrustSha256);
+  const iamReadback = await collectLiveRolePolicyIdentity([principalArn], async (args) => args[1] === "get-role"
+    ? { Role: { Arn: principalArn, AssumeRolePolicyDocument: { ...RUNTIME_CONSUMABILITY.ecsTaskTrust, Statement: [{ ...RUNTIME_CONSUMABILITY.ecsTaskTrust.Statement[0], Sid: "" }] } } }
+    : aws(args));
+  assert.equal(iamReadback.roles[0].trustPolicySha256, RUNTIME_CONSUMABILITY.ecsTaskTrustSha256);
+  await assert.rejects(() => collectLiveRolePolicyIdentity([principalArn], async (args) => args[1] === "get-role"
+    ? { Role: { Arn: principalArn, AssumeRolePolicyDocument: { ...RUNTIME_CONSUMABILITY.ecsTaskTrust, Statement: [{ ...RUNTIME_CONSUMABILITY.ecsTaskTrust.Statement[0], Sid: "unexpected" }] } } }
+    : aws(args)), /ECS task trust/);
   await assert.rejects(() => collectLiveRolePolicyIdentity([principalArn], async (args) => args[1] === "get-role"
     ? { Role: { Arn: principalArn, AssumeRolePolicyDocument: { Version: "2012-10-17", Statement: [] } } }
     : aws(args)), /ECS task trust/);
