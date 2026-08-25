@@ -19,6 +19,7 @@ import {
   assertFreshRuntimeConsumabilityVerification,
   signRuntimeConsumabilityEvidence,
   signRuntimeDependencyInventory,
+  simulateRuntimeDependencies,
   RUNTIME_AUTHORIZATION_MAX_AGE_MS,
   LIVE_RUNTIME_EVIDENCE_MAX_AGE_MS,
   RUNTIME_CONSUMABILITY,
@@ -167,12 +168,30 @@ const metadata = (value) => Object.fromEntries(deriveEcsRuntimeDependencies(valu
   return [];
 }));
 
+const managedExecutionPolicy = { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: ["ecr:GetAuthorizationToken", "ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage", "logs:CreateLogStream", "logs:PutLogEvents"], Resource: "*" }] };
+const loggingAuthorization = (value, dependencies, policySha256) => {
+  const options = value.containerDefinitions[0].logConfiguration.options; const logGroupArn = `arn:aws:logs:eu-west-2:368992683803:log-group:${options["awslogs-group"]}`;
+  const claims = dependencies.filter(({ action }) => ["logs:CreateLogStream", "logs:PutLogEvents"].includes(action)).map((dependency) => ({
+    dependencyId: dependency.dependencyId, principalArn: dependency.principalArn, action: dependency.action, resource: dependency.resource,
+    logGroupArn, logGroupName: options["awslogs-group"], streamPrefix: options["awslogs-stream-prefix"], containerName: value.containerDefinitions[0].name,
+    futureStreamNamespace: `${logGroupArn}:log-stream:${options["awslogs-stream-prefix"]}/${value.containerDefinitions[0].name}/*`,
+  })).sort((left, right) => left.dependencyId.localeCompare(right.dependencyId));
+  return { claimsSha256: canonicalSha256(claims), namespaces: [{ logGroupArn, logGroupName: options["awslogs-group"], streamPrefix: options["awslogs-stream-prefix"], containerName: value.containerDefinitions[0].name,
+    futureStreamNamespace: `${logGroupArn}:log-stream:${options["awslogs-stream-prefix"]}/${value.containerDefinitions[0].name}/*` }],
+  positivePolicyArn: RUNTIME_CONSUMABILITY.awsManagedExecutionPolicyArn, defaultVersionId: "v1", positivePolicySha256: policySha256,
+  identityPolicyDenyAnalysis: "NO_INTERSECTING_DENY", permissionsBoundary: "ABSENT" };
+};
+
 function passing(value = candidate(), resourceMetadata = metadata(value)) {
   const dependencies = addEncryptionDependencies(value, deriveEcsRuntimeDependencies(value), resourceMetadata);
   const sourcePolicyOwnership = sourceRuntimePolicyOwnership(value, resourceMetadata);
   const simulations = Object.fromEntries(dependencies.map(({ dependencyId, principalArn, action, resource }) => [dependencyId, { principalArn, action, resource, decision: "allowed" }]));
   const generatedSha256 = Object.values(sourcePolicyOwnership).find(({ policyName }) => policyName)?.sourcePolicySha256;
-  const livePolicyBody = { roles: [{ principalArn: value.executionRoleArn, trustPolicySha256: RUNTIME_CONSUMABILITY.ecsTaskTrustSha256, inlinePolicies: [{ policyName: "mscqr-ecs-secrets-read", policySha256: generatedSha256 }], attachedPolicies: [{ policyArn: "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy", policySha256: "e".repeat(64) }] }] };
+  const managedSha256 = canonicalSha256(managedExecutionPolicy);
+  const livePolicyBody = { roles: [{ principalArn: value.executionRoleArn, trustPolicySha256: RUNTIME_CONSUMABILITY.ecsTaskTrustSha256, permissionsBoundary: null,
+    inlinePolicies: [{ policyName: "mscqr-ecs-secrets-read", policySha256: generatedSha256 }],
+    attachedPolicies: [{ policyArn: RUNTIME_CONSUMABILITY.awsManagedExecutionPolicyArn, defaultVersionId: "v1", policySha256: managedSha256 }],
+    loggingAuthorization: loggingAuthorization(value, dependencies, managedSha256) }] };
   const livePolicyIdentity = { ...livePolicyBody, identitySha256: canonicalSha256(livePolicyBody) };
   const evidence = buildRuntimeConsumabilityEvidence({ sourceSha, candidate: value, resourceMetadata, sourcePolicyOwnership, livePolicyIdentity, simulations, generatedAt: "2026-08-24T18:00:00.000Z" });
   return { evidence, resourceMetadata, livePolicyIdentity, dependencies, simulations, sourcePolicyOwnership };
@@ -196,6 +215,94 @@ test("candidate-derived closure binds exact execution-role runtime dependencies"
   const policy = buildLegacyExecutionRuntimePolicy(value, result.resourceMetadata);
   assert.equal(policy.Statement[0].Resource.includes(bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT), true);
   assert.equal(JSON.stringify(policy).includes("*"), false);
+});
+
+test("CloudWatch Logs simulation corroborates only the managed wildcard grant and preserves candidate evidence", async () => {
+  const dependencies = deriveEcsRuntimeDependencies(candidate()).filter(({ action }) => ["logs:CreateLogStream", "logs:PutLogEvents"].includes(action));
+  const calls = []; const simulate = (decision, mutate = (value) => value) => simulateRuntimeDependencies(dependencies, async (args) => {
+    const action = args[args.indexOf("--action-names") + 1]; const resource = args[args.indexOf("--resource-arns") + 1];
+    calls.push({ action, resource });
+    return mutate({ EvaluationResults: [{ EvalActionName: action, EvalResourceName: `arn:${"${Partition}"}:logs:${"${Region}"}:${"${Account}"}:log-group:${"${LogGroupName}"}:log-stream:${"${LogStreamName}"}`, EvalDecision: decision,
+      MissingContextValues: [], ResourceSpecificResults: [{ EvalResourceName: resource, EvalResourceDecision: decision, MissingContextValues: [] }] }] }, { action, resource });
+  });
+  const simulations = await simulate("allowed");
+  for (const dependency of dependencies) {
+    assert.deepEqual(simulations[dependency.dependencyId], { principalArn: dependency.principalArn, action: dependency.action, resource: dependency.resource, decision: "allowed" });
+    assert.match(dependency.resource, /:log-stream:\*$/);
+  }
+  assert.equal(calls.every(({ resource }) => resource === "*"), true);
+  for (const decision of ["implicitDeny", "explicitDeny"]) assert.equal(Object.values(await simulate(decision)).every(({ decision: value }) => value === "denied"), true);
+  for (const mutate of [
+    () => ({ EvaluationResults: [] }),
+    (response) => { response.EvaluationResults[0].EvalActionName = "logs:DescribeLogStreams"; return response; },
+    (response) => { response.EvaluationResults[0].ResourceSpecificResults[0].EvalResourceName = "unexpected"; return response; },
+    (response) => { response.EvaluationResults[0].EvalDecision = "explicitDeny"; return response; },
+    (response) => { response.EvaluationResults[0].ResourceSpecificResults[0].MissingContextValues = ["aws:SourceArn"]; return response; },
+    (response) => { response.EvaluationResults[0].ResourceSpecificResults[0].PermissionsBoundaryDecisionDetail = { AllowedByPermissionsBoundary: false }; return response; },
+    (response) => { response.EvaluationResults[0].ResourceSpecificResults = null; return response; },
+    (response) => { response.EvaluationResults[0].ResourceSpecificResults.push({ EvalResourceName: "unexpected", EvalResourceDecision: "allowed", MissingContextValues: [] }); return response; },
+    (response) => { response.EvaluationResults.push({ EvalActionName: "logs:DescribeLogStreams", EvalDecision: "allowed" }); return response; },
+  ]) assert.equal(Object.values(await simulate("allowed", mutate)).every(({ decision }) => decision === "denied"), true);
+});
+
+test("CloudWatch Logs authority binds the future namespace and rejects intersecting identity denies", async () => {
+  const value = candidate(); const principalArn = value.executionRoleArn; const roleName = principalArn.split("/").at(-1);
+  const collect = (inlineDocument = { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "secretsmanager:GetSecretValue", Resource: "*" }] }, role = {}, {
+    attached = [{ PolicyName: "AmazonECSTaskExecutionRolePolicy", PolicyArn: RUNTIME_CONSUMABILITY.awsManagedExecutionPolicyArn }], managedDocument = managedExecutionPolicy,
+  } = {}) => {
+    const calls = [];
+    return collectLiveRolePolicyIdentity([principalArn], async (args) => {
+      calls.push(args); const operation = args.slice(0, 2).join(" ");
+      if (operation === "iam get-role") return { Role: { Arn: principalArn, AssumeRolePolicyDocument: RUNTIME_CONSUMABILITY.ecsTaskTrust, ...role } };
+      if (operation === "iam list-role-policies") return { PolicyNames: ["runtime"] };
+      if (operation === "iam get-role-policy") return { RoleName: roleName, PolicyName: "runtime", PolicyDocument: inlineDocument };
+      if (operation === "iam list-attached-role-policies") return { AttachedPolicies: attached };
+      if (operation === "iam get-policy") return { Policy: { Arn: args[args.indexOf("--policy-arn") + 1], DefaultVersionId: "v1" } };
+      if (operation === "iam get-policy-version") return { PolicyVersion: { Document: args.includes("arn:aws:iam::368992683803:policy/boundary") ? { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "*", Resource: "*" }] } : managedDocument } };
+      throw new Error(operation);
+    }, value).then((identity) => ({ identity, calls }));
+  };
+  const exact = await collect(); const authorization = exact.identity.roles[0].loggingAuthorization;
+  assert.equal(authorization.namespaces.length, 1);
+  assert.equal(authorization.namespaces[0].futureStreamNamespace, "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-backend:log-stream:ecs/backend/*");
+  assert.equal(exact.calls.every((args) => args[0] === "iam" && !["put-role-policy", "create-policy-version"].includes(args[1])), true);
+  const deny = (Action, Resource, extra = {}) => ({ Version: "2012-10-17", Statement: [{ Effect: "Deny", Action, Resource, ...extra }] });
+  for (const document of [
+    deny("logs:PutLogEvents", "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-backend:log-stream:*"),
+    deny("logs:CreateLogStream", "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-backend:log-stream:ecs/backend/*"),
+    deny("logs:Put*", "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-*:log-stream:*"),
+    deny("logs:PutLogEvents", "*", { Condition: { StringEquals: { "aws:PrincipalArn": principalArn } } }),
+    { Version: "2012-10-17", Statement: [{ Effect: "Deny", NotAction: "logs:Describe*", Resource: "*" }] },
+    { Version: "2012-10-17", Statement: [{ Effect: "Deny", Action: "logs:PutLogEvents", NotResource: "arn:aws:logs:eu-west-2:368992683803:log-group:/unrelated:*" }] },
+  ]) await assert.rejects(() => collect(document), /denied|condition/);
+  for (const document of [
+    deny("logs:PutLogEvents", "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-backend:log-stream:${aws:PrincipalTag/prefix}/*"),
+    deny("logs:CreateLogStream", "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-backend:log-stream:${aws:username}/*"),
+    { Version: "2012-10-17", Statement: [{ Effect: "Deny", Action: "logs:PutLogEvents", NotResource: "arn:aws:logs:eu-west-2:368992683803:log-group:${aws:PrincipalTag/group}:log-stream:*" }] },
+  ]) await assert.rejects(() => collect(document), /UNSUPPORTED_VARIABLE_BEARING_LOGGING_DENY/);
+  await assert.doesNotReject(() => collect(deny("logs:PutLogEvents", "arn:aws:logs:eu-west-2:368992683803:log-group:/unrelated:log-stream:*")));
+  await assert.rejects(() => collect(undefined, { PermissionsBoundary: { PermissionsBoundaryArn: "arn:aws:iam::368992683803:policy/boundary" } }), /permissions boundary/);
+  await assert.rejects(() => collect(undefined, {}, { attached: [] }), /AWS-managed ECS execution policy/);
+  await assert.rejects(() => collect(undefined, {}, { managedDocument: { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "logs:DescribeLogGroups", Resource: "*" }] } }), /wildcard authority/);
+  await assert.rejects(() => collect(undefined, {}, { attached: [{ PolicyArn: RUNTIME_CONSUMABILITY.awsManagedExecutionPolicyArn }, { PolicyArn: RUNTIME_CONSUMABILITY.awsManagedExecutionPolicyArn }] }), /policy census/);
+});
+
+test("non-logging runtime simulations retain exact resources and KMS context", async () => {
+  const dependencies = [
+    { dependencyId: "secret", principalArn: candidate().executionRoleArn, action: "secretsmanager:GetSecretValue", resource: bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT },
+    { dependencyId: "kms", principalArn: candidate().executionRoleArn, action: "kms:Decrypt", resource: `arn:aws:kms:eu-west-2:368992683803:key/${"1".repeat(32)}`, context: { "kms:ViaService": "secretsmanager.eu-west-2.amazonaws.com" } },
+    { dependencyId: "ecr", principalArn: candidate().executionRoleArn, action: "ecr:BatchGetImage", resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend" },
+    { dependencyId: "ssm", principalArn: candidate().executionRoleArn, action: "ssm:GetParameters", resource: "arn:aws:ssm:eu-west-2:368992683803:parameter/mscqr/runtime" },
+    { dependencyId: "other-logs", principalArn: candidate().executionRoleArn, action: "logs:DescribeLogStreams", resource: "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-backend" },
+  ];
+  const calls = [];
+  const simulations = await simulateRuntimeDependencies(dependencies, async (args) => {
+    calls.push(args);
+    return { EvaluationResults: [{ EvalActionName: args[args.indexOf("--action-names") + 1], EvalResourceName: args[args.indexOf("--resource-arns") + 1], EvalDecision: "allowed", MissingContextValues: [] }] };
+  });
+  for (const dependency of dependencies) assert.deepEqual(simulations[dependency.dependencyId], { principalArn: dependency.principalArn, action: dependency.action, resource: dependency.resource, decision: "allowed" });
+  assert.equal(calls.every((args, index) => args[args.indexOf("--resource-arns") + 1] === dependencies[index].resource), true);
+  assert.equal(calls.find((args) => args.includes("kms:Decrypt")).includes("ContextKeyName=kms:ViaService,ContextKeyValues=secretsmanager.eu-west-2.amazonaws.com,ContextKeyType=string"), true);
 });
 
 test("repeated candidate secret references retain dependency identity but deduplicate IAM resources", () => {
@@ -574,8 +681,7 @@ test("awslogs groups are exact, paginated, create-aware, and refreshed before mu
   state = "CYCLE"; await assert.rejects(() => collectRuntimeResourceMetadataCore(value, aws), /cyclic/);
   const createValue = candidate(); createValue.containerDefinitions[0].logConfiguration.options["awslogs-create-group"] = "true";
   state = "MISSING";
-  const created = await collectRuntimeResourceMetadataCore(createValue, aws);
-  assert.equal(created[logGroupArn].availability, "INTENTIONALLY_CREATED_BY_RUNTIME");
+  await assert.rejects(() => collectRuntimeResourceMetadataCore(createValue, aws), /does not exist/);
   const wrongRegion = candidate(); wrongRegion.containerDefinitions[0].logConfiguration.options["awslogs-region"] = "us-east-1";
   assert.throws(() => deriveEcsRuntimeDependencies(wrongRegion), /awslogs configuration/);
   const malformedCreate = candidate(); malformedCreate.containerDefinitions[0].logConfiguration.options["awslogs-create-group"] = "yes";

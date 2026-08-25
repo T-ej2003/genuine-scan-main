@@ -57,7 +57,9 @@ export function deriveEcsRuntimeDependencies(candidate) {
     if (logs?.logDriver === "awslogs") {
       const group = logs.options?.["awslogs-group"];
       const createGroup = logs.options?.["awslogs-create-group"];
+      const streamPrefix = logs.options?.["awslogs-stream-prefix"];
       if (typeof group !== "string" || group.length > 512 || !/^\/[._/#A-Za-z0-9-]+$/.test(group) || logs.options?.["awslogs-region"] !== RUNTIME_REGION
+        || typeof streamPrefix !== "string" || !/^[._/#A-Za-z0-9-]{1,512}$/.test(streamPrefix)
         || (createGroup !== undefined && !["true", "false"].includes(createGroup))) throw new Error(`Production awslogs configuration is not exact at ${source}.logConfiguration.`);
       const groupArn = `arn:aws:logs:${RUNTIME_REGION}:${RUNTIME_ACCOUNT}:log-group:${group}`;
       for (const action of ["logs:CreateLogStream", "logs:PutLogEvents"]) add(dependencies, { consumer: "EXECUTION_ROLE", principalArn: executionRoleArn, action, resource: `${groupArn}:log-stream:*`, source: `${source}.logConfiguration` });

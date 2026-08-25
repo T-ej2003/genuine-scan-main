@@ -129,7 +129,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       ? await deps.collectRuntimeResourceMetadata(candidate, aws)
       : await refreshRuntimeResourceMetadata(candidate, runtimeClosure.value?.evidence?.resourceMetadata, aws, readKmsKey);
     const dependencies = deriveEcsRuntimeDependencies(candidate);
-    const livePolicyIdentity = await (deps.collectLiveRolePolicyIdentity || collectLiveRolePolicyIdentity)(dependencies.map(({ principalArn }) => principalArn), aws);
+    const livePolicyIdentity = await (deps.collectLiveRolePolicyIdentity || collectLiveRolePolicyIdentity)(dependencies.map(({ principalArn }) => principalArn), aws, candidate);
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-runtime-closure-verify-"));
     try {
       const digest = path.join(directory, "digest"); const signature = path.join(directory, "signature");
