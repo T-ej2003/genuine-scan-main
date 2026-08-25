@@ -60,7 +60,7 @@ test("real file boundaries support inventory, CAS convergence, post-convergence 
     if (operation === "iam get-role-policy") return { RoleName: "mscqr-ecs-execution-role", PolicyName: "mscqr-ecs-secrets-read", PolicyDocument: structuredClone(runtimePolicy) };
     if (operation === "iam list-attached-role-policies") return { AttachedPolicies: [{ PolicyName: "AmazonECSTaskExecutionRolePolicy", PolicyArn: RUNTIME_CONSUMABILITY.awsManagedExecutionPolicyArn }] };
     if (operation === "iam get-policy") return { Policy: { Arn: RUNTIME_CONSUMABILITY.awsManagedExecutionPolicyArn, DefaultVersionId: "v1" } };
-    if (operation === "iam get-policy-version") return { PolicyVersion: { Document: { Version: "2012-10-17", Statement: [] } } };
+    if (operation === "iam get-policy-version") return { PolicyVersion: { Document: { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: ["ecr:GetAuthorizationToken", "ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage", "logs:CreateLogStream", "logs:PutLogEvents"], Resource: "*" }] } } };
     if (operation === "iam simulate-principal-policy") { simulations += 1; const action = valueAfter("--action-names"); const resource = valueAfter("--resource-arns"); return { EvaluationResults: [{ EvalActionName: action, EvalResourceName: resource, EvalDecision: "allowed" }] }; }
     if (operation === "iam put-role-policy") { writes += 1; runtimePolicy = JSON.parse(valueAfter("--policy-document")); return {}; }
     throw new Error(`unexpected local AWS adapter operation: ${operation}`);
