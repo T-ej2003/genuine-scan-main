@@ -22,6 +22,7 @@ import {
   RUNTIME_AUTHORIZATION_MAX_AGE_MS,
   LIVE_RUNTIME_EVIDENCE_MAX_AGE_MS,
   RUNTIME_CONSUMABILITY,
+  assertEcrRepositoryPolicyResponse,
   isEcrRepositoryPolicyNotFound,
 } from "../aws/production-ecs-runtime-consumability.mjs";
 import { buildLegacyBackendRecoveryCandidate } from "../aws/production-backend-health-recovery-contract.mjs";
@@ -73,6 +74,18 @@ const noRepositoryPolicy = (prefix = "aws: [ERROR]: ") => {
   const error = new Error("AWS CLI failed");
   error.stderr = Buffer.from(`\n${noRepositoryPolicyStderr(prefix)}\n`);
   return error;
+};
+const ecrPolicyResponse = (policy) => ({ registryId, repositoryName, policyText: JSON.stringify(policy) });
+const ecrRawPolicyResponse = (policyText) => ({ registryId, repositoryName, policyText });
+const currentMscqrRepositoryPolicy = {
+  Version: "2012-10-17",
+  Statement: [{
+    Sid: "AllowRuntimePull",
+    Effect: "Allow",
+    Principal: { AWS: "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role" },
+    Action: ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
+    Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+  }],
 };
 
 test("ECR no-policy classification accepts only complete observed CLI envelopes", () => {
@@ -127,6 +140,58 @@ test("ECR no-policy classification accepts only complete observed CLI envelopes"
   assert.equal(classify({ registryId, repositoryName, policyText: "{}" }), false);
   assert.equal(isEcrRepositoryPolicyNotFound(noRepositoryPolicy(), { repositoryName: "mscqr-worker", registryId }), false);
   assert.equal(isEcrRepositoryPolicyNotFound(noRepositoryPolicy(), { repositoryName, registryId: "000000000000" }), false);
+});
+
+test("ECR successful policy responses require complete IAM statement structure", () => {
+  const valid = [
+    currentMscqrRepositoryPolicy,
+    { Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: "*", Action: "ecr:BatchGetImage", Resource: "*" }] },
+    { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: ["arn:aws:iam::368992683803:root"] }, Action: ["ecr:BatchGetImage"], Resource: ["*"], Condition: { StringEquals: { "aws:PrincipalAccount": "368992683803" } } }] },
+    { Version: "2012-10-17", Statement: [{ Effect: "Deny", NotPrincipal: { Service: "ecs-tasks.amazonaws.com" }, NotAction: "ecr:GetDownloadUrlForLayer", NotResource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker" }] },
+  ];
+  for (const policy of valid) assert.deepEqual(assertEcrRepositoryPolicyResponse(ecrPolicyResponse(policy), { repositoryName, registryId }).repositoryName, repositoryName);
+
+  const allow = currentMscqrRepositoryPolicy.Statement[0];
+  const malformed = [
+    null, [], "policy", 1, {},
+    { Version: "2012-10-17" },
+    { Version: "2012-10-17", Statement: [] },
+    { Version: "2012-10-17", Statement: null },
+    { Version: "2012-10-17", Statement: {} },
+    { Version: "2012-10-17", Statement: "statement" },
+    ...[null, true, false, 0, 1, "", "statement", [], {}].map((statement) => ({ Version: "2012-10-17", Statement: [statement] })),
+    { Version: "2012-10-17", Statement: [allow, null] },
+    { Version: "2012-10-17", Statement: [allow, 1] },
+    { Version: "2012-10-17", Statement: [[allow]] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Effect: "Permit" }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Effect: true }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Action: {} }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, NotAction: "ecr:GetDownloadUrlForLayer" }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Action: ["ecr:BatchGetImage", null] }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Action: [] }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Principal: [] }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Principal: { Unknown: "*" } }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, NotPrincipal: "*" }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Resource: {} }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, NotResource: "*" }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Condition: [] }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Condition: { StringEquals: null } }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Condition: { StringEquals: { "aws:PrincipalAccount": [["368992683803"]] } } }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Sid: "invalid sid" }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Sid: 1 }] },
+    { Version: "2012-10-17", Statement: [{ ...allow, Unknown: true }] },
+  ];
+  for (const [index, policy] of malformed.entries()) assert.throws(() => assertEcrRepositoryPolicyResponse(ecrPolicyResponse(policy), { repositoryName, registryId }), /malformed/, `malformed policy fixture ${index}`);
+  for (const policyText of ["{", `${JSON.stringify(currentMscqrRepositoryPolicy)} trailing`]) {
+    assert.throws(() => assertEcrRepositoryPolicyResponse(ecrRawPolicyResponse(policyText), { repositoryName, registryId }));
+  }
+  for (const response of [
+    { ...ecrPolicyResponse(currentMscqrRepositoryPolicy), registryId: "000000000000" },
+    { ...ecrPolicyResponse(currentMscqrRepositoryPolicy), repositoryName: "mscqr-worker" },
+    { registryId, repositoryName },
+    { registryId, repositoryName, policyText: currentMscqrRepositoryPolicy },
+    { ...ecrPolicyResponse(currentMscqrRepositoryPolicy), extra: true },
+  ]) assert.throws(() => assertEcrRepositoryPolicyResponse(response, { repositoryName, registryId }), /incomplete|malformed/);
 });
 const metadata = (value) => Object.fromEntries(deriveEcsRuntimeDependencies(value).flatMap(({ action, resource }) => {
   if (action === "secretsmanager:GetSecretValue") {
@@ -320,6 +385,11 @@ test("secret resource policy and customer-managed KMS authority are authenticate
     ? { ARN: args.at(-1), ResourcePolicy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "secretsmanager:GetSecretValue", Resource: args.at(-1) }] }) }
     : aws(args);
   await assert.rejects(() => collectRuntimeResourceMetadata(value, allowResourcePolicyAws, { readKmsKey }), /unsupported/);
+  const malformedResourcePolicyAws = async (args) => args[1] === "get-resource-policy"
+    ? { ARN: args.at(-1), ResourcePolicy: JSON.stringify({ Version: "2012-10-17", Statement: [null] }) }
+    : aws(args);
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, malformedResourcePolicyAws, { readKmsKey }), /malformed/);
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: JSON.stringify({ Version: "2012-10-17", Statement: [null] }) }) }), /malformed/);
 
   const delegatedPolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:root" }, Action: "kms:Decrypt", Resource: "*" }] });
   const delegatedReadKmsKey = async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: delegatedPolicy });
@@ -363,6 +433,8 @@ test("real DescribeImages detail identity and ECR policy state fail closed on ev
     if (args[1] === "get-repository-policy") return { registryId: "368992683803", repositoryName: "mscqr-worker", policyText: "{" };
     return baseAws(args);
   }), /incomplete|valid JSON/);
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, async (args) => args[1] === "get-repository-policy"
+    ? ecrPolicyResponse({ Version: "2012-10-17", Statement: [null] }) : baseAws(args)), /malformed/);
   await assert.rejects(() => collectRuntimeResourceMetadata(value, async (args) => args[1] === "get-repository-policy" ? {} : baseAws(args)), /incomplete/);
   await assert.rejects(() => collectRuntimeResourceMetadata(value, async (args) => {
     if (args[1] === "get-repository-policy") { const error = new Error("access denied"); error.name = "AccessDeniedException"; throw error; }

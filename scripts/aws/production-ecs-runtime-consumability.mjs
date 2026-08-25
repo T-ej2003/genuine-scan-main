@@ -24,6 +24,33 @@ const SECRET_RESOURCE = new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}
 const LOG_GROUP_ARN = new RegExp(`^arn:aws:logs:${REGION}:${ACCOUNT}:log-group:(/[^*]+)$`);
 const AWS_CLI_ENHANCED_ERROR_PREFIX = "aws: [ERROR]: ";
 const ECR_REPOSITORY_POLICY_NOT_FOUND_PREFIX = "An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: ";
+const POLICY_EFFECTS = new Set(["Allow", "Deny"]);
+const POLICY_STATEMENT_FIELDS = new Set(["Sid", "Effect", "Principal", "NotPrincipal", "Action", "NotAction", "Resource", "NotResource", "Condition"]);
+const PRINCIPAL_TYPES = new Set(["AWS", "Federated", "Service", "CanonicalUser"]);
+const isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+const isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
+const isStringOrStringList = (value) => isNonEmptyString(value) || (Array.isArray(value) && value.length > 0 && value.every((item, index) => Object.hasOwn(value, index) && isNonEmptyString(item)));
+const isPrincipal = (value) => value === "*" || (isPlainObject(value) && Object.keys(value).length > 0
+  && Object.entries(value).every(([type, principal]) => PRINCIPAL_TYPES.has(type) && isStringOrStringList(principal)));
+const isConditionValue = (value) => isNonEmptyString(value) || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))
+  || (Array.isArray(value) && value.length > 0 && value.every((item, index) => Object.hasOwn(value, index)
+    && (isNonEmptyString(item) || typeof item === "boolean" || (typeof item === "number" && Number.isFinite(item)))));
+const isCondition = (value) => isPlainObject(value) && Object.keys(value).length > 0
+  && Object.entries(value).every(([operator, entries]) => isNonEmptyString(operator) && isPlainObject(entries) && Object.keys(entries).length > 0
+    && Object.entries(entries).every(([key, conditionValue]) => isNonEmptyString(key) && isConditionValue(conditionValue)));
+const isPolicyStatement = (statement) => {
+  if (!isPlainObject(statement) || Object.keys(statement).some((key) => !POLICY_STATEMENT_FIELDS.has(key))
+    || !Object.hasOwn(statement, "Effect") || !POLICY_EFFECTS.has(statement.Effect)) return false;
+  const action = Object.hasOwn(statement, "Action"); const notAction = Object.hasOwn(statement, "NotAction");
+  const resource = Object.hasOwn(statement, "Resource"); const notResource = Object.hasOwn(statement, "NotResource");
+  const principal = Object.hasOwn(statement, "Principal"); const notPrincipal = Object.hasOwn(statement, "NotPrincipal");
+  return action !== notAction && resource !== notResource && !(principal && notPrincipal)
+    && isStringOrStringList(statement[action ? "Action" : "NotAction"])
+    && isStringOrStringList(statement[resource ? "Resource" : "NotResource"])
+    && (!principal && !notPrincipal || isPrincipal(statement[principal ? "Principal" : "NotPrincipal"]))
+    && (!Object.hasOwn(statement, "Sid") || isNonEmptyString(statement.Sid) && /^[A-Za-z0-9]+$/.test(statement.Sid))
+    && (!Object.hasOwn(statement, "Condition") || isCondition(statement.Condition));
+};
 const actionMatches = (value, expected) => [value].flat().some((action) => action === "*" || action === expected || (action?.endsWith("*") && expected.startsWith(action.slice(0, -1))));
 const patternMatches = (pattern, value) => typeof pattern === "string" && new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*").replaceAll("?", ".")}$`).test(value);
 const principalValues = (value) => [value].flatMap((principal) => typeof principal === "object" && principal ? [principal.AWS].flat() : [principal]);
@@ -33,7 +60,11 @@ const policyStatements = (value, label) => {
   if (typeof policy === "string") {
     try { policy = JSON.parse(policy); } catch { throw new Error(`${label} is not valid JSON.`); }
   }
-  if (!policy || policy.Version !== "2012-10-17" || !Array.isArray(policy.Statement)) throw new Error(`${label} is malformed.`);
+  if (!isPlainObject(policy) || !Object.hasOwn(policy, "Version") || !Object.hasOwn(policy, "Statement") || policy.Version !== "2012-10-17"
+    || Object.keys(policy).some((key) => !new Set(["Version", "Id", "Statement"]).has(key))
+    || Object.hasOwn(policy, "Id") && !isNonEmptyString(policy.Id)
+    || !Array.isArray(policy.Statement) || policy.Statement.length === 0
+    || !policy.Statement.every((statement, index) => Object.hasOwn(policy.Statement, index) && isPolicyStatement(statement))) throw new Error(`${label} is malformed.`);
   return { policy, statements: policy.Statement };
 };
 

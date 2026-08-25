@@ -27,7 +27,7 @@ const allowed = (args) => {
   if (args[0] === "sts") return JSON.stringify({ Arn: caller });
   if (args[0] === "ecr" && args[1] === "get-repository-policy") {
     const repositoryName = args[args.indexOf("--repository-name") + 1];
-    return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify({ Version: "2012-10-17", Statement: [] }) });
+    return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role" }, Action: ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"], Resource: `arn:aws:ecr:eu-west-2:368992683803:repository/${repositoryName}` }] }) });
   }
   if (args[0] === "iam" && args[1] === "get-role" && args.includes("mscqr-production-independent-checker")) return JSON.stringify({ Role: { Arn: CHECKER_SOURCE_ROLE_ARN, AssumeRolePolicyDocument: { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: CHECKER_USER_ARN }, Action: "sts:AssumeRole", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }] } } });
   if (args[0] === "s3api" && args[1] === "get-object") {
@@ -187,7 +187,10 @@ test("release preflight treats current AWS CLI no-policy errors as authenticated
 
 test("release preflight rejects malformed successful ECR policy responses", () => {
   const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
-    if (probe.action === "ecr:GetRepositoryPolicy") return "{}";
+    if (probe.action === "ecr:GetRepositoryPolicy") {
+      const repositoryName = args[args.indexOf("--repository-name") + 1];
+      return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify({ Version: "2012-10-17", Statement: [null] }) });
+    }
     return allowed(args);
   } });
   assert.equal(report.status, "blocked");
