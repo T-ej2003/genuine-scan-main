@@ -15,7 +15,7 @@ import { buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDI
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
-import { MALFORMED_ECR_REPOSITORY_POLICIES } from "./fixtures/ecr-repository-policy-fixtures.mjs";
+import { ECR_DOCUMENTED_NO_RESOURCE_POLICY, MALFORMED_ECR_REPOSITORY_POLICIES } from "./fixtures/ecr-repository-policy-fixtures.mjs";
 
 const caller = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test";
 const stageAState = JSON.stringify({ lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: 35, resources: [] });
@@ -179,6 +179,18 @@ test("release preflight treats current AWS CLI no-policy errors as authenticated
       const repositoryName = args[args.indexOf("--repository-name") + 1];
       error.stderr = Buffer.from(`\naws: [ERROR]: An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: Repository policy does not exist for the repository with name '${repositoryName}' in the registry with id '368992683803'\n`);
       throw error;
+    }
+    return allowed(args);
+  } });
+  assert.equal(report.status, "valid");
+  assert.equal(report.requiredReads["ecr:GetRepositoryPolicy"], "allowed");
+});
+
+test("release preflight accepts the documented repository-scoped ECR policy without Resource", () => {
+  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+    if (probe.action === "ecr:GetRepositoryPolicy") {
+      const repositoryName = args[args.indexOf("--repository-name") + 1];
+      return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify(ECR_DOCUMENTED_NO_RESOURCE_POLICY) });
     }
     return allowed(args);
   } });

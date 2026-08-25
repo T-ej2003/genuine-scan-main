@@ -25,6 +25,8 @@ const LOG_GROUP_ARN = new RegExp(`^arn:aws:logs:${REGION}:${ACCOUNT}:log-group:(
 const AWS_CLI_ENHANCED_ERROR_PREFIX = "aws: [ERROR]: ";
 const ECR_REPOSITORY_POLICY_NOT_FOUND_PREFIX = "An error occurred (RepositoryPolicyNotFoundException) when calling the GetRepositoryPolicy operation: ";
 const POLICY_EFFECTS = new Set(["Allow", "Deny"]);
+const ECR_POLICY_VERSIONS = new Set(["2008-10-17", "2012-10-17"]);
+const CURRENT_POLICY_VERSION = new Set(["2012-10-17"]);
 const POLICY_STATEMENT_FIELDS = new Set(["Sid", "Effect", "Principal", "NotPrincipal", "Action", "NotAction", "Resource", "NotResource", "Condition"]);
 const PRINCIPAL_TYPES = new Set(["AWS", "Federated", "Service", "CanonicalUser"]);
 const isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -38,39 +40,55 @@ const isConditionValue = (value) => isNonEmptyString(value) || typeof value === 
 const isCondition = (value) => isPlainObject(value) && Object.keys(value).length > 0
   && Object.entries(value).every(([operator, entries]) => isNonEmptyString(operator) && isPlainObject(entries) && Object.keys(entries).length > 0
     && Object.entries(entries).every(([key, conditionValue]) => isNonEmptyString(key) && isConditionValue(conditionValue)));
-const isPolicyStatement = (statement) => {
+const isPolicyStatementShape = (statement) => {
   if (!isPlainObject(statement) || Object.keys(statement).some((key) => !POLICY_STATEMENT_FIELDS.has(key))
     || !Object.hasOwn(statement, "Effect") || !POLICY_EFFECTS.has(statement.Effect)) return false;
   const action = Object.hasOwn(statement, "Action"); const notAction = Object.hasOwn(statement, "NotAction");
   const resource = Object.hasOwn(statement, "Resource"); const notResource = Object.hasOwn(statement, "NotResource");
   const principal = Object.hasOwn(statement, "Principal"); const notPrincipal = Object.hasOwn(statement, "NotPrincipal");
-  return action !== notAction && resource !== notResource && principal !== notPrincipal
-    && isStringOrStringList(statement[action ? "Action" : "NotAction"])
-    && isStringOrStringList(statement[resource ? "Resource" : "NotResource"])
-    && isPrincipal(statement[principal ? "Principal" : "NotPrincipal"])
-    && (!Object.hasOwn(statement, "Sid") || isNonEmptyString(statement.Sid) && /^[A-Za-z0-9]+$/.test(statement.Sid))
+  return !(action && notAction) && !(resource && notResource) && !(principal && notPrincipal)
+    && (!action && !notAction || isStringOrStringList(statement[action ? "Action" : "NotAction"]))
+    && (!resource && !notResource || isStringOrStringList(statement[resource ? "Resource" : "NotResource"]))
+    && (!principal && !notPrincipal || isPrincipal(statement[principal ? "Principal" : "NotPrincipal"]))
+    && (!Object.hasOwn(statement, "Sid") || isNonEmptyString(statement.Sid))
     && (!Object.hasOwn(statement, "Condition") || isCondition(statement.Condition));
 };
+const hasExactlyOne = (statement, field, inverse) => Object.hasOwn(statement, field) !== Object.hasOwn(statement, inverse);
+const isEcrPolicyStatement = (statement) => {
+  if (!isPolicyStatementShape(statement)) return false;
+  return hasExactlyOne(statement, "Action", "NotAction") && hasExactlyOne(statement, "Principal", "NotPrincipal");
+};
+const isSecretsManagerPolicyStatement = (statement) => {
+  if (!isPolicyStatementShape(statement) || Object.hasOwn(statement, "Sid") && !/^[A-Za-z0-9]+$/.test(statement.Sid)) return false;
+  return hasExactlyOne(statement, "Action", "NotAction") && hasExactlyOne(statement, "Resource", "NotResource") && hasExactlyOne(statement, "Principal", "NotPrincipal");
+};
+const isKmsPolicyStatement = (statement) => isPolicyStatementShape(statement)
+  && Object.hasOwn(statement, "Action") && !Object.hasOwn(statement, "NotAction")
+  && Object.hasOwn(statement, "Principal") && !Object.hasOwn(statement, "NotPrincipal")
+  && statement.Resource === "*" && !Object.hasOwn(statement, "NotResource");
 const actionMatches = (value, expected) => [value].flat().some((action) => action === "*" || action === expected || (action?.endsWith("*") && expected.startsWith(action.slice(0, -1))));
 const patternMatches = (pattern, value) => typeof pattern === "string" && new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*").replaceAll("?", ".")}$`).test(value);
 const principalValues = (value) => [value].flatMap((principal) => typeof principal === "object" && principal ? [principal.AWS].flat() : [principal]);
 const resourceMatches = (value, resource) => [value].flat().some((candidate) => patternMatches(candidate, resource));
-const policyStatements = (value, label) => {
+const policyStatements = (value, label, { versions, statement }) => {
   let policy = value;
   if (typeof policy === "string") {
     try { policy = JSON.parse(policy); } catch { throw new Error(`${label} is not valid JSON.`); }
   }
-  if (!isPlainObject(policy) || !Object.hasOwn(policy, "Version") || !Object.hasOwn(policy, "Statement") || policy.Version !== "2012-10-17"
+  if (!isPlainObject(policy) || !Object.hasOwn(policy, "Version") || !Object.hasOwn(policy, "Statement") || !versions.has(policy.Version)
     || Object.keys(policy).some((key) => !new Set(["Version", "Id", "Statement"]).has(key))
     || Object.hasOwn(policy, "Id") && !isNonEmptyString(policy.Id)
     || !Array.isArray(policy.Statement) || policy.Statement.length === 0
-    || !policy.Statement.every((statement, index) => Object.hasOwn(policy.Statement, index) && isPolicyStatement(statement))) throw new Error(`${label} is malformed.`);
+    || !policy.Statement.every((item, index) => Object.hasOwn(policy.Statement, index) && statement(item))) throw new Error(`${label} is malformed.`);
   return { policy, statements: policy.Statement };
 };
+const ecrPolicyStatements = (value, label) => policyStatements(value, label, { versions: ECR_POLICY_VERSIONS, statement: isEcrPolicyStatement });
+const secretsManagerPolicyStatements = (value, label) => policyStatements(value, label, { versions: CURRENT_POLICY_VERSION, statement: isSecretsManagerPolicyStatement });
+const kmsPolicyStatements = (value, label) => policyStatements(value, label, { versions: CURRENT_POLICY_VERSION, statement: isKmsPolicyStatement });
 
 function assertResourcePolicyAllowsRuntime({ policy, principalArn, action, resource, label }) {
   if (!policy) return { resourcePolicySha256: canonicalSha256(null), resourcePolicyAccess: "NO_RESOURCE_POLICY" };
-  policyStatements(policy, label);
+  secretsManagerPolicyStatements(policy, label);
   throw new Error(`${label} is unsupported for production runtime authorization and fails closed.`);
 }
 
@@ -89,11 +107,15 @@ export const assertEcrRepositoryPolicyResponse = (response, { repositoryName, re
     || value.registryId !== registryId || value.repositoryName !== repositoryName || typeof value.policyText !== "string") {
     throw new Error("ECR repository-policy response is incomplete or malformed.");
   }
-  policyStatements(value.policyText, `ECR repository policy for ${repositoryName}`);
+  ecrPolicyStatements(value.policyText, `ECR repository policy for ${repositoryName}`);
   return value;
 };
 
-async function collectEcrRepositoryPolicyMetadata(dependency, aws, readEcrRepositoryPolicy) {
+const ecrStatementMatches = (statement, { principalArn, action, resource }) => (statement.Principal === "*"
+  || principalValues(statement.Principal).some((principal) => principal === principalArn || principal === `arn:aws:iam::${ACCOUNT}:root`))
+  && actionMatches(statement.Action, action) && (!Object.hasOwn(statement, "Resource") || resourceMatches(statement.Resource, resource));
+
+async function collectEcrRepositoryPolicyMetadata(dependency, runtimeDependencies, aws, readEcrRepositoryPolicy) {
   const match = ECR_REPOSITORY_ARN.exec(dependency.resource || "");
   if (!match) throw new Error(`Runtime ECR repository identity is invalid for ${dependency.resource}.`);
   const repositoryName = match[1];
@@ -114,11 +136,21 @@ async function collectEcrRepositoryPolicyMetadata(dependency, aws, readEcrReposi
     return Object.freeze({ ...state, metadataSha256: canonicalSha256(state) });
   }
   assertEcrRepositoryPolicyResponse(response, { repositoryName, registryId: ACCOUNT });
-  throw new Error(`Runtime ECR repository policy semantics are unsupported for ${dependency.resource} and fail closed.`);
+  const parsed = ecrPolicyStatements(response.policyText, `ECR repository policy for ${repositoryName}`);
+  const required = runtimeDependencies.filter(({ action, resource }) => action.startsWith("ecr:") && resource === dependency.resource);
+  if (parsed.statements.some((statement) => statement.Condition || statement.NotPrincipal || statement.NotAction || statement.NotResource)) {
+    throw new Error(`Runtime ECR repository policy contains unsupported inverse or condition semantics for ${dependency.resource}.`);
+  }
+  if (parsed.statements.some((statement) => statement.Effect === "Deny" && required.some((item) => ecrStatementMatches(statement, item)))
+    || required.some((item) => !parsed.statements.some((statement) => statement.Effect === "Allow" && ecrStatementMatches(statement, item)))) {
+    throw new Error(`Runtime ECR repository policy does not authorize the exact runtime pull for ${dependency.resource}.`);
+  }
+  const state = { resource: dependency.resource, repositoryName, imageDigest, imageAvailability: "EXISTS", repositoryPolicyState: "ALLOWS_RUNTIME", repositoryPolicySha256: canonicalSha256(parsed.policy) };
+  return Object.freeze({ ...state, metadataSha256: canonicalSha256(state) });
 }
 
 function assertKmsKeyPolicyAllowsRuntime({ policy, principalArn, keyArn }) {
-  const parsed = policyStatements(policy, `Runtime KMS key policy for ${keyArn}`);
+  const parsed = kmsPolicyStatements(policy, `Runtime KMS key policy for ${keyArn}`);
   if (parsed.statements.some((statement) => statement?.Effect === "Deny" || statement?.NotPrincipal || statement?.NotAction || statement?.NotResource)) throw new Error(`Runtime KMS key policy contains unsupported deny or inverse semantics for ${principalArn}.`);
   const access = parsed.statements.some((statement) => statement?.Effect === "Allow" && !statement.Condition && principalValues(statement.Principal).includes(principalArn)
     && actionMatches(statement.Action, "kms:Decrypt") && resourceMatches(statement.Resource, keyArn)) ? "EXACT_ROLE"
@@ -197,9 +229,11 @@ export function addEncryptionDependencies(candidate, dependencies, resourceMetad
   for (const dependency of dependencies.filter(({ action, resource }) => action.startsWith("ecr:") && resource !== "*")) {
     const metadata = resourceMetadata?.[dependency.resource];
     const expected = metadata && canonicalSha256({ resource: metadata.resource, repositoryName: metadata.repositoryName, imageDigest: metadata.imageDigest, imageAvailability: metadata.imageAvailability, repositoryPolicyState: metadata.repositoryPolicyState, repositoryPolicySha256: metadata.repositoryPolicySha256 });
-    if (!metadata || metadata.resource !== dependency.resource || metadata.repositoryPolicyState !== "NO_POLICY"
+    const policyStateValid = metadata?.repositoryPolicyState === "NO_POLICY" && metadata.repositoryPolicySha256 === canonicalSha256(null)
+      || metadata?.repositoryPolicyState === "ALLOWS_RUNTIME" && HEX.test(metadata.repositoryPolicySha256 || "");
+    if (!metadata || metadata.resource !== dependency.resource || !policyStateValid
       || metadata.repositoryName !== dependency.context?.repositoryName || metadata.imageDigest !== dependency.context?.imageDigest || metadata.imageAvailability !== "EXISTS"
-      || metadata.repositoryPolicySha256 !== canonicalSha256(null) || metadata.metadataSha256 !== expected) throw new Error(`Runtime ECR image or repository-policy metadata is missing or stale for ${dependency.resource}.`);
+      || metadata.metadataSha256 !== expected) throw new Error(`Runtime ECR image or repository-policy metadata is missing or stale for ${dependency.resource}.`);
   }
   for (const dependency of dependencies.filter(({ action }) => action.startsWith("logs:"))) {
     const groupArn = dependency.resource.split(":log-stream:")[0]; const metadata = resourceMetadata?.[groupArn];
@@ -403,7 +437,7 @@ export async function collectRuntimeResourceMetadata(candidate, aws, { readKmsKe
   const metadata = {};
   const dependencies = deriveEcsRuntimeDependencies(candidate);
   for (const dependency of dependencies.filter(({ action, resource }) => action.startsWith("ecr:") && resource !== "*")) {
-    if (!metadata[dependency.resource]) metadata[dependency.resource] = await collectEcrRepositoryPolicyMetadata(dependency, aws, readEcrRepositoryPolicy);
+    if (!metadata[dependency.resource]) metadata[dependency.resource] = await collectEcrRepositoryPolicyMetadata(dependency, dependencies, aws, readEcrRepositoryPolicy);
   }
   for (const dependency of dependencies.filter(({ action }) => action.startsWith("logs:"))) {
     const groupArn = dependency.resource.split(":log-stream:")[0];

@@ -28,7 +28,7 @@ import {
 import { buildLegacyBackendRecoveryCandidate } from "../aws/production-backend-health-recovery-contract.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { prepareProductionEcsRuntimeConsumability, prepareProductionEcsRuntimeInventory } from "../aws/prepare-production-ecs-runtime-consumability.mjs";
-import { MALFORMED_ECR_REPOSITORY_POLICIES, VALID_ECR_REPOSITORY_POLICIES } from "./fixtures/ecr-repository-policy-fixtures.mjs";
+import { ECR_DOCUMENTED_NO_RESOURCE_POLICY, MALFORMED_ECR_REPOSITORY_POLICIES, VALID_ECR_REPOSITORY_POLICIES } from "./fixtures/ecr-repository-policy-fixtures.mjs";
 
 const sourceSha = "b64274e155434ae9390d28762d40a37801be5362";
 const digest = "sha256:6ce8e4eae1a9243c94368e95259a19446fb6c7241e127cf010b66d0611a17189";
@@ -133,7 +133,7 @@ test("ECR no-policy classification accepts only complete observed CLI envelopes"
   assert.equal(isEcrRepositoryPolicyNotFound(noRepositoryPolicy(), { repositoryName, registryId: "000000000000" }), false);
 });
 
-test("ECR successful policy responses require complete IAM statement structure", () => {
+test("ECR successful policy responses require service-aware repository-policy structure", () => {
   for (const policy of VALID_ECR_REPOSITORY_POLICIES) assert.deepEqual(assertEcrRepositoryPolicyResponse(ecrPolicyResponse(policy), { repositoryName, registryId }).repositoryName, repositoryName);
   for (const [label, policy] of MALFORMED_ECR_REPOSITORY_POLICIES) assert.throws(() => assertEcrRepositoryPolicyResponse(ecrPolicyResponse(policy), { repositoryName, registryId }), /malformed/, label);
   for (const policyText of ["{", `${JSON.stringify(VALID_ECR_REPOSITORY_POLICIES[0])} trailing`]) {
@@ -306,7 +306,7 @@ test("signed read-only inventory binds file bytes, semantic candidate, dependenc
 test("secret resource policy and customer-managed KMS authority are authenticated without secret values", async () => {
   const value = candidate();
   const keyArn = "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478";
-  const exactRolePolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt", Resource: keyArn }] });
+  const exactRolePolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Sid: "Exact runtime role", Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt", Resource: "*" }] });
   const aws = async (args) => {
     const operation = args.slice(0, 2).join(" "); const resource = args.at(-1);
     if (operation === "ecr describe-images") return describeImagesResponse(args);
@@ -343,14 +343,20 @@ test("secret resource policy and customer-managed KMS authority are authenticate
     ? { ARN: args.at(-1), ResourcePolicy: JSON.stringify({ Version: "2012-10-17", Statement: [null] }) }
     : aws(args);
   await assert.rejects(() => collectRuntimeResourceMetadata(value, malformedResourcePolicyAws, { readKmsKey }), /malformed/);
+  const missingSecretResourceAws = async (args) => args[1] === "get-resource-policy"
+    ? { ARN: args.at(-1), ResourcePolicy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "secretsmanager:GetSecretValue" }] }) }
+    : aws(args);
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, missingSecretResourceAws, { readKmsKey }), /malformed/);
   await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: JSON.stringify({ Version: "2012-10-17", Statement: [null] }) }) }), /malformed/);
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt" }] }) }) }), /malformed/);
+  await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt", Resource: keyArn }] }) }) }), /malformed/);
 
   const delegatedPolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:root" }, Action: "kms:Decrypt", Resource: "*" }] });
   const delegatedReadKmsKey = async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: delegatedPolicy });
   const delegated = await collectRuntimeResourceMetadata(value, aws, { readKmsKey: delegatedReadKmsKey });
   assert.equal(delegated[bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].kmsKeyPolicyAccess, "ACCOUNT_IAM_DELEGATED");
   await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Disabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: exactRolePolicy }) }), /KMS key is unavailable/);
-  const denyPolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt", Resource: keyArn }] });
+  const denyPolicy = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: { AWS: value.executionRoleArn }, Action: "kms:Decrypt", Resource: "*" }] });
   await assert.rejects(() => collectRuntimeResourceMetadata(value, aws, { readKmsKey: async () => ({ metadata: { Arn: keyArn, KeyState: "Enabled", KeyUsage: "ENCRYPT_DECRYPT" }, policy: denyPolicy }) }), /unsupported deny/);
 
   const foreignKey = "arn:aws:kms:eu-west-2:368992683803:key/11111111-2222-3333-4444-555555555555";
@@ -374,14 +380,22 @@ test("real DescribeImages detail identity and ECR policy state fail closed on ev
   assert.equal(authenticated[repository].repositoryPolicyState, "NO_POLICY");
   assert.doesNotThrow(() => passing(value, authenticated));
 
+  for (const policy of [ECR_DOCUMENTED_NO_RESOURCE_POLICY, VALID_ECR_REPOSITORY_POLICIES[1]]) {
+    const policyAws = async (args) => args[1] === "get-repository-policy" ? ecrPolicyResponse(policy) : baseAws(args);
+    const policyAuthenticated = await collectRuntimeResourceMetadata(value, policyAws);
+    assert.equal(policyAuthenticated[repository].repositoryPolicyState, "ALLOWS_RUNTIME");
+    assert.doesNotThrow(() => passing(value, policyAuthenticated));
+    await assert.doesNotReject(() => refreshRuntimeResourceMetadata(value, policyAuthenticated, startupAws(value, policyAws)));
+  }
+
   for (const policy of [
     { Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: { AWS: value.executionRoleArn }, Action: "ecr:BatchGetImage", Resource: repository }] },
     { Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: "*", Action: ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"], Resource: repository }] },
     { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: value.executionRoleArn }, Action: "ecr:BatchGetImage", Resource: repository, Condition: { StringLike: { "aws:PrincipalArn": "*" } } }] },
   ]) {
     const withPolicy = async (args) => args[1] === "get-repository-policy" ? { registryId: "368992683803", repositoryName: "mscqr-backend", policyText: JSON.stringify(policy) } : baseAws(args);
-    await assert.rejects(() => collectRuntimeResourceMetadata(value, withPolicy), /unsupported/);
-    await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, startupAws(value, withPolicy)), /unsupported/);
+    await assert.rejects(() => collectRuntimeResourceMetadata(value, withPolicy), /does not authorize|unsupported/);
+    await assert.rejects(() => refreshRuntimeResourceMetadata(value, authenticated, startupAws(value, withPolicy)), /does not authorize|unsupported/);
   }
   await assert.rejects(() => collectRuntimeResourceMetadata(value, async (args) => {
     if (args[1] === "get-repository-policy") return { registryId: "368992683803", repositoryName: "mscqr-worker", policyText: "{" };
