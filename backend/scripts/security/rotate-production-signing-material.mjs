@@ -274,9 +274,13 @@ const validateRuntimeProof = ({ file, proof: persistedProof, config, phase, expe
     if (proof[phase === "overlap" ? "qrPreviousRuntimeVerify" : "qrPreviousRuntimeRejected"] !== false) throw new Error(`${phase} runtime proof falsely claims historical QR verification`);
   } else {
     const explicitContinuity = [proof.historicalContinuity, proof.legacyQrKeypairUnrecoverable, proof.qrPreviousSlotAbsent].some((value) => value !== undefined);
-    if ((explicitContinuity && (proof.historicalContinuity !== QR_CONTINUITY_VERIFIED || proof.legacyQrKeypairUnrecoverable !== false || proof.qrPreviousSlotAbsent !== false)) || proof[phase === "overlap" ? "qrPreviousRuntimeVerify" : "qrPreviousRuntimeRejected"] !== true) throw new Error(`${phase} runtime proof is missing verified previous QR continuity`);
+    const expectedQrPreviousSlotAbsent = phase === "cleanup";
+    if (explicitContinuity && (proof.historicalContinuity !== QR_CONTINUITY_VERIFIED || proof.legacyQrKeypairUnrecoverable !== false)) throw new Error(`${phase} runtime proof is missing verified previous QR continuity`);
+    if (proof.qrPreviousSlotAbsent !== undefined && proof.qrPreviousSlotAbsent !== expectedQrPreviousSlotAbsent) throw new Error(`${phase} runtime proof has an invalid previous QR slot observation`);
+    if (proof[phase === "overlap" ? "qrPreviousRuntimeVerify" : "qrPreviousRuntimeRejected"] !== true) throw new Error(`${phase} runtime proof is missing verified previous QR continuity`);
+    return { ...proof, historicalContinuity, legacyQrKeypairUnrecoverable: false, qrPreviousSlotAbsent: expectedQrPreviousSlotAbsent, observedAt: new Date(observedAt).toISOString(), healthObservedAt: new Date(healthObservedAt).toISOString() };
   }
-  return { ...proof, historicalContinuity, legacyQrKeypairUnrecoverable: historicalContinuity === QR_CONTINUITY_UNRECOVERABLE, qrPreviousSlotAbsent: historicalContinuity === QR_CONTINUITY_UNRECOVERABLE, observedAt: new Date(observedAt).toISOString(), healthObservedAt: new Date(healthObservedAt).toISOString() };
+  return { ...proof, historicalContinuity, legacyQrKeypairUnrecoverable: true, qrPreviousSlotAbsent: true, observedAt: new Date(observedAt).toISOString(), healthObservedAt: new Date(healthObservedAt).toISOString() };
 };
 
 const stateForPending = ({ config, identity, oldJwt, oldQrPrivate, oldQrPublic, oldQrVersion, newJwt, newQrPublic, newPrivate, newQrVersion, pending, inventoryEvidenceSha256, historicalContinuity }) => ({

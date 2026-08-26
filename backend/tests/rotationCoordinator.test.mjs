@@ -833,14 +833,30 @@ test("runtime proof accepts only the expected deployment SHA for overlap and cle
   try {
     const config = { rotationId: "rotation-proof", sourceSha: "a".repeat(40) };
     const common = { rotationId: config.rotationId, runtimeInvocationRef: "https://example.test/proof", observedAt: "2026-08-10T00:00:00.000Z", serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: "a".repeat(40), expectedReleaseGitSha: "a".repeat(40), healthObservedAt: "2026-08-10T00:00:00.000Z" };
-    const overlap = { ...common, phase: "overlap", deploymentSha: "a".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true };
-    const cleanupProof = { ...common, phase: "cleanup", deploymentSha: "b".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeRejected: true, qrUnknownKeyRejected: true };
+    const overlap = { ...common, phase: "overlap", deploymentSha: "a".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, historicalContinuity: "VERIFIED_PREVIOUS_QR", legacyQrKeypairUnrecoverable: false, qrPreviousSlotAbsent: false, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true };
+    const cleanupProof = { ...common, phase: "cleanup", deploymentSha: "b".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeRejected: true, historicalContinuity: "VERIFIED_PREVIOUS_QR", legacyQrKeypairUnrecoverable: false, qrPreviousSlotAbsent: true, qrUnknownKeyRejected: true };
     const overlapFile = writeProof(directory, "overlap.json", overlap);
     const cleanupFile = writeProof(directory, "cleanup.json", cleanupProof);
+    const legacyOverlap = { ...overlap };
+    const legacyCleanup = { ...cleanupProof };
+    delete legacyOverlap.historicalContinuity;
+    delete legacyOverlap.legacyQrKeypairUnrecoverable;
+    delete legacyOverlap.qrPreviousSlotAbsent;
+    delete legacyCleanup.historicalContinuity;
+    delete legacyCleanup.legacyQrKeypairUnrecoverable;
+    delete legacyCleanup.qrPreviousSlotAbsent;
+    const legacyOverlapFile = writeProof(directory, "legacy-overlap.json", legacyOverlap);
+    const legacyCleanupFile = writeProof(directory, "legacy-cleanup.json", legacyCleanup);
+    const overlapAbsentFile = writeProof(directory, "overlap-absent.json", { ...overlap, qrPreviousSlotAbsent: true });
+    const cleanupPresentFile = writeProof(directory, "cleanup-present.json", { ...cleanupProof, qrPreviousSlotAbsent: false });
     const clock = () => Date.parse("2026-08-10T00:01:00.000Z");
-    assert.doesNotThrow(() => validateRuntimeProof({ file: overlapFile, config, phase: "overlap", expectedDeploymentSha: overlap.deploymentSha, clock }));
+    assert.equal(validateRuntimeProof({ file: overlapFile, config, phase: "overlap", expectedDeploymentSha: overlap.deploymentSha, clock }).qrPreviousSlotAbsent, false);
+    assert.equal(validateRuntimeProof({ file: legacyOverlapFile, config, phase: "overlap", expectedDeploymentSha: overlap.deploymentSha, clock }).qrPreviousSlotAbsent, false);
     assert.throws(() => validateRuntimeProof({ file: overlapFile, config, phase: "overlap", expectedDeploymentSha: "c".repeat(40), clock }), /deployment SHA is invalid/);
-    assert.doesNotThrow(() => validateRuntimeProof({ file: cleanupFile, config, phase: "cleanup", expectedDeploymentSha: cleanupProof.deploymentSha, clock }));
+    assert.equal(validateRuntimeProof({ file: cleanupFile, config, phase: "cleanup", expectedDeploymentSha: cleanupProof.deploymentSha, clock }).qrPreviousSlotAbsent, true);
+    assert.equal(validateRuntimeProof({ file: legacyCleanupFile, config, phase: "cleanup", expectedDeploymentSha: cleanupProof.deploymentSha, clock }).qrPreviousSlotAbsent, true);
+    assert.throws(() => validateRuntimeProof({ file: overlapAbsentFile, config, phase: "overlap", expectedDeploymentSha: overlap.deploymentSha, clock }), /previous QR slot observation/);
+    assert.throws(() => validateRuntimeProof({ file: cleanupPresentFile, config, phase: "cleanup", expectedDeploymentSha: cleanupProof.deploymentSha, clock }), /previous QR slot observation/);
     assert.throws(() => validateRuntimeProof({ file: cleanupFile, config, phase: "cleanup", expectedDeploymentSha: "d".repeat(40), clock }), /deployment SHA is invalid/);
     assert.throws(() => validateRuntimeProof({ file: overlapFile, config, phase: "cleanup", expectedDeploymentSha: overlap.deploymentSha, clock }), /does not match this rotation/);
   } finally {
