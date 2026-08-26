@@ -2,9 +2,9 @@
 
 Generated from the permission manifest, reviewed source policies, release probes, canonical recovery, zero-registration forward recovery, publisher policy, Terraform runtime policy actions, and the production path. Do not edit generated capability rows manually.
 
-- Phases: 40
-- Capability nodes: 325
-- Unique AWS actions: 130
+- Phases: 41
+- Capability nodes: 332
+- Unique AWS actions: 131
 - Identities: GITHUB_IMAGE_PUBLISHER, ADMINISTRATOR, ROOT_OPERATOR, BOOTSTRAP_OPERATOR, RELEASE_DEPLOYER, INDEPENDENT_CHECKER, ECS_EXEC_VERIFIER_OPERATOR, SERVICE_RUNTIME
 
 | Order | Phase | Source |
@@ -49,3 +49,4 @@ Generated from the permission manifest, reviewed source policies, release probes
 | 38 | post-apply-verification | `scripts/aws/verify-production-green-stage-b-ecs-observations.mjs` |
 | 39 | runtime-activation-boundary | `scripts/aws/create-production-green-stage-b-approval.mjs` |
 | 40 | normal-backend-activation | `scripts/aws/production-normal-backend-activation.mjs` |
+| 41 | initial-activation-lifecycle | `scripts/aws/manage-production-initial-activation-lifecycle.mjs` |

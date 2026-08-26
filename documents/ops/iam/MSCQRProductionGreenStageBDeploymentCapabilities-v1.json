@@ -203,6 +203,11 @@
       "order": 40,
       "id": "normal-backend-activation",
       "sourceFile": "scripts/aws/production-normal-backend-activation.mjs"
+    },
+    {
+      "order": 41,
+      "id": "initial-activation-lifecycle",
+      "sourceFile": "scripts/aws/manage-production-initial-activation-lifecycle.mjs"
     }
   ],
   "identities": [
@@ -755,7 +760,7 @@
         "sid": "PublishExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "47f3ba4e9d440c258f7f65383c2670a82e23d7c56a2f11dc8d82bfe1a3210226"
+        "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
       },
       "required": true,
       "mutation": true
@@ -1013,6 +1018,132 @@
       "mutation": true
     },
     {
+      "id": "initial-activation-create-claim",
+      "phase": "initial-activation-lifecycle",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "initial-activation-create-claim",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/claim.json"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "NORMAL_ACTIVATION_MUTATION",
+      "probe": "direct-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "CreateExactActivationLifecycleConditionally",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "initial-activation-create-completion",
+      "phase": "initial-activation-lifecycle",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "initial-activation-create-completion",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/completion.json"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "NORMAL_ACTIVATION_MUTATION",
+      "probe": "direct-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "CreateExactActivationLifecycleConditionally",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "initial-activation-read-claim",
+      "phase": "initial-activation-lifecycle",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "initial-activation-read-claim",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/claim.json"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct-live-read",
+      "probeIds": [
+        "stage-a-state",
+        "stage-b-state"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "ReadExactActivationLifecycle",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-read-completion",
+      "phase": "initial-activation-lifecycle",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "initial-activation-read-completion",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/completion.json"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct-live-read",
+      "probeIds": [
+        "stage-a-state",
+        "stage-b-state"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "ReadExactActivationLifecycle",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "manifest-activate-exact-ecs-service",
       "phase": "wrapper-apply",
       "identity": "RELEASE_DEPLOYER",
@@ -1168,6 +1299,31 @@
       "mutation": true
     },
     {
+      "id": "manifest-apply-stage-a-production-artifacts-bucket-policy",
+      "phase": "wrapper-apply",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "apply-stage-a-production-artifacts-bucket-policy",
+      "action": "s3:PutBucketPolicy",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "ApplyCompleteProductionArtifactsBucketPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "manifest-apply-stage-b-backend-lock-delete",
       "phase": "wrapper-apply",
       "identity": "RELEASE_DEPLOYER",
@@ -1286,7 +1442,7 @@
           "key": "s3:if-none-match",
           "type": "string",
           "values": [
-            "present"
+            "*"
           ]
         }
       ],
@@ -4815,6 +4971,31 @@
       "mutation": false
     },
     {
+      "id": "manifest-refresh-stage-a-production-artifacts-bucket-policy",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-production-artifacts-bucket-policy",
+      "action": "s3:GetBucketPolicy",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "ReadCompleteProductionArtifactsBucketPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "manifest-refresh-stage-a-provider-log-groups",
       "phase": "refresh-only",
       "identity": "RELEASE_DEPLOYER",
@@ -6815,6 +6996,31 @@
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
         "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "manifest-unrelated-bucket-policy-write",
+      "phase": "refresh-only",
+      "identity": "ADMINISTRATOR",
+      "executor": "iam-simulator",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "unrelated-bucket-policy-write",
+      "action": "s3:PutBucketPolicy",
+      "resources": [
+        "arn:aws:s3:::unrelated-bucket"
+      ],
+      "context": [],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
       },
       "required": true,
       "mutation": true

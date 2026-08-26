@@ -5,13 +5,14 @@ import { assertSteadyStateReleasePolicy, assertTemporaryReleasePolicy, buildTemp
 import { assertStageARootDropKeyPolicySource } from "../aws/production-stage-a-control-plane.mjs";
 
 const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
+const activationLifecyclePolicy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json", "utf8"));
 const providerReadPolicy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json", "utf8"));
 const terraformSource = fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
 const sourceSha = "72c2c7e9bc45213b2655bbbcaaf2a45a5b5aa0c7";
 const transitionId = "stage-a-root-drop-20260818";
 const refreshContract = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAProviderRefreshContract-v1.json", "utf8"));
 const statements = policy.Statement;
-const allStatements = [...statements, ...providerReadPolicy.Statement];
+const allStatements = [...statements, ...activationLifecyclePolicy.Statement, ...providerReadPolicy.Statement];
 const asArray = (value) => Array.isArray(value) ? value : [value];
 const matches = (pattern, value) => pattern === "*" || pattern === value || (pattern.endsWith("*") && value.startsWith(pattern.slice(0, -1)));
 
@@ -20,6 +21,7 @@ const production = Object.freeze({
   bucketArn: refreshContract.backend.bucketArn,
   stateArn: refreshContract.backend.stateArn,
   lockArn: refreshContract.backend.lockArn,
+  artifactsBucketArn: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
   endpointSecurityGroupArn: "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412",
   storageKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/254a1eed-9472-4216-9da0-133a2c3b8ed5",
   approvalKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478",
@@ -105,6 +107,7 @@ const readCases = [
   ["logs:ListTagsForResource", production.executorLogArn],
   ["logs:ListTagsForResource", production.brokerLogArn],
   ["secretsmanager:DescribeSecret", "*"],
+  ["s3:GetBucketPolicy", production.artifactsBucketArn],
 ];
 
 test("Stage A provider refresh actions are exact and region-bound", () => {
@@ -155,6 +158,13 @@ test("Stage A apply permits only the exact endpoint security-group ingress", () 
   assert.equal(allows({ action: "ec2:AuthorizeSecurityGroupIngress", resource: production.endpointSecurityGroupArn, values: context() }), true);
   assert.equal(allows({ action: "ec2:AuthorizeSecurityGroupIngress", resource: "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-unrelated", values: context() }), false);
   assert.equal(allows({ action: "ec2:AuthorizeSecurityGroupIngress", resource: production.endpointSecurityGroupArn, values: context("us-east-1") }), false);
+});
+
+test("Stage A owns only the complete production artifacts bucket policy", () => {
+  assert.equal(allows({ action: "s3:GetBucketPolicy", resource: production.artifactsBucketArn, values: context() }), true);
+  assert.equal(allows({ action: "s3:PutBucketPolicy", resource: production.artifactsBucketArn, values: context() }), true);
+  assert.equal(allows({ action: "s3:PutBucketPolicy", resource: "arn:aws:s3:::unrelated-bucket", values: context() }), false);
+  assert.equal(allows({ action: "s3:DeleteBucketPolicy", resource: production.artifactsBucketArn, values: context() }), false);
 });
 
 test("Stage A steady-state release policy has no permanent KMS tagging capability", () => {

@@ -27,6 +27,22 @@ export const STAGE_B = Object.freeze({
   frontendTaskDefinition: "mscqr-frontend:20",
 });
 
+export const PRODUCTION_ACTIVATION_LIFECYCLE = Object.freeze({
+  bucket: STAGE_B.receiptBucket,
+  claimKey: "production-activation-lifecycle/claim.json",
+  completionKey: "production-activation-lifecycle/completion.json",
+  claimArn: `arn:aws:s3:::${STAGE_B.receiptBucket}/production-activation-lifecycle/claim.json`,
+  completionArn: `arn:aws:s3:::${STAGE_B.receiptBucket}/production-activation-lifecycle/completion.json`,
+  releaseRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+});
+
+export const PRODUCTION_ECS_CLUSTER_NAME = STAGE_B.clusterArn.slice(STAGE_B.clusterArn.lastIndexOf("/") + 1);
+
+export function canonicalProductionEcsClusterArn(value) {
+  if (value === PRODUCTION_ECS_CLUSTER_NAME || value === STAGE_B.clusterArn) return STAGE_B.clusterArn;
+  throw new Error("ECS cluster identity is not the exact production cluster name or ARN.");
+}
+
 const brokerAliasParts = (value) => {
   const match = /^arn:aws:lambda:([^:]+):([^:]+):function:([^:]+)(?::([^:]+))?$/.exec(String(value || ""));
   return match ? { region: match[1], account: match[2], functionName: match[3], qualifier: match[4] || "" } : null;

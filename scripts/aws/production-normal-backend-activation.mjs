@@ -92,20 +92,24 @@ function oldestDeletablePolicyVersion(versions, defaultVersionId) {
   return oldest.VersionId;
 }
 
-function assertReleaseReceipt(receipt, { sourceSha, imageAuthorization }) {
-  const digest = authorizedBackendDigest(imageAuthorization);
+export function assertProductionRlsReleaseReceipt(receipt, { sourceSha, imageDigest }) {
   const copy = structuredClone(receipt);
   const claimed = copy?.receiptBundleSha256;
   delete copy.receiptBundleSha256;
-  if (receipt?.schemaVersion !== 2 || receipt.environment !== "production" || receipt.releaseSha !== sourceSha || receipt.images?.backend !== `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}` || receipt.approvalId !== stageBApprovalIdForReleaseSha(sourceSha) || !SHA256.test(claimed || "") || claimed !== sha256(`${JSON.stringify(copy)}\n`)) throw new Error("Production RLS release receipt is not bound to the normal backend activation.");
+  if (receipt?.schemaVersion !== 2 || receipt.environment !== "production" || receipt.releaseSha !== sourceSha || receipt.images?.backend !== `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${imageDigest}` || receipt.approvalId !== stageBApprovalIdForReleaseSha(sourceSha) || !SHA256.test(claimed || "") || claimed !== sha256(`${JSON.stringify(copy)}\n`)) throw new Error("Production RLS release receipt is not bound to the normal backend activation.");
   return receipt.approvalId;
 }
 
-function assertService(service, expectedCurrentArn) {
+function assertReleaseReceipt(receipt, { sourceSha, imageAuthorization }) {
+  return assertProductionRlsReleaseReceipt(receipt, { sourceSha, imageDigest: authorizedBackendDigest(imageAuthorization) });
+}
+
+function assertService(service, expectedCurrentArn, expectedCurrentDeploymentId) {
   if (service?.serviceArn !== NORMAL_ACTIVATION.serviceArn || service.clusterArn !== NORMAL_ACTIVATION.clusterArn || service.status !== "ACTIVE" || service.taskDefinition !== expectedCurrentArn || !Number.isInteger(service.desiredCount) || service.desiredCount < 1) throw new Error("Production backend service identity/current revision is invalid.");
   const deployments = service.deployments || [];
-  if (deployments.length !== 1 || deployments[0]?.status !== "PRIMARY" || deployments[0]?.taskDefinition !== expectedCurrentArn || deployments[0]?.pendingCount !== 0 || deployments[0]?.runningCount !== service.desiredCount || (deployments[0]?.rolloutState && deployments[0].rolloutState !== "COMPLETED")) throw new Error("Production backend service changed or is not stable before activation.");
-  return true;
+  if (deployments.length !== 1 || !/^ecs-svc\/[1-9][0-9]*$/.test(deployments[0]?.id || "") || deployments[0]?.status !== "PRIMARY" || deployments[0]?.taskDefinition !== expectedCurrentArn || deployments[0]?.pendingCount !== 0 || deployments[0]?.runningCount !== service.desiredCount || (deployments[0]?.rolloutState && deployments[0].rolloutState !== "COMPLETED")) throw new Error("Production backend service changed or is not stable before activation.");
+  if (expectedCurrentDeploymentId !== undefined && deployments[0].id !== expectedCurrentDeploymentId) throw new Error("Production backend deployment identity changed after overlap verification.");
+  return deployments[0].id;
 }
 
 function assertTaskDefinition(response, candidate) {
@@ -159,7 +163,7 @@ function assertRunIdentity(runIdentity) {
   return Object.freeze({ workflowRunId: String(runIdentity.workflowRunId), releaseTrainRunId: String(runIdentity.releaseTrainRunId) });
 }
 
-export function collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn, validateImageAuthorization, runIdentity } = {}) {
+export function collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn, expectedCurrentDeploymentId, validateImageAuthorization, runIdentity } = {}) {
   if (typeof run !== "function") throw new Error("Authenticated AWS command runner is required.");
   const caller = parseJson(run, ["sts", "get-caller-identity"]);
   if (caller.Account !== NORMAL_ACTIVATION.account || !new RegExp(`^arn:aws:sts::${NORMAL_ACTIVATION.account}:assumed-role/mscqr-production-release-deployer/[^/]+$`).test(caller.Arn || "")) throw new Error("Normal activation requires the canonical release-deployer session.");
@@ -168,13 +172,13 @@ export function collectNormalActivationLiveEvidence({ run, sourceSha, imageAutho
   assertTaskDefinition(parseJson(run, ["ecs", "describe-task-definition", "--task-definition", candidate.targetArn, "--include", "TAGS"]), candidate);
   const service = parseJson(run, ["ecs", "describe-services", "--cluster", NORMAL_ACTIVATION.cluster, "--services", NORMAL_ACTIVATION.service]).services?.[0];
   const current = expectedCurrentTaskDefinitionArn || service?.taskDefinition;
-  assertService(service, current);
+  const currentDeploymentId = assertService(service, current, expectedCurrentDeploymentId);
   const source = sourceTaskDefinitionIdentity(parseJson(run, ["ecs", "describe-task-definition", "--task-definition", current, "--include", "TAGS"]), current);
   assertRollbackImageAvailable(run, source.sourceDigest);
   assertRunningServiceTarget(run, { taskDefinitionArn: current, digest: source.sourceDigest, desiredCount: service.desiredCount });
   const policy = readLivePolicy(run);
   assertNormalActivationTransactionPolicy(policy.document, { sourceArn: current, targetArn: candidate.targetArn });
-  return Object.freeze({ schemaVersion: 2, releaseMode: "normal", ...candidate, ...source, rollbackImageVerified: true, desiredCount: service.desiredCount, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, expectedCurrentTaskDefinitionArn: current, policyArn: NORMAL_ACTIVATION.policyArn, policyVersionId: policy.defaultVersionId, livePolicySha256: sha256(canonical(policy.document)), ...(runIdentity ? assertRunIdentity(runIdentity) : {}) });
+  return Object.freeze({ schemaVersion: 2, releaseMode: "normal", ...candidate, ...source, rollbackImageVerified: true, desiredCount: service.desiredCount, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, expectedCurrentTaskDefinitionArn: current, expectedCurrentDeploymentId: currentDeploymentId, policyArn: NORMAL_ACTIVATION.policyArn, policyVersionId: policy.defaultVersionId, livePolicySha256: sha256(canonical(policy.document)), ...(runIdentity ? assertRunIdentity(runIdentity) : {}) });
 }
 
 export function assertNormalActivationBinding(binding, expected) {
@@ -331,7 +335,7 @@ export function classifyNormalActivationLiveOutcome({ run, binding }) {
 
 export function executeNormalBackendActivation({ run, runScript = execFileSync, sourceSha, imageAuthorization, releaseReceipt, binding, metadataFile, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh"), runIdentity } = {}) {
   assertReleaseReceipt(releaseReceipt, { sourceSha, imageAuthorization });
-  const fresh = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: binding?.expectedCurrentTaskDefinitionArn, runIdentity });
+  const fresh = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: binding?.expectedCurrentTaskDefinitionArn, expectedCurrentDeploymentId: binding?.expectedCurrentDeploymentId, runIdentity });
   assertNormalActivationBinding(binding, fresh);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-normal-activation-"));
   const bindingFile = path.join(directory, "binding.json");
@@ -409,9 +413,16 @@ export function runCli(argv = process.argv.slice(2)) {
   const run = createProductionCommandRunner();
   const runIdentity = { workflowRunId: required(values, "--workflow-run-id"), releaseTrainRunId: required(values, "--release-train-run-id") };
   if (mode === "prepare") {
-    const binding = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, runIdentity });
+    const binding = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: values.get("--expected-current-task-definition"), expectedCurrentDeploymentId: values.get("--expected-current-deployment-id"), runIdentity });
     writePrivateJson(required(values, "--binding-out"), binding);
     process.stdout.write(`${JSON.stringify({ status: "AUTHORIZED", targetArn: binding.targetArn, stateSerial: binding.stateSerial })}\n`);
+    return binding;
+  }
+  if (mode === "verify") {
+    const binding = readBoundStageBPrivateJson({ filePath: required(values, "--binding"), expectedSha256: required(values, "--binding-sha256"), label: "Normal backend activation binding" });
+    const fresh = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: binding.expectedCurrentTaskDefinitionArn, expectedCurrentDeploymentId: binding.expectedCurrentDeploymentId, runIdentity });
+    assertNormalActivationBinding(binding, fresh);
+    process.stdout.write(`${JSON.stringify({ status: "VERIFIED", sourceArn: binding.sourceArn, targetArn: binding.targetArn, expectedCurrentDeploymentId: binding.expectedCurrentDeploymentId })}\n`);
     return binding;
   }
   if (mode === "execute") {
@@ -421,7 +432,7 @@ export function runCli(argv = process.argv.slice(2)) {
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }
-  throw new Error("--mode must be converge-policy, contract-policy, prepare, or execute.");
+  throw new Error("--mode must be converge-policy, contract-policy, prepare, verify, or execute.");
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {

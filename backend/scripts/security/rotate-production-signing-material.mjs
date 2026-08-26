@@ -5,6 +5,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import jwt from "jsonwebtoken";
 import {
+  assertLegacyProductionRotationGraceSeconds,
+  assertNormalizedProductionRotationGraceSeconds,
+  assertProductionRotationGraceSeconds,
+  deriveProductionRotationCleanupEligibleAt,
+  PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT,
+  normalizeProductionRotationState,
+  PRODUCTION_ROTATION_STATE_VERSION,
+} from "./production-rotation-grace-contract.mjs";
+import {
   GetSecretValueCommand,
   PutSecretValueCommand,
   SecretsManagerClient,
@@ -66,9 +75,7 @@ const loadConfig = (file, expectedSha256) => {
   required(config.sourceSha, "config.sourceSha");
   if (!safeId(config.rotationId)) throw new Error("config.rotationId is invalid");
   if (!fullSha(config.sourceSha)) throw new Error("config.sourceSha must be a full SHA-1");
-  if (!Number.isSafeInteger(config.minimumGraceSeconds) || config.minimumGraceSeconds < 1) {
-    throw new Error("config.minimumGraceSeconds must be a positive safe integer");
-  }
+  assertLegacyProductionRotationGraceSeconds(config.minimumGraceSeconds, "config.minimumGraceSeconds");
   const ids = [
     config.jwt?.currentSecretId, config.jwt?.previousSecretId, config.jwt?.pendingSecretId,
     config.qr?.privateCurrentSecretId, config.qr?.privatePendingSecretId,
@@ -137,6 +144,23 @@ const statePath = (values) => path.resolve(required(values.get("state-file"), "-
 const fixturePath = (values) => path.resolve(required(values.get("fixture-file"), "--fixture-file"));
 const persist = (context, state) => (context.persistState || writeState)(statePath(context.values), state);
 const clockOf = (context) => context.clock || Date.now;
+
+const assertStateIdentity = (state, config) => {
+  if (!state || state.rotationId !== config.rotationId) throw new Error("state file belongs to another rotation");
+  if (!PHASES.includes(state.phase)) throw new Error(`unsupported rotation phase: ${state.phase}`);
+  if (state.sourceSha !== config.sourceSha) throw new Error("state source SHA does not match config");
+  if (state.overlapDeploymentSha !== config.overlapDeploymentSha) throw new Error("state overlap deployment SHA does not match config");
+};
+
+const readCurrentState = (context, { persistMigration = true } = {}) => {
+  const persisted = readState(statePath(context.values));
+  if (!persisted) return null;
+  assertStateIdentity(persisted, context.config);
+  const normalized = normalizeProductionRotationState(persisted, { reviewedMinimumGraceSeconds: context.config.minimumGraceSeconds });
+  assertState(normalized.state, context.config);
+  if (normalized.migrated && persistMigration) persist(context, normalized.state);
+  return normalized.state;
+};
 
 const slots = async (sm, config) => {
   const records = await Promise.all([
@@ -212,13 +236,14 @@ const validateRuntimeProof = ({ file, proof: persistedProof, config, phase, expe
     ? ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "serviceHealthy"]
     : ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeRejected", "qrUnknownKeyRejected", "serviceHealthy"];
   for (const check of requiredChecks) if (proof[check] !== true) throw new Error(`${phase} runtime proof is missing ${check}`);
-  return { ...proof, observedAt: new Date(observedAt).toISOString() };
+  return { ...proof, observedAt: new Date(observedAt).toISOString(), healthObservedAt: new Date(healthObservedAt).toISOString() };
 };
 
 const stateForPending = ({ config, identity, oldJwt, oldQrPrivate, oldQrPublic, oldQrVersion, newJwt, newQrPublic, newPrivate, newQrVersion, pending, inventoryEvidenceSha256 }) => ({
-  stateVersion: 3,
+  stateVersion: PRODUCTION_ROTATION_STATE_VERSION,
   rotationId: config.rotationId,
   sourceSha: config.sourceSha,
+  minimumGraceSeconds: config.minimumGraceSeconds,
   operator: identity,
   phase: "prepared",
   overlapDeploymentSha: config.overlapDeploymentSha,
@@ -230,9 +255,10 @@ const stateForPending = ({ config, identity, oldJwt, oldQrPrivate, oldQrPublic, 
 });
 
 const assertState = (state, config) => {
-  if (!state || state.rotationId !== config.rotationId) throw new Error("state file belongs to another rotation");
-  if (!PHASES.includes(state.phase)) throw new Error(`unsupported rotation phase: ${state.phase}`);
-  if (state.sourceSha !== config.sourceSha) throw new Error("state source SHA does not match config");
+  assertStateIdentity(state, config);
+  if (state.stateVersion !== PRODUCTION_ROTATION_STATE_VERSION) throw new Error(`state stateVersion must be ${PRODUCTION_ROTATION_STATE_VERSION}`);
+  assertNormalizedProductionRotationGraceSeconds(state);
+  if (state.minimumGraceSeconds !== config.minimumGraceSeconds) throw new Error("state minimum grace does not match the reviewed config");
 };
 const assertStateSlots = (state, current) => {
   assertQrVersionSlots(current, state);
@@ -286,12 +312,13 @@ const assertPrepareLineage = (state, current) => {
 
 const prepare = async (context) => {
   const { config, sm, values, identity, inventoryEvidenceSha256 } = context;
+  let state = readCurrentState(context);
+  if (!state || state.graceContract !== PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT) assertProductionRotationGraceSeconds(config.minimumGraceSeconds, "config.minimumGraceSeconds");
+  deriveProductionRotationCleanupEligibleAt(nowIso(clockOf(context)), config.minimumGraceSeconds);
   const inventoryBindingRequired = values.has("inventory-evidence-file");
   if (inventoryBindingRequired && !/^[a-f0-9]{64}$/.test(inventoryEvidenceSha256 || "")) throw new Error("bounded inventory evidence hash is required");
   const stateFile = statePath(values);
   const fixtureFile = fixturePath(values);
-  let state = readState(stateFile);
-  if (state) assertState(state, config);
   if (inventoryBindingRequired && state && state.inventoryEvidenceSha256 !== inventoryEvidenceSha256) throw new Error("rotation state is not bound to the current bounded inventory evidence");
   let current = await slots(sm, config);
   for (const [name, record] of [["jwt", current.jwtPending], ["QR private", current.qrPrivatePending], ["QR public", current.qrPublicPending]]) assertPendingOwnership(name, record.material, config.rotationId);
@@ -390,12 +417,13 @@ const verify = async (context) => {
   const { config, values } = context;
   const file = required(values.get("runtime-verification-file"), "--runtime-verification-file");
   const stateFile = statePath(values);
-  const state = readState(stateFile);
-  assertState(state, config);
+  const state = readCurrentState(context);
   if (!["overlap-deploy-required", "overlap-ready"].includes(state.phase)) throw new Error("rotation must require an overlap deployment before verification");
   const proof = validateRuntimeProof({ file, config, phase: "overlap", expectedDeploymentSha: config.overlapDeploymentSha, clock: clockOf(context) });
   const overlapReadyAt = proof.observedAt;
-  const cleanupEligibleAt = new Date(isoDate(overlapReadyAt) + config.minimumGraceSeconds * 1000).toISOString();
+  const cleanupEligibleAt = deriveProductionRotationCleanupEligibleAt(overlapReadyAt, state.minimumGraceSeconds);
+  if (state.overlapReadyAt && state.overlapReadyAt !== overlapReadyAt) throw new Error("persisted overlap grace anchor does not match the runtime proof");
+  if (state.cleanupEligibleAt && state.cleanupEligibleAt !== cleanupEligibleAt) throw new Error("persisted cleanup deadline does not match the reviewed grace");
   state.phase = "overlap-ready";
   state.overlapReadyAt = state.overlapReadyAt || overlapReadyAt;
   state.cleanupEligibleAt = state.cleanupEligibleAt || cleanupEligibleAt;
@@ -507,8 +535,7 @@ const cleanup = async (context) => {
   const { config, sm, values, identity } = context;
   if (!values.has("confirm-cleanup")) throw new Error("--confirm-cleanup is required for cleanup");
   const stateFile = statePath(values);
-  const state = readState(stateFile);
-  assertState(state, config);
+  const state = readCurrentState(context);
   const cleanupDeploymentSha = required(values.get("cleanup-deployment-sha"), "--cleanup-deployment-sha");
   if (!fullSha(cleanupDeploymentSha)) throw new Error("--cleanup-deployment-sha must be a full SHA");
   const cleanupEvidenceRef = ["cleanup-runtime-verified", "cleaned"].includes(state.phase)
@@ -588,9 +615,8 @@ const cleanup = async (context) => {
 
 const status = async ({ config, sm, values, identity }) => {
   const current = await slots(sm, config);
-  const state = readState(statePath(values));
+  const state = readCurrentState({ config, sm, values, identity }, { persistMigration: false });
   if (state) {
-    assertState(state, config);
     if (state.phase === "prepared") assertPrepareLineage(state, current);
     if (["overlap-deploy-required", "overlap-ready", "verified", "grace-wait", "retirement-started", "retirement-complete", "cleanup-deploy-required", "cleanup-runtime-verified", "cleaned"].includes(state.phase)) assertStateSlots(state, current);
   }
@@ -616,7 +642,7 @@ const main = async () => {
   return status(context);
 };
 
-export { assertIdentity, cleanup, prepare, status, verify, validateRuntimeProof, writeState };
+export { assertIdentity, cleanup, prepare, readCurrentState, status, verify, validateRuntimeProof, writeState };
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error) => {

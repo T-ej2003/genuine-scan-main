@@ -14,6 +14,22 @@ locals {
   ])
   runtime_secret_roles = toset(["app", "read", "preauth", "worker", "scheduled", "operator", "migration"])
   canary_secret_names  = toset(["ordinary_email", "ordinary_password", "ordinary_mfa_secret", "admin_email", "admin_password", "admin_mfa_secret"])
+  activation_lifecycle_object_arns = [
+    "${var.receipt_bucket_arn}/production-activation-lifecycle/claim.json",
+    "${var.receipt_bucket_arn}/production-activation-lifecycle/completion.json",
+  ]
+}
+
+resource "aws_s3_bucket_policy" "production_artifacts" {
+  bucket = trimprefix(var.receipt_bucket_arn, "arn:aws:s3:::")
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Sid = "AllowReleaseDeployerReadActivationLifecycle", Effect = "Allow", Principal = { AWS = var.release_role_arn }, Action = "s3:GetObject", Resource = local.activation_lifecycle_object_arns },
+    { Sid = "AllowReleaseDeployerConditionalActivationLifecycleCreate", Effect = "Allow", Principal = { AWS = var.release_role_arn }, Action = "s3:PutObject", Resource = local.activation_lifecycle_object_arns, Condition = { StringEquals = { "s3:if-none-match" = "*" } } },
+    { Sid = "DenyNonConditionalActivationLifecycleWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.activation_lifecycle_object_arns, Condition = { StringNotEquals = { "s3:if-none-match" = "*" } } },
+    { Sid = "DenyOtherPrincipalsActivationLifecycleWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.activation_lifecycle_object_arns, Condition = { StringNotEquals = { "aws:PrincipalArn" = var.release_role_arn } } },
+    { Sid = "DenyActivationLifecycleDeletion", Effect = "Deny", Principal = "*", Action = ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource = local.activation_lifecycle_object_arns },
+    { Sid = "DenyProductionArtifactsBucketPolicyMutation", Effect = "Deny", Principal = "*", Action = ["s3:PutBucketPolicy", "s3:DeleteBucketPolicy"], Resource = var.receipt_bucket_arn },
+  ] })
 }
 
 # Stage A owns only new, isolated green resources. Blue ECS, ALB, DNS, RDS,

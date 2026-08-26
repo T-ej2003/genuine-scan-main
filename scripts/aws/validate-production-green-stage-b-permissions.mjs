@@ -110,6 +110,7 @@ const arnPattern = /^(?:arn:aws:[^:]+:[^:]*:368992683803:.+|arn:aws:s3:::[^/]+(?
 
 export const RELEASE_POLICY_SOURCES = Object.freeze([
   ["MSCQRProductionGreenStageARelease", "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json"],
+  ["MSCQRProductionInitialActivationLifecycle", "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json"],
   ["MSCQRProductionGreenStageBBrokerCodeSigningRead", "documents/ops/iam/MSCQRProductionGreenStageBBrokerCodeSigningRead-v1.json"],
   ["MSCQRProductionGreenStageBProviderRecovery", "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json"],
   ["MSCQRProductionGreenStageBProviderReadOnly", "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json"],
@@ -372,7 +373,7 @@ export const REVIEWED_SIMULATION_CONTEXT_REGISTRY = Object.freeze([
   { key: "ecs:task-definition", type: "stringList", values: Object.freeze(["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47"]) },
   { key: "ecs:task-memory", type: "numeric", values: Object.freeze(["512", "1024", "2048", "4096"]) },
   { key: "iam:PassedToService", type: "string", values: Object.freeze(["ecs-tasks.amazonaws.com"]) },
-  { key: "s3:if-none-match", type: "string", values: Object.freeze(["present"]) },
+  { key: "s3:if-none-match", type: "string", values: Object.freeze(["*"]) },
   { key: "secretsmanager:Name", type: "string", values: Object.freeze(["mscqr/production/rls-green/artifact-signing/private-key-current", "mscqr/production/rls-green/artifact-signing/public-key-current", "mscqr/production/rls-green/artifact-signing/active-key-version", "mscqr/production/rls-green/artifact-signing/public-keys-json", "mscqr/prod/rotation/jwt-previous", "mscqr/prod/rotation/jwt-pending", "mscqr/prod/rotation/qr-private-pending", "mscqr/prod/rotation/qr-public-previous", "mscqr/prod/rotation/qr-public-pending", "mscqr/prod/rotation/qr-current-version", "mscqr/prod/rotation/qr-previous-version"]) },
 ]);
 
@@ -385,7 +386,7 @@ export function assertReviewedSimulationContextRegistry({ conditionKeyOrigins = 
     const extra = registryKeys.filter((key) => !discoveredKeys.includes(key));
     throw new Error(`Reviewed simulator context registry differs from policy condition keys: missing=${missing.join(",") || "none"}; extra=${extra.join(",") || "none"}.`);
   }
-  if (registry.some(({ values }) => values.some((value) => value === "*"))) throw new Error("Reviewed simulator context registry may not contain wildcard values.");
+  if (registry.some(({ key, values }) => key !== "s3:if-none-match" && values.some((value) => value === "*"))) throw new Error("Reviewed simulator context registry may not contain wildcard values.");
   return Object.freeze(registry.map(({ key, type, values }) => ({ key, type, values: [...values] })).sort((left, right) => left.key.localeCompare(right.key)));
 }
 

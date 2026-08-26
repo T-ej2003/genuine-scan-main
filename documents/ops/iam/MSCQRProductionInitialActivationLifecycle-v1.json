@@ -1,0 +1,55 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadExactActivationLifecycle",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/claim.json",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/completion.json"
+      ]
+    },
+    {
+      "Sid": "CreateExactActivationLifecycleConditionally",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/claim.json",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/completion.json"
+      ],
+      "Condition": { "StringEquals": { "s3:if-none-match": "*" } }
+    },
+    {
+      "Sid": "DenyNonConditionalActivationLifecycleWrites",
+      "Effect": "Deny",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/claim.json",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/completion.json"
+      ],
+      "Condition": { "StringNotEquals": { "s3:if-none-match": "*" } }
+    },
+    {
+      "Sid": "DenyActivationLifecycleDeletion",
+      "Effect": "Deny",
+      "Action": ["s3:DeleteObject", "s3:DeleteObjectVersion"],
+      "Resource": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/claim.json",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/completion.json"
+      ]
+    },
+    {
+      "Sid": "ReadCompleteProductionArtifactsBucketPolicy",
+      "Effect": "Allow",
+      "Action": "s3:GetBucketPolicy",
+      "Resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+    },
+    {
+      "Sid": "ApplyCompleteProductionArtifactsBucketPolicy",
+      "Effect": "Allow",
+      "Action": "s3:PutBucketPolicy",
+      "Resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+    }
+  ]
+}

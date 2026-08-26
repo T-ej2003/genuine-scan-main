@@ -74,10 +74,54 @@ prepared -> overlap-deploy-required -> overlap-ready -> verified -> grace-wait
   -> cleanup-runtime-verified -> cleaned
 ```
 
-`minimumGraceSeconds` is an explicit reviewed operator value. The coordinator
-persists `overlapReadyAt`, `verifiedAt`, `cleanupEligibleAt`, and
-`retirementTimestamp`; cleanup fails closed before the deadline and has no
+For every new rotation, `minimumGraceSeconds` is an explicit reviewed operator
+value of at least 2,592,000 seconds. Longer reviewed values are supported. The coordinator
+persists the exact reviewed value with `overlapReadyAt`, `verifiedAt`,
+`cleanupEligibleAt`, and `retirementTimestamp`; `cleanupEligibleAt` is always
+`overlapReadyAt + minimumGraceSeconds`. A resumed run must match the persisted
+grace and anchor. Cleanup fails closed before the deadline and has no
 force/skip-grace bypass.
+
+Persisted coordinator state uses schema version 4. Authentic version-3 state
+from the prior coordinator is upgraded once at the state-reader boundary:
+pre-overlap phases take the exact hash-bound reviewed config value, while
+`overlap-ready` and later phases derive the historical grace only from the
+unchanged canonical `overlapReadyAt` and `cleanupEligibleAt` timestamps. The
+upgrade never changes either timestamp or restarts the cleanup window.
+Any state hash used by a later workflow is captured from the post-upgrade bytes;
+the original version-3 bytes are validated before the atomic replacement and
+are never relabeled as current-schema evidence.
+
+Version-3 compatibility preserves the historical policy rather than applying
+the new minimum retroactively. Pre-overlap v3 state is accepted by the overlap
+transition without migration because no grace anchor exists; the coordinator
+can migrate it only with that transaction's exact reviewed config. Timed v3
+state derives a positive whole-second grace solely from its authenticated
+`overlapReadyAt` and `cleanupEligibleAt`. Migrated v4 state carries
+`graceContract: LEGACY_V3_PRESERVED`; unmarked v4 state is current-policy state
+and must retain the 30-day minimum. Both forms retain the same Date-range cap.
+
+The deployment-side verifier accepts either the exact production cluster name
+or its full ARN as operator input, uses the full ARN for ECS reads, and persists
+only `arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main` in the
+runtime proof. The initial-overlap validator consumes that canonical ARN; wrong
+accounts, regions, names, aliases, and partial ARNs fail closed.
+
+## Initial-overlap producer/consumer contract
+
+| Persisted field group | Authoritative producer | Persisted representation | Consumers |
+| --- | --- | --- | --- |
+| `sourceSha`, `rotationId`, `overlapDeploymentSha`, signing-material fingerprints and key versions | approved runtime config plus coordinator preparation | full SHA strings, reviewed rotation ID, redacted fingerprints/versions | coordinator resume, initial-overlap validator |
+| Runtime checks, release health, `observedAt`, `healthObservedAt`, invocation reference | image-local runtime verifier | booleans, full source SHA, canonical UTC ISO timestamps, machine reference | ECS verifier, coordinator, initial-overlap validator, onboarding |
+| Service, cluster, task definition, image, task and deployment identity | deployment-side ECS verifier after final task re-read | exact service name, canonical cluster ARN, full ARNs/digest, `ecs-svc/<id>` | coordinator persistence, initial-overlap validator, Release Gate |
+| `minimumGraceSeconds`, `overlapReadyAt`, `verifiedAt`, `cleanupEligibleAt` | reviewed config plus coordinator | safe integer seconds and canonical UTC ISO timestamps | initial-overlap validator, cleanup executor, Stage-B closure |
+| State bytes and state SHA-256 | coordinator atomic mode-600 state file plus release input binding | exact serialized bytes and SHA-256 | Release Gate and Stage-B closure |
+
+Release Gate validates the dispatch inputs in `resolve-deploy-target`, then reconstructs the exact redacted coordinator-state bytes from those same immutable workflow inputs on the fresh `deploy-production-ecs` runner. The state hash and complete overlap contract are revalidated there before same-job environment bindings are published. No runner-local path or `$GITHUB_ENV` value crosses the job boundary, and both RLS and backend mutation steps re-run the validator against the deployment runner's reconstructed bytes.
+
+Runtime proof has no separate `verifiedAt`: `observedAt` belongs to the runtime
+producer, while state-level `verifiedAt` records coordinator acceptance. This
+distinction prevents producer/consumer timestamp aliasing.
 
 Cleanup is two-step and retry-safe: retire `JWT_SECRET_PREVIOUS`,
 `QR_SIGN_PUBLIC_KEY_PREVIOUS`, `JWT pending`, `QR private pending`, and

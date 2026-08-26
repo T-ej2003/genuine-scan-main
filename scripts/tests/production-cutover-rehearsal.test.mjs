@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assertStageAPlan, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "../aws/production-stage-a-control-plane.mjs";
+import { assertStageAPlan, buildStageAProductionArtifactsBucketPolicy, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
@@ -59,6 +59,15 @@ const checkerRoleChange = ({ actions = ["no-op"], before = {}, after = {} } = {}
     actions,
     before: { name: STAGE_A_CHECKER_ROLE_TRUST.name, assume_role_policy: checkerRoleTrustDocument({ condition: actions[0] === "update" ? { Bool: { "aws:MultiFactorAuthPresent": "true" } } : undefined }), ...before },
     after: { name: STAGE_A_CHECKER_ROLE_TRUST.name, assume_role_policy: checkerRoleTrustDocument(), ...after },
+  },
+});
+const artifactsBucketPolicyChange = ({ actions = ["create"], before = null, after = {}, policy = buildStageAProductionArtifactsBucketPolicy() } = {}) => ({
+  address: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address,
+  type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type,
+  change: {
+    actions,
+    before: actions[0] === "no-op" ? { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(buildStageAProductionArtifactsBucketPolicy()), ...before } : before,
+    after: { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(policy), ...after },
   },
 });
 
@@ -120,7 +129,7 @@ export function fixtureInput(overrides = {}) {
     endpointSecurityGroupId: "sg-endpoint",
     runtimeSecurityGroupId: "sg-runtime",
     adapter: {
-      createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null } } }, checkerPolicyChange(), checkerRoleChange(), checkerPublicationChange()] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
+      createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null } } }, checkerPolicyChange(), checkerRoleChange(), checkerPublicationChange(), artifactsBucketPolicyChange()] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
       applySavedPlan: async () => { mutations.push("M2_STAGE_A_APPLY"); },
       describeIngress: async () => ({ present: true, endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime", direction: "ingress", protocol: "tcp", fromPort: 443, toPort: 443 }),
     },
@@ -156,8 +165,8 @@ export function fixtureInput(overrides = {}) {
   };
 }
 
-const stageAPlan = ({ address = 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', actions = ["create"], checkerActions = actions, after = {}, checkerAfter = {}, checkerRole = checkerRoleChange(), checkerPublication = checkerPublicationChange(), extra = [] } = {}) => ({
-  resource_changes: [{ address, change: { actions, after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null, ...after } } }, checkerPolicyChange(checkerActions, checkerAfter), checkerRole, checkerPublication, ...extra],
+const stageAPlan = ({ address = 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', actions = ["create"], checkerActions = actions, after = {}, checkerAfter = {}, checkerRole = checkerRoleChange(), checkerPublication = checkerPublicationChange(), artifactsBucketPolicy, extra = [] } = {}) => ({
+  resource_changes: [{ address, change: { actions, after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null, ...after } } }, checkerPolicyChange(checkerActions, checkerAfter), checkerRole, checkerPublication, artifactsBucketPolicy ?? artifactsBucketPolicyChange({ actions: actions[0] === "no-op" ? ["no-op"] : ["create"] }), ...extra],
 });
 
 test("Stage A accepts only the reviewed indexed for_each instance", () => {
@@ -197,6 +206,22 @@ test("Stage A admits only the exact checker role-chain policy semantics", () => 
   ]) assert.throws(() => assertStageAPlan(stageAPlan({ checkerAfter }), inputs));
   assert.throws(() => assertStageAPlan(stageAPlan({ checkerActions: ["update"] }), inputs));
   assert.throws(() => assertStageAPlan(stageAPlan({ extra: [{ address: "aws_iam_role_policy.unrelated", type: "aws_iam_role_policy", change: { actions: ["create"], after: {} } }] }), inputs));
+});
+
+test("Stage A admits only the exact first-owner production-artifacts bucket policy", () => {
+  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  assert.doesNotThrow(() => assertStageAPlan(stageAPlan(), inputs));
+  const broadened = buildStageAProductionArtifactsBucketPolicy();
+  broadened.Statement[0].Resource = [`arn:aws:s3:::${STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket}/*`];
+  const missingSelfProtection = buildStageAProductionArtifactsBucketPolicy();
+  missingSelfProtection.Statement.pop();
+  for (const artifactsBucketPolicy of [
+    artifactsBucketPolicyChange({ actions: ["update"] }),
+    artifactsBucketPolicyChange({ before: {} }),
+    artifactsBucketPolicyChange({ after: { bucket: "unrelated-bucket" } }),
+    artifactsBucketPolicyChange({ policy: broadened }),
+    artifactsBucketPolicyChange({ policy: missingSelfProtection }),
+  ]) assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy }), inputs));
 });
 
 test("Stage A admits only the exact checker publication policy transition", () => {
@@ -295,7 +320,7 @@ test("Stage A applies exact create once and reads the postcondition", async () =
   });
   assert.equal(result.alreadyConverged, false);
   assert.equal(result.appliedExactSavedPlan, true);
-  assert.equal(result.mutationCount, 2);
+  assert.equal(result.mutationCount, 3);
   assert.equal(applyCalls, 1);
   assert.equal(postconditionReads, 1);
 });

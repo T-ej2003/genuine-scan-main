@@ -125,6 +125,13 @@
         { "action": "secretsmanager:DescribeSecret", "resources": ["*"], "region": "eu-west-2", "conditions": { "aws:ResourceTag/Environment": "production", "aws:ResourceTag/ManagedBy": "Terraform", "aws:ResourceTag/Component": "full-rls-green-stage-a" }, "sourceOfProof": "provider secretsmanager/secret.go; AWS Secrets Manager service authorization" },
         { "action": "secretsmanager:GetResourcePolicy", "resources": ["*"], "region": "eu-west-2", "conditions": { "aws:ResourceTag/Environment": "production", "aws:ResourceTag/ManagedBy": "Terraform", "aws:ResourceTag/Component": "full-rls-green-stage-a" }, "sourceOfProof": "provider secretsmanager/secret.go resourceSecretFlatten; AWS Secrets Manager service authorization" }
       ]
+    },
+    {
+      "type": "aws_s3_bucket_policy",
+      "addresses": ["aws_s3_bucket_policy.production_artifacts"],
+      "readActions": [
+        { "action": "s3:GetBucketPolicy", "resources": ["arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"], "sourceOfProof": "locked hashicorp/aws 6.56.0 s3/bucket_policy.go findBucketPolicy" }
+      ]
     }
   ],
   "unmappedResourceTypes": []

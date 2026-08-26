@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { PRODUCTION_ACTIVATION_LIFECYCLE, STAGE_B } from "./production-green-stage-b-contract.mjs";
 const REQUIRED_LOGICAL_ADDRESS = "aws_vpc_security_group_ingress_rule.runtime_endpoints_https";
 const SHA256 = /^[a-f0-9]{64}$/;
 const RDS_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
@@ -60,6 +60,25 @@ export const STAGE_A_CHECKER_PUBLICATION_POLICY = Object.freeze({
   publishAction: "secretsmanager:PutSecretValue",
   publishResource: STAGE_B.approvalSecretArn,
 });
+export const STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY = Object.freeze({
+  address: "aws_s3_bucket_policy.production_artifacts",
+  type: "aws_s3_bucket_policy",
+  bucket: PRODUCTION_ACTIVATION_LIFECYCLE.bucket,
+});
+export function buildStageAProductionArtifactsBucketPolicy() {
+  const objects = [PRODUCTION_ACTIVATION_LIFECYCLE.claimArn, PRODUCTION_ACTIVATION_LIFECYCLE.completionArn];
+  return {
+    Version: "2012-10-17",
+    Statement: [
+      { Sid: "AllowReleaseDeployerReadActivationLifecycle", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn }, Action: "s3:GetObject", Resource: objects },
+      { Sid: "AllowReleaseDeployerConditionalActivationLifecycleCreate", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn }, Action: "s3:PutObject", Resource: objects, Condition: { StringEquals: { "s3:if-none-match": "*" } } },
+      { Sid: "DenyNonConditionalActivationLifecycleWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: objects, Condition: { StringNotEquals: { "s3:if-none-match": "*" } } },
+      { Sid: "DenyOtherPrincipalsActivationLifecycleWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: objects, Condition: { StringNotEquals: { "aws:PrincipalArn": PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn } } },
+      { Sid: "DenyActivationLifecycleDeletion", Effect: "Deny", Principal: "*", Action: ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource: objects },
+      { Sid: "DenyProductionArtifactsBucketPolicyMutation", Effect: "Deny", Principal: "*", Action: ["s3:PutBucketPolicy", "s3:DeleteBucketPolicy"], Resource: `arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}` },
+    ],
+  };
+}
 const STAGE_A_CHECKER_PUBLICATION_PREDECESSOR = Object.freeze({
   Version: "2012-10-17",
   Statement: [{
@@ -219,6 +238,20 @@ function assertStageACheckerPublicationPolicyChange(entry) {
   return { valid: true, alreadyConverged: exactActions(change.actions, ["no-op"]), mutationCount: exactActions(change.actions, ["update"]) ? 1 : 0 };
 }
 
+function assertStageAProductionArtifactsBucketPolicyChange(entry) {
+  if (entry.type !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type) throw new Error("Stage A production-artifacts bucket-policy resource type is wrong.");
+  const change = entry.change;
+  if (!exactActions(change?.actions, ["create"]) && !exactActions(change?.actions, ["no-op"])) throw new Error("Stage A production-artifacts bucket policy must be an initial create or converged no-op.");
+  if (change.replace_paths?.length || change.after?.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket) throw new Error("Stage A production-artifacts bucket-policy identity is wrong.");
+  const expected = stablePolicyJson(buildStageAProductionArtifactsBucketPolicy());
+  if (stablePolicyJson(decodePolicyDocument(change.after?.policy, "Stage A production-artifacts bucket policy")) !== expected) throw new Error("Stage A production-artifacts bucket-policy semantics are not exact.");
+  if (exactActions(change.actions, ["create"])) {
+    if (change.before !== null) throw new Error("Stage A production-artifacts bucket policy does not have the authenticated absent predecessor.");
+  } else if (stablePolicyJson(decodePolicyDocument(change.before?.policy, "Stage A converged production-artifacts bucket policy")) !== expected
+    || change.before?.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket) throw new Error("Stage A converged production-artifacts bucket-policy predecessor is not exact.");
+  return { alreadyConverged: exactActions(change.actions, ["no-op"]), mutationCount: exactActions(change.actions, ["create"]) ? 1 : 0 };
+}
+
 function readAndVerifyPlanSha256(planPath, expectedSha256) {
   if (!SHA256.test(expectedSha256 || "")) throw new Error("Stage A preserved plan SHA-256 is missing or malformed.");
   let bytes;
@@ -247,9 +280,13 @@ export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurit
   const checkerPublication = changes.filter(({ entry }) => entry.address === STAGE_A_CHECKER_PUBLICATION_POLICY.address);
   if (checkerPublication.length !== 1) throw new Error("Stage A plan must contain exactly one reviewed checker publication policy resource.");
   const checkerPublicationValidation = assertStageACheckerPublicationPolicyChange(checkerPublication[0].entry);
+  const artifactsBucketPolicy = changes.filter(({ entry }) => entry.address === STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address);
+  if (artifactsBucketPolicy.length !== 1) throw new Error("Stage A plan must contain exactly one complete production-artifacts bucket policy.");
+  const artifactsBucketPolicyValidation = assertStageAProductionArtifactsBucketPolicyChange(artifactsBucketPolicy[0].entry);
   const unexpected = changes.filter(({ entry, actions }) => entry.address !== expectedAddress && entry.address !== STAGE_A_CHECKER_POLICY.address
     && entry.address !== STAGE_A_CHECKER_ROLE_TRUST.address
     && entry.address !== STAGE_A_CHECKER_PUBLICATION_POLICY.address
+    && entry.address !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address
     && !exactActions(actions, ["no-op"]) && !exactActions(actions, ["read"]));
   if (unexpected.length) throw new Error("Stage A plan contains an unreviewed mutation.");
   const reviewed = changes.filter(({ entry }) => entry.address === expectedAddress);
@@ -283,8 +320,8 @@ export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurit
   exact(String(after.to_port), "443", "Stage A plan ingress port is wrong.");
   exact(after.ip_protocol, "tcp", "Stage A plan ingress protocol is wrong.");
   if (after.cidr_ipv4 !== null || after.cidr_ipv6 !== null || after.prefix_list_id !== null) throw new Error("Stage A plan ingress source is not the reviewed security group.");
-  const mutationCount = [actions, checkerActions].filter((value) => exactActions(value, ["create"])).length + checkerRoleValidation.mutationCount + checkerPublicationValidation.mutationCount;
-  return { valid: true, changes: mutationCount, address: change.address, actions, checkerActions, checkerRoleActions: checkerRole[0].actions, checkerPublicationActions: checkerPublication[0].actions, alreadyConverged: exactActions(actions, ["no-op"]) && exactActions(checkerActions, ["no-op"]) && checkerRoleValidation.alreadyConverged && checkerPublicationValidation.alreadyConverged };
+  const mutationCount = [actions, checkerActions].filter((value) => exactActions(value, ["create"])).length + checkerRoleValidation.mutationCount + checkerPublicationValidation.mutationCount + artifactsBucketPolicyValidation.mutationCount;
+  return { valid: true, changes: mutationCount, address: change.address, actions, checkerActions, checkerRoleActions: checkerRole[0].actions, checkerPublicationActions: checkerPublication[0].actions, alreadyConverged: exactActions(actions, ["no-op"]) && exactActions(checkerActions, ["no-op"]) && checkerRoleValidation.alreadyConverged && checkerPublicationValidation.alreadyConverged && artifactsBucketPolicyValidation.alreadyConverged };
 }
 
 export async function runStageAControlPlane({ adapter, endpointSecurityGroupId, runtimeSecurityGroupId, sourceSha } = {}) {
