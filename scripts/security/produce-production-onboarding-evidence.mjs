@@ -8,7 +8,9 @@ export async function produceOnboardingEvidence({ runStrictProbes, expectedSourc
   if (typeof runStrictProbes !== "function") throw new Error("Strict onboarding probe adapter is required.");
   const evidence = await runStrictProbes({ sourceSha: expectedSourceSha, imageDigest: expectedImageDigest, taskDefinitionArn: expectedTaskDefinitionArn, taskArn: expectedTaskArn, rotationId: expectedRotationId, rotationStateSha256: expectedRotationStateSha256, rotationFixtureSha256: expectedRotationFixtureSha256, strict: true });
   assertNoOnboardingEvidenceLeak(evidence);
-  if (evidence?.sourceSha !== expectedSourceSha || evidence?.imageDigest !== expectedImageDigest) throw new Error("Strict onboarding evidence identity does not match the deployment.");
+  if (evidence?.sourceSha !== expectedSourceSha || evidence?.imageDigest !== expectedImageDigest
+    || evidence?.taskDefinitionArn !== expectedTaskDefinitionArn || evidence?.taskArn !== expectedTaskArn
+    || evidence?.rotationId !== expectedRotationId || evidence?.rotationStateSha256 !== expectedRotationStateSha256) throw new Error("Strict onboarding evidence identity does not match the deployment.");
   validateOnboardingContract(evidence);
   const bytes = Buffer.from(JSON.stringify(evidence));
   return { valid: true, evidenceRef: `onboarding:${expectedSourceSha}`, evidenceSha256: createHash("sha256").update(bytes).digest("hex"), evidence };

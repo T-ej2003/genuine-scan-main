@@ -203,6 +203,11 @@
       "order": 40,
       "id": "normal-backend-activation",
       "sourceFile": "scripts/aws/production-normal-backend-activation.mjs"
+    },
+    {
+      "order": 41,
+      "id": "initial-activation-lifecycle",
+      "sourceFile": "scripts/aws/manage-production-initial-activation-lifecycle.mjs"
     }
   ],
   "identities": [
@@ -755,7 +760,7 @@
         "sid": "PublishExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "47f3ba4e9d440c258f7f65383c2670a82e23d7c56a2f11dc8d82bfe1a3210226"
+        "expectedPolicySha256": "f045b9cb3a49ea1331bb648cf4737ebbf37dc5b36b6ec2bd0bb2cda033e2b3cd"
       },
       "required": true,
       "mutation": true
@@ -1011,6 +1016,132 @@
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "initial-activation-create-claim",
+      "phase": "initial-activation-lifecycle",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "initial-activation-create-claim",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/claim.json"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "NORMAL_ACTIVATION_MUTATION",
+      "probe": "direct-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "CreateExactActivationLifecycleConditionally",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "8161f743a759a857df0b247938d1e519fe7a4c6cb247aff5e6b965c61211bec8"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "initial-activation-create-completion",
+      "phase": "initial-activation-lifecycle",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "initial-activation-create-completion",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/completion.json"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "NORMAL_ACTIVATION_MUTATION",
+      "probe": "direct-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "CreateExactActivationLifecycleConditionally",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "8161f743a759a857df0b247938d1e519fe7a4c6cb247aff5e6b965c61211bec8"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "initial-activation-read-claim",
+      "phase": "initial-activation-lifecycle",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "initial-activation-read-claim",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/claim.json"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct-live-read",
+      "probeIds": [
+        "stage-a-state",
+        "stage-b-state"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "ReadExactActivationLifecycle",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "8161f743a759a857df0b247938d1e519fe7a4c6cb247aff5e6b965c61211bec8"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-read-completion",
+      "phase": "initial-activation-lifecycle",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "initial-activation-read-completion",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/completion.json"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct-live-read",
+      "probeIds": [
+        "stage-a-state",
+        "stage-b-state"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "ReadExactActivationLifecycle",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "8161f743a759a857df0b247938d1e519fe7a4c6cb247aff5e6b965c61211bec8"
+      },
+      "required": true,
+      "mutation": false
     },
     {
       "id": "manifest-activate-exact-ecs-service",
@@ -1286,7 +1417,7 @@
           "key": "s3:if-none-match",
           "type": "string",
           "values": [
-            "present"
+            "*"
           ]
         }
       ],

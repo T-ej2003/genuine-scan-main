@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RELEASE_READ_PROBES } from "./production-green-stage-b-identity-capabilities.mjs";
-import { STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { PRODUCTION_ACTIVATION_LIFECYCLE, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { RELEASE_POLICY_SOURCES, canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS } from "./stage-b-evidence-freshness.mjs";
 import { ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
@@ -87,9 +87,14 @@ const PHASES = Object.freeze([
   ["post-apply-verification", "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs"],
   ["runtime-activation-boundary", "scripts/aws/create-production-green-stage-b-approval.mjs"],
   ["normal-backend-activation", "scripts/aws/production-normal-backend-activation.mjs"],
+  ["initial-activation-lifecycle", "scripts/aws/manage-production-initial-activation-lifecycle.mjs"],
 ]);
 
 const NORMAL_ACTIVATION_CAPABILITIES = Object.freeze([
+  ["initial-activation-read-claim", "initial-activation-lifecycle", "RELEASE_DEPLOYER", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.claimArn], false],
+  ["initial-activation-read-completion", "initial-activation-lifecycle", "RELEASE_DEPLOYER", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.completionArn], false],
+  ["initial-activation-create-claim", "initial-activation-lifecycle", "RELEASE_DEPLOYER", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.claimArn], true],
+  ["initial-activation-create-completion", "initial-activation-lifecycle", "RELEASE_DEPLOYER", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.completionArn], true],
   ["normal-activation-admin-identify", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "sts:GetCallerIdentity", ["*"], false],
   ["normal-activation-admin-read-state", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "s3:GetObject", [STAGE_B_TERRAFORM_BACKEND.stateArn], false],
   ["normal-activation-admin-read-policy", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "iam:GetPolicy", [NORMAL_ACTIVATION.policyArn], false],

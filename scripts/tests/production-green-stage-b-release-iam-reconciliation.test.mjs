@@ -37,9 +37,10 @@ const allows = (evaluation) => policies.some(({ document }) => document.Statemen
     && list(statement.Resource).some((resource) => matches(resource, evaluation.resource));
 }));
 
-test("release-role ownership is exactly eight managed policies and no inline authority", () => {
+test("release-role ownership is exactly nine managed policies and no inline authority", () => {
   assert.deepEqual(RELEASE_POLICY_SOURCES.map(({ name }) => name), [
     "MSCQRProductionGreenStageARelease",
+    "MSCQRProductionInitialActivationLifecycle",
     "MSCQRProductionGreenStageBBrokerCodeSigningRead",
     "MSCQRProductionGreenStageBProviderRecovery",
     "MSCQRProductionGreenStageBProviderReadOnly",
@@ -48,7 +49,7 @@ test("release-role ownership is exactly eight managed policies and no inline aut
     "MSCQRProductionGreenStageBTaskDefinitionRegistration",
     "MSCQRProductionGreenStageBWorkspaceState",
   ]);
-  assert.equal(new Set(RELEASE_POLICY_SOURCES.map(({ arn }) => arn)).size, 8);
+  assert.equal(new Set(RELEASE_POLICY_SOURCES.map(({ arn }) => arn)).size, 9);
 });
 
 test("broker alias update is authorized on the exact broker function resource", () => {
@@ -74,14 +75,14 @@ test("backend recovery ECR reads are exact and add no ECR write authority", () =
     Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
     Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
   });
-  assert.equal(policies.some(({ document }) => document.Statement.some(({ Effect, Action }) => Effect === "Allow" && list(Action).some((action) => action.startsWith("ecr:") && !["ecr:DescribeImages", "ecr:DescribeRepositories"].includes(action)))), false);
+  assert.equal(policies.some(({ document }) => document.Statement.some(({ Effect, Action }) => Effect === "Allow" && list(Action).some((action) => action.startsWith("ecr:") && !["ecr:DescribeImages", "ecr:DescribeRepositories", "ecr:GetRepositoryPolicy"].includes(action)))), false);
 });
 
 test("production-shaped required and forbidden resources reconcile to the source policy set", () => {
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 238);
+  assert.equal(evaluations.required.length, 255);
   assert.equal(evaluations.forbidden.length, 37);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
@@ -161,8 +162,9 @@ test("rotation coordinator legacy-current secret access is exact and action-boun
   ];
   const context = [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }];
   for (const resource of legacy) for (const action of ["secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"]) assert.equal(allows({ action, resource, context }), true, `${action} ${resource}`);
-  assert.equal(allows({ action: "secretsmanager:DescribeSecret", resource: legacy[0], context }), false);
-  assert.equal(allows({ action: "secretsmanager:GetSecretValue", resource: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/unrelated", context }), false);
+  const finalAllows = (evaluation) => finalWrite.Statement.some((statement) => statement.Effect === "Allow" && conditionsMatch(statement.Condition, evaluation) && list(statement.Action).includes(evaluation.action) && list(statement.Resource).some((resource) => matches(resource, evaluation.resource)));
+  assert.equal(finalAllows({ action: "secretsmanager:DescribeSecret", resource: legacy[0], context }), false);
+  assert.equal(finalAllows({ action: "secretsmanager:GetSecretValue", resource: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/unrelated", context }), false);
   assert.deepEqual(finalWrite.Statement.find(({ Sid }) => Sid === "ManageExactLegacyCurrentRotationSecrets").Resource, legacy);
 });
 

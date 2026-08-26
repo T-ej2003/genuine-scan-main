@@ -369,7 +369,8 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
   assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 19);
   assert.equal(assertReviewedSimulationContextRegistry().length, 19);
-  assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0 && !values.includes("*")));
+  assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0
+    && (key === "s3:if-none-match" ? values.length === 1 && values[0] === "*" : !values.includes("*"))));
 });
 
 test("locked Stage A provider refresh contract is preflighted before any apply", () => {

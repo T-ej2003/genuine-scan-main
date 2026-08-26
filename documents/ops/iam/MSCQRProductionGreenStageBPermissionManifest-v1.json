@@ -92,7 +92,7 @@
       "phase": "apply",
       "action": "s3:PutObject",
       "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"],
-      "context": [{"key": "s3:if-none-match", "type": "string", "values": ["present"]}],
+      "context": [{"key": "s3:if-none-match", "type": "string", "values": ["*"]}],
       "evidence": "conditional If-None-Match:* creates the exact artifact-set reservation once"
     },
     {

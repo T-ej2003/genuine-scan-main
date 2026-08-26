@@ -211,7 +211,8 @@ jobs:
                 state_file="$RUNNER_TEMP/initial-overlap-rotation-state.json"
                 printf '%s' "$ROTATION_STATE_JSON" > "$state_file"
                 chmod 600 "$state_file"
-                node scripts/security/production-initial-overlap-activation-contract.mjs \
+                node scripts/aws/manage-production-initial-activation-lifecycle.mjs \
+                  --mode validate-candidate \
                   --state-file "$state_file" \
                   --state-sha256 "$ROTATION_STATE_SHA256" \
                   --source-sha "$SOURCE_SHA" \
@@ -414,7 +415,8 @@ jobs:
             state_file="$RUNNER_TEMP/initial-overlap-rotation-state.json"
             printf '%s' "$ROTATION_STATE_JSON" > "$state_file"
             chmod 600 "$state_file"
-            node scripts/security/production-initial-overlap-activation-contract.mjs \
+            node scripts/aws/manage-production-initial-activation-lifecycle.mjs \
+              --mode validate-candidate \
               --state-file "$state_file" \
               --state-sha256 "$ROTATION_STATE_SHA256" \
               --source-sha "$SOURCE_SHA" \
@@ -639,6 +641,33 @@ jobs:
             --binding-out "$BINDING_FILE"
           echo "binding_file=$BINDING_FILE" >> "$GITHUB_OUTPUT"
           echo "binding_sha256=$(sha256sum "$BINDING_FILE" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Atomically claim initial production activation
+        if: ${{ inputs.release_mode == 'normal' && inputs.rotation_state_json != '' }}
+        env:
+          ACTIVATION_BINDING_FILE: ${{ steps.backend-activation.outputs.binding_file }}
+        run: |
+          set -euo pipefail
+          claim_file="$RUNNER_TEMP/production-initial-activation-claim.json"
+          activation_task_definition="$(node -e 'const value=require(process.argv[1]); process.stdout.write(String(value.targetArn || ""))' "$ACTIVATION_BINDING_FILE")"
+          result="$(node scripts/aws/manage-production-initial-activation-lifecycle.mjs \
+            --mode claim \
+            --state-file "$PRODUCTION_INITIAL_OVERLAP_STATE_FILE" \
+            --state-sha256 "$PRODUCTION_INITIAL_OVERLAP_STATE_SHA256" \
+            --source-sha "$PRODUCTION_INITIAL_OVERLAP_SOURCE_SHA" \
+            --rotation-id "$PRODUCTION_INITIAL_OVERLAP_ROTATION_ID" \
+            --deployment-sha "$PRODUCTION_INITIAL_OVERLAP_DEPLOYMENT_SHA" \
+            --task-definition "$PRODUCTION_INITIAL_OVERLAP_TASK_DEFINITION" \
+            --activation-task-definition "$activation_task_definition" \
+            --image-digest "$PRODUCTION_INITIAL_OVERLAP_IMAGE_DIGEST" \
+            --claim-out "$claim_file")"
+          claim_sha256="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).claimSha256)' "$result")"
+          transaction_id="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).activationTransactionId)' "$result")"
+          {
+            echo "PRODUCTION_INITIAL_OVERLAP_ACTIVATION_TASK_DEFINITION=$activation_task_definition"
+            echo "PRODUCTION_INITIAL_OVERLAP_CLAIM_SHA256=$claim_sha256"
+            echo "PRODUCTION_INITIAL_OVERLAP_ACTIVATION_TRANSACTION_ID=$transaction_id"
+          } >> "$GITHUB_ENV"
 
       - name: Apply and verify checksum-bound production RLS package
         id: database-release

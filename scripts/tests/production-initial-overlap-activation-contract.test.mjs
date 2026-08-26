@@ -13,6 +13,9 @@ import {
 } from "../security/production-initial-overlap-activation-contract.mjs";
 import { PRODUCTION_ROTATION_LEGACY_STATE_VERSION, PRODUCTION_ROTATION_STATE_VERSION } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 import { canonicalProductionEcsClusterArn, PRODUCTION_ECS_CLUSTER_NAME, STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
+import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
+import { buildInitialActivationClaim } from "../aws/production-initial-activation-lifecycle.mjs";
+import { checkProductionActivationRotation } from "../check-production-activation-rotation.mjs";
 import { validateOnboardingContract, validateRotationClosedContract } from "../security/production-onboarding-contract.mjs";
 import { readCurrentState, verify as persistVerifiedOverlap, writeState } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
 
@@ -58,9 +61,15 @@ const state = (phase = "verified", extra = {}) => ({
   ...extra,
 });
 const expected = { sourceSha, rotationId, deploymentSha, taskDefinitionArn, imageDigest };
+const claimFor = (value, expectedValue = expected) => {
+  const claim = buildInitialActivationClaim({ ...expectedValue, overlapDeploymentSha: expectedValue.deploymentSha, activationTaskDefinitionArn: expectedValue.taskDefinitionArn.replace(/:[1-9][0-9]*$/, ":52"), overlapRuntimeProofSha256: createHash("sha256").update(canonicalJson(value.overlapRuntime)).digest("hex"), createdAt: "2026-08-26T12:00:31.000Z" });
+  const claimRaw = Buffer.from(`${canonicalJson(claim)}\n`);
+  return { claimRaw, claimSha256: createHash("sha256").update(claimRaw).digest("hex") };
+};
 const validate = (value, expectedOverrides = {}, clock = now) => {
   const rawState = Buffer.from(JSON.stringify(value));
-  return validateProductionInitialActivationDuringAuthenticatedOverlap({ state: value, rawState, stateSha256: createHash("sha256").update(rawState).digest("hex"), expected: { ...expected, ...expectedOverrides }, now: clock });
+  const expectedValue = { ...expected, ...expectedOverrides };
+  return validateProductionInitialActivationDuringAuthenticatedOverlap({ state: value, rawState, stateSha256: createHash("sha256").update(rawState).digest("hex"), ...claimFor(value, expectedValue), expected: expectedValue, now: clock });
 };
 
 test("verified overlap authorizes initial activation without claiming rotation closure", () => {
@@ -80,13 +89,11 @@ test("authentic legacy verified state derives its grace without moving the origi
   const legacyGraceSeconds = 7 * 24 * 60 * 60;
   const legacyDeadline = new Date(Date.parse(legacy.overlapReadyAt) + legacyGraceSeconds * 1000).toISOString();
   legacy.cleanupEligibleAt = legacyDeadline;
-  const rawState = Buffer.from(JSON.stringify(legacy));
-  const input = { state: legacy, rawState, stateSha256: createHash("sha256").update(rawState).digest("hex"), expected };
-  const result = validateProductionInitialActivationDuringAuthenticatedOverlap({ ...input, now: Date.parse(legacyDeadline) - 1 });
+  const result = validate(legacy, {}, Date.parse(legacyDeadline) - 1);
   assert.equal(result.minimumGraceSeconds, legacyGraceSeconds);
   assert.equal(result.cleanupEligibleAt, legacyDeadline);
   assert.equal(legacy.minimumGraceSeconds, undefined);
-  assert.throws(() => validateProductionInitialActivationDuringAuthenticatedOverlap({ ...input, now: Date.parse(legacyDeadline) }), /expired/);
+  assert.throws(() => validate(legacy, {}, Date.parse(legacyDeadline)), /expired/);
 });
 
 test("production cluster name and ARN canonicalize to one persisted identity", () => {
@@ -203,7 +210,7 @@ test("state byte tampering and expected identity drift fail closed", () => {
   const rawState = Buffer.from(JSON.stringify(value));
   assert.throws(() => validateProductionInitialActivationDuringAuthenticatedOverlap({ state: value, rawState, stateSha256: "0".repeat(64), expected, now }), /bytes/);
   const unrelatedObject = state(); unrelatedObject.rotationId = "rotation-other";
-  assert.equal(validateProductionInitialActivationDuringAuthenticatedOverlap({ state: unrelatedObject, rawState, stateSha256: createHash("sha256").update(rawState).digest("hex"), expected, now }).rotationId, rotationId);
+  assert.equal(validateProductionInitialActivationDuringAuthenticatedOverlap({ state: unrelatedObject, rawState, stateSha256: createHash("sha256").update(rawState).digest("hex"), ...claimFor(value), expected, now }).rotationId, rotationId);
   for (const [name, replacement] of [["sourceSha", "f".repeat(40)], ["rotationId", "rotation-other"], ["deploymentSha", "d".repeat(40)], ["taskDefinitionArn", taskDefinitionArn.replace(/:51$/, ":52")], ["imageDigest", `sha256:${"e".repeat(64)}`]]) {
     assert.throws(() => validate(value, { [name]: replacement }), undefined, name);
   }
@@ -241,7 +248,7 @@ test("Release Gate uses the shared overlap contract and preserves the normal che
   const lifecycle = workflow.indexOf("Validate production release lifecycle mode");
   const rls = workflow.indexOf("Apply and verify checksum-bound production RLS package");
   const activation = workflow.indexOf("Activate exact Stage-B backend candidate");
-  assert.match(workflow.slice(lifecycle, rls), /production-initial-overlap-activation-contract\.mjs/);
+  assert.match(workflow.slice(lifecycle, rls), /manage-production-initial-activation-lifecycle\.mjs/);
   assert.match(workflow.slice(lifecycle, rls), /check:rotation-evidence-freshness/);
   assert.match(workflow.slice(workflow.indexOf(reconstruct.name), rls), /PRODUCTION_INITIAL_OVERLAP_STATE_FILE=.*GITHUB_ENV/s);
   assert(rls > lifecycle && activation > rls);
@@ -283,7 +290,7 @@ test("production closure rejects missing or contradictory lifecycle selection", 
   );
 });
 
-test("production closure consumes the exact verified-overlap state bytes", () => {
+test("production closure consumes the exact verified-overlap state bytes", async () => {
   const directory = mkdtempSync(path.join(tmpdir(), "mscqr-initial-overlap-"));
   try {
     const stateFile = path.join(directory, "state.json");
@@ -297,10 +304,10 @@ test("production closure consumes the exact verified-overlap state bytes", () =>
     value.overlapRuntime.healthObservedAt = new Date(observed - 1_000).toISOString();
     const rawState = Buffer.from(JSON.stringify(value));
     writeFileSync(stateFile, rawState, { mode: 0o600 });
-    const output = execFileSync(process.execPath, ["scripts/check-production-activation-rotation.mjs"], {
-      encoding: "utf8",
+    const claim = claimFor(value);
+    const claimValue = JSON.parse(claim.claimRaw);
+    const result = await checkProductionActivationRotation({
       env: {
-        ...process.env,
         PRODUCTION_ACTIVATION_ROTATION_CONTRACT: "AUTHENTICATED_OVERLAP",
         PRODUCTION_INITIAL_OVERLAP_STATE_FILE: stateFile,
         PRODUCTION_INITIAL_OVERLAP_STATE_SHA256: createHash("sha256").update(rawState).digest("hex"),
@@ -308,10 +315,15 @@ test("production closure consumes the exact verified-overlap state bytes", () =>
         PRODUCTION_INITIAL_OVERLAP_ROTATION_ID: rotationId,
         PRODUCTION_INITIAL_OVERLAP_DEPLOYMENT_SHA: deploymentSha,
         PRODUCTION_INITIAL_OVERLAP_TASK_DEFINITION: taskDefinitionArn,
+        PRODUCTION_INITIAL_OVERLAP_ACTIVATION_TASK_DEFINITION: claimValue.activationTaskDefinitionArn,
         PRODUCTION_INITIAL_OVERLAP_IMAGE_DIGEST: imageDigest,
+        PRODUCTION_INITIAL_OVERLAP_CLAIM_SHA256: claim.claimSha256,
+        PRODUCTION_INITIAL_OVERLAP_ACTIVATION_TRANSACTION_ID: claimValue.activationTransactionId,
       },
+      assertCompletionAbsent: () => true,
+      readClaim: () => ({ value: claimValue, sha256: claim.claimSha256, versionId: "v1" }),
     });
-    assert.match(output, new RegExp(PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP));
+    assert.equal(result.contract, PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -368,7 +380,7 @@ if (!responses[key]) process.exit(8); process.stdout.write(JSON.stringify(respon
     writeFileSync(stateFile, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
     const legacyBytes = readFileSync(stateFile);
     const legacySha256 = createHash("sha256").update(legacyBytes).digest("hex");
-    assert.match(execFileSync(process.execPath, ["scripts/security/production-initial-overlap-activation-contract.mjs", "--state-file", stateFile, "--state-sha256", legacySha256, "--source-sha", sourceSha, "--rotation-id", rotationId, "--deployment-sha", deploymentSha, "--task-definition", taskDefinitionArn, "--image-digest", imageDigest], { encoding: "utf8" }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
+    assert.match(execFileSync(process.execPath, ["scripts/aws/manage-production-initial-activation-lifecycle.mjs", "--mode", "validate-candidate", "--state-file", stateFile, "--state-sha256", legacySha256, "--source-sha", sourceSha, "--rotation-id", rotationId, "--deployment-sha", deploymentSha, "--task-definition", taskDefinitionArn, "--image-digest", imageDigest], { encoding: "utf8" }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
     readCurrentState({ config: coordinatorConfig, values: new Map([["state-file", stateFile]]) });
     const persistedBytes = readFileSync(stateFile);
     const persisted = JSON.parse(persistedBytes);
@@ -391,7 +403,7 @@ if (!responses[key]) process.exit(8); process.stdout.write(JSON.stringify(respon
     for (const field of roundTripFields) assert.notEqual(at(persisted, field), undefined, `real producer omitted ${field}`);
     const stateSha256 = createHash("sha256").update(persistedBytes).digest("hex");
     const activationArgs = ["--state-file", stateFile, "--state-sha256", stateSha256, "--source-sha", sourceSha, "--rotation-id", rotationId, "--deployment-sha", deploymentSha, "--task-definition", taskDefinitionArn, "--image-digest", imageDigest];
-    assert.match(execFileSync(process.execPath, ["scripts/security/production-initial-overlap-activation-contract.mjs", ...activationArgs], { encoding: "utf8" }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
+    assert.match(execFileSync(process.execPath, ["scripts/aws/manage-production-initial-activation-lifecycle.mjs", "--mode", "validate-candidate", ...activationArgs], { encoding: "utf8" }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
     const workflow = yaml.load(readFileSync(".github/workflows/release-gate.yml", "utf8"));
     const reconstruction = workflow.jobs["deploy-production-ecs"].steps.find(({ name }) => name === "Reconstruct activation rotation contract on deployment runner");
     assert(reconstruction);
@@ -429,7 +441,7 @@ if (!responses[key]) process.exit(8); process.stdout.write(JSON.stringify(respon
     assert.equal(jobBEnvironment.PRODUCTION_ACTIVATION_ROTATION_CONTRACT, "AUTHENTICATED_OVERLAP");
     assert.match(jobBEnvironment.PRODUCTION_INITIAL_OVERLAP_STATE_FILE, new RegExp(`^${jobB.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/`));
     assert.equal(existsSync(jobBEnvironment.PRODUCTION_INITIAL_OVERLAP_STATE_FILE), true);
-    assert.match(execFileSync(process.execPath, ["scripts/check-production-activation-rotation.mjs"], { encoding: "utf8", env: { PATH: process.env.PATH, ...jobBEnvironment } }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
+    assert.equal(jobBEnvironment.PRODUCTION_INITIAL_OVERLAP_CLAIM_SHA256, undefined);
 
     const reject = (name, overrides) => assert.throws(() => runReconstruction(overrides, path.join(directory, `reject-${name}`)), undefined, name);
     reject("missing-job-output", { SOURCE_SHA: "" });

@@ -11,6 +11,8 @@ import {
   PRODUCTION_ROTATION_STATE_VERSION,
 } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 import { canonicalProductionEcsClusterArn } from "../aws/production-green-stage-b-contract.mjs";
+import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
+import { parseInitialActivationClaim } from "../aws/production-initial-activation-lifecycle.mjs";
 
 export const PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP = "PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP";
 export { PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS };
@@ -43,7 +45,7 @@ const containsSensitiveStateKey = (value) => {
   return Object.entries(value).some(([key, child]) => /(value|token|secret|fixture|password|credential|private(?:key|material))/i.test(key) || containsSensitiveStateKey(child));
 };
 
-export function validateProductionInitialActivationDuringAuthenticatedOverlap({ state, rawState, stateSha256, expected, now = Date.now() } = {}) {
+export function validateProductionInitialActivationClaimCandidateDuringAuthenticatedOverlap({ state, rawState, stateSha256, expected, now = Date.now() } = {}) {
   if (!Buffer.isBuffer(rawState) || !SHA256.test(stateSha256 || "") || createHash("sha256").update(rawState).digest("hex") !== stateSha256) fail("Initial-overlap rotation state bytes do not match their SHA-256.");
   try { state = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(rawState)); } catch { fail("Initial-overlap rotation state bytes are not valid UTF-8 JSON."); }
   if (!state || typeof state !== "object" || Array.isArray(state) || containsSensitiveStateKey(state)) fail("Initial-overlap rotation state must be redacted metadata.");
@@ -89,8 +91,23 @@ export function validateProductionInitialActivationDuringAuthenticatedOverlap({ 
     imageDigest: proof.targetImageDigest,
     cleanupEligibleAt: state.cleanupEligibleAt,
     minimumGraceSeconds: state.minimumGraceSeconds,
+    overlapRuntimeProofSha256: canonicalSha256(proof),
     cleanupPending: true,
   });
+}
+
+export function validateProductionInitialActivationDuringAuthenticatedOverlap({ claimRaw, claimSha256, ...input } = {}) {
+  const overlap = validateProductionInitialActivationClaimCandidateDuringAuthenticatedOverlap(input);
+  const claim = parseInitialActivationClaim(claimRaw, {
+    sourceSha: overlap.sourceSha,
+    rotationId: overlap.rotationId,
+    overlapDeploymentSha: input.expected.deploymentSha,
+    taskDefinitionArn: overlap.taskDefinitionArn,
+    imageDigest: overlap.imageDigest,
+    activationTransactionId: undefined,
+  });
+  if (!SHA256.test(claimSha256 || "") || claim.sha256 !== claimSha256 || claim.value.overlapRuntimeProofSha256 !== overlap.overlapRuntimeProofSha256) fail("Initial activation claim is not bound to the authenticated overlap proof.");
+  return Object.freeze({ ...overlap, activationTransactionId: claim.value.activationTransactionId, claimSha256, claim: claim.value });
 }
 
 const required = (values, name) => {
@@ -111,6 +128,8 @@ export function runCli(argv = process.argv.slice(2)) {
   const result = validateProductionInitialActivationDuringAuthenticatedOverlap({
     rawState,
     stateSha256: required(values, "--state-sha256"),
+    claimRaw: readFileSync(required(values, "--claim-file")),
+    claimSha256: required(values, "--claim-sha256"),
     expected: {
       sourceSha: required(values, "--source-sha"),
       rotationId: required(values, "--rotation-id"),

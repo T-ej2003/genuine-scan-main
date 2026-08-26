@@ -92,13 +92,16 @@ function oldestDeletablePolicyVersion(versions, defaultVersionId) {
   return oldest.VersionId;
 }
 
-function assertReleaseReceipt(receipt, { sourceSha, imageAuthorization }) {
-  const digest = authorizedBackendDigest(imageAuthorization);
+export function assertProductionRlsReleaseReceipt(receipt, { sourceSha, imageDigest }) {
   const copy = structuredClone(receipt);
   const claimed = copy?.receiptBundleSha256;
   delete copy.receiptBundleSha256;
-  if (receipt?.schemaVersion !== 2 || receipt.environment !== "production" || receipt.releaseSha !== sourceSha || receipt.images?.backend !== `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}` || receipt.approvalId !== stageBApprovalIdForReleaseSha(sourceSha) || !SHA256.test(claimed || "") || claimed !== sha256(`${JSON.stringify(copy)}\n`)) throw new Error("Production RLS release receipt is not bound to the normal backend activation.");
+  if (receipt?.schemaVersion !== 2 || receipt.environment !== "production" || receipt.releaseSha !== sourceSha || receipt.images?.backend !== `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${imageDigest}` || receipt.approvalId !== stageBApprovalIdForReleaseSha(sourceSha) || !SHA256.test(claimed || "") || claimed !== sha256(`${JSON.stringify(copy)}\n`)) throw new Error("Production RLS release receipt is not bound to the normal backend activation.");
   return receipt.approvalId;
+}
+
+function assertReleaseReceipt(receipt, { sourceSha, imageAuthorization }) {
+  return assertProductionRlsReleaseReceipt(receipt, { sourceSha, imageDigest: authorizedBackendDigest(imageAuthorization) });
 }
 
 function assertService(service, expectedCurrentArn, expectedCurrentDeploymentId) {
