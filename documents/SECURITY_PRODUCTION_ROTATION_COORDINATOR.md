@@ -82,6 +82,16 @@ persists the exact reviewed value with `overlapReadyAt`, `verifiedAt`,
 grace and anchor. Cleanup fails closed before the deadline and has no
 force/skip-grace bypass.
 
+Persisted coordinator state uses schema version 4. Authentic version-3 state
+from the prior coordinator is upgraded once at the state-reader boundary:
+pre-overlap phases take the exact hash-bound reviewed config value, while
+`overlap-ready` and later phases derive the historical grace only from the
+unchanged canonical `overlapReadyAt` and `cleanupEligibleAt` timestamps. The
+upgrade never changes either timestamp or restarts the cleanup window.
+Any state hash used by a later workflow is captured from the post-upgrade bytes;
+the original version-3 bytes are validated before the atomic replacement and
+are never relabeled as current-schema evidence.
+
 The deployment-side verifier accepts either the exact production cluster name
 or its full ARN as operator input, uses the full ARN for ECS reads, and persists
 only `arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main` in the

@@ -2,7 +2,14 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { assertProductionRotationGraceSeconds, deriveProductionRotationCleanupEligibleAt, PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
+import {
+  assertProductionRotationGraceSeconds,
+  deriveProductionRotationCleanupEligibleAt,
+  normalizeProductionRotationState,
+  PRODUCTION_ROTATION_LEGACY_STATE_VERSION,
+  PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS,
+  PRODUCTION_ROTATION_STATE_VERSION,
+} from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 import { canonicalProductionEcsClusterArn } from "../aws/production-green-stage-b-contract.mjs";
 
 export const PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP = "PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP";
@@ -37,11 +44,14 @@ const containsSensitiveStateKey = (value) => {
 };
 
 export function validateProductionInitialActivationDuringAuthenticatedOverlap({ state, rawState, stateSha256, expected, now = Date.now() } = {}) {
-  if (!state || typeof state !== "object" || Array.isArray(state) || containsSensitiveStateKey(state)) fail("Initial-overlap rotation state must be redacted metadata.");
   if (!Buffer.isBuffer(rawState) || !SHA256.test(stateSha256 || "") || createHash("sha256").update(rawState).digest("hex") !== stateSha256) fail("Initial-overlap rotation state bytes do not match their SHA-256.");
+  try { state = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(rawState)); } catch { fail("Initial-overlap rotation state bytes are not valid UTF-8 JSON."); }
+  if (!state || typeof state !== "object" || Array.isArray(state) || containsSensitiveStateKey(state)) fail("Initial-overlap rotation state must be redacted metadata.");
   if (!expected || !SHA40.test(expected.sourceSha || "") || !ROTATION_ID.test(expected.rotationId || "") || !TASK_DEFINITION.test(expected.taskDefinitionArn || "") || !DIGEST.test(expected.imageDigest || "") || !SHA40.test(expected.deploymentSha || "")) fail("Initial-overlap expected identity is incomplete.");
-  if (state.stateVersion !== 3 || state.sourceSha !== expected.sourceSha || state.rotationId !== expected.rotationId || state.overlapDeploymentSha !== expected.deploymentSha) fail("Initial-overlap rotation identity does not match the authorized release.");
+  if (![PRODUCTION_ROTATION_LEGACY_STATE_VERSION, PRODUCTION_ROTATION_STATE_VERSION].includes(state.stateVersion)
+    || state.sourceSha !== expected.sourceSha || state.rotationId !== expected.rotationId || state.overlapDeploymentSha !== expected.deploymentSha) fail("Initial-overlap rotation identity does not match the authorized release.");
   if (state.phase !== "verified") fail("Initial activation requires OVERLAP_RUNTIME_VERIFIED state.");
+  try { state = normalizeProductionRotationState(state).state; } catch (error) { fail(error.message); }
   if (!FINGERPRINT.test(state.jwt?.oldFingerprint || "") || !FINGERPRINT.test(state.jwt?.newFingerprint || "") || state.jwt.oldFingerprint === state.jwt.newFingerprint) fail("Current and previous JWT material identities are invalid.");
   if (!FINGERPRINT.test(state.qr?.oldPublicFingerprint || "") || !FINGERPRINT.test(state.qr?.newPublicFingerprint || "") || state.qr.oldPublicFingerprint === state.qr.newPublicFingerprint || typeof state.qr?.oldKeyVersion !== "string" || typeof state.qr?.newKeyVersion !== "string" || !state.qr.oldKeyVersion || !state.qr.newKeyVersion || state.qr.oldKeyVersion === state.qr.newKeyVersion) fail("Current and previous QR material identities are invalid.");
 
@@ -99,7 +109,6 @@ export function runCli(argv = process.argv.slice(2)) {
   const stateFile = required(values, "--state-file");
   const rawState = readFileSync(stateFile);
   const result = validateProductionInitialActivationDuringAuthenticatedOverlap({
-    state: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(rawState)),
     rawState,
     stateSha256: required(values, "--state-sha256"),
     expected: {

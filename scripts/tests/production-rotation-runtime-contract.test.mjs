@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { validateRotationTransition } from "../security/check-production-rotation-transition.mjs";
+import { PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS, PRODUCTION_ROTATION_STATE_VERSION } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 
 const read = (path) => readFileSync(path, "utf8");
 const template = read("infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-rotation-candidate.json");
@@ -241,9 +242,10 @@ const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/ms
 const expectedCurrentTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47";
 const imageDigest = `sha256:${"c".repeat(64)}`;
 const makeState = (phase, extra = {}) => ({
-  stateVersion: 3,
+  stateVersion: PRODUCTION_ROTATION_STATE_VERSION,
   rotationId: "rotation-gate-test",
   sourceSha,
+  minimumGraceSeconds: PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS,
   phase,
   overlapDeploymentSha: deploymentSha,
   preparedAt: "2026-08-11T00:00:00.000Z",
@@ -278,11 +280,14 @@ test("rotation overlap and cleanup transitions validate state without final fres
   const cleanupState = makeState("cleanup-deploy-required", {
     cleanupDeploymentSha: deploymentSha,
     cleanupEligibleAt: "2026-08-11T01:00:00.000Z",
+    overlapReadyAt: "2026-07-12T01:00:00.000Z",
     retirementTimestamp: "2026-08-11T01:10:00.000Z",
     verifiedAt: "2026-08-11T00:30:00.000Z",
-    overlapRuntime: { phase: "overlap", deploymentSha: deploymentSha },
+    overlapRuntime: { phase: "overlap", rotationId: "rotation-gate-test", deploymentSha, observedAt: "2026-07-12T01:00:00.000Z" },
   });
   assert.equal(validateRotationTransition(transitionArgs("rotation-cleanup", cleanupState)).phase, "cleanup-deploy-required");
+  const legacyCleanupState = { ...cleanupState, stateVersion: 3 }; delete legacyCleanupState.minimumGraceSeconds;
+  assert.equal(validateRotationTransition(transitionArgs("rotation-cleanup", legacyCleanupState)).phase, "cleanup-deploy-required");
 });
 
 test("rotation transition validator fails closed for missing, foreign, premature, or closed state", async () => {
@@ -292,10 +297,13 @@ test("rotation transition validator fails closed for missing, foreign, premature
   assert.throws(() => validateRotationTransition(transitionArgs("rotation-overlap", makeState("prepared"))), /overlap-deploy-required/);
   assert.throws(() => validateRotationTransition(transitionArgs("rotation-overlap", overlapState, { sourceSha: "d".repeat(40) })), /source SHA/);
   assert.throws(() => validateRotationTransition(transitionArgs("rotation-overlap", overlapState, { rotationId: "foreign-rotation" })), /rotationId/);
-  assert.throws(() => validateRotationTransition(transitionArgs("rotation-overlap", makeState("cleaned"))), /overlap-deploy-required/);
-  const beforeGrace = makeState("cleanup-deploy-required", { cleanupDeploymentSha: deploymentSha, cleanupEligibleAt: "2026-08-11T03:00:00.000Z", retirementTimestamp: "2026-08-11T01:10:00.000Z", verifiedAt: "2026-08-11T00:30:00.000Z", overlapRuntime: {} });
+  assert.throws(() => validateRotationTransition({ ...transitionArgs("rotation-overlap", overlapState), rawState: "{malformed" }), /SHA-256|UTF-8 JSON/);
+  const invalidUtf8 = Buffer.from([0xff]);
+  assert.throws(() => validateRotationTransition({ ...transitionArgs("rotation-overlap", overlapState), rawState: invalidUtf8, stateSha256: createHash("sha256").update(invalidUtf8).digest("hex") }), /UTF-8 JSON/);
+  assert.throws(() => validateRotationTransition(transitionArgs("rotation-overlap", makeState("cleaned", { overlapReadyAt: "2026-07-12T01:00:00.000Z", cleanupEligibleAt: "2026-08-11T01:00:00.000Z", verifiedAt: "2026-08-11T00:30:00.000Z", overlapRuntime: { phase: "overlap", rotationId: "rotation-gate-test", deploymentSha, observedAt: "2026-07-12T01:00:00.000Z" } }))), /overlap-deploy-required/);
+  const beforeGrace = makeState("cleanup-deploy-required", { cleanupDeploymentSha: deploymentSha, overlapReadyAt: "2026-07-12T03:00:00.000Z", cleanupEligibleAt: "2026-08-11T03:00:00.000Z", retirementTimestamp: "2026-08-11T01:10:00.000Z", verifiedAt: "2026-08-11T00:30:00.000Z", overlapRuntime: { phase: "overlap", rotationId: "rotation-gate-test", deploymentSha, observedAt: "2026-07-12T03:00:00.000Z" } });
   assert.throws(() => validateRotationTransition(transitionArgs("rotation-cleanup", beforeGrace)), /grace window/);
-  const retirementIncomplete = makeState("retirement-complete", { cleanupDeploymentSha: deploymentSha, cleanupEligibleAt: "2026-08-11T01:00:00.000Z", retirementTimestamp: "2026-08-11T01:10:00.000Z", verifiedAt: "2026-08-11T00:30:00.000Z", overlapRuntime: {} });
+  const retirementIncomplete = makeState("retirement-complete", { cleanupDeploymentSha: deploymentSha, overlapReadyAt: "2026-07-12T01:00:00.000Z", cleanupEligibleAt: "2026-08-11T01:00:00.000Z", retirementTimestamp: "2026-08-11T01:10:00.000Z", verifiedAt: "2026-08-11T00:30:00.000Z", overlapRuntime: { phase: "overlap", rotationId: "rotation-gate-test", deploymentSha, observedAt: "2026-07-12T01:00:00.000Z" } });
   assert.throws(() => validateRotationTransition(transitionArgs("rotation-cleanup", retirementIncomplete)), /cleanup-deploy-required/);
 });
 

@@ -5,8 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import jwt from "jsonwebtoken";
-import { assertIdentity, cleanup, prepare, validateRuntimeProof, verify } from "../scripts/security/rotate-production-signing-material.mjs";
-import { PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS } from "../scripts/security/production-rotation-grace-contract.mjs";
+import { assertIdentity, cleanup, prepare, readCurrentState, validateRuntimeProof, verify } from "../scripts/security/rotate-production-signing-material.mjs";
+import {
+  normalizeProductionRotationState,
+  PRODUCTION_ROTATION_LEGACY_STATE_VERSION,
+  PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS,
+  PRODUCTION_ROTATION_STATE_VERSION,
+} from "../scripts/security/production-rotation-grace-contract.mjs";
 
 const baseConfig = {
   region: "eu-west-2",
@@ -260,11 +265,32 @@ test("prepared state resumes with the original current lineage without regenerat
     await assert.rejects(prepare(first), /simulated process death before promotion/);
     const pendingBefore = sm.values.get(baseConfig.jwt.pendingSecretId);
     assert.equal(JSON.parse(sm.values.get(baseConfig.jwt.currentSecretId)).value, "old-jwt-material");
+    const stateFile = path.join(directory, "state.json");
+    writeFileSync(stateFile, `${JSON.stringify(legacyV3(JSON.parse(readFileSync(stateFile, "utf8"))))}\n`, { mode: 0o600 });
     const resumedSm = fakeSecrets(Object.fromEntries(sm.values));
     await prepare(contextFor(directory, baseConfig, resumedSm));
     assert.equal(resumedSm.values.get(baseConfig.jwt.pendingSecretId), pendingBefore);
     assert.equal(JSON.parse(resumedSm.values.get(baseConfig.jwt.previousSecretId)).value, "old-jwt-material");
     assert.notEqual(JSON.parse(resumedSm.values.get(baseConfig.jwt.currentSecretId)).value, "old-jwt-material");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("legacy overlap-deployed state resumes without regenerating material", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-v3-overlap-resume-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    await prepare(contextFor(directory, baseConfig, sm));
+    const stateFile = path.join(directory, "state.json");
+    writeFileSync(stateFile, `${JSON.stringify(legacyV3(JSON.parse(readFileSync(stateFile, "utf8"))))}\n`, { mode: 0o600 });
+    const resumedSm = fakeSecrets(Object.fromEntries(sm.values));
+    await prepare(contextFor(directory, baseConfig, resumedSm));
+    const resumed = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(resumed.stateVersion, PRODUCTION_ROTATION_STATE_VERSION);
+    assert.equal(resumed.phase, "overlap-deploy-required");
+    assert.equal(resumedSm.putCount, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -574,7 +600,7 @@ test("cleanup-runtime-verified fails closed when persisted overlap runtime is mi
     delete state.overlapRuntime;
     writeFileSync(stateFile, `${JSON.stringify(state)}\n`, { mode: 0o600 });
     const resumedSm = fakeSecrets(Object.fromEntries(sm.values), { versionIds: Object.fromEntries(sm.versionIds) });
-    await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [], ["cleanup-evidence-ref"]) }), /state.overlapRuntime is required/);
+    await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [], ["cleanup-evidence-ref"]) }), /grace anchor|state.overlapRuntime is required/);
     assert.equal(resumedSm.putCount, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -593,7 +619,7 @@ test("cleanup-runtime-verified fails closed when persisted overlap runtime has t
     state.overlapRuntime.deploymentSha = "d".repeat(40);
     writeFileSync(stateFile, `${JSON.stringify(state)}\n`, { mode: 0o600 });
     const resumedSm = fakeSecrets(Object.fromEntries(sm.values), { versionIds: Object.fromEntries(sm.versionIds) });
-    await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [], ["cleanup-evidence-ref"]) }), /does not match config|deployment SHA is invalid/);
+    await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [], ["cleanup-evidence-ref"]) }), /grace anchor|does not match config|deployment SHA is invalid/);
     assert.equal(resumedSm.putCount, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -612,7 +638,7 @@ test("cleanup-runtime-verified revalidates overlap proof phase while cleanup pro
     state.overlapRuntime.phase = "cleanup";
     writeFileSync(stateFile, `${JSON.stringify(state)}\n`, { mode: 0o600 });
     const resumedSm = fakeSecrets(Object.fromEntries(sm.values), { versionIds: Object.fromEntries(sm.versionIds) });
-    await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [], ["cleanup-evidence-ref"]) }), /overlap runtime proof does not match this rotation/);
+    await assert.rejects(cleanup({ ...cleanupContext, sm: resumedSm, values: valuesWith(cleanupContext, [], ["cleanup-evidence-ref"]) }), /grace anchor|overlap runtime proof does not match this rotation/);
     assert.equal(resumedSm.putCount, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -709,4 +735,127 @@ test("verified state persists the reviewed grace and rejects config or proof att
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+const legacyV3 = (state) => {
+  const legacy = structuredClone(state);
+  legacy.stateVersion = PRODUCTION_ROTATION_LEGACY_STATE_VERSION;
+  delete legacy.minimumGraceSeconds;
+  return legacy;
+};
+
+test("actual coordinator reader migrates legacy prepared and overlap-deployed states exactly once from reviewed config", () => {
+  for (const phase of ["prepared", "overlap-deploy-required"]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), `mscqr-rotation-v3-${phase}-`));
+    try {
+      const stateFile = path.join(directory, "state.json");
+      const legacy = legacyV3({
+        stateVersion: PRODUCTION_ROTATION_STATE_VERSION,
+        rotationId: baseConfig.rotationId,
+        sourceSha: baseConfig.sourceSha,
+        operator: "arn:aws:sts::368992683803:assumed-role/release/test",
+        phase,
+        overlapDeploymentSha: baseConfig.overlapDeploymentSha,
+        preparedAt: "2026-08-10T00:00:00.000Z",
+        ...(phase === "overlap-deploy-required" ? { overlapPreparedAt: "2026-08-10T00:01:00.000Z" } : {}),
+        jwt: { oldFingerprint: "1".repeat(16), newFingerprint: "2".repeat(16) },
+        qr: { oldPrivateFingerprint: "3".repeat(16), oldPublicFingerprint: "4".repeat(16), newPrivateFingerprint: "5".repeat(16), newPublicFingerprint: "6".repeat(16), oldKeyVersion: "legacy-v1", newKeyVersion: "next-v2" },
+        pending: { jwtVersionId: "jwt-version-1", qrPrivateVersionId: "qr-private-version-1", qrPublicVersionId: "qr-public-version-1" },
+      });
+      writeFileSync(stateFile, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
+      const context = contextFor(directory, baseConfig, fakeSecrets({}));
+      const migrated = readCurrentState(context);
+      assert.equal(migrated.stateVersion, PRODUCTION_ROTATION_STATE_VERSION);
+      assert.equal(migrated.minimumGraceSeconds, baseConfig.minimumGraceSeconds);
+      const firstBytes = readFileSync(stateFile, "utf8");
+      assert.deepEqual(readCurrentState(context), migrated);
+      assert.equal(readFileSync(stateFile, "utf8"), firstBytes);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("legacy timed phases derive the original grace and preserve the exact deadline through atomic disk migration", () => {
+  for (const phase of ["overlap-ready", "verified", "grace-wait", "retirement-started", "retirement-complete", "cleanup-deploy-required", "cleanup-runtime-verified", "cleaned"]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), `mscqr-rotation-v3-${phase}-`));
+    try {
+      const stateFile = path.join(directory, "state.json");
+      const overlapReadyAt = "2026-08-10T00:00:00.000Z";
+      const cleanupEligibleAt = "2026-09-09T00:00:00.000Z";
+      const legacy = legacyV3({
+        stateVersion: PRODUCTION_ROTATION_STATE_VERSION,
+        rotationId: baseConfig.rotationId,
+        sourceSha: baseConfig.sourceSha,
+        phase,
+        overlapDeploymentSha: baseConfig.overlapDeploymentSha,
+        overlapReadyAt,
+        cleanupEligibleAt,
+        overlapRuntime: { phase: "overlap", rotationId: baseConfig.rotationId, deploymentSha: baseConfig.overlapDeploymentSha, observedAt: overlapReadyAt },
+        ...(phase === "overlap-ready" ? {} : { verifiedAt: "2026-08-10T00:01:00.000Z" }),
+      });
+      writeFileSync(stateFile, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
+      const context = contextFor(directory, baseConfig, fakeSecrets({}));
+      const migrated = readCurrentState(context);
+      assert.equal(migrated.minimumGraceSeconds, baseConfig.minimumGraceSeconds);
+      assert.equal(migrated.overlapReadyAt, overlapReadyAt);
+      assert.equal(migrated.cleanupEligibleAt, cleanupEligibleAt);
+      const firstBytes = readFileSync(stateFile, "utf8");
+      assert.deepEqual(readCurrentState(context), migrated);
+      assert.equal(readFileSync(stateFile, "utf8"), firstBytes);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("legacy verified state reaches cleanup at its original deadline without restarting the window", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-v3-verified-cleanup-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    const clockState = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const context = contextFor(directory, baseConfig, sm, () => clockState.now);
+    await prepare(context);
+    const proofFile = writeProof(directory, "overlap.json", runtimeProof(baseConfig, "overlap", new Date(clockState.now).toISOString(), baseConfig.overlapDeploymentSha));
+    await verify({ ...context, values: valuesWith(context, [["runtime-verification-file", proofFile]]) });
+    const stateFile = path.join(directory, "state.json");
+    const verified = JSON.parse(readFileSync(stateFile, "utf8"));
+    const originalDeadline = verified.cleanupEligibleAt;
+    writeFileSync(stateFile, `${JSON.stringify(legacyV3(verified), null, 2)}\n`, { mode: 0o600 });
+    clockState.now = Date.parse(originalDeadline);
+    await cleanup({ ...context, values: valuesWith(context, [["cleanup-deployment-sha", "c".repeat(40)], ["cleanup-evidence-ref", "https://example.test/cleanup"]]) });
+    const resumed = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(resumed.stateVersion, PRODUCTION_ROTATION_STATE_VERSION);
+    assert.equal(resumed.minimumGraceSeconds, baseConfig.minimumGraceSeconds);
+    assert.equal(resumed.overlapReadyAt, verified.overlapReadyAt);
+    assert.equal(resumed.cleanupEligibleAt, originalDeadline);
+    assert.equal(resumed.phase, "cleanup-deploy-required");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("legacy migration fails closed for unauthenticated, malformed, shortened, fractional, or conflicting grace", () => {
+  const timed = legacyV3({
+    stateVersion: PRODUCTION_ROTATION_STATE_VERSION,
+    phase: "verified",
+    rotationId: baseConfig.rotationId,
+    overlapDeploymentSha: baseConfig.overlapDeploymentSha,
+    overlapReadyAt: "2026-08-10T00:00:00.000Z",
+    verifiedAt: "2026-08-10T00:01:00.000Z",
+    cleanupEligibleAt: "2026-09-09T00:00:00.000Z",
+    overlapRuntime: { phase: "overlap", rotationId: baseConfig.rotationId, deploymentSha: baseConfig.overlapDeploymentSha, observedAt: "2026-08-10T00:00:00.000Z" },
+  });
+  assert.throws(() => normalizeProductionRotationState(legacyV3({ stateVersion: PRODUCTION_ROTATION_STATE_VERSION, phase: "prepared" })), /authenticated reviewed grace/);
+  assert.throws(() => normalizeProductionRotationState(legacyV3({ stateVersion: PRODUCTION_ROTATION_STATE_VERSION, phase: "overlap-deploy-required", overlapRuntime: timed.overlapRuntime }), { reviewedMinimumGraceSeconds: baseConfig.minimumGraceSeconds }), /overlap runtime or grace fields/);
+  assert.throws(() => normalizeProductionRotationState({ ...timed, overlapReadyAt: "2026-08-10 00:00:00" }), /canonical ISO/);
+  assert.throws(() => normalizeProductionRotationState({ ...timed, cleanupEligibleAt: "2026-08-09T23:59:59.000Z" }), /positive/);
+  assert.throws(() => normalizeProductionRotationState({ ...timed, cleanupEligibleAt: "2026-09-09T00:00:00.001Z" }), /whole number/);
+  assert.throws(() => normalizeProductionRotationState({ ...timed, cleanupEligibleAt: "2026-08-11T00:00:00.000Z" }), /at least/);
+  assert.throws(() => normalizeProductionRotationState({ ...timed, overlapRuntime: { ...timed.overlapRuntime, observedAt: "2026-08-10T00:00:01.000Z" } }), /overlap runtime proof/);
+  assert.throws(() => normalizeProductionRotationState({ ...timed, minimumGraceSeconds: baseConfig.minimumGraceSeconds }), /legacy rotation state/);
+  assert.throws(() => normalizeProductionRotationState(timed, { reviewedMinimumGraceSeconds: baseConfig.minimumGraceSeconds + 1 }), /reviewed config/);
+  const current = normalizeProductionRotationState(timed, { reviewedMinimumGraceSeconds: baseConfig.minimumGraceSeconds }).state;
+  assert.deepEqual(normalizeProductionRotationState(current, { reviewedMinimumGraceSeconds: baseConfig.minimumGraceSeconds }).state, current);
 });

@@ -11,9 +11,10 @@ import {
   PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS,
   validateProductionInitialActivationDuringAuthenticatedOverlap,
 } from "../security/production-initial-overlap-activation-contract.mjs";
+import { PRODUCTION_ROTATION_LEGACY_STATE_VERSION, PRODUCTION_ROTATION_STATE_VERSION } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 import { canonicalProductionEcsClusterArn, PRODUCTION_ECS_CLUSTER_NAME, STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { validateOnboardingContract, validateRotationClosedContract } from "../security/production-onboarding-contract.mjs";
-import { verify as persistVerifiedOverlap, writeState } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
+import { readCurrentState, verify as persistVerifiedOverlap, writeState } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
 
 const sourceSha = "a".repeat(40);
 const imageDigest = `sha256:${"b".repeat(64)}`;
@@ -31,7 +32,7 @@ const runtimeChecks = {
   artifactCurrentRuntimeVerify: true, artifactHistoricalRuntimeVerify: true, serviceHealthy: true,
 };
 const state = (phase = "verified", extra = {}) => ({
-  stateVersion: 3,
+  stateVersion: PRODUCTION_ROTATION_STATE_VERSION,
   rotationId,
   sourceSha,
   phase,
@@ -70,6 +71,19 @@ test("verified overlap authorizes initial activation without claiming rotation c
   assert.equal(result.cleanupEligibleAt, cleanupEligibleAt);
   assert.equal(result.cleanupPending, true);
   assert.throws(() => validateRotationClosedContract(state(), () => now), /cleanup|grace/i);
+});
+
+test("authentic legacy verified state derives its grace without moving the original deadline", () => {
+  const legacy = state();
+  legacy.stateVersion = PRODUCTION_ROTATION_LEGACY_STATE_VERSION;
+  delete legacy.minimumGraceSeconds;
+  const rawState = Buffer.from(JSON.stringify(legacy));
+  const input = { state: legacy, rawState, stateSha256: createHash("sha256").update(rawState).digest("hex"), expected };
+  const result = validateProductionInitialActivationDuringAuthenticatedOverlap({ ...input, now: cleanupEligibleAtMs - 1 });
+  assert.equal(result.minimumGraceSeconds, PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS);
+  assert.equal(result.cleanupEligibleAt, cleanupEligibleAt);
+  assert.equal(legacy.minimumGraceSeconds, undefined);
+  assert.throws(() => validateProductionInitialActivationDuringAuthenticatedOverlap({ ...input, now: cleanupEligibleAtMs }), /expired/);
 });
 
 test("production cluster name and ARN canonicalize to one persisted identity", () => {
@@ -120,21 +134,21 @@ test("cleanup deadline remains anchored to the canonical overlap observation", (
   for (const delta of [-1, 1]) {
     const value = state();
     value.cleanupEligibleAt = new Date(cleanupEligibleAtMs + delta).toISOString();
-    assert.throws(() => validate(value), /reviewed grace period/);
+    assert.throws(() => validate(value), /persisted grace/);
   }
 
   const shiftedObservation = state();
   shiftedObservation.overlapRuntime.observedAt = new Date(Date.parse(observedAt) + 1).toISOString();
   shiftedObservation.overlapReadyAt = shiftedObservation.overlapRuntime.observedAt;
-  assert.throws(() => validate(shiftedObservation), /reviewed grace period/);
+  assert.throws(() => validate(shiftedObservation), /persisted grace/);
 
   const ambiguousTimestamp = state();
   ambiguousTimestamp.cleanupEligibleAt = "2026-09-25 12:00:00";
-  assert.throws(() => validate(ambiguousTimestamp), /timeline/);
+  assert.throws(() => validate(ambiguousTimestamp), /persisted grace/);
 
   const offsetTimestamp = state();
   offsetTimestamp.cleanupEligibleAt = "2026-09-25T13:00:00.000+01:00";
-  assert.throws(() => validate(offsetTimestamp), /timeline/);
+  assert.throws(() => validate(offsetTimestamp), /persisted grace/);
 
   for (const invalidClock of [Number.NaN, Number.POSITIVE_INFINITY, cleanupEligibleAtMs - 0.5]) {
     assert.throws(() => validate(state(), {}, invalidClock), /timeline/);
@@ -155,7 +169,7 @@ test("reviewed grace is at least 30 days and remains bound to its original deadl
     const value = state(); value.minimumGraceSeconds = minimumGraceSeconds;
     assert.throws(() => validate(value));
   }
-  const extended = state(); extended.minimumGraceSeconds += 1; assert.throws(() => validate(extended), /reviewed grace/);
+  const extended = state(); extended.minimumGraceSeconds += 1; assert.throws(() => validate(extended), /persisted grace/);
   const shortened = state(); shortened.minimumGraceSeconds -= 1; assert.throws(() => validate(shortened), /at least/);
 });
 
@@ -185,6 +199,8 @@ test("state byte tampering and expected identity drift fail closed", () => {
   const value = state();
   const rawState = Buffer.from(JSON.stringify(value));
   assert.throws(() => validateProductionInitialActivationDuringAuthenticatedOverlap({ state: value, rawState, stateSha256: "0".repeat(64), expected, now }), /bytes/);
+  const unrelatedObject = state(); unrelatedObject.rotationId = "rotation-other";
+  assert.equal(validateProductionInitialActivationDuringAuthenticatedOverlap({ state: unrelatedObject, rawState, stateSha256: createHash("sha256").update(rawState).digest("hex"), expected, now }).rotationId, rotationId);
   for (const [name, replacement] of [["sourceSha", "f".repeat(40)], ["rotationId", "rotation-other"], ["deploymentSha", "d".repeat(40)], ["taskDefinitionArn", taskDefinitionArn.replace(/:51$/, ":52")], ["imageDigest", `sha256:${"e".repeat(64)}`]]) {
     assert.throws(() => validate(value, { [name]: replacement }), undefined, name);
   }
@@ -339,12 +355,22 @@ if (!responses[key]) process.exit(8); process.stdout.write(JSON.stringify(respon
 
     const stateFile = path.join(directory, "state.json");
     const longerGrace = PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS + 1;
-    writeState(stateFile, { ...state("overlap-deploy-required"), minimumGraceSeconds: longerGrace, cleanupEligibleAt: undefined, overlapReadyAt: undefined, verifiedAt: undefined, overlapRuntime: undefined, verification: undefined });
+    writeState(stateFile, { ...state("overlap-deploy-required"), stateVersion: PRODUCTION_ROTATION_STATE_VERSION, minimumGraceSeconds: longerGrace, cleanupEligibleAt: undefined, overlapReadyAt: undefined, verifiedAt: undefined, overlapRuntime: undefined, verification: undefined });
     const coordinatorConfig = { rotationId, sourceSha, overlapDeploymentSha: deploymentSha, minimumGraceSeconds: longerGrace };
     await persistVerifiedOverlap({ config: coordinatorConfig, values: new Map([["state-file", stateFile], ["runtime-verification-file", proofFile]]), clock: () => Date.parse(observed) + 60_000 });
+    const produced = JSON.parse(readFileSync(stateFile, "utf8"));
+    const legacy = { ...produced, stateVersion: PRODUCTION_ROTATION_LEGACY_STATE_VERSION }; delete legacy.minimumGraceSeconds;
+    writeFileSync(stateFile, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
+    const legacyBytes = readFileSync(stateFile);
+    const legacySha256 = createHash("sha256").update(legacyBytes).digest("hex");
+    assert.match(execFileSync(process.execPath, ["scripts/security/production-initial-overlap-activation-contract.mjs", "--state-file", stateFile, "--state-sha256", legacySha256, "--source-sha", sourceSha, "--rotation-id", rotationId, "--deployment-sha", deploymentSha, "--task-definition", taskDefinitionArn, "--image-digest", imageDigest], { encoding: "utf8" }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
+    readCurrentState({ config: coordinatorConfig, values: new Map([["state-file", stateFile]]) });
     const persistedBytes = readFileSync(stateFile);
     const persisted = JSON.parse(persistedBytes);
+    assert.equal(persisted.stateVersion, PRODUCTION_ROTATION_STATE_VERSION);
     assert.equal(persisted.minimumGraceSeconds, longerGrace);
+    assert.equal(persisted.overlapReadyAt, legacy.overlapReadyAt);
+    assert.equal(persisted.cleanupEligibleAt, legacy.cleanupEligibleAt);
     assert.equal(persisted.overlapRuntime.targetCluster, STAGE_B.clusterArn);
     assert.equal(persisted.cleanupEligibleAt, new Date(Date.parse(observed) + longerGrace * 1000).toISOString());
     const roundTripFields = [

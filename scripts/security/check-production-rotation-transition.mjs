@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { normalizeProductionRotationState, PRODUCTION_ROTATION_LEGACY_STATE_VERSION, PRODUCTION_ROTATION_STATE_VERSION } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 
 const MODES = new Set(["rotation-overlap", "rotation-cleanup"]);
 const SHA = /^[a-f0-9]{40}$/;
@@ -36,18 +37,21 @@ const assertCommon = ({ state, mode, sourceSha, rotationId, deploymentSha, taskD
   assert(taskDefinitionArn !== expectedCurrentTaskDefinitionArn, "rotation target and expected current task definitions must differ");
   assert(typeof state === "object" && state !== null && !Array.isArray(state), "rotation state must be an object");
   assert(!containsSensitiveStateKey(state), "rotation state must contain metadata only, not secrets or fixtures");
-  assert(state.stateVersion === 3, "rotation stateVersion must be 3");
+  assert([PRODUCTION_ROTATION_LEGACY_STATE_VERSION, PRODUCTION_ROTATION_STATE_VERSION].includes(state.stateVersion), "rotation stateVersion is unsupported");
   assert(state.rotationId === rotationId, "rotation state rotationId does not match release input");
   assert(state.sourceSha === sourceSha, "rotation state source SHA does not match release target");
   assert(FINGERPRINT.test(state.jwt?.oldFingerprint) && FINGERPRINT.test(state.jwt?.newFingerprint), "rotation JWT fingerprints are invalid");
   assert(FINGERPRINT.test(state.qr?.oldPublicFingerprint) && FINGERPRINT.test(state.qr?.newPublicFingerprint), "rotation QR fingerprints are invalid");
   for (const [name, value] of Object.entries(state.pending || {})) assert(VERSION_ID.test(value), `${name} pending version ID is invalid`);
   assert(typeof state.overlapDeploymentSha === "string" && SHA.test(state.overlapDeploymentSha), "rotation overlap deployment SHA is invalid");
-  assert(stateSha256 === createHash("sha256").update(rawState).digest("hex"), "rotation state SHA-256 does not match release input");
 };
 
-export function validateRotationTransition({ mode, state, sourceSha, rotationId, deploymentSha, taskDefinitionArn, expectedCurrentTaskDefinitionArn, imageDigest, stateSha256, rawState, now = Date.now() }) {
+export function validateRotationTransition({ mode, sourceSha, rotationId, deploymentSha, taskDefinitionArn, expectedCurrentTaskDefinitionArn, imageDigest, stateSha256, rawState, now = Date.now() }) {
+  assert((typeof rawState === "string" || Buffer.isBuffer(rawState)) && stateSha256 === createHash("sha256").update(rawState).digest("hex"), "rotation state SHA-256 does not match release input");
+  let state;
+  try { state = JSON.parse(Buffer.isBuffer(rawState) ? new TextDecoder("utf-8", { fatal: true }).decode(rawState) : rawState); } catch { fail("rotation state bytes are not valid UTF-8 JSON"); }
   assertCommon({ mode, state, sourceSha, rotationId, deploymentSha, taskDefinitionArn, expectedCurrentTaskDefinitionArn, imageDigest, stateSha256, rawState });
+  state = normalizeProductionRotationState(state).state;
   const nowMs = typeof now === "function" ? now() : now;
   assert(Number.isFinite(nowMs), "transition validation clock is invalid");
   assert(ISO(state.preparedAt) !== null && ISO(state.preparedAt) <= nowMs, "rotation preparedAt is invalid");
@@ -93,11 +97,9 @@ const main = () => {
   const values = parseArgs(process.argv.slice(2));
   const mode = required(values.get("mode"), "--mode");
   const stateFile = required(values.get("state-file"), "--state-file");
-  const rawState = readFileSync(stateFile, "utf8");
-  const state = JSON.parse(rawState);
+  const rawState = readFileSync(stateFile);
   const result = validateRotationTransition({
     mode,
-    state,
     rawState,
     sourceSha: required(values.get("source-sha"), "--source-sha"),
     rotationId: required(values.get("rotation-id"), "--rotation-id"),
