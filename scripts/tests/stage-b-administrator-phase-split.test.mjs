@@ -138,6 +138,16 @@ test("initial launcher rejects plan-bound arguments before producer start", () =
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
+test("initial launcher requires the protected source SHA", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-phase-launcher-"));
+  assert.throws(() => parseStageBAdministratorPreflightArgs(["--phase", "initial", "--output", path.join(directory, "report.json"), "--signature-output", path.join(directory, "signature.json"), "--lifecycle-directory", path.join(directory, "lifecycle")]), /--source-sha is required/);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("plan-bound launcher rejects the initial-only protected source SHA", () => {
+  assert.throws(() => parseStageBAdministratorPreflightArgs(["--phase", "plan-bound", "--source-sha", "9".repeat(40), "--output", "/private/tmp/report.json", "--signature-output", "/private/tmp/signature.json", "--lifecycle-directory", "/private/tmp/lifecycle"]), /does not accept --source-sha/);
+});
+
 test("launcher preserves producer flags around boolean retry and strips only launcher arguments", () => {
   const args = parseStageBAdministratorPreflightArgs([
     "--phase", "plan-bound",

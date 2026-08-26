@@ -18,6 +18,7 @@ import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-che
 import { ECR_DOCUMENTED_NO_RESOURCE_POLICY, MALFORMED_ECR_REPOSITORY_POLICIES } from "./fixtures/ecr-repository-policy-fixtures.mjs";
 
 const caller = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test";
+const protectedSourceSha = "9".repeat(40);
 const stageAState = JSON.stringify({ lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: 35, resources: [] });
 const shapedPolicyEvidence = () => {
   const policies = sourcePolicyEvidence().map((policy) => ({ ...policy, defaultVersionId: "v1", liveSha256: policy.sourceSha256, attached: true, matchesSource: true }));
@@ -307,17 +308,24 @@ test("failed preflight removes a stale Stage-A identity instead of preserving it
   assert.equal(fs.existsSync(identityPath), false);
 });
 
-test("one command keeps administrator simulation and release reads on separate identities", () => {
+test("administrator preflight binds live temporary-KMS absence evidence to protected main, not the simulation fixture", () => {
   const directory = temp(); const adminPath = path.join(directory, "admin.json"); const signaturePath = path.join(directory, "admin.signature.json");
   let administratorSimulations = 0;
-  const admin = runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--output", adminPath, "--signature-output", signaturePath], {
+  const admin = runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--source-sha", protectedSourceSha, "--output", adminPath, "--signature-output", signaturePath], {
     caller: () => "arn:aws:iam::368992683803:root",
     collectPolicies: shapedPolicyEvidence,
     collectEcsExecOperatorEvidence: () => buildEcsExecOperatorEvidence(),
+    readProtectedMainCheckout: () => ({ toolingSha: protectedSourceSha, currentHead: protectedSourceSha, originMainHead: protectedSourceSha, porcelainStatus: "" }),
     permissionPreflight: (input) => { administratorSimulations += 1; return runPermissionPreflight({ ...input, simulate: ({ evaluation }) => ({ decision: evaluation.expectedDecision || "allowed", matchedStatements: evaluation.expectedDecision ? 0 : 1, missingContextValues: evaluation.expectedDecision ? evaluation.expectedMissingContextValues : [] }), cloudTrail: () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] }) }); },
     sign: (report, { reportBytes }) => { const canonicalPayloadSha256 = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(report))).digest("hex"); const reportFileSha256 = crypto.createHash("sha256").update(reportBytes).digest("hex"); const bindingPayload = buildPermissionReportBinding({ report, canonicalPayloadSha256, reportFileSha256, keyArn: PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm: PERMISSION_REPORT_SIGNING_ALGORITHM }); return { schemaVersion: PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, hashDomain: PERMISSION_REPORT_HASH_DOMAIN, bindingDomain: PERMISSION_REPORT_BINDING_DOMAIN, bindingSchemaVersion: PERMISSION_REPORT_BINDING_SCHEMA_VERSION, evidenceKind: report.evidenceKind, phase: report.phase, purpose: report.purpose, accountId: "368992683803", region: "eu-west-2", keyId: PERMISSION_REPORT_SIGNING_KEY_ARN, keyArn: PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm: PERMISSION_REPORT_SIGNING_ALGORITHM, canonicalPayloadSha256, reportFileSha256, signedBindingSha256: signedPermissionReportBindingSha256(bindingPayload), signatureBase64: "AQ==", signedAt: report.generatedAt }; },
   });
   assert.equal(admin.status, "valid"); assert.equal(administratorSimulations, 1);
+  const administratorReport = JSON.parse(fs.readFileSync(adminPath, "utf8"));
+  const administratorSignature = JSON.parse(fs.readFileSync(signaturePath, "utf8"));
+  assert.equal(administratorReport.toolingSha, "e".repeat(40));
+  assert.equal(administratorReport.temporaryKmsCapability.sourceSha, protectedSourceSha);
+  assert.equal(administratorReport.temporaryKmsCapability.transitionId, `preflight-${protectedSourceSha.slice(0, 12)}`);
+  assert.equal(administratorSignature.canonicalPayloadSha256, crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(administratorReport))).digest("hex"));
   const releasePath = path.join(directory, "release.json"); let releaseReads = 0;
   const release = runProductionPreflightCli(["--identity", "release-deployer", "--output", releasePath, "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
     caller: () => caller,
@@ -330,12 +338,25 @@ test("one command keeps administrator simulation and release reads on separate i
 
 test("administrator preflight rejects a root-drop policy missing provider rotation readback", () => {
   const directory = temp(); let simulated = false;
-  assert.throws(() => runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--output", path.join(directory, "admin.json"), "--signature-output", path.join(directory, "admin.signature.json")], {
+  assert.throws(() => runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--source-sha", protectedSourceSha, "--output", path.join(directory, "admin.json"), "--signature-output", path.join(directory, "admin.signature.json")], {
     caller: () => "arn:aws:iam::368992683803:root",
+    readProtectedMainCheckout: () => ({ toolingSha: protectedSourceSha, currentHead: protectedSourceSha, originMainHead: protectedSourceSha, porcelainStatus: "" }),
     readStageATerraformSource: () => fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8").replace("kms:GetKeyRotationStatus", "kms:GetKeyPolicy"),
     permissionPreflight: () => { simulated = true; return {}; },
   }), /provider read/);
   assert.equal(simulated, false);
+});
+
+test("administrator preflight rejects missing, malformed, fixture-bound, and stale protected source identities", () => {
+  const directory = temp();
+  const base = ["--identity", "administrator", "--phase", "initial", "--output", path.join(directory, "admin.json"), "--signature-output", path.join(directory, "admin.signature.json")];
+  const deps = { caller: () => "arn:aws:iam::368992683803:root", readProtectedMainCheckout: () => ({ toolingSha: protectedSourceSha, currentHead: protectedSourceSha, originMainHead: protectedSourceSha, porcelainStatus: "" }) };
+  assert.throws(() => runProductionPreflightCli(base, deps), /exactly one --source-sha/);
+  assert.throws(() => runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--source-sha", protectedSourceSha, "--source-sha", protectedSourceSha, "--output", path.join(directory, "duplicate.json"), "--signature-output", path.join(directory, "duplicate.signature.json")], deps), /exactly one --source-sha/);
+  assert.throws(() => runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--source-sha", "bad", "--output", path.join(directory, "malformed.json"), "--signature-output", path.join(directory, "malformed.signature.json")], deps), /full protected source SHA/);
+  for (const sourceSha of ["e".repeat(40), "a".repeat(40)]) {
+    assert.throws(() => runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--source-sha", sourceSha, "--output", path.join(directory, `${sourceSha.slice(0, 1)}.json`), "--signature-output", path.join(directory, `${sourceSha.slice(0, 1)}.signature.json`)], deps), /exact clean protected-main source/);
+  }
 });
 
 test("invalid release capability report stops before backend readiness", () => {

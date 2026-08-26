@@ -30,9 +30,12 @@ import {
 } from "./validate-production-green-stage-b-permissions.mjs";
 import { collectLiveEcsExecOperatorEvidence } from "./production-ecs-exec-operator-contract.mjs";
 import { assertStageARootDropKeyPolicySource } from "./production-stage-a-control-plane.mjs";
+import { buildTemporaryCapabilityEvidence } from "./production-stage-a-temporary-kms-capability.mjs";
+import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
+const SHA40 = /^[a-f0-9]{40}$/;
 const readOption = (argv, name) => { const i = argv.indexOf(name); return i < 0 ? undefined : argv[i + 1]; };
 const value = (argv, name) => { const result = readOption(argv, name); if (!result || result.startsWith("--")) throw new Error(`${name} is required.`); return result; };
 const write = (output, document) => {
@@ -94,11 +97,17 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
   continueReadiness = (argv) => continueReleaseReadiness(argv),
   validateCapabilityGraph = assertStageBDeploymentCapabilityGraph,
   readStageATerraformSource = () => fs.readFileSync(path.join(root, "infra/aws/terraform/production-green-stage-a/main.tf"), "utf8"),
+  readProtectedMainCheckout = () => readStageBProtectedMainCheckout({ cwd: root }),
 } = {}) {
   const identity = value(argv, "--identity"); const output = value(argv, "--output"); const capabilityGraph = validateCapabilityGraph(); const observedCaller = caller();
   if (identity === "administrator") {
     if (value(argv, "--phase") !== "initial") throw new Error("Administrator capability preflight requires --phase initial.");
     if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(observedCaller)) throw new Error("Administrator production preflight requires the approved root identity.");
+    if (argv.filter((argument) => argument === "--source-sha").length !== 1) throw new Error("Administrator production preflight requires exactly one --source-sha.");
+    const sourceSha = value(argv, "--source-sha");
+    if (!SHA40.test(sourceSha)) throw new Error("Administrator production preflight requires a full protected source SHA.");
+    const protectedMain = readProtectedMainCheckout();
+    if (!protectedMain || protectedMain.toolingSha !== sourceSha || protectedMain.currentHead !== sourceSha || protectedMain.originMainHead !== sourceSha || protectedMain.porcelainStatus) throw new Error("Administrator production preflight requires the exact clean protected-main source.");
     const planPath = path.join(root, "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
     const manifestPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json");
     const planBytes = fs.readFileSync(planPath); const plan = JSON.parse(planBytes); const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
@@ -112,6 +121,13 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
       phase: "initial",
     });
     assertStageBPermissionEvidenceKind(report, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
+    report.temporaryKmsCapability = buildTemporaryCapabilityEvidence({
+      state: "ABSENCE_VERIFIED",
+      sourceSha,
+      transitionId: `preflight-${sourceSha.slice(0, 12)}`,
+      defaultVersionId: report.policyEvidence.policies.find(({ name }) => name === "MSCQRProductionGreenStageARelease")?.defaultVersionId,
+      observedAt: generatedAt,
+    });
     report.capabilityGraph = capabilityGraph;
     if (report.status !== "valid") {
       const reportFile = write(output, report);
