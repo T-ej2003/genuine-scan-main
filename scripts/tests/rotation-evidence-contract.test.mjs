@@ -46,6 +46,15 @@ test("fresh machine-verifiable evidence passes", () => {
   assert.deepEqual(validateRotationEvidence(fresh, { now: Date.parse("2026-08-10T12:00:00.000Z") }), []);
 });
 
+test("final evidence preserves explicit unrecoverable initial QR history without claiming old-key rejection", () => {
+  const evidence = structuredClone(fresh);
+  Object.assign(evidence.proofs, { historicalContinuity: "LEGACY_QR_KEYPAIR_UNRECOVERABLE", legacyQrKeypairUnrecoverable: true, qrPreviousSlotAbsent: true, qrPreviousRuntimeRejected: false });
+  Object.assign(evidence.families.find(({ name }) => name === "qr_signing_keys"), { historicalContinuity: "LEGACY_QR_KEYPAIR_UNRECOVERABLE", rollbackCapable: false });
+  assert.deepEqual(validateRotationEvidenceContract(evidence, { now: Date.parse("2026-08-10T12:00:00.000Z") }), []);
+  evidence.proofs.qrPreviousSlotAbsent = false;
+  assert.match(validateRotationEvidenceContract(evidence, { now: Date.parse("2026-08-10T12:00:00.000Z") }).join("\n"), /retirement proof/);
+});
+
 test("valid stale evidence passes contract validation but fails freshness", () => {
   const stale = {
     ...fresh,

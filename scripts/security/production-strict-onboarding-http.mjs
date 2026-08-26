@@ -11,7 +11,7 @@ function splitSetCookieHeader(value) {
   return String(value || "").split(/,(?=\s*[^=;,\s]+=)/).map((part) => part.trim()).filter(Boolean);
 }
 
-const readRotationQrFixtureToken = (fixtureFile, expectedSha256) => {
+const readRotationQrFixture = (fixtureFile, expectedSha256) => {
   if (typeof fixtureFile !== "string" || !fixtureFile || !/^[a-f0-9]{64}$/.test(expectedSha256 || "")) throw new Error("Hash-bound rotation QR fixture is required for public verification probes.");
   let fixture;
   try {
@@ -20,7 +20,9 @@ const readRotationQrFixtureToken = (fixtureFile, expectedSha256) => {
     fixture = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes));
   } catch { throw new Error("Rotation QR fixture is unavailable, changed, or malformed."); }
   if (typeof fixture?.token !== "string" || !fixture.token.trim()) throw new Error("Rotation QR fixture token is missing.");
-  return fixture.token.trim();
+  const historicalContinuity = fixture.historicalContinuity === undefined ? "VERIFIED_PREVIOUS_QR" : fixture.historicalContinuity;
+  if (!["VERIFIED_PREVIOUS_QR", "LEGACY_QR_KEYPAIR_UNRECOVERABLE"].includes(historicalContinuity)) throw new Error("Rotation QR fixture historical continuity is invalid.");
+  return { token: fixture.token.trim(), historicalContinuity };
 };
 
 const tamperToken = (token) => `${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`;
@@ -101,7 +103,8 @@ export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials,
     return auth?.mfaVerified === true;
   };
   return async ({ sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256, rotationFixtureSha256 }) => {
-    const rotationQrToken = readRotationQrFixtureToken(rotationFixtureFile, rotationFixtureSha256);
+    const rotationQrFixture = readRotationQrFixture(rotationFixtureFile, rotationFixtureSha256);
+    const rotationQrToken = rotationQrFixture.token;
     return runStrictOnboardingProbes({
     expected: { sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 },
     probes: {
@@ -142,6 +145,7 @@ export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials,
       jwtInvalidRuntimeRejected: async () => proofCheck("jwtInvalidRuntimeRejected"),
       qrCurrentRuntimeVerify: async () => proofCheck("qrCurrentRuntimeVerify"),
       qrPreviousRuntimeVerify: async () => proofCheck("qrPreviousRuntimeVerify"),
+      legacyQrKeypairUnrecoverable: async () => proofCheck("legacyQrKeypairUnrecoverable") && runtimeProof?.historicalContinuity === rotationQrFixture.historicalContinuity,
       qrTamperMatchingKeyTest: async () => proofCheck("qrTamperMatchingKeyTest"),
       qrUnknownKeyRejected: async () => proofCheck("qrUnknownKeyRejected"),
       artifactCurrentRuntimeVerify: async () => proofCheck("artifactCurrentRuntimeVerify"),

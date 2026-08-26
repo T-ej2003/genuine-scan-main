@@ -82,6 +82,24 @@ test("verified overlap authorizes initial activation without claiming rotation c
   assert.throws(() => validateRotationClosedContract(state(), () => now), /cleanup|grace/i);
 });
 
+test("initial activation accepts only explicitly authenticated unrecoverable legacy QR continuity", () => {
+  const value = state();
+  Object.assign(value.qr, { historicalContinuity: "LEGACY_QR_KEYPAIR_UNRECOVERABLE", rollbackCapable: false });
+  Object.assign(value.overlapRuntime, { historicalContinuity: "LEGACY_QR_KEYPAIR_UNRECOVERABLE", legacyQrKeypairUnrecoverable: true, qrPreviousSlotAbsent: true, qrPreviousRuntimeVerify: false });
+  Object.assign(value.verification, { historicalContinuity: "LEGACY_QR_KEYPAIR_UNRECOVERABLE", legacyQrKeypairUnrecoverable: true, qrPreviousSlotAbsent: true, qrPreviousRuntimeVerify: false });
+  const result = validate(value);
+  assert.equal(result.historicalContinuity, "LEGACY_QR_KEYPAIR_UNRECOVERABLE");
+  for (const mutate of [
+    (candidate) => { candidate.qr.rollbackCapable = true; },
+    (candidate) => { candidate.overlapRuntime.qrPreviousRuntimeVerify = true; },
+    (candidate) => { candidate.overlapRuntime.qrPreviousSlotAbsent = false; },
+    (candidate) => { delete candidate.verification.legacyQrKeypairUnrecoverable; },
+  ]) {
+    const candidate = structuredClone(value); mutate(candidate);
+    assert.throws(() => validate(candidate), /continuity|historical/i);
+  }
+});
+
 test("authentic legacy verified state derives its grace without moving the original deadline", () => {
   const legacy = state();
   legacy.stateVersion = PRODUCTION_ROTATION_LEGACY_STATE_VERSION;
@@ -223,6 +241,9 @@ test("verified overlap plus strict onboarding permits readiness while security f
   const acceptanceNames = ["superAdminLogin", "mfa", "authMe", "refresh", "dashboardStats", "qrStats", "tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "dbReady", "redisReady", "objectStorageReady", "stageANetworkingReady"];
   const onboarding = { valid: true, evidenceRef: "onboarding:test", evidenceSha256: "7".repeat(64), sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256: "8".repeat(64), taskMarker: true, ecsExecProof: true, serviceStable: true, targetTaskDefinitionMatch: true, targetImageDigestMatch: true, health: { serviceHealthy: true, healthReleaseGitSha: sourceSha }, rotationPhase: "verified", runtime: Object.fromEntries(runtimeNames.map((name) => [name, true])), acceptance: Object.fromEntries(acceptanceNames.map((name) => [name, true])) };
   assert.equal(validateOnboardingContract(onboarding), true);
+  const unrecoverable = { ...onboarding, runtime: { ...onboarding.runtime, qrPreviousRuntimeVerify: false, legacyQrKeypairUnrecoverable: true } };
+  assert.equal(validateOnboardingContract(unrecoverable), true);
+  assert.throws(() => validateOnboardingContract({ ...unrecoverable, runtime: { ...unrecoverable.runtime, legacyQrKeypairUnrecoverable: false } }), /continuity/);
   for (const name of ["dbReady", "tenantIsolation", "superAdminLogin"]) assert.throws(() => validateOnboardingContract({ ...onboarding, acceptance: { ...onboarding.acceptance, [name]: false } }), new RegExp(name));
   assert.throws(() => validateOnboardingContract({ ...onboarding, health: { ...onboarding.health, serviceHealthy: false } }), /health/);
 });

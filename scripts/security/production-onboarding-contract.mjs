@@ -38,7 +38,8 @@ export const validateOnboardingContract = (evidence) => {
   for (const [name, value] of Object.entries({ serviceStable: evidence.serviceStable, targetTaskDefinitionMatch: evidence.targetTaskDefinitionMatch, targetImageDigestMatch: evidence.targetImageDigestMatch, health: evidence.health?.serviceHealthy })) requiredTrue(value, name);
   if (evidence.health.healthReleaseGitSha !== evidence.sourceSha) throw new Error("health release SHA does not match source SHA");
   if (!["overlap-ready", "verified"].includes(evidence.rotationPhase)) throw new Error("onboarding requires an overlap-safe rotation phase");
-  for (const name of ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "cookieCurrentSealOnly", "cookiePreviousOpenDuringOverlap", "artifactCurrentRuntimeVerify", "artifactHistoricalRuntimeVerify"]) requiredTrue(evidence.runtime?.[name], `runtime.${name}`);
+  for (const name of ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "cookieCurrentSealOnly", "cookiePreviousOpenDuringOverlap", "artifactCurrentRuntimeVerify", "artifactHistoricalRuntimeVerify"]) requiredTrue(evidence.runtime?.[name], `runtime.${name}`);
+  if ((evidence.runtime?.qrPreviousRuntimeVerify === true) === (evidence.runtime?.legacyQrKeypairUnrecoverable === true)) throw new Error("runtime QR historical continuity must be either verified or explicitly unrecoverable");
   for (const name of ["superAdminLogin", "mfa", "authMe", "refresh", "dashboardStats", "qrStats", "tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "dbReady", "redisReady", "objectStorageReady", "stageANetworkingReady"]) requiredTrue(evidence.acceptance?.[name], `acceptance.${name}`);
   return true;
 };
@@ -47,6 +48,7 @@ export const validateRotationClosedContract = (evidence, now = Date.now) => {
   if (!evidence || typeof evidence !== "object") throw new Error("rotation closure evidence is required");
   const eligibleAt = Date.parse(String(evidence.cleanupEligibleAt || ""));
   if (!Number.isFinite(eligibleAt) || now() < eligibleAt) throw new Error("rotation grace window has not elapsed");
-  for (const name of ["previousSlotsRetired", "pendingSlotsRetired", "cleanupDeploymentAfterRetirement", "cleanupRuntimeVerified", "oldJwtRejected", "oldQrRejected", "freshFinalRotationEvidence"]) requiredTrue(evidence[name], name);
+  for (const name of ["previousSlotsRetired", "pendingSlotsRetired", "cleanupDeploymentAfterRetirement", "cleanupRuntimeVerified", "oldJwtRejected", "freshFinalRotationEvidence"]) requiredTrue(evidence[name], name);
+  if (evidence.legacyQrKeypairUnrecoverable === true ? evidence.oldQrRejected !== false || evidence.qrPreviousSlotAbsent !== true : evidence.oldQrRejected !== true) throw new Error("oldQrRejected or explicit unrecoverable legacy QR state is required");
   return true;
 };

@@ -24,6 +24,8 @@ const PHASES = [
   "retirement-started", "retirement-complete", "cleanup-deploy-required",
   "cleanup-runtime-verified", "cleaned",
 ];
+const QR_CONTINUITY_VERIFIED = "VERIFIED_PREVIOUS_QR";
+const QR_CONTINUITY_UNRECOVERABLE = "LEGACY_QR_KEYPAIR_UNRECOVERABLE";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const fingerprint = (value) => sha256(value).slice(0, 16);
 const safeId = (value) => /^[A-Za-z0-9._-]{8,128}$/.test(value);
@@ -123,6 +125,18 @@ const isInitialEmptySlot = (material) => material?.value === ""
   && material.metadata?.initialMigration === true
   && material.metadata?.slot === "empty"
   && ["jwt_secrets", "qr_signing_keys"].includes(material.metadata?.family);
+const isInitialVersionSlot = (material, sourceSha, slot, value = "") => material?.value === value
+  && material.metadata?.initialMigration === true
+  && material.metadata?.family === "qr_key_versions"
+  && material.metadata?.slot === slot
+  && material.metadata?.sourceSha === sourceSha;
+const isAuthenticatedInitialMigration = (current, sourceSha) =>
+  isInitialEmptySlot(current.jwtPrevious.material)
+  && current.jwtPrevious.material.metadata.sourceSha === sourceSha
+  && isInitialEmptySlot(current.qrPublicPrevious.material)
+  && current.qrPublicPrevious.material.metadata.sourceSha === sourceSha
+  && isInitialVersionSlot(current.qrCurrentVersion.material, sourceSha, "current", current.qrCurrentVersion.material.value)
+  && isInitialVersionSlot(current.qrPreviousVersion.material, sourceSha, "previous-empty");
 const putMaterial = async (sm, id, material, metadata, token) => {
   const payload = JSON.stringify({ ...metadata, value: material });
   return sm.send(new PutSecretValueCommand({
@@ -174,6 +188,7 @@ const slots = async (sm, config) => {
 
 const validQrVersion = (value) => /^[A-Za-z0-9._:-]{1,128}$/.test(String(value || ""));
 const qrSlotValue = (record) => String(record?.material?.value || "");
+const qrHistoricalContinuity = (state) => state?.qr?.historicalContinuity || QR_CONTINUITY_VERIFIED;
 const assertQrVersionSlots = (current, state = null) => {
   const currentVersion = qrSlotValue(current.qrCurrentVersion);
   const previousVersion = qrSlotValue(current.qrPreviousVersion);
@@ -184,7 +199,8 @@ const assertQrVersionSlots = (current, state = null) => {
   if (current.qrPublicPrevious.material.value && current.qrPublicPrevious.material.metadata.keyVersion && current.qrPublicPrevious.material.metadata.keyVersion !== previousVersion) throw new Error("previous QR key and key-version slots are inconsistent");
   const retiredPreviousVersion = isRetired(current.qrPreviousVersion.material);
   const previousVersionRetiredAfterGrace = !previousVersion && retiredPreviousVersion && ["retirement-started", "retirement-complete", "cleanup-deploy-required", "cleanup-runtime-verified", "cleaned"].includes(state?.phase);
-  if (state && (currentVersion !== state.qr.newKeyVersion || (previousVersion !== state.qr.oldKeyVersion && !previousVersionRetiredAfterGrace))) throw new Error("promoted QR key and key-version slots are inconsistent");
+  const expectedPreviousVersion = qrHistoricalContinuity(state) === QR_CONTINUITY_UNRECOVERABLE ? "" : state?.qr?.oldKeyVersion;
+  if (state && (currentVersion !== state.qr.newKeyVersion || (previousVersion !== expectedPreviousVersion && !previousVersionRetiredAfterGrace))) throw new Error("promoted QR key and key-version slots are inconsistent");
   return { currentVersion, previousVersion };
 };
 
@@ -213,16 +229,33 @@ const keyPair = () => generateKeyPairSync("ed25519", {
 });
 const qrVersion = (publicKey) => sha256(publicKey).slice(0, 16);
 
-const makePreviousQrFixture = (privatePem, publicPem, oldVersion, file) => {
-  const payload = { qr_id: "printer-test:rotation-synthetic", batch_id: null, licensee_id: "rotation", iat: 1_700_000_000, nonce: sha256(`${oldVersion}:fixture`).slice(0, 24), kid: oldVersion };
+const invalidQrPair = (label, cause) => Object.assign(new Error(`${label} is not a matching Ed25519 key pair`, { cause }), { code: "QR_KEYPAIR_INVALID" });
+const authenticateEd25519Pair = (privatePem, publicPem, label) => {
+  try {
+    const privateKey = createPrivateKey(privatePem);
+    const publicKey = createPublicKey(publicPem);
+    if (privateKey.asymmetricKeyType !== "ed25519" || publicKey.asymmetricKeyType !== "ed25519") throw invalidQrPair(label);
+    const derivedPublic = createPublicKey(privateKey).export({ format: "der", type: "spki" });
+    const suppliedPublic = publicKey.export({ format: "der", type: "spki" });
+    if (!derivedPublic.equals(suppliedPublic)) throw invalidQrPair(label);
+    return { privateKey, publicKey };
+  } catch (error) {
+    if (error?.code === "QR_KEYPAIR_INVALID") throw error;
+    throw invalidQrPair(label, error);
+  }
+};
+
+const makeQrFixture = (privatePem, publicPem, keyVersion, file, historicalContinuity) => {
+  const { privateKey, publicKey } = authenticateEd25519Pair(privatePem, publicPem, historicalContinuity === QR_CONTINUITY_VERIFIED ? "legacy QR" : "pending QR");
+  const payload = { qr_id: "printer-test:rotation-synthetic", batch_id: null, licensee_id: "rotation", iat: 1_700_000_000, nonce: sha256(`${keyVersion}:fixture`).slice(0, 24), kid: keyVersion };
   const bytes = Buffer.from(JSON.stringify(payload));
-  const signature = cryptoSign(null, createHash("sha256").update(bytes).digest(), createPrivateKey(privatePem));
-  if (!cryptoVerify(null, createHash("sha256").update(bytes).digest(), createPublicKey(publicPem), signature)) throw new Error("failed to create previous QR fixture");
-  writeFileSync(file, JSON.stringify({ payload, signature: signature.toString("base64url"), token: `${bytes.toString("base64url")}.${signature.toString("base64url")}` }, null, 2), { mode: 0o600 });
+  const signature = cryptoSign(null, createHash("sha256").update(bytes).digest(), privateKey);
+  if (!cryptoVerify(null, createHash("sha256").update(bytes).digest(), publicKey, signature)) throw new Error("failed to create QR rotation fixture");
+  writeFileSync(file, JSON.stringify({ historicalContinuity, payload, signature: signature.toString("base64url"), token: `${bytes.toString("base64url")}.${signature.toString("base64url")}` }, null, 2), { mode: 0o600 });
   chmodSync(file, 0o600);
 };
 
-const validateRuntimeProof = ({ file, proof: persistedProof, config, phase, expectedDeploymentSha, clock }) => {
+const validateRuntimeProof = ({ file, proof: persistedProof, config, phase, expectedDeploymentSha, clock, historicalContinuity = QR_CONTINUITY_VERIFIED }) => {
   const proof = persistedProof || JSON.parse(readFileSync(path.resolve(required(file, `--${phase}-runtime-file`)), "utf8"));
   if (proof.rotationId !== config.rotationId || proof.phase !== phase) throw new Error(`${phase} runtime proof does not match this rotation`);
   if (!fullSha(expectedDeploymentSha) || proof.deploymentSha !== expectedDeploymentSha) throw new Error(`${phase} runtime proof deployment SHA is invalid`);
@@ -233,13 +266,20 @@ const validateRuntimeProof = ({ file, proof: persistedProof, config, phase, expe
   const healthObservedAt = isoDate(proof.healthObservedAt);
   if (healthObservedAt === null || healthObservedAt > observedAt || observedAt - healthObservedAt > 300_000) throw new Error(`${phase} runtime proof health timestamp is invalid`);
   const requiredChecks = phase === "overlap"
-    ? ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "serviceHealthy"]
-    : ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeRejected", "qrUnknownKeyRejected", "serviceHealthy"];
+    ? ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "serviceHealthy"]
+    : ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeRejected", "qrCurrentRuntimeVerify", "qrUnknownKeyRejected", "serviceHealthy"];
   for (const check of requiredChecks) if (proof[check] !== true) throw new Error(`${phase} runtime proof is missing ${check}`);
-  return { ...proof, observedAt: new Date(observedAt).toISOString(), healthObservedAt: new Date(healthObservedAt).toISOString() };
+  if (historicalContinuity === QR_CONTINUITY_UNRECOVERABLE) {
+    if (proof.historicalContinuity !== historicalContinuity || proof.legacyQrKeypairUnrecoverable !== true || proof.qrPreviousSlotAbsent !== true) throw new Error(`${phase} runtime proof does not preserve unrecoverable legacy QR state`);
+    if (proof[phase === "overlap" ? "qrPreviousRuntimeVerify" : "qrPreviousRuntimeRejected"] !== false) throw new Error(`${phase} runtime proof falsely claims historical QR verification`);
+  } else {
+    const explicitContinuity = [proof.historicalContinuity, proof.legacyQrKeypairUnrecoverable, proof.qrPreviousSlotAbsent].some((value) => value !== undefined);
+    if ((explicitContinuity && (proof.historicalContinuity !== QR_CONTINUITY_VERIFIED || proof.legacyQrKeypairUnrecoverable !== false || proof.qrPreviousSlotAbsent !== false)) || proof[phase === "overlap" ? "qrPreviousRuntimeVerify" : "qrPreviousRuntimeRejected"] !== true) throw new Error(`${phase} runtime proof is missing verified previous QR continuity`);
+  }
+  return { ...proof, historicalContinuity, legacyQrKeypairUnrecoverable: historicalContinuity === QR_CONTINUITY_UNRECOVERABLE, qrPreviousSlotAbsent: historicalContinuity === QR_CONTINUITY_UNRECOVERABLE, observedAt: new Date(observedAt).toISOString(), healthObservedAt: new Date(healthObservedAt).toISOString() };
 };
 
-const stateForPending = ({ config, identity, oldJwt, oldQrPrivate, oldQrPublic, oldQrVersion, newJwt, newQrPublic, newPrivate, newQrVersion, pending, inventoryEvidenceSha256 }) => ({
+const stateForPending = ({ config, identity, oldJwt, oldQrPrivate, oldQrPublic, oldQrVersion, newJwt, newQrPublic, newPrivate, newQrVersion, pending, inventoryEvidenceSha256, historicalContinuity }) => ({
   stateVersion: PRODUCTION_ROTATION_STATE_VERSION,
   rotationId: config.rotationId,
   sourceSha: config.sourceSha,
@@ -250,7 +290,7 @@ const stateForPending = ({ config, identity, oldJwt, oldQrPrivate, oldQrPublic, 
   inventoryEvidenceSha256,
   preparedAt: nowIso(),
   jwt: { oldFingerprint: fingerprint(oldJwt), newFingerprint: fingerprint(newJwt) },
-  qr: { oldPrivateFingerprint: fingerprint(oldQrPrivate), oldPublicFingerprint: fingerprint(oldQrPublic), newPrivateFingerprint: fingerprint(newPrivate), newPublicFingerprint: fingerprint(newQrPublic), oldKeyVersion: oldQrVersion, newKeyVersion: newQrVersion },
+  qr: { historicalContinuity, rollbackCapable: historicalContinuity === QR_CONTINUITY_VERIFIED, oldPrivateFingerprint: fingerprint(oldQrPrivate), oldPublicFingerprint: fingerprint(oldQrPublic), newPrivateFingerprint: fingerprint(newPrivate), newPublicFingerprint: fingerprint(newQrPublic), oldKeyVersion: oldQrVersion, newKeyVersion: newQrVersion },
   pending,
 });
 
@@ -259,6 +299,9 @@ const assertState = (state, config) => {
   if (state.stateVersion !== PRODUCTION_ROTATION_STATE_VERSION) throw new Error(`state stateVersion must be ${PRODUCTION_ROTATION_STATE_VERSION}`);
   assertNormalizedProductionRotationGraceSeconds(state);
   if (state.minimumGraceSeconds !== config.minimumGraceSeconds) throw new Error("state minimum grace does not match the reviewed config");
+  const continuity = state.qr?.historicalContinuity || QR_CONTINUITY_VERIFIED;
+  const rollbackCapable = continuity === QR_CONTINUITY_VERIFIED ? state.qr?.rollbackCapable ?? true : state.qr?.rollbackCapable;
+  if (![QR_CONTINUITY_VERIFIED, QR_CONTINUITY_UNRECOVERABLE].includes(continuity) || rollbackCapable !== (continuity === QR_CONTINUITY_VERIFIED)) throw new Error("state QR historical continuity is invalid");
 };
 const assertStateSlots = (state, current) => {
   assertQrVersionSlots(current, state);
@@ -293,15 +336,20 @@ const assertPrepareLineage = (state, current) => {
   const qrPrivateNew = check(current.qrPrivateCurrent, state.qr?.oldPrivateFingerprint, state.qr?.newPrivateFingerprint, "current QR private key", state.qr?.newKeyVersion, state.qr?.oldKeyVersion);
   const qrPublicNew = check(current.qrPublicCurrent, state.qr?.oldPublicFingerprint, state.qr?.newPublicFingerprint, "current QR public key", state.qr?.newKeyVersion, state.qr?.oldKeyVersion);
   if (qrPublicNew && !qrPrivateNew) throw new Error("prepared QR public promotion is ahead of its private key");
-  if (current.qrPublicPrevious.material.value) check(current.qrPublicPrevious, state.qr?.oldPublicFingerprint, state.qr?.oldPublicFingerprint, "previous QR public key", state.qr?.oldKeyVersion, state.qr?.oldKeyVersion);
+  const historicalContinuity = qrHistoricalContinuity(state);
+  if (historicalContinuity === QR_CONTINUITY_UNRECOVERABLE) {
+    if (!isInitialEmptySlot(current.qrPublicPrevious.material) || current.qrPublicPrevious.material.metadata.sourceSha !== state.sourceSha) throw new Error("unrecoverable legacy QR state must keep the previous public slot empty");
+  } else if (current.qrPublicPrevious.material.value) check(current.qrPublicPrevious, state.qr?.oldPublicFingerprint, state.qr?.oldPublicFingerprint, "previous QR public key", state.qr?.oldKeyVersion, state.qr?.oldKeyVersion);
 
   const currentVersion = qrSlotValue(current.qrCurrentVersion);
   const previousVersion = qrSlotValue(current.qrPreviousVersion);
   if (currentVersion !== state.qr?.oldKeyVersion && currentVersion !== state.qr?.newKeyVersion) throw new Error("current QR key-version slot does not match prepared rotation lineage");
-  if (previousVersion && previousVersion !== state.qr?.oldKeyVersion) throw new Error("previous QR key-version slot does not match prepared rotation lineage");
+  if (historicalContinuity === QR_CONTINUITY_UNRECOVERABLE) {
+    if (previousVersion || (!isInitialVersionSlot(current.qrPreviousVersion.material, state.sourceSha, "previous-empty") && !isRetired(current.qrPreviousVersion.material))) throw new Error("unrecoverable legacy QR state must keep the previous key-version slot empty");
+  } else if (previousVersion && previousVersion !== state.qr?.oldKeyVersion) throw new Error("previous QR key-version slot does not match prepared rotation lineage");
   if (current.qrCurrentVersion.material.metadata.keyVersion && current.qrCurrentVersion.material.metadata.keyVersion !== currentVersion) throw new Error("current QR key-version metadata is inconsistent");
   if (current.qrPreviousVersion.material.metadata.keyVersion && current.qrPreviousVersion.material.metadata.keyVersion !== previousVersion) throw new Error("previous QR key-version metadata is inconsistent");
-  if (currentVersion === state.qr?.newKeyVersion && (!qrPrivateNew || !qrPublicNew || previousVersion !== state.qr?.oldKeyVersion)) throw new Error("prepared QR promotion is incomplete");
+  if (currentVersion === state.qr?.newKeyVersion && (!qrPrivateNew || !qrPublicNew || previousVersion !== (historicalContinuity === QR_CONTINUITY_UNRECOVERABLE ? "" : state.qr?.oldKeyVersion))) throw new Error("prepared QR promotion is incomplete");
   if (previousVersion && !current.qrPublicPrevious.material.value) throw new Error("previous QR key-version slot exists without previous QR public key");
   if (current.qrPublicPrevious.material.value && !previousVersion && state.phase !== "prepared") throw new Error("previous QR public key exists without its key-version slot");
   if (state.phase !== "prepared") {
@@ -341,8 +389,14 @@ const prepare = async (context) => {
       newPrivate = pair.privateKey;
       newPublic = pair.publicKey;
     } else {
-      newPublic = createPublicKey(newPrivate).export({ format: "pem", type: "spki" });
-      if (current.qrPublicPending.material.value && fingerprint(current.qrPublicPending.material.value) !== fingerprint(newPublic)) throw new Error("QR pending public key does not match pending private key");
+      const suppliedPublic = current.qrPublicPending.material.value;
+      const pendingPrivateKey = createPrivateKey(newPrivate);
+      if (pendingPrivateKey.asymmetricKeyType !== "ed25519") throw new Error("pending QR private key must be Ed25519");
+      newPublic = createPublicKey(pendingPrivateKey).export({ format: "pem", type: "spki" });
+      if (suppliedPublic) {
+        authenticateEd25519Pair(newPrivate, suppliedPublic, "pending QR");
+        if (fingerprint(suppliedPublic) !== fingerprint(newPublic)) throw new Error("QR pending public key does not match pending private key");
+      }
     }
     if (!newJwt) newJwt = randomBytes(48).toString("base64url");
     const newQrVersion = qrVersion(newPublic);
@@ -359,6 +413,13 @@ const prepare = async (context) => {
     for (const [name, record, expected] of [["JWT", current.jwtPending, newJwt], ["QR private", current.qrPrivatePending, newPrivate], ["QR public", current.qrPublicPending, newPublic]]) {
       if (fingerprint(record.material.value) !== fingerprint(expected) || record.material.metadata.rotationId !== config.rotationId) throw new Error(`${name} pending material could not be resumed safely`);
     }
+    let historicalContinuity = QR_CONTINUITY_VERIFIED;
+    try {
+      authenticateEd25519Pair(current.qrPrivateCurrent.material.value, oldQrPublic, "legacy QR");
+    } catch (error) {
+      if (error?.code !== "QR_KEYPAIR_INVALID" || !isAuthenticatedInitialMigration(current, config.sourceSha)) throw error;
+      historicalContinuity = QR_CONTINUITY_UNRECOVERABLE;
+    }
     state = stateForPending({
       config, identity, oldJwt, oldQrPrivate: current.qrPrivateCurrent.material.value, oldQrPublic, oldQrVersion, newJwt, newQrPublic: newPublic, newPrivate, newQrVersion,
       pending: {
@@ -367,6 +428,7 @@ const prepare = async (context) => {
         qrPublicVersionId: current.qrPublicPending.raw.versionId,
       },
       inventoryEvidenceSha256: inventoryEvidenceSha256 || null,
+      historicalContinuity,
     });
     const fixture = {
       payload: null,
@@ -375,7 +437,8 @@ const prepare = async (context) => {
       jwtCurrentToken: jwt.sign({ rotationId: config.rotationId, slot: "current" }, newJwt, { algorithm: "HS256", noTimestamp: true }),
       jwtPreviousToken: jwt.sign({ rotationId: config.rotationId, slot: "previous" }, oldJwt, { algorithm: "HS256", noTimestamp: true }),
     };
-    makePreviousQrFixture(current.qrPrivateCurrent.material.value, oldQrPublic, oldQrVersion, fixtureFile);
+    if (historicalContinuity === QR_CONTINUITY_VERIFIED) makeQrFixture(current.qrPrivateCurrent.material.value, oldQrPublic, oldQrVersion, fixtureFile, historicalContinuity);
+    else makeQrFixture(newPrivate, newPublic, newQrVersion, fixtureFile, historicalContinuity);
     const qrFixture = JSON.parse(readFileSync(fixtureFile, "utf8"));
     writeFileSync(fixtureFile, JSON.stringify({ ...qrFixture, jwtCurrentToken: fixture.jwtCurrentToken, jwtPreviousToken: fixture.jwtPreviousToken }, null, 2), { mode: 0o600 });
     chmodSync(fixtureFile, 0o600);
@@ -395,14 +458,17 @@ const prepare = async (context) => {
     const previousJwt = current.jwtPrevious.material;
     const previousQrPublic = current.qrPublicPrevious.material;
     if (previousJwt.value && fingerprint(previousJwt.value) !== state.jwt.oldFingerprint) throw new Error("JWT previous slot is owned by another value");
-    if (previousQrPublic.value && fingerprint(previousQrPublic.value) !== state.qr.oldPublicFingerprint) throw new Error("QR previous slot is owned by another value");
+    const historicalContinuity = qrHistoricalContinuity(state);
+    if (historicalContinuity === QR_CONTINUITY_UNRECOVERABLE) {
+      if (!isInitialEmptySlot(previousQrPublic) || previousQrPublic.metadata.sourceSha !== state.sourceSha) throw new Error("unrecoverable legacy QR state cannot trust a previous public key");
+    } else if (previousQrPublic.value && fingerprint(previousQrPublic.value) !== state.qr.oldPublicFingerprint) throw new Error("QR previous slot is owned by another value");
     if (!previousJwt.value || isRetired(previousJwt)) await putMaterial(sm, config.jwt.previousSecretId, currentJwt.value, { rotationId: config.rotationId, family: "jwt_secrets", slot: "previous", materialFingerprint: state.jwt.oldFingerprint }, `${config.rotationId}:jwt:previous`);
-    if (!previousQrPublic.value || isRetired(previousQrPublic)) await putMaterial(sm, config.qr.publicPreviousSecretId, currentQrPublic.value, { rotationId: config.rotationId, family: "qr_signing_keys", slot: "previous", keyVersion: state.qr.oldKeyVersion, materialFingerprint: state.qr.oldPublicFingerprint }, `${config.rotationId}:qr:previous`);
+    if (historicalContinuity === QR_CONTINUITY_VERIFIED && (!previousQrPublic.value || isRetired(previousQrPublic))) await putMaterial(sm, config.qr.publicPreviousSecretId, currentQrPublic.value, { rotationId: config.rotationId, family: "qr_signing_keys", slot: "previous", keyVersion: state.qr.oldKeyVersion, materialFingerprint: state.qr.oldPublicFingerprint }, `${config.rotationId}:qr:previous`);
     if (fingerprint(currentJwt.value) !== state.jwt.newFingerprint) await putMaterial(sm, config.jwt.currentSecretId, pendingJwt.value, { rotationId: config.rotationId, family: "jwt_secrets", slot: "current", materialFingerprint: state.jwt.newFingerprint }, `${config.rotationId}:jwt:current`);
     if (fingerprint(current.qrPrivateCurrent.material.value) !== fingerprint(pendingPrivate.value)) await putMaterial(sm, config.qr.privateCurrentSecretId, pendingPrivate.value, { rotationId: config.rotationId, family: "qr_signing_keys", slot: "current-private", keyVersion: state.qr.newKeyVersion, materialFingerprint: fingerprint(pendingPrivate.value) }, `${config.rotationId}:qr:current-private`);
     if (fingerprint(currentQrPublic.value) !== state.qr.newPublicFingerprint) await putMaterial(sm, config.qr.publicCurrentSecretId, pendingPublic.value, { rotationId: config.rotationId, family: "qr_signing_keys", slot: "current-public", keyVersion: state.qr.newKeyVersion, materialFingerprint: state.qr.newPublicFingerprint }, `${config.rotationId}:qr:current-public`);
     const versionMetadata = { rotationId: config.rotationId, family: "qr_key_versions", sourceSha: config.sourceSha };
-    if (qrSlotValue(current.qrPreviousVersion) !== state.qr.oldKeyVersion) await putMaterial(sm, config.qr.previousKeyVersionSecretId, state.qr.oldKeyVersion, { ...versionMetadata, slot: "previous", keyVersion: state.qr.oldKeyVersion }, `${config.rotationId}:qr:previous-version`);
+    if (historicalContinuity === QR_CONTINUITY_VERIFIED && qrSlotValue(current.qrPreviousVersion) !== state.qr.oldKeyVersion) await putMaterial(sm, config.qr.previousKeyVersionSecretId, state.qr.oldKeyVersion, { ...versionMetadata, slot: "previous", keyVersion: state.qr.oldKeyVersion }, `${config.rotationId}:qr:previous-version`);
     if (qrSlotValue(current.qrCurrentVersion) !== state.qr.newKeyVersion) await putMaterial(sm, config.qr.currentKeyVersionSecretId, state.qr.newKeyVersion, { ...versionMetadata, slot: "current", keyVersion: state.qr.newKeyVersion }, `${config.rotationId}:qr:current-version`);
     current = await slots(sm, config);
     assertQrVersionSlots(current, state);
@@ -419,7 +485,7 @@ const verify = async (context) => {
   const stateFile = statePath(values);
   const state = readCurrentState(context);
   if (!["overlap-deploy-required", "overlap-ready"].includes(state.phase)) throw new Error("rotation must require an overlap deployment before verification");
-  const proof = validateRuntimeProof({ file, config, phase: "overlap", expectedDeploymentSha: config.overlapDeploymentSha, clock: clockOf(context) });
+  const proof = validateRuntimeProof({ file, config, phase: "overlap", expectedDeploymentSha: config.overlapDeploymentSha, clock: clockOf(context), historicalContinuity: qrHistoricalContinuity(state) });
   const overlapReadyAt = proof.observedAt;
   const cleanupEligibleAt = deriveProductionRotationCleanupEligibleAt(overlapReadyAt, state.minimumGraceSeconds);
   if (state.overlapReadyAt && state.overlapReadyAt !== overlapReadyAt) throw new Error("persisted overlap grace anchor does not match the runtime proof");
@@ -437,13 +503,16 @@ const verify = async (context) => {
     jwtPreviousRuntimeVerify: true,
     jwtInvalidRuntimeRejected: true,
     qrCurrentRuntimeVerify: true,
-    qrPreviousRuntimeVerify: true,
+    qrPreviousRuntimeVerify: proof.qrPreviousRuntimeVerify,
+    historicalContinuity: proof.historicalContinuity,
+    legacyQrKeypairUnrecoverable: proof.legacyQrKeypairUnrecoverable,
+    qrPreviousSlotAbsent: proof.qrPreviousSlotAbsent,
     qrTamperMatchingKeyTest: true,
     qrUnknownKeyRejected: true,
     serviceHealthy: true,
   };
   persist(context, state);
-  console.log(JSON.stringify({ mode: "verify", phase: state.phase, rotationId: state.rotationId, overlapReadyAt: state.overlapReadyAt, cleanupEligibleAt: state.cleanupEligibleAt, jwtPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true }));
+  console.log(JSON.stringify({ mode: "verify", phase: state.phase, rotationId: state.rotationId, overlapReadyAt: state.overlapReadyAt, cleanupEligibleAt: state.cleanupEligibleAt, jwtPreviousRuntimeVerify: true, qrPreviousRuntimeVerify: proof.qrPreviousRuntimeVerify, historicalContinuity: proof.historicalContinuity, qrTamperMatchingKeyTest: true }));
 };
 
 const retirementPayload = (config, family, slot, retirementTimestamp) => ({
@@ -455,7 +524,9 @@ const retireSlot = async (sm, record, config, family, slot, retirementTimestamp)
     if (record.material.metadata.rotationId !== config.rotationId || record.material.metadata.slot !== expected.slot || record.material.metadata.retiredAt !== retirementTimestamp) throw new Error(`${slot} retirement metadata conflicts with this rotation`);
     return record.raw.versionId;
   }
-  if (!record.material.value && Object.keys(record.material.metadata || {}).length) throw new Error(`${slot} contains non-retired metadata`);
+  const authenticatedInitialEmpty = (isInitialEmptySlot(record.material) && record.material.metadata.sourceSha === config.sourceSha)
+    || (family === "qr_key_versions" && isInitialVersionSlot(record.material, config.sourceSha, "previous-empty"));
+  if (!record.material.value && Object.keys(record.material.metadata || {}).length && !authenticatedInitialEmpty) throw new Error(`${slot} contains non-retired metadata`);
   const result = await putMaterial(sm, record.id, "", expected, `${config.rotationId}:${family}:${slot}:retired`);
   return String(result.VersionId || "");
 };
@@ -476,6 +547,8 @@ const evidenceFor = (state, config, overlapRuntime, cleanupRuntime, current) => 
   const verifiedCleanupSha = required(cleanupRuntime.deploymentSha, "cleanup runtime deployment SHA");
   if (!fullSha(verifiedOverlapSha) || verifiedOverlapSha !== config.overlapDeploymentSha) throw new Error("overlap runtime deployment SHA is not bound to config");
   if (!fullSha(verifiedCleanupSha) || verifiedCleanupSha !== state.cleanupDeploymentSha) throw new Error("cleanup runtime deployment SHA is not bound to state");
+  const historicalContinuity = qrHistoricalContinuity(state);
+  const legacyQrKeypairUnrecoverable = historicalContinuity === QR_CONTINUITY_UNRECOVERABLE;
   return {
   evidenceVersion: 2, rotationId: config.rotationId, recordedAt: state.overlapReadyAt, sourceSha: config.sourceSha,
   approvedBy: required(config.approvedBy, "config.approvedBy"), approverRole: required(config.approverRole, "config.approverRole"),
@@ -486,14 +559,15 @@ const evidenceFor = (state, config, overlapRuntime, cleanupRuntime, current) => 
   proofs: {
     previousJwtSlotRetired: true, previousQrPublicSlotRetired: true, jwtPendingRetired: true, qrPrivatePendingRetired: true, qrPublicPendingRetired: true,
     cleanupDeploymentAfterRetirement: new Date(cleanupRuntime.observedAt).getTime() > new Date(state.retirementTimestamp).getTime(),
-    cleanupRuntimeVerified: true, jwtPreviousRuntimeRejected: true, qrPreviousRuntimeRejected: true,
+    cleanupRuntimeVerified: true, jwtPreviousRuntimeRejected: true, qrPreviousRuntimeRejected: !legacyQrKeypairUnrecoverable,
+    historicalContinuity, legacyQrKeypairUnrecoverable, qrPreviousSlotAbsent: true,
     jwtCurrentRuntimeVerify: true, qrCurrentRuntimeVerify: true, qrUnknownKeyRejected: true, serviceHealthy: true,
   },
   linkedDeployShas: [verifiedOverlapSha, verifiedCleanupSha],
   verificationRefs: [reference(config.verificationRef), reference(state.cleanupEvidenceRef), state.verification.runtimeInvocationRef, cleanupRuntime.runtimeInvocationRef],
   families: [
     { name: "jwt_secrets", rotatedAt: state.overlapReadyAt, operator: required(state.cleanupVerifiedBy, "state.cleanupVerifiedBy"), method: "dual-slot", currentVersionId: current.jwtCurrent.raw.versionId, previousVersionId: current.jwtPrevious.raw.versionId, verificationRef: reference(config.verificationRef) },
-    { name: "qr_signing_keys", rotatedAt: state.overlapReadyAt, operator: required(state.cleanupVerifiedBy, "state.cleanupVerifiedBy"), method: "dual-slot", currentVersionId: current.qrPublicCurrent.raw.versionId, previousVersionId: current.qrPublicPrevious.raw.versionId, currentKeyVersion: state.qr.newKeyVersion, previousKeyVersion: state.qr.oldKeyVersion, verificationRef: reference(config.verificationRef) },
+    { name: "qr_signing_keys", rotatedAt: state.overlapReadyAt, operator: required(state.cleanupVerifiedBy, "state.cleanupVerifiedBy"), method: "dual-slot", currentVersionId: current.qrPublicCurrent.raw.versionId, previousVersionId: current.qrPublicPrevious.raw.versionId, currentKeyVersion: state.qr.newKeyVersion, previousKeyVersion: state.qr.oldKeyVersion, historicalContinuity, rollbackCapable: !legacyQrKeypairUnrecoverable, verificationRef: reference(config.verificationRef) },
   ],
   };
 };
@@ -504,10 +578,11 @@ const assertPersistedCleanupRuntime = (state, config, cleanupDeploymentSha, cloc
   if (!fullSha(config.overlapDeploymentSha)) throw new Error("config.overlapDeploymentSha must be a full SHA");
   if (!state.overlapRuntime || typeof state.overlapRuntime !== "object") throw new Error("state.overlapRuntime is required to resume cleanup");
   if (state.overlapRuntime.deploymentSha !== config.overlapDeploymentSha) throw new Error("overlap runtime deployment SHA does not match config");
-  const overlapRuntime = validateRuntimeProof({ proof: state.overlapRuntime, config, phase: "overlap", expectedDeploymentSha: config.overlapDeploymentSha, clock });
+  const historicalContinuity = qrHistoricalContinuity(state);
+  const overlapRuntime = validateRuntimeProof({ proof: state.overlapRuntime, config, phase: "overlap", expectedDeploymentSha: config.overlapDeploymentSha, clock, historicalContinuity });
   const retirementTimestamp = isoDate(required(state.retirementTimestamp, "state.retirementTimestamp"));
   if (retirementTimestamp === null || retirementTimestamp > clock()) throw new Error("state.retirementTimestamp is invalid");
-  const cleanupRuntime = validateRuntimeProof({ proof: state.cleanupRuntime, config, phase: "cleanup", expectedDeploymentSha: state.cleanupDeploymentSha, clock });
+  const cleanupRuntime = validateRuntimeProof({ proof: state.cleanupRuntime, config, phase: "cleanup", expectedDeploymentSha: state.cleanupDeploymentSha, clock, historicalContinuity });
   if (isoDate(cleanupRuntime.observedAt) <= retirementTimestamp) throw new Error("cleanup deployment must occur after retirement writes");
   const cleanupCompletedAt = isoDate(state.cleanupCompletedAt || cleanupRuntime.observedAt);
   if (cleanupCompletedAt === null || cleanupCompletedAt < isoDate(cleanupRuntime.observedAt) || cleanupCompletedAt > clock()) throw new Error("state.cleanupCompletedAt is invalid");
@@ -576,7 +651,7 @@ const cleanup = async (context) => {
     }
     if (!cleanupEvidenceRef) throw new Error("--cleanup-evidence-ref is required when finalizing cleanup");
     const runtimeFile = required(values.get("cleanup-runtime-file"), "--cleanup-runtime-file");
-    const proof = validateRuntimeProof({ file: runtimeFile, config, phase: "cleanup", expectedDeploymentSha: cleanupDeploymentSha, clock });
+    const proof = validateRuntimeProof({ file: runtimeFile, config, phase: "cleanup", expectedDeploymentSha: cleanupDeploymentSha, clock, historicalContinuity: qrHistoricalContinuity(state) });
     if (isoDate(proof.observedAt) <= isoDate(state.retirementTimestamp)) throw new Error("cleanup deployment must occur after retirement writes");
     state.cleanupRuntime = proof;
     state.cleanupEvidenceRef = cleanupEvidenceRef;

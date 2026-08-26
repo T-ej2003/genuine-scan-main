@@ -60,9 +60,11 @@ try {
 }
 const phase = required(process.env.ROTATION_RUNTIME_PHASE, "ROTATION_RUNTIME_PHASE");
 if (phase !== "overlap" && phase !== "cleanup") throw new Error("ROTATION_RUNTIME_PHASE must be overlap or cleanup");
+const historicalContinuity = fixture.historicalContinuity === undefined ? "VERIFIED_PREVIOUS_QR" : required(fixture.historicalContinuity, "fixture.historicalContinuity");
+if (!["VERIFIED_PREVIOUS_QR", "LEGACY_QR_KEYPAIR_UNRECOVERABLE"].includes(historicalContinuity)) throw new Error("fixture.historicalContinuity is invalid");
 const checks = phase === "overlap"
-  ? verifyProductionRotationRuntime({ currentJwtToken: required(fixture.jwtCurrentToken, "fixture.jwtCurrentToken"), previousJwtToken: required(fixture.jwtPreviousToken, "fixture.jwtPreviousToken"), previousQrToken: required(fixture.token, "fixture.token"), artifactHistoricalPayload: fixture.artifactHistoricalPayload, artifactHistoricalSignature: fixture.artifactHistoricalSignature, healthEvidence })
-  : verifyProductionRotationCleanupRuntime({ currentJwtToken: required(fixture.jwtCurrentToken, "fixture.jwtCurrentToken"), previousJwtToken: required(fixture.jwtPreviousToken, "fixture.jwtPreviousToken"), previousQrToken: required(fixture.token, "fixture.token"), artifactHistoricalPayload: fixture.artifactHistoricalPayload, artifactHistoricalSignature: fixture.artifactHistoricalSignature, healthEvidence });
+  ? verifyProductionRotationRuntime({ currentJwtToken: required(fixture.jwtCurrentToken, "fixture.jwtCurrentToken"), previousJwtToken: required(fixture.jwtPreviousToken, "fixture.jwtPreviousToken"), qrFixtureToken: required(fixture.token, "fixture.token"), historicalContinuity, artifactHistoricalPayload: fixture.artifactHistoricalPayload, artifactHistoricalSignature: fixture.artifactHistoricalSignature, healthEvidence })
+  : verifyProductionRotationCleanupRuntime({ currentJwtToken: required(fixture.jwtCurrentToken, "fixture.jwtCurrentToken"), previousJwtToken: required(fixture.jwtPreviousToken, "fixture.jwtPreviousToken"), qrFixtureToken: required(fixture.token, "fixture.token"), historicalContinuity, artifactHistoricalPayload: fixture.artifactHistoricalPayload, artifactHistoricalSignature: fixture.artifactHistoricalSignature, healthEvidence });
 const output = {
   rotationId: required(process.env.ROTATION_ID, "ROTATION_ID"),
   phase,
