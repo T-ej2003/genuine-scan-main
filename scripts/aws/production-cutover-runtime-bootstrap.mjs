@@ -17,6 +17,7 @@ import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-
 import { assertProductionRotationGraceSeconds } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 import {
   assertProductionInitialMigrationSourceAdvance,
+  assertProductionSupersessionManifest,
   assertProductionSupersessionEvidence,
   PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE_KIND,
 } from "../security/production-initial-migration-source-advance.mjs";
@@ -145,11 +146,13 @@ export function buildProductionRotationConfig({ sourceSha, rotationId, approval,
   };
 }
 
-export function buildInitialMigrationSourceAdvance({ currentSourceSha, rotationBindings, rotationBindingsSha256, supersessionEvidence, supersessionEvidenceSha256, proveDescendant } = {}) {
+export function buildInitialMigrationSourceAdvance({ currentSourceSha, rotationBindings, rotationBindingsSha256, supersessionEvidence, supersessionEvidenceSha256, supersessionManifest, supersessionManifestSha256, proveDescendant } = {}) {
   const originalSourceSha = rotationBindings?.sourceSha;
   if (!originalSourceSha || originalSourceSha === currentSourceSha) return undefined;
-  if (!SHA40.test(currentSourceSha || "") || !SHA40.test(originalSourceSha) || rotationBindings.rotationId !== supersessionEvidence?.rotationId || !SHA256.test(rotationBindingsSha256 || "") || !SHA256.test(supersessionEvidenceSha256 || "")) throw new Error("Initial-migration source-advance inputs are incomplete.");
+  if (!SHA40.test(currentSourceSha || "") || !SHA40.test(originalSourceSha) || rotationBindings.rotationId !== supersessionEvidence?.rotationId || !SHA256.test(rotationBindingsSha256 || "") || !SHA256.test(supersessionEvidenceSha256 || "") || !supersessionManifest) throw new Error("Initial-migration source-advance inputs are incomplete.");
   const evidence = assertProductionSupersessionEvidence(supersessionEvidence);
+  assertProductionSupersessionManifest(supersessionManifest, { supersessionEvidence: evidence, supersessionEvidenceSha256, bindingEvidenceSha256: rotationBindingsSha256, manifestSha256: supersessionManifestSha256 });
+  if (hash(`${JSON.stringify(rotationBindings, null, 2)}\n`) !== rotationBindingsSha256) throw new Error("Rotation binding bytes are not the canonical producer output.");
   if (evidence.sourceSha !== originalSourceSha || proveDescendant?.({ ancestorSha: originalSourceSha, descendantSha: currentSourceSha }) !== true) throw new Error("Initial-migration source advancement is not an authenticated protected-main descendant transition.");
   const expectedArns = {
     jwtPending: rotationBindings.jwt?.pendingSecretId,
@@ -179,6 +182,8 @@ export function prepareProductionCutoverRuntime({
   rotationBindingsSha256,
   rotationSupersessionEvidence,
   rotationSupersessionEvidenceSha256,
+  rotationSupersessionManifest,
+  rotationSupersessionManifestSha256,
   sourceSha,
   git,
   imageAuthorization,
@@ -285,6 +290,8 @@ export function prepareProductionCutoverRuntime({
       rotationBindingsSha256,
       supersessionEvidence: rotationSupersessionEvidence,
       supersessionEvidenceSha256: rotationSupersessionEvidenceSha256,
+      supersessionManifest: rotationSupersessionManifest,
+      supersessionManifestSha256: rotationSupersessionManifestSha256,
       proveDescendant: proveSourceAdvance || (({ ancestorSha, descendantSha }) => {
         try { (git || execFileSync)("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; }
       }),
@@ -433,7 +440,7 @@ const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
 export function parseBootstrapArgs(argv) {
   const supported = new Set([
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
-    "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "image-authorization", "iam-evidence",
+    "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "rotation-supersession-manifest", "image-authorization", "iam-evidence",
     "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "onboarding-paths",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir",
   ]);

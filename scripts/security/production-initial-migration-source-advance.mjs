@@ -5,6 +5,10 @@ export const PRODUCTION_SUPERSESSION_SLOTS = Object.freeze([
   "jwtPending", "qrPrivatePending", "qrPublicPending", "jwtPrevious",
   "qrPublicPrevious", "qrCurrentVersion", "qrPreviousVersion",
 ]);
+const PRODUCTION_SUPERSESSION_MANIFEST_KEYS = Object.freeze([
+  "status", "transition", "sourceSha", "staleSourceSha", "rotationId", "staleRotationId",
+  "supersessionEvidenceFile", "supersessionEvidenceSha256", "bindingFile", "bindingEvidenceSha256", "writes",
+]);
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -28,6 +32,14 @@ export function assertProductionSupersessionEvidence(evidence) {
   }
   if (!SHA256.test(evidence.evidenceIdentitySha256) || evidence.evidenceIdentitySha256 !== productionSupersessionEvidenceIdentity(evidence)) throw new Error("Rotation supersession evidence identity hash is invalid.");
   return evidence;
+}
+
+export function assertProductionSupersessionManifest(manifest, { supersessionEvidence, supersessionEvidenceSha256, bindingEvidenceSha256, manifestSha256 } = {}) {
+  if (!manifest || Object.keys(manifest).sort().join(",") !== [...PRODUCTION_SUPERSESSION_MANIFEST_KEYS].sort().join(",") || manifest.status !== "valid" || manifest.transition !== "SUPERSEDE_STALE_PENDING" || !SHA40.test(manifest.sourceSha) || !SHA40.test(manifest.staleSourceSha) || !ROTATION_ID.test(manifest.rotationId) || !ROTATION_ID.test(manifest.staleRotationId) || manifest.sourceSha === manifest.staleSourceSha || manifest.rotationId === manifest.staleRotationId || !SHA256.test(manifest.supersessionEvidenceSha256) || !SHA256.test(manifest.bindingEvidenceSha256) || !Number.isSafeInteger(manifest.writes) || manifest.writes < 0) throw new Error("Rotation supersession manifest schema is invalid.");
+  if (!SHA256.test(manifestSha256 || "") || sha256(`${JSON.stringify(manifest, null, 2)}\n`) !== manifestSha256) throw new Error("Rotation supersession manifest bytes are not the canonical producer output.");
+  const evidence = assertProductionSupersessionEvidence(supersessionEvidence);
+  if (manifest.sourceSha !== evidence.sourceSha || manifest.staleSourceSha !== evidence.staleSourceSha || manifest.rotationId !== evidence.rotationId || manifest.staleRotationId !== evidence.staleRotationId || manifest.supersessionEvidenceSha256 !== supersessionEvidenceSha256 || manifest.bindingEvidenceSha256 !== bindingEvidenceSha256) throw new Error("Rotation supersession manifest does not authenticate the supplied producer evidence.");
+  return manifest;
 }
 
 export function assertProductionInitialMigrationSourceAdvance(bridge) {

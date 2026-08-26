@@ -72,9 +72,11 @@ closed.
 
 If protected main advances solely to make that initial migration consumable,
 runtime preparation must also receive the canonical
-`--rotation-supersession-evidence` file. It emits an
+`--rotation-supersession-evidence` and
+`--rotation-supersession-manifest` files. It emits an
 `initialMigrationSourceAdvance` binding only after authenticating the original
-binding bytes, the supersession evidence bytes and identity, the exact seven
+binding bytes against the producer-recorded `bindingEvidenceSha256`, the
+supersession evidence bytes and identity, the exact seven
 deterministic Secrets Manager version IDs, the rotation ID, and a Git
 ancestor-to-current-protected-main transition. The coordinator independently
 rechecks those version IDs and ancestry before accepting malformed historical

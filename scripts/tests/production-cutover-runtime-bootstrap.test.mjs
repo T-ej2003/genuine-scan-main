@@ -66,6 +66,26 @@ function sourceAdvanceEvidence(originalSourceSha, rotationId, sourceBindings = b
   return evidence;
 }
 
+function sourceAdvanceManifest(originalSourceSha, rotationId, evidence, bindingEvidenceSha256, supersessionEvidenceSha256) {
+  return {
+    status: "valid",
+    transition: "SUPERSEDE_STALE_PENDING",
+    sourceSha: originalSourceSha,
+    staleSourceSha: evidence.staleSourceSha,
+    rotationId,
+    staleRotationId: evidence.staleRotationId,
+    supersessionEvidenceFile: "/private/rotation-supersession.json",
+    supersessionEvidenceSha256,
+    bindingFile: "/private/rotation-bindings.json",
+    bindingEvidenceSha256,
+    writes: 7,
+  };
+}
+
+function manifestSha256(manifest) {
+  return createHash("sha256").update(`${JSON.stringify(manifest, null, 2)}\n`).digest("hex");
+}
+
 function gitFixture(expectedSha = sourceSha) {
   return (file, args) => {
     if (file === "git" && args[0] === "status") return "";
@@ -173,7 +193,9 @@ test("source-advance bridge requires exact supersession evidence, binding bytes,
   const rotationBindings = { ...bindings, sourceSha: originalSourceSha, rotationId };
   const evidence = sourceAdvanceEvidence(originalSourceSha, rotationId, rotationBindings);
   const evidenceSha256 = createHash("sha256").update(`${JSON.stringify(evidence, null, 2)}\n`).digest("hex");
-  const input = { currentSourceSha: sourceSha, rotationBindings, rotationBindingsSha256: "8".repeat(64), supersessionEvidence: evidence, supersessionEvidenceSha256: evidenceSha256, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === originalSourceSha && descendantSha === sourceSha };
+  const bindingSha256 = createHash("sha256").update(`${JSON.stringify(rotationBindings, null, 2)}\n`).digest("hex");
+  const supersessionManifest = sourceAdvanceManifest(originalSourceSha, rotationId, evidence, bindingSha256, evidenceSha256);
+  const input = { currentSourceSha: sourceSha, rotationBindings, rotationBindingsSha256: bindingSha256, supersessionEvidence: evidence, supersessionEvidenceSha256: evidenceSha256, supersessionManifest, supersessionManifestSha256: manifestSha256(supersessionManifest), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === originalSourceSha && descendantSha === sourceSha };
   const bridge = buildInitialMigrationSourceAdvance(input);
   assert.equal(bridge.supersessionEvidence.sourceSha, originalSourceSha);
   assert.equal(bridge.currentSourceSha, sourceSha);
@@ -183,6 +205,15 @@ test("source-advance bridge requires exact supersession evidence, binding bytes,
     { proveDescendant: () => false },
     { supersessionEvidence: { ...evidence, resources: { ...evidence.resources, jwtPending: { ...evidence.resources.jwtPending, arn: bindings.jwt.currentSecretId } } } },
   ]) assert.throws(() => buildInitialMigrationSourceAdvance({ ...input, ...changed }));
+
+  for (const field of ["jwt.currentSecretId", "qr.privateCurrentSecretId", "qr.publicCurrentSecretId"]) {
+    const [group, name] = field.split(".");
+    const changedBindings = { ...rotationBindings, [group]: { ...rotationBindings[group], [name]: `${rotationBindings[group][name]}-changed` } };
+    const changedSha256 = createHash("sha256").update(`${JSON.stringify(changedBindings, null, 2)}\n`).digest("hex");
+    assert.throws(() => buildInitialMigrationSourceAdvance({ ...input, rotationBindings: changedBindings, rotationBindingsSha256: changedSha256 }), /authenticate|canonical/);
+  }
+  assert.throws(() => buildInitialMigrationSourceAdvance({ ...input, supersessionManifest: undefined }), /incomplete/);
+  assert.throws(() => buildInitialMigrationSourceAdvance({ ...input, supersessionManifestSha256: "f".repeat(64) }), /canonical producer/);
 });
 
 test("runtime config carries the authenticated source-advance bridge into coordinator approval bytes", () => {
@@ -192,12 +223,16 @@ test("runtime config carries the authenticated source-advance bridge into coordi
     const rotationId = "rotation-source-advance";
     const rotationBindings = { ...bindings, sourceSha: originalSourceSha, rotationId };
     const evidence = sourceAdvanceEvidence(originalSourceSha, rotationId, rotationBindings);
+    const bindingSha256 = createHash("sha256").update(`${JSON.stringify(rotationBindings, null, 2)}\n`).digest("hex");
+    const supersessionEvidenceSha256 = createHash("sha256").update(`${JSON.stringify(evidence, null, 2)}\n`).digest("hex");
     const input = {
       ...fullInput(directory, process.cwd()),
       rotationBindings,
-      rotationBindingsSha256: "8".repeat(64),
+      rotationBindingsSha256: bindingSha256,
       rotationSupersessionEvidence: evidence,
-      rotationSupersessionEvidenceSha256: createHash("sha256").update(`${JSON.stringify(evidence, null, 2)}\n`).digest("hex"),
+      rotationSupersessionEvidenceSha256: supersessionEvidenceSha256,
+      rotationSupersessionManifest: sourceAdvanceManifest(originalSourceSha, rotationId, evidence, bindingSha256, supersessionEvidenceSha256),
+      rotationSupersessionManifestSha256: manifestSha256(sourceAdvanceManifest(originalSourceSha, rotationId, evidence, bindingSha256, supersessionEvidenceSha256)),
       proveSourceAdvance: () => true,
     };
     const result = prepareProductionCutoverRuntime(input);
