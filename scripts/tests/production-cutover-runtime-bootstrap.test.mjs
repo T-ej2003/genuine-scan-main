@@ -8,7 +8,8 @@ import { createHash } from "node:crypto";
 import { createProductionCutoverAdapters, createProductionRotationInfrastructureAdapter } from "../aws/production-cutover-production-adapters.mjs";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
-import { parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { buildInitialMigrationSourceAdvance, parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { productionSupersessionEvidenceIdentity, productionSupersessionVersionId } from "../security/production-initial-migration-source-advance.mjs";
 import { assertUniqueSecretBindingNames, buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
@@ -48,6 +49,22 @@ const bindings = {
     previousKeyVersion: "qr-v1",
   },
 };
+
+function sourceAdvanceEvidence(originalSourceSha, rotationId, sourceBindings = bindings) {
+  const arns = {
+    jwtPending: sourceBindings.jwt.pendingSecretId,
+    qrPrivatePending: sourceBindings.qr.privatePendingSecretId,
+    qrPublicPending: sourceBindings.qr.publicPendingSecretId,
+    jwtPrevious: sourceBindings.jwt.previousSecretId,
+    qrPublicPrevious: sourceBindings.qr.publicPreviousSecretId,
+    qrCurrentVersion: sourceBindings.qr.currentKeyVersionSecretId,
+    qrPreviousVersion: sourceBindings.qr.previousKeyVersionSecretId,
+  };
+  const resources = Object.fromEntries(Object.entries(arns).map(([slot, arn]) => [slot, { arn, versionId: productionSupersessionVersionId(originalSourceSha, rotationId, slot), stages: ["AWSCURRENT"] }]));
+  const evidence = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha: originalSourceSha, staleSourceSha: "7".repeat(40), rotationId, staleRotationId: "rotation-stale-source", generatedAt: "2026-08-26T06:06:32.000Z", resources };
+  evidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(evidence);
+  return evidence;
+}
 
 function gitFixture(expectedSha = sourceSha) {
   return (file, args) => {
@@ -146,6 +163,50 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     assert.doesNotMatch(readFileSync(result.configPath, "utf8"), /PRIVATE KEY|SecretString|fixture-password|123456/);
   } finally {
     rmSync(path.join(repositoryRoot, "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("source-advance bridge requires exact supersession evidence, binding bytes, and protected ancestry", () => {
+  const originalSourceSha = "5".repeat(40);
+  const rotationId = "rotation-source-advance";
+  const rotationBindings = { ...bindings, sourceSha: originalSourceSha, rotationId };
+  const evidence = sourceAdvanceEvidence(originalSourceSha, rotationId, rotationBindings);
+  const evidenceSha256 = createHash("sha256").update(`${JSON.stringify(evidence, null, 2)}\n`).digest("hex");
+  const input = { currentSourceSha: sourceSha, rotationBindings, rotationBindingsSha256: "8".repeat(64), supersessionEvidence: evidence, supersessionEvidenceSha256: evidenceSha256, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === originalSourceSha && descendantSha === sourceSha };
+  const bridge = buildInitialMigrationSourceAdvance(input);
+  assert.equal(bridge.supersessionEvidence.sourceSha, originalSourceSha);
+  assert.equal(bridge.currentSourceSha, sourceSha);
+  for (const changed of [
+    { supersessionEvidenceSha256: "9".repeat(64) },
+    { rotationBindings: { ...rotationBindings, rotationId: "rotation-foreign" } },
+    { proveDescendant: () => false },
+    { supersessionEvidence: { ...evidence, resources: { ...evidence.resources, jwtPending: { ...evidence.resources.jwtPending, arn: bindings.jwt.currentSecretId } } } },
+  ]) assert.throws(() => buildInitialMigrationSourceAdvance({ ...input, ...changed }));
+});
+
+test("runtime config carries the authenticated source-advance bridge into coordinator approval bytes", () => {
+  const directory = fsTemp();
+  try {
+    const originalSourceSha = "5".repeat(40);
+    const rotationId = "rotation-source-advance";
+    const rotationBindings = { ...bindings, sourceSha: originalSourceSha, rotationId };
+    const evidence = sourceAdvanceEvidence(originalSourceSha, rotationId, rotationBindings);
+    const input = {
+      ...fullInput(directory, process.cwd()),
+      rotationBindings,
+      rotationBindingsSha256: "8".repeat(64),
+      rotationSupersessionEvidence: evidence,
+      rotationSupersessionEvidenceSha256: createHash("sha256").update(`${JSON.stringify(evidence, null, 2)}\n`).digest("hex"),
+      proveSourceAdvance: () => true,
+    };
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, true);
+    assert.equal(result.config.initialMigrationSourceAdvance.supersessionEvidence.sourceSha, originalSourceSha);
+    assert.equal(result.config.sourceSha, sourceSha);
+    assert.deepEqual(JSON.parse(readFileSync(result.configPath, "utf8")).initialMigrationSourceAdvance, result.config.initialMigrationSourceAdvance);
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
     rmSync(directory, { recursive: true, force: true });
   }
 });

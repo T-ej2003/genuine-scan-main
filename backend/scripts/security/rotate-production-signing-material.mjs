@@ -14,6 +14,10 @@ import {
   PRODUCTION_ROTATION_STATE_VERSION,
 } from "./production-rotation-grace-contract.mjs";
 import {
+  assertProductionInitialMigrationSourceAdvance,
+  productionSupersessionVersionId,
+} from "../../../scripts/security/production-initial-migration-source-advance.mjs";
+import {
   GetSecretValueCommand,
   PutSecretValueCommand,
   SecretsManagerClient,
@@ -87,6 +91,10 @@ const loadConfig = (file, expectedSha256) => {
   if (new Set(ids).size !== ids.length) throw new Error("rotation secret resources must be distinct");
   required(config.qr?.previousKeyVersion, "config.qr.previousKeyVersion");
   if (!fullSha(config.overlapDeploymentSha)) throw new Error("config.overlapDeploymentSha must be a full SHA");
+  if (config.initialMigrationSourceAdvance !== undefined) {
+    const bridge = assertProductionInitialMigrationSourceAdvance(config.initialMigrationSourceAdvance);
+    if (bridge.currentSourceSha !== config.sourceSha || bridge.supersessionEvidence.rotationId !== config.rotationId) throw new Error("initial-migration source advance does not match config identity");
+  }
   reference(config.verificationRef);
   return config;
 };
@@ -130,13 +138,49 @@ const isInitialVersionSlot = (material, sourceSha, slot, value = "") => material
   && material.metadata?.family === "qr_key_versions"
   && material.metadata?.slot === slot
   && material.metadata?.sourceSha === sourceSha;
-const isAuthenticatedInitialMigration = (current, sourceSha) =>
-  isInitialEmptySlot(current.jwtPrevious.material)
-  && current.jwtPrevious.material.metadata.sourceSha === sourceSha
-  && isInitialEmptySlot(current.qrPublicPrevious.material)
-  && current.qrPublicPrevious.material.metadata.sourceSha === sourceSha
-  && isInitialVersionSlot(current.qrCurrentVersion.material, sourceSha, "current", current.qrCurrentVersion.material.value)
-  && isInitialVersionSlot(current.qrPreviousVersion.material, sourceSha, "previous-empty");
+const initialMigrationRecords = (current) => ({
+  jwtPending: current.jwtPending,
+  qrPrivatePending: current.qrPrivatePending,
+  qrPublicPending: current.qrPublicPending,
+  jwtPrevious: current.jwtPrevious,
+  qrPublicPrevious: current.qrPublicPrevious,
+  qrCurrentVersion: current.qrCurrentVersion,
+  qrPreviousVersion: current.qrPreviousVersion,
+});
+const isAuthenticatedInitialMigration = (current, config, proveDescendant) => {
+  const markerSourceSha = current.jwtPrevious.material.metadata.sourceSha;
+  const markersValid = isInitialEmptySlot(current.jwtPrevious.material)
+    && isInitialEmptySlot(current.qrPublicPrevious.material)
+    && current.qrPublicPrevious.material.metadata.sourceSha === markerSourceSha
+    && isInitialVersionSlot(current.qrCurrentVersion.material, markerSourceSha, "current", current.qrCurrentVersion.material.value)
+    && isInitialVersionSlot(current.qrPreviousVersion.material, markerSourceSha, "previous-empty");
+  if (!markersValid) return false;
+  if (markerSourceSha === config.sourceSha) return true;
+  try {
+    const bridge = assertProductionInitialMigrationSourceAdvance(config.initialMigrationSourceAdvance);
+    const evidence = bridge.supersessionEvidence;
+    if (bridge.currentSourceSha !== config.sourceSha || evidence.sourceSha !== markerSourceSha || evidence.rotationId !== config.rotationId || proveDescendant?.({ ancestorSha: markerSourceSha, descendantSha: config.sourceSha }) !== true) return false;
+    const expectedArns = {
+      jwtPending: config.jwt.pendingSecretId,
+      qrPrivatePending: config.qr.privatePendingSecretId,
+      qrPublicPending: config.qr.publicPendingSecretId,
+      jwtPrevious: config.jwt.previousSecretId,
+      qrPublicPrevious: config.qr.publicPreviousSecretId,
+      qrCurrentVersion: config.qr.currentKeyVersionSecretId,
+      qrPreviousVersion: config.qr.previousKeyVersionSecretId,
+    };
+    return Object.entries(initialMigrationRecords(current)).every(([slot, record]) =>
+      evidence.resources[slot].arn === expectedArns[slot]
+      && record.raw.versionId === productionSupersessionVersionId(markerSourceSha, config.rotationId, slot)
+      && record.material.metadata.sourceSha === markerSourceSha
+      && (!slot.endsWith("Pending") || record.material.metadata.rotationId === config.rotationId));
+  } catch {
+    return false;
+  }
+};
+const sourceAdvanceProof = (context) => context.proveDescendant || (({ ancestorSha, descendantSha }) => {
+  try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; }
+});
 const putMaterial = async (sm, id, material, metadata, token) => {
   const payload = JSON.stringify({ ...metadata, value: material });
   return sm.send(new PutSecretValueCommand({
@@ -295,8 +339,11 @@ const stateForPending = ({ config, identity, oldJwt, oldQrPrivate, oldQrPublic, 
   preparedAt: nowIso(),
   jwt: { oldFingerprint: fingerprint(oldJwt), newFingerprint: fingerprint(newJwt) },
   qr: { historicalContinuity, rollbackCapable: historicalContinuity === QR_CONTINUITY_VERIFIED, oldPrivateFingerprint: fingerprint(oldQrPrivate), oldPublicFingerprint: fingerprint(oldQrPublic), newPrivateFingerprint: fingerprint(newPrivate), newPublicFingerprint: fingerprint(newQrPublic), oldKeyVersion: oldQrVersion, newKeyVersion: newQrVersion },
+  ...(historicalContinuity === QR_CONTINUITY_UNRECOVERABLE && config.initialMigrationSourceAdvance ? { initialMigrationSourceSha: config.initialMigrationSourceAdvance.supersessionEvidence.sourceSha } : {}),
   pending,
 });
+
+const initialMigrationSourceSha = (state) => state.initialMigrationSourceSha || state.sourceSha;
 
 const assertState = (state, config) => {
   assertStateIdentity(state, config);
@@ -306,6 +353,7 @@ const assertState = (state, config) => {
   const continuity = state.qr?.historicalContinuity || QR_CONTINUITY_VERIFIED;
   const rollbackCapable = continuity === QR_CONTINUITY_VERIFIED ? state.qr?.rollbackCapable ?? true : state.qr?.rollbackCapable;
   if (![QR_CONTINUITY_VERIFIED, QR_CONTINUITY_UNRECOVERABLE].includes(continuity) || rollbackCapable !== (continuity === QR_CONTINUITY_VERIFIED)) throw new Error("state QR historical continuity is invalid");
+  if (continuity === QR_CONTINUITY_UNRECOVERABLE && initialMigrationSourceSha(state) !== (config.initialMigrationSourceAdvance?.supersessionEvidence.sourceSha || config.sourceSha)) throw new Error("state initial-migration source identity is invalid");
 };
 const assertStateSlots = (state, current) => {
   assertQrVersionSlots(current, state);
@@ -342,14 +390,14 @@ const assertPrepareLineage = (state, current) => {
   if (qrPublicNew && !qrPrivateNew) throw new Error("prepared QR public promotion is ahead of its private key");
   const historicalContinuity = qrHistoricalContinuity(state);
   if (historicalContinuity === QR_CONTINUITY_UNRECOVERABLE) {
-    if (!isInitialEmptySlot(current.qrPublicPrevious.material) || current.qrPublicPrevious.material.metadata.sourceSha !== state.sourceSha) throw new Error("unrecoverable legacy QR state must keep the previous public slot empty");
+    if (!isInitialEmptySlot(current.qrPublicPrevious.material) || current.qrPublicPrevious.material.metadata.sourceSha !== initialMigrationSourceSha(state)) throw new Error("unrecoverable legacy QR state must keep the previous public slot empty");
   } else if (current.qrPublicPrevious.material.value) check(current.qrPublicPrevious, state.qr?.oldPublicFingerprint, state.qr?.oldPublicFingerprint, "previous QR public key", state.qr?.oldKeyVersion, state.qr?.oldKeyVersion);
 
   const currentVersion = qrSlotValue(current.qrCurrentVersion);
   const previousVersion = qrSlotValue(current.qrPreviousVersion);
   if (currentVersion !== state.qr?.oldKeyVersion && currentVersion !== state.qr?.newKeyVersion) throw new Error("current QR key-version slot does not match prepared rotation lineage");
   if (historicalContinuity === QR_CONTINUITY_UNRECOVERABLE) {
-    if (previousVersion || (!isInitialVersionSlot(current.qrPreviousVersion.material, state.sourceSha, "previous-empty") && !isRetired(current.qrPreviousVersion.material))) throw new Error("unrecoverable legacy QR state must keep the previous key-version slot empty");
+    if (previousVersion || (!isInitialVersionSlot(current.qrPreviousVersion.material, initialMigrationSourceSha(state), "previous-empty") && !isRetired(current.qrPreviousVersion.material))) throw new Error("unrecoverable legacy QR state must keep the previous key-version slot empty");
   } else if (previousVersion && previousVersion !== state.qr?.oldKeyVersion) throw new Error("previous QR key-version slot does not match prepared rotation lineage");
   if (current.qrCurrentVersion.material.metadata.keyVersion && current.qrCurrentVersion.material.metadata.keyVersion !== currentVersion) throw new Error("current QR key-version metadata is inconsistent");
   if (current.qrPreviousVersion.material.metadata.keyVersion && current.qrPreviousVersion.material.metadata.keyVersion !== previousVersion) throw new Error("previous QR key-version metadata is inconsistent");
@@ -373,6 +421,7 @@ const prepare = async (context) => {
   const fixtureFile = fixturePath(values);
   if (inventoryBindingRequired && state && state.inventoryEvidenceSha256 !== inventoryEvidenceSha256) throw new Error("rotation state is not bound to the current bounded inventory evidence");
   let current = await slots(sm, config);
+  if (!state && config.initialMigrationSourceAdvance && !isAuthenticatedInitialMigration(current, config, sourceAdvanceProof(context))) throw new Error("initial-migration source advance does not match authenticated live state");
   for (const [name, record] of [["jwt", current.jwtPending], ["QR private", current.qrPrivatePending], ["QR public", current.qrPublicPending]]) assertPendingOwnership(name, record.material, config.rotationId);
   if (state) assertPrepareLineage(state, current);
   else assertQrVersionSlots(current);
@@ -421,7 +470,7 @@ const prepare = async (context) => {
     try {
       authenticateEd25519Pair(current.qrPrivateCurrent.material.value, oldQrPublic, "legacy QR");
     } catch (error) {
-      if (error?.code !== "QR_KEYPAIR_INVALID" || !isAuthenticatedInitialMigration(current, config.sourceSha)) throw error;
+      if (error?.code !== "QR_KEYPAIR_INVALID" || !isAuthenticatedInitialMigration(current, config, sourceAdvanceProof(context))) throw error;
       historicalContinuity = QR_CONTINUITY_UNRECOVERABLE;
     }
     state = stateForPending({
@@ -464,7 +513,7 @@ const prepare = async (context) => {
     if (previousJwt.value && fingerprint(previousJwt.value) !== state.jwt.oldFingerprint) throw new Error("JWT previous slot is owned by another value");
     const historicalContinuity = qrHistoricalContinuity(state);
     if (historicalContinuity === QR_CONTINUITY_UNRECOVERABLE) {
-      if (!isInitialEmptySlot(previousQrPublic) || previousQrPublic.metadata.sourceSha !== state.sourceSha) throw new Error("unrecoverable legacy QR state cannot trust a previous public key");
+      if (!isInitialEmptySlot(previousQrPublic) || previousQrPublic.metadata.sourceSha !== initialMigrationSourceSha(state)) throw new Error("unrecoverable legacy QR state cannot trust a previous public key");
     } else if (previousQrPublic.value && fingerprint(previousQrPublic.value) !== state.qr.oldPublicFingerprint) throw new Error("QR previous slot is owned by another value");
     if (!previousJwt.value || isRetired(previousJwt)) await putMaterial(sm, config.jwt.previousSecretId, currentJwt.value, { rotationId: config.rotationId, family: "jwt_secrets", slot: "previous", materialFingerprint: state.jwt.oldFingerprint }, `${config.rotationId}:jwt:previous`);
     if (historicalContinuity === QR_CONTINUITY_VERIFIED && (!previousQrPublic.value || isRetired(previousQrPublic))) await putMaterial(sm, config.qr.publicPreviousSecretId, currentQrPublic.value, { rotationId: config.rotationId, family: "qr_signing_keys", slot: "previous", keyVersion: state.qr.oldKeyVersion, materialFingerprint: state.qr.oldPublicFingerprint }, `${config.rotationId}:qr:previous`);
@@ -522,14 +571,14 @@ const verify = async (context) => {
 const retirementPayload = (config, family, slot, retirementTimestamp) => ({
   rotationId: config.rotationId, family, slot: `${slot}-retired`, retiredAt: retirementTimestamp,
 });
-const retireSlot = async (sm, record, config, family, slot, retirementTimestamp) => {
+const retireSlot = async (sm, record, config, family, slot, retirementTimestamp, markerSourceSha = config.sourceSha) => {
   const expected = retirementPayload(config, family, slot, retirementTimestamp);
   if (isRetired(record.material)) {
     if (record.material.metadata.rotationId !== config.rotationId || record.material.metadata.slot !== expected.slot || record.material.metadata.retiredAt !== retirementTimestamp) throw new Error(`${slot} retirement metadata conflicts with this rotation`);
     return record.raw.versionId;
   }
-  const authenticatedInitialEmpty = (isInitialEmptySlot(record.material) && record.material.metadata.sourceSha === config.sourceSha)
-    || (family === "qr_key_versions" && isInitialVersionSlot(record.material, config.sourceSha, "previous-empty"));
+  const authenticatedInitialEmpty = (isInitialEmptySlot(record.material) && record.material.metadata.sourceSha === markerSourceSha)
+    || (family === "qr_key_versions" && isInitialVersionSlot(record.material, markerSourceSha, "previous-empty"));
   if (!record.material.value && Object.keys(record.material.metadata || {}).length && !authenticatedInitialEmpty) throw new Error(`${slot} contains non-retired metadata`);
   const result = await putMaterial(sm, record.id, "", expected, `${config.rotationId}:${family}:${slot}:retired`);
   return String(result.VersionId || "");
@@ -637,7 +686,7 @@ const cleanup = async (context) => {
     const retirementTimestamp = required(state.retirementTimestamp, "state.retirementTimestamp");
     if (isoDate(retirementTimestamp) === null || isoDate(retirementTimestamp) > clock()) throw new Error("state.retirementTimestamp is invalid");
     const current = await slots(sm, config);
-    for (const [name, family, slot] of retirementRecords(current)) await retireSlot(sm, current[name], config, family, slot, retirementTimestamp);
+    for (const [name, family, slot] of retirementRecords(current)) await retireSlot(sm, current[name], config, family, slot, retirementTimestamp, initialMigrationSourceSha(state));
     const retired = await slots(sm, config);
     assertRetired(retired, config, retirementTimestamp);
     state.phase = "retirement-complete";

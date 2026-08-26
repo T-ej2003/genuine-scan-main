@@ -15,6 +15,11 @@ import { assertRootDropEvidence } from "./production-root-drop-evidence.mjs";
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
 import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertProductionRotationGraceSeconds } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
+import {
+  assertProductionInitialMigrationSourceAdvance,
+  assertProductionSupersessionEvidence,
+  PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE_KIND,
+} from "../security/production-initial-migration-source-advance.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -140,11 +145,40 @@ export function buildProductionRotationConfig({ sourceSha, rotationId, approval,
   };
 }
 
+export function buildInitialMigrationSourceAdvance({ currentSourceSha, rotationBindings, rotationBindingsSha256, supersessionEvidence, supersessionEvidenceSha256, proveDescendant } = {}) {
+  const originalSourceSha = rotationBindings?.sourceSha;
+  if (!originalSourceSha || originalSourceSha === currentSourceSha) return undefined;
+  if (!SHA40.test(currentSourceSha || "") || !SHA40.test(originalSourceSha) || rotationBindings.rotationId !== supersessionEvidence?.rotationId || !SHA256.test(rotationBindingsSha256 || "") || !SHA256.test(supersessionEvidenceSha256 || "")) throw new Error("Initial-migration source-advance inputs are incomplete.");
+  const evidence = assertProductionSupersessionEvidence(supersessionEvidence);
+  if (evidence.sourceSha !== originalSourceSha || proveDescendant?.({ ancestorSha: originalSourceSha, descendantSha: currentSourceSha }) !== true) throw new Error("Initial-migration source advancement is not an authenticated protected-main descendant transition.");
+  const expectedArns = {
+    jwtPending: rotationBindings.jwt?.pendingSecretId,
+    qrPrivatePending: rotationBindings.qr?.privatePendingSecretId,
+    qrPublicPending: rotationBindings.qr?.publicPendingSecretId,
+    jwtPrevious: rotationBindings.jwt?.previousSecretId,
+    qrPublicPrevious: rotationBindings.qr?.publicPreviousSecretId,
+    qrCurrentVersion: rotationBindings.qr?.currentKeyVersionSecretId,
+    qrPreviousVersion: rotationBindings.qr?.previousKeyVersionSecretId,
+  };
+  if (Object.entries(expectedArns).some(([slot, arn]) => evidence.resources[slot].arn !== arn)) throw new Error("Initial-migration source-advance resources do not match rotation bindings.");
+  return assertProductionInitialMigrationSourceAdvance({
+    schemaVersion: 1,
+    kind: PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE_KIND,
+    currentSourceSha,
+    supersessionEvidence: evidence,
+    supersessionEvidenceSha256,
+    bindingEvidenceSha256: rotationBindingsSha256,
+  });
+}
+
 export function prepareProductionCutoverRuntime({
   repositoryRoot = process.cwd(),
   outputDirectory,
   approval,
   rotationBindings,
+  rotationBindingsSha256,
+  rotationSupersessionEvidence,
+  rotationSupersessionEvidenceSha256,
   sourceSha,
   git,
   imageAuthorization,
@@ -170,6 +204,7 @@ export function prepareProductionCutoverRuntime({
   constructAdapters,
   imageAuthorizationValidation,
   verifyRootDropSignature,
+  proveSourceAdvance,
 } = {}) {
   const directory = ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot, create: true, normalize: true, label: "Production cutover runtime directory" });
   const paths = phasePaths(directory);
@@ -244,7 +279,17 @@ export function prepareProductionCutoverRuntime({
     const loadedTaskDefinition = typeof loadCurrentTaskDefinition === "function" ? loadCurrentTaskDefinition() : currentTaskDefinition;
     const taskDefinition = loadedTaskDefinition?.taskDefinition || loadedTaskDefinition;
     const { baseUrl, currentKeyVersion } = deriveRuntimeMetadata(taskDefinition);
-    const approvalConfig = buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, liveCurrentKeyVersion: currentKeyVersion });
+    const initialMigrationSourceAdvance = buildInitialMigrationSourceAdvance({
+      currentSourceSha: protectedSha,
+      rotationBindings,
+      rotationBindingsSha256,
+      supersessionEvidence: rotationSupersessionEvidence,
+      supersessionEvidenceSha256: rotationSupersessionEvidenceSha256,
+      proveDescendant: proveSourceAdvance || (({ ancestorSha, descendantSha }) => {
+        try { (git || execFileSync)("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; }
+      }),
+    });
+    const approvalConfig = { ...buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, liveCurrentKeyVersion: currentKeyVersion }), ...(initialMigrationSourceAdvance ? { initialMigrationSourceAdvance } : {}) };
     const overlapTaskInput = buildOverlapTaskDefinition({
       backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${backendImageDigest}`,
       releaseSha: protectedSha,
@@ -388,7 +433,7 @@ const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
 export function parseBootstrapArgs(argv) {
   const supported = new Set([
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
-    "minimum-grace-seconds", "rotation-bindings", "image-authorization", "iam-evidence",
+    "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "image-authorization", "iam-evidence",
     "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "onboarding-paths",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir",
   ]);

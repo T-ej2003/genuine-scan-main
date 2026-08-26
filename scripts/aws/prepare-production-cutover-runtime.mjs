@@ -17,12 +17,15 @@ const imageAuthorization = read("image-authorization", "Image authorization evid
 const iamEvidence = read("iam-evidence", "IAM evidence");
 if (temporaryKmsCapabilityPath) readStageBPrivateFileBytes({ filePath: temporaryKmsCapabilityPath, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
 for (const [name, label] of [["artifact-binding", "Artifact-signing runtime binding"], ["root-drop-evidence", "Root-drop evidence"], ["stage-a-plan", "Preserved Stage-A saved plan"], ["stage-a-recovery-evidence", "Stage-A recovery evidence"], ["stage-a-state", "Stage-A state"], ["stage-a-handoff", "Stage-A handoff"], ["stage-b-state", "Historical Stage-B state"], ["current-stage-b-state", "Current Stage-B state"], ["stage-b-tfvars", "Canonical Stage B tfvars"], ["stage-b-tfvars-binding-report", "Canonical Stage B tfvars binding report"]]) if (args.has(name)) capture(name, label);
-if (args.has("rotation-bindings")) capture("rotation-bindings", "Rotation secret binding manifest");
+const rotationBindingCapture = args.has("rotation-bindings") ? capture("rotation-bindings", "Rotation secret binding manifest") : null;
+const rotationSupersessionCapture = args.has("rotation-supersession-evidence") ? capture("rotation-supersession-evidence", "Rotation supersession evidence") : null;
 if (args.has("onboarding-paths")) capture("onboarding-paths", "Onboarding path manifest");
 ensureStageBPrivateDirectory({ directory: required("stage-b-terraform-data-dir"), repositoryRoot: process.cwd(), create: false, label: "Canonical Stage B Terraform data directory" });
 iamEvidence.filePath = path.resolve(required("iam-evidence"));
 imageAuthorization.filePath = path.resolve(required("image-authorization"));
-const rotationBindings = args.has("rotation-bindings") ? read("rotation-bindings") : undefined;
+const decode = (captured) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes));
+const rotationBindings = rotationBindingCapture ? decode(rotationBindingCapture) : undefined;
+const rotationSupersessionEvidence = rotationSupersessionCapture ? decode(rotationSupersessionCapture) : undefined;
 const onboardingPaths = args.has("onboarding-paths") ? read("onboarding-paths") : undefined;
 const loadCurrentTaskDefinition = () => {
   const run = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
@@ -42,6 +45,9 @@ const result = prepareProductionCutoverRuntime({
   outputDirectory,
   approval,
   rotationBindings,
+  rotationBindingsSha256: rotationBindingCapture?.sha256,
+  rotationSupersessionEvidence,
+  rotationSupersessionEvidenceSha256: rotationSupersessionCapture?.sha256,
   rotationId: rotationBindings?.rotationId,
   imageAuthorization,
   iamEvidence,
