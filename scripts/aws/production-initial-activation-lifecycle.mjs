@@ -22,6 +22,20 @@ const COMPLETION_FIELDS = Object.freeze(["schemaVersion", "kind", "environment",
 
 const canonicalBytes = (value) => Buffer.from(`${canonicalJson(value)}\n`);
 const identity = (value) => ({ sourceSha: value.sourceSha, rotationId: value.rotationId, overlapDeploymentSha: value.overlapDeploymentSha, taskDefinitionArn: value.taskDefinitionArn, activationTaskDefinitionArn: value.activationTaskDefinitionArn, imageDigest: value.imageDigest, activationTransactionId: value.activationTransactionId });
+export function assertOpaqueS3VersionId(value, label = "S3 VersionId") {
+  if (typeof value !== "string" || value.length === 0) throw new Error(`${label} must be a non-empty string.`);
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) throw new Error(`${label} must be valid UTF-8.`);
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) throw new Error(`${label} must be valid UTF-8.`);
+  }
+  if (Buffer.byteLength(value, "utf8") > 1024) throw new Error(`${label} exceeds the 1024-byte limit.`);
+  return value;
+}
+const claimVersionIdValue = (value) => value === undefined ? "UNVERSIONED" : assertOpaqueS3VersionId(value, "claimVersionId");
 const assertIdentity = (value) => {
   if (!SHA40.test(value.sourceSha || "") || !ROTATION_ID.test(value.rotationId || "") || !SHA40.test(value.overlapDeploymentSha || "") || !TASK_DEFINITION.test(value.taskDefinitionArn || "") || !TASK_DEFINITION.test(value.activationTaskDefinitionArn || "") || !DIGEST.test(value.imageDigest || "") || !SHA256.test(value.activationTransactionId || "")) throw new Error("Production activation lifecycle identity is invalid.");
 };
@@ -53,17 +67,18 @@ export function parseInitialActivationClaim(raw, expected) {
 
 export function buildInitialActivationCompletion({ claim, claimSha256, claimVersionId, rlsReceiptSha256, onboardingEvidenceSha256, completedAt } = {}) {
   validateInitialActivationClaim(claim);
-  const completion = { schemaVersion: 1, kind: COMPLETION_KIND, environment: "production", repository: REPOSITORY, ...identity(claim), claimSha256, claimVersionId: claimVersionId || "UNVERSIONED", rlsReceiptSha256, onboardingEvidenceSha256, completedAt };
+  const completion = { schemaVersion: 1, kind: COMPLETION_KIND, environment: "production", repository: REPOSITORY, ...identity(claim), claimSha256, claimVersionId: claimVersionIdValue(claimVersionId), rlsReceiptSha256, onboardingEvidenceSha256, completedAt };
   validateInitialActivationCompletion(completion, { claim, claimSha256, claimVersionId });
   return Object.freeze(completion);
 }
 
 export function validateInitialActivationCompletion(value, { claim, claimSha256, claimVersionId, expected } = {}) {
-  if (!exactKeys(value, COMPLETION_FIELDS) || value.schemaVersion !== 1 || value.kind !== COMPLETION_KIND || value.environment !== "production" || value.repository !== REPOSITORY || !SHA256.test(value.claimSha256 || "") || !SHA256.test(value.rlsReceiptSha256 || "") || !SHA256.test(value.onboardingEvidenceSha256 || "") || !ISO(value.completedAt) || !(value.claimVersionId === "UNVERSIONED" || /^[A-Za-z0-9._-]{1,1024}$/.test(value.claimVersionId || ""))) throw new Error("Production initial activation completion schema is invalid.");
+  if (!exactKeys(value, COMPLETION_FIELDS) || value.schemaVersion !== 1 || value.kind !== COMPLETION_KIND || value.environment !== "production" || value.repository !== REPOSITORY || !SHA256.test(value.claimSha256 || "") || !SHA256.test(value.rlsReceiptSha256 || "") || !SHA256.test(value.onboardingEvidenceSha256 || "") || !ISO(value.completedAt)) throw new Error("Production initial activation completion schema is invalid.");
+  claimVersionIdValue(value.claimVersionId);
   assertIdentity(value);
   if (claim) validateInitialActivationClaim(claim, value);
   if (claimSha256 && value.claimSha256 !== claimSha256) throw new Error("Production activation completion claim digest is invalid.");
-  if (value.claimVersionId !== (claimVersionId || "UNVERSIONED")) throw new Error("Production activation completion claim version is invalid.");
+  if (value.claimVersionId !== claimVersionIdValue(claimVersionId)) throw new Error("Production activation completion claim version is invalid.");
   if (expected) {
     const withoutTimestamp = ({ completedAt: _completedAt, ...rest }) => rest;
     if (canonicalJson(withoutTimestamp(value)) !== canonicalJson(withoutTimestamp(expected))) throw new Error("Production activation completion conflicts with the authenticated transaction.");
@@ -87,9 +102,8 @@ const readObject = ({ key, aws = awsCli }) => {
   try {
     const result = aws(["s3api", "get-object", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket, "--key", key, output]);
     if (result?.missing) return null;
-    if (!result?.ok || !result.value || typeof result.value !== "object" || Array.isArray(result.value)
-      || (result.value.VersionId !== undefined && !/^[A-Za-z0-9._-]{1,1024}$/.test(result.value.VersionId))) throw new Error("Production activation lifecycle object read failed.");
-    return { raw: readFileSync(output), versionId: result.value.VersionId || "UNVERSIONED" };
+    if (!result?.ok || !result.value || typeof result.value !== "object" || Array.isArray(result.value)) throw new Error("Production activation lifecycle object read failed.");
+    return { raw: readFileSync(output), versionId: claimVersionIdValue(result.value.VersionId) };
   } finally { rmSync(directory, { recursive: true, force: true }); }
 };
 

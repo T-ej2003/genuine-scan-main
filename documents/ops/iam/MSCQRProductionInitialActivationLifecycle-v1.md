@@ -13,4 +13,6 @@ After the checksum-bound RLS receipt and complete `produceOnboardingEvidence()` 
 
 The production artifacts bucket is pre-existing and is not created by this contract. Its live versioning status must be read during governed source-to-live convergence; monotonicity does not depend on versioning because governed principals are explicitly denied both deletion operations.
 
+S3 `VersionId` values are opaque service-generated identifiers. The lifecycle reader preserves them exactly, accepts any non-empty valid UTF-8 value up to 1024 bytes (including the documented `null` value for unversioned or suspended-versioning objects), and rejects only structurally invalid values. An omitted response field remains represented as `UNVERSIONED`.
+
 Before this lifecycle is provisioned, the authenticated production baseline has no live bucket policy, no Terraform bucket-policy owner, and no historical repository owner. Stage A therefore establishes the first and sole repository-controlled policy for the complete production-artifacts bucket-policy object. Its complete policy contains only the activation-lifecycle statements above and a self-protecting denial of subsequent `PutBucketPolicy` or `DeleteBucketPolicy` calls. Existing receipt access remains governed by its existing identity policies and is not migrated or redefined here.

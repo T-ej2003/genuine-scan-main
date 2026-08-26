@@ -9,7 +9,9 @@ import {
   buildInitialActivationCompletion,
   createInitialActivationClaim,
   createInitialActivationCompletion,
+  assertOpaqueS3VersionId,
   readInitialActivationClaim,
+  readInitialActivationCompletion,
 } from "../aws/production-initial-activation-lifecycle.mjs";
 import { PRODUCTION_ACTIVATION_LIFECYCLE } from "../aws/production-green-stage-b-contract.mjs";
 import { runCli } from "../aws/manage-production-initial-activation-lifecycle.mjs";
@@ -32,7 +34,7 @@ const terraformFiles = (directory) => readdirSync(directory, { withFileTypes: tr
   return entry.isDirectory() ? terraformFiles(target) : entry.name.endsWith(".tf") ? [target] : [];
 });
 
-const memoryS3 = () => {
+const memoryS3 = ({ versionIds = {} } = {}) => {
   const objects = new Map();
   let writes = 0;
   const aws = (args) => {
@@ -48,12 +50,28 @@ const memoryS3 = () => {
     if (operation === "get-object") {
       if (!objects.has(key)) return { ok: false, missing: true };
       writeFileSync(args.at(-1), objects.get(key));
-      return { ok: true, value: { VersionId: key.endsWith("claim.json") ? "v1" : "v2" } };
+      return { ok: true, value: { VersionId: versionIds[key] ?? (key.endsWith("claim.json") ? "v1" : "v2") } };
     }
     throw new Error(`unexpected ${operation}`);
   };
   return { aws, objects, get writes() { return writes; } };
 };
+
+test("S3 VersionId bindings remain opaque and exact", () => {
+  for (const value of ["opaque+/=", "null", "é".repeat(512)]) assert.equal(assertOpaqueS3VersionId(value), value);
+  for (const value of ["", null, 7, [], "é".repeat(513), "\ud800"]) assert.throws(() => assertOpaqueS3VersionId(value));
+
+  const s3 = memoryS3({ versionIds: { [PRODUCTION_ACTIVATION_LIFECYCLE.claimKey]: "claim+/=", [PRODUCTION_ACTIVATION_LIFECYCLE.completionKey]: "completion+/=" } });
+  const createdClaim = createInitialActivationClaim({ claim: claim(), aws: s3.aws });
+  assert.equal(createdClaim.versionId, "claim+/=");
+  assert.equal(readInitialActivationClaim({ expected: claim(), aws: s3.aws }).versionId, "claim+/=");
+  const completion = buildInitialActivationCompletion({ claim: createdClaim.value, claimSha256: createdClaim.sha256, claimVersionId: createdClaim.versionId, rlsReceiptSha256: "1".repeat(64), onboardingEvidenceSha256: "2".repeat(64), completedAt: "2026-08-26T13:00:00.000Z" });
+  const createdCompletion = createInitialActivationCompletion({ completion, claim: createdClaim.value, claimSha256: createdClaim.sha256, claimVersionId: createdClaim.versionId, aws: s3.aws });
+  assert.equal(createdCompletion.versionId, "completion+/=");
+  assert.equal(readInitialActivationCompletion({ claim: createdClaim.value, claimSha256: createdClaim.sha256, claimVersionId: "claim+/=", aws: s3.aws }).versionId, "completion+/=");
+  assert.equal(createInitialActivationCompletion({ completion, claim: createdClaim.value, claimSha256: createdClaim.sha256, claimVersionId: createdClaim.versionId, aws: s3.aws }).status, "ALREADY_EXISTS_MATCHING");
+  assert.throws(() => readInitialActivationCompletion({ claim: createdClaim.value, claimSha256: createdClaim.sha256, claimVersionId: "claim=/=", aws: s3.aws }), /claim version/);
+});
 
 test("atomic fixed-key claim has one creator and matching retry", () => {
   const s3 = memoryS3();
