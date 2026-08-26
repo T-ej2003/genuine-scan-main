@@ -15,6 +15,7 @@ import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from
 import { assertSelectedTargetTask, selectTargetTask } from "./ecs-exec-target-selection.mjs";
 import { createStrictHttpOnboardingAdapter } from "../security/production-strict-onboarding-http.mjs";
 import { assertOnboardingPaths } from "../security/production-onboarding-contract.mjs";
+import { promptProductionMfaCode } from "../security/production-interactive-mfa-provider.mjs";
 import { resolveSmokeAdminMfaCode } from "../lib/staging-smoke-totp.mjs";
 import { persistOverlapReadinessEvidence } from "./produce-production-overlap-readiness-evidence.mjs";
 import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH } from "./production-artifact-signing-bootstrap.mjs";
@@ -41,6 +42,27 @@ const ROTATION_EXECUTION_POLICY_ADDRESS = 'aws_iam_role_policy.execution["backen
 const ROTATION_EXECUTION_ROLE = "mscqr-production-rls-green-backend-execution";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const AWS_SERVICE_COMMANDS = new Set(["ec2", "ecs", "ecr", "iam", "kms", "logs", "rds", "s3", "secretsmanager", "ssm", "sts"]);
+const MFA_PROMPTS = Object.freeze({ onboarding: "Production strict-onboarding administrator MFA code: ", canary: "Production strict-onboarding tenant-canary MFA code: " });
+
+export function createConditionalMfaResolvers({ env = process.env, interactiveMfaCodeProvider = promptProductionMfaCode, resolveTenantMfaCode = resolveSmokeAdminMfaCode } = {}) {
+  if (!env || typeof env !== "object" || typeof interactiveMfaCodeProvider !== "function" || typeof resolveTenantMfaCode !== "function") throw new Error("Conditional MFA provider configuration is invalid.");
+  const interactive = async (prompt) => {
+    try {
+      const code = await interactiveMfaCodeProvider({ prompt });
+      if (!/^[0-9]{6,8}$/.test(String(code || ""))) throw new Error("invalid");
+      return code;
+    } catch {
+      throw new Error("Interactive MFA entry failed.");
+    }
+  };
+  return {
+    getOnboardingMfaCode: async () => String(env.MSCQR_ONBOARDING_MFA_CODE || "").trim() || interactive(MFA_PROMPTS.onboarding),
+    getTenantMfaCode: async () => {
+      const code = await resolveTenantMfaCode({ code: env.MSCQR_CANARY_ORDINARY_MFA_CODE, secret: env.MSCQR_CANARY_ORDINARY_MFA_SECRET });
+      return code || interactive(MFA_PROMPTS.canary);
+    },
+  };
+}
 const profileEnvironment = (profile, env = process.env) => {
   const result = { ...env, AWS_REGION: REGION, AWS_DEFAULT_REGION: REGION };
   if (profile) {
@@ -200,7 +222,7 @@ export function createProductionRotationInfrastructureAdapter({ run = execFileSy
   };
 }
 
-export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier" } = {}) {
+export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier", interactiveMfaCodeProvider } = {}) {
   if (!config || typeof config !== "object" || !/^[a-f0-9]{64}$/.test(runtimeConfigSha256 || "")) throw new Error("Hash-authenticated production cutover adapter configuration is required.");
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || config.sourceSha !== sourceSha || typeof rotationId !== "string" || config.rotationId !== rotationId) throw new Error("Production cutover adapter identity does not match its runtime config.");
   if (releaseProfile !== "mscqr-production-release-deployer" || verifierProfile !== "mscqr-production-ecs-exec-verifier") throw new Error("Production cutover adapter profiles do not match the asymmetric identity contract.");
@@ -229,6 +251,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   const stageARecoveryEvidence = config.stageARecoveryEvidenceFile ? readBoundStageBPrivateJson({ filePath: config.stageARecoveryEvidenceFile, expectedSha256: config.stageARecoveryEvidenceSha256, label: "Stage-A recovery evidence" }) : null;
   const onboardingPaths = assertOnboardingPaths(readBoundStageBPrivateJson({ filePath: config.onboardingPathsFile, expectedSha256: config.onboardingPathsSha256, label: "Onboarding path manifest" }));
   if (canonicalJson(onboardingPaths) !== canonicalJson(config.onboardingPaths)) throw new Error("Onboarding path manifest diverges from the authenticated runtime config.");
+  const conditionalMfa = createConditionalMfaResolvers({ ...(interactiveMfaCodeProvider ? { interactiveMfaCodeProvider } : {}) });
   const readIamEvidence = () => {
     const report = readBoundStageBPrivateJson({ filePath: config.iamEvidenceFile, expectedSha256: config.iamEvidenceFileSha256, label: "IAM evidence" });
     if (config.temporaryKmsCapabilityFile) {
@@ -348,9 +371,9 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       baseUrl: config.onboardingBaseUrl,
       paths: onboardingPaths,
       credentials: { email: process.env.MSCQR_ONBOARDING_EMAIL, password: process.env.MSCQR_ONBOARDING_PASSWORD },
-      getMfaCode: () => process.env.MSCQR_ONBOARDING_MFA_CODE,
+      getMfaCode: conditionalMfa.getOnboardingMfaCode,
       tenantCredentials: { email: process.env.MSCQR_CANARY_ORDINARY_EMAIL, password: process.env.MSCQR_CANARY_ORDINARY_PASSWORD },
-      getTenantMfaCode: () => resolveSmokeAdminMfaCode({ code: process.env.MSCQR_CANARY_ORDINARY_MFA_CODE, secret: process.env.MSCQR_CANARY_ORDINARY_MFA_SECRET }),
+      getTenantMfaCode: conditionalMfa.getTenantMfaCode,
       runtimeReadback,
       ecsExecEvidence: async () => latestEcsExecProof || { valid: false },
       rotationStateReadback,

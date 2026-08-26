@@ -6,17 +6,98 @@ import os from "node:os";
 import path from "node:path";
 import { verifyArtifactSigningDomain } from "../aws/production-artifact-signing-domain.mjs";
 import { createProductionRuntimeInventoryAdapter, PRODUCTION_RUNTIME_INVENTORY_COMMAND } from "../aws/production-runtime-inventory-adapter.mjs";
-import { createProductionCommandRunner, createProductionOverlapDeploymentAdapter } from "../aws/production-cutover-production-adapters.mjs";
+import { createConditionalMfaResolvers, createProductionCommandRunner, createProductionOverlapDeploymentAdapter } from "../aws/production-cutover-production-adapters.mjs";
 import { loadApprovedArtifactSigningBindings } from "../aws/production-artifact-signing-secrets-adapter.mjs";
 import { assertNoOnboardingEvidenceLeak } from "../security/production-strict-onboarding.mjs";
 import { createProductionInteractiveEcsExecRunner } from "../aws/production-ecs-exec-command.mjs";
 import { executeProductionRotationInventory, buildRotationInventorySql } from "../security/production-rotation-state-inventory.mjs";
 import { createCookieAuthenticatedRequest, createStrictHttpOnboardingAdapter, parseSetCookieHeaders } from "../security/production-strict-onboarding-http.mjs";
+import { promptProductionMfaCode } from "../security/production-interactive-mfa-provider.mjs";
 import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
 
 const digest = `sha256:${"b".repeat(64)}`;
 const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/one";
 const expected = { expectedClusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", expectedTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1", expectedImageDigest: digest, serviceName: "mscqr-backend-servi-euw2", containerName: "backend" };
+
+test("conditional MFA resolves only at the MFA callback and preserves supplied noninteractive values", async () => {
+  const prompts = [];
+  const interactiveMfaCodeProvider = async ({ prompt }) => { prompts.push(prompt); return "123456"; };
+  const supplied = createConditionalMfaResolvers({ env: { MSCQR_ONBOARDING_MFA_CODE: "654321", MSCQR_CANARY_ORDINARY_MFA_CODE: "765432" }, interactiveMfaCodeProvider });
+  assert.equal(prompts.length, 0);
+  assert.equal(await supplied.getOnboardingMfaCode(), "654321");
+  assert.equal(await supplied.getTenantMfaCode(), "765432");
+  assert.equal(prompts.length, 0);
+
+  const prompted = createConditionalMfaResolvers({ env: {}, interactiveMfaCodeProvider, resolveTenantMfaCode: async () => "" });
+  assert.equal(await prompted.getOnboardingMfaCode(), "123456");
+  assert.equal(await prompted.getTenantMfaCode(), "123456");
+  assert.deepEqual(prompts, ["Production strict-onboarding administrator MFA code: ", "Production strict-onboarding tenant-canary MFA code: "]);
+
+  const sensitiveProviderFailure = createConditionalMfaResolvers({ env: {}, interactiveMfaCodeProvider: async () => { throw new Error("sensitive-987654"); } });
+  await assert.rejects(() => sensitiveProviderFailure.getOnboardingMfaCode(), (error) => error.message === "Interactive MFA entry failed." && !error.message.includes("987654"));
+});
+
+test("interactive MFA provider uses a controlling TTY, restores echo in its child trap, and never reports the code", () => {
+  const calls = [];
+  const code = promptProductionMfaCode({
+    prompt: "Production strict-onboarding administrator MFA code: ",
+    openTerminal: (file, flags) => { calls.push({ file, flags }); return 19; },
+    closeTerminal: (fd) => calls.push({ close: fd }),
+    spawn: (file, args, options) => {
+      calls.push({ file, args, options });
+      return { status: 0, stdout: Buffer.from("123456") };
+    },
+  });
+  assert.equal(code, "123456");
+  assert.equal(calls[0].file, "/dev/tty");
+  assert.equal(calls[1].file, "/bin/sh");
+  assert.equal(calls[1].options.stdio[0], 19);
+  assert.deepEqual(calls[1].options.env, { PATH: "/usr/bin:/bin" });
+  assert.match(calls[1].args[1], /stty -echo/);
+  assert.match(calls[1].args[1], /trap 'restore' EXIT/);
+  assert.ok(!JSON.stringify(calls).includes("123456"));
+  assert.deepEqual(calls.at(-1), { close: 19 });
+  assert.throws(() => promptProductionMfaCode({ prompt: "Production strict-onboarding administrator MFA code: ", openTerminal: () => 19, closeTerminal: () => {}, spawn: () => ({ status: 1, stdout: Buffer.from("not-a-code") }) }), /Interactive MFA entry failed/);
+});
+
+test("strict onboarding never requests conditional MFA until its corresponding login returns MFA_BOOTSTRAP", async () => {
+  const rotationFixtureFile = path.join(os.tmpdir(), `mscqr-onboarding-no-mfa-${process.pid}.json`);
+  const rotationFixtureBytes = Buffer.from(JSON.stringify({ token: "synthetic-qr-fixture-token" }));
+  const rotationFixtureSha256 = createHash("sha256").update(rotationFixtureBytes).digest("hex");
+  fs.writeFileSync(rotationFixtureFile, rotationFixtureBytes, { mode: 0o600 });
+  let mfaCalls = 0;
+  const proof = { jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true, artifactCurrentRuntimeVerify: true, artifactHistoricalRuntimeVerify: true };
+  const response = (status, payload) => ({ status, ok: status >= 200 && status < 300, headers: { getSetCookie: () => [] }, json: async () => payload });
+  const fetchImpl = async (url, options = {}) => {
+    if (url.endsWith("/api/auth/login")) {
+      const tenant = options.body?.includes("tenant@example.invalid");
+      return response(200, { data: { auth: { sessionStage: "ACTIVE", mfaVerified: true }, user: tenant ? { role: "LICENSEE_ADMIN", licenseeId: "tenant-licensee" } : { role: "PLATFORM_SUPER_ADMIN", licenseeId: null } } });
+    }
+    if (url.endsWith("/version")) return response(200, { releaseGitSha: "a".repeat(40) });
+    if (url.endsWith("/api/health/ready")) return response(200, { status: "ready", dependencies: { database: { ready: true }, redis: { ready: true }, objectStorage: { ready: true } } });
+    if (url.includes("/api/licensees/")) return response(403, {});
+    if (url.endsWith("/api/manufacturer/printer-agent/status")) return response(403, {});
+    if (url.endsWith("/api/verify/ROTATION-SYNTHETIC")) return response(options.headers?.["x-mscqr-verification-token"] === "synthetic-qr-fixture-token" ? 200 : 400, {});
+    return response(200, {});
+  };
+  try {
+    const run = createStrictHttpOnboardingAdapter({
+      baseUrl: "https://fixture.example", paths: PRODUCTION_ONBOARDING_PATHS,
+      credentials: { email: "admin@example.invalid", password: "fixture-password" },
+      tenantCredentials: { email: "tenant@example.invalid", password: "tenant-fixture-password" },
+      getMfaCode: () => { mfaCalls += 1; throw new Error("must not prompt"); },
+      getTenantMfaCode: () => { mfaCalls += 1; throw new Error("must not prompt"); },
+      runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
+      ecsExecEvidence: async () => ({ valid: true, proof }),
+      rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "overlap-deploy-required" }, sha256: "b".repeat(64) }),
+      rotationFixtureFile, fetchImpl,
+    });
+    assert.equal((await run({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 })).valid, true);
+    assert.equal(mfaCalls, 0);
+  } finally {
+    fs.rmSync(rotationFixtureFile, { force: true });
+  }
+});
 
 test("runtime inventory uses one exact tagged task and fixed aggregate command", async () => {
   let finalDescribe;
