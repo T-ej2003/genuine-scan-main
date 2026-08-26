@@ -219,15 +219,6 @@ jobs:
                   --deployment-sha "$ROTATION_DEPLOYMENT_SHA" \
                   --task-definition "$ROTATION_TASK_DEFINITION_ARN" \
                   --image-digest "$ROTATION_IMAGE_DIGEST"
-                {
-                  echo "PRODUCTION_INITIAL_OVERLAP_STATE_FILE=$state_file"
-                  echo "PRODUCTION_INITIAL_OVERLAP_STATE_SHA256=$ROTATION_STATE_SHA256"
-                  echo "PRODUCTION_INITIAL_OVERLAP_SOURCE_SHA=$SOURCE_SHA"
-                  echo "PRODUCTION_INITIAL_OVERLAP_ROTATION_ID=$ROTATION_ID"
-                  echo "PRODUCTION_INITIAL_OVERLAP_DEPLOYMENT_SHA=$ROTATION_DEPLOYMENT_SHA"
-                  echo "PRODUCTION_INITIAL_OVERLAP_TASK_DEFINITION=$ROTATION_TASK_DEFINITION_ARN"
-                  echo "PRODUCTION_INITIAL_OVERLAP_IMAGE_DIGEST=$ROTATION_IMAGE_DIGEST"
-                } >> "$GITHUB_ENV"
               else
                 npm run check:rotation-evidence-freshness
               fi
@@ -395,6 +386,56 @@ jobs:
           set -euo pipefail
           npm ci
           npm --prefix backend ci
+
+      - name: Reconstruct activation rotation contract on deployment runner
+        if: ${{ inputs.release_mode == 'normal' }}
+        env:
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          ROTATION_ID: ${{ inputs.rotation_id }}
+          ROTATION_STATE_JSON: ${{ inputs.rotation_state_json }}
+          ROTATION_STATE_SHA256: ${{ inputs.rotation_state_sha256 }}
+          ROTATION_TASK_DEFINITION_ARN: ${{ inputs.rotation_task_definition_arn }}
+          ROTATION_IMAGE_DIGEST: ${{ inputs.rotation_image_digest }}
+          ROTATION_DEPLOYMENT_SHA: ${{ inputs.rotation_deployment_sha }}
+        run: |
+          set -euo pipefail
+          overlap_values=(ROTATION_ID ROTATION_STATE_JSON ROTATION_STATE_SHA256 ROTATION_TASK_DEFINITION_ARN ROTATION_IMAGE_DIGEST ROTATION_DEPLOYMENT_SHA)
+          overlap_present=0
+          for name in "${overlap_values[@]}"; do
+            if [ -n "${!name:-}" ]; then overlap_present=1; fi
+          done
+          if [ "$overlap_present" -eq 1 ]; then
+            for name in "${overlap_values[@]}"; do
+              if [ -z "${!name:-}" ]; then
+                echo "::error::${name} is required for authenticated-overlap initial activation."
+                exit 1
+              fi
+            done
+            state_file="$RUNNER_TEMP/initial-overlap-rotation-state.json"
+            printf '%s' "$ROTATION_STATE_JSON" > "$state_file"
+            chmod 600 "$state_file"
+            node scripts/security/production-initial-overlap-activation-contract.mjs \
+              --state-file "$state_file" \
+              --state-sha256 "$ROTATION_STATE_SHA256" \
+              --source-sha "$SOURCE_SHA" \
+              --rotation-id "$ROTATION_ID" \
+              --deployment-sha "$ROTATION_DEPLOYMENT_SHA" \
+              --task-definition "$ROTATION_TASK_DEFINITION_ARN" \
+              --image-digest "$ROTATION_IMAGE_DIGEST"
+            {
+              echo "PRODUCTION_ACTIVATION_ROTATION_CONTRACT=AUTHENTICATED_OVERLAP"
+              echo "PRODUCTION_INITIAL_OVERLAP_STATE_FILE=$state_file"
+              echo "PRODUCTION_INITIAL_OVERLAP_STATE_SHA256=$ROTATION_STATE_SHA256"
+              echo "PRODUCTION_INITIAL_OVERLAP_SOURCE_SHA=$SOURCE_SHA"
+              echo "PRODUCTION_INITIAL_OVERLAP_ROTATION_ID=$ROTATION_ID"
+              echo "PRODUCTION_INITIAL_OVERLAP_DEPLOYMENT_SHA=$ROTATION_DEPLOYMENT_SHA"
+              echo "PRODUCTION_INITIAL_OVERLAP_TASK_DEFINITION=$ROTATION_TASK_DEFINITION_ARN"
+              echo "PRODUCTION_INITIAL_OVERLAP_IMAGE_DIGEST=$ROTATION_IMAGE_DIGEST"
+            } >> "$GITHUB_ENV"
+          else
+            npm run check:rotation-evidence-freshness
+            echo "PRODUCTION_ACTIVATION_ROTATION_CONTRACT=STRICT_FINAL_ROTATION" >> "$GITHUB_ENV"
+          fi
 
       - name: Backend build and tests
         run: |

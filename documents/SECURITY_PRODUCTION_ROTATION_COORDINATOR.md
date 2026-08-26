@@ -98,6 +98,8 @@ accounts, regions, names, aliases, and partial ARNs fail closed.
 | `minimumGraceSeconds`, `overlapReadyAt`, `verifiedAt`, `cleanupEligibleAt` | reviewed config plus coordinator | safe integer seconds and canonical UTC ISO timestamps | initial-overlap validator, cleanup executor, Stage-B closure |
 | State bytes and state SHA-256 | coordinator atomic mode-600 state file plus release input binding | exact serialized bytes and SHA-256 | Release Gate and Stage-B closure |
 
+Release Gate validates the dispatch inputs in `resolve-deploy-target`, then reconstructs the exact redacted coordinator-state bytes from those same immutable workflow inputs on the fresh `deploy-production-ecs` runner. The state hash and complete overlap contract are revalidated there before same-job environment bindings are published. No runner-local path or `$GITHUB_ENV` value crosses the job boundary, and both RLS and backend mutation steps re-run the validator against the deployment runner's reconstructed bytes.
+
 Runtime proof has no separate `verifiedAt`: `observedAt` belongs to the runtime
 producer, while state-level `verifiedAt` records coordinator acceptance. This
 distinction prevents producer/consumer timestamp aliasing.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -203,13 +203,28 @@ test("verified overlap plus strict onboarding permits readiness while security f
 
 test("Release Gate uses the shared overlap contract and preserves the normal checksum-bound RLS transaction", () => {
   const workflow = readFileSync(".github/workflows/release-gate.yml", "utf8");
-  yaml.load(workflow);
+  const parsed = yaml.load(workflow);
+  const resolveSteps = parsed.jobs["resolve-deploy-target"].steps;
+  const deploySteps = parsed.jobs["deploy-production-ecs"].steps;
+  const resolveLifecycle = resolveSteps.find(({ name }) => name === "Validate production release lifecycle mode");
+  const reconstruct = deploySteps.find(({ name }) => name === "Reconstruct activation rotation contract on deployment runner");
+  const rlsStep = deploySteps.find(({ name }) => name === "Apply and verify checksum-bound production RLS package");
+  const activationStep = deploySteps.find(({ name }) => name === "Activate exact Stage-B backend candidate");
+  assert(resolveLifecycle && reconstruct && rlsStep && activationStep);
+  assert.doesNotMatch(resolveLifecycle.run, /GITHUB_ENV|PRODUCTION_INITIAL_OVERLAP_STATE_FILE/);
+  assert.match(reconstruct.env.ROTATION_STATE_JSON, /inputs\.rotation_state_json/);
+  assert.match(reconstruct.env.SOURCE_SHA, /needs\.resolve-deploy-target\.outputs\.deploy_sha/);
+  assert.match(reconstruct.run, /RUNNER_TEMP\/initial-overlap-rotation-state\.json/);
+  assert.match(reconstruct.run, /PRODUCTION_ACTIVATION_ROTATION_CONTRACT=AUTHENTICATED_OVERLAP/);
+  assert.match(reconstruct.run, /PRODUCTION_ACTIVATION_ROTATION_CONTRACT=STRICT_FINAL_ROTATION/);
+  assert(deploySteps.indexOf(reconstruct) < deploySteps.indexOf(rlsStep));
+  assert(deploySteps.indexOf(rlsStep) < deploySteps.indexOf(activationStep));
   const lifecycle = workflow.indexOf("Validate production release lifecycle mode");
   const rls = workflow.indexOf("Apply and verify checksum-bound production RLS package");
   const activation = workflow.indexOf("Activate exact Stage-B backend candidate");
   assert.match(workflow.slice(lifecycle, rls), /production-initial-overlap-activation-contract\.mjs/);
   assert.match(workflow.slice(lifecycle, rls), /check:rotation-evidence-freshness/);
-  assert.match(workflow.slice(lifecycle, rls), /PRODUCTION_INITIAL_OVERLAP_STATE_FILE=.*GITHUB_ENV/s);
+  assert.match(workflow.slice(workflow.indexOf(reconstruct.name), rls), /PRODUCTION_INITIAL_OVERLAP_STATE_FILE=.*GITHUB_ENV/s);
   assert(rls > lifecycle && activation > rls);
   assert.match(workflow, /--expected-current-task-definition[\s\S]*--expected-current-deployment-id/);
   assert.match(workflow.slice(rls, activation), /production-normal-backend-activation\.mjs[\s\S]*--mode verify[\s\S]*apply-production-full-rls-release\.mjs/);
@@ -224,8 +239,27 @@ test("production closure selects exactly one rotation lifecycle contract", () =>
   assert.match(packageJson.scripts["stage-b:deployment-closure:production"], /check-production-activation-rotation/);
   assert.match(script, /check-rotation-evidence-freshness/);
   assert.match(script, /production-initial-overlap-activation-contract/);
-  assert.match(script, /values\.every/);
-  assert.match(script, /values\.some/);
+  assert.match(script, /STRICT_FINAL_ROTATION/);
+  assert.match(script, /AUTHENTICATED_OVERLAP/);
+  assert.match(script, /must be selected explicitly/);
+});
+
+test("production closure rejects missing or contradictory lifecycle selection", () => {
+  assert.throws(
+    () => execFileSync(process.execPath, ["scripts/check-production-activation-rotation.mjs"], { env: { PATH: process.env.PATH }, stdio: "pipe" }),
+    /Production activation rotation contract must be selected explicitly/,
+  );
+  assert.throws(
+    () => execFileSync(process.execPath, ["scripts/check-production-activation-rotation.mjs"], {
+      env: {
+        PATH: process.env.PATH,
+        PRODUCTION_ACTIVATION_ROTATION_CONTRACT: "STRICT_FINAL_ROTATION",
+        PRODUCTION_INITIAL_OVERLAP_STATE_FILE: "/job-a/state.json",
+      },
+      stdio: "pipe",
+    }),
+    /Strict final rotation cannot consume initial-overlap bindings/,
+  );
 });
 
 test("production closure consumes the exact verified-overlap state bytes", () => {
@@ -246,6 +280,7 @@ test("production closure consumes the exact verified-overlap state bytes", () =>
       encoding: "utf8",
       env: {
         ...process.env,
+        PRODUCTION_ACTIVATION_ROTATION_CONTRACT: "AUTHENTICATED_OVERLAP",
         PRODUCTION_INITIAL_OVERLAP_STATE_FILE: stateFile,
         PRODUCTION_INITIAL_OVERLAP_STATE_SHA256: createHash("sha256").update(rawState).digest("hex"),
         PRODUCTION_INITIAL_OVERLAP_SOURCE_SHA: sourceSha,
@@ -326,7 +361,62 @@ if (!responses[key]) process.exit(8); process.stdout.write(JSON.stringify(respon
     const stateSha256 = createHash("sha256").update(persistedBytes).digest("hex");
     const activationArgs = ["--state-file", stateFile, "--state-sha256", stateSha256, "--source-sha", sourceSha, "--rotation-id", rotationId, "--deployment-sha", deploymentSha, "--task-definition", taskDefinitionArn, "--image-digest", imageDigest];
     assert.match(execFileSync(process.execPath, ["scripts/security/production-initial-overlap-activation-contract.mjs", ...activationArgs], { encoding: "utf8" }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
-    assert.match(execFileSync(process.execPath, ["scripts/check-production-activation-rotation.mjs"], { encoding: "utf8", env: { ...process.env, PRODUCTION_INITIAL_OVERLAP_STATE_FILE: stateFile, PRODUCTION_INITIAL_OVERLAP_STATE_SHA256: stateSha256, PRODUCTION_INITIAL_OVERLAP_SOURCE_SHA: sourceSha, PRODUCTION_INITIAL_OVERLAP_ROTATION_ID: rotationId, PRODUCTION_INITIAL_OVERLAP_DEPLOYMENT_SHA: deploymentSha, PRODUCTION_INITIAL_OVERLAP_TASK_DEFINITION: taskDefinitionArn, PRODUCTION_INITIAL_OVERLAP_IMAGE_DIGEST: imageDigest } }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
+    const workflow = yaml.load(readFileSync(".github/workflows/release-gate.yml", "utf8"));
+    const reconstruction = workflow.jobs["deploy-production-ecs"].steps.find(({ name }) => name === "Reconstruct activation rotation contract on deployment runner");
+    assert(reconstruction);
+    const jobA = path.join(directory, "job-a"); mkdirSync(jobA);
+    writeFileSync(path.join(jobA, "state.json"), persistedBytes, { mode: 0o600 });
+    writeFileSync(path.join(jobA, "github-env"), "PRODUCTION_INITIAL_OVERLAP_STATE_FILE=/job-a/state.json\n");
+    rmSync(jobA, { recursive: true, force: true });
+    assert.equal(existsSync(jobA), false);
+
+    const jobB = path.join(directory, "job-b"); mkdirSync(jobB);
+    const runReconstruction = (overrides = {}, target = jobB) => {
+      mkdirSync(target, { recursive: true });
+      const githubEnv = path.join(target, "github-env");
+      const environment = {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        RUNNER_TEMP: target,
+        GITHUB_ENV: githubEnv,
+        SOURCE_SHA: sourceSha,
+        ROTATION_ID: rotationId,
+        ROTATION_STATE_JSON: persistedBytes.toString("utf8"),
+        ROTATION_STATE_SHA256: stateSha256,
+        ROTATION_TASK_DEFINITION_ARN: taskDefinitionArn,
+        ROTATION_IMAGE_DIGEST: imageDigest,
+        ROTATION_DEPLOYMENT_SHA: deploymentSha,
+        ...overrides,
+      };
+      execFileSync("bash", ["-c", reconstruction.run], { cwd: process.cwd(), env: environment, stdio: "pipe" });
+      return Object.fromEntries(readFileSync(githubEnv, "utf8").trim().split("\n").map((line) => {
+        const separator = line.indexOf("=");
+        return [line.slice(0, separator), line.slice(separator + 1)];
+      }));
+    };
+    const jobBEnvironment = runReconstruction();
+    assert.equal(jobBEnvironment.PRODUCTION_ACTIVATION_ROTATION_CONTRACT, "AUTHENTICATED_OVERLAP");
+    assert.match(jobBEnvironment.PRODUCTION_INITIAL_OVERLAP_STATE_FILE, new RegExp(`^${jobB.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/`));
+    assert.equal(existsSync(jobBEnvironment.PRODUCTION_INITIAL_OVERLAP_STATE_FILE), true);
+    assert.match(execFileSync(process.execPath, ["scripts/check-production-activation-rotation.mjs"], { encoding: "utf8", env: { PATH: process.env.PATH, ...jobBEnvironment } }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
+
+    const reject = (name, overrides) => assert.throws(() => runReconstruction(overrides, path.join(directory, `reject-${name}`)), undefined, name);
+    reject("missing-job-output", { SOURCE_SHA: "" });
+    reject("tampered-job-output", { SOURCE_SHA: "f".repeat(40) });
+    reject("missing-state-source", { ROTATION_STATE_JSON: "", PRODUCTION_INITIAL_OVERLAP_STATE_FILE: "/job-a/state.json" });
+    reject("state-hash", { ROTATION_STATE_SHA256: "0".repeat(64) });
+    reject("rotation-id", { ROTATION_ID: "rotation-other" });
+    reject("deployment", { ROTATION_DEPLOYMENT_SHA: "d".repeat(40) });
+    reject("task-definition", { ROTATION_TASK_DEFINITION_ARN: taskDefinitionArn.replace(/:51$/, ":52") });
+    reject("image", { ROTATION_IMAGE_DIGEST: `sha256:${"e".repeat(64)}` });
+    const expired = structuredClone(persisted);
+    expired.overlapRuntime.observedAt = "2026-07-01T00:00:00.000Z";
+    expired.overlapRuntime.healthObservedAt = "2026-06-30T23:59:59.000Z";
+    expired.overlapReadyAt = expired.overlapRuntime.observedAt;
+    expired.verifiedAt = "2026-07-01T00:01:00.000Z";
+    expired.cleanupEligibleAt = new Date(Date.parse(expired.overlapReadyAt) + expired.minimumGraceSeconds * 1000).toISOString();
+    const expiredJson = JSON.stringify(expired);
+    reject("expired", { ROTATION_STATE_JSON: expiredJson, ROTATION_STATE_SHA256: createHash("sha256").update(expiredJson).digest("hex") });
 
     const onboardingFile = path.join(directory, "onboarding.json");
     const runtimeNames = ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "cookieCurrentSealOnly", "cookiePreviousOpenDuringOverlap", "artifactCurrentRuntimeVerify", "artifactHistoricalRuntimeVerify"];
