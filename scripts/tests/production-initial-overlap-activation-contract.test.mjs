@@ -22,6 +22,7 @@ const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/01
 const observedAt = "2026-08-26T12:00:00.000Z";
 const cleanupEligibleAt = "2026-09-25T12:00:00.000Z";
 const now = Date.parse("2026-08-26T12:01:00.000Z");
+const cleanupEligibleAtMs = Date.parse(cleanupEligibleAt);
 const runtimeChecks = {
   jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true,
   qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true,
@@ -53,9 +54,9 @@ const state = (phase = "verified", extra = {}) => ({
   ...extra,
 });
 const expected = { sourceSha, rotationId, deploymentSha, taskDefinitionArn, imageDigest };
-const validate = (value, expectedOverrides = {}) => {
+const validate = (value, expectedOverrides = {}, clock = now) => {
   const rawState = Buffer.from(JSON.stringify(value));
-  return validateProductionInitialActivationDuringAuthenticatedOverlap({ state: value, rawState, stateSha256: createHash("sha256").update(rawState).digest("hex"), expected: { ...expected, ...expectedOverrides }, now });
+  return validateProductionInitialActivationDuringAuthenticatedOverlap({ state: value, rawState, stateSha256: createHash("sha256").update(rawState).digest("hex"), expected: { ...expected, ...expectedOverrides }, now: clock });
 };
 
 test("verified overlap authorizes initial activation without claiming rotation closure", () => {
@@ -72,6 +73,50 @@ test("prepared or deployed-only rotation cannot authorize initial activation", (
   assert.throws(() => validate(state("prepared")), /OVERLAP_RUNTIME_VERIFIED/);
   assert.throws(() => validate(state("overlap-deploy-required")), /OVERLAP_RUNTIME_VERIFIED/);
   assert.throws(() => validate(state("overlap-ready")), /OVERLAP_RUNTIME_VERIFIED/);
+  assert.throws(() => validate(state("grace-wait")), /OVERLAP_RUNTIME_VERIFIED/);
+});
+
+test("authenticated overlap expires exactly when cleanup becomes eligible", () => {
+  assert.doesNotThrow(() => validate(state(), {}, cleanupEligibleAtMs - 1));
+  assert.throws(() => validate(state(), {}, cleanupEligibleAtMs), /expired/);
+  assert.throws(() => validate(state(), {}, cleanupEligibleAtMs + 1), /expired/);
+
+  const finalCleanup = {
+    cleanupEligibleAt,
+    previousSlotsRetired: true,
+    pendingSlotsRetired: true,
+    cleanupDeploymentAfterRetirement: true,
+    cleanupRuntimeVerified: true,
+    oldJwtRejected: true,
+    oldQrRejected: true,
+    freshFinalRotationEvidence: true,
+  };
+  assert.equal(validateRotationClosedContract(finalCleanup, () => cleanupEligibleAtMs), true);
+});
+
+test("cleanup deadline remains anchored to the canonical overlap observation", () => {
+  for (const delta of [-1, 1]) {
+    const value = state();
+    value.cleanupEligibleAt = new Date(cleanupEligibleAtMs + delta).toISOString();
+    assert.throws(() => validate(value), /30-day grace period/);
+  }
+
+  const shiftedObservation = state();
+  shiftedObservation.overlapRuntime.observedAt = new Date(Date.parse(observedAt) + 1).toISOString();
+  shiftedObservation.overlapReadyAt = shiftedObservation.overlapRuntime.observedAt;
+  assert.throws(() => validate(shiftedObservation), /30-day grace period/);
+
+  const ambiguousTimestamp = state();
+  ambiguousTimestamp.cleanupEligibleAt = "2026-09-25 12:00:00";
+  assert.throws(() => validate(ambiguousTimestamp), /timeline/);
+
+  const offsetTimestamp = state();
+  offsetTimestamp.cleanupEligibleAt = "2026-09-25T13:00:00.000+01:00";
+  assert.throws(() => validate(offsetTimestamp), /timeline/);
+
+  for (const invalidClock of [Number.NaN, Number.POSITIVE_INFINITY, cleanupEligibleAtMs - 0.5]) {
+    assert.throws(() => validate(state(), {}, invalidClock), /timeline/);
+  }
 });
 
 test("identity, runtime, health, signing, and cleanup inconsistencies fail closed", () => {

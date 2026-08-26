@@ -24,8 +24,9 @@ const CLEANUP_FIELDS = Object.freeze(["retirementTimestamp", "cleanupDeploymentS
 
 const fail = (message) => { throw new Error(message); };
 const iso = (value) => {
-  const parsed = Date.parse(String(value || ""));
-  return Number.isFinite(parsed) ? parsed : null;
+  if (typeof value !== "string") return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value ? parsed : null;
 };
 const containsSensitiveStateKey = (value) => {
   if (!value || typeof value !== "object") return false;
@@ -55,8 +56,9 @@ export function validateProductionInitialActivationDuringAuthenticatedOverlap({ 
   const verifiedAt = iso(state.verifiedAt);
   const cleanupEligibleAt = iso(state.cleanupEligibleAt);
   const nowMs = typeof now === "function" ? now() : now;
-  if ([observedAt, healthObservedAt, verifiedAt, cleanupEligibleAt, nowMs].some((value) => !Number.isFinite(value)) || healthObservedAt > observedAt || observedAt > verifiedAt || verifiedAt > nowMs || state.overlapReadyAt !== proof.observedAt) fail("Initial-overlap runtime timeline is invalid.");
+  if ([observedAt, healthObservedAt, verifiedAt, cleanupEligibleAt, nowMs].some((value) => !Number.isSafeInteger(value)) || healthObservedAt > observedAt || observedAt > verifiedAt || verifiedAt > nowMs || state.overlapReadyAt !== proof.observedAt) fail("Initial-overlap runtime timeline is invalid.");
   if (cleanupEligibleAt !== observedAt + PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS * 1000) fail("Rotation cleanup eligibility does not preserve the 30-day grace period.");
+  if (nowMs >= cleanupEligibleAt) fail("Authenticated-overlap initial activation has expired; strict rotation cleanup is required.");
   if (state.cleanupWindowComplete === true || CLEANUP_FIELDS.some((field) => state[field] !== undefined && state[field] !== null)) fail("Initial overlap must not claim rotation cleanup or retirement.");
 
   return Object.freeze({

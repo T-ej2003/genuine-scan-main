@@ -216,7 +216,7 @@ For this repo, the practical minimum is the full refresh-token window if you wan
 
 ### 5. Retire, Then Cleanup Deploy
 
-After the persisted `cleanupEligibleAt` deadline, run coordinator `--cleanup`.
+The authenticated-overlap initial-activation exception is valid only while the authenticated clock is strictly before the persisted `cleanupEligibleAt`; at equality, run coordinator `--cleanup` and use the strict final-rotation path.
 It retires `JWT_SECRET_PREVIOUS`, `QR_SIGN_PUBLIC_KEY_PREVIOUS`, and all three
 pending slots with one immutable `retirementTimestamp`, then stops at
 `cleanup-deploy-required`. Deploy/restart tasks after those writes, run the
