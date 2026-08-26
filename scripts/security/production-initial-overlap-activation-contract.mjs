@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import {
-  assertProductionRotationGraceSeconds,
+  assertNormalizedProductionRotationGraceSeconds,
   deriveProductionRotationCleanupEligibleAt,
   normalizeProductionRotationState,
   PRODUCTION_ROTATION_LEGACY_STATE_VERSION,
@@ -72,7 +72,7 @@ export function validateProductionInitialActivationDuringAuthenticatedOverlap({ 
   if ([observedAt, healthObservedAt, verifiedAt, cleanupEligibleAt, nowMs].some((value) => !Number.isSafeInteger(value)) || healthObservedAt > observedAt || observedAt > verifiedAt || verifiedAt > nowMs || state.overlapReadyAt !== proof.observedAt) fail("Initial-overlap runtime timeline is invalid.");
   let expectedCleanupEligibleAt;
   try {
-    assertProductionRotationGraceSeconds(state.minimumGraceSeconds, "state.minimumGraceSeconds");
+    assertNormalizedProductionRotationGraceSeconds(state);
     expectedCleanupEligibleAt = deriveProductionRotationCleanupEligibleAt(proof.observedAt, state.minimumGraceSeconds);
   } catch (error) { fail(error.message); }
   if (state.cleanupEligibleAt !== expectedCleanupEligibleAt) fail("Rotation cleanup eligibility does not preserve the reviewed grace period.");

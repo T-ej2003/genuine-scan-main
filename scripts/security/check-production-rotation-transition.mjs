@@ -51,17 +51,18 @@ export function validateRotationTransition({ mode, sourceSha, rotationId, deploy
   let state;
   try { state = JSON.parse(Buffer.isBuffer(rawState) ? new TextDecoder("utf-8", { fatal: true }).decode(rawState) : rawState); } catch { fail("rotation state bytes are not valid UTF-8 JSON"); }
   assertCommon({ mode, state, sourceSha, rotationId, deploymentSha, taskDefinitionArn, expectedCurrentTaskDefinitionArn, imageDigest, stateSha256, rawState });
-  state = normalizeProductionRotationState(state).state;
   const nowMs = typeof now === "function" ? now() : now;
   assert(Number.isFinite(nowMs), "transition validation clock is invalid");
   assert(ISO(state.preparedAt) !== null && ISO(state.preparedAt) <= nowMs, "rotation preparedAt is invalid");
 
   if (mode === "rotation-overlap") {
     assert(state.phase === "overlap-deploy-required", "overlap requires phase overlap-deploy-required");
+    if (state.stateVersion === PRODUCTION_ROTATION_STATE_VERSION) state = normalizeProductionRotationState(state).state;
     assert(state.overlapDeploymentSha === deploymentSha, "overlap deployment SHA does not match prepared state");
     assert(ISO(state.overlapPreparedAt) !== null && ISO(state.overlapPreparedAt) <= nowMs, "overlapPreparedAt is invalid");
     assert(!state.cleanupRuntime && !state.cleanupCompletedAt && !state.cleanupDeploymentSha, "overlap state already contains cleanup proof");
   } else {
+    state = normalizeProductionRotationState(state).state;
     assert(state.phase === "cleanup-deploy-required", "cleanup requires phase cleanup-deploy-required");
     assert(state.cleanupDeploymentSha === deploymentSha, "cleanup deployment SHA does not match persisted state");
     assert(ISO(state.cleanupEligibleAt) !== null && ISO(state.cleanupEligibleAt) <= nowMs, "cleanup grace window has not elapsed");

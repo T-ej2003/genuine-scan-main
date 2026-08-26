@@ -5,8 +5,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import jwt from "jsonwebtoken";
 import {
+  assertLegacyProductionRotationGraceSeconds,
+  assertNormalizedProductionRotationGraceSeconds,
   assertProductionRotationGraceSeconds,
   deriveProductionRotationCleanupEligibleAt,
+  PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT,
   normalizeProductionRotationState,
   PRODUCTION_ROTATION_STATE_VERSION,
 } from "./production-rotation-grace-contract.mjs";
@@ -72,7 +75,7 @@ const loadConfig = (file, expectedSha256) => {
   required(config.sourceSha, "config.sourceSha");
   if (!safeId(config.rotationId)) throw new Error("config.rotationId is invalid");
   if (!fullSha(config.sourceSha)) throw new Error("config.sourceSha must be a full SHA-1");
-  assertProductionRotationGraceSeconds(config.minimumGraceSeconds, "config.minimumGraceSeconds");
+  assertLegacyProductionRotationGraceSeconds(config.minimumGraceSeconds, "config.minimumGraceSeconds");
   const ids = [
     config.jwt?.currentSecretId, config.jwt?.previousSecretId, config.jwt?.pendingSecretId,
     config.qr?.privateCurrentSecretId, config.qr?.privatePendingSecretId,
@@ -254,7 +257,7 @@ const stateForPending = ({ config, identity, oldJwt, oldQrPrivate, oldQrPublic, 
 const assertState = (state, config) => {
   assertStateIdentity(state, config);
   if (state.stateVersion !== PRODUCTION_ROTATION_STATE_VERSION) throw new Error(`state stateVersion must be ${PRODUCTION_ROTATION_STATE_VERSION}`);
-  assertProductionRotationGraceSeconds(state.minimumGraceSeconds, "state.minimumGraceSeconds");
+  assertNormalizedProductionRotationGraceSeconds(state);
   if (state.minimumGraceSeconds !== config.minimumGraceSeconds) throw new Error("state minimum grace does not match the reviewed config");
 };
 const assertStateSlots = (state, current) => {
@@ -309,12 +312,13 @@ const assertPrepareLineage = (state, current) => {
 
 const prepare = async (context) => {
   const { config, sm, values, identity, inventoryEvidenceSha256 } = context;
+  let state = readCurrentState(context);
+  if (!state || state.graceContract !== PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT) assertProductionRotationGraceSeconds(config.minimumGraceSeconds, "config.minimumGraceSeconds");
   deriveProductionRotationCleanupEligibleAt(nowIso(clockOf(context)), config.minimumGraceSeconds);
   const inventoryBindingRequired = values.has("inventory-evidence-file");
   if (inventoryBindingRequired && !/^[a-f0-9]{64}$/.test(inventoryEvidenceSha256 || "")) throw new Error("bounded inventory evidence hash is required");
   const stateFile = statePath(values);
   const fixtureFile = fixturePath(values);
-  let state = readCurrentState(context);
   if (inventoryBindingRequired && state && state.inventoryEvidenceSha256 !== inventoryEvidenceSha256) throw new Error("rotation state is not bound to the current bounded inventory evidence");
   let current = await slots(sm, config);
   for (const [name, record] of [["jwt", current.jwtPending], ["QR private", current.qrPrivatePending], ["QR public", current.qrPublicPending]]) assertPendingOwnership(name, record.material, config.rotationId);

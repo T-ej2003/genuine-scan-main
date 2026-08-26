@@ -7,6 +7,7 @@ import test from "node:test";
 import jwt from "jsonwebtoken";
 import { assertIdentity, cleanup, prepare, readCurrentState, validateRuntimeProof, verify } from "../scripts/security/rotate-production-signing-material.mjs";
 import {
+  PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT,
   normalizeProductionRotationState,
   PRODUCTION_ROTATION_LEGACY_STATE_VERSION,
   PRODUCTION_ROTATION_MAXIMUM_GRACE_SECONDS,
@@ -789,6 +790,29 @@ test("actual coordinator reader migrates legacy prepared and overlap-deployed st
   }
 });
 
+test("legacy pre-overlap state resumes with its authenticated seven-day reviewed config", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-v3-seven-day-"));
+  try {
+    const stateFile = path.join(directory, "state.json");
+    const config = { ...baseConfig, minimumGraceSeconds: 604_800 };
+    const legacy = legacyV3({
+      stateVersion: PRODUCTION_ROTATION_STATE_VERSION,
+      rotationId: config.rotationId,
+      sourceSha: config.sourceSha,
+      phase: "overlap-deploy-required",
+      overlapDeploymentSha: config.overlapDeploymentSha,
+      preparedAt: "2026-08-10T00:00:00.000Z",
+      overlapPreparedAt: "2026-08-10T00:01:00.000Z",
+    });
+    writeFileSync(stateFile, `${JSON.stringify(legacy)}\n`, { mode: 0o600 });
+    const migrated = readCurrentState(contextFor(directory, config, fakeSecrets({})));
+    assert.equal(migrated.minimumGraceSeconds, 604_800);
+    assert.equal(migrated.graceContract, PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("legacy timed phases derive the original grace and preserve the exact deadline through atomic disk migration", () => {
   for (const phase of ["overlap-ready", "verified", "grace-wait", "retirement-started", "retirement-complete", "cleanup-deploy-required", "cleanup-runtime-verified", "cleaned"]) {
     const directory = mkdtempSync(path.join(os.tmpdir(), `mscqr-rotation-v3-${phase}-`));
@@ -865,10 +889,18 @@ test("legacy migration fails closed for unauthenticated, malformed, shortened, f
   assert.throws(() => normalizeProductionRotationState({ ...timed, overlapReadyAt: "2026-08-10 00:00:00" }), /canonical ISO/);
   assert.throws(() => normalizeProductionRotationState({ ...timed, cleanupEligibleAt: "2026-08-09T23:59:59.000Z" }), /positive/);
   assert.throws(() => normalizeProductionRotationState({ ...timed, cleanupEligibleAt: "2026-09-09T00:00:00.001Z" }), /whole number/);
-  assert.throws(() => normalizeProductionRotationState({ ...timed, cleanupEligibleAt: "2026-08-11T00:00:00.000Z" }), /at least/);
+  const sevenDayDeadline = "2026-08-17T00:00:00.000Z";
+  const sevenDay = normalizeProductionRotationState({ ...timed, cleanupEligibleAt: sevenDayDeadline }, { reviewedMinimumGraceSeconds: 604_800 }).state;
+  assert.equal(sevenDay.minimumGraceSeconds, 604_800);
+  assert.equal(sevenDay.cleanupEligibleAt, sevenDayDeadline);
+  assert.equal(sevenDay.graceContract, PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT);
+  assert.deepEqual(normalizeProductionRotationState(sevenDay, { reviewedMinimumGraceSeconds: 604_800 }).state, sevenDay);
+  assert.throws(() => normalizeProductionRotationState({ ...timed, cleanupEligibleAt: timed.overlapReadyAt }), /positive/);
+  assert.throws(() => normalizeProductionRotationState({ ...timed, cleanupEligibleAt: "+275760-09-13T00:00:00.001Z" }), /canonical ISO/);
   assert.throws(() => normalizeProductionRotationState({ ...timed, overlapRuntime: { ...timed.overlapRuntime, observedAt: "2026-08-10T00:00:01.000Z" } }), /overlap runtime proof/);
   assert.throws(() => normalizeProductionRotationState({ ...timed, minimumGraceSeconds: baseConfig.minimumGraceSeconds }), /legacy rotation state/);
   assert.throws(() => normalizeProductionRotationState(timed, { reviewedMinimumGraceSeconds: baseConfig.minimumGraceSeconds + 1 }), /reviewed config/);
   const current = normalizeProductionRotationState(timed, { reviewedMinimumGraceSeconds: baseConfig.minimumGraceSeconds }).state;
   assert.deepEqual(normalizeProductionRotationState(current, { reviewedMinimumGraceSeconds: baseConfig.minimumGraceSeconds }).state, current);
+  assert.throws(() => normalizeProductionRotationState({ ...current, graceContract: undefined, minimumGraceSeconds: 604_800 }), /at least/);
 });

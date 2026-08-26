@@ -4,6 +4,7 @@ const MAXIMUM_DATE_MILLISECONDS = Date.parse("+275760-09-13T00:00:00.000Z");
 export const PRODUCTION_ROTATION_MAXIMUM_GRACE_SECONDS = MAXIMUM_DATE_MILLISECONDS / 1000;
 export const PRODUCTION_ROTATION_LEGACY_STATE_VERSION = 3;
 export const PRODUCTION_ROTATION_STATE_VERSION = 4;
+export const PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT = "LEGACY_V3_PRESERVED";
 
 const PHASES_WITH_GRACE_ANCHOR = new Set([
   "overlap-ready", "verified", "grace-wait", "retirement-started", "retirement-complete",
@@ -26,8 +27,21 @@ export function assertProductionRotationGraceSeconds(value, label = "minimumGrac
   return value;
 }
 
+export function assertLegacyProductionRotationGraceSeconds(value, label = "legacy minimumGraceSeconds") {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > PRODUCTION_ROTATION_MAXIMUM_GRACE_SECONDS) {
+    throw new Error(`${label} must be a positive safe integer of at most ${PRODUCTION_ROTATION_MAXIMUM_GRACE_SECONDS} seconds`);
+  }
+  return value;
+}
+
+export function assertNormalizedProductionRotationGraceSeconds(state, label = "state.minimumGraceSeconds") {
+  return state?.graceContract === PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT
+    ? assertLegacyProductionRotationGraceSeconds(state.minimumGraceSeconds, label)
+    : assertProductionRotationGraceSeconds(state?.minimumGraceSeconds, label);
+}
+
 export function deriveProductionRotationCleanupEligibleAt(observedAt, minimumGraceSeconds) {
-  assertProductionRotationGraceSeconds(minimumGraceSeconds);
+  assertLegacyProductionRotationGraceSeconds(minimumGraceSeconds);
   const observedAtMs = canonicalTimestamp(observedAt, "overlap observedAt");
   const graceMs = minimumGraceSeconds * 1000;
   const cleanupEligibleAtMs = observedAtMs + graceMs;
@@ -47,7 +61,7 @@ function historicalGraceSeconds(state) {
   if (!Number.isSafeInteger(graceMs) || graceMs <= 0 || graceMs % 1000 !== 0) {
     throw new Error("legacy rotation grace must be a positive whole number of seconds");
   }
-  return assertProductionRotationGraceSeconds(graceMs / 1000, "derived legacy minimumGraceSeconds");
+  return assertLegacyProductionRotationGraceSeconds(graceMs / 1000, "derived legacy minimumGraceSeconds");
 }
 
 function assertPersistedGraceWindow(state, minimumGraceSeconds) {
@@ -64,10 +78,14 @@ function assertPersistedGraceWindow(state, minimumGraceSeconds) {
 export function normalizeProductionRotationState(state, { reviewedMinimumGraceSeconds } = {}) {
   if (!state || typeof state !== "object" || Array.isArray(state)) throw new Error("rotation state must be a plain object");
   if (!PHASES_BEFORE_GRACE_ANCHOR.has(state.phase) && !PHASES_WITH_GRACE_ANCHOR.has(state.phase)) throw new Error(`unsupported rotation phase: ${state.phase}`);
-  if (reviewedMinimumGraceSeconds !== undefined) assertProductionRotationGraceSeconds(reviewedMinimumGraceSeconds, "reviewed minimumGraceSeconds");
 
   if (state.stateVersion === PRODUCTION_ROTATION_STATE_VERSION) {
-    assertProductionRotationGraceSeconds(state.minimumGraceSeconds, "state.minimumGraceSeconds");
+    if (state.graceContract !== undefined && state.graceContract !== PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT) throw new Error("state grace contract is unsupported");
+    assertNormalizedProductionRotationGraceSeconds(state);
+    if (reviewedMinimumGraceSeconds !== undefined) {
+      if (state.graceContract === PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT) assertLegacyProductionRotationGraceSeconds(reviewedMinimumGraceSeconds, "reviewed minimumGraceSeconds");
+      else assertProductionRotationGraceSeconds(reviewedMinimumGraceSeconds, "reviewed minimumGraceSeconds");
+    }
     if (reviewedMinimumGraceSeconds !== undefined && state.minimumGraceSeconds !== reviewedMinimumGraceSeconds) throw new Error("state minimum grace does not match the reviewed config");
     if (PHASES_BEFORE_GRACE_ANCHOR.has(state.phase)) {
       if (GRACE_STATE_FIELDS.some((field) => state[field] !== undefined)) throw new Error("pre-overlap rotation state cannot contain overlap runtime or grace fields");
@@ -77,6 +95,7 @@ export function normalizeProductionRotationState(state, { reviewedMinimumGraceSe
 
   if (state.stateVersion !== PRODUCTION_ROTATION_LEGACY_STATE_VERSION) throw new Error(`unsupported rotation stateVersion: ${state.stateVersion}`);
   if (Object.hasOwn(state, "minimumGraceSeconds")) throw new Error("legacy rotation state cannot contain current-schema minimumGraceSeconds");
+  if (reviewedMinimumGraceSeconds !== undefined) assertLegacyProductionRotationGraceSeconds(reviewedMinimumGraceSeconds, "reviewed minimumGraceSeconds");
   let minimumGraceSeconds;
   if (PHASES_BEFORE_GRACE_ANCHOR.has(state.phase)) {
     if (GRACE_STATE_FIELDS.some((field) => state[field] !== undefined)) throw new Error("legacy pre-overlap state cannot contain overlap runtime or grace fields");
@@ -86,7 +105,7 @@ export function normalizeProductionRotationState(state, { reviewedMinimumGraceSe
     minimumGraceSeconds = historicalGraceSeconds(state);
     if (reviewedMinimumGraceSeconds !== undefined && minimumGraceSeconds !== reviewedMinimumGraceSeconds) throw new Error("derived legacy minimum grace does not match the reviewed config");
   }
-  const normalized = { ...state, stateVersion: PRODUCTION_ROTATION_STATE_VERSION, minimumGraceSeconds };
+  const normalized = { ...state, stateVersion: PRODUCTION_ROTATION_STATE_VERSION, minimumGraceSeconds, graceContract: PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT };
   if (PHASES_WITH_GRACE_ANCHOR.has(normalized.phase)) assertPersistedGraceWindow(normalized, normalized.minimumGraceSeconds);
   return Object.freeze({ state: normalized, migrated: true });
 }

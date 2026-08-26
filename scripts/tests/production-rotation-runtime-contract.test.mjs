@@ -276,6 +276,8 @@ const transitionArgs = (mode, state, overrides = {}) => {
 test("rotation overlap and cleanup transitions validate state without final freshness", async () => {
   const overlapState = makeState("overlap-deploy-required");
   assert.equal(validateRotationTransition(transitionArgs("rotation-overlap", overlapState)).phase, "overlap-deploy-required");
+  const legacyOverlapState = { ...overlapState, stateVersion: 3 }; delete legacyOverlapState.minimumGraceSeconds;
+  assert.equal(validateRotationTransition(transitionArgs("rotation-overlap", legacyOverlapState)).phase, "overlap-deploy-required");
 
   const cleanupState = makeState("cleanup-deploy-required", {
     cleanupDeploymentSha: deploymentSha,
@@ -288,6 +290,8 @@ test("rotation overlap and cleanup transitions validate state without final fres
   assert.equal(validateRotationTransition(transitionArgs("rotation-cleanup", cleanupState)).phase, "cleanup-deploy-required");
   const legacyCleanupState = { ...cleanupState, stateVersion: 3 }; delete legacyCleanupState.minimumGraceSeconds;
   assert.equal(validateRotationTransition(transitionArgs("rotation-cleanup", legacyCleanupState)).phase, "cleanup-deploy-required");
+  const legacySevenDayCleanup = { ...legacyCleanupState, overlapReadyAt: "2026-08-04T01:00:00.000Z", cleanupEligibleAt: "2026-08-11T01:00:00.000Z", overlapRuntime: { ...legacyCleanupState.overlapRuntime, observedAt: "2026-08-04T01:00:00.000Z" } };
+  assert.equal(validateRotationTransition(transitionArgs("rotation-cleanup", legacySevenDayCleanup)).phase, "cleanup-deploy-required");
 });
 
 test("rotation transition validator fails closed for missing, foreign, premature, or closed state", async () => {

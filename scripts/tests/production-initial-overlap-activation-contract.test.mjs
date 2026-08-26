@@ -77,13 +77,16 @@ test("authentic legacy verified state derives its grace without moving the origi
   const legacy = state();
   legacy.stateVersion = PRODUCTION_ROTATION_LEGACY_STATE_VERSION;
   delete legacy.minimumGraceSeconds;
+  const legacyGraceSeconds = 7 * 24 * 60 * 60;
+  const legacyDeadline = new Date(Date.parse(legacy.overlapReadyAt) + legacyGraceSeconds * 1000).toISOString();
+  legacy.cleanupEligibleAt = legacyDeadline;
   const rawState = Buffer.from(JSON.stringify(legacy));
   const input = { state: legacy, rawState, stateSha256: createHash("sha256").update(rawState).digest("hex"), expected };
-  const result = validateProductionInitialActivationDuringAuthenticatedOverlap({ ...input, now: cleanupEligibleAtMs - 1 });
-  assert.equal(result.minimumGraceSeconds, PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS);
-  assert.equal(result.cleanupEligibleAt, cleanupEligibleAt);
+  const result = validateProductionInitialActivationDuringAuthenticatedOverlap({ ...input, now: Date.parse(legacyDeadline) - 1 });
+  assert.equal(result.minimumGraceSeconds, legacyGraceSeconds);
+  assert.equal(result.cleanupEligibleAt, legacyDeadline);
   assert.equal(legacy.minimumGraceSeconds, undefined);
-  assert.throws(() => validateProductionInitialActivationDuringAuthenticatedOverlap({ ...input, now: cleanupEligibleAtMs }), /expired/);
+  assert.throws(() => validateProductionInitialActivationDuringAuthenticatedOverlap({ ...input, now: Date.parse(legacyDeadline) }), /expired/);
 });
 
 test("production cluster name and ARN canonicalize to one persisted identity", () => {

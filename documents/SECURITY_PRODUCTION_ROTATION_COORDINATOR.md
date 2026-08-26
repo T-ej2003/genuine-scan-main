@@ -74,8 +74,8 @@ prepared -> overlap-deploy-required -> overlap-ready -> verified -> grace-wait
   -> cleanup-runtime-verified -> cleaned
 ```
 
-`minimumGraceSeconds` is an explicit reviewed operator value of at least
-2,592,000 seconds. Longer reviewed values are supported. The coordinator
+For every new rotation, `minimumGraceSeconds` is an explicit reviewed operator
+value of at least 2,592,000 seconds. Longer reviewed values are supported. The coordinator
 persists the exact reviewed value with `overlapReadyAt`, `verifiedAt`,
 `cleanupEligibleAt`, and `retirementTimestamp`; `cleanupEligibleAt` is always
 `overlapReadyAt + minimumGraceSeconds`. A resumed run must match the persisted
@@ -91,6 +91,15 @@ upgrade never changes either timestamp or restarts the cleanup window.
 Any state hash used by a later workflow is captured from the post-upgrade bytes;
 the original version-3 bytes are validated before the atomic replacement and
 are never relabeled as current-schema evidence.
+
+Version-3 compatibility preserves the historical policy rather than applying
+the new minimum retroactively. Pre-overlap v3 state is accepted by the overlap
+transition without migration because no grace anchor exists; the coordinator
+can migrate it only with that transaction's exact reviewed config. Timed v3
+state derives a positive whole-second grace solely from its authenticated
+`overlapReadyAt` and `cleanupEligibleAt`. Migrated v4 state carries
+`graceContract: LEGACY_V3_PRESERVED`; unmarked v4 state is current-policy state
+and must retain the 30-day minimum. Both forms retain the same Date-range cap.
 
 The deployment-side verifier accepts either the exact production cluster name
 or its full ARN as operator input, uses the full ARN for ECS reads, and persists
