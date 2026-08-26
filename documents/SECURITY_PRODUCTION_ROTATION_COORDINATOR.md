@@ -56,6 +56,20 @@ current private/public pair; verification accepts the current public key or one
 explicit previous public key selected by `kid`. There is no arbitrary keyring
 and no HMAC downgrade in the rotation path.
 
+During the first authenticated dual-slot migration only, the bootstrap's exact
+empty previous-slot markers permit the coordinator to record
+`LEGACY_QR_KEYPAIR_UNRECOVERABLE` when the pre-existing QR private/public pair
+cannot be parsed as a matching Ed25519 pair. The malformed values are
+fingerprint-bound as observed legacy input but are never copied into the
+previous slots, treated as trusted keys, or used to fabricate historical
+continuity. The pending pair must still parse and match as Ed25519. Runtime and
+onboarding then verify a hash-bound current-key fixture and explicitly attest
+that no previous QR slot is deployed. QR rollback and verification of QR codes
+signed by the malformed legacy pair are unavailable; JWT overlap, the grace
+window, cleanup, and every new-material check remain unchanged. Any malformed
+legacy QR material outside those authenticated initial-migration markers fails
+closed.
+
 The coordinator does not deploy ECS. The existing approved deployment workflow
 must perform the overlap deployment and run the deployment-side verifier inside
 that task. The verifier uses the compiled application `verifyJwtWithCurrentOrPrevious`

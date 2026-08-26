@@ -7,6 +7,7 @@ const SHA = /^[a-f0-9]{40}$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const TASK_DEFINITION = /^arn:aws:ecs:[a-z0-9-]+:[0-9]{12}:task-definition\/[A-Za-z0-9_-]+:[1-9][0-9]*$/;
 const FINGERPRINT = /^[a-f0-9]{16}$/;
+const QR_CONTINUITY = new Set(["VERIFIED_PREVIOUS_QR", "LEGACY_QR_KEYPAIR_UNRECOVERABLE"]);
 const VERSION_ID = /^[A-Za-z0-9+=/:._-]{7,256}$/;
 const ISO = (value) => {
   const time = Date.parse(String(value || ""));
@@ -42,6 +43,10 @@ const assertCommon = ({ state, mode, sourceSha, rotationId, deploymentSha, taskD
   assert(state.sourceSha === sourceSha, "rotation state source SHA does not match release target");
   assert(FINGERPRINT.test(state.jwt?.oldFingerprint) && FINGERPRINT.test(state.jwt?.newFingerprint), "rotation JWT fingerprints are invalid");
   assert(FINGERPRINT.test(state.qr?.oldPublicFingerprint) && FINGERPRINT.test(state.qr?.newPublicFingerprint), "rotation QR fingerprints are invalid");
+  const historicalContinuity = state.qr?.historicalContinuity || "VERIFIED_PREVIOUS_QR";
+  assert(QR_CONTINUITY.has(historicalContinuity), "rotation QR historical continuity is invalid");
+  const rollbackCapable = historicalContinuity === "VERIFIED_PREVIOUS_QR" ? state.qr?.rollbackCapable ?? true : state.qr?.rollbackCapable;
+  assert(rollbackCapable === (historicalContinuity === "VERIFIED_PREVIOUS_QR"), "rotation QR rollback semantics are invalid");
   for (const [name, value] of Object.entries(state.pending || {})) assert(VERSION_ID.test(value), `${name} pending version ID is invalid`);
   assert(typeof state.overlapDeploymentSha === "string" && SHA.test(state.overlapDeploymentSha), "rotation overlap deployment SHA is invalid");
 };

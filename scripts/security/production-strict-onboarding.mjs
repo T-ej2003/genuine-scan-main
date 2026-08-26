@@ -38,7 +38,7 @@ export function buildOnboardingEvidenceFingerprint(evidence) {
     rotationId: evidence.rotationId,
     rotationStateSha256: evidence.rotationStateSha256,
     rotationPhase: evidence.rotationPhase,
-    checks: Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, evidence.checks[name]])),
+    checks: { ...Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, evidence.checks[name]])), legacyQrKeypairUnrecoverable: evidence.checks.legacyQrKeypairUnrecoverable },
   };
 }
 
@@ -49,8 +49,11 @@ export async function runStrictOnboardingProbes({ probes, expected } = {}) {
   const checks = {};
   for (const name of STRICT_ONBOARDING_CHECKS) {
     if (typeof probes[name] !== "function") throw new Error(`Mandatory onboarding probe is unavailable: ${name}.`);
-    checks[name] = asBoolean(await probes[name]({ expected }), name);
+    const result = await probes[name]({ expected });
+    checks[name] = name === "qrPreviousRuntimeVerify" ? result === true : asBoolean(result, name);
   }
+  checks.legacyQrKeypairUnrecoverable = typeof probes.legacyQrKeypairUnrecoverable === "function" && await probes.legacyQrKeypairUnrecoverable({ expected }) === true;
+  if (checks.qrPreviousRuntimeVerify === checks.legacyQrKeypairUnrecoverable) throw new Error("Mandatory onboarding QR continuity check failed.");
   const evidence = {
     sourceSha: expected.sourceSha,
     imageDigest: expected.imageDigest,
@@ -71,6 +74,7 @@ export async function runStrictOnboardingProbes({ probes, expected } = {}) {
       jwtInvalidRuntimeRejected: checks.jwtInvalidRuntimeRejected,
       qrCurrentRuntimeVerify: checks.qrCurrentRuntimeVerify,
       qrPreviousRuntimeVerify: checks.qrPreviousRuntimeVerify,
+      legacyQrKeypairUnrecoverable: checks.legacyQrKeypairUnrecoverable,
       qrTamperMatchingKeyTest: checks.qrTamperMatchingKeyTest,
       qrUnknownKeyRejected: checks.qrUnknownKeyRejected,
       cookieCurrentSealOnly: checks.refresh,

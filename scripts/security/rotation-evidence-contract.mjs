@@ -64,10 +64,12 @@ export const validateRotationEvidenceContract = (evidence, { now = Date.now(), r
     if (!hasRealReference(evidence?.cleanupEvidenceRef)) failures.push("rotation evidence cleanupEvidenceRef must be machine-verifiable");
     const proofNames = [
       "previousJwtSlotRetired", "previousQrPublicSlotRetired", "jwtPendingRetired", "qrPrivatePendingRetired", "qrPublicPendingRetired",
-      "cleanupDeploymentAfterRetirement", "cleanupRuntimeVerified", "jwtPreviousRuntimeRejected", "qrPreviousRuntimeRejected",
+      "cleanupDeploymentAfterRetirement", "cleanupRuntimeVerified", "jwtPreviousRuntimeRejected",
       "jwtCurrentRuntimeVerify", "qrCurrentRuntimeVerify", "qrUnknownKeyRejected", "serviceHealthy",
     ];
     for (const name of proofNames) if (evidence?.proofs?.[name] !== true) failures.push(`rotation evidence cleanup proof ${name} must be true`);
+    const legacyQrKeypairUnrecoverable = evidence?.proofs?.historicalContinuity === "LEGACY_QR_KEYPAIR_UNRECOVERABLE" && evidence?.proofs?.legacyQrKeypairUnrecoverable === true;
+    if (legacyQrKeypairUnrecoverable ? evidence?.proofs?.qrPreviousRuntimeRejected !== false || evidence?.proofs?.qrPreviousSlotAbsent !== true : evidence?.proofs?.qrPreviousRuntimeRejected !== true) failures.push("rotation evidence QR retirement proof is invalid");
   }
 
   const families = Array.isArray(evidence?.families) ? evidence.families : [];
@@ -87,6 +89,8 @@ export const validateRotationEvidenceContract = (evidence, { now = Date.now(), r
       if (!text(family?.currentKeyVersion) || !text(family?.previousKeyVersion) || text(family.currentKeyVersion) === text(family.previousKeyVersion)) {
         failures.push("rotation evidence QR key versions must be present and distinct");
       }
+      const unrecoverable = family?.historicalContinuity === "LEGACY_QR_KEYPAIR_UNRECOVERABLE";
+      if (unrecoverable ? family?.rollbackCapable !== false : family?.historicalContinuity !== undefined && (family.historicalContinuity !== "VERIFIED_PREVIOUS_QR" || family.rollbackCapable !== true)) failures.push("rotation evidence QR continuity semantics are invalid");
     }
   }
 

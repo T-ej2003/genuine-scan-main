@@ -7,12 +7,16 @@ import { verifyJwtWithCurrentOrPrevious } from "../utils/security";
 type RuntimeInput = {
   currentJwtToken: string;
   previousJwtToken: string;
-  previousQrToken: string;
+  qrFixtureToken: string;
+  historicalContinuity: "VERIFIED_PREVIOUS_QR" | "LEGACY_QR_KEYPAIR_UNRECOVERABLE";
   artifactHistoricalPayload?: string;
   artifactHistoricalSignature?: unknown;
   healthEvidence: HealthEvidence;
   now?: () => number;
 };
+
+const QR_CONTINUITY_VERIFIED = "VERIFIED_PREVIOUS_QR";
+const QR_CONTINUITY_UNRECOVERABLE = "LEGACY_QR_KEYPAIR_UNRECOVERABLE";
 
 type HealthEvidence = {
   serviceHealthy: boolean;
@@ -82,7 +86,7 @@ const verifyArtifactRuntime = (payload: string | undefined, envelope: unknown) =
   return true;
 };
 
-export const verifyProductionRotationRuntime = ({ currentJwtToken, previousJwtToken, previousQrToken, artifactHistoricalPayload, artifactHistoricalSignature, healthEvidence, now = Date.now }: RuntimeInput) => {
+export const verifyProductionRotationRuntime = ({ currentJwtToken, previousJwtToken, qrFixtureToken, historicalContinuity, artifactHistoricalPayload, artifactHistoricalSignature, healthEvidence, now = Date.now }: RuntimeInput) => {
   const health = validateHealthEvidence(healthEvidence, now);
   const currentJwt = requiredEnv("JWT_SECRET_CURRENT");
   const previousJwt = requiredEnv("JWT_SECRET_PREVIOUS");
@@ -101,7 +105,11 @@ export const verifyProductionRotationRuntime = ({ currentJwtToken, previousJwtTo
 
   const currentQrToken = signQrPayload({ qr_id: "rotation-runtime", batch_id: null, licensee_id: "rotation", iat: Math.floor(now() / 1000), nonce: createHash("sha256").update("rotation-runtime").digest("hex").slice(0, 24) });
   verifyQrToken(currentQrToken);
-  verifyQrToken(previousQrToken);
+  verifyQrToken(qrFixtureToken);
+  const legacyQrKeypairUnrecoverable = historicalContinuity === QR_CONTINUITY_UNRECOVERABLE;
+  if (!legacyQrKeypairUnrecoverable && historicalContinuity !== QR_CONTINUITY_VERIFIED) throw new Error("QR historical continuity is invalid");
+  const qrPreviousSlotAbsent = !String(process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS || "").trim() && !String(process.env.QR_SIGN_PREVIOUS_KEY_VERSION || "").trim();
+  if (legacyQrKeypairUnrecoverable && !qrPreviousSlotAbsent) throw new Error("unrecoverable legacy QR material must not be trusted as previous");
 
   const tamperedCurrent = tokenWithPayload(currentQrToken, (payload) => ({ ...payload, qr_id: "rotation-runtime-tampered" }));
   let tamperRejected = false;
@@ -130,7 +138,10 @@ export const verifyProductionRotationRuntime = ({ currentJwtToken, previousJwtTo
     jwtPreviousRuntimeVerify: true,
     jwtInvalidRuntimeRejected: invalidRejected,
     qrCurrentRuntimeVerify: true,
-    qrPreviousRuntimeVerify: true,
+    qrPreviousRuntimeVerify: !legacyQrKeypairUnrecoverable,
+    historicalContinuity,
+    legacyQrKeypairUnrecoverable,
+    qrPreviousSlotAbsent,
     qrTamperMatchingKeyTest: tamperRejected,
     qrUnknownKeyRejected: unknownRejected,
     artifactCurrentRuntimeVerify: true,
@@ -139,7 +150,7 @@ export const verifyProductionRotationRuntime = ({ currentJwtToken, previousJwtTo
   };
 };
 
-export const verifyProductionRotationCleanupRuntime = ({ currentJwtToken, previousJwtToken, previousQrToken, artifactHistoricalPayload, artifactHistoricalSignature, healthEvidence, now = Date.now }: RuntimeInput) => {
+export const verifyProductionRotationCleanupRuntime = ({ currentJwtToken, previousJwtToken, qrFixtureToken, historicalContinuity, artifactHistoricalPayload, artifactHistoricalSignature, healthEvidence, now = Date.now }: RuntimeInput) => {
   const health = validateHealthEvidence(healthEvidence, now);
   const currentJwt = requiredEnv("JWT_SECRET_CURRENT");
   const preparedCurrentJwtToken = verifyJwtFixtureInSlot(currentJwtToken, currentJwt, "current");
@@ -153,11 +164,19 @@ export const verifyProductionRotationCleanupRuntime = ({ currentJwtToken, previo
 
   const currentQrToken = signQrPayload({ qr_id: "rotation-cleanup-runtime", batch_id: null, licensee_id: "rotation", iat: Math.floor(now() / 1000), nonce: createHash("sha256").update("rotation-cleanup-runtime").digest("hex").slice(0, 24) });
   verifyQrToken(currentQrToken);
+  const legacyQrKeypairUnrecoverable = historicalContinuity === QR_CONTINUITY_UNRECOVERABLE;
+  if (!legacyQrKeypairUnrecoverable && historicalContinuity !== QR_CONTINUITY_VERIFIED) throw new Error("QR historical continuity is invalid");
+  const qrPreviousSlotAbsent = !String(process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS || "").trim() && !String(process.env.QR_SIGN_PREVIOUS_KEY_VERSION || "").trim();
+  if (!qrPreviousSlotAbsent) throw new Error("cleanup runtime still contains previous QR material");
   let previousQrRejected = false;
-  try {
-    verifyQrToken(previousQrToken);
-  } catch {
-    previousQrRejected = true;
+  if (!legacyQrKeypairUnrecoverable) {
+    try {
+      verifyQrToken(qrFixtureToken);
+    } catch {
+      previousQrRejected = true;
+    }
+  } else {
+    verifyQrToken(qrFixtureToken);
   }
   const unknownKey = signUnknownKidFixture(currentQrToken);
   let unknownRejected = false;
@@ -178,6 +197,9 @@ export const verifyProductionRotationCleanupRuntime = ({ currentJwtToken, previo
     jwtPreviousRuntimeRejected: previousJwtRejected,
     qrCurrentRuntimeVerify: true,
     qrPreviousRuntimeRejected: previousQrRejected,
+    historicalContinuity,
+    legacyQrKeypairUnrecoverable,
+    qrPreviousSlotAbsent,
     qrUnknownKeyRejected: unknownRejected,
     artifactCurrentRuntimeVerify: true,
     artifactHistoricalRuntimeVerify: verifyArtifactRuntime(artifactHistoricalPayload, artifactHistoricalSignature),

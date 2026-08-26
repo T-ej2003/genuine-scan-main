@@ -276,6 +276,9 @@ const transitionArgs = (mode, state, overrides = {}) => {
 test("rotation overlap and cleanup transitions validate state without final freshness", async () => {
   const overlapState = makeState("overlap-deploy-required");
   assert.equal(validateRotationTransition(transitionArgs("rotation-overlap", overlapState)).phase, "overlap-deploy-required");
+  const unrecoverable = makeState("overlap-deploy-required", { qr: { oldPublicFingerprint: "3".repeat(16), newPublicFingerprint: "4".repeat(16), historicalContinuity: "LEGACY_QR_KEYPAIR_UNRECOVERABLE", rollbackCapable: false } });
+  assert.equal(validateRotationTransition(transitionArgs("rotation-overlap", unrecoverable)).phase, "overlap-deploy-required");
+  assert.throws(() => validateRotationTransition(transitionArgs("rotation-overlap", { ...unrecoverable, qr: { ...unrecoverable.qr, rollbackCapable: true } })), /rollback semantics/);
   const legacyOverlapState = { ...overlapState, stateVersion: 3 }; delete legacyOverlapState.minimumGraceSeconds;
   assert.equal(validateRotationTransition(transitionArgs("rotation-overlap", legacyOverlapState)).phase, "overlap-deploy-required");
 

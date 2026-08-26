@@ -28,9 +28,11 @@ const DEPLOYMENT = /^ecs-svc\/[1-9][0-9]*$/;
 const SERVICE = "mscqr-backend-servi-euw2";
 const REQUIRED_RUNTIME_CHECKS = Object.freeze([
   "jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected",
-  "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected",
+  "qrCurrentRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected",
   "artifactCurrentRuntimeVerify", "artifactHistoricalRuntimeVerify", "serviceHealthy",
 ]);
+const QR_CONTINUITY_VERIFIED = "VERIFIED_PREVIOUS_QR";
+const QR_CONTINUITY_UNRECOVERABLE = "LEGACY_QR_KEYPAIR_UNRECOVERABLE";
 const CLEANUP_FIELDS = Object.freeze(["retirementTimestamp", "cleanupDeploymentSha", "cleanupRuntime", "cleanupCompletedAt", "cleanupEvidenceRef"]);
 
 const fail = (message) => { throw new Error(message); };
@@ -56,6 +58,10 @@ export function validateProductionInitialActivationClaimCandidateDuringAuthentic
   try { state = normalizeProductionRotationState(state).state; } catch (error) { fail(error.message); }
   if (!FINGERPRINT.test(state.jwt?.oldFingerprint || "") || !FINGERPRINT.test(state.jwt?.newFingerprint || "") || state.jwt.oldFingerprint === state.jwt.newFingerprint) fail("Current and previous JWT material identities are invalid.");
   if (!FINGERPRINT.test(state.qr?.oldPublicFingerprint || "") || !FINGERPRINT.test(state.qr?.newPublicFingerprint || "") || state.qr.oldPublicFingerprint === state.qr.newPublicFingerprint || typeof state.qr?.oldKeyVersion !== "string" || typeof state.qr?.newKeyVersion !== "string" || !state.qr.oldKeyVersion || !state.qr.newKeyVersion || state.qr.oldKeyVersion === state.qr.newKeyVersion) fail("Current and previous QR material identities are invalid.");
+  const historicalContinuity = state.qr.historicalContinuity || QR_CONTINUITY_VERIFIED;
+  const legacyQrKeypairUnrecoverable = historicalContinuity === QR_CONTINUITY_UNRECOVERABLE;
+  const rollbackCapable = legacyQrKeypairUnrecoverable ? state.qr.rollbackCapable : state.qr.rollbackCapable ?? true;
+  if (![QR_CONTINUITY_VERIFIED, QR_CONTINUITY_UNRECOVERABLE].includes(historicalContinuity) || rollbackCapable !== !legacyQrKeypairUnrecoverable) fail("QR historical continuity state is invalid.");
 
   const proof = state.overlapRuntime;
   if (!proof || typeof proof !== "object" || Array.isArray(proof) || proof.phase !== "overlap" || proof.rotationId !== state.rotationId || proof.deploymentSha !== state.overlapDeploymentSha) fail("Authenticated overlap runtime proof is missing or mismatched.");
@@ -63,8 +69,12 @@ export function validateProductionInitialActivationClaimCandidateDuringAuthentic
   if (proof.targetService !== SERVICE || proof.targetTaskDefinitionArn !== expected.taskDefinitionArn || proof.targetImageDigest !== expected.imageDigest || !TASK.test(proof.targetTaskArn || "") || proof.selectedTaskArn !== proof.targetTaskArn || !DEPLOYMENT.test(proof.targetDeploymentId || "")) fail("Overlap runtime proof is not bound to the exact ECS deployment.");
   if (proof.expectedReleaseSha !== expected.sourceSha || proof.expectedReleaseGitSha !== expected.sourceSha || proof.healthReleaseGitSha !== expected.sourceSha || proof.healthHttpStatus !== 200) fail("Overlap runtime health is not bound to protected source.");
   for (const name of REQUIRED_RUNTIME_CHECKS) if (proof[name] !== true) fail(`Overlap runtime proof is missing ${name}.`);
+  const proofHasContinuity = [proof.historicalContinuity, proof.legacyQrKeypairUnrecoverable, proof.qrPreviousSlotAbsent].some((value) => value !== undefined);
+  if ((legacyQrKeypairUnrecoverable || proofHasContinuity) && (proof.historicalContinuity !== historicalContinuity || proof.legacyQrKeypairUnrecoverable !== legacyQrKeypairUnrecoverable || proof.qrPreviousSlotAbsent !== legacyQrKeypairUnrecoverable) || proof.qrPreviousRuntimeVerify !== !legacyQrKeypairUnrecoverable) fail("Overlap runtime proof misrepresents QR historical continuity.");
   if (state.verification?.runtimeInvocationRef !== proof.runtimeInvocationRef) fail("Rotation verification does not bind the runtime invocation.");
   for (const name of REQUIRED_RUNTIME_CHECKS.filter((name) => !name.startsWith("artifact") && name !== "healthHttpStatus")) if (state.verification?.[name] !== true) fail(`Rotation verification is missing ${name}.`);
+  const verificationHasContinuity = [state.verification?.historicalContinuity, state.verification?.legacyQrKeypairUnrecoverable, state.verification?.qrPreviousSlotAbsent].some((value) => value !== undefined);
+  if ((legacyQrKeypairUnrecoverable || verificationHasContinuity) && (state.verification?.historicalContinuity !== historicalContinuity || state.verification?.legacyQrKeypairUnrecoverable !== legacyQrKeypairUnrecoverable || state.verification?.qrPreviousSlotAbsent !== legacyQrKeypairUnrecoverable) || state.verification?.qrPreviousRuntimeVerify !== !legacyQrKeypairUnrecoverable) fail("Rotation verification misrepresents QR historical continuity.");
 
   const observedAt = iso(proof.observedAt);
   const healthObservedAt = iso(proof.healthObservedAt);
@@ -92,6 +102,7 @@ export function validateProductionInitialActivationClaimCandidateDuringAuthentic
     cleanupEligibleAt: state.cleanupEligibleAt,
     minimumGraceSeconds: state.minimumGraceSeconds,
     overlapRuntimeProofSha256: canonicalSha256(proof),
+    historicalContinuity,
     cleanupPending: true,
   });
 }

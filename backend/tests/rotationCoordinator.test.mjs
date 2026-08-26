@@ -131,6 +131,19 @@ const seededRotationSecrets = () => {
   return initial;
 };
 
+const initialMigrationSecrets = ({ legacyPrivate, legacyPublic, markerSourceSha = baseConfig.sourceSha } = {}) => {
+  const { keys, initial } = initialSecrets();
+  const seeded = seededRotationSecrets();
+  Object.assign(initial, seeded);
+  initial[baseConfig.qr.privateCurrentSecretId] = material(legacyPrivate ?? keys.privateKey, { keyVersion: "legacy-v1" });
+  initial[baseConfig.qr.publicCurrentSecretId] = material(legacyPublic ?? keys.publicKey, { keyVersion: "legacy-v1" });
+  initial[baseConfig.jwt.previousSecretId] = material("", { family: "jwt_secrets", slot: "empty", sourceSha: markerSourceSha, initialMigration: true });
+  initial[baseConfig.qr.publicPreviousSecretId] = material("", { family: "qr_signing_keys", slot: "empty", sourceSha: markerSourceSha, initialMigration: true });
+  initial[baseConfig.qr.currentKeyVersionSecretId] = material("legacy-v1", { family: "qr_key_versions", slot: "current", sourceSha: markerSourceSha, initialMigration: true });
+  initial[baseConfig.qr.previousKeyVersionSecretId] = material("", { family: "qr_key_versions", slot: "previous-empty", sourceSha: markerSourceSha, initialMigration: true });
+  return initial;
+};
+
 const runtimeProof = (config, phase, observedAt, deploymentSha) => phase === "overlap"
   ? {
       rotationId: config.rotationId, phase, deploymentSha, runtimeInvocationRef: "https://example.test/runtime-overlap",
@@ -234,6 +247,7 @@ test("promotion writes pre-rotation current to previous and pending to current",
     const state = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8"));
     assert.equal(state.jwt.oldFingerprint, fingerprint("old-jwt-material"));
     const fixture = JSON.parse(readFileSync(path.join(directory, "previous-qr.json"), "utf8"));
+    assert.equal(fixture.historicalContinuity, "VERIFIED_PREVIOUS_QR");
     assert.equal(fixture.payload.qr_id, "printer-test:rotation-synthetic");
     assert.doesNotThrow(() => jwt.verify(fixture.jwtPreviousToken, "old-jwt-material", { algorithms: ["HS256"] }));
     assert.doesNotThrow(() => jwt.verify(fixture.jwtCurrentToken, JSON.parse(sm.values.get(baseConfig.jwt.currentSecretId)).value, { algorithms: ["HS256"] }));
@@ -260,6 +274,83 @@ test("canonical retired previous JWT is reusable but never becomes the old secre
     assert.doesNotThrow(() => jwt.verify(fixture.jwtPreviousToken, "old-jwt-material", { algorithms: ["HS256"] }));
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+for (const [name, legacy] of [
+  ["malformed private", { legacyPrivate: "not-a-private-key" }],
+  ["malformed public", { legacyPublic: "not-a-public-key" }],
+  ["malformed private and public", { legacyPrivate: "not-a-private-key", legacyPublic: "not-a-public-key" }],
+]) test(`initial migration records ${name} as unrecoverable without trusting it`, async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-unrecoverable-"));
+  try {
+    const sm = fakeSecrets(initialMigrationSecrets(legacy));
+    const context = contextFor(directory, baseConfig, sm);
+    await prepare(context);
+    const state = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8"));
+    const fixture = JSON.parse(readFileSync(path.join(directory, "previous-qr.json"), "utf8"));
+    assert.equal(state.qr.historicalContinuity, "LEGACY_QR_KEYPAIR_UNRECOVERABLE");
+    assert.equal(state.qr.rollbackCapable, false);
+    assert.equal(fixture.historicalContinuity, "LEGACY_QR_KEYPAIR_UNRECOVERABLE");
+    assert.equal(fixture.payload.kid, state.qr.newKeyVersion);
+    assert.notEqual(fixture.payload.kid, state.qr.oldKeyVersion);
+    assert.equal(JSON.parse(sm.values.get(baseConfig.qr.publicPreviousSecretId)).value, "");
+    assert.equal(JSON.parse(sm.values.get(baseConfig.qr.previousKeyVersionSecretId)).value, "");
+    const writes = sm.putCount;
+    const fixtureBytes = readFileSync(path.join(directory, "previous-qr.json"));
+    await prepare(context);
+    assert.equal(sm.putCount, writes);
+    assert.deepEqual(readFileSync(path.join(directory, "previous-qr.json")), fixtureBytes);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("malformed legacy QR material outside authenticated initial migration fails closed", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-malformed-noninitial-"));
+  try {
+    const initial = seededRotationSecrets();
+    initial[baseConfig.qr.privateCurrentSecretId] = material("not-a-private-key", { keyVersion: "legacy-v1" });
+    const sm = fakeSecrets(initial);
+    await assert.rejects(prepare(contextFor(directory, baseConfig, sm)), /legacy QR|private key|unsupported|DECODER/i);
+    assert.equal(sm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("initial migration still rejects malformed or mismatched pending QR material", async () => {
+  for (const mutate of [
+    (initial) => { initial[baseConfig.qr.privatePendingSecretId] = material("not-a-private-key", { rotationId: baseConfig.rotationId, family: "qr_signing_keys", slot: "pending-private", materialFingerprint: fingerprint("not-a-private-key") }); },
+    (initial) => { initial[baseConfig.qr.publicPendingSecretId] = material("not-a-public-key", { rotationId: baseConfig.rotationId, family: "qr_signing_keys", slot: "pending-public", materialFingerprint: fingerprint("not-a-public-key") }); },
+    (initial) => { const other = makeKeys().publicKey; const parsed = JSON.parse(initial[baseConfig.qr.publicPendingSecretId]); parsed.value = other; parsed.materialFingerprint = fingerprint(other); initial[baseConfig.qr.publicPendingSecretId] = JSON.stringify(parsed); },
+  ]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-bad-pending-"));
+    try {
+      const initial = initialMigrationSecrets({ legacyPrivate: "not-a-private-key", legacyPublic: "not-a-public-key" });
+      mutate(initial);
+      const sm = fakeSecrets(initial);
+      await assert.rejects(prepare(contextFor(directory, baseConfig, sm)), /pending QR|private key|public key|unsupported|DECODER/i);
+      assert.equal(sm.putCount, 0);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("unrecoverable legacy exception rejects stale initial-migration source and foreign pending rotation", async () => {
+  for (const initial of [
+    initialMigrationSecrets({ legacyPrivate: "not-a-private-key", legacyPublic: "not-a-public-key", markerSourceSha: "c".repeat(40) }),
+    (() => { const value = initialMigrationSecrets({ legacyPrivate: "not-a-private-key", legacyPublic: "not-a-public-key" }); const pending = JSON.parse(value[baseConfig.qr.privatePendingSecretId]); pending.rotationId = "foreign-rotation"; value[baseConfig.qr.privatePendingSecretId] = JSON.stringify(pending); return value; })(),
+  ]) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-bad-binding-"));
+    try {
+      const sm = fakeSecrets(initial);
+      await assert.rejects(prepare(contextFor(directory, baseConfig, sm)));
+      assert.equal(sm.putCount, 0);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }
 });
 
@@ -465,6 +556,38 @@ test("full rotation enforces grace, retires every slot, deploys after retirement
     } finally {
       rmSync(nextDirectory, { recursive: true, force: true });
     }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("unrecoverable initial QR migration verifies current material and reaches cleanup without inventing historical trust", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-unrecoverable-full-"));
+  try {
+    const clock = { now: Date.parse("2026-08-10T00:00:00.000Z") };
+    const sm = fakeSecrets(initialMigrationSecrets({ legacyPrivate: "not-a-private-key", legacyPublic: "not-a-public-key" }));
+    const context = contextFor(directory, baseConfig, sm, () => clock.now);
+    await prepare(context);
+    const overlap = runtimeProof(baseConfig, "overlap", new Date(clock.now).toISOString(), baseConfig.overlapDeploymentSha);
+    Object.assign(overlap, { historicalContinuity: "LEGACY_QR_KEYPAIR_UNRECOVERABLE", legacyQrKeypairUnrecoverable: true, qrPreviousSlotAbsent: true, qrPreviousRuntimeVerify: false });
+    await verify({ ...context, values: valuesWith(context, [["runtime-verification-file", writeProof(directory, "unrecoverable-overlap.json", overlap)]]) });
+    let state = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8"));
+    assert.equal(state.verification.qrPreviousRuntimeVerify, false);
+    assert.equal(state.verification.legacyQrKeypairUnrecoverable, true);
+    clock.now = Date.parse(state.cleanupEligibleAt);
+    const cleanupSha = "d".repeat(40);
+    const cleanupContext = { ...context, values: valuesWith(context, [["cleanup-deployment-sha", cleanupSha], ["cleanup-evidence-ref", "https://example.test/unrecoverable-cleanup"]]) };
+    await cleanup(cleanupContext);
+    state = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8"));
+    clock.now = Date.parse(state.retirementTimestamp) + 2_000;
+    const cleanupProof = runtimeProof(baseConfig, "cleanup", new Date(Date.parse(state.retirementTimestamp) + 1_000).toISOString(), cleanupSha);
+    Object.assign(cleanupProof, { historicalContinuity: "LEGACY_QR_KEYPAIR_UNRECOVERABLE", legacyQrKeypairUnrecoverable: true, qrPreviousSlotAbsent: true, qrPreviousRuntimeRejected: false });
+    const evidenceFile = path.join(directory, "unrecoverable-evidence.json");
+    await cleanup({ ...cleanupContext, values: valuesWith(cleanupContext, [["cleanup-runtime-file", writeProof(directory, "unrecoverable-cleanup.json", cleanupProof)], ["evidence-out", evidenceFile]]) });
+    const evidence = JSON.parse(readFileSync(evidenceFile, "utf8"));
+    assert.equal(evidence.proofs.qrPreviousRuntimeRejected, false);
+    assert.equal(evidence.proofs.legacyQrKeypairUnrecoverable, true);
+    assert.equal(evidence.families.find(({ name }) => name === "qr_signing_keys").rollbackCapable, false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -710,14 +833,30 @@ test("runtime proof accepts only the expected deployment SHA for overlap and cle
   try {
     const config = { rotationId: "rotation-proof", sourceSha: "a".repeat(40) };
     const common = { rotationId: config.rotationId, runtimeInvocationRef: "https://example.test/proof", observedAt: "2026-08-10T00:00:00.000Z", serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: "a".repeat(40), expectedReleaseGitSha: "a".repeat(40), healthObservedAt: "2026-08-10T00:00:00.000Z" };
-    const overlap = { ...common, phase: "overlap", deploymentSha: "a".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true };
-    const cleanupProof = { ...common, phase: "cleanup", deploymentSha: "b".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeRejected: true, qrUnknownKeyRejected: true };
+    const overlap = { ...common, phase: "overlap", deploymentSha: "a".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, historicalContinuity: "VERIFIED_PREVIOUS_QR", legacyQrKeypairUnrecoverable: false, qrPreviousSlotAbsent: false, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true };
+    const cleanupProof = { ...common, phase: "cleanup", deploymentSha: "b".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeRejected: true, historicalContinuity: "VERIFIED_PREVIOUS_QR", legacyQrKeypairUnrecoverable: false, qrPreviousSlotAbsent: true, qrUnknownKeyRejected: true };
     const overlapFile = writeProof(directory, "overlap.json", overlap);
     const cleanupFile = writeProof(directory, "cleanup.json", cleanupProof);
+    const legacyOverlap = { ...overlap };
+    const legacyCleanup = { ...cleanupProof };
+    delete legacyOverlap.historicalContinuity;
+    delete legacyOverlap.legacyQrKeypairUnrecoverable;
+    delete legacyOverlap.qrPreviousSlotAbsent;
+    delete legacyCleanup.historicalContinuity;
+    delete legacyCleanup.legacyQrKeypairUnrecoverable;
+    delete legacyCleanup.qrPreviousSlotAbsent;
+    const legacyOverlapFile = writeProof(directory, "legacy-overlap.json", legacyOverlap);
+    const legacyCleanupFile = writeProof(directory, "legacy-cleanup.json", legacyCleanup);
+    const overlapAbsentFile = writeProof(directory, "overlap-absent.json", { ...overlap, qrPreviousSlotAbsent: true });
+    const cleanupPresentFile = writeProof(directory, "cleanup-present.json", { ...cleanupProof, qrPreviousSlotAbsent: false });
     const clock = () => Date.parse("2026-08-10T00:01:00.000Z");
-    assert.doesNotThrow(() => validateRuntimeProof({ file: overlapFile, config, phase: "overlap", expectedDeploymentSha: overlap.deploymentSha, clock }));
+    assert.equal(validateRuntimeProof({ file: overlapFile, config, phase: "overlap", expectedDeploymentSha: overlap.deploymentSha, clock }).qrPreviousSlotAbsent, false);
+    assert.equal(validateRuntimeProof({ file: legacyOverlapFile, config, phase: "overlap", expectedDeploymentSha: overlap.deploymentSha, clock }).qrPreviousSlotAbsent, false);
     assert.throws(() => validateRuntimeProof({ file: overlapFile, config, phase: "overlap", expectedDeploymentSha: "c".repeat(40), clock }), /deployment SHA is invalid/);
-    assert.doesNotThrow(() => validateRuntimeProof({ file: cleanupFile, config, phase: "cleanup", expectedDeploymentSha: cleanupProof.deploymentSha, clock }));
+    assert.equal(validateRuntimeProof({ file: cleanupFile, config, phase: "cleanup", expectedDeploymentSha: cleanupProof.deploymentSha, clock }).qrPreviousSlotAbsent, true);
+    assert.equal(validateRuntimeProof({ file: legacyCleanupFile, config, phase: "cleanup", expectedDeploymentSha: cleanupProof.deploymentSha, clock }).qrPreviousSlotAbsent, true);
+    assert.throws(() => validateRuntimeProof({ file: overlapAbsentFile, config, phase: "overlap", expectedDeploymentSha: overlap.deploymentSha, clock }), /previous QR slot observation/);
+    assert.throws(() => validateRuntimeProof({ file: cleanupPresentFile, config, phase: "cleanup", expectedDeploymentSha: cleanupProof.deploymentSha, clock }), /previous QR slot observation/);
     assert.throws(() => validateRuntimeProof({ file: cleanupFile, config, phase: "cleanup", expectedDeploymentSha: "d".repeat(40), clock }), /deployment SHA is invalid/);
     assert.throws(() => validateRuntimeProof({ file: overlapFile, config, phase: "cleanup", expectedDeploymentSha: overlap.deploymentSha, clock }), /does not match this rotation/);
   } finally {

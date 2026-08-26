@@ -69,13 +69,16 @@ try {
     signature: sign(null, createHash("sha256").update(artifactHistoricalPayload).digest(), artifactHistorical.privateKey).toString("base64url"),
   };
   const healthEvidence = { serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: "a".repeat(40), expectedReleaseGitSha: "a".repeat(40), healthObservedAt: new Date().toISOString() };
-  const overlapRuntime = verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, artifactHistoricalPayload, artifactHistoricalSignature, healthEvidence });
+  const overlapRuntime = verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, qrFixtureToken: oldToken, historicalContinuity: "VERIFIED_PREVIOUS_QR", artifactHistoricalPayload, artifactHistoricalSignature, healthEvidence });
   assert.deepEqual(overlapRuntime, {
     jwtCurrentRuntimeVerify: true,
     jwtPreviousRuntimeVerify: true,
     jwtInvalidRuntimeRejected: true,
     qrCurrentRuntimeVerify: true,
     qrPreviousRuntimeVerify: true,
+    historicalContinuity: "VERIFIED_PREVIOUS_QR",
+    legacyQrKeypairUnrecoverable: false,
+    qrPreviousSlotAbsent: false,
     qrTamperMatchingKeyTest: true,
     qrUnknownKeyRejected: true,
     artifactCurrentRuntimeVerify: true,
@@ -87,30 +90,40 @@ try {
     healthObservedAt: healthEvidence.healthObservedAt,
   });
   delete process.env.JWT_SECRET_PREVIOUS;
-  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence }), /JWT_SECRET_PREVIOUS/);
+  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, qrFixtureToken: oldToken, historicalContinuity: "VERIFIED_PREVIOUS_QR", healthEvidence }), /JWT_SECRET_PREVIOUS/);
   process.env.JWT_SECRET_PREVIOUS = "jwt-previous";
 
   process.env.JWT_SECRET_CURRENT = "wrong-current";
-  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence }), /invalid signature|Invalid token|current/i);
+  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, qrFixtureToken: oldToken, historicalContinuity: "VERIFIED_PREVIOUS_QR", healthEvidence }), /invalid signature|Invalid token|current/i);
   process.env.JWT_SECRET_CURRENT = "jwt-current";
   process.env.JWT_SECRET_PREVIOUS = "wrong-previous";
-  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence }), /invalid signature|Invalid token|previous/i);
+  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, qrFixtureToken: oldToken, historicalContinuity: "VERIFIED_PREVIOUS_QR", healthEvidence }), /invalid signature|Invalid token|previous/i);
   process.env.JWT_SECRET_PREVIOUS = "jwt-previous";
+
+  delete process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS;
+  delete process.env.QR_SIGN_PREVIOUS_KEY_VERSION;
+  const initialMigrationRuntime = verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, qrFixtureToken: currentToken, historicalContinuity: "LEGACY_QR_KEYPAIR_UNRECOVERABLE", healthEvidence });
+  assert.equal(initialMigrationRuntime.qrPreviousRuntimeVerify, false);
+  assert.equal(initialMigrationRuntime.legacyQrKeypairUnrecoverable, true);
+  assert.equal(initialMigrationRuntime.qrPreviousSlotAbsent, true);
+  process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS = old.publicKey;
+  process.env.QR_SIGN_PREVIOUS_KEY_VERSION = "old-v1";
+  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, qrFixtureToken: currentToken, historicalContinuity: "LEGACY_QR_KEYPAIR_UNRECOVERABLE", healthEvidence }), /must not be trusted/);
 
   delete process.env.JWT_SECRET_PREVIOUS;
   delete process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS;
   delete process.env.QR_SIGN_PREVIOUS_KEY_VERSION;
-  const cleanupRuntime = verifyProductionRotationCleanupRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, artifactHistoricalPayload, artifactHistoricalSignature, healthEvidence });
+  const cleanupRuntime = verifyProductionRotationCleanupRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, qrFixtureToken: oldToken, historicalContinuity: "VERIFIED_PREVIOUS_QR", artifactHistoricalPayload, artifactHistoricalSignature, healthEvidence });
   assert.equal(cleanupRuntime.jwtPreviousRuntimeRejected, true);
   assert.equal(cleanupRuntime.qrPreviousRuntimeRejected, true);
   assert.equal(cleanupRuntime.jwtCurrentRuntimeVerify, true);
   assert.equal(cleanupRuntime.qrCurrentRuntimeVerify, true);
   assert.equal(cleanupRuntime.artifactHistoricalRuntimeVerify, true);
 
-  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence: { ...healthEvidence, serviceHealthy: false } }), /health/i);
-  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence: { ...healthEvidence, healthHttpStatus: 500 } }), /health/i);
-  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence: { ...healthEvidence, healthReleaseGitSha: "b".repeat(40) } }), /health/i);
-  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, previousQrToken: oldToken, healthEvidence: { ...healthEvidence, healthObservedAt: new Date(Date.now() - 301_000).toISOString() } }), /health/i);
+  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, qrFixtureToken: oldToken, historicalContinuity: "VERIFIED_PREVIOUS_QR", healthEvidence: { ...healthEvidence, serviceHealthy: false } }), /health/i);
+  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, qrFixtureToken: oldToken, historicalContinuity: "VERIFIED_PREVIOUS_QR", healthEvidence: { ...healthEvidence, healthHttpStatus: 500 } }), /health/i);
+  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, qrFixtureToken: oldToken, historicalContinuity: "VERIFIED_PREVIOUS_QR", healthEvidence: { ...healthEvidence, healthReleaseGitSha: "b".repeat(40) } }), /health/i);
+  assert.throws(() => verifyProductionRotationRuntime({ currentJwtToken: preparedCurrentJwtToken, previousJwtToken: preparedPreviousJwtToken, qrFixtureToken: oldToken, historicalContinuity: "VERIFIED_PREVIOUS_QR", healthEvidence: { ...healthEvidence, healthObservedAt: new Date(Date.now() - 301_000).toISOString() } }), /health/i);
 } finally {
   for (const key of Object.keys(process.env)) {
     if (!(key in restore)) delete process.env[key];
