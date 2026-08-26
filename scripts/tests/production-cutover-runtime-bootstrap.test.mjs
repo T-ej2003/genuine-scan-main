@@ -8,7 +8,8 @@ import { createHash } from "node:crypto";
 import { createProductionCutoverAdapters, createProductionRotationInfrastructureAdapter } from "../aws/production-cutover-production-adapters.mjs";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
-import { parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { buildInitialMigrationSourceAdvance, parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { productionSupersessionEvidenceIdentity, productionSupersessionVersionId } from "../security/production-initial-migration-source-advance.mjs";
 import { assertUniqueSecretBindingNames, buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-contract.mjs";
@@ -49,6 +50,22 @@ const bindings = {
   },
 };
 
+function sourceAdvanceEvidence(originalSourceSha, rotationId, sourceBindings = bindings) {
+  const arns = {
+    jwtPending: sourceBindings.jwt.pendingSecretId,
+    qrPrivatePending: sourceBindings.qr.privatePendingSecretId,
+    qrPublicPending: sourceBindings.qr.publicPendingSecretId,
+    jwtPrevious: sourceBindings.jwt.previousSecretId,
+    qrPublicPrevious: sourceBindings.qr.publicPreviousSecretId,
+    qrCurrentVersion: sourceBindings.qr.currentKeyVersionSecretId,
+    qrPreviousVersion: sourceBindings.qr.previousKeyVersionSecretId,
+  };
+  const resources = Object.fromEntries(Object.entries(arns).map(([slot, arn]) => [slot, { arn, versionId: productionSupersessionVersionId(originalSourceSha, rotationId, slot), stages: ["AWSCURRENT"] }]));
+  const evidence = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha: originalSourceSha, staleSourceSha: "7".repeat(40), rotationId, staleRotationId: "rotation-stale-source", generatedAt: "2026-08-26T06:06:32.000Z", resources };
+  evidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(evidence);
+  return evidence;
+}
+
 function gitFixture(expectedSha = sourceSha) {
   return (file, args) => {
     if (file === "git" && args[0] === "status") return "";
@@ -63,8 +80,8 @@ function approval() {
   return { ticket: "CHG-ROTATION-0001", approvedBy: "security@example.invalid", approverRole: "Security Lead", reason: "Scheduled production security rotation", verificationRef: "https://example.invalid/approval/1", minimumGraceSeconds: PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS };
 }
 
-function taskDefinition() {
-  return { taskDefinition: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", containerDefinitions: [{ name: "backend", environment: [{ name: "PUBLIC_APP_URL", value: "https://www.mscqr.com" }, { name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "qr-v1" }] }] } };
+function taskDefinition(taskBindings = bindings) {
+  return { taskDefinition: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", containerDefinitions: [{ name: "backend", environment: [{ name: "PUBLIC_APP_URL", value: "https://www.mscqr.com" }, { name: "QR_SIGN_ACTIVE_KEY_VERSION", value: taskBindings.qr.previousKeyVersion }], secrets: [{ name: "JWT_SECRET", valueFrom: taskBindings.jwt.currentSecretId }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: taskBindings.qr.privateCurrentSecretId }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: taskBindings.qr.publicCurrentSecretId }] }] } };
 }
 
 function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha) {
@@ -146,6 +163,55 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     assert.doesNotMatch(readFileSync(result.configPath, "utf8"), /PRIVATE KEY|SecretString|fixture-password|123456/);
   } finally {
     rmSync(path.join(repositoryRoot, "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("source-advance bridge anchors legacy-current bindings to the live task definition", () => {
+  const originalSourceSha = "5".repeat(40);
+  const rotationId = "rotation-source-advance";
+  const rotationBindings = { ...bindings, sourceSha: originalSourceSha, rotationId, legacy: { jwtCurrent: bindings.jwt.currentSecretId, qrPrivateCurrent: bindings.qr.privateCurrentSecretId, qrPublicCurrent: bindings.qr.publicCurrentSecretId, qrCurrentVersion: bindings.qr.previousKeyVersion } };
+  const evidence = sourceAdvanceEvidence(originalSourceSha, rotationId, rotationBindings);
+  const liveLegacyBaseline = { jwtCurrent: bindings.jwt.currentSecretId, qrPrivateCurrent: bindings.qr.privateCurrentSecretId, qrPublicCurrent: bindings.qr.publicCurrentSecretId, qrCurrentVersion: bindings.qr.previousKeyVersion };
+  const input = { currentSourceSha: sourceSha, rotationBindings, supersessionEvidence: evidence, liveLegacyBaseline, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === originalSourceSha && descendantSha === sourceSha };
+  const bridge = buildInitialMigrationSourceAdvance(input);
+  assert.equal(bridge.supersessionEvidence.sourceSha, originalSourceSha);
+  assert.equal(bridge.currentSourceSha, sourceSha);
+  for (const changed of [
+    { rotationBindings: { ...rotationBindings, rotationId: "rotation-foreign" } },
+    { proveDescendant: () => false },
+    { supersessionEvidence: { ...evidence, resources: { ...evidence.resources, jwtPending: { ...evidence.resources.jwtPending, arn: bindings.jwt.currentSecretId } } } },
+  ]) assert.throws(() => buildInitialMigrationSourceAdvance({ ...input, ...changed }));
+
+  for (const field of ["jwt.currentSecretId", "qr.privateCurrentSecretId", "qr.publicCurrentSecretId"]) {
+    const [group, name] = field.split(".");
+    const changedBindings = { ...rotationBindings, [group]: { ...rotationBindings[group], [name]: `${rotationBindings[group][name]}-changed` } };
+    assert.throws(() => buildInitialMigrationSourceAdvance({ ...input, rotationBindings: changedBindings }), /authenticated live legacy/);
+  }
+  const changedSeven = { ...rotationBindings, jwt: { ...rotationBindings.jwt, pendingSecretId: `${rotationBindings.jwt.pendingSecretId}-changed` } };
+  assert.throws(() => buildInitialMigrationSourceAdvance({ ...input, rotationBindings: changedSeven }), /resources do not match/);
+});
+
+test("runtime config carries the authenticated source-advance bridge into coordinator approval bytes", () => {
+  const directory = fsTemp();
+  try {
+    const originalSourceSha = "5".repeat(40);
+    const rotationId = "rotation-source-advance";
+    const rotationBindings = { ...bindings, sourceSha: originalSourceSha, rotationId, legacy: { jwtCurrent: bindings.jwt.currentSecretId, qrPrivateCurrent: bindings.qr.privateCurrentSecretId, qrPublicCurrent: bindings.qr.publicCurrentSecretId, qrCurrentVersion: bindings.qr.previousKeyVersion } };
+    const evidence = sourceAdvanceEvidence(originalSourceSha, rotationId, rotationBindings);
+    const input = {
+      ...fullInput(directory, process.cwd()),
+      rotationBindings,
+      rotationSupersessionEvidence: evidence,
+      proveSourceAdvance: () => true,
+    };
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, true);
+    assert.equal(result.config.initialMigrationSourceAdvance.supersessionEvidence.sourceSha, originalSourceSha);
+    assert.equal(result.config.sourceSha, sourceSha);
+    assert.deepEqual(JSON.parse(readFileSync(result.configPath, "utf8")).initialMigrationSourceAdvance, result.config.initialMigrationSourceAdvance);
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
     rmSync(directory, { recursive: true, force: true });
   }
 });

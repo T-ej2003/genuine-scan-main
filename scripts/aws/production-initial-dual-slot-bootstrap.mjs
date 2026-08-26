@@ -4,6 +4,10 @@ import { chmodSync, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSy
 import path from "node:path";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { rotationBindingsToTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
+import { productionSupersessionEvidenceIdentity } from "../security/production-initial-migration-source-advance.mjs";
+import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
+
+export { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 
 const requireBackend = createRequire(path.resolve("backend/package.json"));
 const {
@@ -41,35 +45,6 @@ const required = (value, label) => {
   return value.trim();
 };
 const notFound = (error) => /ResourceNotFoundException|not exist|can't find/i.test(String(error?.name || error?.message || error));
-
-const legacySecret = (container, name) => container?.secrets?.find((secret) => secret.name === name)?.valueFrom;
-const backendContainer = (taskDefinition) => {
-  const container = (taskDefinition?.taskDefinition || taskDefinition)?.containerDefinitions?.find(({ name }) => name === "backend");
-  if (!container) throw new Error("Live task definition does not contain the reviewed backend container.");
-  return container;
-};
-
-export function deriveLegacyRotationBaseline(taskDefinition) {
-  const container = backendContainer(taskDefinition);
-  const environment = Object.fromEntries((container.environment || []).map(({ name, value }) => [name, value]));
-  const baseline = {
-    jwtCurrent: legacySecret(container, "JWT_SECRET"),
-    qrPrivateCurrent: legacySecret(container, "QR_SIGN_PRIVATE_KEY"),
-    qrPublicCurrent: legacySecret(container, "QR_SIGN_PUBLIC_KEY"),
-    qrCurrentVersion: environment.QR_SIGN_ACTIVE_KEY_VERSION,
-  };
-  for (const [name, value] of Object.entries(baseline)) {
-    if (name === "qrCurrentVersion") {
-      if (!VERSION.test(String(value || ""))) throw new Error("Live QR active key version is invalid.");
-    } else if (!SECRET_ARN.test(String(value || ""))) {
-      throw new Error(`Live legacy ${name} binding is invalid.`);
-    }
-  }
-  if (new Set([baseline.jwtCurrent, baseline.qrPrivateCurrent, baseline.qrPublicCurrent]).size !== 3) {
-    throw new Error("Live legacy signing bindings must be distinct.");
-  }
-  return Object.freeze(baseline);
-}
 
 const emptySlot = (family, slot, sourceSha) => ({ value: "", family, slot, sourceSha, initialMigration: true });
 const versionSlot = (value, slot, sourceSha) => ({ value, family: "qr_key_versions", slot, sourceSha, initialMigration: true });
@@ -313,10 +288,6 @@ function assertRotationVersionTopology(response, name) {
   return stages;
 }
 
-function supersessionEvidenceIdentity({ sourceSha, staleSourceSha, rotationId, staleRotationId, resources }) {
-  return sha256(JSON.stringify({ schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha, staleSourceSha, rotationId, staleRotationId, resources }));
-}
-
 function readExistingSupersessionEvidence({ outputFile, repositoryRoot, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, transitionVersionId }) {
   const stat = lstatSync(outputFile, { throwIfNoEntry: false });
   if (!stat) return null;
@@ -325,7 +296,7 @@ function readExistingSupersessionEvidence({ outputFile, repositoryRoot, sourceSh
   let evidence;
   try { evidence = JSON.parse(bytes.toString("utf8")); } catch { throw new Error("Existing stale rotation supersession evidence is malformed."); }
   const expectedResources = Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: transitionVersionId(slot), stages: ["AWSCURRENT"] }]));
-  const expectedIdentity = supersessionEvidenceIdentity({ sourceSha, staleSourceSha, rotationId, staleRotationId, resources: expectedResources });
+  const expectedIdentity = productionSupersessionEvidenceIdentity({ sourceSha, staleSourceSha, rotationId, staleRotationId, resources: expectedResources });
   const expectedKeys = ["schemaVersion", "transition", "sourceSha", "staleSourceSha", "rotationId", "staleRotationId", "generatedAt", "resources", "evidenceIdentitySha256"];
   if (Object.keys(evidence).sort().join(",") !== expectedKeys.sort().join(",") || evidence.schemaVersion !== 1 || evidence.transition !== "SUPERSEDE_STALE_PENDING" || evidence.sourceSha !== sourceSha || evidence.staleSourceSha !== staleSourceSha || evidence.rotationId !== rotationId || evidence.staleRotationId !== staleRotationId || JSON.stringify(evidence.resources) !== JSON.stringify(expectedResources) || evidence.evidenceIdentitySha256 !== expectedIdentity || !Number.isFinite(Date.parse(evidence.generatedAt)) || bytes.toString("utf8") !== `${JSON.stringify(evidence, null, 2)}\n`) throw new Error("Existing stale rotation supersession evidence does not match the authenticated transition.");
   return { evidence, sha256: sha256(bytes) };
@@ -425,7 +396,7 @@ export async function supersedeStalePendingRotation({ send, sourceSha, staleSour
     generatedAt: new Date().toISOString(),
     resources: expectedEvidenceResources,
   };
-  const evidence = { ...evidenceCore, evidenceIdentitySha256: supersessionEvidenceIdentity(evidenceCore) };
+  const evidence = { ...evidenceCore, evidenceIdentitySha256: productionSupersessionEvidenceIdentity(evidenceCore) };
   const bytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`);
   const persisted = existingEvidence || writeStageBPrivateFileAtomic({ filePath: outputFile, bytes, repositoryRoot, label: "Stale rotation supersession evidence" });
   if (lstatSync(materialFile, { throwIfNoEntry: false })) unlinkSync(materialFile);

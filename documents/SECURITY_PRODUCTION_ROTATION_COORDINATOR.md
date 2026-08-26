@@ -70,6 +70,19 @@ window, cleanup, and every new-material check remain unchanged. Any malformed
 legacy QR material outside those authenticated initial-migration markers fails
 closed.
 
+If protected main advances solely to make that initial migration consumable,
+runtime preparation must also receive the canonical
+`--rotation-supersession-evidence` file. It emits an
+`initialMigrationSourceAdvance` binding only after matching the three
+legacy-current JWT/QR identifiers to the live ECS task definition and proving
+the original source is an ancestor of protected main. The coordinator then
+independently rechecks the seven superseded slots against their live
+deterministic Secrets Manager versions before any write. It preserves the
+original marker source SHA separately from the current execution SHA; it never
+rewrites historical marker bytes. Missing or modified evidence, another
+rotation/material set, an unrelated source, or any non-initial rotation fails
+closed.
+
 The coordinator does not deploy ECS. The existing approved deployment workflow
 must perform the overlap deployment and run the deployment-side verifier inside
 that task. The verifier uses the compiled application `verifyJwtWithCurrentOrPrevious`

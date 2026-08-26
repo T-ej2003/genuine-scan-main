@@ -6,7 +6,6 @@ import path from "node:path";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
 import { createInitialDualSlotSecretsManagerClient, supersedeStalePendingRotation, bootstrapInitialDualSlotRotation } from "./production-initial-dual-slot-bootstrap.mjs";
-import { writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
 const parse = (argv) => {
   const accepted = new Set(["output-directory", "stale-source-sha", "stale-rotation-id", "source-sha", "rotation-id"]);
@@ -38,6 +37,4 @@ const result = await supersedeStalePendingRotation({
   outputFile: path.join(outputDirectory, "rotation-supersession.json"), repositoryRoot: process.cwd(),
 });
 const binding = await bootstrapInitialDualSlotRotation({ send: (command) => client.send(command), taskDefinition, sourceSha, rotationId, outputFile: path.join(outputDirectory, "rotation-bindings.json"), repositoryRoot: process.cwd() });
-const manifest = { status: "valid", transition: result.transition, sourceSha, staleSourceSha: result.staleSourceSha, rotationId, staleRotationId, supersessionEvidenceFile: result.evidenceFile, supersessionEvidenceSha256: result.evidenceSha256, bindingFile: binding.bindingFile, bindingEvidenceSha256: binding.evidenceSha256, writes: result.writes };
-writeStageBPrivateFileAtomic({ filePath: path.join(outputDirectory, "rotation-supersession-manifest.json"), bytes: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`), repositoryRoot: process.cwd(), label: "Rotation supersession manifest" });
-process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
+process.stdout.write(`${JSON.stringify({ status: "valid", transition: result.transition, sourceSha, staleSourceSha: result.staleSourceSha, rotationId, staleRotationId, supersessionEvidenceFile: result.evidenceFile, bindingFile: binding.bindingFile, writes: result.writes }, null, 2)}\n`);

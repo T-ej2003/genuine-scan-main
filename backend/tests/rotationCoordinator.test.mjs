@@ -7,6 +7,10 @@ import test from "node:test";
 import jwt from "jsonwebtoken";
 import { assertIdentity, cleanup, prepare, readCurrentState, validateRuntimeProof, verify } from "../scripts/security/rotate-production-signing-material.mjs";
 import {
+  productionSupersessionEvidenceIdentity,
+  productionSupersessionVersionId,
+} from "../../scripts/security/production-initial-migration-source-advance.mjs";
+import {
   PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT,
   normalizeProductionRotationState,
   PRODUCTION_ROTATION_LEGACY_STATE_VERSION,
@@ -135,6 +139,11 @@ const initialMigrationSecrets = ({ legacyPrivate, legacyPublic, markerSourceSha 
   const { keys, initial } = initialSecrets();
   const seeded = seededRotationSecrets();
   Object.assign(initial, seeded);
+  for (const id of [baseConfig.jwt.pendingSecretId, baseConfig.qr.privatePendingSecretId, baseConfig.qr.publicPendingSecretId]) {
+    const pending = JSON.parse(initial[id]);
+    pending.sourceSha = markerSourceSha;
+    initial[id] = JSON.stringify(pending);
+  }
   initial[baseConfig.qr.privateCurrentSecretId] = material(legacyPrivate ?? keys.privateKey, { keyVersion: "legacy-v1" });
   initial[baseConfig.qr.publicCurrentSecretId] = material(legacyPublic ?? keys.publicKey, { keyVersion: "legacy-v1" });
   initial[baseConfig.jwt.previousSecretId] = material("", { family: "jwt_secrets", slot: "empty", sourceSha: markerSourceSha, initialMigration: true });
@@ -142,6 +151,23 @@ const initialMigrationSecrets = ({ legacyPrivate, legacyPublic, markerSourceSha 
   initial[baseConfig.qr.currentKeyVersionSecretId] = material("legacy-v1", { family: "qr_key_versions", slot: "current", sourceSha: markerSourceSha, initialMigration: true });
   initial[baseConfig.qr.previousKeyVersionSecretId] = material("", { family: "qr_key_versions", slot: "previous-empty", sourceSha: markerSourceSha, initialMigration: true });
   return initial;
+};
+
+const sourceAdvanceFixture = ({ originalSourceSha = "c".repeat(40), currentSourceSha = baseConfig.sourceSha, rotationId = baseConfig.rotationId } = {}) => {
+  const arns = {
+    jwtPending: baseConfig.jwt.pendingSecretId,
+    qrPrivatePending: baseConfig.qr.privatePendingSecretId,
+    qrPublicPending: baseConfig.qr.publicPendingSecretId,
+    jwtPrevious: baseConfig.jwt.previousSecretId,
+    qrPublicPrevious: baseConfig.qr.publicPreviousSecretId,
+    qrCurrentVersion: baseConfig.qr.currentKeyVersionSecretId,
+    qrPreviousVersion: baseConfig.qr.previousKeyVersionSecretId,
+  };
+  const resources = Object.fromEntries(Object.entries(arns).map(([slot, arn]) => [slot, { arn, versionId: productionSupersessionVersionId(originalSourceSha, rotationId, slot), stages: ["AWSCURRENT"] }]));
+  const evidence = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha: originalSourceSha, staleSourceSha: "d".repeat(40), rotationId, staleRotationId: "rotation-stale-2026", generatedAt: "2026-08-26T06:06:32.000Z", resources };
+  evidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(evidence);
+  const bridge = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE", currentSourceSha, supersessionEvidence: evidence };
+  return { bridge, versionIds: Object.fromEntries(Object.entries(resources).map(([slot, value]) => [arns[slot], value.versionId])) };
 };
 
 const runtimeProof = (config, phase, observedAt, deploymentSha) => phase === "overlap"
@@ -313,6 +339,100 @@ test("malformed legacy QR material outside authenticated initial migration fails
     initial[baseConfig.qr.privateCurrentSecretId] = material("not-a-private-key", { keyVersion: "legacy-v1" });
     const sm = fakeSecrets(initial);
     await assert.rejects(prepare(contextFor(directory, baseConfig, sm)), /legacy QR|private key|unsupported|DECODER/i);
+    assert.equal(sm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("authenticated source advancement preserves exact initial-migration identity", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-source-advance-"));
+  const originalSourceSha = "5506cbe3972a27a77c211f2891756c3b97de7197";
+  const currentSourceSha = "4b15c740f26e8b0e97178e38265633424fcfd852";
+  try {
+    const { bridge, versionIds } = sourceAdvanceFixture({ originalSourceSha, currentSourceSha });
+    const config = { ...baseConfig, sourceSha: currentSourceSha, initialMigrationSourceAdvance: bridge };
+    const sm = fakeSecrets(initialMigrationSecrets({ legacyPrivate: "not-a-private-key", legacyPublic: "not-a-public-key", markerSourceSha: originalSourceSha }), { versionIds });
+    await prepare(contextFor(directory, config, sm, undefined, { proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === originalSourceSha && descendantSha === currentSourceSha }));
+    const state = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8"));
+    assert.equal(state.sourceSha, currentSourceSha);
+    assert.equal(state.initialMigrationSourceSha, originalSourceSha);
+    assert.equal(state.qr.historicalContinuity, "LEGACY_QR_KEYPAIR_UNRECOVERABLE");
+    assert.equal(JSON.parse(sm.values.get(baseConfig.qr.publicPreviousSecretId)).value, "");
+    const writes = sm.putCount;
+    writeFileSync(path.join(directory, "state.json"), `${JSON.stringify({ ...state, initialMigrationSourceSha: "f".repeat(40) })}\n`, { mode: 0o600 });
+    await assert.rejects(prepare(contextFor(directory, config, sm, undefined, { proveDescendant: () => true })), /initial-migration source identity/);
+    assert.equal(sm.putCount, writes);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("initial-migration source advancement rejects missing, stale, foreign, or modified bindings", async () => {
+  const originalSourceSha = "c".repeat(40);
+  const base = sourceAdvanceFixture({ originalSourceSha });
+  const cases = [
+    { bridge: undefined, versions: base.versionIds, prove: true },
+    { bridge: { ...base.bridge, currentSourceSha: "f".repeat(40) }, versions: base.versionIds, prove: true },
+    { bridge: base.bridge, versions: base.versionIds, prove: false },
+    { bridge: { ...base.bridge, supersessionEvidence: { ...base.bridge.supersessionEvidence, rotationId: "rotation-foreign-2026" } }, versions: base.versionIds, prove: true },
+    { bridge: base.bridge, versions: { ...base.versionIds, [baseConfig.jwt.pendingSecretId]: "modified-version" }, prove: true },
+  ];
+  for (const entry of cases) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-source-advance-reject-"));
+    try {
+      const config = { ...baseConfig, ...(entry.bridge ? { initialMigrationSourceAdvance: entry.bridge } : {}) };
+      const sm = fakeSecrets(initialMigrationSecrets({ legacyPrivate: "not-a-private-key", legacyPublic: "not-a-public-key", markerSourceSha: originalSourceSha }), { versionIds: entry.versions });
+      await assert.rejects(prepare(contextFor(directory, config, sm, undefined, { proveDescendant: () => entry.prove })));
+      assert.equal(sm.putCount, 0);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("source-advance rejects a fully replaced local supersession artifact set before writes", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-source-advance-local-artifacts-"));
+  const originalSourceSha = "c".repeat(40);
+  try {
+    const { bridge, versionIds } = sourceAdvanceFixture({ originalSourceSha });
+    const foreignPending = "jwt-pending-foreign";
+    const evidence = { ...bridge.supersessionEvidence, resources: { ...bridge.supersessionEvidence.resources, jwtPending: { ...bridge.supersessionEvidence.resources.jwtPending, arn: foreignPending } } };
+    evidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(evidence);
+    const config = { ...baseConfig, jwt: { ...baseConfig.jwt, pendingSecretId: foreignPending }, initialMigrationSourceAdvance: { ...bridge, supersessionEvidence: evidence } };
+    const sm = fakeSecrets(initialMigrationSecrets({ legacyPrivate: "not-a-private-key", legacyPublic: "not-a-public-key", markerSourceSha: originalSourceSha }), { versionIds });
+    await assert.rejects(prepare(contextFor(directory, config, sm, undefined, { proveDescendant: () => true })));
+    assert.equal(sm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("source-advance bridge cannot authorize a non-initial rotation", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-source-advance-noninitial-"));
+  try {
+    const { bridge, versionIds } = sourceAdvanceFixture();
+    const initial = seededRotationSecrets();
+    initial[baseConfig.qr.privateCurrentSecretId] = material("not-a-private-key", { keyVersion: "legacy-v1" });
+    const sm = fakeSecrets(initial, { versionIds });
+    await assert.rejects(prepare(contextFor(directory, { ...baseConfig, initialMigrationSourceAdvance: bridge }, sm, undefined, { proveDescendant: () => true })));
+    assert.equal(sm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("source-advance bridge rejects a marker changed after supersession", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-source-advance-marker-"));
+  const originalSourceSha = "c".repeat(40);
+  try {
+    const { bridge, versionIds } = sourceAdvanceFixture({ originalSourceSha });
+    const initial = initialMigrationSecrets({ legacyPrivate: "not-a-private-key", legacyPublic: "not-a-public-key", markerSourceSha: originalSourceSha });
+    const changed = JSON.parse(initial[baseConfig.qr.publicPreviousSecretId]);
+    changed.sourceSha = "f".repeat(40);
+    initial[baseConfig.qr.publicPreviousSecretId] = JSON.stringify(changed);
+    const sm = fakeSecrets(initial, { versionIds });
+    await assert.rejects(prepare(contextFor(directory, { ...baseConfig, initialMigrationSourceAdvance: bridge }, sm, undefined, { proveDescendant: () => true })));
     assert.equal(sm.putCount, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
