@@ -760,7 +760,7 @@
         "sid": "PublishExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "f045b9cb3a49ea1331bb648cf4737ebbf37dc5b36b6ec2bd0bb2cda033e2b3cd"
+        "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
       },
       "required": true,
       "mutation": true
@@ -1042,7 +1042,7 @@
         "sid": "CreateExactActivationLifecycleConditionally",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8161f743a759a857df0b247938d1e519fe7a4c6cb247aff5e6b965c61211bec8"
+        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
       },
       "required": true,
       "mutation": true
@@ -1072,7 +1072,7 @@
         "sid": "CreateExactActivationLifecycleConditionally",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8161f743a759a857df0b247938d1e519fe7a4c6cb247aff5e6b965c61211bec8"
+        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
       },
       "required": true,
       "mutation": true
@@ -1105,7 +1105,7 @@
         "sid": "ReadExactActivationLifecycle",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8161f743a759a857df0b247938d1e519fe7a4c6cb247aff5e6b965c61211bec8"
+        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
       },
       "required": true,
       "mutation": false
@@ -1138,7 +1138,7 @@
         "sid": "ReadExactActivationLifecycle",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "8161f743a759a857df0b247938d1e519fe7a4c6cb247aff5e6b965c61211bec8"
+        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
       },
       "required": true,
       "mutation": false
@@ -1294,6 +1294,31 @@
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
         "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "manifest-apply-stage-a-production-artifacts-bucket-policy",
+      "phase": "wrapper-apply",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "apply-stage-a-production-artifacts-bucket-policy",
+      "action": "s3:PutBucketPolicy",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "plan-derived-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "ApplyCompleteProductionArtifactsBucketPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
       },
       "required": true,
       "mutation": true
@@ -4946,6 +4971,31 @@
       "mutation": false
     },
     {
+      "id": "manifest-refresh-stage-a-production-artifacts-bucket-policy",
+      "phase": "refresh-only",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "refresh-stage-a-production-artifacts-bucket-policy",
+      "action": "s3:GetBucketPolicy",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "context": [],
+      "classification": "TERRAFORM_REFRESH_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "ReadCompleteProductionArtifactsBucketPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "manifest-refresh-stage-a-provider-log-groups",
       "phase": "refresh-only",
       "identity": "RELEASE_DEPLOYER",
@@ -6946,6 +6996,31 @@
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
         "expectedVersion": "signed-administrator-evidence",
         "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "manifest-unrelated-bucket-policy-write",
+      "phase": "refresh-only",
+      "identity": "ADMINISTRATOR",
+      "executor": "iam-simulator",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "unrelated-bucket-policy-write",
+      "action": "s3:PutBucketPolicy",
+      "resources": [
+        "arn:aws:s3:::unrelated-bucket"
+      ],
+      "context": [],
+      "classification": "FORBIDDEN",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": null,
+        "sid": "implicit-deny",
+        "livePolicyArn": null,
+        "expectedVersion": null,
+        "expectedPolicySha256": null
       },
       "required": true,
       "mutation": true

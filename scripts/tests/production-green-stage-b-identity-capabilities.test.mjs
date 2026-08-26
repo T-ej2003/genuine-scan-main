@@ -58,7 +58,7 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 41, capabilities: 329, uniqueActions: 130, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 41, capabilities: 332, uniqueActions: 131, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
@@ -66,6 +66,21 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   assert.equal(first.capabilities.find(({ id }) => id === "manifest-release-deployer-ecs-exec").identity, "ADMINISTRATOR");
   assert.equal(first.capabilities.filter(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:PutSecretValue" && resources.includes("arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho")).length, 1);
   assert.equal(first.capabilities.filter(({ identity, action, resources }) => identity === "RELEASE_DEPLOYER" && action === "secretsmanager:PutSecretValue" && resources.includes("arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho")).length, 0);
+  for (const [id, action, mutation] of [
+    ["manifest-refresh-stage-a-production-artifacts-bucket-policy", "s3:GetBucketPolicy", false],
+    ["manifest-apply-stage-a-production-artifacts-bucket-policy", "s3:PutBucketPolicy", true],
+  ]) assert(first.capabilities.some((capability) => capability.id === id
+    && capability.action === action
+    && capability.identity === "RELEASE_DEPLOYER"
+    && capability.resources.length === 1
+    && capability.resources[0] === "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+    && capability.policy.sourceFile === "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json"
+    && capability.mutation === mutation));
+  assert(first.capabilities.some((capability) => capability.id === "manifest-unrelated-bucket-policy-write"
+    && capability.action === "s3:PutBucketPolicy"
+    && capability.classification === "FORBIDDEN"
+    && capability.resources.length === 1
+    && capability.resources[0] === "arn:aws:s3:::unrelated-bucket"));
   assert(first.capabilities.some(({ id, action }) => id === "recovery-list-backend-revisions" && action === "ecs:ListTaskDefinitions"));
   assert(first.capabilities.some(({ id, action, resources, phase, classification, mutation }) => id === "manifest-backend-health-recovery-register-legacy-task-definition" && action === "ecs:RegisterTaskDefinition" && resources.length === 1 && resources[0].endsWith("task-definition/mscqr-backend:*") && phase === "backend-health-recovery" && classification === "RELEASE_DIRECT_MUTATION" && mutation === true));
   assert(first.capabilities.some(({ id, action, resources, phase, classification, mutation }) => id === "manifest-backend-health-recovery-update-service" && action === "ecs:UpdateService" && resources.length === 1 && resources[0].endsWith("service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2") && phase === "backend-health-recovery" && classification === "RELEASE_DIRECT_MUTATION" && mutation === true));

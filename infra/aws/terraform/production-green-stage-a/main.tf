@@ -20,23 +20,7 @@ locals {
   ]
 }
 
-resource "aws_iam_policy" "activation_lifecycle" {
-  name = "MSCQRProductionInitialActivationLifecycle"
-  policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Sid = "ReadExactActivationLifecycle", Effect = "Allow", Action = "s3:GetObject", Resource = local.activation_lifecycle_object_arns },
-    { Sid = "CreateExactActivationLifecycleConditionally", Effect = "Allow", Action = "s3:PutObject", Resource = local.activation_lifecycle_object_arns, Condition = { StringEquals = { "s3:if-none-match" = "*" } } },
-    { Sid = "DenyNonConditionalActivationLifecycleWrites", Effect = "Deny", Action = "s3:PutObject", Resource = local.activation_lifecycle_object_arns, Condition = { StringNotEquals = { "s3:if-none-match" = "*" } } },
-    { Sid = "DenyActivationLifecycleDeletion", Effect = "Deny", Action = ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource = local.activation_lifecycle_object_arns },
-  ] })
-  tags = local.tags
-}
-
-resource "aws_iam_role_policy_attachment" "activation_lifecycle" {
-  role       = element(reverse(split("/", var.release_role_arn)), 0)
-  policy_arn = aws_iam_policy.activation_lifecycle.arn
-}
-
-resource "aws_s3_bucket_policy" "activation_lifecycle" {
+resource "aws_s3_bucket_policy" "production_artifacts" {
   bucket = trimprefix(var.receipt_bucket_arn, "arn:aws:s3:::")
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Sid = "AllowReleaseDeployerReadActivationLifecycle", Effect = "Allow", Principal = { AWS = var.release_role_arn }, Action = "s3:GetObject", Resource = local.activation_lifecycle_object_arns },
@@ -44,6 +28,7 @@ resource "aws_s3_bucket_policy" "activation_lifecycle" {
     { Sid = "DenyNonConditionalActivationLifecycleWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.activation_lifecycle_object_arns, Condition = { StringNotEquals = { "s3:if-none-match" = "*" } } },
     { Sid = "DenyOtherPrincipalsActivationLifecycleWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.activation_lifecycle_object_arns, Condition = { StringNotEquals = { "aws:PrincipalArn" = var.release_role_arn } } },
     { Sid = "DenyActivationLifecycleDeletion", Effect = "Deny", Principal = "*", Action = ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource = local.activation_lifecycle_object_arns },
+    { Sid = "DenyProductionArtifactsBucketPolicyMutation", Effect = "Deny", Principal = "*", Action = ["s3:PutBucketPolicy", "s3:DeleteBucketPolicy"], Resource = var.receipt_bucket_arn },
   ] })
 }
 

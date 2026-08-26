@@ -38,6 +38,18 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/claim.json",
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-activation-lifecycle/completion.json"
       ]
+    },
+    {
+      "Sid": "ReadCompleteProductionArtifactsBucketPolicy",
+      "Effect": "Allow",
+      "Action": "s3:GetBucketPolicy",
+      "Resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+    },
+    {
+      "Sid": "ApplyCompleteProductionArtifactsBucketPolicy",
+      "Effect": "Allow",
+      "Action": "s3:PutBucketPolicy",
+      "Resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
     }
   ]
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -27,6 +27,10 @@ const identity = {
   overlapRuntimeProofSha256: "d".repeat(64),
 };
 const claim = (overrides = {}) => buildInitialActivationClaim({ ...identity, createdAt: "2026-08-26T12:00:00.000Z", ...overrides });
+const terraformFiles = (directory) => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  const target = path.join(directory, entry.name);
+  return entry.isDirectory() ? terraformFiles(target) : entry.name.endsWith(".tf") ? [target] : [];
+});
 
 const memoryS3 = () => {
   const objects = new Map();
@@ -137,17 +141,53 @@ test("completion publication requires authenticated RLS and strict onboarding ev
 test("source policy and bucket policy enforce only exact conditional lifecycle objects", () => {
   const policy = JSON.parse(readFileSync("documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json", "utf8"));
   const terraform = readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
+  const bucketPolicy = terraform.slice(terraform.indexOf('resource "aws_s3_bucket_policy" "production_artifacts"'), terraform.indexOf("# Stage A owns only new"));
   const expected = [PRODUCTION_ACTIVATION_LIFECYCLE.claimArn, PRODUCTION_ACTIVATION_LIFECYCLE.completionArn];
-  for (const statement of policy.Statement) assert.deepEqual([statement.Resource].flat(), expected);
-  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "CreateExactActivationLifecycleConditionally").Condition, { StringEquals: { "s3:if-none-match": "*" } });
-  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "DenyNonConditionalActivationLifecycleWrites").Condition, { StringNotEquals: { "s3:if-none-match": "*" } });
-  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "DenyActivationLifecycleDeletion").Action, ["s3:DeleteObject", "s3:DeleteObjectVersion"]);
-  assert.doesNotMatch(JSON.stringify(policy), /ListBucket|production-activation-lifecycle\/\*/);
+  const lifecycle = policy.Statement.filter(({ Sid }) => ["ReadExactActivationLifecycle", "CreateExactActivationLifecycleConditionally", "DenyNonConditionalActivationLifecycleWrites", "DenyActivationLifecycleDeletion"].includes(Sid));
+  assert.equal(lifecycle.length, 4);
+  for (const statement of lifecycle) assert.deepEqual([statement.Resource].flat(), expected);
+  assert.deepEqual(lifecycle.find(({ Sid }) => Sid === "CreateExactActivationLifecycleConditionally").Condition, { StringEquals: { "s3:if-none-match": "*" } });
+  assert.deepEqual(lifecycle.find(({ Sid }) => Sid === "DenyNonConditionalActivationLifecycleWrites").Condition, { StringNotEquals: { "s3:if-none-match": "*" } });
+  assert.deepEqual(lifecycle.find(({ Sid }) => Sid === "DenyActivationLifecycleDeletion").Action, ["s3:DeleteObject", "s3:DeleteObjectVersion"]);
+  assert.doesNotMatch(JSON.stringify(lifecycle), /ListBucket|production-activation-lifecycle\/\*/);
+  assert.deepEqual(policy.Statement.filter(({ Sid }) => ["ReadCompleteProductionArtifactsBucketPolicy", "ApplyCompleteProductionArtifactsBucketPolicy"].includes(Sid)), [
+    { Sid: "ReadCompleteProductionArtifactsBucketPolicy", Effect: "Allow", Action: "s3:GetBucketPolicy", Resource: `arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}` },
+    { Sid: "ApplyCompleteProductionArtifactsBucketPolicy", Effect: "Allow", Action: "s3:PutBucketPolicy", Resource: `arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}` },
+  ]);
+  assert.match(bucketPolicy, /AllowReleaseDeployerReadActivationLifecycle[\s\S]*Principal = \{ AWS = var\.release_role_arn \}[\s\S]*Action = "s3:GetObject"[\s\S]*Resource = local\.activation_lifecycle_object_arns/);
+  assert.match(bucketPolicy, /AllowReleaseDeployerConditionalActivationLifecycleCreate[\s\S]*Principal = \{ AWS = var\.release_role_arn \}[\s\S]*Action = "s3:PutObject"[\s\S]*Resource = local\.activation_lifecycle_object_arns/);
   assert.match(terraform, /DenyNonConditionalActivationLifecycleWrites[\s\S]*Principal\s*=\s*"\*"/);
   assert.match(terraform, /DenyOtherPrincipalsActivationLifecycleWrites[\s\S]*aws:PrincipalArn[\s\S]*var\.release_role_arn/);
   assert.match(terraform, /StringEquals\s*=\s*\{\s*"s3:if-none-match"\s*=\s*"\*"\s*\}/);
   assert.match(terraform, /StringNotEquals\s*=\s*\{\s*"s3:if-none-match"\s*=\s*"\*"\s*\}/);
   assert.match(terraform, /DenyActivationLifecycleDeletion[\s\S]*s3:DeleteObjectVersion/);
+  assert.deepEqual([...bucketPolicy.matchAll(/Sid = "([^"]+)"/g)].map(([, sid]) => sid), [
+    "AllowReleaseDeployerReadActivationLifecycle",
+    "AllowReleaseDeployerConditionalActivationLifecycleCreate",
+    "DenyNonConditionalActivationLifecycleWrites",
+    "DenyOtherPrincipalsActivationLifecycleWrites",
+    "DenyActivationLifecycleDeletion",
+    "DenyProductionArtifactsBucketPolicyMutation",
+  ]);
+  assert.match(bucketPolicy, /DenyProductionArtifactsBucketPolicyMutation[\s\S]*s3:PutBucketPolicy[\s\S]*s3:DeleteBucketPolicy[\s\S]*var\.receipt_bucket_arn/);
+  assert.doesNotMatch(bucketPolicy, /rls-(?:broker-)?receipts|ignore_changes|production-activation-lifecycle\/\*/);
+});
+
+test("Stage A is the sole complete production artifacts bucket-policy owner", () => {
+  const root = "infra/aws/terraform";
+  const files = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("production-"))
+    .flatMap((entry) => terraformFiles(path.join(root, entry.name)));
+  const sources = files.map((file) => [file, readFileSync(file, "utf8")]);
+  const owners = sources.flatMap(([file, source]) => [...source.matchAll(/resource\s+"aws_s3_bucket_policy"\s+"([^"]+)"/g)]
+    .map((match) => ({ file, name: match[1], body: source.slice(match.index, source.indexOf("\nresource ", match.index + 1) < 0 ? source.length : source.indexOf("\nresource ", match.index + 1)) }))
+    .filter(({ body }) => /receipt_bucket_arn|mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/.test(body))
+    .map(({ file: ownerFile, name }) => ({ file: ownerFile, name })));
+  assert.deepEqual(owners, [{ file: "infra/aws/terraform/production-green-stage-a/main.tf", name: "production_artifacts" }]);
+  assert.equal(sources.some(([, source]) => /data\s+"aws_s3_bucket_policy"[\s\S]{0,500}(?:receipt_bucket_arn|mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an)/.test(source)), false);
+  const stageA = sources.find(([file]) => file === "infra/aws/terraform/production-green-stage-a/main.tf")[1];
+  assert.doesNotMatch(stageA, /(?:ignore_changes|\bimport\s*\{|\bmoved\s*\{)/);
+  assert.match(stageA, /resource "aws_s3_bucket_policy" "production_artifacts"[\s\S]*bucket\s*=\s*trimprefix\(var\.receipt_bucket_arn/);
 });
 
 test("strict onboarding producer rejects every deployment identity mismatch", async () => {

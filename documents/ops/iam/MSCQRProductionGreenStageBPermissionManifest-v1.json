@@ -532,6 +532,14 @@
       "evidence": "locked hashicorp/aws provider refresh of the Stage A checker policy and exact source-role checker role-chain policy"
     },
     {
+      "id": "refresh-stage-a-production-artifacts-bucket-policy",
+      "phase": "refresh",
+      "action": "s3:GetBucketPolicy",
+      "resources": ["arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"],
+      "context": [],
+      "evidence": "locked hashicorp/aws 6.56.0 refresh of the complete Stage A production-artifacts bucket policy"
+    },
+    {
       "id": "refresh-stage-a-rds-tags",
       "phase": "refresh",
       "action": "rds:ListTagsForResource",
@@ -899,6 +907,7 @@
     {"id": "apply-stage-a-checker-role-trust", "phase": "apply", "action": "iam:UpdateAssumeRolePolicy", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"], "context": [], "evidence": "Exact Role B trust transition admitted by the Stage A semantic gate; Terraform changes only the obsolete second-hop-MFA trust to the exact Role A principal"},
     {"id": "apply-stage-a-checker-role-chain-policy", "phase": "apply", "action": "iam:PutRolePolicy", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-independent-checker"], "context": [], "evidence": "Exact Stage A inline policy on the existing checker source role; Terraform separately proves the policy name, exact sts:AssumeRole action, and exact RLS checker target"},
     {"id": "apply-stage-a-checker-publication-policy", "phase": "apply", "action": "iam:PutRolePolicy", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"], "context": [], "evidence": "Exact Stage A checker publication inline policy on the RLS checker target role; Terraform separately proves the policy name, exact KMS signing statements, and exact Stage-B approval secret"},
+    {"id": "apply-stage-a-production-artifacts-bucket-policy", "phase": "apply", "action": "s3:PutBucketPolicy", "resources": ["arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"], "context": [], "evidence": "Stage A creates and thereafter owns the complete production-artifacts bucket policy from the authenticated absent-policy baseline"},
     {"id": "artifact-signing-bootstrap-create-private-key", "phase": "artifact-signing", "action": "secretsmanager:CreateSecret", "resources": ["*"], "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}, {"key": "secretsmanager:Name", "type": "string", "values": ["mscqr/production/rls-green/artifact-signing/private-key-current"]}], "evidence": "Bootstrap creates the exact private-key container; AWS requires Resource=* for CreateSecret and the Name condition supplies the reviewed namespace boundary"},
     {"id": "artifact-signing-bootstrap-create-public-key", "phase": "artifact-signing", "action": "secretsmanager:CreateSecret", "resources": ["*"], "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}, {"key": "secretsmanager:Name", "type": "string", "values": ["mscqr/production/rls-green/artifact-signing/public-key-current"]}], "evidence": "Bootstrap creates the exact public-key container; AWS requires Resource=* for CreateSecret and the Name condition supplies the reviewed namespace boundary"},
     {"id": "artifact-signing-bootstrap-create-active-version", "phase": "artifact-signing", "action": "secretsmanager:CreateSecret", "resources": ["*"], "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}, {"key": "secretsmanager:Name", "type": "string", "values": ["mscqr/production/rls-green/artifact-signing/active-key-version"]}], "evidence": "Bootstrap creates the exact active-version container; AWS requires Resource=* for CreateSecret and the Name condition supplies the reviewed namespace boundary"},
@@ -994,6 +1003,7 @@
     {"id": "backend-other-stage-b-key-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/other.tfstate"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Stage B release role is bound to one exact state object"},
     {"id": "backend-unrelated-bucket-read", "action": "s3:GetObject", "resources": ["arn:aws:s3:::unrelated-bucket/state.tfstate"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Stage B release role has no arbitrary bucket access"},
     {"id": "backend-bucket-policy-write", "action": "s3:PutBucketPolicy", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Release role must not administer the backend bucket"},
+    {"id": "unrelated-bucket-policy-write", "action": "s3:PutBucketPolicy", "resources": ["arn:aws:s3:::unrelated-bucket"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Stage A bucket-policy ownership is limited to the exact production-artifacts bucket"},
     {"id": "backend-bucket-delete", "action": "s3:DeleteBucket", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Release role must not delete the backend bucket"},
     {"id": "backend-versioning-write", "action": "s3:PutBucketVersioning", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Release role must not change versioning"},
     {"id": "backend-encryption-write", "action": "s3:PutEncryptionConfiguration", "resources": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"], "context": [], "expectedDecision": "implicitDeny", "expectedMissingContextValues": [], "reason": "Release role must not change encryption"},
