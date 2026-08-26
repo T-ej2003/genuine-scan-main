@@ -5,6 +5,9 @@ import path from "node:path";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { rotationBindingsToTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
 import { productionSupersessionEvidenceIdentity } from "../security/production-initial-migration-source-advance.mjs";
+import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
+
+export { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 
 const requireBackend = createRequire(path.resolve("backend/package.json"));
 const {
@@ -42,35 +45,6 @@ const required = (value, label) => {
   return value.trim();
 };
 const notFound = (error) => /ResourceNotFoundException|not exist|can't find/i.test(String(error?.name || error?.message || error));
-
-const legacySecret = (container, name) => container?.secrets?.find((secret) => secret.name === name)?.valueFrom;
-const backendContainer = (taskDefinition) => {
-  const container = (taskDefinition?.taskDefinition || taskDefinition)?.containerDefinitions?.find(({ name }) => name === "backend");
-  if (!container) throw new Error("Live task definition does not contain the reviewed backend container.");
-  return container;
-};
-
-export function deriveLegacyRotationBaseline(taskDefinition) {
-  const container = backendContainer(taskDefinition);
-  const environment = Object.fromEntries((container.environment || []).map(({ name, value }) => [name, value]));
-  const baseline = {
-    jwtCurrent: legacySecret(container, "JWT_SECRET"),
-    qrPrivateCurrent: legacySecret(container, "QR_SIGN_PRIVATE_KEY"),
-    qrPublicCurrent: legacySecret(container, "QR_SIGN_PUBLIC_KEY"),
-    qrCurrentVersion: environment.QR_SIGN_ACTIVE_KEY_VERSION,
-  };
-  for (const [name, value] of Object.entries(baseline)) {
-    if (name === "qrCurrentVersion") {
-      if (!VERSION.test(String(value || ""))) throw new Error("Live QR active key version is invalid.");
-    } else if (!SECRET_ARN.test(String(value || ""))) {
-      throw new Error(`Live legacy ${name} binding is invalid.`);
-    }
-  }
-  if (new Set([baseline.jwtCurrent, baseline.qrPrivateCurrent, baseline.qrPublicCurrent]).size !== 3) {
-    throw new Error("Live legacy signing bindings must be distinct.");
-  }
-  return Object.freeze(baseline);
-}
 
 const emptySlot = (family, slot, sourceSha) => ({ value: "", family, slot, sourceSha, initialMigration: true });
 const versionSlot = (value, slot, sourceSha) => ({ value, family: "qr_key_versions", slot, sourceSha, initialMigration: true });

@@ -5,11 +5,6 @@ export const PRODUCTION_SUPERSESSION_SLOTS = Object.freeze([
   "jwtPending", "qrPrivatePending", "qrPublicPending", "jwtPrevious",
   "qrPublicPrevious", "qrCurrentVersion", "qrPreviousVersion",
 ]);
-const PRODUCTION_SUPERSESSION_MANIFEST_KEYS = Object.freeze([
-  "status", "transition", "sourceSha", "staleSourceSha", "rotationId", "staleRotationId",
-  "supersessionEvidenceFile", "supersessionEvidenceSha256", "bindingFile", "bindingEvidenceSha256", "writes",
-]);
-
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const ROTATION_ID = /^[A-Za-z0-9._-]{8,128}$/;
@@ -30,22 +25,15 @@ export function assertProductionSupersessionEvidence(evidence) {
     const resource = evidence.resources[slot];
     if (!resource || Object.keys(resource).sort().join(",") !== "arn,stages,versionId" || typeof resource.arn !== "string" || !resource.arn || resource.versionId !== productionSupersessionVersionId(evidence.sourceSha, evidence.rotationId, slot) || JSON.stringify(resource.stages) !== '["AWSCURRENT"]') throw new Error(`Rotation supersession evidence ${slot} binding is invalid.`);
   }
+  // This only validates deterministic evidence shape. Live slot readback is the producer-authentication boundary.
   if (!SHA256.test(evidence.evidenceIdentitySha256) || evidence.evidenceIdentitySha256 !== productionSupersessionEvidenceIdentity(evidence)) throw new Error("Rotation supersession evidence identity hash is invalid.");
   return evidence;
 }
 
-export function assertProductionSupersessionManifest(manifest, { supersessionEvidence, supersessionEvidenceSha256, bindingEvidenceSha256, manifestSha256 } = {}) {
-  if (!manifest || Object.keys(manifest).sort().join(",") !== [...PRODUCTION_SUPERSESSION_MANIFEST_KEYS].sort().join(",") || manifest.status !== "valid" || manifest.transition !== "SUPERSEDE_STALE_PENDING" || !SHA40.test(manifest.sourceSha) || !SHA40.test(manifest.staleSourceSha) || !ROTATION_ID.test(manifest.rotationId) || !ROTATION_ID.test(manifest.staleRotationId) || manifest.sourceSha === manifest.staleSourceSha || manifest.rotationId === manifest.staleRotationId || !SHA256.test(manifest.supersessionEvidenceSha256) || !SHA256.test(manifest.bindingEvidenceSha256) || !Number.isSafeInteger(manifest.writes) || manifest.writes < 0) throw new Error("Rotation supersession manifest schema is invalid.");
-  if (!SHA256.test(manifestSha256 || "") || sha256(`${JSON.stringify(manifest, null, 2)}\n`) !== manifestSha256) throw new Error("Rotation supersession manifest bytes are not the canonical producer output.");
-  const evidence = assertProductionSupersessionEvidence(supersessionEvidence);
-  if (manifest.sourceSha !== evidence.sourceSha || manifest.staleSourceSha !== evidence.staleSourceSha || manifest.rotationId !== evidence.rotationId || manifest.staleRotationId !== evidence.staleRotationId || manifest.supersessionEvidenceSha256 !== supersessionEvidenceSha256 || manifest.bindingEvidenceSha256 !== bindingEvidenceSha256) throw new Error("Rotation supersession manifest does not authenticate the supplied producer evidence.");
-  return manifest;
-}
-
 export function assertProductionInitialMigrationSourceAdvance(bridge) {
-  const keys = ["schemaVersion", "kind", "currentSourceSha", "supersessionEvidence", "supersessionEvidenceSha256", "bindingEvidenceSha256"];
-  if (!bridge || Object.keys(bridge).sort().join(",") !== keys.sort().join(",") || bridge.schemaVersion !== 1 || bridge.kind !== PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE_KIND || !SHA40.test(bridge.currentSourceSha) || !SHA256.test(bridge.supersessionEvidenceSha256) || !SHA256.test(bridge.bindingEvidenceSha256)) throw new Error("Initial-migration source-advance binding is invalid.");
+  const keys = ["schemaVersion", "kind", "currentSourceSha", "supersessionEvidence"];
+  if (!bridge || Object.keys(bridge).sort().join(",") !== keys.sort().join(",") || bridge.schemaVersion !== 1 || bridge.kind !== PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE_KIND || !SHA40.test(bridge.currentSourceSha)) throw new Error("Initial-migration source-advance binding is invalid.");
   const evidence = assertProductionSupersessionEvidence(bridge.supersessionEvidence);
-  if (sha256(`${JSON.stringify(evidence, null, 2)}\n`) !== bridge.supersessionEvidenceSha256 || evidence.sourceSha === bridge.currentSourceSha) throw new Error("Initial-migration source-advance evidence is invalid.");
+  if (evidence.sourceSha === bridge.currentSourceSha) throw new Error("Initial-migration source-advance evidence is invalid.");
   return bridge;
 }

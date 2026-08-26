@@ -166,7 +166,7 @@ const sourceAdvanceFixture = ({ originalSourceSha = "c".repeat(40), currentSourc
   const resources = Object.fromEntries(Object.entries(arns).map(([slot, arn]) => [slot, { arn, versionId: productionSupersessionVersionId(originalSourceSha, rotationId, slot), stages: ["AWSCURRENT"] }]));
   const evidence = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha: originalSourceSha, staleSourceSha: "d".repeat(40), rotationId, staleRotationId: "rotation-stale-2026", generatedAt: "2026-08-26T06:06:32.000Z", resources };
   evidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(evidence);
-  const bridge = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE", currentSourceSha, supersessionEvidence: evidence, supersessionEvidenceSha256: createHash("sha256").update(`${JSON.stringify(evidence, null, 2)}\n`).digest("hex"), bindingEvidenceSha256: "e".repeat(64) };
+  const bridge = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE", currentSourceSha, supersessionEvidence: evidence };
   return { bridge, versionIds: Object.fromEntries(Object.entries(resources).map(([slot, value]) => [arns[slot], value.versionId])) };
 };
 
@@ -388,6 +388,23 @@ test("initial-migration source advancement rejects missing, stale, foreign, or m
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  }
+});
+
+test("source-advance rejects a fully replaced local supersession artifact set before writes", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-source-advance-local-artifacts-"));
+  const originalSourceSha = "c".repeat(40);
+  try {
+    const { bridge, versionIds } = sourceAdvanceFixture({ originalSourceSha });
+    const foreignPending = "jwt-pending-foreign";
+    const evidence = { ...bridge.supersessionEvidence, resources: { ...bridge.supersessionEvidence.resources, jwtPending: { ...bridge.supersessionEvidence.resources.jwtPending, arn: foreignPending } } };
+    evidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(evidence);
+    const config = { ...baseConfig, jwt: { ...baseConfig.jwt, pendingSecretId: foreignPending }, initialMigrationSourceAdvance: { ...bridge, supersessionEvidence: evidence } };
+    const sm = fakeSecrets(initialMigrationSecrets({ legacyPrivate: "not-a-private-key", legacyPublic: "not-a-public-key", markerSourceSha: originalSourceSha }), { versionIds });
+    await assert.rejects(prepare(contextFor(directory, config, sm, undefined, { proveDescendant: () => true })));
+    assert.equal(sm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 
