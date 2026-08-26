@@ -309,6 +309,7 @@ const assertPrepareLineage = (state, current) => {
 
 const prepare = async (context) => {
   const { config, sm, values, identity, inventoryEvidenceSha256 } = context;
+  deriveProductionRotationCleanupEligibleAt(nowIso(clockOf(context)), config.minimumGraceSeconds);
   const inventoryBindingRequired = values.has("inventory-evidence-file");
   if (inventoryBindingRequired && !/^[a-f0-9]{64}$/.test(inventoryEvidenceSha256 || "")) throw new Error("bounded inventory evidence hash is required");
   const stateFile = statePath(values);

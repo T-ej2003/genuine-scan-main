@@ -1,4 +1,7 @@
 export const PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS = 2_592_000;
+// ECMAScript Date's canonical TimeClip ceiling; cleanup deadlines use Date/ISO milliseconds.
+const MAXIMUM_DATE_MILLISECONDS = Date.parse("+275760-09-13T00:00:00.000Z");
+export const PRODUCTION_ROTATION_MAXIMUM_GRACE_SECONDS = MAXIMUM_DATE_MILLISECONDS / 1000;
 export const PRODUCTION_ROTATION_LEGACY_STATE_VERSION = 3;
 export const PRODUCTION_ROTATION_STATE_VERSION = 4;
 
@@ -17,8 +20,8 @@ const canonicalTimestamp = (value, label) => {
 };
 
 export function assertProductionRotationGraceSeconds(value, label = "minimumGraceSeconds") {
-  if (!Number.isSafeInteger(value) || value < PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS) {
-    throw new Error(`${label} must be a safe integer of at least ${PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS} seconds`);
+  if (!Number.isSafeInteger(value) || value < PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS || value > PRODUCTION_ROTATION_MAXIMUM_GRACE_SECONDS) {
+    throw new Error(`${label} must be a safe integer of at least ${PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS} and at most ${PRODUCTION_ROTATION_MAXIMUM_GRACE_SECONDS} seconds`);
   }
   return value;
 }
@@ -28,7 +31,7 @@ export function deriveProductionRotationCleanupEligibleAt(observedAt, minimumGra
   const observedAtMs = canonicalTimestamp(observedAt, "overlap observedAt");
   const graceMs = minimumGraceSeconds * 1000;
   const cleanupEligibleAtMs = observedAtMs + graceMs;
-  if (!Number.isSafeInteger(graceMs) || !Number.isSafeInteger(cleanupEligibleAtMs)) throw new Error("rotation cleanup deadline exceeds the supported timestamp range");
+  if (!Number.isSafeInteger(graceMs) || !Number.isSafeInteger(cleanupEligibleAtMs) || cleanupEligibleAtMs > MAXIMUM_DATE_MILLISECONDS) throw new Error("rotation cleanup deadline exceeds the supported timestamp range");
   const cleanupEligibleAt = new Date(cleanupEligibleAtMs).toISOString();
   if (Date.parse(cleanupEligibleAt) !== cleanupEligibleAtMs) throw new Error("rotation cleanup deadline exceeds the supported timestamp range");
   return cleanupEligibleAt;

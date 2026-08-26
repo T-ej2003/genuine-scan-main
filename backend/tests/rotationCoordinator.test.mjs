@@ -9,9 +9,22 @@ import { assertIdentity, cleanup, prepare, readCurrentState, validateRuntimeProo
 import {
   normalizeProductionRotationState,
   PRODUCTION_ROTATION_LEGACY_STATE_VERSION,
+  PRODUCTION_ROTATION_MAXIMUM_GRACE_SECONDS,
   PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS,
   PRODUCTION_ROTATION_STATE_VERSION,
 } from "../scripts/security/production-rotation-grace-contract.mjs";
+
+test("prepare rejects an unrepresentable cleanup deadline before writing secret material", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "rotation-deadline-"));
+  try {
+    const sm = fakeSecrets(initialSecrets().initial);
+    const config = { ...baseConfig, minimumGraceSeconds: PRODUCTION_ROTATION_MAXIMUM_GRACE_SECONDS };
+    await assert.rejects(prepare(contextFor(directory, config, sm)), /timestamp range/);
+    assert.equal(sm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 const baseConfig = {
   region: "eu-west-2",

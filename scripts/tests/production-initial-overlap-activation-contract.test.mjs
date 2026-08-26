@@ -253,6 +253,8 @@ test("production closure selects exactly one rotation lifecycle contract", () =>
   const script = readFileSync("scripts/check-production-activation-rotation.mjs", "utf8");
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
   assert.match(packageJson.scripts["stage-b:deployment-closure:production"], /check-production-activation-rotation/);
+  assert.match(packageJson.scripts["stage-b:deployment-closure:production:strict-final-rotation"], /^PRODUCTION_ACTIVATION_ROTATION_CONTRACT=STRICT_FINAL_ROTATION npm run stage-b:deployment-closure:production --$/);
+  assert.match(readFileSync("documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.md", "utf8"), /stage-b:deployment-closure:production:strict-final-rotation/);
   assert.match(script, /check-rotation-evidence-freshness/);
   assert.match(script, /production-initial-overlap-activation-contract/);
   assert.match(script, /STRICT_FINAL_ROTATION/);
