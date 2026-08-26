@@ -1,4 +1,4 @@
-const launcherValueOptions = new Set(["--phase", "--output", "--signature-output", "--lifecycle-directory"]);
+const launcherValueOptions = new Set(["--phase", "--output", "--signature-output", "--lifecycle-directory", "--source-sha"]);
 const launcherBooleanOptions = new Set(["--retry"]);
 const planBoundOnlyOptions = new Set(["--report-generator-caller-arn", "--simulated-role-arn", "--plan-json", "--canonical-plan-json", "--saved-plan", "--plan-approval-report", "--plan-approval-report-sha256", "--manifest", "--expected-account", "--expected-region", "--policy-published-at", "--cloudtrail-session-name", "--reference-audit", "--refresh-report"]);
 
@@ -34,12 +34,14 @@ export function parseStageBAdministratorPreflightArgs(argv) {
   const phase = required("--phase");
   if (!["initial", "plan-bound"].includes(phase)) throw new Error("--phase must be initial or plan-bound.");
   if (phase === "initial" && forwarded.some((argument) => planBoundOnlyOptions.has(argument))) throw new Error("Initial administrator capability preflight does not accept plan-bound arguments.");
+  if (phase === "plan-bound" && seen.has("--source-sha")) throw new Error("Plan-bound administrator preflight does not accept --source-sha.");
 
   return {
     phase,
     outputPath: required("--output"),
     signaturePath: required("--signature-output"),
     lifecycleDirectory: required("--lifecycle-directory"),
+    sourceSha: phase === "initial" ? required("--source-sha") : undefined,
     retry: seen.has("--retry"),
     forwarded,
   };

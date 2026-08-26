@@ -230,6 +230,8 @@ test("credential-session documentation is explicit without inventing a root life
   assert.match(runbook, /assume-role --duration-seconds 3600/);
   assert.match(runbook, /root administrator `aws login --profile default` session is externally controlled/);
   assert.match(runbook, /ExpiredToken/);
+  assert.match(runbook, /--source-sha <exact-protected-main-sha>/);
+  assert.match(runbook, /static plan fixture never supplies the live temporary-KMS absence-evidence identity/);
 });
 
 test("plan-bound permission runbook documents every mandatory artifact input", () => {

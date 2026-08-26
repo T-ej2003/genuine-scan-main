@@ -12,6 +12,7 @@ Start exactly one initial administrator capability producer through the reviewed
 
 ```bash
 npm run stage-b:administrator-capability-preflight -- \
+  --source-sha <exact-protected-main-sha> \
   --output <absolute-private-report> \
   --signature-output <absolute-private-signature> \
   --lifecycle-directory <new-private-lifecycle-directory>
@@ -24,6 +25,10 @@ independent of the `3600`-second evidence TTL. A process that is active before t
 deadline remains `RUNNING`; exit code zero plus a complete mode-0600 transactional pair
 becomes `SUCCEEDED`; non-zero exit becomes `FAILED`; an active process at the deadline
 is terminated through the reviewed shutdown path and becomes `TIMED_OUT`.
+
+`--source-sha` must be the exact current protected-main SHA. Before signing, the producer
+requires a clean checkout whose `HEAD` and freshly fetched `origin/main` match it; the
+static plan fixture never supplies the live temporary-KMS absence-evidence identity.
 
 An empty output directory while lifecycle state is `RUNNING` is not a failure. A second
 invocation while the recorded PID is active is rejected. Retry is permitted only after

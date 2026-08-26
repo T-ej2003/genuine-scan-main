@@ -380,6 +380,22 @@ test("runtime preparation validates canonical IAM evidence before live AWS disco
   }
 });
 
+test("runtime preparation rejects fixture-bound nested KMS absence evidence before a standalone proof", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    const { filePath, ...report } = input.iamEvidence;
+    report.temporaryKmsCapability = buildTemporaryCapabilityEvidence({ state: "ABSENCE_VERIFIED", sourceSha: "e".repeat(40), transitionId: "preflight-eeeeeeeeeeee", defaultVersionId: "v1", observedAt: "2026-08-18T12:00:00.000Z" });
+    writeFileSync(filePath, `${JSON.stringify(report)}\n`, { mode: 0o600 });
+    input.iamEvidence = { ...report, filePath };
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, false);
+    assert.match(result.blockers.join("\n"), /Temporary Stage-A KMS capability: evidence identity or state is wrong/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("canonical IAM outer hash fails closed for nested, census, SHA, path, and symlink tamper", () => {
   const cases = [
     ["self-consistent nested absence", (result) => {
