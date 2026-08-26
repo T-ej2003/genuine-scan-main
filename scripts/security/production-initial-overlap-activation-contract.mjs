@@ -2,19 +2,21 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { assertProductionRotationGraceSeconds, deriveProductionRotationCleanupEligibleAt, PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
+import { canonicalProductionEcsClusterArn } from "../aws/production-green-stage-b-contract.mjs";
 
 export const PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP = "PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP";
-export const PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS = 2_592_000;
+export { PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS };
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
+const ROTATION_ID = /^[A-Za-z0-9._-]{8,128}$/;
 const FINGERPRINT = /^[a-f0-9]{16}$/;
 const TASK_DEFINITION = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend-candidate:[1-9][0-9]*$/;
 const TASK = /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[A-Za-z0-9-]+$/;
 const DEPLOYMENT = /^ecs-svc\/[1-9][0-9]*$/;
 const SERVICE = "mscqr-backend-servi-euw2";
-const CLUSTER = "mscqr-prod-euw2-main";
 const REQUIRED_RUNTIME_CHECKS = Object.freeze([
   "jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected",
   "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected",
@@ -37,7 +39,7 @@ const containsSensitiveStateKey = (value) => {
 export function validateProductionInitialActivationDuringAuthenticatedOverlap({ state, rawState, stateSha256, expected, now = Date.now() } = {}) {
   if (!state || typeof state !== "object" || Array.isArray(state) || containsSensitiveStateKey(state)) fail("Initial-overlap rotation state must be redacted metadata.");
   if (!Buffer.isBuffer(rawState) || !SHA256.test(stateSha256 || "") || createHash("sha256").update(rawState).digest("hex") !== stateSha256) fail("Initial-overlap rotation state bytes do not match their SHA-256.");
-  if (!expected || !SHA40.test(expected.sourceSha || "") || typeof expected.rotationId !== "string" || !expected.rotationId || !TASK_DEFINITION.test(expected.taskDefinitionArn || "") || !DIGEST.test(expected.imageDigest || "") || !SHA40.test(expected.deploymentSha || "")) fail("Initial-overlap expected identity is incomplete.");
+  if (!expected || !SHA40.test(expected.sourceSha || "") || !ROTATION_ID.test(expected.rotationId || "") || !TASK_DEFINITION.test(expected.taskDefinitionArn || "") || !DIGEST.test(expected.imageDigest || "") || !SHA40.test(expected.deploymentSha || "")) fail("Initial-overlap expected identity is incomplete.");
   if (state.stateVersion !== 3 || state.sourceSha !== expected.sourceSha || state.rotationId !== expected.rotationId || state.overlapDeploymentSha !== expected.deploymentSha) fail("Initial-overlap rotation identity does not match the authorized release.");
   if (state.phase !== "verified") fail("Initial activation requires OVERLAP_RUNTIME_VERIFIED state.");
   if (!FINGERPRINT.test(state.jwt?.oldFingerprint || "") || !FINGERPRINT.test(state.jwt?.newFingerprint || "") || state.jwt.oldFingerprint === state.jwt.newFingerprint) fail("Current and previous JWT material identities are invalid.");
@@ -45,7 +47,8 @@ export function validateProductionInitialActivationDuringAuthenticatedOverlap({ 
 
   const proof = state.overlapRuntime;
   if (!proof || typeof proof !== "object" || Array.isArray(proof) || proof.phase !== "overlap" || proof.rotationId !== state.rotationId || proof.deploymentSha !== state.overlapDeploymentSha) fail("Authenticated overlap runtime proof is missing or mismatched.");
-  if (proof.targetService !== SERVICE || proof.targetCluster !== CLUSTER || proof.targetTaskDefinitionArn !== expected.taskDefinitionArn || proof.targetImageDigest !== expected.imageDigest || !TASK.test(proof.targetTaskArn || "") || proof.selectedTaskArn !== proof.targetTaskArn || !DEPLOYMENT.test(proof.targetDeploymentId || "")) fail("Overlap runtime proof is not bound to the exact ECS deployment.");
+  try { canonicalProductionEcsClusterArn(proof.targetCluster); } catch { fail("Overlap runtime proof is not bound to the exact ECS deployment."); }
+  if (proof.targetService !== SERVICE || proof.targetTaskDefinitionArn !== expected.taskDefinitionArn || proof.targetImageDigest !== expected.imageDigest || !TASK.test(proof.targetTaskArn || "") || proof.selectedTaskArn !== proof.targetTaskArn || !DEPLOYMENT.test(proof.targetDeploymentId || "")) fail("Overlap runtime proof is not bound to the exact ECS deployment.");
   if (proof.expectedReleaseSha !== expected.sourceSha || proof.expectedReleaseGitSha !== expected.sourceSha || proof.healthReleaseGitSha !== expected.sourceSha || proof.healthHttpStatus !== 200) fail("Overlap runtime health is not bound to protected source.");
   for (const name of REQUIRED_RUNTIME_CHECKS) if (proof[name] !== true) fail(`Overlap runtime proof is missing ${name}.`);
   if (state.verification?.runtimeInvocationRef !== proof.runtimeInvocationRef) fail("Rotation verification does not bind the runtime invocation.");
@@ -57,7 +60,12 @@ export function validateProductionInitialActivationDuringAuthenticatedOverlap({ 
   const cleanupEligibleAt = iso(state.cleanupEligibleAt);
   const nowMs = typeof now === "function" ? now() : now;
   if ([observedAt, healthObservedAt, verifiedAt, cleanupEligibleAt, nowMs].some((value) => !Number.isSafeInteger(value)) || healthObservedAt > observedAt || observedAt > verifiedAt || verifiedAt > nowMs || state.overlapReadyAt !== proof.observedAt) fail("Initial-overlap runtime timeline is invalid.");
-  if (cleanupEligibleAt !== observedAt + PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS * 1000) fail("Rotation cleanup eligibility does not preserve the 30-day grace period.");
+  let expectedCleanupEligibleAt;
+  try {
+    assertProductionRotationGraceSeconds(state.minimumGraceSeconds, "state.minimumGraceSeconds");
+    expectedCleanupEligibleAt = deriveProductionRotationCleanupEligibleAt(proof.observedAt, state.minimumGraceSeconds);
+  } catch (error) { fail(error.message); }
+  if (state.cleanupEligibleAt !== expectedCleanupEligibleAt) fail("Rotation cleanup eligibility does not preserve the reviewed grace period.");
   if (nowMs >= cleanupEligibleAt) fail("Authenticated-overlap initial activation has expired; strict rotation cleanup is required.");
   if (state.cleanupWindowComplete === true || CLEANUP_FIELDS.some((field) => state[field] !== undefined && state[field] !== null)) fail("Initial overlap must not claim rotation cleanup or retirement.");
 
@@ -70,7 +78,7 @@ export function validateProductionInitialActivationDuringAuthenticatedOverlap({ 
     taskArn: proof.targetTaskArn,
     imageDigest: proof.targetImageDigest,
     cleanupEligibleAt: state.cleanupEligibleAt,
-    minimumGraceSeconds: PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS,
+    minimumGraceSeconds: state.minimumGraceSeconds,
     cleanupPending: true,
   });
 }

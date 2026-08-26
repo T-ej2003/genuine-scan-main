@@ -15,6 +15,7 @@ import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-c
 import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 import { buildRootDropEvidence, buildRootDropPayload } from "../aws/production-root-drop-evidence.mjs";
 import { buildTemporaryCapabilityEvidence } from "../aws/production-stage-a-temporary-kms-capability.mjs";
+import { PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 import { artifactSigningRuntimeBindingPath, loadArtifactSigningBootstrapContract } from "../aws/production-artifact-signing-bootstrap.mjs";
 import { runCli as runArtifactSigningBootstrap } from "../aws/bootstrap-production-artifact-signing.mjs";
 import { producePostApplyStageAPlanRecovery } from "../aws/production-stage-a-recovery-evidence.mjs";
@@ -54,7 +55,7 @@ function gitFixture(expectedSha = sourceSha) {
 }
 
 function approval() {
-  return { ticket: "CHG-ROTATION-0001", approvedBy: "security@example.invalid", approverRole: "Security Lead", reason: "Scheduled production security rotation", verificationRef: "https://example.invalid/approval/1", minimumGraceSeconds: 2592000 };
+  return { ticket: "CHG-ROTATION-0001", approvedBy: "security@example.invalid", approverRole: "Security Lead", reason: "Scheduled production security rotation", verificationRef: "https://example.invalid/approval/1", minimumGraceSeconds: PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS };
 }
 
 function taskDefinition() {
@@ -630,6 +631,33 @@ test("HUMAN_FIELDS_REQUIRED fails before generating a rotation config", () => {
   } finally {
     rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("reviewed rotation grace accepts the minimum or longer and rejects shorter or unsafe values", () => {
+  for (const minimumGraceSeconds of [PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS, PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS + 1, 3_000_000]) {
+    const directory = fsTemp();
+    try {
+      const input = fullInput(directory, process.cwd()); input.approval.minimumGraceSeconds = minimumGraceSeconds;
+      const result = prepareProductionCutoverRuntime(input);
+      assert.equal(result.readyToConsumeMfa, true);
+      assert.equal(result.config.minimumGraceSeconds, minimumGraceSeconds);
+    } finally {
+      rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+  for (const minimumGraceSeconds of [PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS - 1, 0, -1, Number.MAX_SAFE_INTEGER + 1]) {
+    const directory = fsTemp();
+    try {
+      const input = fullInput(directory, process.cwd()); input.approval.minimumGraceSeconds = minimumGraceSeconds;
+      const result = prepareProductionCutoverRuntime(input);
+      assert.equal(result.readyToConsumeMfa, false);
+      assert.match(result.blockers.join("\n"), /minimumGraceSeconds|timestamp range/);
+    } finally {
+      rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+      rmSync(directory, { recursive: true, force: true });
+    }
   }
 });
 

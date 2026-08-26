@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { assertSelectedTargetTask, assertTaskBelongsToExactPrimaryDeployment, requireExecuteCommandEnabled, selectAndRevalidateExactTarget } from "./ecs-exec-target-selection.mjs";
 import { ECS_EXEC_OPERATOR_CALLER_PATTERN, ECS_EXEC_OPERATOR_ROLE_ARN, ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
+import { canonicalProductionEcsClusterArn, PRODUCTION_ECS_CLUSTER_NAME } from "./production-green-stage-b-contract.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PTY_HELPER = path.join(ROOT, "scripts/aws/ecs-exec-fixture-pty.py");
@@ -36,7 +37,7 @@ const safeIdentifier = (value, name) => {
 };
 const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
 const region = safeReference(args.get("region") || "eu-west-2", "region");
-const cluster = safeReference(args.get("cluster") || "mscqr-prod-euw2-main", "cluster");
+const cluster = canonicalProductionEcsClusterArn(safeReference(args.get("cluster") || PRODUCTION_ECS_CLUSTER_NAME, "cluster"));
 const service = safeReference(args.get("service") || "mscqr-backend-servi-euw2", "service");
 const container = safeReference(args.get("container") || "backend", "container");
 const phase = safeReference(args.get("phase") || process.env.ROTATION_RUNTIME_PHASE || "", "phase");
@@ -82,7 +83,7 @@ if (!serviceRecord || serviceResult.failures?.length || serviceRecord.serviceNam
 requireExecuteCommandEnabled(serviceRecord);
 const clusterResult = awsJson(["ecs", "describe-clusters", "--clusters", cluster]);
 const clusterRecord = clusterResult.clusters?.[0];
-if (!clusterRecord || clusterResult.failures?.length || clusterRecord.status !== "ACTIVE" || typeof clusterRecord.clusterArn !== "string") throw new Error("expected ECS cluster was not found");
+if (!clusterRecord || clusterResult.failures?.length || clusterRecord.status !== "ACTIVE" || clusterRecord.clusterArn !== cluster || clusterRecord.clusterName !== PRODUCTION_ECS_CLUSTER_NAME) throw new Error("expected ECS cluster was not found");
 
 const taskDefinition = awsJson(["ecs", "describe-task-definition", "--task-definition", expectedTaskDefinition]).taskDefinition;
 const taskContainer = taskDefinition?.containerDefinitions?.find((entry) => entry.name === container);

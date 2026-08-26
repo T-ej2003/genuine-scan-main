@@ -4,6 +4,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, ran
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import jwt from "jsonwebtoken";
+import { assertProductionRotationGraceSeconds, deriveProductionRotationCleanupEligibleAt } from "./production-rotation-grace-contract.mjs";
 import {
   GetSecretValueCommand,
   PutSecretValueCommand,
@@ -66,9 +67,7 @@ const loadConfig = (file, expectedSha256) => {
   required(config.sourceSha, "config.sourceSha");
   if (!safeId(config.rotationId)) throw new Error("config.rotationId is invalid");
   if (!fullSha(config.sourceSha)) throw new Error("config.sourceSha must be a full SHA-1");
-  if (!Number.isSafeInteger(config.minimumGraceSeconds) || config.minimumGraceSeconds < 1) {
-    throw new Error("config.minimumGraceSeconds must be a positive safe integer");
-  }
+  assertProductionRotationGraceSeconds(config.minimumGraceSeconds, "config.minimumGraceSeconds");
   const ids = [
     config.jwt?.currentSecretId, config.jwt?.previousSecretId, config.jwt?.pendingSecretId,
     config.qr?.privateCurrentSecretId, config.qr?.privatePendingSecretId,
@@ -212,13 +211,14 @@ const validateRuntimeProof = ({ file, proof: persistedProof, config, phase, expe
     ? ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "serviceHealthy"]
     : ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeRejected", "qrUnknownKeyRejected", "serviceHealthy"];
   for (const check of requiredChecks) if (proof[check] !== true) throw new Error(`${phase} runtime proof is missing ${check}`);
-  return { ...proof, observedAt: new Date(observedAt).toISOString() };
+  return { ...proof, observedAt: new Date(observedAt).toISOString(), healthObservedAt: new Date(healthObservedAt).toISOString() };
 };
 
 const stateForPending = ({ config, identity, oldJwt, oldQrPrivate, oldQrPublic, oldQrVersion, newJwt, newQrPublic, newPrivate, newQrVersion, pending, inventoryEvidenceSha256 }) => ({
   stateVersion: 3,
   rotationId: config.rotationId,
   sourceSha: config.sourceSha,
+  minimumGraceSeconds: config.minimumGraceSeconds,
   operator: identity,
   phase: "prepared",
   overlapDeploymentSha: config.overlapDeploymentSha,
@@ -233,6 +233,8 @@ const assertState = (state, config) => {
   if (!state || state.rotationId !== config.rotationId) throw new Error("state file belongs to another rotation");
   if (!PHASES.includes(state.phase)) throw new Error(`unsupported rotation phase: ${state.phase}`);
   if (state.sourceSha !== config.sourceSha) throw new Error("state source SHA does not match config");
+  assertProductionRotationGraceSeconds(state.minimumGraceSeconds, "state.minimumGraceSeconds");
+  if (state.minimumGraceSeconds !== config.minimumGraceSeconds) throw new Error("state minimum grace does not match the reviewed config");
 };
 const assertStateSlots = (state, current) => {
   assertQrVersionSlots(current, state);
@@ -395,7 +397,9 @@ const verify = async (context) => {
   if (!["overlap-deploy-required", "overlap-ready"].includes(state.phase)) throw new Error("rotation must require an overlap deployment before verification");
   const proof = validateRuntimeProof({ file, config, phase: "overlap", expectedDeploymentSha: config.overlapDeploymentSha, clock: clockOf(context) });
   const overlapReadyAt = proof.observedAt;
-  const cleanupEligibleAt = new Date(isoDate(overlapReadyAt) + config.minimumGraceSeconds * 1000).toISOString();
+  const cleanupEligibleAt = deriveProductionRotationCleanupEligibleAt(overlapReadyAt, state.minimumGraceSeconds);
+  if (state.overlapReadyAt && state.overlapReadyAt !== overlapReadyAt) throw new Error("persisted overlap grace anchor does not match the runtime proof");
+  if (state.cleanupEligibleAt && state.cleanupEligibleAt !== cleanupEligibleAt) throw new Error("persisted cleanup deadline does not match the reviewed grace");
   state.phase = "overlap-ready";
   state.overlapReadyAt = state.overlapReadyAt || overlapReadyAt;
   state.cleanupEligibleAt = state.cleanupEligibleAt || cleanupEligibleAt;

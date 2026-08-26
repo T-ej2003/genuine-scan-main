@@ -101,6 +101,10 @@ scripts/aws/verify-production-rotation-via-ecs-exec.sh \
   --health-url https://www.mscqr.com/api/health \
   --proof-output /secure/operator/overlap-runtime.json
 
+# The exact short cluster name is also accepted for operator compatibility;
+# both forms are validated as the one production cluster and the proof always
+# persists the canonical full cluster ARN.
+
 # After the grace deadline and retirement, submit the governed cleanup
 # transition. It requires phase=cleanup-deploy-required and the exact persisted
 # retirement/deployment identity before invoking the same wrapper.
@@ -133,7 +137,8 @@ scripts/aws/verify-production-rotation-via-ecs-exec.sh \
 ```
 
 The config maps distinct Secrets Manager resources for JWT current/previous/pending, QR current/private,
-QR previous/public, and pending material. It also requires a reviewed `minimumGraceSeconds`. The coordinator
+QR previous/public, and pending material. It also requires a reviewed `minimumGraceSeconds` of at least
+2,592,000 seconds; longer reviewed windows remain valid and are persisted exactly. The coordinator
 writes only non-secret state and redacted runtime proof to operator-controlled mode-600 files. The deployed-task
 verifier uses the compiled application JWT and QR verification functions; it is not a public endpoint.
 Artifact packs and immutable audit exports use the independent Ed25519 artifact domain and an explicit

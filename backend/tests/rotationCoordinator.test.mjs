@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import jwt from "jsonwebtoken";
 import { assertIdentity, cleanup, prepare, validateRuntimeProof, verify } from "../scripts/security/rotate-production-signing-material.mjs";
+import { PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS } from "../scripts/security/production-rotation-grace-contract.mjs";
 
 const baseConfig = {
   region: "eu-west-2",
@@ -15,7 +16,7 @@ const baseConfig = {
   approvedBy: "security@example.com",
   approverRole: "Security Lead",
   reason: "test rotation",
-  minimumGraceSeconds: 10,
+  minimumGraceSeconds: PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS,
   overlapDeploymentSha: "b".repeat(40),
   verificationRef: "https://example.test/verify",
   jwt: { currentSecretId: "jwt-current", previousSecretId: "jwt-previous", pendingSecretId: "jwt-pending" },
@@ -143,7 +144,7 @@ const setupCleanupDeployRequired = async (directory, sm, clockState) => {
   await prepare(context);
   const overlapFile = writeProof(directory, "overlap.json", runtimeProof(baseConfig, "overlap", new Date(clockState.now).toISOString(), baseConfig.overlapDeploymentSha));
   await verify({ ...context, values: valuesWith(context, [["runtime-verification-file", overlapFile]]) });
-  clockState.now += 10_000;
+  clockState.now += baseConfig.minimumGraceSeconds * 1000;
   const cleanupSha = "c".repeat(40);
   const cleanupContext = { ...context, values: valuesWith(context, [["cleanup-deployment-sha", cleanupSha], ["cleanup-evidence-ref", "https://example.test/cleanup"]]) };
   await cleanup(cleanupContext);
@@ -395,9 +396,9 @@ test("full rotation enforces grace, retires every slot, deploys after retirement
     const overlapFile = writeProof(directory, "overlap.json", runtimeProof(baseConfig, "overlap", new Date(currentTime).toISOString(), baseConfig.overlapDeploymentSha));
     await verify({ ...context, values: new Map([...context.values, ["runtime-verification-file", overlapFile]]) });
     await assert.rejects(cleanup({ ...context, values: new Map([...context.values, ["cleanup-deployment-sha", "c".repeat(40)], ["cleanup-evidence-ref", "https://example.test/cleanup"]]) }), /cleanup grace window has not expired/);
-    currentTime += 9_000;
+    currentTime += baseConfig.minimumGraceSeconds * 1000 - 1;
     await assert.rejects(cleanup({ ...context, values: new Map([...context.values, ["cleanup-deployment-sha", "c".repeat(40)], ["cleanup-evidence-ref", "https://example.test/cleanup"]]) }), /cleanup grace window has not expired/);
-    currentTime += 1_000;
+    currentTime += 1;
     const cleanupSha = "c".repeat(40);
     const firstCleanup = { ...context, values: new Map([...context.values, ["cleanup-deployment-sha", cleanupSha], ["cleanup-evidence-ref", "https://example.test/cleanup"]]) };
     await cleanup(firstCleanup);
@@ -679,6 +680,32 @@ test("runtime proof accepts only the expected deployment SHA for overlap and cle
     assert.doesNotThrow(() => validateRuntimeProof({ file: cleanupFile, config, phase: "cleanup", expectedDeploymentSha: cleanupProof.deploymentSha, clock }));
     assert.throws(() => validateRuntimeProof({ file: cleanupFile, config, phase: "cleanup", expectedDeploymentSha: "d".repeat(40), clock }), /deployment SHA is invalid/);
     assert.throws(() => validateRuntimeProof({ file: overlapFile, config, phase: "cleanup", expectedDeploymentSha: overlap.deploymentSha, clock }), /does not match this rotation/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("verified state persists the reviewed grace and rejects config or proof attempts to reset its deadline", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-grace-binding-"));
+  try {
+    const { initial } = initialSecrets();
+    const sm = fakeSecrets(initial);
+    const clock = () => Date.parse("2026-08-10T00:01:00.000Z");
+    const context = contextFor(directory, baseConfig, sm, clock);
+    await prepare(context);
+    const firstProof = writeProof(directory, "overlap.json", runtimeProof(baseConfig, "overlap", "2026-08-10T00:00:00.000Z", baseConfig.overlapDeploymentSha));
+    await verify({ ...context, values: valuesWith(context, [["runtime-verification-file", firstProof]]) });
+    const stateFile = path.join(directory, "state.json");
+    const persisted = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(persisted.minimumGraceSeconds, baseConfig.minimumGraceSeconds);
+    assert.equal(persisted.cleanupEligibleAt, "2026-09-09T00:00:00.000Z");
+
+    const retryState = { ...persisted, phase: "overlap-ready" };
+    writeFileSync(stateFile, `${JSON.stringify(retryState)}\n`, { mode: 0o600 });
+    await assert.rejects(verify({ ...context, config: { ...baseConfig, minimumGraceSeconds: baseConfig.minimumGraceSeconds + 1 }, values: valuesWith(context, [["runtime-verification-file", firstProof]]) }), /state minimum grace/);
+
+    const laterProof = writeProof(directory, "later.json", runtimeProof(baseConfig, "overlap", "2026-08-10T00:00:01.000Z", baseConfig.overlapDeploymentSha));
+    await assert.rejects(verify({ ...context, values: valuesWith(context, [["runtime-verification-file", laterProof]]) }), /grace anchor/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

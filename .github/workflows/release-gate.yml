@@ -219,7 +219,15 @@ jobs:
                   --deployment-sha "$ROTATION_DEPLOYMENT_SHA" \
                   --task-definition "$ROTATION_TASK_DEFINITION_ARN" \
                   --image-digest "$ROTATION_IMAGE_DIGEST"
-                rm -f "$state_file"
+                {
+                  echo "PRODUCTION_INITIAL_OVERLAP_STATE_FILE=$state_file"
+                  echo "PRODUCTION_INITIAL_OVERLAP_STATE_SHA256=$ROTATION_STATE_SHA256"
+                  echo "PRODUCTION_INITIAL_OVERLAP_SOURCE_SHA=$SOURCE_SHA"
+                  echo "PRODUCTION_INITIAL_OVERLAP_ROTATION_ID=$ROTATION_ID"
+                  echo "PRODUCTION_INITIAL_OVERLAP_DEPLOYMENT_SHA=$ROTATION_DEPLOYMENT_SHA"
+                  echo "PRODUCTION_INITIAL_OVERLAP_TASK_DEFINITION=$ROTATION_TASK_DEFINITION_ARN"
+                  echo "PRODUCTION_INITIAL_OVERLAP_IMAGE_DIGEST=$ROTATION_IMAGE_DIGEST"
+                } >> "$GITHUB_ENV"
               else
                 npm run check:rotation-evidence-freshness
               fi
@@ -614,6 +622,7 @@ jobs:
           ACTIVATION_BINDING_SHA256: ${{ steps.backend-activation.outputs.binding_sha256 }}
         run: |
           set -euo pipefail
+          node scripts/check-production-activation-rotation.mjs
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode verify \
             --source-sha "$SOURCE_SHA" \
@@ -643,6 +652,7 @@ jobs:
           RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
         run: |
           set -euo pipefail
+          node scripts/check-production-activation-rotation.mjs
           receipt_sha256="$(sha256sum "$RLS_RECEIPT" | cut -d' ' -f1)"
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode execute \

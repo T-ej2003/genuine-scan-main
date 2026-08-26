@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "3f45edf69c42fe0da880877c0977f940932b280867d263756fa43576739cee44",
+  "sourceContractSha256": "078518f5bd32c024918113945344aa1a13577e1eee45e6b13988bbacc6245f7f",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -200,7 +200,7 @@
     },
     {
       "path": "scripts/aws/production-green-stage-b-contract.mjs",
-      "sha256": "9c9c8bc1a199427bb2fbffcd38eb329941be4fd25f55f9ae18185056183b1b70"
+      "sha256": "6e2d6af02b2fd5b03251906ea71ab5637ec478849a7b969d659a3a18a5ef7a83"
     },
     {
       "path": "scripts/aws/create-production-green-stage-b-approval.mjs",
@@ -228,7 +228,7 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "d71dac823b91b30fac816103fa5ae888659a4d8bec574db369ea0df695114446"
+      "sha256": "770c6f6a5559c3281c4b2f6ba1e7facd47d610123d6bd8837d014e8c867d7b6d"
     },
     {
       "path": ".github/workflows/release-train.yml",
@@ -324,7 +324,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:3f45edf69c42fe0da880877c0977f940932b280867d263756fa43576739cee44",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:078518f5bd32c024918113945344aa1a13577e1eee45e6b13988bbacc6245f7f",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

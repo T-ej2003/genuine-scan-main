@@ -14,6 +14,7 @@ import { assertAuthenticatedCurrentStageBState, assertPostApplyStageAPlanRecover
 import { assertRootDropEvidence } from "./production-root-drop-evidence.mjs";
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
 import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
+import { assertProductionRotationGraceSeconds } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -41,7 +42,7 @@ function assertNoSecretMaterial(value, label) {
 
 function assertApproval(approval = {}) {
   for (const name of ["ticket", "approvedBy", "approverRole", "reason", "verificationRef"]) nonEmpty(approval[name], `approval.${name}`);
-  if (!Number.isSafeInteger(approval.minimumGraceSeconds) || approval.minimumGraceSeconds < 1) throw new Error("approval.minimumGraceSeconds must be a positive safe integer.");
+  assertProductionRotationGraceSeconds(approval.minimumGraceSeconds, "approval.minimumGraceSeconds");
   assertNoSecretMaterial(approval, "Approval metadata");
   return Object.freeze({ ...approval });
 }

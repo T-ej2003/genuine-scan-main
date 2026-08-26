@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,7 +11,9 @@ import {
   PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS,
   validateProductionInitialActivationDuringAuthenticatedOverlap,
 } from "../security/production-initial-overlap-activation-contract.mjs";
+import { canonicalProductionEcsClusterArn, PRODUCTION_ECS_CLUSTER_NAME, STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { validateOnboardingContract, validateRotationClosedContract } from "../security/production-onboarding-contract.mjs";
+import { verify as persistVerifiedOverlap, writeState } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
 
 const sourceSha = "a".repeat(40);
 const imageDigest = `sha256:${"b".repeat(64)}`;
@@ -39,6 +41,7 @@ const state = (phase = "verified", extra = {}) => ({
   overlapReadyAt: observedAt,
   verifiedAt: "2026-08-26T12:00:30.000Z",
   cleanupEligibleAt,
+  minimumGraceSeconds: PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS,
   jwt: { oldFingerprint: "1".repeat(16), newFingerprint: "2".repeat(16) },
   qr: { oldPrivateFingerprint: "3".repeat(16), oldPublicFingerprint: "4".repeat(16), newPrivateFingerprint: "5".repeat(16), newPublicFingerprint: "6".repeat(16), oldKeyVersion: "qr-old", newKeyVersion: "qr-new" },
   pending: { jwtVersionId: "jwt-version-1", qrPrivateVersionId: "qr-private-1", qrPublicVersionId: "qr-public-1" },
@@ -47,7 +50,7 @@ const state = (phase = "verified", extra = {}) => ({
     healthObservedAt: "2026-08-26T11:59:59.000Z", healthHttpStatus: 200, healthReleaseGitSha: sourceSha,
     expectedReleaseGitSha: sourceSha, expectedReleaseSha: sourceSha,
     targetTaskArn: taskArn, selectedTaskArn: taskArn, targetTaskDefinitionArn: taskDefinitionArn,
-    targetImageDigest: imageDigest, targetService: "mscqr-backend-servi-euw2", targetCluster: "mscqr-prod-euw2-main",
+    targetImageDigest: imageDigest, targetService: "mscqr-backend-servi-euw2", targetCluster: STAGE_B.clusterArn,
     targetDeploymentId: "ecs-svc/123456789", ...runtimeChecks,
   },
   verification: { runtimeInvocationRef: "runtime-proof-1", ...Object.fromEntries(Object.entries(runtimeChecks).filter(([name]) => !name.startsWith("artifact"))) },
@@ -67,6 +70,25 @@ test("verified overlap authorizes initial activation without claiming rotation c
   assert.equal(result.cleanupEligibleAt, cleanupEligibleAt);
   assert.equal(result.cleanupPending, true);
   assert.throws(() => validateRotationClosedContract(state(), () => now), /cleanup|grace/i);
+});
+
+test("production cluster name and ARN canonicalize to one persisted identity", () => {
+  assert.equal(canonicalProductionEcsClusterArn(PRODUCTION_ECS_CLUSTER_NAME), STAGE_B.clusterArn);
+  assert.equal(canonicalProductionEcsClusterArn(STAGE_B.clusterArn), STAGE_B.clusterArn);
+  assert.doesNotThrow(() => validate(state()));
+  const authenticatedShortName = state(); authenticatedShortName.overlapRuntime.targetCluster = PRODUCTION_ECS_CLUSTER_NAME;
+  assert.doesNotThrow(() => validate(authenticatedShortName));
+  for (const value of [
+    "another-cluster",
+    "arn:aws:ecs:eu-west-2:000000000000:cluster/mscqr-prod-euw2-main",
+    "arn:aws:ecs:us-east-1:368992683803:cluster/mscqr-prod-euw2-main",
+    "arn:aws:ecs:eu-west-2:368992683803:cluster/another-cluster",
+    "cluster/mscqr-prod-euw2-main",
+  ]) {
+    assert.throws(() => canonicalProductionEcsClusterArn(value));
+    const proofState = state(); proofState.overlapRuntime.targetCluster = value;
+    assert.throws(() => validate(proofState), /exact ECS deployment/);
+  }
 });
 
 test("prepared or deployed-only rotation cannot authorize initial activation", () => {
@@ -98,13 +120,13 @@ test("cleanup deadline remains anchored to the canonical overlap observation", (
   for (const delta of [-1, 1]) {
     const value = state();
     value.cleanupEligibleAt = new Date(cleanupEligibleAtMs + delta).toISOString();
-    assert.throws(() => validate(value), /30-day grace period/);
+    assert.throws(() => validate(value), /reviewed grace period/);
   }
 
   const shiftedObservation = state();
   shiftedObservation.overlapRuntime.observedAt = new Date(Date.parse(observedAt) + 1).toISOString();
   shiftedObservation.overlapReadyAt = shiftedObservation.overlapRuntime.observedAt;
-  assert.throws(() => validate(shiftedObservation), /30-day grace period/);
+  assert.throws(() => validate(shiftedObservation), /reviewed grace period/);
 
   const ambiguousTimestamp = state();
   ambiguousTimestamp.cleanupEligibleAt = "2026-09-25 12:00:00";
@@ -117,6 +139,24 @@ test("cleanup deadline remains anchored to the canonical overlap observation", (
   for (const invalidClock of [Number.NaN, Number.POSITIVE_INFINITY, cleanupEligibleAtMs - 0.5]) {
     assert.throws(() => validate(state(), {}, invalidClock), /timeline/);
   }
+});
+
+test("reviewed grace is at least 30 days and remains bound to its original deadline", () => {
+  for (const minimumGraceSeconds of [2_592_000, 2_592_001, 3_000_000]) {
+    const value = state();
+    value.minimumGraceSeconds = minimumGraceSeconds;
+    value.cleanupEligibleAt = new Date(Date.parse(value.overlapRuntime.observedAt) + minimumGraceSeconds * 1000).toISOString();
+    const deadline = Date.parse(value.cleanupEligibleAt);
+    assert.doesNotThrow(() => validate(value, {}, deadline - 1));
+    assert.throws(() => validate(value, {}, deadline), /expired/);
+    assert.throws(() => validate(value, {}, deadline + 1), /expired/);
+  }
+  for (const minimumGraceSeconds of [2_591_999, 0, -1, Number.MAX_SAFE_INTEGER]) {
+    const value = state(); value.minimumGraceSeconds = minimumGraceSeconds;
+    assert.throws(() => validate(value));
+  }
+  const extended = state(); extended.minimumGraceSeconds += 1; assert.throws(() => validate(extended), /reviewed grace/);
+  const shortened = state(); shortened.minimumGraceSeconds -= 1; assert.throws(() => validate(shortened), /at least/);
 });
 
 test("identity, runtime, health, signing, and cleanup inconsistencies fail closed", () => {
@@ -148,6 +188,7 @@ test("state byte tampering and expected identity drift fail closed", () => {
   for (const [name, replacement] of [["sourceSha", "f".repeat(40)], ["rotationId", "rotation-other"], ["deploymentSha", "d".repeat(40)], ["taskDefinitionArn", taskDefinitionArn.replace(/:51$/, ":52")], ["imageDigest", `sha256:${"e".repeat(64)}`]]) {
     assert.throws(() => validate(value, { [name]: replacement }), undefined, name);
   }
+  for (const rotationId of ["short", "rotation\ninjected", "rotation id spaces"]) assert.throws(() => validate(value, { rotationId }), /identity/);
 });
 
 test("verified overlap plus strict onboarding permits readiness while security failures remain blocking", () => {
@@ -168,9 +209,11 @@ test("Release Gate uses the shared overlap contract and preserves the normal che
   const activation = workflow.indexOf("Activate exact Stage-B backend candidate");
   assert.match(workflow.slice(lifecycle, rls), /production-initial-overlap-activation-contract\.mjs/);
   assert.match(workflow.slice(lifecycle, rls), /check:rotation-evidence-freshness/);
+  assert.match(workflow.slice(lifecycle, rls), /PRODUCTION_INITIAL_OVERLAP_STATE_FILE=.*GITHUB_ENV/s);
   assert(rls > lifecycle && activation > rls);
   assert.match(workflow, /--expected-current-task-definition[\s\S]*--expected-current-deployment-id/);
   assert.match(workflow.slice(rls, activation), /production-normal-backend-activation\.mjs[\s\S]*--mode verify[\s\S]*apply-production-full-rls-release\.mjs/);
+  assert.equal(workflow.match(/node scripts\/check-production-activation-rotation\.mjs/g)?.length, 2);
   assert.match(workflow, /Authenticated-overlap runtime image does not match the protected release image authorization/);
   assert.doesNotMatch(workflow, /minimumGraceSeconds\s*=|cleanupWindowComplete\s*=|--confirm-cleanup/);
 });
@@ -213,6 +256,83 @@ test("production closure consumes the exact verified-overlap state bytes", () =>
       },
     });
     assert.match(output, new RegExp(PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("real producer-consumer disk rehearsal accepts the documented cluster ARN and reviewed longer grace", async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "mscqr-overlap-roundtrip-"));
+  try {
+    const bin = path.join(directory, "bin"); mkdirSync(bin);
+    const proofFile = path.join(directory, "runtime-proof.json");
+    const fixtureFile = path.join(directory, "fixture.json"); writeFileSync(fixtureFile, "{}\n", { mode: 0o600 });
+    const observed = new Date(Date.now() - 120_000).toISOString();
+    const healthObserved = new Date(Date.parse(observed) - 1_000).toISOString();
+    const deploymentId = "ecs-svc/123456789";
+    const awsFixture = {
+      caller: { Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecs-exec-verifier/rehearsal" },
+      service: { services: [{ serviceName: "mscqr-backend-servi-euw2", enableExecuteCommand: true, deployments: [{ id: deploymentId, status: "PRIMARY", taskDefinition: taskDefinitionArn }] }], failures: [] },
+      cluster: { clusters: [{ clusterArn: STAGE_B.clusterArn, clusterName: PRODUCTION_ECS_CLUSTER_NAME, status: "ACTIVE" }], failures: [] },
+      taskDefinition: { taskDefinition: { taskDefinitionArn, containerDefinitions: [{ name: "backend", image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${imageDigest}`, environment: [{ name: "RELEASE_GIT_SHA", value: sourceSha }] }] } },
+      listed: { taskArns: [taskArn] },
+      described: { tasks: [{ taskArn, clusterArn: STAGE_B.clusterArn, taskDefinitionArn, lastStatus: "RUNNING", healthStatus: "HEALTHY", group: "service:mscqr-backend-servi-euw2", startedBy: deploymentId, containers: [{ name: "backend", imageDigest }], tags: [{ key: "MSCQRExecTarget", value: "production-backend" }], managedAgents: [{ name: "ExecuteCommandAgent", lastStatus: "RUNNING" }] }], failures: [] },
+    };
+    const aws = path.join(bin, "aws");
+    writeFileSync(aws, `#!/usr/bin/env node
+const fixture = JSON.parse(process.env.FAKE_AWS_FIXTURE);
+const args = process.argv.slice(2); const key = args[0] + " " + args[1];
+const clusterAt = args.indexOf("--cluster"); if (clusterAt >= 0 && args[clusterAt + 1] !== process.env.FAKE_CLUSTER_ARN) process.exit(9);
+const responses = { "sts get-caller-identity": fixture.caller, "ecs describe-services": fixture.service, "ecs describe-clusters": fixture.cluster, "ecs describe-task-definition": fixture.taskDefinition, "ecs list-tasks": fixture.listed, "ecs describe-tasks": fixture.described };
+if (!responses[key]) process.exit(8); process.stdout.write(JSON.stringify(responses[key]));
+`, { mode: 0o700 }); chmodSync(aws, 0o700);
+    const python = path.join(bin, "python3");
+    writeFileSync(python, "#!/bin/sh\nprintf 'MSCQR_PROOF_BEGIN\\n%s\\nMSCQR_PROOF_END\\n' \"$FAKE_RUNTIME_PROOF\"\n", { mode: 0o700 }); chmodSync(python, 0o700);
+    const proof = { rotationId, phase: "overlap", deploymentSha, runtimeInvocationRef: "runtime-proof-roundtrip", observedAt: observed, healthObservedAt: healthObserved, healthHttpStatus: 200, healthReleaseGitSha: sourceSha, expectedReleaseGitSha: sourceSha, ...runtimeChecks };
+    const runVerifier = (cluster, output) => execFileSync(process.execPath, [
+      "scripts/aws/verify-production-rotation-via-ecs-exec.mjs",
+      "--cluster", cluster, "--service", "mscqr-backend-servi-euw2", "--task-definition", taskDefinitionArn,
+      "--image-digest", imageDigest, "--release-sha", sourceSha, "--deployment-sha", deploymentSha,
+      "--rotation-id", rotationId, "--invocation-ref", "runtime-proof-roundtrip", "--phase", "overlap",
+      "--fixture-file", fixtureFile, "--health-url", "https://www.mscqr.com/api/health", "--proof-output", output,
+    ], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_AWS_FIXTURE: JSON.stringify(awsFixture), FAKE_CLUSTER_ARN: STAGE_B.clusterArn, FAKE_RUNTIME_PROOF: JSON.stringify(proof) } });
+    runVerifier(STAGE_B.clusterArn, proofFile);
+    assert.equal(JSON.parse(readFileSync(proofFile, "utf8")).targetCluster, STAGE_B.clusterArn);
+    const shortNameProofFile = path.join(directory, "runtime-proof-short-name.json");
+    runVerifier(PRODUCTION_ECS_CLUSTER_NAME, shortNameProofFile);
+    assert.equal(JSON.parse(readFileSync(shortNameProofFile, "utf8")).targetCluster, STAGE_B.clusterArn);
+
+    const stateFile = path.join(directory, "state.json");
+    const longerGrace = PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS + 1;
+    writeState(stateFile, { ...state("overlap-deploy-required"), minimumGraceSeconds: longerGrace, cleanupEligibleAt: undefined, overlapReadyAt: undefined, verifiedAt: undefined, overlapRuntime: undefined, verification: undefined });
+    const coordinatorConfig = { rotationId, sourceSha, overlapDeploymentSha: deploymentSha, minimumGraceSeconds: longerGrace };
+    await persistVerifiedOverlap({ config: coordinatorConfig, values: new Map([["state-file", stateFile], ["runtime-verification-file", proofFile]]), clock: () => Date.parse(observed) + 60_000 });
+    const persistedBytes = readFileSync(stateFile);
+    const persisted = JSON.parse(persistedBytes);
+    assert.equal(persisted.minimumGraceSeconds, longerGrace);
+    assert.equal(persisted.overlapRuntime.targetCluster, STAGE_B.clusterArn);
+    assert.equal(persisted.cleanupEligibleAt, new Date(Date.parse(observed) + longerGrace * 1000).toISOString());
+    const roundTripFields = [
+      "sourceSha", "rotationId", "phase", "overlapDeploymentSha", "overlapReadyAt", "verifiedAt", "cleanupEligibleAt", "minimumGraceSeconds",
+      "jwt.oldFingerprint", "jwt.newFingerprint", "qr.oldPublicFingerprint", "qr.newPublicFingerprint", "qr.oldKeyVersion", "qr.newKeyVersion",
+      "overlapRuntime.phase", "overlapRuntime.rotationId", "overlapRuntime.deploymentSha", "overlapRuntime.targetService", "overlapRuntime.targetCluster",
+      "overlapRuntime.targetTaskDefinitionArn", "overlapRuntime.targetImageDigest", "overlapRuntime.targetTaskArn", "overlapRuntime.selectedTaskArn",
+      "overlapRuntime.targetDeploymentId", "overlapRuntime.observedAt", "overlapRuntime.healthObservedAt", "overlapRuntime.expectedReleaseSha",
+      "overlapRuntime.expectedReleaseGitSha", "overlapRuntime.healthReleaseGitSha", "overlapRuntime.runtimeInvocationRef", "verification.runtimeInvocationRef",
+      ...Object.keys(runtimeChecks).map((name) => `overlapRuntime.${name}`),
+    ];
+    const at = (object, field) => field.split(".").reduce((value, key) => value?.[key], object);
+    for (const field of roundTripFields) assert.notEqual(at(persisted, field), undefined, `real producer omitted ${field}`);
+    const stateSha256 = createHash("sha256").update(persistedBytes).digest("hex");
+    const activationArgs = ["--state-file", stateFile, "--state-sha256", stateSha256, "--source-sha", sourceSha, "--rotation-id", rotationId, "--deployment-sha", deploymentSha, "--task-definition", taskDefinitionArn, "--image-digest", imageDigest];
+    assert.match(execFileSync(process.execPath, ["scripts/security/production-initial-overlap-activation-contract.mjs", ...activationArgs], { encoding: "utf8" }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
+    assert.match(execFileSync(process.execPath, ["scripts/check-production-activation-rotation.mjs"], { encoding: "utf8", env: { ...process.env, PRODUCTION_INITIAL_OVERLAP_STATE_FILE: stateFile, PRODUCTION_INITIAL_OVERLAP_STATE_SHA256: stateSha256, PRODUCTION_INITIAL_OVERLAP_SOURCE_SHA: sourceSha, PRODUCTION_INITIAL_OVERLAP_ROTATION_ID: rotationId, PRODUCTION_INITIAL_OVERLAP_DEPLOYMENT_SHA: deploymentSha, PRODUCTION_INITIAL_OVERLAP_TASK_DEFINITION: taskDefinitionArn, PRODUCTION_INITIAL_OVERLAP_IMAGE_DIGEST: imageDigest } }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
+
+    const onboardingFile = path.join(directory, "onboarding.json");
+    const runtimeNames = ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "cookieCurrentSealOnly", "cookiePreviousOpenDuringOverlap", "artifactCurrentRuntimeVerify", "artifactHistoricalRuntimeVerify"];
+    const acceptanceNames = ["superAdminLogin", "mfa", "authMe", "refresh", "dashboardStats", "qrStats", "tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "dbReady", "redisReady", "objectStorageReady", "stageANetworkingReady"];
+    writeFileSync(onboardingFile, JSON.stringify({ valid: true, evidenceRef: "onboarding:roundtrip", evidenceSha256: "7".repeat(64), sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256: stateSha256, taskMarker: true, ecsExecProof: true, serviceStable: true, targetTaskDefinitionMatch: true, targetImageDigestMatch: true, health: { serviceHealthy: true, healthReleaseGitSha: sourceSha }, rotationPhase: persisted.phase, runtime: Object.fromEntries(runtimeNames.map((name) => [name, true])), acceptance: Object.fromEntries(acceptanceNames.map((name) => [name, true])) }), { mode: 0o600 });
+    assert.equal(validateOnboardingContract(JSON.parse(readFileSync(onboardingFile, "utf8"))), true);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
