@@ -20,6 +20,12 @@ export const requireExecuteCommandEnabled = (service) => {
   return true;
 };
 
+export const assertTaskBelongsToExactPrimaryDeployment = ({ service, task, expectedTaskDefinitionArn }) => {
+  const matching = (service?.deployments || []).filter((deployment) => deployment?.status === "PRIMARY" && deployment.taskDefinition === expectedTaskDefinitionArn && /^ecs-svc\/[1-9][0-9]*$/.test(deployment.id || ""));
+  if (matching.length !== 1 || task?.startedBy !== matching[0].id) throw new Error("selected ECS task is not bound to one exact primary service deployment");
+  return matching[0];
+};
+
 export const selectTargetTask = ({ tasks, expectedClusterArn, expectedTaskDefinitionArn, expectedImageDigest, serviceName, containerName, expectedTaskTagKey, expectedTaskTagValue }) => {
   const matching = (Array.isArray(tasks) ? tasks : []).filter((task) => {
     try {

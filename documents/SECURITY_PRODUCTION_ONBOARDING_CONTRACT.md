@@ -11,6 +11,8 @@ tenant/RBAC/security smokes, dependencies, and Stage-A networking must all pass.
 
 The overlap proof is runtime evidence from the exact ECS task selected by the ECS Exec verifier. It must not
 be converted into final rotation freshness evidence, and it must not claim that old material has been retired.
+Once that proof reaches `verified`, the normal checksum-bound RLS/backend activation and strict onboarding
+probes may run while `ROTATION_CLEANUP_PENDING=true`. The 2,592,000-second grace period remains unchanged.
 
 ## Rotation closed
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorTrustDocument, buildEcsExecOperatorEvidence, collectLiveEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256, normalizeEcsExecOperatorTrustDocument, normalizeMfaRequired } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { RELEASE_POLICY_SOURCES } from "../aws/validate-production-green-stage-b-permissions.mjs";
+import { assertTaskBelongsToExactPrimaryDeployment } from "../aws/ecs-exec-target-selection.mjs";
 
 const helper = readFileSync("scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "utf8");
 const selection = readFileSync("scripts/aws/ecs-exec-target-selection.mjs", "utf8");
@@ -14,8 +15,8 @@ const role = JSON.parse(readFileSync("documents/ops/iam/MSCQR_PRODUCTION_ECS_EXE
 const trust = JSON.parse(readFileSync("documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_TRUST_POLICY.json", "utf8"));
 const terraform = readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
 
-test("ECS Exec verifier binds the exact service, task definition, digest, and release", () => {
-  for (const value of ["describe-services", "describe-clusters", "list-tasks", "describe-tasks", "describe-task-definition", "requireExecuteCommandEnabled", "selectTargetTask", "taskDefinitionArn", "RELEASE_GIT_SHA", "matchingTaskCount", "selectedTaskArn", "expected task definition is not the primary service deployment"]) {
+test("ECS Exec verifier binds the exact service deployment, task definition, digest, and release", () => {
+  for (const value of ["describe-services", "describe-clusters", "list-tasks", "describe-tasks", "describe-task-definition", "requireExecuteCommandEnabled", "selectTargetTask", "taskDefinitionArn", "RELEASE_GIT_SHA", "matchingTaskCount", "selectedTaskArn", "targetDeploymentId", "startedBy", "one exact primary service deployment"]) {
     assert.ok(`${helper}\n${selection}`.includes(value), `missing ECS Exec contract: ${value}`);
   }
   assert.match(helper, /--fixture-stdin/);
@@ -23,6 +24,14 @@ test("ECS Exec verifier binds the exact service, task definition, digest, and re
   assert.match(helper, /fixture appeared in the ECS Exec transcript/);
   assert.match(pty, /MSCQR_FIXTURE_READY/);
   assert.match(pty, /fixture in output/);
+});
+
+test("ECS Exec runtime proof rejects a task from another deployment of the same task definition", () => {
+  const taskDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:51";
+  const service = { deployments: [{ id: "ecs-svc/123456789", status: "PRIMARY", taskDefinition }] };
+  assert.equal(assertTaskBelongsToExactPrimaryDeployment({ service, task: { startedBy: "ecs-svc/123456789" }, expectedTaskDefinitionArn: taskDefinition }).id, "ecs-svc/123456789");
+  assert.throws(() => assertTaskBelongsToExactPrimaryDeployment({ service, task: { startedBy: "ecs-svc/987654321" }, expectedTaskDefinitionArn: taskDefinition }), /exact primary/);
+  assert.throws(() => assertTaskBelongsToExactPrimaryDeployment({ service: { deployments: [...service.deployments, { id: "ecs-svc/987654321", status: "PRIMARY", taskDefinition }] }, task: { startedBy: "ecs-svc/123456789" }, expectedTaskDefinitionArn: taskDefinition }), /exact primary/);
 });
 
 test("production ECS Exec policy is narrow and has no shell or mutation permissions", () => {

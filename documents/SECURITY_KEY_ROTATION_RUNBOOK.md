@@ -325,29 +325,36 @@ Source implementation PRs require the contract, runtime, coordinator, secret
 leakage, and security checks. They do not constitute a production rotation and
 must not be required to make stale operational evidence fresh.
 
-Production release, deployment, scheduled security, and release-candidate
+Normal post-rotation releases, scheduled security, and release-candidate
 readiness gates require `check:rotation-evidence-freshness` and must remain red
-until a real governed rotation has completed. The gate contexts are explicit:
+until a real governed rotation has completed. Initial production activation is
+the sole narrower case: authenticated `verified` overlap may run the existing
+checksum-bound RLS and backend activation transaction while cleanup remains
+pending. The gate contexts are explicit:
 
 | Consumer | Context | Contract | Freshness | Mutation-capable |
 | --- | --- | --- | --- | --- |
 | Source PR validation | pull request | required | reported, not required | no |
 | Stage B source closure | pull request | required | not required | no |
-| Production release/deployment | protected push/manual release | required | required | downstream only |
+| Initial activation during authenticated overlap | protected manual release | exact overlap state/runtime proof | cleanup pending | downstream only |
+| Normal post-rotation release/deployment | protected push/manual release | required | required | downstream only |
 | Scheduled DR/security validation | scheduled/manual operational run | required | required | no |
 | Release-candidate readiness | release push/manual release | required | required | downstream only |
 
 Pull requests and ordinary pushes select the source-validation command. This is
 a lifecycle gate mode, not a PR, branch, or environment bypass: it validates
-the evidence contract without claiming that a rotation occurred. Scheduled and
-explicit operational runs, release-candidate refs, and the production release
-gate keep the strict freshness path. Before the first real rotation, the valid
-state is `ROTATION_CONTRACT_VALID=true`, `ROTATION_EVIDENCE_FRESH=false`, and
+the evidence contract without claiming that a rotation occurred. Scheduled
+operational runs and release-candidate refs keep the strict freshness path. The
+production Release Gate keeps that path unless every exact
+`PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP` binding validates.
+Before cleanup, the valid initial-activation state is
+`ROTATION_EVIDENCE_FRESH=false`, `ROTATION_CLEANUP_PENDING=true`, and
 `ROTATION_CLOSED=false`.
 
-The production `release-gate` repeats `npm run check:rotation-evidence-freshness`
-after upstream gate sanity and before the deploy job. A successful source-only
-push check can therefore never authorize production deployment by itself.
+The production `release-gate` repeats either strict final freshness or the
+exact authenticated-overlap initial-activation contract after upstream gate
+sanity and before the deploy job. A successful source-only push check can
+therefore never authorize production deployment by itself.
 
 After a real rotation, run the strict checks without changing their threshold:
 

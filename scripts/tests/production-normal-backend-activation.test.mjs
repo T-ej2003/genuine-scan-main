@@ -24,7 +24,7 @@ const state = (arn = targetArn, releaseSha = sourceSha, serial = 103) => ({
   } }] }],
 });
 const validate = () => true;
-const stableService = (taskDefinition = sourceArn) => ({ serviceArn: NORMAL_ACTIVATION.serviceArn, clusterArn: NORMAL_ACTIVATION.clusterArn, status: "ACTIVE", taskDefinition, desiredCount: 2, deployments: [{ status: "PRIMARY", taskDefinition, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" }] });
+const stableService = (taskDefinition = sourceArn) => ({ serviceArn: NORMAL_ACTIVATION.serviceArn, clusterArn: NORMAL_ACTIVATION.clusterArn, status: "ACTIVE", taskDefinition, desiredCount: 2, deployments: [{ id: "ecs-svc/123456789", status: "PRIMARY", taskDefinition, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" }] });
 const sourceTask = (arn = sourceArn) => ({ taskDefinition: { taskDefinitionArn: arn, family: arn.includes("mscqr-backend:") ? "mscqr-backend" : NORMAL_ACTIVATION.family, status: "ACTIVE", containerDefinitions: [{ name: "backend", image: sourceImage }] }, tags: [] });
 const listedTasks = { taskArns: ["task-1", "task-2"] };
 const describedTasks = (taskDefinitionArn = sourceArn, imageDigest = sourceDigest) => ({ failures: [], tasks: [1, 2].map(() => ({ lastStatus: "RUNNING", taskDefinitionArn, containers: [{ name: "backend", imageDigest }] })) });
@@ -102,6 +102,7 @@ test("live preparation authenticates caller, state, exact policy, target, servic
   const evidence = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, validateImageAuthorization: validate });
   assert.equal(evidence.targetArn, targetArn);
   assert.equal(evidence.expectedCurrentTaskDefinitionArn, service.taskDefinition);
+  assert.equal(evidence.expectedCurrentDeploymentId, "ecs-svc/123456789");
   assert.equal(evidence.sourceDigest, sourceDigest);
   for (const mutate of [
     () => { service.taskDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:49"; },
@@ -115,6 +116,7 @@ test("live preparation authenticates caller, state, exact policy, target, servic
   runningDigest = digest;
   assert.throws(() => collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: evidence.expectedCurrentTaskDefinitionArn, validateImageAuthorization: validate }), /running task/);
   runningDigest = sourceDigest;
+  assert.throws(() => collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: evidence.expectedCurrentTaskDefinitionArn, expectedCurrentDeploymentId: "ecs-svc/987654321", validateImageAuthorization: validate }), /deployment identity/);
 });
 
 test("administrator convergence changes only the exact candidate binding and is idempotent", () => {

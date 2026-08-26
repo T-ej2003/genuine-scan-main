@@ -196,7 +196,33 @@ jobs:
                 fi
               done
               node --input-type=module -e 'import { createHash } from "node:crypto"; const bytes=process.env.NORMAL_IMAGE_AUTHORIZATION_JSON; const expected=process.env.NORMAL_IMAGE_AUTHORIZATION_SHA256; if (!/^[a-f0-9]{64}$/.test(expected) || createHash("sha256").update(bytes).digest("hex") !== expected) throw new Error("Normal image authorization bytes do not match their SHA-256."); JSON.parse(bytes);'
-              npm run check:rotation-evidence-freshness
+              overlap_values=(ROTATION_ID ROTATION_STATE_JSON ROTATION_STATE_SHA256 ROTATION_TASK_DEFINITION_ARN ROTATION_IMAGE_DIGEST ROTATION_DEPLOYMENT_SHA)
+              overlap_present=0
+              for name in "${overlap_values[@]}"; do
+                if [ -n "${!name:-}" ]; then overlap_present=1; fi
+              done
+              if [ "$overlap_present" -eq 1 ]; then
+                for name in "${overlap_values[@]}"; do
+                  if [ -z "${!name:-}" ]; then
+                    echo "::error::${name} is required for authenticated-overlap initial activation."
+                    exit 1
+                  fi
+                done
+                state_file="$RUNNER_TEMP/initial-overlap-rotation-state.json"
+                printf '%s' "$ROTATION_STATE_JSON" > "$state_file"
+                chmod 600 "$state_file"
+                node scripts/security/production-initial-overlap-activation-contract.mjs \
+                  --state-file "$state_file" \
+                  --state-sha256 "$ROTATION_STATE_SHA256" \
+                  --source-sha "$SOURCE_SHA" \
+                  --rotation-id "$ROTATION_ID" \
+                  --deployment-sha "$ROTATION_DEPLOYMENT_SHA" \
+                  --task-definition "$ROTATION_TASK_DEFINITION_ARN" \
+                  --image-digest "$ROTATION_IMAGE_DIGEST"
+                rm -f "$state_file"
+              else
+                npm run check:rotation-evidence-freshness
+              fi
               ;;
             backend-health-recovery)
               for name in BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN BACKEND_RECOVERY_IMAGE_DIGEST BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256; do
@@ -534,8 +560,25 @@ jobs:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           BINDING_FILE: ${{ runner.temp }}/normal-backend-activation.json
           RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
+          INITIAL_OVERLAP_STATE_JSON: ${{ inputs.rotation_state_json }}
+          INITIAL_OVERLAP_TASK_DEFINITION_ARN: ${{ inputs.rotation_task_definition_arn }}
+          INITIAL_OVERLAP_IMAGE_DIGEST: ${{ inputs.rotation_image_digest }}
+          AUTHORIZED_BACKEND_IMAGE_REF: ${{ steps.images.outputs.backend_image_ref }}
         run: |
           set -euo pipefail
+          activation_args=()
+          if [ -n "$INITIAL_OVERLAP_STATE_JSON" ]; then
+            initial_overlap_deployment_id="$(node -e 'const state=JSON.parse(process.env.INITIAL_OVERLAP_STATE_JSON); process.stdout.write(String(state.overlapRuntime?.targetDeploymentId || ""))')"
+            if [ -z "$INITIAL_OVERLAP_TASK_DEFINITION_ARN" ] || [ -z "$initial_overlap_deployment_id" ]; then
+              echo "::error::Authenticated-overlap activation identity is incomplete."
+              exit 1
+            fi
+            if [ "$AUTHORIZED_BACKEND_IMAGE_REF" != "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${INITIAL_OVERLAP_IMAGE_DIGEST}" ]; then
+              echo "::error::Authenticated-overlap runtime image does not match the protected release image authorization."
+              exit 1
+            fi
+            activation_args+=(--expected-current-task-definition "$INITIAL_OVERLAP_TASK_DEFINITION_ARN" --expected-current-deployment-id "$initial_overlap_deployment_id")
+          fi
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode prepare \
             --source-sha "$SOURCE_SHA" \
@@ -543,6 +586,7 @@ jobs:
             --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
             --image-authorization "${{ steps.images.outputs.authorization_file }}" \
             --image-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
+            "${activation_args[@]}" \
             --binding-out "$BINDING_FILE"
           echo "binding_file=$BINDING_FILE" >> "$GITHUB_OUTPUT"
           echo "binding_sha256=$(sha256sum "$BINDING_FILE" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -564,8 +608,21 @@ jobs:
           PRODUCTION_RLS_CLUSTER_ARN: arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main
           PRODUCTION_RLS_RECEIPT_BUCKET: ${{ vars.PRODUCTION_RLS_RECEIPT_BUCKET }}
           PRODUCTION_RLS_RELEASE_RECEIPT_PATH: ${{ runner.temp }}/production-rls-release-receipt.json
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
+          ACTIVATION_BINDING_FILE: ${{ steps.backend-activation.outputs.binding_file }}
+          ACTIVATION_BINDING_SHA256: ${{ steps.backend-activation.outputs.binding_sha256 }}
         run: |
           set -euo pipefail
+          node scripts/aws/production-normal-backend-activation.mjs \
+            --mode verify \
+            --source-sha "$SOURCE_SHA" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
+            --image-authorization "${{ steps.images.outputs.authorization_file }}" \
+            --image-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
+            --binding "$ACTIVATION_BINDING_FILE" \
+            --binding-sha256 "$ACTIVATION_BINDING_SHA256"
           node scripts/aws/apply-production-full-rls-release.mjs
 
       - name: Upload immutable production database receipt

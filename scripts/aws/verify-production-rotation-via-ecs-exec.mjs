@@ -2,7 +2,7 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { assertSelectedTargetTask, requireExecuteCommandEnabled, selectAndRevalidateExactTarget } from "./ecs-exec-target-selection.mjs";
+import { assertSelectedTargetTask, assertTaskBelongsToExactPrimaryDeployment, requireExecuteCommandEnabled, selectAndRevalidateExactTarget } from "./ecs-exec-target-selection.mjs";
 import { ECS_EXEC_OPERATOR_CALLER_PATTERN, ECS_EXEC_OPERATOR_ROLE_ARN, ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
@@ -83,8 +83,6 @@ requireExecuteCommandEnabled(serviceRecord);
 const clusterResult = awsJson(["ecs", "describe-clusters", "--clusters", cluster]);
 const clusterRecord = clusterResult.clusters?.[0];
 if (!clusterRecord || clusterResult.failures?.length || clusterRecord.status !== "ACTIVE" || typeof clusterRecord.clusterArn !== "string") throw new Error("expected ECS cluster was not found");
-const expectedPrimaryDeployment = serviceRecord.deployments?.some((deployment) => deployment.status === "PRIMARY" && deployment.taskDefinition === expectedTaskDefinition);
-if (!expectedPrimaryDeployment) throw new Error("expected task definition is not the primary service deployment");
 
 const taskDefinition = awsJson(["ecs", "describe-task-definition", "--task-definition", expectedTaskDefinition]).taskDefinition;
 const taskContainer = taskDefinition?.containerDefinitions?.find((entry) => entry.name === container);
@@ -106,6 +104,7 @@ assertSelectedTargetTask({ task: targetTask, expectedClusterArn: clusterRecord.c
 const finalTargetResponse = awsJson(["ecs", "describe-tasks", "--cluster", cluster, "--tasks", targetTask.taskArn, "--include", "TAGS"]);
 if (finalTargetResponse.failures?.length || !Array.isArray(finalTargetResponse.tasks)) throw new Error("final ECS Exec target revalidation returned an invalid response");
 const finalTargetTask = selectAndRevalidateExactTarget({ tasks: described.tasks, finalTasks: finalTargetResponse.tasks, ...expectedTarget }).finalTask;
+const expectedPrimaryDeployment = assertTaskBelongsToExactPrimaryDeployment({ service: serviceRecord, task: finalTargetTask, expectedTaskDefinitionArn: expectedTaskDefinition });
 
 const remoteProofPath = `/app/uploads/.mscqr-rotation-proof-${rotationId}.json`;
 const remoteCommand = [
@@ -169,6 +168,7 @@ const finalProof = {
   expectedReleaseSha,
   targetService: service,
   targetCluster: cluster,
+  targetDeploymentId: expectedPrimaryDeployment.id,
 };
 writeFileSync(proofOutput, `${JSON.stringify(finalProof, null, 2)}\n`, { mode: 0o600, flag: "wx" });
 console.log(JSON.stringify({
