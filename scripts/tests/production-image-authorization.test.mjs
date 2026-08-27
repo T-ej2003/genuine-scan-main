@@ -17,6 +17,8 @@ import {
   deriveStageBImageImpactReport,
   imageImpactReportFor,
   reportFor,
+  STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION,
+  STAGE_B_IMAGE_REUSE_SCHEMA_VERSION,
   STAGE_B_IMAGE_REUSE_RULES_VERSION,
 } from "../aws/validate-stage-b-image-reuse.mjs";
 import {
@@ -344,6 +346,7 @@ test("real default composition preserves historical publication provenance while
     assert.equal(cliAuthorization.imageReuseEvidenceSha256, canonicalSha256(fixture.reuseEvidence));
     assert.equal(cliAuthorization.imageReuseEvidenceSha256, authorization.imageReuseEvidenceSha256);
     assert.deepEqual(cliAuthorization.imageReuseEvidence, fixture.reuseEvidence);
+    assert.equal(cliAuthorization.imageReuseEvidence.schemaVersion, STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION);
 
     const base = ["--artifact", artifactPath, "--publication-source-sha", producingSourceSha, "--current-source-sha", currentConsumingSourceSha, "--image-release-sha", twoShaImageReleaseSha, "--workflow-run-id", twoShaWorkflowRunId, "--artifact-sha256", fixture.artifactSha256, "--publication-identity", identityPath, "--publication-identity-sha256", publicationIdentitySha256(fixture.identity), "--output", path.join(directory, "negative-evidence.json"), "--signature-output", path.join(directory, "negative-signature.json")];
     assert.throws(() => runImageEvidenceCli(base, { run, sign: () => "AQ==", observedAt, now: observedAt }), /source bridge is malformed|requires canonical image-reuse compatibility evidence/);
@@ -398,6 +401,55 @@ test("fresh protected-main publication is a separate authorization path", () => 
   assert.equal(freshAuthorization.imageReleaseSha, freshSourceSha);
   assert.equal(freshAuthorization.workflowRunId, freshWorkflowRunId);
   assert.doesNotThrow(() => assertImageAuthorization(freshAuthorization, freshSourceSha, { now: observedAt, verifyImageEvidence: freshVerifyImageEvidence }));
+});
+
+test("CLI preserves schema-1 fresh image-impact evidence without deriving reviewed reuse", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-fresh-image-authorization-"));
+  const write = (name, value) => {
+    const filePath = path.join(directory, name);
+    fs.writeFileSync(filePath, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+    fs.chmodSync(filePath, 0o600);
+    return filePath;
+  };
+  const run = (impactPath, output) => runCli([
+    "--source-sha", freshSourceSha,
+    "--image-evidence", write("image-evidence.json", freshImageEvidence),
+    "--image-signature", write("image-evidence.signature.json", freshImageEvidenceSignature),
+    "--image-reuse-evidence", impactPath,
+    "--output", output,
+  ], {
+    freshProtectedMain: { fetchSucceeded: true, headSha: freshSourceSha, freshRemoteMainSha: freshSourceSha },
+    now: observedAt,
+    verifyImageEvidence: freshVerifyImageEvidence,
+  });
+  try {
+    const output = path.join(directory, "fresh-authorization.json");
+    run(write("fresh-impact.json", freshImageImpactEvidence), output);
+    const authorization = JSON.parse(fs.readFileSync(output, "utf8"));
+    assert.equal(authorization.authorizationPath, "FRESH_IMAGE_PUBLICATION");
+    assert.equal(authorization.imageReuseEvidence.schemaVersion, STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION);
+    assert.equal(authorization.imageReuseEvidence.imageReleaseSha, freshImpactReleaseSha);
+    assert.equal(authorization.imageEvidence.imageReleaseSha, freshImageReleaseSha);
+
+    assert.throws(
+      () => run(write("unsupported.json", { ...freshImageImpactEvidence, schemaVersion: 99 }), path.join(directory, "unsupported-output.json")),
+      /schema is unsupported/,
+    );
+    assert.throws(
+      () => run(write("malformed-impact.json", { schemaVersion: STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION }), path.join(directory, "malformed-impact-output.json")),
+      /Image-impact release SHA/,
+    );
+    assert.throws(
+      () => run(write("malformed-reuse.json", { schemaVersion: STAGE_B_IMAGE_REUSE_SCHEMA_VERSION }), path.join(directory, "malformed-reuse-output.json")),
+      /Compatibility report/,
+    );
+    assert.throws(
+      () => run(write("wrong-impact.json", { ...freshImageImpactEvidence, imageReleaseSha: freshSourceSha }), path.join(directory, "wrong-impact-output.json")),
+      /independently derived git impact report/,
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("fresh publication rejects stale or cross-boundary evidence", () => {

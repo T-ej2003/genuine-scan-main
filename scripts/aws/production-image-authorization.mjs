@@ -7,6 +7,8 @@ import { assertImageEvidence, assertImageEvidenceReuseBridge, imageEvidenceSha25
 import {
   deriveStageBImageImpactReport,
   assertStageBImageReuseResult,
+  STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION,
+  STAGE_B_IMAGE_REUSE_SCHEMA_VERSION,
 } from "./validate-stage-b-image-reuse.mjs";
 import {
   assertStageBArtifactPath,
@@ -203,12 +205,19 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
   });
   const { value: imageEvidence } = readJsonPrivate(imageEvidencePath, "Image evidence");
   const { value: imageEvidenceSignature } = readJsonPrivate(imageSignaturePath, "Image evidence signature");
-  const { value: reviewedImageReuseEvidence } = readJsonPrivate(imageReuseEvidencePath, "Image-reuse compatibility report");
-  const imageReuseEvidence = deriveStageBImageImpactReport({
-    imageReleaseSha: imageEvidence.imageReleaseSha,
-    toolingSha: sourceSha,
-    reviewedReport: reviewedImageReuseEvidence,
-  });
+  const { value: suppliedImageImpactEvidence } = readJsonPrivate(imageReuseEvidencePath, "Image-reuse or image-impact evidence");
+  let imageReuseEvidence;
+  if (suppliedImageImpactEvidence?.schemaVersion === STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION) {
+    imageReuseEvidence = suppliedImageImpactEvidence;
+  } else if (suppliedImageImpactEvidence?.schemaVersion === STAGE_B_IMAGE_REUSE_SCHEMA_VERSION) {
+    imageReuseEvidence = deriveStageBImageImpactReport({
+      imageReleaseSha: imageEvidence.imageReleaseSha,
+      toolingSha: sourceSha,
+      reviewedReport: suppliedImageImpactEvidence,
+    });
+  } else {
+    throw new Error("Image-reuse or image-impact evidence schema is unsupported.");
+  }
   const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
   const authorization = createImageAuthorization({
     sourceSha,
