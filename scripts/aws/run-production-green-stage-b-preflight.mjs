@@ -139,6 +139,11 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
   }
   if (identity === "release-deployer") {
     if (!new RegExp(`^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`).test(observedCaller)) throw new Error("Release production preflight requires the exact release-deployer identity.");
+    if (argv.filter((argument) => argument === "--tooling-sha").length !== 1) throw new Error("Release production preflight requires exactly one --tooling-sha.");
+    const sourceSha = value(argv, "--tooling-sha");
+    if (!SHA40.test(sourceSha)) throw new Error("Release production preflight requires a full protected source SHA.");
+    const protectedMain = readProtectedMainCheckout();
+    if (!protectedMain || protectedMain.toolingSha !== sourceSha || protectedMain.currentHead !== sourceSha || protectedMain.originMainHead !== sourceSha || protectedMain.porcelainStatus) throw new Error("Release production preflight requires the exact clean protected-main source.");
     const adminReportBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report"))); const adminReport = JSON.parse(adminReportBytes);
     const administratorSignatureBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report-signature")));
     const signature = JSON.parse(administratorSignatureBytes);
@@ -149,6 +154,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     if (canonicalizeJson(adminReport.capabilityGraph) !== canonicalizeJson(capabilityGraph)) throw new Error("Administrator pre-plan capability graph is stale.");
     assertReleasePolicyEvidence(adminReport.policyEvidence);
     const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)) });
+    report.sourceSha = sourceSha;
     report.requiredReads["kms:Verify"] = "allowed";
     report.administratorReportSha256 = sha256(adminReportBytes);
     report.policyVersions = adminReport.policyEvidence.policies.map(({ arn, defaultVersionId, liveSha256 }) => ({ arn, defaultVersionId, liveSha256 }));

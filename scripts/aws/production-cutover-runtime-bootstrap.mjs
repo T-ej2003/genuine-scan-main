@@ -21,6 +21,7 @@ import {
   PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE_KIND,
 } from "../security/production-initial-migration-source-advance.mjs";
 import { assertBindingsMatchLegacyBaseline, deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
+import { assertReleasePreflightCheckerTrustEvidence } from "./production-checker-chain-contract.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -182,6 +183,7 @@ export function prepareProductionCutoverRuntime({
   git,
   imageAuthorization,
   iamEvidence,
+  releasePreflightEvidenceFile,
   artifactBindingFile,
   rootDropEvidenceFile,
   temporaryKmsCapabilityFile,
@@ -241,6 +243,9 @@ export function prepareProductionCutoverRuntime({
     if (canonicalHash(suppliedIamEvidence) !== canonicalHash(preparedIamEvidence.value)) throw new Error("IAM evidence input differs from its authenticated file.");
     if (preparedIamEvidence.value.status !== "valid" || preparedIamEvidence.value.iamEvaluationCensus?.executed !== preparedIamEvidence.value.iamEvaluationCensus?.total || preparedIamEvidence.value.iamEvaluationCensus?.invalid !== 0) throw new Error("IAM evidence is incomplete.");
     assertPreCutoverTemporaryCapabilityAbsent(preparedIamEvidence.value.temporaryKmsCapability, { sourceSha: protectedSha });
+    if (!releasePreflightEvidenceFile) throw new Error("Release-preflight checker-trust evidence file is required.");
+    const releasePreflightEvidence = readInputFile(releasePreflightEvidenceFile, repositoryRoot, "Release-preflight checker-trust evidence");
+    assertReleasePreflightCheckerTrustEvidence(releasePreflightEvidence.value, { sourceSha: protectedSha, administratorReportSha256: preparedIamEvidence.sha256 });
     const temporaryKmsCapability = temporaryKmsCapabilityFile ? readInputFile(temporaryKmsCapabilityFile, repositoryRoot, "Temporary Stage-A KMS capability evidence") : null;
     if (temporaryKmsCapability) {
       assertPreCutoverTemporaryCapabilityAbsent(temporaryKmsCapability.value, { sourceSha: protectedSha });
@@ -314,6 +319,8 @@ export function prepareProductionCutoverRuntime({
       imageAuthorizationFile: preparedImageAuthorization.path,
       iamEvidenceFile: preparedIamEvidence.path,
       iamEvidenceSha256: preparedIamEvidence.value.evidence?.evidenceSha256 || preparedIamEvidence.value.evidenceSha256 || null,
+      releasePreflightEvidenceFile: releasePreflightEvidence.path,
+      releasePreflightEvidenceFileSha256: releasePreflightEvidence.sha256,
       rootDropEvidenceFile: rootDrop.path,
       rootDropEvidenceSha256: rootDrop.sha256,
       temporaryKmsCapabilityFile: temporaryKmsCapability?.path || null,
@@ -432,7 +439,7 @@ const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
 export function parseBootstrapArgs(argv) {
   const supported = new Set([
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
-    "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "image-authorization", "iam-evidence",
+    "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "image-authorization", "iam-evidence", "release-preflight-evidence",
     "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "onboarding-paths",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir",
   ]);

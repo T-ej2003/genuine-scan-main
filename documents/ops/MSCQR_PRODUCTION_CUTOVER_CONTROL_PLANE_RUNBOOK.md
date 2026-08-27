@@ -57,12 +57,14 @@ secret values belong in that configuration.
 Before MFA, use `npm run stage-b:prepare-cutover-runtime --` with the reviewed approval metadata.
 This private preflight derives protected-main SHA, production region and role, overlap deployment
 SHA, current runtime metadata, image/IAM/artifact evidence references, and phase-owned output paths.
-It validates the complete adapter graph before live ECS discovery, then atomically publishes the
+It validates the complete adapter graph before live ECS discovery, including the separately hash-bound
+release-preflight checker-trust report (`checkerTrust.exact=true` and `checkerTrust.mfaRequired=true`)
+and the administrator/KMS report; checker trust is never treated as administrator evidence. It then atomically publishes the
 identifier-only rotation config, redacted manifest, canonical onboarding paths, and rotation Terraform
 input in a 0700 runtime directory; all four are 0600 outputs.
 It never creates rotation state or the rotation fixture. Those remain outputs of the coordinator's
 `--prepare` phase. The command emits one exact `stage-b:run-cutover-operator` command only after all
-pre-MFA inputs are valid. The launcher obtains the required verifier and strict-onboarding inputs
+pre-MFA inputs are valid. The launcher obtains the verifier MFA device ARN and strict-onboarding inputs
 from the controlling terminal with echo disabled, then invokes the governed entrypoint without
 putting them in command arguments, files, or evidence. The pre-MFA bootstrap does not collect onboarding MFA. The onboarding
 adapter reads `MSCQR_ONBOARDING_MFA_CODE` only after the live login response enters the MFA challenge

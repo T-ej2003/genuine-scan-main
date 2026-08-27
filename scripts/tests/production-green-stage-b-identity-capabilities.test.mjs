@@ -327,13 +327,15 @@ test("administrator preflight binds live temporary-KMS absence evidence to prote
   assert.equal(administratorReport.temporaryKmsCapability.transitionId, `preflight-${protectedSourceSha.slice(0, 12)}`);
   assert.equal(administratorSignature.canonicalPayloadSha256, crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(administratorReport))).digest("hex"));
   const releasePath = path.join(directory, "release.json"); let releaseReads = 0;
-  const release = runProductionPreflightCli(["--identity", "release-deployer", "--output", releasePath, "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
+  const release = runProductionPreflightCli(["--identity", "release-deployer", "--tooling-sha", protectedSourceSha, "--output", releasePath, "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
     caller: () => caller,
     verify: () => true,
+    readProtectedMainCheckout: () => ({ toolingSha: protectedSourceSha, currentHead: protectedSourceSha, originMainHead: protectedSourceSha, porcelainStatus: "" }),
     releasePreflight: () => { releaseReads += 1; return { schemaVersion: 1, caller, account: "368992683803", region: "eu-west-2", requiredReads: {}, failed: [], skipped: [], status: "valid" }; },
     continueReadiness: () => ({ backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true }), validateCapabilityGraph: () => admin.capabilityGraph,
   });
   assert.equal(release.status, "ready-for-plan"); assert.equal(releaseReads, 1);
+  assert.equal(JSON.parse(fs.readFileSync(releasePath, "utf8")).sourceSha, protectedSourceSha);
 });
 
 test("administrator preflight rejects a root-drop policy missing provider rotation readback", () => {
@@ -364,8 +366,9 @@ test("invalid release capability report stops before backend readiness", () => {
   const capabilityGraph = assertStageBDeploymentCapabilityGraph();
   fs.writeFileSync(adminPath, JSON.stringify({ schemaVersion: 1, evidenceKind: "INITIAL_ADMIN_CAPABILITY", phase: "initial", purpose: "pre-plan-capability", status: "valid", simulatedRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", policyEvidence: shapedPolicyEvidence(), capabilityGraph }));
   fs.writeFileSync(signaturePath, "{}"); let continued = 0;
-  assert.throws(() => runProductionPreflightCli(["--identity", "release-deployer", "--output", path.join(directory, "release.json"), "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
+  assert.throws(() => runProductionPreflightCli(["--identity", "release-deployer", "--tooling-sha", protectedSourceSha, "--output", path.join(directory, "release.json"), "--administrator-report", adminPath, "--administrator-report-signature", signaturePath], {
     caller: () => caller, verify: () => true,
+    readProtectedMainCheckout: () => ({ toolingSha: protectedSourceSha, currentHead: protectedSourceSha, originMainHead: protectedSourceSha, porcelainStatus: "" }),
     releasePreflight: () => ({ requiredReads: { "ecs:DescribeClusters": "denied" }, failed: [{ action: "ecs:DescribeClusters" }], skipped: [], status: "blocked" }),
     continueReadiness: () => { continued += 1; }, validateCapabilityGraph: () => capabilityGraph,
   }), /Cutover-critical release capability lacks valid evidence/);

@@ -9,6 +9,8 @@ export const ACCOUNT = "368992683803";
 export const REGION = "eu-west-2";
 export const ECS_EXEC_OPERATOR_ROLE_NAME = "mscqr-production-ecs-exec-verifier";
 export const ECS_EXEC_OPERATOR_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/${ECS_EXEC_OPERATOR_ROLE_NAME}`;
+export const ECS_EXEC_OPERATOR_BOOTSTRAP_USER_ARN = `arn:aws:iam::${ACCOUNT}:user/mscqr-production-bootstrap-operator`;
+export const ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN = `arn:aws:iam::${ACCOUNT}:mfa/mscqr-production-bootstrap-operator`;
 export const ECS_EXEC_OPERATOR_POLICY_ARN = `arn:aws:iam::${ACCOUNT}:policy/${ECS_EXEC_OPERATOR_ROLE_NAME}`;
 export const ECS_EXEC_OPERATOR_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/${ECS_EXEC_OPERATOR_ROLE_NAME}/[^/]+$`;
 export const ECS_EXEC_OPERATOR_POLICY_PATH = "documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_POLICY.json";
@@ -127,14 +129,14 @@ export function normalizeEcsExecOperatorTrustDocument(rawTrust) {
 export function assertEcsExecOperatorTrustDocument(trust) {
   if (trust?.Version !== "2012-10-17" || !Array.isArray(trust.Statement) || trust.Statement.length !== 1) throw new Error("ECS Exec verifier trust policy must contain exactly one reviewed statement.");
   const statement = trust.Statement[0];
-  if (statement.Effect !== "Allow" || statement.Action !== "sts:AssumeRole" || statement.Principal?.AWS !== `arn:aws:iam::${ACCOUNT}:user/mscqr-production-bootstrap-operator` || statement.Condition?.Bool?.["aws:MultiFactorAuthPresent"] !== "true") throw new Error("ECS Exec verifier trust policy is not the exact MFA-backed bootstrap trust boundary.");
+  if (statement.Effect !== "Allow" || statement.Action !== "sts:AssumeRole" || statement.Principal?.AWS !== ECS_EXEC_OPERATOR_BOOTSTRAP_USER_ARN || statement.Condition?.Bool?.["aws:MultiFactorAuthPresent"] !== "true") throw new Error("ECS Exec verifier trust policy is not the exact MFA-backed bootstrap trust boundary.");
   if (Object.keys(statement.Principal || {}).length !== 1 || Object.keys(statement.Condition || {}).length !== 1 || Object.keys(statement.Condition.Bool || {}).length !== 1) throw new Error("ECS Exec verifier trust policy contains extra principals or conditions.");
   return true;
 }
 
 export function assertEcsExecOperatorLiveEvidence(evidence) {
   const policy = evidence?.policy;
-  if (!evidence || evidence.roleArn !== ECS_EXEC_OPERATOR_ROLE_ARN || evidence.sourceTrustCanonicalSha256 !== ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256 || evidence.liveTrustCanonicalSha256 !== ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256 || evidence.converged !== true || evidence.trustedPrincipal !== `arn:aws:iam::${ACCOUNT}:user/mscqr-production-bootstrap-operator` || evidence.mfaRequired !== true) throw new Error("ECS Exec verifier trust evidence is missing or does not converge with the reviewed source.");
+  if (!evidence || evidence.roleArn !== ECS_EXEC_OPERATOR_ROLE_ARN || evidence.sourceTrustCanonicalSha256 !== ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256 || evidence.liveTrustCanonicalSha256 !== ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256 || evidence.converged !== true || evidence.trustedPrincipal !== ECS_EXEC_OPERATOR_BOOTSTRAP_USER_ARN || evidence.mfaRequired !== true) throw new Error("ECS Exec verifier trust evidence is missing or does not converge with the reviewed source.");
   if (!policy || policy.policyArn !== ECS_EXEC_OPERATOR_POLICY_ARN || policy.sourceCanonicalSha256 !== ECS_EXEC_OPERATOR_SOURCE_POLICY_SHA256 || policy.liveCanonicalSha256 !== ECS_EXEC_OPERATOR_SOURCE_POLICY_SHA256 || policy.converged !== true || policy.attached !== true || policy.inline !== false) throw new Error("ECS Exec verifier policy evidence is missing or does not converge with the reviewed source.");
   return true;
 }
@@ -145,7 +147,7 @@ export function buildEcsExecOperatorEvidence() {
     sourceTrustCanonicalSha256: ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256,
     liveTrustCanonicalSha256: ECS_EXEC_OPERATOR_SOURCE_TRUST_SHA256,
     converged: true,
-    trustedPrincipal: `arn:aws:iam::${ACCOUNT}:user/mscqr-production-bootstrap-operator`,
+    trustedPrincipal: ECS_EXEC_OPERATOR_BOOTSTRAP_USER_ARN,
     mfaRequired: true,
     policy: { policyArn: ECS_EXEC_OPERATOR_POLICY_ARN, sourceCanonicalSha256: ECS_EXEC_OPERATOR_SOURCE_POLICY_SHA256, liveCanonicalSha256: ECS_EXEC_OPERATOR_SOURCE_POLICY_SHA256, converged: true, attached: true, inline: false },
     status: "valid",

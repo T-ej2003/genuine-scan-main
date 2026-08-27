@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { establishEcsExecVerifierSession } from "./establish-production-ecs-exec-verifier-session.mjs";
+import { assertVerifierMfaSerial, establishEcsExecVerifierSession } from "./establish-production-ecs-exec-verifier-session.mjs";
 import { ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 
 const ACCOUNT = "368992683803";
@@ -92,10 +92,12 @@ export async function establishReleaseDeployerIdentity({ adapter } = {}) {
 }
 
 export async function establishVerifierIdentity({ adapter, mfaSerial, mfaCode, getMfaCode } = {}) {
-  const result = await establishEcsExecVerifierSession({ adapter, mfaSerial, mfaCode, getMfaCode });
+  const result = await establishEcsExecVerifierSession({ adapter, mfaSerial: assertVerifierMfaSerial(mfaSerial), mfaCode, getMfaCode });
   if (result.roleArn !== ECS_EXEC_OPERATOR_ROLE_ARN) throw new Error("Verifier identity is outside the reviewed role.");
   return result;
 }
+
+export { assertVerifierMfaSerial } from "./establish-production-ecs-exec-verifier-session.mjs";
 
 function cryptoSha(value) {
   return createHash("sha256").update(value).digest("hex");

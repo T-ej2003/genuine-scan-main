@@ -2,11 +2,12 @@
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { promptProductionHiddenInput } from "../security/production-interactive-mfa-provider.mjs";
+import { assertVerifierMfaSerial } from "./establish-production-ecs-exec-verifier-session.mjs";
 
 const SHA1 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const REQUIRED_INPUTS = Object.freeze([
-  Object.freeze({ name: "MSCQR_VERIFIER_MFA_SERIAL", prompt: "Production verifier MFA serial: ", validate: (value) => Boolean(value) }),
+  Object.freeze({ name: "MSCQR_VERIFIER_MFA_SERIAL", prompt: "Production verifier MFA serial: ", validate: (value) => { try { assertVerifierMfaSerial(value); return true; } catch { return false; } } }),
   Object.freeze({ name: "MSCQR_ONBOARDING_EMAIL", prompt: "Production strict-onboarding administrator email: ", validate: (value) => Boolean(value) }),
   Object.freeze({ name: "MSCQR_ONBOARDING_PASSWORD", prompt: "Production strict-onboarding administrator password: ", validate: (value) => Boolean(value) }),
   Object.freeze({ name: "MSCQR_CANARY_ORDINARY_EMAIL", prompt: "Production strict-onboarding tenant-canary email: ", validate: (value) => Boolean(value) }),

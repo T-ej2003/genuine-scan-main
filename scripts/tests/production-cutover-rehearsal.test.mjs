@@ -96,7 +96,6 @@ function iamFixture() {
     },
     ecsExecVerifierTrust: buildEcsExecOperatorEvidence(),
     iamEvaluationCensus: { total: all.length, executed: all.length, invalid: 0, failures: [] },
-    checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN },
     temporaryKmsCapability: buildTemporaryCapabilityEvidence({ state: "ABSENCE_VERIFIED", sourceSha, transitionId: "rehearsal-transition", defaultVersionId: "v1", observedAt: "2026-08-18T12:00:00.000Z" }),
   };
 }
@@ -144,6 +143,7 @@ export function fixtureInput(overrides = {}) {
     imageAuthorization: structuredClone(imageAuthorizationFixture.authorization),
     imageAuthorizationValidation: { now: imageAuthorizationFixture.now, verifyImageEvidence: imageAuthorizationFixture.verifyImageEvidence },
     iamReport: iamFixture(),
+    checkerTrustEvidence: { sourceSha, administratorReportSha256: "a".repeat(64), checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN } },
     checkerChain: {
       verifySourceTrust: async () => ({ exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }),
       verifyComplete: async () => ({ valid: true, sourceTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }, sourcePermission: { exact: true, action: "sts:AssumeRole", resource: CHECKER_TARGET_ROLE_ARN }, targetTrust: { exact: true, secondHopMfaRequired: false, principal: CHECKER_SOURCE_ROLE_ARN, roleArn: CHECKER_TARGET_ROLE_ARN }, checkerUserExact: true, firstHopMfaRequired: true, roleAAssumeTargetPermissionExact: true, roleBTrustExactRoleA: true, roleBSecondHopMfaRequired: false }),
@@ -469,6 +469,14 @@ test("invalid IAM evidence is rejected before reconciliation", async () => {
   await assert.rejects(() => runProductionCutoverControlPlane(input), /IAM preflight is invalid/);
   assert.equal(reconciliationCalls, 0);
   assert.deepEqual(input._mutations, []);
+});
+
+test("authenticated release-preflight checker trust is required before identities or mutations", async () => {
+  for (const checkerTrustEvidence of [undefined, { sourceSha, checkerTrust: { exact: false, mfaRequired: true } }, { sourceSha, checkerTrust: { exact: true, mfaRequired: false } }]) {
+    const input = fixtureInput({ checkerTrustEvidence, identities: { establish: async () => { throw new Error("must not establish identities"); } } });
+    await assert.rejects(() => runProductionCutoverControlPlane(input), /release-preflight Role-A MFA trust evidence/);
+    assert.deepEqual(input._mutations, []);
+  }
 });
 
 test("the real predeployment adapter feeds the same cutover spine before deployment", async () => {

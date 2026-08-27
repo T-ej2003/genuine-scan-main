@@ -27,6 +27,7 @@ import { runCli as runArtifactSigningBootstrap } from "../aws/bootstrap-producti
 import { producePostApplyStageAPlanRecovery } from "../aws/production-stage-a-recovery-evidence.mjs";
 import { STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { productionStageAIngress, productionStageAState, STAGE_A_STATE_OBJECT } from "./fixtures/production-stage-a-state.mjs";
+import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
@@ -94,6 +95,12 @@ function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha) {
   iamDocument.temporaryKmsCapability = JSON.parse(readFileSync(temporaryKmsCapability, "utf8"));
   writeFileSync(iamEvidence, JSON.stringify(iamDocument) + "\n", { mode: 0o600 });
   chmodSync(iamEvidence, 0o600);
+  const releasePreflightEvidence = file("release-preflight.json", {
+    status: "ready-for-plan",
+    sourceSha: expectedSha,
+    administratorReportSha256: createHash("sha256").update(readFileSync(iamEvidence)).digest("hex"),
+    checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN },
+  });
   const rootDrop = file("root-drop.json", buildRootDropEvidence({ payload: buildRootDropPayload({ sourceSha: expectedSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "runtime-bootstrap-root-with-entropy" }), signatureBase64: "c2lnbmF0dXJl" }));
   const stageAPlan = file("stage-a.tfplan", "binary-fixture");
   const tfvarsBytes = Buffer.from("production_rotation_enabled = false\n");
@@ -111,7 +118,7 @@ function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha) {
     ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-d",
   } }, null, 2));
   chmodSync(artifactBinding, 0o600);
-  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, temporaryKmsCapability, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
+  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, releasePreflightEvidence, temporaryKmsCapability, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
 }
 
 function fullInput(directory, repositoryRoot, expectedSha = sourceSha) {
@@ -124,6 +131,7 @@ function fullInput(directory, repositoryRoot, expectedSha = sourceSha) {
     git: gitFixture(expectedSha),
     imageAuthorization: { ...JSON.parse(readFileSync(evidence.imageAuthorization, "utf8")), filePath: evidence.imageAuthorization },
     iamEvidence: { ...JSON.parse(readFileSync(evidence.iamEvidence, "utf8")), filePath: evidence.iamEvidence },
+    releasePreflightEvidenceFile: evidence.releasePreflightEvidence,
     temporaryKmsCapabilityFile: evidence.temporaryKmsCapability,
     artifactBindingFile: evidence.artifactBinding,
     rootDropEvidenceFile: evidence.rootDrop,
@@ -271,6 +279,7 @@ test("runtime adapter rejects artifact binding tamper after preparation", () => 
 test("runtime adapter authenticates every prepared eligibility artifact before AWS work", () => {
   for (const [field, message] of [
     ["iamEvidenceFile", /IAM evidence changed after runtime preparation/],
+    ["releasePreflightEvidenceFile", /Release-preflight checker-trust evidence changed after runtime preparation/],
     ["rootDropEvidenceFile", /Root-drop evidence changed after runtime preparation/],
     ["onboardingPathsFile", /Onboarding path manifest changed after runtime preparation/],
   ]) {
@@ -284,6 +293,26 @@ test("runtime adapter authenticates every prepared eligibility artifact before A
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  }
+});
+
+test("runtime preparation binds release-preflight checker trust separately from administrator evidence", () => {
+  const cases = [
+    ["missing", (input) => { delete input.releasePreflightEvidenceFile; }, /Release-preflight checker-trust evidence file is required/],
+    ["exact false", (input) => { const report = JSON.parse(readFileSync(input.releasePreflightEvidenceFile, "utf8")); report.checkerTrust.exact = false; writeFileSync(input.releasePreflightEvidenceFile, `${JSON.stringify(report)}\n`, { mode: 0o600 }); }, /checker Role-A MFA trust evidence is invalid/],
+    ["MFA false", (input) => { const report = JSON.parse(readFileSync(input.releasePreflightEvidenceFile, "utf8")); report.checkerTrust.mfaRequired = false; writeFileSync(input.releasePreflightEvidenceFile, `${JSON.stringify(report)}\n`, { mode: 0o600 }); }, /checker Role-A MFA trust evidence is invalid/],
+    ["source mismatch", (input) => { const report = JSON.parse(readFileSync(input.releasePreflightEvidenceFile, "utf8")); report.sourceSha = "a".repeat(40); writeFileSync(input.releasePreflightEvidenceFile, `${JSON.stringify(report)}\n`, { mode: 0o600 }); }, /not bound to the authenticated source/],
+    ["administrator hash mismatch", (input) => { const report = JSON.parse(readFileSync(input.releasePreflightEvidenceFile, "utf8")); report.administratorReportSha256 = "0".repeat(64); writeFileSync(input.releasePreflightEvidenceFile, `${JSON.stringify(report)}\n`, { mode: 0o600 }); }, /not bound to the authenticated source/],
+  ];
+  for (const [name, mutate, expected] of cases) {
+    const directory = fsTemp();
+    try {
+      const input = fullInput(directory, process.cwd());
+      mutate(input);
+      const result = prepareProductionCutoverRuntime(input);
+      assert.equal(result.readyToConsumeMfa, false, name);
+      assert.match(result.blockers.join("\n"), expected, name);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   }
 });
 

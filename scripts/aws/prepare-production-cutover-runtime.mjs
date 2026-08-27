@@ -12,9 +12,11 @@ const capture = (name, label = name) => readStageBPrivateFileBytes({ filePath: r
 const read = (name, label) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(capture(name, label).bytes));
 const imageAuthorizationPath = required("image-authorization");
 const iamEvidencePath = required("iam-evidence");
+const releasePreflightEvidencePath = required("release-preflight-evidence");
 const temporaryKmsCapabilityPath = args.get("temporary-kms-capability");
 const imageAuthorization = read("image-authorization", "Image authorization evidence");
 const iamEvidence = read("iam-evidence", "IAM evidence");
+capture("release-preflight-evidence", "Release-preflight checker-trust evidence");
 if (temporaryKmsCapabilityPath) readStageBPrivateFileBytes({ filePath: temporaryKmsCapabilityPath, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
 for (const [name, label] of [["artifact-binding", "Artifact-signing runtime binding"], ["root-drop-evidence", "Root-drop evidence"], ["stage-a-plan", "Preserved Stage-A saved plan"], ["stage-a-recovery-evidence", "Stage-A recovery evidence"], ["stage-a-state", "Stage-A state"], ["stage-a-handoff", "Stage-A handoff"], ["stage-b-state", "Historical Stage-B state"], ["current-stage-b-state", "Current Stage-B state"], ["stage-b-tfvars", "Canonical Stage B tfvars"], ["stage-b-tfvars-binding-report", "Canonical Stage B tfvars binding report"]]) if (args.has(name)) capture(name, label);
 const rotationBindingCapture = args.has("rotation-bindings") ? capture("rotation-bindings", "Rotation secret binding manifest") : null;
@@ -49,6 +51,7 @@ const result = prepareProductionCutoverRuntime({
   rotationId: rotationBindings?.rotationId,
   imageAuthorization,
   iamEvidence,
+  releasePreflightEvidenceFile: path.resolve(releasePreflightEvidencePath),
   artifactBindingFile: required("artifact-binding"),
   rootDropEvidenceFile: required("root-drop-evidence"),
   temporaryKmsCapabilityFile: temporaryKmsCapabilityPath,

@@ -28,6 +28,7 @@ import { assertAuthenticatedCurrentStageBState, readAuthenticatedStageARecoveryS
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
+import { assertReleasePreflightCheckerTrustEvidence } from "./production-checker-chain-contract.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -271,6 +272,10 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     assertPreCutoverTemporaryCapabilityAbsent(report.temporaryKmsCapability, { sourceSha });
     return report;
   };
+  const readCheckerTrustEvidence = () => assertReleasePreflightCheckerTrustEvidence(
+    readBoundStageBPrivateJson({ filePath: config.releasePreflightEvidenceFile, expectedSha256: config.releasePreflightEvidenceFileSha256, label: "Release-preflight checker-trust evidence" }),
+    { sourceSha, administratorReportSha256: config.iamEvidenceFileSha256 },
+  );
   const artifact = createAwsArtifactSigningAdapter({
     run: async (args) => releaseRun(args),
     sourceSha,
@@ -301,6 +306,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   const preDeploymentInventory = createProductionPreDeploymentInventoryAdapter({ run: async (args) => releaseRun(args), sourceSha, imageDigest: config.overlapTaskInput?.backendImage, config });
   return {
     iam: { report: readIamEvidence(), reconcile: async () => ({ mutationCount: 0 }) },
+    checkerTrustEvidence: readCheckerTrustEvidence(),
     checkerChain,
     identities: {
       establish: async () => {

@@ -70,6 +70,9 @@
       "kind": "file",
       "producer": "scripts/aws/run-production-green-stage-b-preflight.mjs:runReleaseReadiness",
       "consumers": [
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/production-cutover-control-plane.mjs",
         "scripts/aws/validate-stage-b-deployment-closure.mjs",
         "scripts/plan-production-green-stage-b.mjs",
         "scripts/apply-production-green-stage-b.mjs"
