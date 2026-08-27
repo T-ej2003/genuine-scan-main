@@ -9,7 +9,7 @@ The reviewed comparison is anchored by the canonical image-reuse boundary:
 ```text
 image release: b3b477a37b50d7796ec9c3225c176f02f04023dc
 comparison base: b3b477a37b50d7796ec9c3225c176f02f04023dc
-tooling revision: 6bc78143cc1c11c645b87a9e1c4ca3b875b1aabf
+tooling revision: 581aa410336b7eb103c93372c4ee4f3d447fc540
 tooling input tree: f4edaed5593336f2bf67051735122838cf3df63cc4eb21dbcfdb5429503b2fe8
 rules version: stage-b-image-reuse-v4
 image reuse compatible: true
@@ -35,6 +35,7 @@ The canonical changed-file classification is:
 | documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json | documentationOnly | false |
 | documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.md | documentationOnly | false |
 | documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json | documentationOnly | false |
+| documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.md | documentationOnly | false |
 | documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_TWO_SHA_IDENTITY.md | documentationOnly | false |
 | scripts/apply-production-green-stage-b.mjs | toolingOnly | false |
 | scripts/aws/dispatch-production-green-stage-b-images.mjs | toolingOnly | false |
