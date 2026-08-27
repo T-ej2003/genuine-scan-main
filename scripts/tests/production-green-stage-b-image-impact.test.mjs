@@ -318,14 +318,27 @@ test("canonical compatibility JSON and Markdown describe the same reviewed bound
   const report = JSON.parse(readFileSync(new URL("../../documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json", import.meta.url), "utf8"));
   const markdown = readFileSync(new URL("../../documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.md", import.meta.url), "utf8");
   for (const [label, value] of [
+    ["schema version", report.schemaVersion],
+    ["identity model", report.identityModel],
     ["image release", report.imageReleaseSha],
     ["comparison base", report.comparisonBaseSha],
     ["tooling revision", report.toolingSha],
+    ["comparison head identity", report.comparisonHeadIdentity],
+    ["comparison head", report.comparisonHeadSha256],
     ["tooling input tree", report.toolingInputTreeSha256],
     ["rules version", report.classificationRulesVersion],
     ["image reuse compatible", String(report.imageReuseCompatible)],
+    ["image build inputs changed", String(report.imageBuildInputsChanged)],
+    ["trusted tooling only paths", report.trustedToolingOnlyPaths.length ? report.trustedToolingOnlyPaths.join(", ") : "(none)"],
+    ["image affecting files", report.imageAffectingFiles.length ? report.imageAffectingFiles.join(", ") : "(none)"],
+    ["reason", report.reason],
   ]) assert.equal(markdown.includes(`${label}: ${value}`), true, `${label} is not synchronized`);
   for (const { file, category, imageAffecting } of report.classifiedChangedFiles) {
     assert.equal(markdown.includes(`| ${file} | ${category} | ${imageAffecting} |`), true, `${file} classification is not synchronized`);
   }
+  assert.equal("trustedWorkflowProof" in report, false);
+  assert.equal("publicationInputFingerprint" in report, false);
+  assert.equal(markdown.includes("trustedToolingOnly"), false);
+  assert.equal(markdown.includes("trusted-workflow proof"), false);
+  assert.equal(markdown.includes("publicationInputFingerprint"), false);
 });
