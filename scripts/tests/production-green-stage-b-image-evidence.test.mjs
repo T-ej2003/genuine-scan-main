@@ -279,6 +279,21 @@ test("image reader accepts the AWS imageDetails envelope exactly once", () => {
   assert.deepEqual(image, { digest: records[0].image_digest, imagePushedAt: observedAt });
 });
 
+test("image reader rejects malformed AWS imageDetails envelopes", () => {
+  const validImage = { imageDigest: records[0].image_digest, imagePushedAt: observedAt };
+  for (const response of [
+    undefined,
+    {},
+    { imageDetails: [] },
+    { imageDetails: [validImage, validImage] },
+    { imageDetails: [{ imagePushedAt: observedAt }] },
+    { imageDetails: [{ imageDigest: records[0].image_digest }] },
+    { imageDetails: "unexpected" },
+  ]) {
+    assert.throws(() => readImageEvidence("mscqr-backend", imageReleaseSha, { describe: () => response }), /exactly one image|evidence is incomplete/);
+  }
+});
+
 test("administrator CLI reads DescribeRepositories exactly once per unique repository", () => {
   const directory = fs.mkdtempSync("/tmp/stage-b-image-evidence-cli-");
   try {
@@ -302,6 +317,49 @@ test("administrator CLI reads DescribeRepositories exactly once per unique repos
     assert.equal(calls, 2);
     assert.equal(result.reportSha256, imageEvidenceSha256(JSON.parse(fs.readFileSync(outputPath, "utf8"))));
     assert.equal(JSON.parse(fs.readFileSync(outputPath, "utf8")).repositories.length, 2);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("administrator CLI default composition normalizes raw DescribeImages responses", () => {
+  const directory = fs.mkdtempSync("/tmp/stage-b-image-evidence-default-composition-");
+  try {
+    const artifactPath = `${directory}/artifact.jsonl`;
+    const outputPath = `${directory}/report.json`;
+    const signaturePath = `${directory}/signature.json`;
+    const identityPath = `${directory}/stage-b-image-publication-identity.json`;
+    fs.writeFileSync(artifactPath, artifactBytes, { mode: 0o600 });
+    fs.writeFileSync(identityPath, `${JSON.stringify(publicationIdentity)}\n`, { mode: 0o600 });
+    const calls = [];
+    const result = runCli(["--artifact", artifactPath, "--tooling-sha", toolingSha, "--image-release-sha", imageReleaseSha, "--workflow-run-id", workflowRunId, "--artifact-sha256", artifactSha256, "--publication-identity", identityPath, "--publication-identity-sha256", publicationIdentitySha256(publicationIdentity), "--output", outputPath, "--signature-output", signaturePath], {
+      observedAt,
+      sign: () => "AQ==",
+      run: (args) => {
+        calls.push(args);
+        if (args[0] === "sts") return JSON.stringify({ Arn: verifierCallerArn });
+        if (args[0] === "ecr" && args[1] === "describe-repositories") {
+          const repository = args[args.indexOf("--repository-names") + 1];
+          return JSON.stringify({ repositories: [{ repositoryName: repository, repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, registryId: "368992683803", repositoryUri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}`, imageTagMutability: "IMMUTABLE", encryptionConfiguration: { encryptionType: "AES256" }, createdAt: "2026-04-17T15:17:09.210Z" }] });
+        }
+        if (args[0] === "ecr" && args[1] === "describe-images") {
+          const repository = args[args.indexOf("--repository-name") + 1];
+          const tag = args[args.indexOf("--image-ids") + 1].replace("imageTag=", "");
+          const record = records.find((candidate) => candidate.repository === repository && candidate.image_tag === tag);
+          return JSON.stringify({ imageDetails: [{ imageDigest: record?.image_digest, imagePushedAt: observedAt }] });
+        }
+        throw new Error(`Unexpected default-composition AWS command: ${args.join(" ")}`);
+      },
+    });
+    const report = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+    assert.equal(result.reportSha256, imageEvidenceSha256(report));
+    assert.deepEqual(report.images.map(({ service, digest }) => ({ service, digest })), [
+      { service: "backend", digest: records[0].image_digest },
+      { service: "rls-canary", digest: records[3].image_digest },
+      { service: "rls-executor", digest: records[2].image_digest },
+      { service: "worker", digest: records[1].image_digest },
+    ]);
+    assert.equal(calls.filter((args) => args[0] === "ecr" && args[1] === "describe-images").length, 4);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
