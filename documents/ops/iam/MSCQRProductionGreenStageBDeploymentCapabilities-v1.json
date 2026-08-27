@@ -76,136 +76,141 @@
     },
     {
       "order": 15,
+      "id": "release-preflight-checker-trust-attestation",
+      "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs"
+    },
+    {
+      "order": 16,
       "id": "backend-config-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-backend-config.mjs"
     },
     {
-      "order": 16,
+      "order": 17,
       "id": "terraform-initialization",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 17,
+      "order": 18,
       "id": "backend-metadata-validation",
       "sourceFile": "scripts/aws/stage-b-terraform-backend-contract.mjs"
     },
     {
-      "order": 18,
+      "order": 19,
       "id": "workspace-validation",
       "sourceFile": "scripts/aws/stage-b-terraform-workspace.mjs"
     },
     {
-      "order": 19,
+      "order": 20,
       "id": "canonical-backend-recovery",
       "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs"
     },
     {
-      "order": 20,
+      "order": 21,
       "id": "backend-health-recovery",
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs"
     },
     {
-      "order": 21,
+      "order": 22,
       "id": "runtime-consumability-evidence",
       "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs"
     },
     {
-      "order": 22,
+      "order": 23,
       "id": "runtime-consumability-convergence",
       "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs"
     },
     {
-      "order": 23,
+      "order": 24,
       "id": "existing-revision-forward-recovery",
       "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs"
     },
     {
-      "order": 24,
+      "order": 25,
       "id": "stage-b-state-pull",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 25,
+      "order": 26,
       "id": "stage-a-state-read",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 26,
+      "order": 27,
       "id": "stage-a-handoff-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"
     },
     {
-      "order": 27,
+      "order": 28,
       "id": "root-drop-evidence-signing",
       "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs"
     },
     {
-      "order": 28,
+      "order": 29,
       "id": "tfvars-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-tfvars.mjs"
     },
     {
-      "order": 29,
+      "order": 30,
       "id": "refresh-only",
       "sourceFile": "scripts/refresh-production-green-stage-b.mjs"
     },
     {
-      "order": 30,
+      "order": 31,
       "id": "saved-plan-generation",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 31,
+      "order": 32,
       "id": "plan-json-canonicalization",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 32,
+      "order": 33,
       "id": "reference-audit",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs"
     },
     {
-      "order": 33,
+      "order": 34,
       "id": "plan-bound-permission-report",
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs"
     },
     {
-      "order": 34,
+      "order": 35,
       "id": "production-closure",
       "sourceFile": "scripts/aws/validate-stage-b-deployment-closure.mjs"
     },
     {
-      "order": 35,
+      "order": 36,
       "id": "validator",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 36,
+      "order": 37,
       "id": "wrapper-verify-only",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 37,
+      "order": 38,
       "id": "wrapper-apply",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 38,
+      "order": 39,
       "id": "post-apply-verification",
       "sourceFile": "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs"
     },
     {
-      "order": 39,
+      "order": 40,
       "id": "runtime-activation-boundary",
       "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs"
     },
     {
-      "order": 40,
+      "order": 41,
       "id": "normal-backend-activation",
       "sourceFile": "scripts/aws/production-normal-backend-activation.mjs"
     },
     {
-      "order": 41,
+      "order": 42,
       "id": "initial-activation-lifecycle",
       "sourceFile": "scripts/aws/manage-production-initial-activation-lifecycle.mjs"
     }
@@ -758,6 +763,62 @@
       "policy": {
         "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
         "sid": "PublishExactStageBApproval",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "checker-release-preflight-trust-attestation-identify",
+      "phase": "release-preflight-checker-trust-attestation",
+      "identity": "INDEPENDENT_CHECKER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs",
+      "sourceFunction": "runReleasePreflightCheckerTrustAttestationCli",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CHECKER_RELEASE_PREFLIGHT_ATTESTATION_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "identity-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "checker-release-preflight-trust-attestation-sign",
+      "phase": "release-preflight-checker-trust-attestation",
+      "identity": "INDEPENDENT_CHECKER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs",
+      "sourceFunction": "runReleasePreflightCheckerTrustAttestationCli",
+      "action": "kms:Sign",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CHECKER_RELEASE_PREFLIGHT_ATTESTATION_SIGNING",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "SignExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
         "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
@@ -11692,6 +11753,10 @@
     },
     {
       "sourceFile": "scripts/aws/production-release-oidc-contract.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs",
       "action": "sts:GetCallerIdentity"
     },
     {

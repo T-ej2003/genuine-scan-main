@@ -28,6 +28,7 @@ const awsCliSourceFiles = [
   "scripts/aws/production-green-stage-b-ecs-observations.mjs", "scripts/aws/production-green-stage-b-image-evidence.mjs",
   "scripts/aws/production-green-stage-b-identity-capabilities.mjs", "scripts/aws/run-production-green-stage-b-preflight.mjs",
   "scripts/aws/validate-production-green-stage-b-permissions.mjs", "scripts/aws/production-checker-chain-contract.mjs",
+  "scripts/aws/production-release-preflight-checker-attestation.mjs",
   "scripts/aws/publish-production-green-stage-b-approval.mjs", "scripts/aws/check-production-green-stage-b-approval-publication.mjs",
   "scripts/aws/recover-stage-b-backend-task-definition.mjs", "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
   "scripts/aws/recover-production-backend-health.mjs",
@@ -61,6 +62,7 @@ const PHASES = Object.freeze([
   ["bootstrap-mfa-session", "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"],
   ["release-role-assumption", "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"],
   ["release-direct-read-preflight", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
+  ["release-preflight-checker-trust-attestation", "scripts/aws/production-release-preflight-checker-attestation.mjs"],
   ["backend-config-generation", "scripts/aws/generate-production-green-stage-b-backend-config.mjs"],
   ["terraform-initialization", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["backend-metadata-validation", "scripts/aws/stage-b-terraform-backend-contract.mjs"],
@@ -260,6 +262,16 @@ function checkerAuthority(entry) {
   return { sourceFile: checkerPolicyPath, sid: "PublishExactStageBApproval", livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(source)) };
 }
 
+function checkerAttestationAuthority() {
+  const source = fs.readFileSync(path.join(root, checkerPolicyPath), "utf8");
+  if (!source.includes('Sid = "SignExactStageBApproval"')
+      || !source.includes('["kms:GetPublicKey", "kms:Sign", "kms:Verify"]')
+      || !source.includes("Resource = aws_kms_key.approval.arn")) {
+    throw new Error("No reviewed checker policy authorizes release-preflight checker-trust attestation signing.");
+  }
+  return { sourceFile: checkerPolicyPath, sid: "SignExactStageBApproval", livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(source)) };
+}
+
 function terraformRuntimeActions() {
   const text = fs.readFileSync(path.join(root, terraformPath), "utf8");
   return [...text.matchAll(/Action\s*=\s*(?:\[([^\]]+)\]|"([^"]+)")/g)]
@@ -323,6 +335,18 @@ export function buildStageBDeploymentCapabilityGraph() {
     sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: "CHECKER_APPROVAL_PUBLICATION",
     probe: "structural", probeIds: [], policy: checkerAuthority(entry), required: true, mutation: true,
   }));
+  checkerCapabilities.push({
+    id: "checker-release-preflight-trust-attestation-identify", phase: "release-preflight-checker-trust-attestation", identity: "INDEPENDENT_CHECKER", executor: "aws-cli",
+    sourceFile: "scripts/aws/production-release-preflight-checker-attestation.mjs", sourceFunction: "runReleasePreflightCheckerTrustAttestationCli",
+    action: "sts:GetCallerIdentity", resources: ["*"], context: { account: STAGE_B.account, region: STAGE_B.region }, classification: "CHECKER_RELEASE_PREFLIGHT_ATTESTATION_READ",
+    probe: "direct", probeIds: [], policy: { sourceFile: checkerPolicyPath, sid: "identity-boundary", livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(fs.readFileSync(path.join(root, checkerPolicyPath), "utf8"))) }, required: true, mutation: false,
+  });
+  checkerCapabilities.push({
+    id: "checker-release-preflight-trust-attestation-sign", phase: "release-preflight-checker-trust-attestation", identity: "INDEPENDENT_CHECKER", executor: "aws-cli",
+    sourceFile: "scripts/aws/production-release-preflight-checker-attestation.mjs", sourceFunction: "runReleasePreflightCheckerTrustAttestationCli",
+    action: "kms:Sign", resources: [STAGE_B.approvalKmsKeyArn], context: { account: STAGE_B.account, region: STAGE_B.region }, classification: "CHECKER_RELEASE_PREFLIGHT_ATTESTATION_SIGNING",
+    probe: "structural", probeIds: [], policy: checkerAttestationAuthority(), required: true, mutation: true,
+  });
   const operatorCapabilities = [[ECS_EXEC_OPERATOR_REQUIRED, false], [ECS_EXEC_OPERATOR_FORBIDDEN, true]].flatMap(([entries, forbidden]) => entries.map((entry) => ({
     id: `operator-${entry.id}`, phase: "runtime-verification", identity: "ECS_EXEC_VERIFIER_OPERATOR", executor: "ecs-exec-verifier",
     sourceFile: ECS_EXEC_OPERATOR_POLICY_PATH, sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: forbidden ? "FORBIDDEN" : entry.action === "ecs:ExecuteCommand" ? "RUNTIME_VERIFICATION_MUTATION" : "RUNTIME_VERIFICATION_READ",
@@ -387,6 +411,8 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   if (normal.some(({ identity, action }) => identity !== "RELEASE_DEPLOYER" || ["ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition"].includes(action)) || normal.filter(({ action }) => action === "ecs:UpdateService").length !== 1) throw new Error("Normal backend activation capability boundary is not exact or reuses registration authority.");
   const checkerPublication = graph.capabilities.filter(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:PutSecretValue" && resources.includes(STAGE_B.approvalSecretArn));
   if (checkerPublication.length !== 1) throw new Error("Exact checker approval publication capability is absent or duplicated.");
+  const checkerAttestation = graph.capabilities.filter(({ id, identity, action, resources }) => id === "checker-release-preflight-trust-attestation-sign" && identity === "INDEPENDENT_CHECKER" && action === "kms:Sign" && JSON.stringify(resources) === JSON.stringify([STAGE_B.approvalKmsKeyArn]));
+  if (checkerAttestation.length !== 1 || graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "kms:Sign")) throw new Error("Release-preflight checker-trust signing boundary is not exact.");
   if (graph.capabilities.some(({ identity, action, resources }) => identity === "RELEASE_DEPLOYER" && ["secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"].includes(action) && resources.includes(STAGE_B.approvalSecretArn))) throw new Error("Release-deployer approval secret authority is present.");
   if (graph.capabilities.some(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:GetSecretValue" && resources.includes(STAGE_B.approvalSecretArn))) throw new Error("Checker approval secret read authority is present.");
   if (graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "ecs:ExecuteCommand" && !graph.capabilities.some(({ id }) => id === "manifest-release-deployer-ecs-exec"))) throw new Error("Release-deployer ECS Exec boundary is not represented.");

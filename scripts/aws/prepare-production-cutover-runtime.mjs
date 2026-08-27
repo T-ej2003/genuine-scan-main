@@ -13,10 +13,14 @@ const read = (name, label) => JSON.parse(new TextDecoder("utf-8", { fatal: true 
 const imageAuthorizationPath = required("image-authorization");
 const iamEvidencePath = required("iam-evidence");
 const releasePreflightEvidencePath = required("release-preflight-evidence");
+const releasePreflightAttestationPath = required("release-preflight-attestation");
+const releasePreflightAttestationSignaturePath = required("release-preflight-attestation-signature");
 const temporaryKmsCapabilityPath = args.get("temporary-kms-capability");
 const imageAuthorization = read("image-authorization", "Image authorization evidence");
 const iamEvidence = read("iam-evidence", "IAM evidence");
 capture("release-preflight-evidence", "Release-preflight checker-trust evidence");
+capture("release-preflight-attestation", "Release-preflight checker-trust attestation");
+capture("release-preflight-attestation-signature", "Release-preflight checker-trust attestation signature");
 if (temporaryKmsCapabilityPath) readStageBPrivateFileBytes({ filePath: temporaryKmsCapabilityPath, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
 for (const [name, label] of [["artifact-binding", "Artifact-signing runtime binding"], ["root-drop-evidence", "Root-drop evidence"], ["stage-a-plan", "Preserved Stage-A saved plan"], ["stage-a-recovery-evidence", "Stage-A recovery evidence"], ["stage-a-state", "Stage-A state"], ["stage-a-handoff", "Stage-A handoff"], ["stage-b-state", "Historical Stage-B state"], ["current-stage-b-state", "Current Stage-B state"], ["stage-b-tfvars", "Canonical Stage B tfvars"], ["stage-b-tfvars-binding-report", "Canonical Stage B tfvars binding report"]]) if (args.has(name)) capture(name, label);
 const rotationBindingCapture = args.has("rotation-bindings") ? capture("rotation-bindings", "Rotation secret binding manifest") : null;
@@ -52,6 +56,8 @@ const result = prepareProductionCutoverRuntime({
   imageAuthorization,
   iamEvidence,
   releasePreflightEvidenceFile: path.resolve(releasePreflightEvidencePath),
+  releasePreflightAttestationFile: path.resolve(releasePreflightAttestationPath),
+  releasePreflightAttestationSignatureFile: path.resolve(releasePreflightAttestationSignaturePath),
   artifactBindingFile: required("artifact-binding"),
   rootDropEvidenceFile: required("root-drop-evidence"),
   temporaryKmsCapabilityFile: temporaryKmsCapabilityPath,

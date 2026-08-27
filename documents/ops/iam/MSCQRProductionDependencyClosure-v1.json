@@ -4,6 +4,25 @@
   "status": "PASS",
   "newAwsCalls": [
     {
+      "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "checker-release-preflight-trust-attestation-identify",
+      "identity": "INDEPENDENT_CHECKER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "INDEPENDENT_CHECKER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
       "action": "ecr:DescribeImages",
       "capabilityId": "manifest-backend-health-recovery-describe-images",

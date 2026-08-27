@@ -28,7 +28,7 @@ import { assertAuthenticatedCurrentStageBState, readAuthenticatedStageARecoveryS
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { assertReleasePreflightCheckerTrustEvidence } from "./production-checker-chain-contract.mjs";
+import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -223,7 +223,7 @@ export function createProductionRotationInfrastructureAdapter({ run = execFileSy
   };
 }
 
-export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier", interactiveMfaCodeProvider, verifierMfaCodeProvider = promptProductionMfaCode } = {}) {
+export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier", interactiveMfaCodeProvider, verifierMfaCodeProvider = promptProductionMfaCode, verifyReleasePreflightAttestationSignature } = {}) {
   if (!config || typeof config !== "object" || !/^[a-f0-9]{64}$/.test(runtimeConfigSha256 || "")) throw new Error("Hash-authenticated production cutover adapter configuration is required.");
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || config.sourceSha !== sourceSha || typeof rotationId !== "string" || config.rotationId !== rotationId) throw new Error("Production cutover adapter identity does not match its runtime config.");
   if (releaseProfile !== "mscqr-production-release-deployer" || verifierProfile !== "mscqr-production-ecs-exec-verifier") throw new Error("Production cutover adapter profiles do not match the asymmetric identity contract.");
@@ -272,10 +272,29 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     assertPreCutoverTemporaryCapabilityAbsent(report.temporaryKmsCapability, { sourceSha });
     return report;
   };
-  const readCheckerTrustEvidence = () => assertReleasePreflightCheckerTrustEvidence(
-    readBoundStageBPrivateJson({ filePath: config.releasePreflightEvidenceFile, expectedSha256: config.releasePreflightEvidenceFileSha256, label: "Release-preflight checker-trust evidence" }),
-    { sourceSha, administratorReportSha256: config.iamEvidenceFileSha256 },
-  );
+  const readCheckerTrustEvidence = () => {
+    const readBound = (filePath, expectedSha256, label) => {
+      const captured = readStageBPrivateFileBytes({ filePath, repositoryRoot: process.cwd(), label });
+      if (captured.sha256 !== expectedSha256) throw new Error(`${label} changed after runtime preparation.`);
+      return { bytes: captured.bytes, value: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes)) };
+    };
+    const report = readBound(config.releasePreflightEvidenceFile, config.releasePreflightEvidenceFileSha256, "Release-preflight checker-trust evidence");
+    const attestation = readBound(config.releasePreflightAttestationFile, config.releasePreflightAttestationFileSha256, "Release-preflight checker-trust attestation");
+    const signature = readBound(config.releasePreflightAttestationSignatureFile, config.releasePreflightAttestationSignatureFileSha256, "Release-preflight checker-trust attestation signature");
+    return authenticateReleasePreflightCheckerTrustEvidence({
+      report: report.value,
+      reportBytes: report.bytes,
+      attestation: attestation.value,
+      attestationBytes: attestation.bytes,
+      signatureArtifact: signature.value,
+      signatureBytes: signature.bytes,
+      sourceSha,
+      administratorReportSha256: config.iamEvidenceFileSha256,
+      expectedAttestationFileSha256: config.releasePreflightAttestationFileSha256,
+      expectedSignatureFileSha256: config.releasePreflightAttestationSignatureFileSha256,
+      ...(verifyReleasePreflightAttestationSignature ? { verifySignature: verifyReleasePreflightAttestationSignature } : {}),
+    });
+  };
   const artifact = createAwsArtifactSigningAdapter({
     run: async (args) => releaseRun(args),
     sourceSha,

@@ -83,6 +83,14 @@ an optional standalone proof is accepted only when it is exactly equivalent.
 Runtime preparation records the raw-byte SHA-256 of every private eligibility artifact, including
 the IAM report. Cutover consumers validate the private external path and exact recorded hash before
 parsing those same captured bytes; replacing a nested self-consistent proof therefore remains invalid.
+Release-preflight checker-trust evidence has two authorities: the release-deployer writes the
+read-only report, then the exact independent-checker session produces a detached
+`PRODUCTION_RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION` with
+`npm run stage-b:attest-release-preflight-checker-trust --`. The private 0600 attestation and KMS
+signature bind the report bytes, protected source SHA, administrator-report SHA, and exact Role-A
+MFA trust. Runtime preparation verifies this detached signature before emitting runtime config;
+unsigned, copied, or self-hashed release reports are rejected. The release-deployer remains
+verify-only and must never sign this attestation.
 The coordinator's rotation fixture is similarly hashed from its persisted private bytes after prepare;
 ECS Exec and onboarding consume that exact hash-bound fixture and reject replacement before any probe.
 The source-bound authorization is produced only by `scripts/aws/production-image-authorization.mjs`.

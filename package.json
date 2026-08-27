@@ -84,6 +84,7 @@
     "stage-b:artifact-contract:verify": "node scripts/aws/verify-stage-b-artifact-contract.mjs && node --test scripts/tests/stage-b-artifact-contract.test.mjs",
     "test:production-green-stage-b-broker-packager": "node --test scripts/tests/production-green-stage-b-broker-packager.test.mjs",
     "stage-b:production-preflight": "node scripts/aws/run-production-green-stage-b-preflight.mjs",
+    "stage-b:attest-release-preflight-checker-trust": "node scripts/aws/production-release-preflight-checker-attestation.mjs",
     "stage-b:administrator-preflight": "node scripts/aws/run-stage-b-administrator-preflight.mjs",
     "stage-b:administrator-capability-preflight": "node scripts/aws/run-stage-b-administrator-preflight.mjs --phase initial",
     "stage-b:plan-bound-permission-preflight": "node scripts/aws/run-stage-b-administrator-preflight.mjs --phase plan-bound",

@@ -89,6 +89,46 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "release-preflight-checker-trust-attestation",
+      "kind": "file",
+      "producer": "scripts/aws/production-release-preflight-checker-attestation.mjs:runReleasePreflightCheckerTrustAttestationCli",
+      "consumers": [
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/production-cutover-control-plane.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "release-preflight-checker-trust-attestation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "release-preflight-checker-trust-attestation-signature",
+      "kind": "file",
+      "producer": "scripts/aws/production-release-preflight-checker-attestation.mjs:runReleasePreflightCheckerTrustAttestationCli",
+      "consumers": [
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/production-cutover-control-plane.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "release-preflight-checker-trust-attestation-signature",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "image-manifest",
       "kind": "file",
       "producer": "external:protected image workflow artifact",
