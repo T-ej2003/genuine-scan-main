@@ -358,7 +358,8 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
   const observedAt = deps.observedAt || new Date().toISOString();
   const artifactBytes = fs.readFileSync(artifactPath);
   const publicationIdentity = readStageBImagePublicationIdentity(publicationIdentityPath, { identitySha256: publicationIdentitySha256Value, expectedToolingSha: toolingSha, expectedReleaseSha: imageReleaseSha, canonicalArtifactBytes: artifactBytes });
-  const imageReader = deps.describe || describeImages(rootRun);
+  const rawImageReader = describeImages(rootRun);
+  const imageReader = deps.describe || ((repository, tag) => describeImage(repository, tag, rawImageReader));
   const repositoryReader = deps.describeRepository || describeRepositories(rootRun);
   const repositories = [...new Set(Object.values(SERVICES).map(({ repository }) => repository))].map((repository) => readImageRepositoryEvidence(repository, { observedAt, describe: repositoryReader }));
   const report = generateImageEvidence({ artifactBytes, toolingSha, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity, verifierCallerArn, describe: imageReader, observedAt, repositories });
