@@ -55,7 +55,7 @@ import { buildStageBImagePublicationIdentity } from "../aws/stage-b-image-public
 import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { deriveContractDigests, generateStageBTfvars } from "../aws/generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { createProductionCommandRunner } from "../aws/production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const realForbiddenSimulations = JSON.parse(fs.readFileSync("scripts/tests/fixtures/aws-iam-simulate-principal-policy-stage-b-forbidden.json", "utf8"));
@@ -1465,7 +1465,7 @@ test("production-default permission verification uses the release profile runner
   const artifact = signPermissionReport(report, { now, reportBytes, sign: () => "AQ==" });
   const signatureBytes = Buffer.from(`${JSON.stringify(artifact, null, 2)}\n`);
   const calls = [];
-  const releaseRun = createProductionCommandRunner({
+  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
     profile: "mscqr-production-release-deployer",
     exec: (file, args, options) => { calls.push({ file, args, options }); return JSON.stringify({ SignatureValid: true }); },
   });

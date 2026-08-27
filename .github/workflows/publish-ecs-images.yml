@@ -125,6 +125,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          source scripts/aws/production-credential-source.sh
+          export MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer
+          configure_production_aws_credential_source
           echo "image_tag=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
           echo "resolved_ref=${{ inputs.git_ref != '' && inputs.git_ref || github.ref_name }}" >> "$GITHUB_OUTPUT"
@@ -134,7 +137,7 @@ jobs:
       - name: Enforce ECR repository controls
         run: |
           set -euo pipefail
-          ./scripts/aws/apply-ecr-repository-controls.sh "$SERVICES"
+          MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer ./scripts/aws/apply-ecr-repository-controls.sh "$SERVICES"
 
       - name: Publish ECS images
         env:
@@ -143,7 +146,7 @@ jobs:
           OUTPUT_FILE: ${{ steps.image-meta.outputs.images_file }}
         run: |
           set -euo pipefail
-          ./scripts/aws/publish-ecs-images.sh "$SERVICES"
+          MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer ./scripts/aws/publish-ecs-images.sh "$SERVICES"
 
       - name: Generate SBOMs, provenance, and signatures
         env:

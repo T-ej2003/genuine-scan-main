@@ -6,7 +6,8 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
-import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
+import { createProductionAwsCredentialEnvironment } from "./production-credential-source-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { iamSimulationContextArgs } from "./iam-simulation-context.mjs";
 import { NORMAL_ACTIVATION, NORMAL_CANDIDATE_ARN, NORMAL_LEGACY_SOURCE_ARN, assertNormalActivationPolicy, assertNormalActivationPolicyTransitionOnly, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, canonicalNormalActivationValue } from "./production-normal-backend-activation-policy.mjs";
@@ -333,17 +334,20 @@ export function classifyNormalActivationLiveOutcome({ run, binding }) {
   } catch (error) { return Object.freeze({ status: "LIVE_STATE_UNAUTHENTICATED", error: error.message }); }
 }
 
-export function executeNormalBackendActivation({ run, runScript = execFileSync, sourceSha, imageAuthorization, releaseReceipt, binding, metadataFile, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh"), runIdentity } = {}) {
+export function executeNormalBackendActivation({ run, runScript = execFileSync, sourceSha, imageAuthorization, releaseReceipt, binding, metadataFile, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh"), runIdentity, credentialSource, env = process.env } = {}) {
   assertReleaseReceipt(releaseReceipt, { sourceSha, imageAuthorization });
   const fresh = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: binding?.expectedCurrentTaskDefinitionArn, expectedCurrentDeploymentId: binding?.expectedCurrentDeploymentId, runIdentity });
   assertNormalActivationBinding(binding, fresh);
+  if (credentialSource !== PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER) throw new Error("Normal backend activation execution requires the GitHub OIDC release-deployer credential source.");
+  const commandEnvironment = createProductionAwsCredentialEnvironment({ credentialSource, env, region: NORMAL_ACTIVATION.region });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-normal-activation-"));
   const bindingFile = path.join(directory, "binding.json");
   const outcomeFile = path.join(directory, "outcome.json");
   try {
     writePrivateJson(bindingFile, binding);
     runScript(deployScript, [], { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: {
-      ...process.env,
+      ...commandEnvironment,
+      MSCQR_AWS_CREDENTIAL_SOURCE: credentialSource,
       AWS_REGION: NORMAL_ACTIVATION.region,
       CLUSTER_NAME: NORMAL_ACTIVATION.cluster,
       SERVICE_NAME: NORMAL_ACTIVATION.service,
@@ -398,19 +402,20 @@ export function runCli(argv = process.argv.slice(2)) {
   if (mode === "converge-policy") {
     const checkout = readStageBProtectedMainCheckout({ cwd: process.cwd() });
     if (checkout.currentHead !== sourceSha) throw new Error("Normal activation convergence must run from exact protected main.");
-    const result = convergeNormalActivationPolicy({ run: createProductionCommandRunner({ profile: required(values, "--admin-profile") }), sourceSha });
+    const result = convergeNormalActivationPolicy({ run: createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(values, "--admin-profile") }), sourceSha });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }
   if (mode === "contract-policy") {
     const checkout = readStageBProtectedMainCheckout({ cwd: process.cwd() });
     if (checkout.currentHead !== sourceSha) throw new Error("Normal activation contraction must run from exact protected main.");
-    const result = contractNormalActivationPolicy({ run: createProductionCommandRunner({ profile: required(values, "--admin-profile") }), sourceSha, sourceArn: required(values, "--source-task-definition") });
+    const result = contractNormalActivationPolicy({ run: createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(values, "--admin-profile") }), sourceSha, sourceArn: required(values, "--source-task-definition") });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }
   const imageAuthorization = readBoundStageBPrivateJson({ filePath: required(values, "--image-authorization"), expectedSha256: required(values, "--image-authorization-sha256"), label: "Normal release image authorization" });
-  const run = createProductionCommandRunner();
+  if (required(values, "--credential-source") !== PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER) throw new Error("Normal backend activation requires the GitHub OIDC release-deployer credential source.");
+  const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER });
   const runIdentity = { workflowRunId: required(values, "--workflow-run-id"), releaseTrainRunId: required(values, "--release-train-run-id") };
   if (mode === "prepare") {
     const binding = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: values.get("--expected-current-task-definition"), expectedCurrentDeploymentId: values.get("--expected-current-deployment-id"), runIdentity });
@@ -428,7 +433,7 @@ export function runCli(argv = process.argv.slice(2)) {
   if (mode === "execute") {
     const binding = readBoundStageBPrivateJson({ filePath: required(values, "--binding"), expectedSha256: required(values, "--binding-sha256"), label: "Normal backend activation binding" });
     const receipt = readBoundStageBPrivateJson({ filePath: required(values, "--release-receipt"), expectedSha256: required(values, "--release-receipt-sha256"), label: "Production RLS release receipt" });
-    const result = executeNormalBackendActivation({ run, sourceSha, imageAuthorization, releaseReceipt: receipt, binding, metadataFile: required(values, "--metadata-out"), runIdentity });
+    const result = executeNormalBackendActivation({ run, sourceSha, imageAuthorization, releaseReceipt: receipt, binding, metadataFile: required(values, "--metadata-out"), runIdentity, credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }

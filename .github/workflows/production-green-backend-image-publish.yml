@@ -61,8 +61,8 @@ jobs:
         run: |
           set -euo pipefail
           : > "$OUTPUT_FILE"
-          ./scripts/aws/apply-ecr-repository-controls.sh backend
-          IMAGE_TAG="$BACKEND_IMAGE_TAG" SOURCE_RELEASE_SHA="$RELEASE_SHA" PLATFORMS="$PLATFORMS" AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)" OUTPUT_FILE="$OUTPUT_FILE" ./scripts/aws/publish-ecs-images.sh backend
+          MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer ./scripts/aws/apply-ecr-repository-controls.sh backend
+          IMAGE_TAG="$BACKEND_IMAGE_TAG" SOURCE_RELEASE_SHA="$RELEASE_SHA" PLATFORMS="$PLATFORMS" OUTPUT_FILE="$OUTPUT_FILE" MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer ./scripts/aws/publish-ecs-images.sh backend
           node --input-type=module - "$OUTPUT_FILE" "$GITHUB_ENV" "$GITHUB_OUTPUT" "$RELEASE_SHA" "$BACKEND_IMAGE_TAG" <<'NODE'
           import fs from "node:fs";
           const [file, envFile, outputFile, releaseSha, imageTag] = process.argv.slice(2);

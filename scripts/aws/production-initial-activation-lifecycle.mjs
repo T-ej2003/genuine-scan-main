@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { canonicalJson, PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
+import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 export const CLAIM_KIND = "PRODUCTION_INITIAL_ACTIVATION_CLAIM";
 export const COMPLETION_KIND = "PRODUCTION_INITIAL_ACTIVATION_COMPLETION";
@@ -86,17 +87,22 @@ export function validateInitialActivationCompletion(value, { claim, claimSha256,
   return value;
 }
 
-const awsCli = (args) => {
-  const result = spawnSync("aws", [...args, "--region", "eu-west-2", "--output", "json", "--no-cli-pager"], { encoding: "utf8" });
+export const createProductionInitialActivationAws = ({ credentialSource, env = process.env, spawn = spawnSync } = {}) => {
+  if (credentialSource !== PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER) throw new Error("Production initial activation requires the GitHub OIDC release-deployer credential source.");
+  const commandEnvironment = createProductionAwsCredentialEnvironment({ credentialSource, env, region: "eu-west-2" });
+  return (args) => {
+  const result = spawn("aws", [...args, "--region", "eu-west-2", "--output", "json", "--no-cli-pager"], { encoding: "utf8", env: commandEnvironment });
   if (result.status === 0) return { ok: true, value: result.stdout.trim() ? JSON.parse(result.stdout) : {} };
   const stderr = String(result.stderr || "");
   if (awsError("PreconditionFailed", "PutObject", "At least one of the pre-conditions you specified did not hold\\.?").test(stderr)) return { ok: false, conflict: "PRECONDITION_FAILED" };
   if (awsError("ConditionalRequestConflict", "PutObject", "A conflicting conditional operation is currently in progress against this resource\\. Please try again\\.?").test(stderr)) return { ok: false, conflict: "CONDITIONAL_REQUEST_CONFLICT" };
   if (awsError("NoSuchKey", "GetObject", "The specified key does not exist\\.?").test(stderr)) return { ok: false, missing: true };
   throw new Error("Production activation lifecycle S3 request failed.");
+  };
 };
 
-const readObject = ({ key, aws = awsCli }) => {
+const readObject = ({ key, aws }) => {
+  if (typeof aws !== "function") throw new Error("Production initial activation AWS client must be injected.");
   const directory = mkdtempSync(path.join(tmpdir(), "mscqr-activation-lifecycle-"));
   const output = path.join(directory, "object.json");
   try {
@@ -107,7 +113,8 @@ const readObject = ({ key, aws = awsCli }) => {
   } finally { rmSync(directory, { recursive: true, force: true }); }
 };
 
-const createObject = ({ key, value, parse, expected, aws = awsCli }) => {
+const createObject = ({ key, value, parse, expected, aws }) => {
+  if (typeof aws !== "function") throw new Error("Production initial activation AWS client must be injected.");
   const raw = canonicalBytes(value);
   const directory = mkdtempSync(path.join(tmpdir(), "mscqr-activation-lifecycle-"));
   const body = path.join(directory, "object.json");

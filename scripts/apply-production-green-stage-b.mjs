@@ -35,10 +35,11 @@ import { assertStageBDeploymentCapabilityGraph } from "./aws/generate-production
 import { assertStageBRecoveryProvenance, assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 import { assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileExclusive } from "./aws/stage-b-artifact-contract.mjs";
 import { assertStageBPlanApprovedBinding } from "./aws/stage-b-plan-approval-contract.mjs";
-import { assertRecoveryOnlyPlan, assertVerifiedStageBRecovery } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
+import { assertRecoveryOnlyPlan, assertVerifiedStageBRecovery, createStageBRecoveryKmsVerifier } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
 import { captureStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs";
 import { findTerraformCliArgEnvKeys } from "./plan-staging-terraform.mjs";
-import { createProductionCommandRunner } from "./aws/production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./aws/production-cutover-production-adapters.mjs";
+import { createProductionAwsCredentialEnvironment } from "./aws/production-credential-source-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -144,7 +145,8 @@ export function stageBApplyAttemptPath({ artifactSetIdentity, effectiveOperatorH
 
 const awsResultText = (result) => `${result?.stdout || ""}\n${result?.stderr || ""}`;
 
-export function reserveStageBSharedApplyAttempt({ artifactSetIdentity, bytes, privateDirectory, run = (args) => spawnSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+export function reserveStageBSharedApplyAttempt({ artifactSetIdentity, bytes, privateDirectory, run } = {}) {
+  if (typeof run !== "function") throw new Error("Stage B shared apply reservation requires an explicit credential-bound AWS command runner.");
   const key = stageBApplyAttemptS3Key(artifactSetIdentity);
   if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw new Error("Stage B shared apply reservation bytes are missing.");
   const temporaryDirectory = fs.mkdtempSync(path.join(privateDirectory, ".shared-reservation-"));
@@ -230,7 +232,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
     if (!recoveryInputs.every((value) => value !== undefined)) throw new Error("Recovery apply requires all recovery artifacts and hashes.");
     for (const [filePath, label] of [[recoveryAttestationPath, "Recovery attestation"], [recoverySignaturePath, "Recovery signature"], [recoveryClassificationPath, "Recovery classification"]]) assertStageBPrivateFile({ filePath, repositoryRoot: root, label });
     const refreshBytes = fs.readFileSync(refreshReportPath); const attestationBytes = fs.readFileSync(recoveryAttestationPath); const signatureBytes = fs.readFileSync(recoverySignaturePath); const classificationBytes = fs.readFileSync(recoveryClassificationPath);
-    trustedRecovery = assertVerifiedStageBRecovery({ refreshReport: JSON.parse(refreshBytes), refreshReportBytes: refreshBytes, refreshReportSha256, classification: JSON.parse(classificationBytes), classificationBytes, classificationSha256: recoveryClassificationSha256, attestation: JSON.parse(attestationBytes), attestationBytes, attestationSha256: recoveryAttestationSha256, signature: JSON.parse(signatureBytes), signatureBytes, signatureSha256: recoverySignatureSha256, expectedSourceSha: toolingSha, expectedLineage: bindingReport.stateLineage, expectedSerial: bindingReport.stateSerial, now: new Date(now) });
+    trustedRecovery = assertVerifiedStageBRecovery({ refreshReport: JSON.parse(refreshBytes), refreshReportBytes: refreshBytes, refreshReportSha256, classification: JSON.parse(classificationBytes), classificationBytes, classificationSha256: recoveryClassificationSha256, attestation: JSON.parse(attestationBytes), attestationBytes, attestationSha256: recoveryAttestationSha256, signature: JSON.parse(signatureBytes), signatureBytes, signatureSha256: recoverySignatureSha256, expectedSourceSha: toolingSha, expectedLineage: bindingReport.stateLineage, expectedSerial: bindingReport.stateSerial, now: new Date(now), verifySignature: createStageBRecoveryKmsVerifier({ run: releaseRun }) });
     if (approvalReport.recoveryAttestationSha256 !== trustedRecovery.attestationSha256 || JSON.parse(auditBytes).recoveryAttestationSha256 !== trustedRecovery.attestationSha256) throw new Error("Recovery apply upstream bindings do not match the verified attestation.");
   } else if (hasRecoveryInputs) throw new Error("Recovery artifacts are not valid without a recovery PLAN_APPROVED report.");
   let refreshBindingReport = bindingReport;
@@ -335,10 +337,6 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   return { plan, audit, permissionReport, imageEvidence, deploymentIdentity, imageBindings, resourceClassification, trustedRecovery, mutationManifest, mutationManifestSha256: mutationManifest.mutationManifestSha256, savedPlanSha256, canonicalPlanJsonSha256, derivedPlanJsonSha256: sha256(derivedPlanBytes) };
 }
 
-function currentCaller() {
-  return JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn;
-}
-
 export function showSavedPlan(planPath, { env = process.env, execFile = execFileSync } = {}) {
   if (execFile === execFileSync) return captureStageBTerraformJson({ args: [`-chdir=${terraformRoot}`, "show", "-json", planPath], cwd: root, env });
   return execFile("terraform", [`-chdir=${terraformRoot}`, "show", "-json", planPath], { cwd: root, env, encoding: null, stdio: ["ignore", "pipe", "pipe"] });
@@ -368,13 +366,15 @@ function stageBApplyBindings({ artifacts, verified, backendMetadata, env }) {
   return bindings;
 }
 
-export function runApply({ argv = process.argv.slice(2), env = process.env, deps = { getCaller: currentCaller, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) } } = {}) {
+export function runApply({ argv = process.argv.slice(2), env = process.env, deps = {} } = {}) {
   if (env.MSCQR_STAGE_B_APPLY_ENABLED !== "true" || env.MSCQR_STAGE_B_APPLY_CONFIRM !== requiredConfirmation) throw new Error("Stage B apply gate is not enabled.");
   assertStageBApplyTerraformEnvironment(env);
-  const artifacts = parseCli(argv); const callerArn = deps.getCaller();
-  const releaseRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
-  const defaultDeps = { getCaller: currentCaller, showPlan: (planPath) => showSavedPlan(planPath, { env }), validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, verifyPermissionSignature: (options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) }), verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }), apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) };
+  const artifacts = parseCli(argv);
+  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+  const governedEnvironment = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" }), TF_DATA_DIR: env.TF_DATA_DIR, TF_WORKSPACE: env.TF_WORKSPACE, MSCQR_STAGE_B_APPLY_ENABLED: env.MSCQR_STAGE_B_APPLY_ENABLED, MSCQR_STAGE_B_APPLY_CONFIRM: env.MSCQR_STAGE_B_APPLY_CONFIRM };
+  const defaultDeps = { getCaller: () => JSON.parse(releaseRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn, showPlan: (planPath) => showSavedPlan(planPath, { env: governedEnvironment }), validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, verifyPermissionSignature: (options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) }), verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }), apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env: governedEnvironment, encoding: "utf8", stdio: "inherit" }) };
   const effectiveDeps = { ...defaultDeps, ...deps };
+  const callerArn = effectiveDeps.getCaller();
   if (typeof deps.showPlan !== "function" && typeof deps.getBackendMetadata !== "function") {
     const backendMetadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: env.TF_DATA_DIR, backendMetadataPath: path.join(path.resolve(env.TF_DATA_DIR || ""), "terraform.tfstate"), repositoryRoot: root });
     const bindingReport = assertStageBTfvarsBinding({ tfvarsPath: artifacts.tfvarsPath, bindingReportPath: artifacts.tfvarsBindingReportPath, bindingReportSha256: artifacts.tfvarsBindingReportSha256, expectedToolingSha: artifacts.toolingSha, expectedToolingTreeSha256: artifacts.toolingTreeSha256, expectedImageReleaseSha: artifacts.imageReleaseSha, expectedImageEvidenceSha256: artifacts.imageEvidenceSha256 });
@@ -409,7 +409,7 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   if (fs.lstatSync(applyAttemptPath, { throwIfNoEntry: false })) throw new Error("Stage B local apply-attempt evidence already exists; Terraform apply is unreachable.");
   const attemptBytes = Buffer.from(`${JSON.stringify({ schemaVersion: 2, kind: "MSCQRProductionGreenStageBApplyAttempt", phase: "APPLYING", applyCalls: 1, applyMayHaveOccurred: true, artifactSetIdentity: executableAuditSha256, executableAuditSha256, createdAt: effectiveDeps.now?.() || new Date().toISOString(), ...finalBindings }, null, 2)}\n`);
   const reserveSharedApplyAttempt = effectiveDeps.reserveSharedApplyAttempt || reserveStageBSharedApplyAttempt;
-  const reserved = reserveSharedApplyAttempt({ artifactSetIdentity: executableAuditSha256, bytes: attemptBytes, privateDirectory: path.dirname(applyAttemptPath) });
+  const reserved = reserveSharedApplyAttempt({ artifactSetIdentity: executableAuditSha256, bytes: attemptBytes, privateDirectory: path.dirname(applyAttemptPath), run: (args) => releaseRun(args) });
   if (reserved?.status !== "reserved" || reserved.key !== stageBApplyAttemptS3Key(executableAuditSha256)) throw new Error("Stage B shared apply reservation was not authenticated; Terraform apply is unreachable.");
   const reserveApplyAttempt = effectiveDeps.reserveApplyAttempt || ((filePath, bytes) => writeStageBPrivateFileExclusive({ filePath, bytes, repositoryRoot: root, label: "Stage B apply attempt" }));
   reserveApplyAttempt(applyAttemptPath, attemptBytes);

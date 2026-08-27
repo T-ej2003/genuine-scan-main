@@ -3,7 +3,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import {
   STAGE_B,
@@ -14,18 +13,20 @@ import {
   validateStageBApproval,
   validateStageBApprovalPayload,
 } from "./production-green-stage-b-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const option = (name) => {
   const index = process.argv.indexOf(name);
   return index < 0 ? "" : String(process.argv[index + 1] || "").trim();
 };
 const required = (name) => option(name) || (() => { throw new Error(`${name} is required.`); })();
-const aws = (args) => {
-  const result = spawnSync("aws", [...args, "--region", STAGE_B.region, "--output", "json"], { encoding: "utf8" });
-  if (result.status !== 0) throw new Error("Stage B approval signing failed; provider detail suppressed.");
-  return JSON.parse(result.stdout || "{}");
-};
 const exactInput = (input) => Object.keys(input || {}).sort().join(",") === [...STAGE_B_APPROVAL_FIELDS].sort().join(",");
+const awsJson = (run, args) => JSON.parse(run([...args, "--output", "json"]) || "{}");
+const withMessage = (callback) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-approval-"));
+  const messagePath = path.join(directory, "approval.json");
+  try { return callback(messagePath); } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+};
 
 export async function prepareStageBApproval(input, { now = new Date() } = {}) {
   if (!exactInput(input)) throw new Error("Stage B approval input fields do not match schema version 2.");
@@ -36,24 +37,11 @@ export async function prepareStageBApproval(input, { now = new Date() } = {}) {
 
 export async function signStageBApproval(input, {
   now = new Date(),
-  caller = async () => aws(["sts", "get-caller-identity"]),
-  sign = async ({ message }) => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-approval-"));
-    const messagePath = path.join(directory, "approval.json");
-    try {
-      fs.writeFileSync(messagePath, message, { mode: 0o600, flag: "wx" });
-      return aws(["kms", "sign", "--key-id", STAGE_B.approvalKmsKeyArn, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signing-algorithm", STAGE_B_APPROVAL_ALGORITHM]).Signature;
-    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
-  },
-  verifySignature = async ({ message, signature }) => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-approval-"));
-    const messagePath = path.join(directory, "approval.json");
-    try {
-      fs.writeFileSync(messagePath, message, { mode: 0o600, flag: "wx" });
-      return aws(["kms", "verify", "--key-id", STAGE_B.approvalKmsKeyArn, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", STAGE_B_APPROVAL_ALGORITHM]).SignatureValid === true;
-    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
-  },
+  caller,
+  sign,
+  verifySignature,
 } = {}) {
+  if (![caller, sign, verifySignature].every((value) => typeof value === "function")) throw new Error("Stage B approval signing requires an explicit independent-checker AWS boundary.");
   const prepared = await prepareStageBApproval(input, { now });
   const identity = String((await caller()).Arn || "");
   if (identity !== prepared.approval.checkerIdentity) throw new Error("Only the exact independent checker session may sign the Stage B approval.");
@@ -73,7 +61,19 @@ async function run() {
     return;
   }
   const output = path.resolve(required("--output"));
-  const { artifact, approvalContractSha256 } = await signStageBApproval(input);
+  if (required("--credential-source") !== PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION) throw new Error("Stage B approval signing requires the inherited independent-checker session credential source.");
+  const runAws = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION });
+  const { artifact, approvalContractSha256 } = await signStageBApproval(input, {
+    caller: async () => awsJson(runAws, ["sts", "get-caller-identity"]),
+    sign: async ({ message }) => withMessage((messagePath) => {
+      fs.writeFileSync(messagePath, message, { mode: 0o600, flag: "wx" });
+      return awsJson(runAws, ["kms", "sign", "--key-id", STAGE_B.approvalKmsKeyArn, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signing-algorithm", STAGE_B_APPROVAL_ALGORITHM]).Signature;
+    }),
+    verifySignature: async ({ message, signature }) => withMessage((messagePath) => {
+      fs.writeFileSync(messagePath, message, { mode: 0o600, flag: "wx" });
+      return awsJson(runAws, ["kms", "verify", "--key-id", STAGE_B.approvalKmsKeyArn, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", STAGE_B_APPROVAL_ALGORITHM]).SignatureValid === true;
+    }),
+  });
   fs.writeFileSync(output, `${JSON.stringify(artifact, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   process.stdout.write(`${JSON.stringify({ status: "signed", schemaVersion: 2, approvalContractSha256 })}\n`);
 }

@@ -11,7 +11,8 @@ import { deriveStageBImageImpactReport, deriveStageBToolingInputTreeSha256 } fro
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { calculateCleanRoomSourceContract } from "../rls/lib/clean-room-source-contract.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
-import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
+import { createProductionAwsCredentialEnvironment } from "./production-credential-source-contract.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
 
@@ -20,9 +21,7 @@ const option = (argv, name) => { const index = argv.indexOf(name); return index 
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const run = (command, args, env) => execFileSync(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 export function buildRecoveryAwsEnvironment(profile, baseEnv = process.env) {
-  const env = { ...baseEnv, AWS_PROFILE: profile, AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2" };
-  for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) delete env[key];
-  return env;
+  return { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, env: baseEnv }) };
 }
 
 export function buildRecoveryTerraformEnvironment(profile, baseEnv = process.env, { allowedTerraformVariableKeys = [] } = {}) {
@@ -133,7 +132,7 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   const imageAuthorization = JSON.parse(fs.readFileSync(imageAuthorizationFile.path, "utf8"));
   const protectedCheckout = readProtectedCheckout();
   const env = buildRecoveryAwsEnvironment(profile, baseEnv);
-  const releaseRun = createProductionCommandRunner({ profile, exec: (command, args) => exec(command, args, env) });
+  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, env, exec: (command, args) => exec(command, args, env) });
   const imageAuthorizationValidation = { verifyImageEvidence: (input) => verifyImageEvidence({ ...input, run: releaseRun }) };
   const deriveProvenance = ({ sourceSha: provenanceSha = sourceSha } = {}) => deriveCanonicalRecoveryProvenance({ sourceSha: provenanceSha, repositoryRoot: root });
   const journal = createFileJournal({ filePath: outputs.journal });

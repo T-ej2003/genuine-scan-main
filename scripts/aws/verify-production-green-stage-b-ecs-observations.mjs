@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -17,7 +18,7 @@ function requireOption(argv, option) {
 export function runCli(argv = process.argv.slice(2)) {
   const outputPath = assertStageBArtifactPath({ artifactPath: requireOption(argv, "--output"), repositoryRoot, label: "Stage B ECS observations", allowExisting: false });
   ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot, create: true });
-  const reader = createAwsReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn });
+  const reader = createAwsReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn, run: createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" }) });
   const callerArn = reader.getCallerIdentity()?.Arn;
   if (typeof callerArn !== "string" || !callerArn) throw new Error("Stage B ECS observation caller identity is missing.");
   const observations = observeStageBEcs({ reader, region: STAGE_B.region, clusterArn: STAGE_B.clusterArn });

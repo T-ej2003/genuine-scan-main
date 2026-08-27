@@ -14,7 +14,7 @@ import {
   writeStageBPrivateFileAtomic,
 } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
-import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -199,7 +199,7 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
   const { value: imageEvidence } = readJsonPrivate(imageEvidencePath, "Image evidence");
   const { value: imageEvidenceSignature } = readJsonPrivate(imageSignaturePath, "Image evidence signature");
   const { value: imageReuseEvidence } = readJsonPrivate(imageReuseEvidencePath, "Image-reuse evidence");
-  const releaseRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
+  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
   const authorization = createImageAuthorization({
     sourceSha,
     freshProtectedMain,

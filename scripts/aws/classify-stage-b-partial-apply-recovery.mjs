@@ -3,21 +3,21 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertRecoveryClassification, classifyRecoveryResidue, parseCanonicalTerraformSerialCliText, STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM, STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN } from "./stage-b-partial-apply-recovery-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const option = (argv, name) => { const i = argv.indexOf(name); return i < 0 ? undefined : argv[i + 1]; };
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
-const kmsVerify = ({ digest, signature }) => {
+const kmsVerify = (run) => ({ digest, signature }) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-recovery-verify-"));
   try {
     const digestPath = path.join(directory, "digest"); const signaturePath = path.join(directory, "signature");
     fs.writeFileSync(digestPath, digest, { mode: 0o600, flag: "wx" }); fs.writeFileSync(signaturePath, signature, { mode: 0o600, flag: "wx" });
-    const result = JSON.parse(execFileSync("aws", ["kms", "verify", "--key-id", STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM, "--output", "json"], { encoding: "utf8" }));
+    const result = JSON.parse(run(["kms", "verify", "--key-id", STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM, "--output", "json"]));
     return result.SignatureValid === true;
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 };
@@ -27,7 +27,8 @@ export function classifyStageBPartialApplyRecovery({ refreshReport, refreshRepor
   return { ...result, sourceSha: attestation.currentObservedEvidence.protectedSourceSha };
 }
 
-export function runCli(argv = process.argv.slice(2), { verifySignature = kmsVerify } = {}) {
+export function runCli(argv = process.argv.slice(2), { verifySignature } = {}) {
+  if (typeof verifySignature !== "function") throw new Error("Recovery classification requires an explicit release signature verifier.");
   const refreshPath = required(argv, "--refresh-report");
   const refreshSha = required(argv, "--refresh-report-sha256");
   const attestationPath = required(argv, "--attestation");
@@ -48,6 +49,9 @@ export function runCli(argv = process.argv.slice(2), { verifySignature = kmsVeri
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  try { process.stdout.write(`${JSON.stringify(runCli())}\n`); }
+  try {
+    const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+    process.stdout.write(`${JSON.stringify(runCli(process.argv.slice(2), { verifySignature: kmsVerify(releaseRun) }))}\n`);
+  }
   catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
 }

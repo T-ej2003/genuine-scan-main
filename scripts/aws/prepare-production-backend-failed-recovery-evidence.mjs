@@ -10,11 +10,21 @@ import { createAuthenticatedFailedRecoveryEvidence, PRE_RUNTIME_CLOSURE_LEGACY_E
 import { canonicalSha256, taskDefinitionFingerprint } from "./stage-b-task-definition-recovery-contract.mjs";
 import { readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? null : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const sha = /^[a-f0-9]{64}$/;
 const repository = "T-ej2003/genuine-scan-main";
+
+export function createProductionBackendFailedRecoveryEvidenceAwsRunner({ env = process.env, exec } = {}) {
+  return createProductionAwsCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "default",
+    env,
+    ...(exec ? { exec } : {}),
+  });
+}
 
 function describeAuthoritativeTaskDefinition({ taskDefinitionArn, run }) {
   const response = JSON.parse(run("aws", ["ecs", "describe-task-definition", "--task-definition", taskDefinitionArn, "--include", "TAGS", "--region", "eu-west-2", "--output", "json", "--no-cli-pager"]));
@@ -150,9 +160,8 @@ export function prepareProductionBackendFailedRecoveryEvidence({ sourceSha, mani
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   try {
-    const profile = process.env.AWS_PROFILE;
-    const env = { ...process.env, AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2", ...(profile ? { AWS_PROFILE: profile } : {}) };
-    const result = prepareProductionBackendFailedRecoveryEvidence({ sourceSha: required(process.argv, "--source-sha"), manifestFile: required(process.argv, "--manifest"), manifestSha256: required(process.argv, "--manifest-sha256"), outputFile: required(process.argv, "--output"), run: (command, args) => execFileSync(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) });
+    const aws = createProductionBackendFailedRecoveryEvidenceAwsRunner();
+    const result = prepareProductionBackendFailedRecoveryEvidence({ sourceSha: required(process.argv, "--source-sha"), manifestFile: required(process.argv, "--manifest"), manifestSha256: required(process.argv, "--manifest-sha256"), outputFile: required(process.argv, "--output"), run: (command, args) => command === "aws" ? aws(args) : execFileSync(command, args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) });
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
 }

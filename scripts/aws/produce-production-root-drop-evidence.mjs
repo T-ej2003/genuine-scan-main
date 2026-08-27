@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
-import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { buildRootDropEvidence, buildRootDropPayload, canonicalRootDropPayload, ROOT_DROP_SIGNING_KEY_ARN, ROOT_DROP_SIGNING_ALGORITHM } from "./production-root-drop-evidence.mjs";
 
 const args = new Map();
@@ -19,7 +19,7 @@ for (const key of ["output", "profile"]) if (!args.get(key)) throw new Error(`--
 const gitRun = (argv) => execFileSync("git", argv, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 const fresh = readFreshProtectedMainIdentity({ run: gitRun, expectedSourceSha: args.get("source-sha") });
 const region = process.env.AWS_REGION || "eu-west-2";
-const run = createProductionCommandRunner({ profile: args.get("profile"), region });
+const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: args.get("profile"), region });
 const identity = JSON.parse(run(["sts", "get-caller-identity"]));
 const payload = buildRootDropPayload({ sourceSha: fresh.headSha, callerArn: identity.Arn, accountId: identity.Account, region, nonce: args.get("nonce") || `${fresh.headSha}-${Date.now()}-operator` });
 const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-root-drop-sign-"));

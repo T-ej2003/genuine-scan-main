@@ -10,7 +10,8 @@ import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.m
 import { deriveStageBImageImpactReport } from "./validate-stage-b-image-reuse.mjs";
 import { deriveCanonicalRecoveryProvenance, collectCanonicalBackendRecoveryCensus, preflightCanonicalRecoveryOutputs } from "./recover-stage-b-backend-task-definition.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
-import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
+import { createProductionAwsCredentialEnvironment } from "./production-credential-source-contract.mjs";
 import { runAmbiguousImportSupersession, runExistingRevisionForwardRecovery, STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION, STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY } from "./stage-b-existing-revision-forward-recovery-contract.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
@@ -23,9 +24,7 @@ const option = (argv, name) => { const index = argv.indexOf(name); return index 
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 
 export function buildForwardRecoveryAwsEnvironment(profile, baseEnv = process.env) {
-  const env = { ...baseEnv, AWS_PROFILE: profile, AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2" };
-  for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN"]) delete env[key];
-  return env;
+  return { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, env: baseEnv }) };
 }
 
 export function buildForwardRecoveryTerraformEnvironment(terraformDataDir, baseEnv = process.env) {
@@ -194,8 +193,8 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const protectedCheckout = readProtectedCheckout();
   const env = buildForwardRecoveryTerraformEnvironment(terraformDataDir, buildForwardRecoveryAwsEnvironment(profile, baseEnv));
   const run = (command, args) => execFile(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  const releaseRun = createProductionCommandRunner({ profile, exec: (command, args) => run(command, args) });
-  const aws = (args) => JSON.parse(run("aws", [...args, "--region", "eu-west-2", "--profile", profile, "--output", "json"]));
+  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, exec: (command, args) => run(command, args) });
+  const aws = (args) => JSON.parse(releaseRun([...args, "--output", "json"]));
   const terraform = (args) => JSON.parse(run("terraform", [`-chdir=${terraformRoot}`, ...args]));
   const validateBackend = () => assertForwardRecoveryTerraformBackend({ env, repositoryRoot: root, runTerraform: (args) => run("terraform", [`-chdir=${terraformRoot}`, ...args]) });
   const readState = async () => { validateBackend(); return terraform(["state", "pull"]); };

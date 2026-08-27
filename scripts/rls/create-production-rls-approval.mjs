@@ -3,24 +3,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { spawnSync } from "node:child_process";
 import {
   PRODUCTION_RLS_APPROVAL_ALGORITHM,
   canonicalProductionApprovalPayload,
   productionApprovalSha256,
 } from "../../backend/scripts/production-rls-approval.mjs";
 import { calculateCleanRoomSourceContract } from "./lib/clean-room-source-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-credential-source-contract.mjs";
 
 const value = (name) => {
   const index = process.argv.indexOf(name);
   return index === -1 ? "" : String(process.argv[index + 1] || "").trim();
 };
 const required = (name) => value(name) || (() => { throw new Error(`${name} is required.`); })();
-const aws = (args) => {
-  const result = spawnSync("aws", [...args, "--region", "eu-west-2", "--output", "json"], { encoding: "utf8" });
-  if (result.status !== 0) throw new Error("Production approval broker command failed; provider detail suppressed.");
-  return JSON.parse(result.stdout || "{}");
-};
 
 export function buildProductionApprovalPayload({
   releaseSha,
@@ -61,9 +56,10 @@ export function createProductionApproval({
   ticketId,
   kmsKeyArn,
   expiresAt,
-  awsClient = aws,
+  awsClient,
   now = new Date(),
 }) {
+  if (typeof awsClient !== "function") throw new Error("Production RLS approval requires an explicit independent-checker AWS command runner.");
   const caller = awsClient(["sts", "get-caller-identity"]);
   const checkerIdentity = String(caller.Arn || "");
   const { sourceContractSha256, migrationSetDigest } = calculateCleanRoomSourceContract();
@@ -101,6 +97,8 @@ export function createProductionApproval({
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
   try {
+    if (required("--credential-source") !== PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION) throw new Error("Production RLS approval requires the inherited independent-checker session credential source.");
+    const runAws = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION });
     const result = createProductionApproval({
       outputPath: path.resolve(required("--output")),
       releaseSha: required("--release-sha"),
@@ -109,6 +107,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(im
       ticketId: required("--ticket-id"),
       kmsKeyArn: required("--kms-key-arn"),
       expiresAt: required("--expires-at"),
+      awsClient: (args) => JSON.parse(runAws([...args, "--output", "json"])),
     });
     process.stdout.write(`${JSON.stringify({ status: "signed", approvalId: result.approvalId, approvalContractSha256: result.approvalContractSha256 })}\n`);
   } catch {

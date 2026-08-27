@@ -2,9 +2,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { TextDecoder } from "node:util";
 import { fileURLToPath } from "node:url";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertStageARootDropKeyPolicyDocument, normalizeStageACheckerPrincipalAws, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "./production-stage-a-control-plane.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
@@ -243,7 +243,8 @@ function liveEvidence({ vpcId, subnetIds, databaseIdentifier, run }) {
   return { vpcId, privateSubnets: checkedSubnets, securityGroups: groups.map((group) => ({ groupId: group.GroupId, vpcId: group.VpcId })).sort((a, b) => a.groupId.localeCompare(b.groupId)), ecsClusterArn: cluster[0].clusterArn, databaseIdentifier, rdsSubnetIds: rdsSubnets };
 }
 
-export function generateStageAPrerequisites({ stateBackup, stateObject, toolingSha, toolingTreeSha256, outputPath, phase, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+export function generateStageAPrerequisites({ stateBackup, stateObject, toolingSha, toolingTreeSha256, outputPath, phase, run } = {}) {
+  if (typeof run !== "function") throw new Error("Stage A prerequisite generation requires an explicit credential-bound AWS command runner.");
   if (!["PRE_APPLY", "POST_APPLY"].includes(phase)) throw new Error("Stage A prerequisite generation requires an explicit PRE_APPLY or POST_APPLY phase.");
   if (!path.isAbsolute(stateBackup || "") || !path.isAbsolute(outputPath || "") || outputPath.startsWith(`${root}${path.sep}`)) throw new Error("Stage A prerequisite inputs and output must be absolute private paths.");
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !/^[a-f0-9]{64}$/.test(toolingTreeSha256 || "")) throw new Error("Stage A prerequisite tooling identity is malformed.");
@@ -265,5 +266,5 @@ export function generateStageAPrerequisites({ stateBackup, stateObject, toolingS
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const option = (name) => { const i = process.argv.indexOf(name); const value = i === -1 ? undefined : process.argv[i + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
-  generateStageAPrerequisites({ stateBackup: option("--stage-a-state-backup"), stateObject: option("--stage-a-state-object"), toolingSha: option("--tooling-sha"), toolingTreeSha256: option("--tooling-tree-sha256"), outputPath: option("--output"), phase: option("--phase") });
+  generateStageAPrerequisites({ stateBackup: option("--stage-a-state-backup"), stateObject: option("--stage-a-state-object"), toolingSha: option("--tooling-sha"), toolingTreeSha256: option("--tooling-tree-sha256"), outputPath: option("--output"), phase: option("--phase"), run: createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" }) });
 }

@@ -1,0 +1,219 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import test from "node:test";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
+import { createProductionAwsCommandRunner } from "../aws/production-credential-source-contract.mjs";
+import { createProductionBackendFailedRecoveryEvidenceAwsRunner } from "../aws/prepare-production-backend-failed-recovery-evidence.mjs";
+import { createReleaseGateImageAuthorizationRunner } from "../aws/verify-production-release-image-authorization.mjs";
+
+const oidc = Object.freeze({
+  AWS_ACCESS_KEY_ID: "fixture-access",
+  AWS_SECRET_ACCESS_KEY: "s",
+  AWS_SESSION_TOKEN: "t",
+  AWS_REGION: "eu-west-2",
+  AWS_PROFILE: "hostile-profile",
+  AWS_DEFAULT_PROFILE: "hostile-default",
+  AWS_CONFIG_FILE: "/hostile/config",
+  AWS_SHARED_CREDENTIALS_FILE: "/hostile/credentials",
+  PATH: process.env.PATH,
+});
+
+test("GitHub release-gate composition preserves only the OIDC session and never selects a profile", () => {
+  const calls = [];
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER,
+    env: oidc,
+    exec: (file, args, options) => { calls.push({ file, args, options }); return JSON.stringify({ SignatureValid: true }); },
+  });
+  run(["kms", "verify", "--key-id", "fixture"]);
+  assert.equal(calls[0].file, "aws");
+  assert.deepEqual(calls[0].args.slice(0, 2), ["kms", "verify"]);
+  assert.equal(calls[0].options.env.AWS_ACCESS_KEY_ID, oidc.AWS_ACCESS_KEY_ID);
+  assert.equal(calls[0].options.env.AWS_SECRET_ACCESS_KEY, oidc.AWS_SECRET_ACCESS_KEY);
+  assert.equal(calls[0].options.env.AWS_SESSION_TOKEN, oidc.AWS_SESSION_TOKEN);
+  assert.equal(calls[0].options.env.AWS_PROFILE, undefined);
+  assert.equal(calls[0].options.env.AWS_DEFAULT_PROFILE, undefined);
+});
+
+test("release-gate image authorization composes its verifier with the workflow OIDC session", () => {
+  const calls = [];
+  const run = createReleaseGateImageAuthorizationRunner({
+    env: oidc,
+    exec: (file, args, options) => { calls.push({ file, args, options }); return JSON.stringify({ SignatureValid: true }); },
+  });
+  run(["kms", "verify", "--key-id", "fixture"]);
+  assert.equal(calls[0].file, "aws");
+  assert.deepEqual(calls[0].args.slice(0, 2), ["kms", "verify"]);
+  assert.equal(calls[0].options.env.AWS_SESSION_TOKEN, oidc.AWS_SESSION_TOKEN);
+  assert.equal(calls[0].options.env.AWS_PROFILE, undefined);
+  assert.equal(calls[0].options.env.AWS_DEFAULT_PROFILE, undefined);
+});
+
+test("local governed composition removes ambient credentials and pins the exact named profile", () => {
+  const calls = [];
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "mscqr-production-release-deployer",
+    env: oidc,
+    exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; },
+  });
+  run(["kms", "verify", "--key-id", "fixture"]);
+  assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-production-release-deployer");
+  for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(calls[0].options.env[name], undefined);
+  assert.equal(calls[0].options.env.AWS_CONFIG_FILE, oidc.AWS_CONFIG_FILE);
+  assert.equal(calls[0].options.env.AWS_SHARED_CREDENTIALS_FILE, oidc.AWS_SHARED_CREDENTIALS_FILE);
+});
+
+test("credential source is explicit and OIDC fails before AWS execution when its session is absent", () => {
+  let calls = 0;
+  assert.throws(() => createProductionCommandRunner({ profile: "mscqr-production-release-deployer", exec: () => { calls += 1; } }), /credential source must be explicit/);
+  assert.throws(() => createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, env: { PATH: process.env.PATH }, exec: () => { calls += 1; } }), /AWS_ACCESS_KEY_ID/);
+  assert.equal(calls, 0);
+});
+
+test("root and preflight AWS-only composition pin a named profile instead of inheriting a session", () => {
+  const calls = [];
+  const run = createProductionAwsCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "default",
+    env: oidc,
+    exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; },
+  });
+  run(["sts", "get-caller-identity"]);
+  assert.equal(calls[0].file, "aws");
+  assert.equal(calls[0].options.env.AWS_PROFILE, "default");
+  for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(calls[0].options.env[name], undefined);
+});
+
+test("failed-recovery evidence composition pins the root profile instead of inheriting ambient credentials", () => {
+  const calls = [];
+  const run = createProductionBackendFailedRecoveryEvidenceAwsRunner({
+    env: oidc,
+    exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; },
+  });
+  run(["kms", "sign", "--key-id", "fixture"]);
+  assert.equal(calls[0].file, "aws");
+  assert.equal(calls[0].options.env.AWS_PROFILE, "default");
+  for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(calls[0].options.env[name], undefined);
+});
+
+for (const [name, source] of [["independent checker", PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION], ["ECS verifier", PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION]]) {
+  test(`${name} session composition preserves only its explicit session credentials`, () => {
+    const calls = [];
+    const run = createProductionAwsCommandRunner({
+      credentialSource: source,
+      env: oidc,
+      exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; },
+    });
+    run(["sts", "get-caller-identity"]);
+    assert.equal(calls[0].options.env.AWS_SESSION_TOKEN, oidc.AWS_SESSION_TOKEN);
+    assert.equal(calls[0].options.env.AWS_PROFILE, undefined);
+    assert.equal(calls[0].options.env.AWS_DEFAULT_PROFILE, undefined);
+  });
+}
+
+test("release-gate workflow explicitly selects OIDC for every AWS-capable CLI root", () => {
+  const workflow = fs.readFileSync(".github/workflows/release-gate.yml", "utf8");
+  for (const script of ["verify-production-release-image-authorization.mjs", "production-normal-backend-activation.mjs", "recover-production-backend-health.mjs", "run-production-cutover.mjs", "apply-production-full-rls-release.mjs"]) {
+    const start = workflow.indexOf(script);
+    assert.ok(start >= 0, `${script} is called by Release Gate`);
+    assert.match(workflow.slice(start, start + 800), /--credential-source github-oidc-release-deployer/);
+  }
+  assert.match(workflow, /manage-production-initial-activation-lifecycle\.mjs[\s\S]{0,600}--mode claim[\s\S]{0,160}--credential-source github-oidc-release-deployer/);
+  assert.match(workflow, /aws-actions\/configure-aws-credentials@v6[\s\S]*role-to-assume: \$\{\{ env\.PRODUCTION_RELEASE_ROLE_ARN \}\}/);
+});
+
+test("workflow shell AWS calls initialize the OIDC source before execution", () => {
+  for (const file of [".github/workflows/release-gate.yml", ".github/workflows/publish-ecs-images.yml"]) {
+    const workflow = fs.readFileSync(file, "utf8");
+    for (const section of workflow.split(/^\s*- name:/m).filter((value) => /\baws\s+(?:sts|ecs)\b/.test(value))) {
+      assert.match(section, /source scripts\/aws\/production-credential-source\.sh/);
+      assert.match(section, /MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer/);
+      assert.match(section, /configure_production_aws_credential_source/);
+    }
+  }
+});
+
+test("production image publisher workflows remain OIDC roots and do not select the local release profile", () => {
+  for (const file of [".github/workflows/production-green-stage-b-image-build.yml", ".github/workflows/production-green-backend-image-publish.yml", ".github/workflows/publish-ecs-images.yml"]) {
+    const workflow = fs.readFileSync(file, "utf8");
+    assert.match(workflow, /aws-actions\/configure-aws-credentials@v6/);
+    assert.doesNotMatch(workflow, /mscqr-production-release-deployer/);
+  }
+});
+
+test("operator documentation declares the exact non-profile verifier and checker session sources", () => {
+  const rotationRunbook = fs.readFileSync("documents/SECURITY_KEY_ROTATION_RUNBOOK.md", "utf8");
+  const activationRunbook = fs.readFileSync("documents/security/rls-program/FULL_DATABASE_PRODUCTION_ACTIVATION_RUNBOOK.md", "utf8");
+  assert.doesNotMatch(rotationRunbook, /AWS_PROFILE=mscqr-production-ecs-exec-verifier/);
+  assert.match(rotationRunbook, /--credential-source inherited-ecs-exec-verifier-session/);
+  assert.match(activationRunbook, /create-production-green-stage-b-approval\.mjs[\s\S]{0,160}--credential-source inherited-checker-session/);
+});
+
+test("every direct production AWS root declares its credential provenance before invoking AWS", () => {
+  const roots = [
+    ["scripts/aws/verify-production-release-image-authorization.mjs", "GITHUB_OIDC_RELEASE_DEPLOYER"],
+    ["scripts/aws/create-production-green-stage-b-approval.mjs", "INHERITED_CHECKER_SESSION"],
+    ["scripts/aws/publish-production-green-stage-b-approval.mjs", "INHERITED_CHECKER_SESSION"],
+    ["scripts/rls/create-production-rls-approval.mjs", "INHERITED_CHECKER_SESSION"],
+    ["scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "INHERITED_ECS_EXEC_VERIFIER_SESSION"],
+    ["scripts/aws/prepare-production-ecs-runtime-consumability.mjs", "NAMED_PROFILE"],
+    ["scripts/aws/production-green-stage-b-image-evidence.mjs", "NAMED_PROFILE"],
+    ["scripts/aws/create-stage-b-partial-apply-recovery-attestation.mjs", "NAMED_PROFILE"],
+    ["scripts/aws/check-production-green-stage-b-approval-publication.mjs", "NAMED_PROFILE"],
+    ["scripts/aws/production-normal-backend-activation.mjs", "GITHUB_OIDC_RELEASE_DEPLOYER"],
+    ["scripts/aws/recover-stage-b-backend-task-definition.mjs", "NAMED_PROFILE"],
+  ];
+  for (const [file, source] of roots) assert.match(fs.readFileSync(file, "utf8"), new RegExp(`PRODUCTION_AWS_CREDENTIAL_SOURCE\\.${source}`), file);
+});
+
+test("direct Bash production AWS roots select an explicit credential source before AWS", () => {
+  for (const file of ["scripts/aws/publish-ecs-images.sh", "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/rollback-ecs-service.sh"]) {
+    const source = fs.readFileSync(file, "utf8");
+    assert.match(source, /source "\$SCRIPT_DIR\/production-credential-source\.sh"/, file);
+    assert.match(source, /configure_production_aws_credential_source/, file);
+  }
+  const contract = fs.readFileSync("scripts/aws/production-credential-source.sh", "utf8");
+  assert.match(contract, /github-oidc-release-deployer/);
+  assert.match(contract, /named-profile/);
+  assert.match(contract, /unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN/);
+  assert.match(contract, /unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE AWS_SDK_LOAD_CONFIG AWS_SECURITY_TOKEN/);
+});
+
+test("the shell credential boundary preserves OIDC only or pins a local profile without an AWS call", () => {
+  const shell = "source scripts/aws/production-credential-source.sh; configure_production_aws_credential_source; printf '%s|%s|%s|%s' \"${AWS_PROFILE:-}\" \"${AWS_ACCESS_KEY_ID:-}\" \"${AWS_SESSION_TOKEN:-}\" \"${AWS_EC2_METADATA_DISABLED:-}\"";
+  const oidcResult = execFileSync("bash", ["-c", shell], { encoding: "utf8", env: { ...oidc, MSCQR_AWS_CREDENTIAL_SOURCE: "github-oidc-release-deployer" } });
+  assert.equal(oidcResult, `|${oidc.AWS_ACCESS_KEY_ID}|${oidc.AWS_SESSION_TOKEN}|true`);
+  const localResult = execFileSync("bash", ["-c", shell], { encoding: "utf8", env: { ...oidc, MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile", MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer" } });
+  assert.equal(localResult, "mscqr-production-release-deployer|||true");
+});
+
+test("every direct AWS source in scripts/aws has an explicit audited credential boundary", () => {
+  const walk = (directory) => fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(`${directory}/${entry.name}`) : [`${directory}/${entry.name}`]);
+  const direct = walk("scripts/aws").filter((file) => /\.(mjs|sh)$/.test(file) && /(?:execFileSync|execFile|spawnSync|spawn|run)\(["']aws["']|\baws\s+(?:sts|kms|ecr|ecs|iam|s3|secretsmanager|rds|cloudtrail)/.test(fs.readFileSync(file, "utf8"))).sort();
+  const classified = [
+    "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs",
+  ].sort();
+  assert.deepEqual(direct, classified);
+  const boundaries = {
+    "scripts/aws/apply-ecr-repository-controls.sh": /configure_production_aws_credential_source/,
+    "scripts/aws/apply-production-full-rls-release.mjs": /createProductionAwsCredentialEnvironment/,
+    "scripts/aws/deploy-ecs-service.sh": /configure_production_aws_credential_source/,
+    "scripts/aws/discover-staging-endpoints.mjs": /--profile", C\.profile/,
+    "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs": /createProductionAwsCommandRunner/,
+    "scripts/aws/production-cutover-production-adapters.mjs": /createProductionAwsCredentialEnvironment/,
+    "scripts/aws/production-identity-adapters.mjs": /createProductionAwsCredentialEnvironment/,
+    "scripts/aws/production-initial-activation-lifecycle.mjs": /createProductionAwsCredentialEnvironment/,
+    "scripts/aws/publish-ecs-images.sh": /configure_production_aws_credential_source/,
+    "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs": /buildRecoveryAwsEnvironment/,
+    "scripts/aws/recover-production-backend-health.mjs": /createProductionAwsCredentialEnvironment/,
+    "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs": /buildRecoveryAwsEnvironment/,
+    "scripts/aws/rollback-ecs-service.sh": /configure_production_aws_credential_source/,
+    "scripts/aws/staging-database-role-credentials.mjs": /awsCliEnvironment\(\)/,
+    "scripts/aws/verify-production-dependency-closure.mjs": /requireTokens/,
+    "scripts/aws/verify-production-rotation-via-ecs-exec.mjs": /createProductionAwsCredentialEnvironment/,
+  };
+  for (const [file, boundary] of Object.entries(boundaries)) assert.match(fs.readFileSync(file, "utf8"), boundary, file);
+  assert.match(fs.readFileSync("scripts/aws/verify-production-dependency-closure.mjs", "utf8"), /requireTokens/);
+});

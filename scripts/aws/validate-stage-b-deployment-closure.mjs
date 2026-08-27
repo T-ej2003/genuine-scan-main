@@ -17,8 +17,8 @@ import { assertStageBDeploymentCapabilityGraph } from "./generate-production-gre
 import { assertStageBRecoveryProvenance, assertStageBRefreshEvidence } from "./stage-b-refresh-contract.mjs";
 import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 import { assertStageBNormalPlanCompleteness, assertStageBPlanApprovedBinding } from "./stage-b-plan-approval-contract.mjs";
-import { assertVerifiedStageBRecovery } from "./stage-b-partial-apply-recovery-contract.mjs";
-import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { assertVerifiedStageBRecovery, createStageBRecoveryKmsVerifier } from "./stage-b-partial-apply-recovery-contract.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
@@ -26,7 +26,7 @@ const matrixPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageB
 const backendPolicyPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json");
 const permissionManifestPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json");
 const fixturePath = path.join(root, "scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
-const releaseRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
+const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
 const mode = parseStageBClosureMode(process.argv.slice(2));
 
 function filesUnder(directory) {
@@ -120,7 +120,7 @@ if (mode === "production" || tfvarsPath || bindingReportPath) {
     if (approvalReport.recoveryAttestationSha256) {
       for (const name of ["STAGE_B_RECOVERY_ATTESTATION_PATH", "STAGE_B_RECOVERY_SIGNATURE_PATH", "STAGE_B_RECOVERY_CLASSIFICATION_PATH"]) assertStageBPrivateFile({ filePath: process.env[name], repositoryRoot: root, label: name });
       const refreshBytes = fs.readFileSync(process.env.STAGE_B_REFRESH_REPORT_PATH); const recoveryBytes = fs.readFileSync(process.env.STAGE_B_RECOVERY_ATTESTATION_PATH); const signatureBytes = fs.readFileSync(process.env.STAGE_B_RECOVERY_SIGNATURE_PATH); const classificationBytes = fs.readFileSync(process.env.STAGE_B_RECOVERY_CLASSIFICATION_PATH);
-      trustedRecovery = assertVerifiedStageBRecovery({ refreshReport: JSON.parse(refreshBytes), refreshReportBytes: refreshBytes, refreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, classification: JSON.parse(classificationBytes), classificationBytes, classificationSha256: process.env.STAGE_B_RECOVERY_CLASSIFICATION_SHA256, attestation: JSON.parse(recoveryBytes), attestationBytes: recoveryBytes, attestationSha256: process.env.STAGE_B_RECOVERY_ATTESTATION_SHA256, signature: JSON.parse(signatureBytes), signatureBytes, signatureSha256: process.env.STAGE_B_RECOVERY_SIGNATURE_SHA256, expectedSourceSha: currentHead, expectedLineage: bindingReport.stateLineage, expectedSerial: bindingReport.stateSerial });
+      trustedRecovery = assertVerifiedStageBRecovery({ refreshReport: JSON.parse(refreshBytes), refreshReportBytes: refreshBytes, refreshReportSha256: process.env.STAGE_B_REFRESH_REPORT_SHA256, classification: JSON.parse(classificationBytes), classificationBytes, classificationSha256: process.env.STAGE_B_RECOVERY_CLASSIFICATION_SHA256, attestation: JSON.parse(recoveryBytes), attestationBytes: recoveryBytes, attestationSha256: process.env.STAGE_B_RECOVERY_ATTESTATION_SHA256, signature: JSON.parse(signatureBytes), signatureBytes, signatureSha256: process.env.STAGE_B_RECOVERY_SIGNATURE_SHA256, expectedSourceSha: currentHead, expectedLineage: bindingReport.stateLineage, expectedSerial: bindingReport.stateSerial, verifySignature: createStageBRecoveryKmsVerifier({ run: releaseRun }) });
       if (approvalReport.recoveryAttestationSha256 !== process.env.STAGE_B_RECOVERY_ATTESTATION_SHA256 || closureAudit.recoveryAttestationSha256 !== process.env.STAGE_B_RECOVERY_ATTESTATION_SHA256) throw new Error("Recovery closure upstream bindings do not match the verified attestation.");
     }
   } else if (hasRecoveryInputs) throw new Error("Recovery artifacts are not authorization inputs in pull-request provenance mode.");

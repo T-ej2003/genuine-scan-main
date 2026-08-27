@@ -10,6 +10,7 @@ import {
   stageBApprovalIdForReleaseSha,
   validateStageBApproval,
 } from "./production-green-stage-b-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const CHECKER_CALLER = new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/[A-Za-z0-9+=,.@_-]{2,64}$`);
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -57,24 +58,27 @@ export async function publishStageBApproval({ approvalPath, expectedSourceSha = 
   return { status: "published", secretArn: response.ARN, versionId: response.VersionId, versionStages: response.VersionStages, approvalId: prepared.approval.approvalId, sourceSha: prepared.approval.releaseSha, approvalSha256: prepared.approvalSha256, approvalContractSha256: prepared.approvalContractSha256 };
 }
 
-const runAwsJson = (args) => JSON.parse(execFileSync("aws", [...args, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], { encoding: "utf8" }));
-const callerArn = async () => String(runAwsJson(["sts", "get-caller-identity"]).Arn || "");
+const runAwsJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
+const callerArn = async (run) => String(runAwsJson(run, ["sts", "get-caller-identity"]).Arn || "");
 const withPrivateFile = (bytes, callback) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-approval-publish-"));
   const filePath = path.join(directory, "payload");
   try { fs.writeFileSync(filePath, bytes, { mode: 0o600, flag: "wx" }); return callback(filePath); } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 };
-const verifySignature = async ({ keyId, message, signature }) => withPrivateFile(message, (messagePath) => {
-  const result = runAwsJson(["kms", "verify", "--key-id", keyId, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", STAGE_B_APPROVAL_ALGORITHM]);
+const verifySignature = (run) => async ({ keyId, message, signature }) => withPrivateFile(message, (messagePath) => {
+  const result = runAwsJson(run, ["kms", "verify", "--key-id", keyId, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", STAGE_B_APPROVAL_ALGORITHM]);
   return result.SignatureValid === true;
 });
-const putSecretValue = async ({ SecretId, SecretString, ClientRequestToken }) => withPrivateFile(Buffer.from(SecretString, "utf8"), (secretPath) => runAwsJson(["secretsmanager", "put-secret-value", "--secret-id", SecretId, "--secret-string", `file://${secretPath}`, "--client-request-token", ClientRequestToken]));
+const putSecretValue = (run) => async ({ SecretId, SecretString, ClientRequestToken }) => withPrivateFile(Buffer.from(SecretString, "utf8"), (secretPath) => runAwsJson(run, ["secretsmanager", "put-secret-value", "--secret-id", SecretId, "--secret-string", `file://${secretPath}`, "--client-request-token", ClientRequestToken]));
 
 async function run(argv = process.argv.slice(2)) {
   const index = argv.indexOf("--approval");
   if (index < 0 || !argv[index + 1] || argv[index + 1].startsWith("--") || argv.some((value) => value === "--secret-arn")) throw new Error("--approval is required and the target secret is contract-bound.");
-  const identity = await callerArn();
-  const result = await publishStageBApproval({ approvalPath: argv[index + 1], callerArn: identity, verifySignature, putSecretValue });
+  const sourceIndex = argv.indexOf("--credential-source");
+  if (sourceIndex < 0 || argv[sourceIndex + 1] !== PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION) throw new Error("Approval publication requires the inherited independent-checker session credential source.");
+  const runAws = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION });
+  const identity = await callerArn(runAws);
+  const result = await publishStageBApproval({ approvalPath: argv[index + 1], callerArn: identity, verifySignature: verifySignature(runAws), putSecretValue: putSecretValue(runAws) });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 

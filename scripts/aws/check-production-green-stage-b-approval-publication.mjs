@@ -5,11 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { STAGE_B, STAGE_B_APPROVAL_PUBLICATION_VALIDATION_OPERATION, stageBApprovalIdForReleaseSha } from "./production-green-stage-b-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const RELEASE_CALLER = new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-release-deployer/[A-Za-z0-9+=,.@_-]{2,64}$`);
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const sourceSha = () => String(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" })).trim();
-const runAwsJson = (args) => JSON.parse(execFileSync("aws", [...args, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], { encoding: "utf8" }));
+const runAwsJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 const privateFiles = (files, callback) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-approval-check-"));
   try {
@@ -42,9 +43,9 @@ export function checkApprovalPublication({ approvalPath, expectedSourceSha = sou
   return invoke(request, (response) => validateApprovalPublicationProof(response, request));
 }
 
-const caller = () => String(runAwsJson(["sts", "get-caller-identity"]).Arn || "");
-const invoke = (request, consume) => privateFiles({ payload: Buffer.from(`${JSON.stringify(request)}\n`), response: Buffer.alloc(0) }, ({ payload, response }) => {
-  const result = runAwsJson(["lambda", "invoke", "--function-name", STAGE_B.brokerAliasArn, "--invocation-type", "RequestResponse", "--cli-binary-format", "raw-in-base64-out", "--payload", `fileb://${payload}`, response]);
+const caller = (run) => String(runAwsJson(run, ["sts", "get-caller-identity"]).Arn || "");
+const invoke = (run, request, consume) => privateFiles({ payload: Buffer.from(`${JSON.stringify(request)}\n`), response: Buffer.alloc(0) }, ({ payload, response }) => {
+  const result = runAwsJson(run, ["lambda", "invoke", "--function-name", STAGE_B.brokerAliasArn, "--invocation-type", "RequestResponse", "--cli-binary-format", "raw-in-base64-out", "--payload", `fileb://${payload}`, response]);
   if (result.FunctionError) throw new Error("Broker approval publication proof invocation failed.");
   return consume(JSON.parse(fs.readFileSync(response, "utf8")));
 });
@@ -55,7 +56,8 @@ if (process.argv[1]?.endsWith("check-production-green-stage-b-approval-publicati
     process.stderr.write('{"status":"blocked","reason":"--approval-is-required"}\n'); process.exitCode = 1;
   } else {
     try {
-      const result = checkApprovalPublication({ approvalPath: process.argv[index + 1], callerArn: caller(), invoke });
+      const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+      const result = checkApprovalPublication({ approvalPath: process.argv[index + 1], callerArn: caller(releaseRun), invoke: (request, consume) => invoke(releaseRun, request, consume) });
       process.stdout.write(`${JSON.stringify(result)}\n`);
     } catch {
       process.stderr.write('{"status":"blocked","reason":"approval-publication-proof-failed"}\n'); process.exitCode = 1;

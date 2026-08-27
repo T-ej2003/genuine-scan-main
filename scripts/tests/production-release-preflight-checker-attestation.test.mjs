@@ -7,7 +7,7 @@ import test from "node:test";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_KIND, RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN, authenticateReleasePreflightCheckerTrustEvidence, buildReleasePreflightCheckerTrustAttestation, runReleasePreflightCheckerTrustAttestationCli } from "../aws/production-release-preflight-checker-attestation.mjs";
 import { PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
-import { createProductionCommandRunner } from "../aws/production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { createProductionCutoverRuntimeComposition } from "../aws/production-cutover-runtime-composition.mjs";
 
 const sourceSha = "a".repeat(40);
@@ -52,7 +52,7 @@ test("runtime-preparation production composition verifies checker attestation th
   const originalProfile = process.env.AWS_PROFILE;
   process.env.AWS_PROFILE = "hostile-default-profile";
   try {
-    const releaseRun = createProductionCommandRunner({
+    const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
       profile: "mscqr-production-release-deployer",
       exec: (file, args, options) => {
         calls.push({ file, args, options });

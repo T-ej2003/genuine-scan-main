@@ -8,7 +8,7 @@ import { canonicalSha256, taskDefinitionFingerprint } from "./stage-b-task-defin
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { loadApprovedArtifactSigningBindings } from "./production-artifact-signing-secrets-adapter.mjs";
 import { readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? null : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
@@ -40,7 +40,7 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
   const artifactSigningFile = required(argv, "--artifact-signing-bindings");
   const artifactSigningBindingSha256 = required(argv, "--artifact-signing-bindings-sha256");
   const artifactSigningBindings = loadApprovedArtifactSigningBindings(artifactSigningFile, { expectedSourceSha: sourceSha, expectedSha256: artifactSigningBindingSha256, repositoryRoot: root });
-  const releaseRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
+  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
   const result = prepareProductionBackendRecoveryCandidate({ sourceSha, taskDefinition, imageAuthorization, imageValidation: deps.imageValidation || { verifyImageEvidence: (input) => verifyImageEvidenceSignature({ ...input, run: releaseRun }) }, artifactSigningBindings, artifactSigningBindingSha256 });
   const output = path.resolve(required(argv, "--output"));
   return persistProductionBackendRecoveryCandidate(result, output);

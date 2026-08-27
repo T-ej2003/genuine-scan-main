@@ -154,7 +154,8 @@ export function buildEcsExecOperatorEvidence() {
   };
 }
 
-export function collectLiveEcsExecOperatorEvidence({ run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+export function collectLiveEcsExecOperatorEvidence({ run } = {}) {
+  if (typeof run !== "function") throw new Error("ECS Exec operator evidence requires an explicit credential-bound AWS command runner.");
   const roleName = ECS_EXEC_OPERATOR_ROLE_NAME;
   const role = JSON.parse(run(["iam", "get-role", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).Role;
   const attached = JSON.parse(run(["iam", "list-attached-role-policies", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).AttachedPolicies || [];

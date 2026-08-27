@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createProductionCommandRunner, createProductionOverlapDeploymentAdapter } from "./production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, createProductionOverlapDeploymentAdapter, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { createProductionCutoverRuntimeComposition } from "./production-cutover-runtime-composition.mjs";
 import { runProductionCutoverControlPlane, runProductionCutoverOverlapControlPlane } from "./production-cutover-control-plane.mjs";
 import { readAndAssertReadyForOverlapDeployment } from "./production-overlap-readiness-contract.mjs";
@@ -19,7 +19,7 @@ if (mode === "rotation-overlap") {
   const readinessFile = value("--readiness-file");
   const readinessSha256 = value("--readiness-sha256");
   const readiness = readAndAssertReadyForOverlapDeployment({ filePath: readinessFile, evidenceSha256: readinessSha256, sourceSha, rotationId, rotationStateSha256 });
-  const run = createProductionCommandRunner();
+  const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER });
   const result = await runProductionCutoverOverlapControlPlane({ readiness: readiness.evidence, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256, deployOverlap: createProductionOverlapDeploymentAdapter({ run, credentialSource, readinessFile, readinessSha256, sourceSha, rotationId, imageDigest: process.env.EXPECTED_IMAGE_DIGEST, cluster: process.env.CLUSTER_NAME, service: process.env.SERVICE_NAME, expectedCurrentTaskDefinitionArn: process.env.EXPECTED_CURRENT_TASK_DEFINITION_ARN, versionUrl: process.env.VERSION_URL, expectedGitSha: process.env.EXPECTED_GIT_SHA }) });
   process.stdout.write(`${JSON.stringify({ ready: result.readyForOverlapDeployment, taskDefinitionArn: result.deployment.taskDefinitionArn, propagateTags: result.deployment.propagateTags, updateServiceCount: result.deployment.updateServiceCount, mutationSequence: result.mutationSequence })}\n`);
 } else {

@@ -3,9 +3,9 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRecoveryAttestation, publishRecoveryAttestation, signRecoveryAttestation, STAGE_B_PARTIAL_APPLY_RECOVERY_CALLER, STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN, STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM } from "./stage-b-partial-apply-recovery-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const readOption = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
@@ -21,11 +21,11 @@ const assertInput = (input) => {
     return { ...item, path: path.resolve(item.path) };
   }) };
 };
-const kmsSign = ({ digest }) => {
+const kmsSign = (run) => ({ digest }) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-recovery-kms-")); const filePath = path.join(dir, "digest");
-  try { fs.writeFileSync(filePath, digest, { mode: 0o600, flag: "wx" }); return JSON.parse(execFileSync("aws", ["kms", "sign", "--key-id", STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN, "--message", `fileb://${filePath}`, "--message-type", "DIGEST", "--signing-algorithm", STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM, "--output", "json"], { encoding: "utf8" })).Signature; } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  try { fs.writeFileSync(filePath, digest, { mode: 0o600, flag: "wx" }); return JSON.parse(run(["kms", "sign", "--key-id", STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN, "--message", `fileb://${filePath}`, "--message-type", "DIGEST", "--signing-algorithm", STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM, "--output", "json"])).Signature; } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 };
-const caller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn;
+const caller = (run) => JSON.parse(run(["sts", "get-caller-identity", "--output", "json"])).Arn;
 
 export function produceRecoveryAttestation({ inputPath, reportPath, signaturePath, getCaller = caller, sign = kmsSign } = {}) {
   const input = JSON.parse(fs.readFileSync(inputPath, "utf8")); const identity = getCaller(); if (identity !== STAGE_B_PARTIAL_APPLY_RECOVERY_CALLER) throw new Error("Recovery producer requires the exact administrator caller.");
@@ -35,5 +35,8 @@ export function produceRecoveryAttestation({ inputPath, reportPath, signaturePat
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  try { process.stdout.write(`${JSON.stringify(produceRecoveryAttestation({ inputPath: readOption(process.argv.slice(2), "--input"), reportPath: readOption(process.argv.slice(2), "--output"), signaturePath: readOption(process.argv.slice(2), "--signature-output") }))}\n`); } catch (error) { console.error(error.message); process.exitCode = 1; }
+  try {
+    const rootRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default" });
+    process.stdout.write(`${JSON.stringify(produceRecoveryAttestation({ inputPath: readOption(process.argv.slice(2), "--input"), reportPath: readOption(process.argv.slice(2), "--output"), signaturePath: readOption(process.argv.slice(2), "--signature-output"), getCaller: () => caller(rootRun), sign: kmsSign(rootRun) }))}\n`);
+  } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { verifyArtifactSigningDomain } from "../aws/production-artifact-signing-domain.mjs";
 import { createProductionRuntimeInventoryAdapter, PRODUCTION_RUNTIME_INVENTORY_COMMAND } from "../aws/production-runtime-inventory-adapter.mjs";
-import { createConditionalMfaResolvers, createProductionCommandRunner, createProductionOverlapDeploymentAdapter } from "../aws/production-cutover-production-adapters.mjs";
+import { createConditionalMfaResolvers, createProductionCommandRunner, createProductionOverlapDeploymentAdapter, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { loadApprovedArtifactSigningBindings } from "../aws/production-artifact-signing-secrets-adapter.mjs";
 import { assertNoOnboardingEvidenceLeak } from "../security/production-strict-onboarding.mjs";
 import { createProductionInteractiveEcsExecRunner } from "../aws/production-ecs-exec-command.mjs";
@@ -135,7 +135,7 @@ test("production AWS command runner executes service operations through aws", ()
   Object.assign(process.env, { AWS_ACCESS_KEY_ID: "ambient", AWS_SECRET_ACCESS_KEY: "ambient", AWS_SESSION_TOKEN: "ambient", AWS_DEFAULT_PROFILE: "ambient" });
   const calls = [];
   try {
-    const run = createProductionCommandRunner({ profile: "mscqr-test", region: "eu-west-2", exec: (file, args, options) => {
+    const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-test", region: "eu-west-2", exec: (file, args, options) => {
       calls.push({ file, args, options });
       return "{}";
     } });
@@ -193,6 +193,7 @@ test("production overlap adapter invokes the governed deploy wrapper with exact 
   let invocation;
   try {
     const adapter = createProductionOverlapDeploymentAdapter({
+      credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
       profile: "mscqr-production-release-deployer",
       run: () => JSON.stringify({ Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test" }),
       deployScript: path.join(directory, "deploy-ecs-service.sh"),

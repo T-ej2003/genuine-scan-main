@@ -19,7 +19,7 @@ import { buildStageBImagePublicationIdentity, publicationIdentitySha256 } from "
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "../aws/stage-b-deployment-contract.mjs";
-import { createProductionCommandRunner } from "../aws/production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 
 const imageReleaseSha = "7245a6036492f875654c414473737e33c1422f3c";
 const toolingSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
@@ -163,7 +163,7 @@ test("production-default image verification uses the release profile runner", ()
   const report = reportFixture();
   const signatureArtifact = signatureFixture(report);
   const calls = [];
-  const releaseRun = createProductionCommandRunner({
+  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
     profile: "mscqr-production-release-deployer",
     exec: (file, args, options) => { calls.push({ file, args, options }); return JSON.stringify({ SignatureValid: true }); },
   });

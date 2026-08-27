@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertReleasePreflightCheckerTrustEvidence } from "./production-checker-chain-contract.mjs";
-import { APPROVED_PREFLIGHT_GENERATOR_ARNS, assertPermissionReportHashDomains, canonicalizeJson, createPermissionReportKmsVerifier, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, signPermissionReport, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
+import { APPROVED_PREFLIGHT_GENERATOR_ARNS, assertPermissionReportHashDomains, canonicalizeJson, createPermissionReportKmsSigner, createPermissionReportKmsVerifier, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -85,11 +85,11 @@ export function authenticateReleasePreflightCheckerTrustEvidence({ report, repor
   return Object.freeze({ sourceSha, administratorReportSha256, reportSha256: sha256(reportBytes), attestation: verifiedAttestation, checkerTrust: Object.freeze({ ...checked.checkerTrust }) });
 }
 
-export function runReleasePreflightCheckerTrustAttestationCli(argv = process.argv.slice(2), {
-  caller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"], { encoding: "utf8" })).Arn,
-  sign = signPermissionReport,
-  readProtectedMainCheckout = () => readStageBProtectedMainCheckout({ cwd: root }),
-} = {}) {
+export function runReleasePreflightCheckerTrustAttestationCli(argv = process.argv.slice(2), dependencies = {}) {
+  const commandRun = dependencies.commandRun || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default" });
+  const caller = dependencies.caller || (() => JSON.parse(commandRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn);
+  const sign = dependencies.sign || createPermissionReportKmsSigner({ run: commandRun });
+  const readProtectedMainCheckout = dependencies.readProtectedMainCheckout || (() => readStageBProtectedMainCheckout({ cwd: root }));
   const sourceSha = required(argv, "--source-sha");
   const administratorReportSha256 = required(argv, "--administrator-report-sha256");
   if (!SHA40.test(sourceSha) || !SHA256.test(administratorReportSha256)) throw new Error("Release-preflight checker-trust attestation source bindings are invalid.");

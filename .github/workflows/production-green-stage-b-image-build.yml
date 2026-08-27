@@ -95,7 +95,7 @@ jobs:
           MIGRATION_SET_DIGEST: ${{ steps.package.outputs.migration_digest }}
           OUTPUT_FILE: ${{ runner.temp }}/stage-b-images.jsonl
         working-directory: release-source
-        run: ./scripts/aws/publish-ecs-images.sh production-green-stage-b
+        run: MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer ./scripts/aws/publish-ecs-images.sh production-green-stage-b
       - name: Bind image digest outputs
         env:
           IMAGES_FILE: ${{ runner.temp }}/stage-b-images.jsonl

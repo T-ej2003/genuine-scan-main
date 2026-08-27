@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { bootstrapInitialDualSlotRotation, createInitialDualSlotSecretsManagerClient } from "./production-initial-dual-slot-bootstrap.mjs";
 import { writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
@@ -31,7 +31,7 @@ const gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["
 const fresh = readFreshProtectedMainIdentity({ run: gitRun, expectedSourceSha: values.get("--source-sha") });
 const sourceSha = fresh.headSha;
 const rotationId = values.get("--rotation-id") || `rotation-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
-const run = createProductionCommandRunner({ profile: "mscqr-production-release-deployer", region: REGION });
+const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: REGION });
 const client = createInitialDualSlotSecretsManagerClient({ region: REGION, profile: "mscqr-production-release-deployer" });
 await client.assertCredentialIdentity();
 const service = JSON.parse(run(["ecs", "describe-services", "--cluster", CLUSTER, "--services", SERVICE])).services?.[0];

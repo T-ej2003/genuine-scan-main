@@ -13,7 +13,7 @@ const sourceSha = "565f78be803558feb40a543ead464c5410738960";
 const digest = "sha256:3dbd02136a99d1741fdfa655397a661fa2275812e1cad0675c93fc5c7c4b4477";
 const currentArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47";
 const now = new Date("2026-08-20T18:00:00.000Z");
-const githubEnv = { GITHUB_ACTIONS: "true", GITHUB_ACTOR: "release-operator", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_WORKFLOW_REF: "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main", GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1" };
+const githubEnv = { GITHUB_ACTIONS: "true", GITHUB_ACTOR: "release-operator", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_WORKFLOW_REF: "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main", GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1", AWS_ACCESS_KEY_ID: "fixture-access", AWS_SECRET_ACCESS_KEY: "s", AWS_SESSION_TOKEN: "t" };
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const artifactSigningBindings = Object.freeze({
   ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-AbCd12",
@@ -61,7 +61,7 @@ function privateFixture() {
   return { dir, image, imageBytes, approvalPath, approvalBytes, environmentApproval, environmentPath, environmentBytes, runtimePath, runtimeBytes, failedReferencePath, failedReferenceBytes, failedPath, failedBytes, imageFixture };
 }
 
-const environmentArgs = (fixture) => ["--aws-profile", "mscqr-production-release-deployer", "--environment-approval", fixture.environmentPath, "--environment-approval-sha256", sha(fixture.environmentBytes), "--runtime-consumability", fixture.runtimePath, "--runtime-consumability-sha256", sha(fixture.runtimeBytes), "--failed-recovery-evidence-reference", fixture.failedReferencePath, "--failed-recovery-evidence-reference-sha256", sha(fixture.failedReferenceBytes), "--failed-recovery-evidence", fixture.failedPath, "--failed-recovery-evidence-sha256", sha(fixture.failedBytes)];
+const environmentArgs = (fixture) => ["--credential-source", "github-oidc-release-deployer", "--environment-approval", fixture.environmentPath, "--environment-approval-sha256", sha(fixture.environmentBytes), "--runtime-consumability", fixture.runtimePath, "--runtime-consumability-sha256", sha(fixture.runtimeBytes), "--failed-recovery-evidence-reference", fixture.failedReferencePath, "--failed-recovery-evidence-reference-sha256", sha(fixture.failedReferenceBytes), "--failed-recovery-evidence", fixture.failedPath, "--failed-recovery-evidence-sha256", sha(fixture.failedBytes)];
 const deps = (fixture, overrides = {}) => ({
   baseEnv: githubEnv, now, readProtectedMain: () => ({ headSha: sourceSha, freshRemoteMainSha: sourceSha }),
   verifyImageEvidence: fixture.imageFixture.verifyImageEvidence,

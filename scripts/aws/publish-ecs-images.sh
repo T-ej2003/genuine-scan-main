@@ -10,6 +10,8 @@ docker buildx. The default output is an ECS/Fargate-ready linux/amd64 manifest
 tagged with the immutable current git SHA.
 
 Environment:
+  MSCQR_AWS_CREDENTIAL_SOURCE Required: github-oidc-release-deployer or named-profile.
+  MSCQR_AWS_NAMED_PROFILE Required only for named-profile execution.
   AWS_REGION         Required AWS region for ECR.
   AWS_ACCOUNT_ID     Optional. Auto-detected via STS when omitted.
   ECR_REGISTRY       Optional. Overrides the computed ECR registry hostname.
@@ -29,8 +31,8 @@ Environment:
   OUTPUT_FILE        Optional JSON Lines output file with published image refs.
 
 Examples:
-  AWS_REGION=eu-west-2 ./scripts/aws/publish-ecs-images.sh backend
-  AWS_REGION=eu-west-2 ./scripts/aws/publish-ecs-images.sh all
+  MSCQR_AWS_CREDENTIAL_SOURCE=named-profile MSCQR_AWS_NAMED_PROFILE=mscqr-production-release-deployer AWS_REGION=eu-west-2 ./scripts/aws/publish-ecs-images.sh backend
+  MSCQR_AWS_CREDENTIAL_SOURCE=named-profile MSCQR_AWS_NAMED_PROFILE=mscqr-production-release-deployer AWS_REGION=eu-west-2 ./scripts/aws/publish-ecs-images.sh all
 EOF
 }
 
@@ -52,6 +54,11 @@ case "$SERVICE_SCOPE" in
     exit 1
     ;;
 esac
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=production-credential-source.sh
+source "$SCRIPT_DIR/production-credential-source.sh"
+configure_production_aws_credential_source
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then

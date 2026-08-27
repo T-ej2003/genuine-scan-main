@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILY_NAMES } from "./stage-b-reference-audit-contract.mjs";
 
@@ -195,8 +194,9 @@ function parseJson(value, label) {
   try { return JSON.parse(value); } catch { throw new Error(`${label} is malformed JSON.`); }
 }
 
-function createAwsReader({ region, clusterArn, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
+function createAwsReader({ region, clusterArn, run }) {
   if (region !== STAGE_B.region || clusterArn !== STAGE_B.clusterArn) throw new Error("Stage B ECS reader requires the exact production region and cluster.");
+  if (typeof run !== "function") throw new Error("Stage B ECS reader requires an explicit credential-bound AWS command runner.");
   const call = (name, args) => {
     try { return parseJson(run([...COMMANDS[name], ...args, "--region", region, "--output", "json", "--no-cli-pager"]), `AWS ${name}`); }
     catch (error) {

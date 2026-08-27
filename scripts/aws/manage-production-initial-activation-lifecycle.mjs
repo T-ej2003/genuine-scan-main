@@ -7,6 +7,7 @@ import {
   buildInitialActivationCompletion,
   createInitialActivationClaim,
   createInitialActivationCompletion,
+  createProductionInitialActivationAws,
   readInitialActivationClaim,
 } from "./production-initial-activation-lifecycle.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
@@ -32,6 +33,7 @@ const writeCanonical = (file, value) => writeFileSync(file, `${canonicalJson(val
 export async function runCli(argv = process.argv.slice(2), dependencies = {}) {
   const values = args(argv);
   const mode = required(values, "--mode");
+  const aws = dependencies.aws || (mode === "validate-candidate" ? undefined : createProductionInitialActivationAws({ credentialSource: required(values, "--credential-source") }));
   if (mode === "validate-candidate" || mode === "claim") {
     const rawState = readFileSync(required(values, "--state-file"));
     const expected = {
@@ -44,14 +46,14 @@ export async function runCli(argv = process.argv.slice(2), dependencies = {}) {
       return overlap;
     }
     const claim = buildInitialActivationClaim({ ...expected, overlapDeploymentSha: expected.deploymentSha, activationTaskDefinitionArn: required(values, "--activation-task-definition"), overlapRuntimeProofSha256: overlap.overlapRuntimeProofSha256, createdAt: dependencies.now?.() || new Date().toISOString() });
-    const result = await createInitialActivationClaim({ claim, aws: dependencies.aws });
+    const result = await createInitialActivationClaim({ claim, aws });
     writeCanonical(required(values, "--claim-out"), result.value);
     process.stdout.write(`${JSON.stringify({ status: result.status, claimSha256: result.sha256, claimVersionId: result.versionId, activationTransactionId: claim.activationTransactionId })}\n`);
     return result;
   }
   if (mode === "verify-claim") {
     const expected = JSON.parse(readFileSync(required(values, "--expected-identity"), "utf8"));
-    const result = readInitialActivationClaim({ expected, aws: dependencies.aws });
+    const result = readInitialActivationClaim({ expected, aws });
     if (result.sha256 !== required(values, "--claim-sha256")) throw new Error("Production initial activation claim digest changed.");
     writeCanonical(required(values, "--claim-out"), result.value);
     return result;
@@ -61,7 +63,7 @@ export async function runCli(argv = process.argv.slice(2), dependencies = {}) {
     const claimSha256 = required(values, "--claim-sha256");
     if (sha256(claimRaw) !== claimSha256) throw new Error("Production initial activation claim digest is invalid.");
     const claim = JSON.parse(claimRaw);
-    const liveClaim = readInitialActivationClaim({ expected: claim, aws: dependencies.aws });
+    const liveClaim = readInitialActivationClaim({ expected: claim, aws });
     if (liveClaim.sha256 !== claimSha256) throw new Error("Production initial activation live claim digest changed.");
     const stateRaw = readFileSync(required(values, "--state-file"));
     const stateSha256 = required(values, "--state-sha256");
@@ -90,7 +92,7 @@ export async function runCli(argv = process.argv.slice(2), dependencies = {}) {
       || onboarding.rotationStateSha256 !== stateSha256 || onboarding.taskDefinitionArn !== claim.activationTaskDefinitionArn
       || onboarding.imageDigest !== claim.imageDigest) throw new Error("Strict onboarding evidence is not bound to the activation claim and overlap runtime.");
     const completion = buildInitialActivationCompletion({ claim, claimSha256, claimVersionId: liveClaim.versionId, rlsReceiptSha256: sha256(receiptRaw), onboardingEvidenceSha256: sha256(onboardingRaw), completedAt: dependencies.now?.() || new Date().toISOString() });
-    const result = await createInitialActivationCompletion({ completion, claim, claimSha256, claimVersionId: liveClaim.versionId, aws: dependencies.aws });
+    const result = await createInitialActivationCompletion({ completion, claim, claimSha256, claimVersionId: liveClaim.versionId, aws });
     process.stdout.write(`${JSON.stringify({ status: result.status, completionSha256: result.sha256, completionVersionId: result.versionId })}\n`);
     return result;
   }

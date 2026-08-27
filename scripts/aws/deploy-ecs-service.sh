@@ -12,6 +12,8 @@ definition, replacing one container image, registering a new revision, and
 deploying it.
 
 Required environment:
+  MSCQR_AWS_CREDENTIAL_SOURCE Explicit github-oidc-release-deployer or named-profile source.
+  MSCQR_AWS_NAMED_PROFILE    Required only when the source is named-profile.
   AWS_REGION        AWS region for ECS.
   CLUSTER_NAME      ECS cluster name.
   SERVICE_NAME      ECS service name.
@@ -66,6 +68,8 @@ the exact target task definition, service load-balancer port binding, and runnin
 task image digest before success.
 
 Example:
+  MSCQR_AWS_CREDENTIAL_SOURCE=named-profile \
+  MSCQR_AWS_NAMED_PROFILE=mscqr-production-release-deployer \
   AWS_REGION=eu-west-2 \
   CLUSTER_NAME=mscqr-prod \
   SERVICE_NAME=mscqr-backend \
@@ -139,6 +143,10 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
 fi
+
+# shellcheck source=production-credential-source.sh
+source "$SCRIPT_DIR/production-credential-source.sh"
+configure_production_aws_credential_source
 
 require_env() {
   local name="$1"
@@ -428,6 +436,8 @@ cleanup_and_rollback_on_exit() {
       TARGET_OWNED)
         echo "Existing task-definition switch failed; restoring ${PREVIOUS_TASK_DEFINITION_ARN}." >&2
         if WAIT_FOR_STABLE=true \
+          MSCQR_AWS_CREDENTIAL_SOURCE="$MSCQR_AWS_CREDENTIAL_SOURCE" \
+          MSCQR_AWS_NAMED_PROFILE="${MSCQR_AWS_NAMED_PROFILE:-}" \
           AWS_REGION="$AWS_REGION" \
           CLUSTER_NAME="$CLUSTER_NAME" \
           SERVICE_NAME="$SERVICE_NAME" \

@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "31ab3c84636f4f0f8464956e84e92c73a219ab6bdfd51333465698271f213500",
+  "sourceContractSha256": "1587fd843411f2cc2975b92824c8123aba79a8a87421f5b6130552a29d7da42d",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -72,11 +72,11 @@
     },
     {
       "path": "scripts/rls/create-production-rls-approval.mjs",
-      "sha256": "23b9b32cfaa93d000e617425364863d2e3d1a949f311f53a167516b348038bd7"
+      "sha256": "0c81646ecae96118ebbac7b26587ed1f734be1d1503e29f8441c4aa3af274924"
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "b5b7c82acdf8ffacd526fc83acdad878cd215b63885f9d0789a2c9b62ff6339f"
+      "sha256": "77206316596c982adf3bce96fc49162c200c8d9313ea095b102be6c96ad30909"
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
@@ -204,19 +204,27 @@
     },
     {
       "path": "scripts/aws/create-production-green-stage-b-approval.mjs",
-      "sha256": "2129305c5c9140c4299df737834c1501d7e55e9e269abaef7c1a952bc7bb5971"
+      "sha256": "97cd1fef21a6093d46685903e111daa62c165fcacf6b32092d9ff75dde789826"
     },
     {
       "path": "scripts/aws/apply-production-full-rls-release.mjs",
-      "sha256": "1fa299dacc1a313b58ffeb600e752b557497738fbf1fe43c7b3a025b392a9084"
+      "sha256": "a48642585c7fc399fb4a69515dee75dc2bc42a93bc52ec18ec03e05e25970f6d"
     },
     {
       "path": "scripts/aws/deploy-ecs-service.sh",
-      "sha256": "c2a4c574ecde1df666577c8945005e0a3df78c606c921ff886fe21d5791bf749"
+      "sha256": "c43952f9dc42626f2de698cdb65b1de6fa37695d2fe6c433cc38ddbb4b64128b"
     },
     {
       "path": "scripts/aws/publish-ecs-images.sh",
-      "sha256": "c855c06bc205d0f62c8848c80fee5b2d0c7d5494b1e5359052fed755856e689c"
+      "sha256": "5dc97d95c11722e1ce341f70007a4530287231d3935f03b94c75e2dd79614d2c"
+    },
+    {
+      "path": "scripts/aws/production-credential-source-contract.mjs",
+      "sha256": "b39772fd498fd9f149f848972b871a0b0401ca21ea3c734d4b35d72a4e0c1011"
+    },
+    {
+      "path": "scripts/aws/production-credential-source.sh",
+      "sha256": "6055c55f4d6c062d129fb902641e6d4199eada7cd581f8208588d9777df6a619"
     },
     {
       "path": "scripts/smoke-release.mjs",
@@ -228,7 +236,7 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "ffda5256252042bc50d6ae1d00d502421272baff36b967b70648c35196072d4d"
+      "sha256": "33ca81cc6dd1353a2bc314ce3c6de97eef4392ddbebfa549010cb204f12ff651"
     },
     {
       "path": ".github/workflows/release-train.yml",
@@ -324,7 +332,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:31ab3c84636f4f0f8464956e84e92c73a219ab6bdfd51333465698271f213500",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:1587fd843411f2cc2975b92824c8123aba79a8a87421f5b6130552a29d7da42d",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
