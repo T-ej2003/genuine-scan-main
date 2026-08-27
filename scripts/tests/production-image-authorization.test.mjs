@@ -210,16 +210,17 @@ const freshAuthorizationInputs = {
 const freshAuthorization = createImageAuthorization(freshAuthorizationInputs);
 
 const producingSourceSha = "a63da17024415c2764452b86f1dcbce0af4ae9b8";
+const twoShaImageReleaseSha = "b3b477a37b50d7796ec9c3225c176f02f04023dc";
 const currentConsumingSourceSha = "a6fbcb95b6b8d968465dad6cc6315564fb21bf64";
 const twoShaWorkflowRunId = "33110140624";
 const twoShaDigests = Object.fromEntries(Object.keys(digests).map((service, index) => [service, `sha256:${String(index + 5).repeat(64)}`]));
 
 function twoShaPublicationFixture() {
   const twoShaRecords = [
-    ["backend", "mscqr-backend", producingSourceSha],
-    ["worker", "mscqr-worker", producingSourceSha],
-    ["rls-executor", "mscqr-backend", `${producingSourceSha}-rls-executor`],
-    ["rls-canary", "mscqr-backend", `${producingSourceSha}-rls-canary`],
+    ["backend", "mscqr-backend", twoShaImageReleaseSha],
+    ["worker", "mscqr-worker", twoShaImageReleaseSha],
+    ["rls-executor", "mscqr-backend", `${twoShaImageReleaseSha}-rls-executor`],
+    ["rls-canary", "mscqr-backend", `${twoShaImageReleaseSha}-rls-canary`],
   ].map(([service, repository, tag]) => ({
     service, repository,
     image_uri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}:${tag}`,
@@ -231,17 +232,17 @@ function twoShaPublicationFixture() {
   const artifactSha256 = crypto.createHash("sha256").update(bytes).digest("hex");
   const identity = buildStageBImagePublicationIdentity({
     expectedPublicationSourceSha: producingSourceSha,
-    expectedReleaseSha: producingSourceSha,
+    expectedReleaseSha: twoShaImageReleaseSha,
     artifactBytes: bytes,
     observed: {
       workflowRunId: twoShaWorkflowRunId, workflowDatabaseId: "401", workflowFile: ".github/workflows/production-green-stage-b-images.yml",
       workflowName: "Production Green Stage B Images", event: "workflow_dispatch", workflowDefinitionSha: producingSourceSha,
-      imageReleaseSha: producingSourceSha, headBranch: "main", conclusion: "success", artifactId: "501",
+      imageReleaseSha: twoShaImageReleaseSha, headBranch: "main", conclusion: "success", artifactId: "501",
       artifactName: "production-green-stage-b-images", artifactExpired: false, artifactArchiveFilename: null,
     },
     observedAt,
   });
-  return { bytes, artifactSha256, identity, records: twoShaRecords, reuseEvidence: deriveStageBImageImpactReport({ imageReleaseSha: producingSourceSha, toolingSha: currentConsumingSourceSha }) };
+  return { bytes, artifactSha256, identity, records: twoShaRecords, reuseEvidence: deriveStageBImageImpactReport({ imageReleaseSha: twoShaImageReleaseSha, toolingSha: currentConsumingSourceSha }) };
 }
 
 test("real default composition preserves historical publication provenance while authorizing a63-to-a6 reuse", () => {
@@ -278,7 +279,7 @@ test("real default composition preserves historical publication provenance while
       "--artifact", artifactPath,
       "--publication-source-sha", producingSourceSha,
       "--current-source-sha", currentConsumingSourceSha,
-      "--image-release-sha", producingSourceSha,
+      "--image-release-sha", twoShaImageReleaseSha,
       "--workflow-run-id", twoShaWorkflowRunId,
       "--artifact-sha256", fixture.artifactSha256,
       "--publication-identity", identityPath,
@@ -300,19 +301,24 @@ test("real default composition preserves historical publication provenance while
     });
     assert.equal(evidence.publicationSourceSha, producingSourceSha);
     assert.equal(evidence.currentSourceSha, currentConsumingSourceSha);
+    assert.equal(evidence.imageReleaseSha, twoShaImageReleaseSha);
     assert.equal(evidence.publicationIdentity.workflowDefinitionSha, producingSourceSha);
+    assert.equal(evidence.publicationIdentity.imageReleaseSha, twoShaImageReleaseSha);
+    assert.equal(fixture.reuseEvidence.imageReleaseSha, twoShaImageReleaseSha);
+    assert.equal(fixture.reuseEvidence.toolingSha, currentConsumingSourceSha);
     assert.equal(authorization.sourceSha, currentConsumingSourceSha);
     assert.equal(authorization.imageEvidence.publicationSourceSha, producingSourceSha);
     assert.equal(authorization.authorizationPath, "IMAGE_REUSE");
     assert.equal(authorization.imageEvidence.images.length, 4);
     assert.doesNotThrow(() => assertImageAuthorization(authorization, currentConsumingSourceSha, { now: observedAt, verifyImageEvidence: ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true }) }));
 
-    const base = ["--artifact", artifactPath, "--publication-source-sha", producingSourceSha, "--current-source-sha", currentConsumingSourceSha, "--image-release-sha", producingSourceSha, "--workflow-run-id", twoShaWorkflowRunId, "--artifact-sha256", fixture.artifactSha256, "--publication-identity", identityPath, "--publication-identity-sha256", publicationIdentitySha256(fixture.identity), "--output", path.join(directory, "negative-evidence.json"), "--signature-output", path.join(directory, "negative-signature.json")];
+    const base = ["--artifact", artifactPath, "--publication-source-sha", producingSourceSha, "--current-source-sha", currentConsumingSourceSha, "--image-release-sha", twoShaImageReleaseSha, "--workflow-run-id", twoShaWorkflowRunId, "--artifact-sha256", fixture.artifactSha256, "--publication-identity", identityPath, "--publication-identity-sha256", publicationIdentitySha256(fixture.identity), "--output", path.join(directory, "negative-evidence.json"), "--signature-output", path.join(directory, "negative-signature.json")];
     assert.throws(() => runImageEvidenceCli(base, { run, sign: () => "AQ==", observedAt, now: observedAt }), /source bridge is malformed|requires canonical image-reuse compatibility evidence/);
     assert.throws(() => runImageEvidenceCli([...base, "--image-reuse-evidence", reusePath], { run: (args) => args[0] === "ecr" && args[1] === "describe-images" ? JSON.stringify({ imageDetails: [{ imageDigest: `sha256:${"f".repeat(64)}`, imagePushedAt: observedAt }] }) : run(args), sign: () => "AQ==", observedAt, now: observedAt }), /does not match canonical artifact/);
     assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: { ...evidence, publicationSourceSha: currentConsumingSourceSha }, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /source identities|publication identity|signature/);
+    assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: { ...evidence, imageReleaseSha: producingSourceSha }, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /source identities|publication identity|signature|image release/);
     assert.throws(() => createImageAuthorization({ sourceSha: producingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: producingSourceSha, freshRemoteMainSha: producingSourceSha }, imageEvidence: evidence, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /source identities|protected-main/);
-    assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: evidence, imageEvidenceSignature: signature, imageReuseEvidence: { ...fixture.reuseEvidence, toolingSha: producingSourceSha }, now: observedAt, verifyImageEvidence: () => true }), /independently derived|exact publication-to-current-source pair|protected-main SHA/);
+    assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: evidence, imageEvidenceSignature: signature, imageReuseEvidence: { ...fixture.reuseEvidence, imageReleaseSha: producingSourceSha }, now: observedAt, verifyImageEvidence: () => true }), /independently derived|exact image-release-to-current-source pair|protected-main SHA/);
     assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: { ...evidence, workflowRunId: "33110140625" }, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /workflow/);
     assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: { ...evidence, canonicalArtifactSha256: "0".repeat(64) }, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /artifact/);
     assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: { ...evidence, publicationIdentity: { ...evidence.publicationIdentity, workflowDefinitionSha: currentConsumingSourceSha } }, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /publication identity|producing source/);

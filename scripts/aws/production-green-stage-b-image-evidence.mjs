@@ -279,7 +279,6 @@ function assertImageEvidenceSourceIdentity(report, { publicationSourceSha, curre
     : report?.publicationSourceSha !== publicationSourceSha || report?.currentSourceSha !== currentSourceSha) throw new Error("Image evidence producing source and current consumer source identities are not the expected pair.");
   if (report.publicationIdentity?.workflowDefinitionSha !== publicationSourceSha || report.publicationIdentity?.imageReleaseSha !== imageReleaseSha) throw new Error("Image evidence publication identity is not bound to its producing source.");
   if (directPublication ? report.imageReuseEvidenceSha256 !== undefined : !allowUnboundReuseEvidence && !/^[a-f0-9]{64}$/.test(report.imageReuseEvidenceSha256 || "")) throw new Error("Cross-source image evidence requires canonical image-reuse compatibility evidence.");
-  if (!directPublication && publicationSourceSha !== imageReleaseSha) throw new Error("Cross-source image reuse requires the historical publication source and image release to match exactly.");
   return directPublication;
 }
 
@@ -288,7 +287,7 @@ export function assertImageEvidenceReuseBridge(report, { imageReuseEvidence, cur
   if (directPublication) return true;
   if (!imageReuseEvidence || typeof imageReuseEvidence !== "object" || Array.isArray(imageReuseEvidence)) throw new Error("Cross-source image evidence requires canonical image-reuse compatibility evidence.");
   const derived = deriveStageBImageImpactReport({ imageReleaseSha: report.imageReleaseSha, toolingSha: report.currentSourceSha });
-  if (canonicalSha256(imageReuseEvidence) !== canonicalSha256(derived) || imageReuseEvidence.imageReleaseSha !== report.publicationSourceSha || imageReuseEvidence.toolingSha !== report.currentSourceSha || report.imageReuseEvidenceSha256 !== canonicalSha256(imageReuseEvidence)) throw new Error("Image-reuse compatibility evidence is not bound to the exact publication-to-current-source pair.");
+  if (canonicalSha256(imageReuseEvidence) !== canonicalSha256(derived) || imageReuseEvidence.imageReleaseSha !== report.imageReleaseSha || imageReuseEvidence.toolingSha !== report.currentSourceSha || report.imageReuseEvidenceSha256 !== canonicalSha256(imageReuseEvidence)) throw new Error("Image-reuse compatibility evidence is not bound to the exact image-release-to-current-source pair.");
   assertStageBImageReuseResult({ ...derived, imageBuildInputsChanged: derived.newImagesRequired });
   return true;
 }
