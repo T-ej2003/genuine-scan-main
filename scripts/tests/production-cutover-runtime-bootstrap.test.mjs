@@ -333,7 +333,10 @@ test("generated cutover command binds runtime config and image authorization byt
   try {
     const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
     assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId }), /Hash-authenticated/);
+    assert.match(result.nextCommand, /^npm run stage-b:run-cutover-operator -- --config /);
     assert.match(result.nextCommand, new RegExp(`--config-sha256 ${result.runtimeConfigSha256}`));
+    assert.equal(result.nextCommand.includes("MSCQR_VERIFIER_MFA_CODE"), false);
+    assert.equal(JSON.stringify(result.config).includes("MSCQR_VERIFIER_MFA_CODE"), false);
     const run = () => execFileSync(process.execPath, ["scripts/aws/run-production-cutover.mjs", "--mode", "production", "--config", result.configPath, "--config-sha256", result.runtimeConfigSha256, "--source-sha", sourceSha, "--rotation-id", result.config.rotationId], { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     writeFileSync(result.configPath, `${readFileSync(result.configPath, "utf8")} `, { mode: 0o600 });
     assert.throws(run, /Production cutover runtime config changed after runtime preparation/);

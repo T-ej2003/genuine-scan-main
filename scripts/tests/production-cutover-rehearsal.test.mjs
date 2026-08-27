@@ -552,12 +552,20 @@ test("unauthorized overlap image variants fail before pre-deployment task regist
 });
 
 test("drifted Role-A trust fails before Stage-A or target-role convergence", async () => {
+  let verifierMfaPrompts = 0;
   const input = fixtureInput({ checkerChain: {
     verifySourceTrust: async () => ({ exact: false, mfaRequired: false }),
     verifyComplete: async () => { throw new Error("must not reach target-role verification"); },
-  } });
+  }, identities: { establish: async () => { verifierMfaPrompts += 1; throw new Error("must not request verifier MFA"); } } });
   await assert.rejects(() => runProductionCutoverControlPlane(input), /Live Role-A trust/);
+  assert.equal(verifierMfaPrompts, 0);
   assert.equal(input._mutations.includes("M2_STAGE_A_APPLY"), false);
+});
+
+test("JIT verifier MFA failure stops before every production mutation boundary", async () => {
+  const input = fixtureInput({ identities: { establish: async () => { throw new Error("Interactive verifier MFA entry failed."); } } });
+  await assert.rejects(() => runProductionCutoverControlPlane(input), /Interactive verifier MFA entry failed/);
+  assert.deepEqual(input._mutations, []);
 });
 
 test("bootstrap ARNs replace stale overlap bindings on the real control-plane path", async () => {

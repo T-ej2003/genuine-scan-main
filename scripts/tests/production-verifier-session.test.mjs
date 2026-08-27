@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createAwsStsRunner, VERIFIER_SESSION_MIN_REMAINING_MS } from "../aws/production-identity-adapters.mjs";
+import { createAwsStsRunner, establishVerifierIdentity, VERIFIER_SESSION_MIN_REMAINING_MS } from "../aws/production-identity-adapters.mjs";
 import { ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { establishEcsExecVerifierSession } from "../aws/establish-production-ecs-exec-verifier-session.mjs";
 
@@ -53,4 +53,34 @@ test("verifier sessions reject role substitution", async () => {
   const { runner } = fixtureRunner();
   await assert.rejects(() => runner.assumeRole({ roleArn: "arn:aws:iam::368992683803:role/wrong", sessionName: "fixture", mfaSerial: "fixture", mfaCode: "123456" }), /reviewed ECS Exec verifier role/);
   assert.equal(ECS_EXEC_OPERATOR_ROLE_ARN, "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier");
+});
+
+test("verifier MFA is requested only after bootstrap identity validation and immediately before AssumeRole", async () => {
+  const calls = [];
+  const adapter = {
+    getCallerIdentity: async () => { calls.push("caller"); return bootstrapArn; },
+    assumeRole: async ({ mfaCode }) => { calls.push(`assume:${mfaCode}`); return { callerArn: verifierArn, expiration: future() }; },
+  };
+  const result = await establishEcsExecVerifierSession({ adapter, mfaSerial: "arn:aws:iam::368992683803:mfa/fixture", getMfaCode: async () => { calls.push("prompt"); return "123456"; } });
+  assert.equal(result.valid, true);
+  assert.deepEqual(calls, ["caller", "prompt", "assume:123456"]);
+});
+
+test("production verifier identity forwards its JIT MFA provider to the STS boundary", async () => {
+  const calls = [];
+  const adapter = {
+    getCallerIdentity: async () => { calls.push("caller"); return bootstrapArn; },
+    assumeRole: async ({ mfaCode }) => { calls.push(`assume:${mfaCode}`); return { callerArn: verifierArn, expiration: future() }; },
+  };
+  await establishVerifierIdentity({ adapter, mfaSerial: "arn:aws:iam::368992683803:mfa/fixture", getMfaCode: async () => { calls.push("prompt"); return "123456"; } });
+  assert.deepEqual(calls, ["caller", "prompt", "assume:123456"]);
+});
+
+test("verifier MFA fails closed without AssumeRole when identity or JIT input validation fails", async () => {
+  let prompts = 0;
+  let assumes = 0;
+  await assert.rejects(() => establishEcsExecVerifierSession({ adapter: { getCallerIdentity: async () => "arn:aws:iam::368992683803:user/unreviewed", assumeRole: async () => { assumes += 1; } }, mfaSerial: "arn:aws:iam::368992683803:mfa/fixture", getMfaCode: async () => { prompts += 1; return "123456"; } }), /Only the reviewed bootstrap operator/);
+  assert.equal(prompts, 0);
+  await assert.rejects(() => establishEcsExecVerifierSession({ adapter: { getCallerIdentity: async () => bootstrapArn, assumeRole: async () => { assumes += 1; } }, mfaSerial: "arn:aws:iam::368992683803:mfa/fixture", getMfaCode: async () => "bad" }), /MFA serial and code are required/);
+  assert.equal(assumes, 0);
 });
