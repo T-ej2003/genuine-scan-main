@@ -203,7 +203,12 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
   });
   const { value: imageEvidence } = readJsonPrivate(imageEvidencePath, "Image evidence");
   const { value: imageEvidenceSignature } = readJsonPrivate(imageSignaturePath, "Image evidence signature");
-  const { value: imageReuseEvidence } = readJsonPrivate(imageReuseEvidencePath, "Image-reuse evidence");
+  const { value: reviewedImageReuseEvidence } = readJsonPrivate(imageReuseEvidencePath, "Image-reuse compatibility report");
+  const imageReuseEvidence = deriveStageBImageImpactReport({
+    imageReleaseSha: imageEvidence.imageReleaseSha,
+    toolingSha: sourceSha,
+    reviewedReport: reviewedImageReuseEvidence,
+  });
   const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
   const authorization = createImageAuthorization({
     sourceSha,

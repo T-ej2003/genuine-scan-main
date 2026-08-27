@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
+import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import {
   createImageAuthorization,
   assertCanonicalImageReuseEvidence,
@@ -326,6 +327,24 @@ test("real default composition preserves historical publication provenance while
     assert.equal(authorization.imageEvidence.images.length, 4);
     assert.doesNotThrow(() => assertImageAuthorization(authorization, currentConsumingSourceSha, { now: observedAt, verifyImageEvidence: ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true }) }));
 
+    const authorizationPath = path.join(directory, "image-authorization.json");
+    runCli([
+      "--source-sha", currentConsumingSourceSha,
+      "--image-evidence", evidencePath,
+      "--image-signature", signaturePath,
+      "--image-reuse-evidence", reusePath,
+      "--output", authorizationPath,
+    ], {
+      freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha },
+      now: observedAt,
+      verifyImageEvidence: ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true }),
+    });
+    const cliAuthorization = JSON.parse(fs.readFileSync(authorizationPath, "utf8"));
+    assert.equal(cliAuthorization.authorizationPath, "IMAGE_REUSE");
+    assert.equal(cliAuthorization.imageReuseEvidenceSha256, canonicalSha256(fixture.reuseEvidence));
+    assert.equal(cliAuthorization.imageReuseEvidenceSha256, authorization.imageReuseEvidenceSha256);
+    assert.deepEqual(cliAuthorization.imageReuseEvidence, fixture.reuseEvidence);
+
     const base = ["--artifact", artifactPath, "--publication-source-sha", producingSourceSha, "--current-source-sha", currentConsumingSourceSha, "--image-release-sha", twoShaImageReleaseSha, "--workflow-run-id", twoShaWorkflowRunId, "--artifact-sha256", fixture.artifactSha256, "--publication-identity", identityPath, "--publication-identity-sha256", publicationIdentitySha256(fixture.identity), "--output", path.join(directory, "negative-evidence.json"), "--signature-output", path.join(directory, "negative-signature.json")];
     assert.throws(() => runImageEvidenceCli(base, { run, sign: () => "AQ==", observedAt, now: observedAt }), /source bridge is malformed|requires canonical image-reuse compatibility evidence/);
     const runWithReviewedReport = (name, reviewed) => {
@@ -504,12 +523,18 @@ test("CLI emits one private source-bound authorization artifact", () => {
     return filePath;
   };
   try {
+    const reviewedImageReuseEvidence = reportFor({
+      imageReleaseSha,
+      toolingSha: sourceSha,
+      changedFiles: imageReuseEvidence.classifiedChangedFiles,
+      toolingInputTreeSha256: imageReuseEvidence.toolingInputTreeSha256,
+    });
     const output = path.join(directory, "image-authorization.json");
     runCli([
       "--source-sha", sourceSha,
       "--image-evidence", write("image-evidence.json", imageEvidence),
       "--image-signature", write("image-evidence.signature.json", imageEvidenceSignature),
-      "--image-reuse-evidence", write("image-reuse.json", imageReuseEvidence),
+      "--image-reuse-evidence", write("image-reuse.json", reviewedImageReuseEvidence),
       "--output", output,
     ], { git: (args) => {
       if (args[0] === "fetch") return "";

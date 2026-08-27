@@ -313,3 +313,19 @@ test("tooling input digest excludes both compatibility evidence artifacts but de
   assert.equal(digest({ [evidenceJson]: "json-b", [evidenceMarkdown]: "markdown-b", [toolingInput]: "tooling-a" }), baseline);
   assert.notEqual(digest({ [evidenceJson]: "json-a", [evidenceMarkdown]: "markdown-a", [toolingInput]: "tooling-b" }), baseline);
 });
+
+test("canonical compatibility JSON and Markdown describe the same reviewed boundary", () => {
+  const report = JSON.parse(readFileSync(new URL("../../documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json", import.meta.url), "utf8"));
+  const markdown = readFileSync(new URL("../../documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.md", import.meta.url), "utf8");
+  for (const [label, value] of [
+    ["image release", report.imageReleaseSha],
+    ["comparison base", report.comparisonBaseSha],
+    ["tooling revision", report.toolingSha],
+    ["tooling input tree", report.toolingInputTreeSha256],
+    ["rules version", report.classificationRulesVersion],
+    ["image reuse compatible", String(report.imageReuseCompatible)],
+  ]) assert.equal(markdown.includes(`${label}: ${value}`), true, `${label} is not synchronized`);
+  for (const { file, category, imageAffecting } of report.classifiedChangedFiles) {
+    assert.equal(markdown.includes(`| ${file} | ${category} | ${imageAffecting} |`), true, `${file} classification is not synchronized`);
+  }
+});
