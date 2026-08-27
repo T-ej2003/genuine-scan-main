@@ -19,6 +19,42 @@ The credential-source contract is implemented in `scripts/aws/production-credent
 
 The direct production CLI roots are deliberately split by authority: root-admin evidence producers use named profile `default`; release planning, verification, and control-plane producers use `mscqr-production-release-deployer`; independent-checker approval producers require an inherited checker STS session; and the ECS verification CLI requires the separately derived verifier STS session. No production root may select a source implicitly or fall back from one source to another.
 
+## AWS environment policy
+
+Named-profile execution resolves the exact selected profile from the standard AWS files below `HOME`. Custom `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` locations are not part of the governed operator contract and are removed, along with all ambient session, role, container-provider, endpoint, CA-bundle, and metadata-selection overrides. The canonical region is then set explicitly and EC2 metadata credentials are disabled. Operators who keep profiles in nonstandard files must first install the reviewed profile into the standard AWS location; the production process will not follow an alternate-file override.
+
+| Variable family | Named profile | GitHub OIDC | GitHub access keys | Offline test | Security reason |
+| --- | --- | --- | --- | --- | --- |
+| `AWS_PROFILE` | require exact selected profile | drop | drop | drop | prevents profile substitution |
+| `AWS_DEFAULT_PROFILE` | drop | drop | drop | drop | prevents default-profile fallback |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | drop | require | require | synthetic input only | binds the authenticated source |
+| `AWS_SESSION_TOKEN` | drop | require | optional | synthetic input only | distinguishes OIDC/session credentials from the documented keys fallback |
+| `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_SDK_LOAD_CONFIG` | drop | drop | drop | drop | prevents alternate profile stores |
+| `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_SESSION_NAME` | drop | drop | drop | drop | prevents an unreviewed second credential-provider hop |
+| `AWS_CONTAINER_CREDENTIALS_*`, `AWS_CONTAINER_AUTHORIZATION_TOKEN*` | drop | drop | drop | drop | prevents container-provider substitution |
+| `AWS_ENDPOINT_URL`, `AWS_ENDPOINT_URL_*`, `AWS_CA_BUNDLE`, FIPS/dual-stack selectors | drop | drop | drop | drop | prevents endpoint or trust-store redirection |
+| metadata timeout/attempt/endpoint selectors | drop | drop | drop | drop | metadata is disabled at every production child boundary |
+| `AWS_REGION`, `AWS_DEFAULT_REGION` | set `eu-west-2` | set `eu-west-2` | set `eu-west-2` | set `eu-west-2` | prevents regional drift |
+| `AWS_EC2_METADATA_DISABLED` | require `true` | require `true` | require `true` | require `true` | blocks metadata fallback |
+
+## PR 408 permanent regression matrix
+
+| Escaped finding | Root cause | Permanent invariant | Regression coverage |
+| --- | --- | --- | --- |
+| administrator/checker-trust ownership | one report was asked to prove two authorities | administrator and checker evidence remain independent | checker-chain and control-plane pre-mutation tests |
+| unsigned checker provenance | a local report hash was mistaken for provenance | only authenticated detached attestation is trusted | forged/self-hashed report tests |
+| pre-Stage-A checker cycle | signer was unreachable before the mutation it gated | root-admin attestation remains pre-Stage-A reachable | initial/recovery DAG tests |
+| missing artifact consumers | direct readers were absent from the generated contract | every producer and direct consumer is declared | artifact-contract generator verification |
+| split atomic pair | attestation and signature appeared independently publishable | both files share one all-or-none atomic group | artifact atomic-group tests |
+| adapter KMS routing | production default could use ambient AWS credentials | release verification uses its explicit boundary runner | production-adapter composition tests |
+| runtime KMS routing | preparation/bootstrap composition omitted the release runner | every runtime verification call is explicitly composed | runtime preparation/bootstrap composition tests |
+| OIDC versus local profile | one release identity model was applied to two environments | each composition root chooses its authenticated source | credential-source composition tests |
+| GitHub access-key fallback | keys mode was treated as token-bearing OIDC | keys require key and secret; token remains optional | workflow auth-mode tests |
+| trusted workflow fingerprint | credential transport changed a trusted workflow input | authentication changes are canonically fingerprinted without claiming image-content change | image-reuse and deployment-closure tests |
+| lifecycle client injection | an injection-only reader retained an unmigrated caller | every production lifecycle call supplies one explicit client | release-gate lifecycle composition tests |
+| incomplete regex escaping | a literal source assertion built a partially escaped regex | literal checks use string inclusion, not dynamic regex | metacharacter literal regression test and CodeQL |
+| named-profile file overrides | documentation promised deterministic profile resolution while code retained redirect variables | alternate config and credentials files never reach governed children | hostile-environment Node, shell, operator, and recovery tests |
+
 ## Audited entrypoint inventory
 
 The credential-source contract test inventories the complete executable AWS surface: production release/control-plane roots, production image-publisher shell roots, local root and independent-checker lifecycles, GitHub release/image OIDC workflows, and segregated staging and DR roots. The staging database-role controller remains under its existing `awsCliEnvironment()` staging contract; it is deliberately classified separately from production. The dependency-closure verifier is offline source inspection only. A new direct AWS subprocess in `scripts/aws/` must be classified by the test before it can land.

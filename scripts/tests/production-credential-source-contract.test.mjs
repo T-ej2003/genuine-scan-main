@@ -8,24 +8,46 @@ import { createProductionBackendFailedRecoveryEvidenceAwsRunner } from "../aws/p
 import { createReleaseGateImageAuthorizationRunner } from "../aws/verify-production-release-image-authorization.mjs";
 import { createProductionCutoverRuntimeComposition } from "../aws/production-cutover-runtime-composition.mjs";
 
+const hostileAwsOverrides = Object.freeze({
+  AWS_PROFILE: "hostile-profile",
+  AWS_DEFAULT_PROFILE: "hostile-default",
+  AWS_CONFIG_FILE: "/hostile/config",
+  AWS_SHARED_CREDENTIALS_FILE: "/hostile/credentials",
+  AWS_SDK_LOAD_CONFIG: "1",
+  AWS_ROLE_ARN: "arn:aws:iam::111111111111:role/hostile",
+  AWS_WEB_IDENTITY_TOKEN_FILE: "/hostile/token",
+  AWS_ROLE_SESSION_NAME: "hostile-session",
+  AWS_CONTAINER_CREDENTIALS_FULL_URI: "https://hostile.invalid/credentials",
+  AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/hostile",
+  AWS_CONTAINER_AUTHORIZATION_TOKEN: "fixture-hostile-token",
+  AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE: "/hostile/container-token",
+  AWS_ENDPOINT_URL: "https://hostile.invalid",
+  AWS_ENDPOINT_URL_KMS: "https://hostile.invalid/kms",
+  AWS_CA_BUNDLE: "/hostile/ca",
+  AWS_USE_FIPS_ENDPOINT: "false",
+  AWS_USE_DUALSTACK_ENDPOINT: "true",
+  AWS_METADATA_SERVICE_TIMEOUT: "99",
+  AWS_METADATA_SERVICE_NUM_ATTEMPTS: "99",
+  AWS_EC2_METADATA_SERVICE_ENDPOINT: "https://hostile.invalid/metadata",
+  AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE: "IPv6",
+});
+const assertAwsOverridesAbsent = (env) => {
+  for (const name of Object.keys(hostileAwsOverrides)) assert.equal(env[name], undefined, name);
+};
+const assertLiteralIncludes = (text, literal, message = literal) => assert.ok(text.includes(literal), message);
+
 const oidc = Object.freeze({
   AWS_ACCESS_KEY_ID: "fixture-access",
   AWS_SECRET_ACCESS_KEY: "s",
   AWS_SESSION_TOKEN: "t",
   AWS_REGION: "eu-west-2",
-  AWS_PROFILE: "hostile-profile",
-  AWS_DEFAULT_PROFILE: "hostile-default",
-  AWS_CONFIG_FILE: "/hostile/config",
-  AWS_SHARED_CREDENTIALS_FILE: "/hostile/credentials",
+  ...hostileAwsOverrides,
   PATH: process.env.PATH,
 });
 const accessKeys = Object.freeze({
   AWS_ACCESS_KEY_ID: "fixture-access-key",
   AWS_SECRET_ACCESS_KEY: "s",
-  AWS_PROFILE: "hostile-profile",
-  AWS_DEFAULT_PROFILE: "hostile-default",
-  AWS_CONFIG_FILE: "/hostile/config",
-  AWS_SHARED_CREDENTIALS_FILE: "/hostile/credentials",
+  ...hostileAwsOverrides,
   PATH: process.env.PATH,
 });
 
@@ -44,6 +66,7 @@ test("GitHub release-gate composition preserves only the OIDC session and never 
   assert.equal(calls[0].options.env.AWS_SESSION_TOKEN, oidc.AWS_SESSION_TOKEN);
   assert.equal(calls[0].options.env.AWS_PROFILE, undefined);
   assert.equal(calls[0].options.env.AWS_DEFAULT_PROFILE, undefined);
+  assertAwsOverridesAbsent(calls[0].options.env);
 });
 
 test("release-gate image authorization composes its verifier with the workflow OIDC session", () => {
@@ -70,9 +93,8 @@ test("local governed composition removes ambient credentials and pins the exact 
   });
   run(["kms", "verify", "--key-id", "fixture"]);
   assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-production-release-deployer");
-  for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(calls[0].options.env[name], undefined);
-  assert.equal(calls[0].options.env.AWS_CONFIG_FILE, oidc.AWS_CONFIG_FILE);
-  assert.equal(calls[0].options.env.AWS_SHARED_CREDENTIALS_FILE, oidc.AWS_SHARED_CREDENTIALS_FILE);
+  for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]) assert.equal(calls[0].options.env[name], undefined);
+  assertAwsOverridesAbsent({ ...calls[0].options.env, AWS_PROFILE: undefined });
 });
 
 test("runtime preparation's real composition root pins the release profile before KMS verification", () => {
@@ -107,6 +129,7 @@ test("GitHub access-key composition preserves an optional session token without 
   assert.equal(calls[0].options.env.AWS_SESSION_TOKEN, undefined);
   assert.equal(calls[0].options.env.AWS_PROFILE, undefined);
   assert.equal(calls[0].options.env.AWS_DEFAULT_PROFILE, undefined);
+  assertAwsOverridesAbsent(calls[0].options.env);
   const withToken = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_ACCESS_KEYS, env: { ...accessKeys, AWS_SESSION_TOKEN: "t" }, exec: (_file, _args, options) => options.env });
   assert.equal(withToken(["sts", "get-caller-identity"]).AWS_SESSION_TOKEN, "t");
   assert.throws(() => createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_ACCESS_KEYS, env: { PATH: process.env.PATH }, exec: () => { throw new Error("must not execute"); } }), /AWS_ACCESS_KEY_ID/);
@@ -124,7 +147,8 @@ test("root and preflight AWS-only composition pin a named profile instead of inh
   run(["sts", "get-caller-identity"]);
   assert.equal(calls[0].file, "aws");
   assert.equal(calls[0].options.env.AWS_PROFILE, "default");
-  for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(calls[0].options.env[name], undefined);
+  for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]) assert.equal(calls[0].options.env[name], undefined);
+  assertAwsOverridesAbsent({ ...calls[0].options.env, AWS_PROFILE: undefined });
 });
 
 test("failed-recovery evidence composition pins the root profile instead of inheriting ambient credentials", () => {
@@ -136,7 +160,8 @@ test("failed-recovery evidence composition pins the root profile instead of inhe
   run(["kms", "sign", "--key-id", "fixture"]);
   assert.equal(calls[0].file, "aws");
   assert.equal(calls[0].options.env.AWS_PROFILE, "default");
-  for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(calls[0].options.env[name], undefined);
+  for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]) assert.equal(calls[0].options.env[name], undefined);
+  assertAwsOverridesAbsent({ ...calls[0].options.env, AWS_PROFILE: undefined });
 });
 
 for (const [name, source] of [["independent checker", PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION], ["ECS verifier", PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION]]) {
@@ -151,6 +176,7 @@ for (const [name, source] of [["independent checker", PRODUCTION_AWS_CREDENTIAL_
     assert.equal(calls[0].options.env.AWS_SESSION_TOKEN, oidc.AWS_SESSION_TOKEN);
     assert.equal(calls[0].options.env.AWS_PROFILE, undefined);
     assert.equal(calls[0].options.env.AWS_DEFAULT_PROFILE, undefined);
+    assertAwsOverridesAbsent(calls[0].options.env);
   });
 }
 
@@ -230,7 +256,7 @@ test("every direct production AWS root declares its credential provenance before
     ["scripts/aws/production-normal-backend-activation.mjs", "GITHUB_OIDC_RELEASE_DEPLOYER"],
     ["scripts/aws/recover-stage-b-backend-task-definition.mjs", "NAMED_PROFILE"],
   ];
-  for (const [file, source] of roots) assert.match(fs.readFileSync(file, "utf8"), new RegExp(`PRODUCTION_AWS_CREDENTIAL_SOURCE\\.${source}`), file);
+  for (const [file, source] of roots) assertLiteralIncludes(fs.readFileSync(file, "utf8"), `PRODUCTION_AWS_CREDENTIAL_SOURCE.${source}`, file);
 });
 
 test("every production activation-lifecycle reader receives an explicit source-bound AWS client", () => {
@@ -241,7 +267,13 @@ test("every production activation-lifecycle reader receives an explicit source-b
   assert.match(checker, /assertCompletionAbsent\(\{ aws \}\)/);
   assert.match(checker, /readClaim\(\{ aws, expected:/);
   assert.match(lifecycle, /createProductionInitialActivationAws\(\{ credentialSource: required\(values, "--credential-source"\) \}\)/);
-  for (const call of ["createInitialActivationClaim({ claim, aws })", "readInitialActivationClaim({ expected, aws })", "readInitialActivationClaim({ expected: claim, aws })", "createInitialActivationCompletion({ completion, claim, claimSha256, claimVersionId: liveClaim.versionId, aws })"]) assert.match(lifecycle, new RegExp(call.replace(/[{}()]/g, "\\$&")));
+  for (const call of ["createInitialActivationClaim({ claim, aws })", "readInitialActivationClaim({ expected, aws })", "readInitialActivationClaim({ expected: claim, aws })", "createInitialActivationCompletion({ completion, claim, claimSha256, claimVersionId: liveClaim.versionId, aws })"]) assertLiteralIncludes(lifecycle, call);
+});
+
+test("literal source assertions treat every ECMAScript regex metacharacter as text", () => {
+  const literal = "\\.*+?^${}()|[]";
+  assertLiteralIncludes(`before:${literal}:after`, literal);
+  assert.throws(() => assertLiteralIncludes("before:ordinary:after", literal), /\\\.\*\+\?\^/);
 });
 
 test("direct Bash production AWS roots select an explicit credential source before AWS", () => {
@@ -255,7 +287,9 @@ test("direct Bash production AWS roots select an explicit credential source befo
   assert.match(contract, /github-access-keys/);
   assert.match(contract, /named-profile/);
   assert.match(contract, /unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN/);
-  assert.match(contract, /unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE AWS_SDK_LOAD_CONFIG AWS_SECURITY_TOKEN/);
+  assert.match(contract, /clear_production_aws_credential_overrides/);
+  for (const name of Object.keys(hostileAwsOverrides).filter((name) => name !== "AWS_ENDPOINT_URL_KMS")) assertLiteralIncludes(contract, name, name);
+  assert.match(contract, /compgen -A variable AWS_ENDPOINT_URL_/);
 });
 
 test("the shell credential boundary preserves OIDC or access keys, or pins a local profile without an AWS call", () => {
@@ -266,6 +300,11 @@ test("the shell credential boundary preserves OIDC or access keys, or pins a loc
   assert.equal(keysResult, `|${accessKeys.AWS_ACCESS_KEY_ID}||true`);
   const localResult = execFileSync("bash", ["-c", shell], { encoding: "utf8", env: { ...oidc, MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile", MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer" } });
   assert.equal(localResult, "mscqr-production-release-deployer|||true");
+  const overrideState = "source scripts/aws/production-credential-source.sh; configure_production_aws_credential_source; printf '%s' \"${AWS_CONFIG_FILE+x}${AWS_SHARED_CREDENTIALS_FILE+x}${AWS_ROLE_ARN+x}${AWS_WEB_IDENTITY_TOKEN_FILE+x}${AWS_ENDPOINT_URL+x}${AWS_ENDPOINT_URL_KMS+x}${AWS_CA_BUNDLE+x}${AWS_METADATA_SERVICE_TIMEOUT+x}\"";
+  for (const source of ["github-oidc-release-deployer", "github-access-keys", "named-profile"]) {
+    const env = { ...(source === "github-access-keys" ? accessKeys : oidc), MSCQR_AWS_CREDENTIAL_SOURCE: source, ...(source === "named-profile" ? { MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer" } : {}) };
+    assert.equal(execFileSync("bash", ["-c", overrideState], { encoding: "utf8", env }), "");
+  }
   const strictShell = `set -e; ${shell}`;
   const failsClosed = (env, message) => assert.throws(
     () => execFileSync("bash", ["-c", strictShell], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] }),

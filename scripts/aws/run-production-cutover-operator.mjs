@@ -13,7 +13,7 @@ const REQUIRED_INPUTS = Object.freeze([
   Object.freeze({ name: "MSCQR_CANARY_ORDINARY_EMAIL", prompt: "Production strict-onboarding tenant-canary email: ", validate: (value) => Boolean(value) }),
   Object.freeze({ name: "MSCQR_CANARY_ORDINARY_PASSWORD", prompt: "Production strict-onboarding tenant-canary password: ", validate: (value) => Boolean(value) }),
 ]);
-const SAFE_PARENT_ENVIRONMENT = Object.freeze(["HOME", "PATH", "TMPDIR", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_SDK_LOAD_CONFIG", "AWS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS"]);
+const SAFE_PARENT_ENVIRONMENT = Object.freeze(["HOME", "PATH", "TMPDIR", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS"]);
 const CHILD_SCRIPT = "scripts/aws/run-production-cutover.mjs";
 
 export function parseProductionCutoverOperatorArgs(argv = []) {

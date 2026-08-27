@@ -13,6 +13,15 @@ export const PRODUCTION_AWS_CREDENTIAL_SOURCE = Object.freeze({
 
 const SESSION_KEYS = Object.freeze(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN"]);
 const PROFILE_KEYS = Object.freeze(["AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_SDK_LOAD_CONFIG"]);
+const CREDENTIAL_REDIRECT_KEYS = Object.freeze([
+  ...PROFILE_KEYS,
+  "AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_SESSION_NAME",
+  "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+  "AWS_CONTAINER_AUTHORIZATION_TOKEN", "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+  "AWS_ENDPOINT_URL", "AWS_CA_BUNDLE", "AWS_USE_FIPS_ENDPOINT", "AWS_USE_DUALSTACK_ENDPOINT",
+  "AWS_METADATA_SERVICE_TIMEOUT", "AWS_METADATA_SERVICE_NUM_ATTEMPTS",
+  "AWS_EC2_METADATA_SERVICE_ENDPOINT", "AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE",
+]);
 const SAFE_PROCESS_KEYS = Object.freeze(["HOME", "PATH", "TMPDIR", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS"]);
 
 const copy = (source, keys) => Object.fromEntries(keys.filter((key) => typeof source?.[key] === "string" && source[key]).map((key) => [key, source[key]]));
@@ -26,7 +35,7 @@ export function createProductionAwsCredentialEnvironment({ credentialSource, pro
   if (typeof region !== "string" || !/^eu-west-2$/.test(region)) throw new Error("Production AWS region is invalid.");
   if (credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE) {
     if (typeof profile !== "string" || !profile) throw new Error("Named-profile production AWS execution requires an explicit profile.");
-    return Object.freeze({ ...copy(env, [...SAFE_PROCESS_KEYS, "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE"]), AWS_PROFILE: profile, AWS_REGION: region, AWS_DEFAULT_REGION: region, AWS_EC2_METADATA_DISABLED: "true" });
+    return Object.freeze({ ...copy(env, SAFE_PROCESS_KEYS), AWS_PROFILE: profile, AWS_REGION: region, AWS_DEFAULT_REGION: region, AWS_EC2_METADATA_DISABLED: "true" });
   }
   if (credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_ACCESS_KEYS) {
     if (profile !== undefined) throw new Error("Access-key production AWS execution cannot select a local profile.");
@@ -60,7 +69,7 @@ export function createAssumedRoleSessionEnvironment({ credentials, env = process
     AWS_SECRET_ACCESS_KEY: required(credentials, "SecretAccessKey"),
     AWS_SESSION_TOKEN: required(credentials, "SessionToken"),
   };
-  return Object.freeze({ ...copy(env, SAFE_PROCESS_KEYS), ...session, AWS_REGION: region, AWS_DEFAULT_REGION: region });
+  return Object.freeze({ ...copy(env, SAFE_PROCESS_KEYS), ...session, AWS_REGION: region, AWS_DEFAULT_REGION: region, AWS_EC2_METADATA_DISABLED: "true" });
 }
 
 export function createProductionAwsCommandRunner({ credentialSource, profile, env = process.env, region = REGION, exec = execFileSync, injected = false } = {}) {
@@ -74,11 +83,11 @@ export function createProductionAwsCommandRunner({ credentialSource, profile, en
 
 export const productionAwsCredentialSourceContract = Object.freeze({
   region: REGION,
-  namedProfileStrips: SESSION_KEYS,
+  namedProfileStrips: Object.freeze([...SESSION_KEYS, ...CREDENTIAL_REDIRECT_KEYS]),
   oidcRequires: SESSION_KEYS.slice(0, 3),
-  oidcStrips: PROFILE_KEYS,
+  oidcStrips: CREDENTIAL_REDIRECT_KEYS,
   accessKeysRequires: SESSION_KEYS.slice(0, 2),
   accessKeysOptional: ["AWS_SESSION_TOKEN"],
-  accessKeysStrips: PROFILE_KEYS,
+  accessKeysStrips: CREDENTIAL_REDIRECT_KEYS,
   checkerSessionRequires: SESSION_KEYS.slice(0, 3),
 });
