@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
-import { assertImageEvidence, imageEvidenceSha256, verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
+import { assertImageEvidence, assertImageEvidenceReuseBridge, imageEvidenceSha256, verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import {
   deriveStageBImageImpactReport,
   assertStageBImageReuseResult,
@@ -23,7 +23,7 @@ const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const WORKFLOW_RUN = /^\d+$/;
 const SERVICES = new Set(["backend", "worker", "rls-executor", "rls-canary"]);
 
-export const IMAGE_AUTHORIZATION_SCHEMA_VERSION = 2;
+export const IMAGE_AUTHORIZATION_SCHEMA_VERSION = 3;
 export const IMAGE_AUTHORIZATION_PATHS = Object.freeze({
   REUSE: "IMAGE_REUSE",
   FRESH_PUBLICATION: "FRESH_IMAGE_PUBLICATION",
@@ -70,7 +70,10 @@ function assertExactImageImpactEvidence(imageEvidence, impactEvidence, sourceSha
 
 function assertFreshPublicationEvidence(imageEvidence, sourceSha) {
   const identity = imageEvidence?.publicationIdentity;
-  if (imageEvidence?.imageReleaseSha !== sourceSha
+  if (imageEvidence?.publicationSourceSha !== undefined
+    || imageEvidence?.currentSourceSha !== undefined
+    || imageEvidence?.imageReuseEvidenceSha256 !== undefined
+    || imageEvidence?.imageReleaseSha !== sourceSha
     || identity?.workflowDefinitionSha !== sourceSha
     || identity?.imageReleaseSha !== imageEvidence.imageReleaseSha
     || String(identity?.workflowRunId) !== String(imageEvidence.workflowRunId)
@@ -96,6 +99,7 @@ export function assertCanonicalImageImpactEvidence(imageEvidence, impactEvidence
     return Object.freeze({ derived, authorizationPath: IMAGE_AUTHORIZATION_PATHS.FRESH_PUBLICATION });
   }
   if (derived.imageReleaseSha !== imageEvidence.imageReleaseSha) throw new Error("Image-reuse evidence is not bound to the image publication.");
+  assertImageEvidenceReuseBridge(imageEvidence, { imageReuseEvidence: impactEvidence, currentSourceSha: sourceSha });
   assertStageBImageReuseResult({ ...derived, imageBuildInputsChanged: false });
   return Object.freeze({ derived, authorizationPath: IMAGE_AUTHORIZATION_PATHS.REUSE });
 }
@@ -119,7 +123,8 @@ export function createImageAuthorization({
 
   assertImageEvidence(imageEvidence, {
     signatureArtifact: imageEvidenceSignature,
-    toolingSha: sourceSha,
+    publicationSourceSha: imageEvidence.publicationSourceSha || imageEvidence.imageReleaseSha,
+    currentSourceSha: sourceSha,
     imageReleaseSha: imageEvidence.imageReleaseSha,
     workflowRunId: imageEvidence.workflowRunId,
     artifactSha256: imageEvidence.canonicalArtifactSha256,

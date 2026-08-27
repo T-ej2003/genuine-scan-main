@@ -103,6 +103,14 @@ test("reference-audit contract registers every production consumer", () => {
   assert.equal(new Set(referenceAudit.consumers).size, referenceAudit.consumers.length);
 });
 
+test("image evidence contract registers the direct authorization reader", () => {
+  for (const id of ["image-evidence", "image-evidence-signature"]) {
+    const artifact = STAGE_B_ARTIFACT_CONTRACTS.find((candidate) => candidate.id === id);
+    assert.ok(artifact?.consumers.includes("scripts/aws/production-image-authorization.mjs"));
+    assert.deepEqual(canonicalStageBArtifactContracts().artifacts.find((candidate) => candidate.id === id)?.consumers, artifact.consumers);
+  }
+});
+
 test("release-preflight checker artifacts declare every direct reader and publish their detached pair atomically", () => {
   const expected = {
     "release-preflight-report": [

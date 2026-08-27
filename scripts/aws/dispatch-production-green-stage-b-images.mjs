@@ -10,8 +10,8 @@ const SHA_PATTERN = /^[a-f0-9]{40}$/;
 
 const runGh = (args, run = execFileSync) => run("gh", args, { encoding: "utf8", stdio: "pipe" });
 
-export function observeStageBImagePublication({ repository, workflowRunId, toolingSha, releaseSha, run = execFileSync } = {}) {
-  if (!/^[a-f0-9]{40}$/.test(String(toolingSha || ""))) throw new Error("Stage B tooling SHA must be a full 40-character commit SHA.");
+export function observeStageBImagePublication({ repository, workflowRunId, publicationSourceSha, releaseSha, run = execFileSync } = {}) {
+  if (!/^[a-f0-9]{40}$/.test(String(publicationSourceSha || ""))) throw new Error("Stage B publication source SHA must be a full 40-character commit SHA.");
   if (!/^\d+$/.test(String(workflowRunId || ""))) throw new Error("Observed Stage B workflow run ID is required.");
   if (!/^[a-f0-9]{40}$/.test(String(releaseSha || ""))) throw new Error("Stage B release SHA must be a full 40-character commit SHA.");
   const runRecord = JSON.parse(runGh(["api", `repos/${repository}/actions/runs/${workflowRunId}`], run));
@@ -34,15 +34,15 @@ export function observeStageBImagePublication({ repository, workflowRunId, tooli
     artifactExpired: Boolean(artifact.expired),
     artifactArchiveFilename: null,
   };
-  assertObservedStageBImagePublicationMetadata(observed, { expectedToolingSha: toolingSha, expectedReleaseSha: releaseSha });
+  assertObservedStageBImagePublicationMetadata(observed, { expectedPublicationSourceSha: publicationSourceSha, expectedReleaseSha: releaseSha });
   return Object.freeze(observed);
 }
 
-export function writeObservedStageBImagePublicationIdentity({ repository, workflowRunId, toolingSha, releaseSha, canonicalArtifactPath, outputPath, repositoryRoot = process.cwd(), run = execFileSync } = {}) {
+export function writeObservedStageBImagePublicationIdentity({ repository, workflowRunId, publicationSourceSha, releaseSha, canonicalArtifactPath, outputPath, repositoryRoot = process.cwd(), run = execFileSync } = {}) {
   const artifactStat = fs.lstatSync(canonicalArtifactPath);
   if (!artifactStat.isFile() || artifactStat.isSymbolicLink() || (artifactStat.mode & 0o777) !== 0o600) throw new Error("Stage B canonical image artifact must be a private regular file.");
-  const observed = observeStageBImagePublication({ repository, workflowRunId, toolingSha, releaseSha, run });
-  return writeStageBImagePublicationIdentity({ observed, artifactBytes: fs.readFileSync(canonicalArtifactPath), expectedToolingSha: toolingSha, expectedReleaseSha: releaseSha, outputPath, repositoryRoot });
+  const observed = observeStageBImagePublication({ repository, workflowRunId, publicationSourceSha, releaseSha, run });
+  return writeStageBImagePublicationIdentity({ observed, artifactBytes: fs.readFileSync(canonicalArtifactPath), expectedPublicationSourceSha: publicationSourceSha, expectedReleaseSha: releaseSha, outputPath, repositoryRoot });
 }
 
 export const dispatchProductionGreenStageBImages = ({

@@ -15,7 +15,7 @@ Generated from the permission manifest, reviewed source policies, release probes
 | 4 | image-impact-classification | `scripts/aws/validate-stage-b-image-reuse.mjs` |
 | 5 | image-workflow-dispatch | `scripts/aws/dispatch-production-green-stage-b-images.mjs` |
 | 6 | image-artifact-verification | `.github/workflows/production-green-stage-b-image-build.yml` |
-| 7 | schema-v3-image-evidence | `scripts/aws/production-green-stage-b-image-evidence.mjs` |
+| 7 | schema-v4-image-evidence | `scripts/aws/production-green-stage-b-image-evidence.mjs` |
 | 8 | administrator-release-oidc-trust-convergence | `scripts/aws/converge-production-release-oidc-trust.mjs` |
 | 9 | administrator-normal-backend-activation-convergence | `scripts/aws/production-normal-backend-activation.mjs` |
 | 10 | administrator-iam-simulation | `scripts/aws/validate-production-green-stage-b-permissions.mjs` |

@@ -20,14 +20,14 @@ const requireExact = (actual, expected, label) => {
   if (actual !== expected) throw new Error(`Stage B publication identity ${label} is invalid.`);
 };
 
-function assertObservedMetadata(observed, { expectedToolingSha, expectedReleaseSha } = {}) {
+function assertObservedMetadata(observed, { expectedPublicationSourceSha, expectedReleaseSha } = {}) {
   if (!observed || typeof observed !== "object" || Array.isArray(observed)) throw new Error("Observed Stage B publication identity is required.");
-  if (!SHA.test(String(expectedToolingSha || "")) || !SHA.test(String(expectedReleaseSha || ""))) throw new Error("Stage B publication identity requires exact tooling and image-release SHAs.");
+  if (!SHA.test(String(expectedPublicationSourceSha || "")) || !SHA.test(String(expectedReleaseSha || ""))) throw new Error("Stage B publication identity requires exact publication-source and image-release SHAs.");
   if (!INTEGER.test(String(observed.workflowRunId || "")) || !INTEGER.test(String(observed.workflowDatabaseId || ""))) throw new Error("Observed Stage B publication identity requires workflow run and database IDs.");
   requireExact(observed.workflowFile, STAGE_B_IMAGE_WORKFLOW_FILE, "workflow file");
   requireExact(observed.workflowName, STAGE_B_IMAGE_WORKFLOW_NAME, "workflow name");
   requireExact(observed.event, "workflow_dispatch", "event");
-  if (!SHA.test(String(observed.workflowDefinitionSha || "")) || observed.workflowDefinitionSha !== expectedToolingSha) throw new Error("Observed Stage B workflow definition SHA is not the protected tooling SHA.");
+  if (!SHA.test(String(observed.workflowDefinitionSha || "")) || observed.workflowDefinitionSha !== expectedPublicationSourceSha) throw new Error("Observed Stage B workflow definition SHA is not the authenticated publication source.");
   if (!SHA.test(String(observed.imageReleaseSha || "")) || observed.imageReleaseSha !== expectedReleaseSha) throw new Error("Observed Stage B image release SHA is not the requested image release.");
   requireExact(observed.headBranch, "main", "head branch");
   requireExact(observed.conclusion, "success", "conclusion");
@@ -50,8 +50,8 @@ function parseServices(artifactBytes) {
   return Object.freeze([...services].sort());
 }
 
-export function buildStageBImagePublicationIdentity({ observed, artifactBytes, expectedToolingSha, expectedReleaseSha, observedAt = new Date().toISOString() } = {}) {
-  assertObservedMetadata(observed, { expectedToolingSha, expectedReleaseSha });
+export function buildStageBImagePublicationIdentity({ observed, artifactBytes, expectedPublicationSourceSha, expectedReleaseSha, observedAt = new Date().toISOString() } = {}) {
+  assertObservedMetadata(observed, { expectedPublicationSourceSha, expectedReleaseSha });
   if (!Buffer.isBuffer(artifactBytes)) throw new Error("Stage B publication artifact bytes are required.");
   if (!ISO.test(observedAt) || !Number.isFinite(Date.parse(observedAt))) throw new Error("Stage B publication observation timestamp is malformed.");
   const canonicalArtifactSha256 = sha256(artifactBytes);
@@ -76,13 +76,13 @@ export function buildStageBImagePublicationIdentity({ observed, artifactBytes, e
     services: parseServices(artifactBytes),
     observedAt,
   };
-  assertStageBImagePublicationIdentity(report, { expectedToolingSha, expectedReleaseSha });
+  assertStageBImagePublicationIdentity(report, { expectedPublicationSourceSha, expectedReleaseSha });
   return Object.freeze(report);
 }
 
-export function assertStageBImagePublicationIdentity(identity, { expectedToolingSha, expectedReleaseSha, canonicalArtifactSha256 } = {}) {
+export function assertStageBImagePublicationIdentity(identity, { expectedPublicationSourceSha, expectedReleaseSha, canonicalArtifactSha256 } = {}) {
   if (!identity || identity.schemaVersion !== STAGE_B_IMAGE_PUBLICATION_IDENTITY_SCHEMA_VERSION) throw new Error("Stage B publication identity report is missing or versioned incorrectly.");
-  assertObservedMetadata(identity, { expectedToolingSha, expectedReleaseSha });
+  assertObservedMetadata(identity, { expectedPublicationSourceSha, expectedReleaseSha });
   requireExact(identity.canonicalFilename, STAGE_B_IMAGE_CANONICAL_FILENAME, "canonical filename");
   if (identity.canonicalArtifactSha256 !== canonicalArtifactSha256 && canonicalArtifactSha256 !== undefined) throw new Error("Stage B publication identity canonical artifact SHA256 does not match the observed artifact.");
   if (!DIGEST.test(String(identity.canonicalArtifactSha256 || "")) || identity.recordCount !== STAGE_B_IMAGE_SERVICES.length || JSON.stringify(identity.services) !== JSON.stringify([...STAGE_B_IMAGE_SERVICES].sort()) || !ISO.test(identity.observedAt) || !Number.isFinite(Date.parse(identity.observedAt))) throw new Error("Stage B publication identity report is malformed.");
@@ -93,22 +93,22 @@ export function publicationIdentitySha256(identity) {
   return sha256(Buffer.from(`${JSON.stringify(identity)}\n`));
 }
 
-export function readStageBImagePublicationIdentity(identityPath, { identitySha256, expectedToolingSha, expectedReleaseSha, canonicalArtifactBytes } = {}) {
+export function readStageBImagePublicationIdentity(identityPath, { identitySha256, expectedPublicationSourceSha, expectedReleaseSha, canonicalArtifactBytes } = {}) {
   const stat = fs.lstatSync(identityPath);
   if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o777) !== 0o600) throw new Error("Stage B publication identity must be a private regular file.");
   const bytes = fs.readFileSync(identityPath);
   const identity = JSON.parse(bytes.toString("utf8"));
   if (publicationIdentitySha256(identity) !== identitySha256) throw new Error("Stage B publication identity report SHA256 does not match.");
   if (!Buffer.isBuffer(canonicalArtifactBytes)) throw new Error("Canonical artifact bytes are required for publication identity binding.");
-  assertStageBImagePublicationIdentity(identity, { expectedToolingSha, expectedReleaseSha, canonicalArtifactSha256: sha256(canonicalArtifactBytes) });
+  assertStageBImagePublicationIdentity(identity, { expectedPublicationSourceSha, expectedReleaseSha, canonicalArtifactSha256: sha256(canonicalArtifactBytes) });
   if (sha256(canonicalArtifactBytes) !== identity.canonicalArtifactSha256) throw new Error("Stage B publication identity is not bound to the canonical artifact bytes.");
   return identity;
 }
 
-export function writeStageBImagePublicationIdentity({ observed, artifactBytes, expectedToolingSha, expectedReleaseSha, outputPath, repositoryRoot } = {}) {
+export function writeStageBImagePublicationIdentity({ observed, artifactBytes, expectedPublicationSourceSha, expectedReleaseSha, outputPath, repositoryRoot } = {}) {
   const identityPath = assertStageBArtifactPath({ artifactPath: outputPath, repositoryRoot, label: "Stage B publication identity", allowExisting: false });
   ensureStageBPrivateDirectory({ directory: path.dirname(identityPath), repositoryRoot, create: true });
-  const identity = buildStageBImagePublicationIdentity({ observed, artifactBytes, expectedToolingSha, expectedReleaseSha });
+  const identity = buildStageBImagePublicationIdentity({ observed, artifactBytes, expectedPublicationSourceSha, expectedReleaseSha });
   writeStageBPrivateFilesAtomic({ repositoryRoot, files: [{ filePath: identityPath, bytes: Buffer.from(`${JSON.stringify(identity)}\n`), label: "Stage B publication identity" }] });
   return { identityPath, identitySha256: publicationIdentitySha256(identity), identity };
 }

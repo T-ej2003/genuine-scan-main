@@ -554,7 +554,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, st
   if (outputPath) assertStageBCanonicalTfvarsOutputPath(outputPath); if (bindingReportPath) assertOutputPath(bindingReportPath, "Binding-report output");
   if (!outputPath || !bindingReportPath) throw new Error("Tfvars and binding-report output paths are required.");
   const report = readJson(imageEvidence); const signature = readJson(imageEvidenceSignature);
-  assertImageEvidence(report, { signatureArtifact: signature, verifySignature, toolingSha, imageReleaseSha, workflowRunId, artifactSha256: canonicalArtifactSha256, now });
+  assertImageEvidence(report, { signatureArtifact: signature, verifySignature, publicationSourceSha: report.publicationSourceSha || report.imageReleaseSha, currentSourceSha: toolingSha, imageReleaseSha, workflowRunId, artifactSha256: canonicalArtifactSha256, now });
   if (freshImagePartialApplyRecovery && (report.publicationIdentity?.imageReleaseSha !== toolingSha || report.publicationIdentity?.workflowDefinitionSha !== toolingSha || report.publicationIdentity?.headBranch !== "main" || report.publicationIdentity?.conclusion !== "success" || report.publicationIdentity?.artifactExpired !== false)) throw new Error("Fresh-image publication evidence is not bound to the protected source or a successful non-expired publication.");
   const evidenceSha256 = imageEvidenceSha256(report);
   const images = extractImages(report, imageReleaseSha);

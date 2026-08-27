@@ -36,7 +36,7 @@
     },
     {
       "order": 7,
-      "id": "schema-v3-image-evidence",
+      "id": "schema-v4-image-evidence",
       "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs"
     },
     {
@@ -256,7 +256,7 @@
     },
     {
       "id": "admin-image-records",
-      "phase": "schema-v3-image-evidence",
+      "phase": "schema-v4-image-evidence",
       "identity": "ADMINISTRATOR",
       "executor": "aws-cli",
       "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs",
@@ -286,7 +286,7 @@
     },
     {
       "id": "admin-image-repositories",
-      "phase": "schema-v3-image-evidence",
+      "phase": "schema-v4-image-evidence",
       "identity": "ADMINISTRATOR",
       "executor": "aws-cli",
       "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs",
@@ -11995,7 +11995,7 @@
   "artifactContracts": [
     "protected-checkout",
     "image-impact",
-    "schema-v3-image-evidence",
+    "schema-v4-image-evidence",
     "stage-a-handoff",
     "tfvars-binding-report",
     "refresh-only",

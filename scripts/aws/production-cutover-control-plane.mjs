@@ -179,7 +179,7 @@ function recordMutation(mutations, name, result) {
 
 export function assertImageAuthorizationEnvelope(value, { now, verifyImageEvidence } = {}) {
   const sourceSha = value?.sourceSha;
-  if (!SHA40.test(sourceSha || "") || value?.schemaVersion !== 2 || value.valid !== true || !SHA256.test(value.evidenceSha256 || "")
+  if (!SHA40.test(sourceSha || "") || value?.schemaVersion !== 3 || value.valid !== true || !SHA256.test(value.evidenceSha256 || "")
     || !value.imageEvidence || !value.imageEvidenceSignature || !value.imageReuseEvidence
     || !Object.values(IMAGE_AUTHORIZATION_PATHS).includes(value.authorizationPath)
     || !SHA256.test(value.imageEvidenceSha256 || "") || !SHA256.test(value.imageReuseEvidenceSha256 || "")
@@ -200,7 +200,8 @@ export function assertImageAuthorizationEnvelope(value, { now, verifyImageEviden
   if (value.evidenceSha256 !== imageAuthorizationSha256(value) || value.authorizationSha256 !== value.evidenceSha256) throw new Error("Image authorization envelope hash is wrong.");
   assertImageEvidence(value.imageEvidence, {
     signatureArtifact: value.imageEvidenceSignature,
-    toolingSha: sourceSha,
+    publicationSourceSha: value.imageEvidence.publicationSourceSha || value.imageEvidence.imageReleaseSha,
+    currentSourceSha: sourceSha,
     imageReleaseSha: value.imageEvidence.imageReleaseSha,
     workflowRunId: value.imageEvidence.workflowRunId,
     artifactSha256: value.imageEvidence.canonicalArtifactSha256,
@@ -208,7 +209,7 @@ export function assertImageAuthorizationEnvelope(value, { now, verifyImageEviden
     ...(verifyImageEvidence ? { verifySignature: verifyImageEvidence } : {}),
   });
   const { derived: impactEvidence, authorizationPath } = assertCanonicalImageImpactEvidence(value.imageEvidence, value.imageReuseEvidence, sourceSha);
-  if (value.imageEvidence.imageReleaseSha !== value.imageReleaseSha || String(value.imageEvidence.workflowRunId) !== String(value.workflowRunId)
+  if ((value.imageEvidence.currentSourceSha || value.imageEvidence.imageReleaseSha) !== sourceSha || value.imageEvidence.imageReleaseSha !== value.imageReleaseSha || String(value.imageEvidence.workflowRunId) !== String(value.workflowRunId)
     || value.imageEvidence.images.some(({ service, digest }) => value.images.find((candidate) => candidate.service === service)?.digest !== digest)
     || value.imageReuseEvidence.imageReuseCompatible !== value.imageReuseCompatible
     || value.imageReuseEvidence.newImagesRequired !== value.imageBuildInputsChanged

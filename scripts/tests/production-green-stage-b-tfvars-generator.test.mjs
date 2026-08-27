@@ -32,8 +32,8 @@ const images = [
   ["rls-executor", "mscqr-backend", `${releaseSha}-rls-executor`, digest(3)],
   ["rls-canary", "mscqr-backend", `${releaseSha}-rls-canary`, `sha256:${"a".repeat(60)}f9a1`],
 ].map(([service, repository, tag, imageDigest]) => ({ service, repository, tag, digest: imageDigest, imagePushedAt: now }));
-const publicationIdentity = { schemaVersion: 2, workflowRunId: "30760789616", workflowDatabaseId: "401", workflowFile: ".github/workflows/production-green-stage-b-images.yml", workflowName: "Production Green Stage B Images", event: "workflow_dispatch", workflowDefinitionSha: "b".repeat(40), imageReleaseSha: releaseSha, headBranch: "main", conclusion: "success", artifactId: "501", artifactName: "production-green-stage-b-images", artifactExpired: false, artifactArchiveFilename: null, canonicalFilename: "stage-b-images.jsonl", canonicalArtifactSha256: "a".repeat(64), recordCount: 4, services: ["backend", "rls-canary", "rls-executor", "worker"], observedAt: now };
-const evidence = { schemaVersion: 3, imageReleaseSha: releaseSha, workflowRunId: "30760789616", publicationIdentitySha256: publicationIdentitySha256(publicationIdentity), publicationIdentity, canonicalArtifactSha256: "a".repeat(64), verifierCallerArn: `arn:aws:iam::${STAGE_B.account}:root`, account: STAGE_B.account, region: STAGE_B.region, observedAt: now, revocationModel: "time-bounded-no-supersession-registry", repositories: [repositoryEvidence("mscqr-backend"), repositoryEvidence("mscqr-worker")], images };
+const publicationIdentity = { schemaVersion: 2, workflowRunId: "30760789616", workflowDatabaseId: "401", workflowFile: ".github/workflows/production-green-stage-b-images.yml", workflowName: "Production Green Stage B Images", event: "workflow_dispatch", workflowDefinitionSha: releaseSha, imageReleaseSha: releaseSha, headBranch: "main", conclusion: "success", artifactId: "501", artifactName: "production-green-stage-b-images", artifactExpired: false, artifactArchiveFilename: null, canonicalFilename: "stage-b-images.jsonl", canonicalArtifactSha256: "a".repeat(64), recordCount: 4, services: ["backend", "rls-canary", "rls-executor", "worker"], observedAt: now };
+const evidence = { schemaVersion: 4, publicationSourceSha: releaseSha, currentSourceSha: "b".repeat(40), imageReleaseSha: releaseSha, imageReuseEvidenceSha256: "d".repeat(64), workflowRunId: "30760789616", publicationIdentitySha256: publicationIdentitySha256(publicationIdentity), publicationIdentity, canonicalArtifactSha256: "a".repeat(64), verifierCallerArn: `arn:aws:iam::${STAGE_B.account}:root`, account: STAGE_B.account, region: STAGE_B.region, observedAt: now, revocationModel: "time-bounded-no-supersession-registry", repositories: [repositoryEvidence("mscqr-backend"), repositoryEvidence("mscqr-worker")], images };
 const signature = signImageEvidence(evidence, { now, sign: () => "AQ==" });
 
 function taskAttributes(family, revision = 1) {
@@ -144,8 +144,12 @@ test("recovery mode truth table has one canonical reachable state per invocation
 test("fresh-image recovery is reachable through the canonical tfvars producer", () => {
   const args = input({ imageReleaseSha: "b".repeat(40) });
   const freshPublication = { ...publicationIdentity, workflowDefinitionSha: args.toolingSha, imageReleaseSha: args.imageReleaseSha };
+  const directEvidence = structuredClone(evidence);
+  delete directEvidence.publicationSourceSha;
+  delete directEvidence.currentSourceSha;
+  delete directEvidence.imageReuseEvidenceSha256;
   const freshEvidence = {
-    ...evidence,
+    ...directEvidence,
     imageReleaseSha: args.imageReleaseSha,
     publicationIdentity: freshPublication,
     publicationIdentitySha256: publicationIdentitySha256(freshPublication),
