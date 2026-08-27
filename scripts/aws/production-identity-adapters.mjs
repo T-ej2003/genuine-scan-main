@@ -91,8 +91,8 @@ export async function establishReleaseDeployerIdentity({ adapter } = {}) {
   return { valid: true, roleArn: RELEASE_ROLE_ARN, callerArn, evidenceRef: `sts:${RELEASE_ROLE_ARN}`, evidenceSha256: cryptoSha(`${RELEASE_ROLE_ARN}\n${callerArn}`) };
 }
 
-export async function establishVerifierIdentity({ adapter, mfaSerial, mfaCode } = {}) {
-  const result = await establishEcsExecVerifierSession({ adapter, mfaSerial, mfaCode });
+export async function establishVerifierIdentity({ adapter, mfaSerial, mfaCode, getMfaCode } = {}) {
+  const result = await establishEcsExecVerifierSession({ adapter, mfaSerial, mfaCode, getMfaCode });
   if (result.roleArn !== ECS_EXEC_OPERATOR_ROLE_ARN) throw new Error("Verifier identity is outside the reviewed role.");
   return result;
 }

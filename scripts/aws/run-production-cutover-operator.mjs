@@ -5,10 +5,8 @@ import { promptProductionHiddenInput } from "../security/production-interactive-
 
 const SHA1 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
-const MFA_CODE = /^\d{6,8}$/;
 const REQUIRED_INPUTS = Object.freeze([
   Object.freeze({ name: "MSCQR_VERIFIER_MFA_SERIAL", prompt: "Production verifier MFA serial: ", validate: (value) => Boolean(value) }),
-  Object.freeze({ name: "MSCQR_VERIFIER_MFA_CODE", prompt: "Production verifier MFA code: ", validate: (value) => MFA_CODE.test(value) }),
   Object.freeze({ name: "MSCQR_ONBOARDING_EMAIL", prompt: "Production strict-onboarding administrator email: ", validate: (value) => Boolean(value) }),
   Object.freeze({ name: "MSCQR_ONBOARDING_PASSWORD", prompt: "Production strict-onboarding administrator password: ", validate: (value) => Boolean(value) }),
   Object.freeze({ name: "MSCQR_CANARY_ORDINARY_EMAIL", prompt: "Production strict-onboarding tenant-canary email: ", validate: (value) => Boolean(value) }),
