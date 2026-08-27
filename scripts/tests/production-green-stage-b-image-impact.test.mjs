@@ -8,6 +8,7 @@ import {
   assertStageBTrustedToolingReuseResult,
   assertStageBTrustedWorkflowSeparation,
   computeStageBToolingInputTreeSha256,
+  deriveStageBToolingInputTreeSha256,
   imageImpactReportFor,
   imageReuseCompatibility,
   classifyStageBImageReusePath,
@@ -15,6 +16,7 @@ import {
   parseStageBClosureMode,
   STAGE_B_IMAGE_REUSE_RULES_VERSION,
   STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH,
+  reportFor,
 } from "../aws/validate-stage-b-image-reuse.mjs";
 
 const imageReleaseSha = "a".repeat(40);
@@ -24,6 +26,7 @@ const compatibilityReport = (classifiedChangedFiles) => ({
   schemaVersion: 2,
   imageReleaseSha,
   comparisonBaseSha: imageReleaseSha,
+  toolingSha,
   comparisonHeadIdentity: "tooling-input-tree-sha256",
   toolingInputTreeSha256,
   comparisonHeadSha256: toolingInputTreeSha256,
@@ -96,6 +99,18 @@ test("image-reuse consumers accept only the current rules version", () => {
   for (const classificationRulesVersion of ["stage-b-image-reuse-v2", "stage-b-image-reuse-v3", "stage-b-image-reuse-v5", undefined]) {
     assert.throws(() => imageReuseCompatibility({ imageReleaseSha, toolingSha, currentHead: toolingSha, changedFiles: files, toolingInputTreeSha256, reviewedReport: { ...report, classificationRulesVersion } }), /rules are stale/);
   }
+});
+
+test("a committed reviewed report may retain its pre-report tooling revision", () => {
+  const imageReleaseSha = "29bf92a14d5e832575009bd76b16886feff62cbd";
+  const reportCommit = execFileSync("git", ["rev-parse", "798851e5"], { encoding: "utf8" }).trim();
+  const reportToolingSha = execFileSync("git", ["rev-parse", "0aa7831b317e32956a930b16d3e072eebc0bee07"], { encoding: "utf8" }).trim();
+  const changedFiles = execFileSync("git", ["diff", "--name-only", `${imageReleaseSha}..${reportCommit}`], { encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
+  const toolingInputTreeSha256 = deriveStageBToolingInputTreeSha256(reportCommit);
+  const reviewedReport = reportFor({ imageReleaseSha, toolingSha: reportToolingSha, changedFiles, toolingInputTreeSha256 });
+  assert.notEqual(reviewedReport.toolingSha, reportCommit);
+  assert.equal(reviewedReport.toolingInputTreeSha256, toolingInputTreeSha256);
+  assert.doesNotThrow(() => imageReuseCompatibility({ imageReleaseSha, toolingSha: reportCommit, currentHead: reportCommit, changedFiles, toolingInputTreeSha256, reviewedReport }));
 });
 
 test("the two-SHA workflow boundary rejects a release-build command change", () => {
@@ -297,4 +312,33 @@ test("tooling input digest excludes both compatibility evidence artifacts but de
   assert.equal(digest({ [evidenceJson]: "json-a", [evidenceMarkdown]: "markdown-b", [toolingInput]: "tooling-a" }), baseline);
   assert.equal(digest({ [evidenceJson]: "json-b", [evidenceMarkdown]: "markdown-b", [toolingInput]: "tooling-a" }), baseline);
   assert.notEqual(digest({ [evidenceJson]: "json-a", [evidenceMarkdown]: "markdown-a", [toolingInput]: "tooling-b" }), baseline);
+});
+
+test("canonical compatibility JSON and Markdown describe the same reviewed boundary", () => {
+  const report = JSON.parse(readFileSync(new URL("../../documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json", import.meta.url), "utf8"));
+  const markdown = readFileSync(new URL("../../documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.md", import.meta.url), "utf8");
+  for (const [label, value] of [
+    ["schema version", report.schemaVersion],
+    ["identity model", report.identityModel],
+    ["image release", report.imageReleaseSha],
+    ["comparison base", report.comparisonBaseSha],
+    ["tooling revision", report.toolingSha],
+    ["comparison head identity", report.comparisonHeadIdentity],
+    ["comparison head", report.comparisonHeadSha256],
+    ["tooling input tree", report.toolingInputTreeSha256],
+    ["rules version", report.classificationRulesVersion],
+    ["image reuse compatible", String(report.imageReuseCompatible)],
+    ["image build inputs changed", String(report.imageBuildInputsChanged)],
+    ["trusted tooling only paths", report.trustedToolingOnlyPaths.length ? report.trustedToolingOnlyPaths.join(", ") : "(none)"],
+    ["image affecting files", report.imageAffectingFiles.length ? report.imageAffectingFiles.join(", ") : "(none)"],
+    ["reason", report.reason],
+  ]) assert.equal(markdown.includes(`${label}: ${value}`), true, `${label} is not synchronized`);
+  for (const { file, category, imageAffecting } of report.classifiedChangedFiles) {
+    assert.equal(markdown.includes(`| ${file} | ${category} | ${imageAffecting} |`), true, `${file} classification is not synchronized`);
+  }
+  assert.equal("trustedWorkflowProof" in report, false);
+  assert.equal("publicationInputFingerprint" in report, false);
+  assert.equal(markdown.includes("trustedToolingOnly"), false);
+  assert.equal(markdown.includes("trusted-workflow proof"), false);
+  assert.equal(markdown.includes("publicationInputFingerprint"), false);
 });

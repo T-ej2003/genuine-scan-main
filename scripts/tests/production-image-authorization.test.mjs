@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
+import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import {
   createImageAuthorization,
   assertCanonicalImageReuseEvidence,
@@ -15,6 +16,9 @@ import {
   assertImageImpactReport,
   deriveStageBImageImpactReport,
   imageImpactReportFor,
+  reportFor,
+  STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION,
+  STAGE_B_IMAGE_REUSE_SCHEMA_VERSION,
   STAGE_B_IMAGE_REUSE_RULES_VERSION,
 } from "../aws/validate-stage-b-image-reuse.mjs";
 import {
@@ -242,7 +246,20 @@ function twoShaPublicationFixture() {
     },
     observedAt,
   });
-  return { bytes, artifactSha256, identity, records: twoShaRecords, reuseEvidence: deriveStageBImageImpactReport({ imageReleaseSha: twoShaImageReleaseSha, toolingSha: currentConsumingSourceSha }) };
+  const derivedReuseEvidence = deriveStageBImageImpactReport({ imageReleaseSha: twoShaImageReleaseSha, toolingSha: currentConsumingSourceSha });
+  return {
+    bytes,
+    artifactSha256,
+    identity,
+    records: twoShaRecords,
+    reuseEvidence: derivedReuseEvidence,
+    reviewedReuseEvidence: reportFor({
+      imageReleaseSha: twoShaImageReleaseSha,
+      toolingSha: currentConsumingSourceSha,
+      changedFiles: derivedReuseEvidence.classifiedChangedFiles,
+      toolingInputTreeSha256: derivedReuseEvidence.toolingInputTreeSha256,
+    }),
+  };
 }
 
 test("real default composition preserves historical publication provenance while authorizing a63-to-a6 reuse", () => {
@@ -255,7 +272,7 @@ test("real default composition preserves historical publication provenance while
   const signaturePath = path.join(directory, "image-evidence.signature.json");
   fs.writeFileSync(artifactPath, fixture.bytes, { mode: 0o600 });
   fs.writeFileSync(identityPath, `${JSON.stringify(fixture.identity)}\n`, { mode: 0o600 });
-  fs.writeFileSync(reusePath, `${JSON.stringify(fixture.reuseEvidence)}\n`, { mode: 0o600 });
+  fs.writeFileSync(reusePath, `${JSON.stringify(fixture.reviewedReuseEvidence)}\n`, { mode: 0o600 });
   const repositoryResponse = (repository) => ({ repositories: [{
     repositoryName: repository,
     repositoryArn: `arn:aws:ecr:eu-west-2:${STAGE_B.account}:repository/${repository}`,
@@ -312,8 +329,37 @@ test("real default composition preserves historical publication provenance while
     assert.equal(authorization.imageEvidence.images.length, 4);
     assert.doesNotThrow(() => assertImageAuthorization(authorization, currentConsumingSourceSha, { now: observedAt, verifyImageEvidence: ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true }) }));
 
+    const authorizationPath = path.join(directory, "image-authorization.json");
+    runCli([
+      "--source-sha", currentConsumingSourceSha,
+      "--image-evidence", evidencePath,
+      "--image-signature", signaturePath,
+      "--image-reuse-evidence", reusePath,
+      "--output", authorizationPath,
+    ], {
+      freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha },
+      now: observedAt,
+      verifyImageEvidence: ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true }),
+    });
+    const cliAuthorization = JSON.parse(fs.readFileSync(authorizationPath, "utf8"));
+    assert.equal(cliAuthorization.authorizationPath, "IMAGE_REUSE");
+    assert.equal(cliAuthorization.imageReuseEvidenceSha256, canonicalSha256(fixture.reuseEvidence));
+    assert.equal(cliAuthorization.imageReuseEvidenceSha256, authorization.imageReuseEvidenceSha256);
+    assert.deepEqual(cliAuthorization.imageReuseEvidence, fixture.reuseEvidence);
+    assert.equal(cliAuthorization.imageReuseEvidence.schemaVersion, STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION);
+
     const base = ["--artifact", artifactPath, "--publication-source-sha", producingSourceSha, "--current-source-sha", currentConsumingSourceSha, "--image-release-sha", twoShaImageReleaseSha, "--workflow-run-id", twoShaWorkflowRunId, "--artifact-sha256", fixture.artifactSha256, "--publication-identity", identityPath, "--publication-identity-sha256", publicationIdentitySha256(fixture.identity), "--output", path.join(directory, "negative-evidence.json"), "--signature-output", path.join(directory, "negative-signature.json")];
     assert.throws(() => runImageEvidenceCli(base, { run, sign: () => "AQ==", observedAt, now: observedAt }), /source bridge is malformed|requires canonical image-reuse compatibility evidence/);
+    const runWithReviewedReport = (name, reviewed) => {
+      const reviewedPath = path.join(directory, `${name}-reuse.json`);
+      fs.writeFileSync(reviewedPath, `${JSON.stringify(reviewed)}\n`, { mode: 0o600 });
+      return runImageEvidenceCli([...base, "--image-reuse-evidence", reviewedPath, "--output", path.join(directory, `${name}-evidence.json`), "--signature-output", path.join(directory, `${name}-signature.json`)], { run, sign: () => "AQ==", observedAt, now: observedAt });
+    };
+    assert.throws(() => runWithReviewedReport("malformed-tooling-sha", { ...fixture.reviewedReuseEvidence, toolingSha: "not-a-commit" }), /malformed|full commit SHA/);
+    assert.throws(() => runWithReviewedReport("wrong-release", { ...fixture.reviewedReuseEvidence, imageReleaseSha: producingSourceSha }), /image release SHA|different image release/);
+    assert.throws(() => runWithReviewedReport("incompatible", { ...fixture.reviewedReuseEvidence, imageReuseCompatible: false }), /Compatibility report compatibility result/);
+    assert.throws(() => runWithReviewedReport("malformed", { schemaVersion: fixture.reviewedReuseEvidence.schemaVersion }), /Compatibility report/);
+    assert.throws(() => runWithReviewedReport("inconsistent-derived", { ...fixture.reviewedReuseEvidence, toolingInputTreeSha256: "0".repeat(64) }), /tooling input tree|comparison head/);
     assert.throws(() => runImageEvidenceCli([...base, "--image-reuse-evidence", reusePath], { run: (args) => args[0] === "ecr" && args[1] === "describe-images" ? JSON.stringify({ imageDetails: [{ imageDigest: `sha256:${"f".repeat(64)}`, imagePushedAt: observedAt }] }) : run(args), sign: () => "AQ==", observedAt, now: observedAt }), /does not match canonical artifact/);
     assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: { ...evidence, publicationSourceSha: currentConsumingSourceSha }, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /source identities|publication identity|signature/);
     assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: { ...evidence, imageReleaseSha: producingSourceSha }, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /source identities|publication identity|signature|image release/);
@@ -355,6 +401,55 @@ test("fresh protected-main publication is a separate authorization path", () => 
   assert.equal(freshAuthorization.imageReleaseSha, freshSourceSha);
   assert.equal(freshAuthorization.workflowRunId, freshWorkflowRunId);
   assert.doesNotThrow(() => assertImageAuthorization(freshAuthorization, freshSourceSha, { now: observedAt, verifyImageEvidence: freshVerifyImageEvidence }));
+});
+
+test("CLI preserves schema-1 fresh image-impact evidence without deriving reviewed reuse", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-fresh-image-authorization-"));
+  const write = (name, value) => {
+    const filePath = path.join(directory, name);
+    fs.writeFileSync(filePath, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+    fs.chmodSync(filePath, 0o600);
+    return filePath;
+  };
+  const run = (impactPath, output) => runCli([
+    "--source-sha", freshSourceSha,
+    "--image-evidence", write("image-evidence.json", freshImageEvidence),
+    "--image-signature", write("image-evidence.signature.json", freshImageEvidenceSignature),
+    "--image-reuse-evidence", impactPath,
+    "--output", output,
+  ], {
+    freshProtectedMain: { fetchSucceeded: true, headSha: freshSourceSha, freshRemoteMainSha: freshSourceSha },
+    now: observedAt,
+    verifyImageEvidence: freshVerifyImageEvidence,
+  });
+  try {
+    const output = path.join(directory, "fresh-authorization.json");
+    run(write("fresh-impact.json", freshImageImpactEvidence), output);
+    const authorization = JSON.parse(fs.readFileSync(output, "utf8"));
+    assert.equal(authorization.authorizationPath, "FRESH_IMAGE_PUBLICATION");
+    assert.equal(authorization.imageReuseEvidence.schemaVersion, STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION);
+    assert.equal(authorization.imageReuseEvidence.imageReleaseSha, freshImpactReleaseSha);
+    assert.equal(authorization.imageEvidence.imageReleaseSha, freshImageReleaseSha);
+
+    assert.throws(
+      () => run(write("unsupported.json", { ...freshImageImpactEvidence, schemaVersion: 99 }), path.join(directory, "unsupported-output.json")),
+      /schema is unsupported/,
+    );
+    assert.throws(
+      () => run(write("malformed-impact.json", { schemaVersion: STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION }), path.join(directory, "malformed-impact-output.json")),
+      /Image-impact release SHA/,
+    );
+    assert.throws(
+      () => run(write("malformed-reuse.json", { schemaVersion: STAGE_B_IMAGE_REUSE_SCHEMA_VERSION }), path.join(directory, "malformed-reuse-output.json")),
+      /Compatibility report/,
+    );
+    assert.throws(
+      () => run(write("wrong-impact.json", { ...freshImageImpactEvidence, imageReleaseSha: freshSourceSha }), path.join(directory, "wrong-impact-output.json")),
+      /independently derived git impact report/,
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("fresh publication rejects stale or cross-boundary evidence", () => {
@@ -480,12 +575,18 @@ test("CLI emits one private source-bound authorization artifact", () => {
     return filePath;
   };
   try {
+    const reviewedImageReuseEvidence = reportFor({
+      imageReleaseSha,
+      toolingSha: sourceSha,
+      changedFiles: imageReuseEvidence.classifiedChangedFiles,
+      toolingInputTreeSha256: imageReuseEvidence.toolingInputTreeSha256,
+    });
     const output = path.join(directory, "image-authorization.json");
     runCli([
       "--source-sha", sourceSha,
       "--image-evidence", write("image-evidence.json", imageEvidence),
       "--image-signature", write("image-evidence.signature.json", imageEvidenceSignature),
-      "--image-reuse-evidence", write("image-reuse.json", imageReuseEvidence),
+      "--image-reuse-evidence", write("image-reuse.json", reviewedImageReuseEvidence),
       "--output", output,
     ], { git: (args) => {
       if (args[0] === "fetch") return "";
