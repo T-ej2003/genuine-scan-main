@@ -24,6 +24,7 @@ const compatibilityReport = (classifiedChangedFiles) => ({
   schemaVersion: 2,
   imageReleaseSha,
   comparisonBaseSha: imageReleaseSha,
+  toolingSha,
   comparisonHeadIdentity: "tooling-input-tree-sha256",
   toolingInputTreeSha256,
   comparisonHeadSha256: toolingInputTreeSha256,

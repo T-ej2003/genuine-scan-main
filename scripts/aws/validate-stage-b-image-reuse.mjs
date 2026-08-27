@@ -239,9 +239,10 @@ export function computeStageBToolingInputTreeSha256({ files, readFile, blobSha25
   return sha256(Buffer.from(canonicalJson(entries)));
 }
 
-function assertReviewedReport({ reviewedReport, imageReleaseSha, toolingInputTreeSha256, changedFiles, trustedWorkflow }) {
+function assertReviewedReport({ reviewedReport, imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles, trustedWorkflow }) {
   assert.equal(reviewedReport?.schemaVersion, STAGE_B_IMAGE_REUSE_SCHEMA_VERSION, "Compatibility report schema is unsupported.");
   assert.equal(reviewedReport.imageReleaseSha, imageReleaseSha, "Compatibility report is for a different image release SHA.");
+  assert.equal(reviewedReport.toolingSha, toolingSha, "Compatibility report is for a different current tooling SHA.");
   assert.equal(reviewedReport.comparisonBaseSha, imageReleaseSha, "Compatibility report comparison base does not match the image release SHA.");
   assert.equal(reviewedReport.comparisonHeadIdentity, "tooling-input-tree-sha256", "Compatibility report comparison head identity is unsupported.");
   assert.equal(reviewedReport.toolingInputTreeSha256, toolingInputTreeSha256, "Compatibility report is for a different tooling input tree.");
@@ -262,7 +263,7 @@ export function imageReuseCompatibility({ imageReleaseSha, toolingSha, changedFi
   const unclassifiedFiles = classifiedChangedFiles.filter(({ category }) => category === "unknown").map(({ file }) => file);
   assert.equal(unclassifiedFiles.length, 0, `Stage B image-impact report contains unclassified files: ${unclassifiedFiles.join(", ")}`);
   const imageAffectingFiles = classifiedChangedFiles.filter(({ imageAffecting }) => imageAffecting).map(({ file }) => file);
-  assertReviewedReport({ reviewedReport, imageReleaseSha, toolingInputTreeSha256, changedFiles: classifiedChangedFiles, trustedWorkflow });
+  assertReviewedReport({ reviewedReport, imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: classifiedChangedFiles, trustedWorkflow });
   return {
     schemaVersion: STAGE_B_IMAGE_REUSE_SCHEMA_VERSION,
     imageReleaseSha,
@@ -455,17 +456,29 @@ export function deriveStageBToolingInputTreeSha256(toolingSha) {
   return toolingInputTreeSha256(toolingSha);
 }
 
-export function deriveStageBImageImpactReport({ imageReleaseSha, toolingSha } = {}) {
+export function deriveStageBImageImpactReport({ imageReleaseSha, toolingSha, reviewedReport } = {}) {
   assert(SHA.test(imageReleaseSha || ""), "Image release SHA must be a full commit SHA.");
   assert(SHA.test(toolingSha || ""), "Tooling SHA must be a full commit SHA.");
   git(["rev-parse", "--verify", `${imageReleaseSha}^{commit}`]);
   git(["rev-parse", "--verify", `${toolingSha}^{commit}`]);
   const files = changedFiles(imageReleaseSha, toolingSha);
+  const toolingTreeSha256 = toolingInputTreeSha256(toolingSha);
+  if (reviewedReport !== undefined) {
+    const reviewed = imageReuseCompatibility({
+      imageReleaseSha,
+      toolingSha,
+      changedFiles: files,
+      currentHead: toolingSha,
+      reviewedReport,
+      toolingInputTreeSha256: toolingTreeSha256,
+    });
+    assertStageBImageReuseResult(reviewed);
+  }
   return imageImpactReportFor({
     imageReleaseSha,
     toolingSha,
     changedFiles: files,
-    toolingInputTreeSha256: toolingInputTreeSha256(toolingSha),
+    toolingInputTreeSha256: toolingTreeSha256,
   });
 }
 

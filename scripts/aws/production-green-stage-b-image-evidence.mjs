@@ -401,7 +401,10 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
   const observedAt = deps.observedAt || new Date().toISOString();
   const artifactBytes = fs.readFileSync(artifactPath);
   const publicationIdentity = readStageBImagePublicationIdentity(publicationIdentityPath, { identitySha256: publicationIdentitySha256Value, expectedPublicationSourceSha: publicationSourceSha, expectedReleaseSha: imageReleaseSha, canonicalArtifactBytes: artifactBytes });
-  const imageReuseEvidence = reuseEvidencePath ? JSON.parse(fs.readFileSync(reuseEvidencePath, "utf8")) : undefined;
+  const reviewedImageReuseEvidence = reuseEvidencePath ? JSON.parse(fs.readFileSync(reuseEvidencePath, "utf8")) : undefined;
+  const imageReuseEvidence = reviewedImageReuseEvidence
+    ? deriveStageBImageImpactReport({ imageReleaseSha, toolingSha: currentSourceSha, reviewedReport: reviewedImageReuseEvidence })
+    : undefined;
   const rawImageReader = describeImages(rootRun);
   const imageReader = deps.describe || ((repository, tag) => describeImage(repository, tag, rawImageReader));
   const repositoryReader = deps.describeRepository || describeRepositories(rootRun);
