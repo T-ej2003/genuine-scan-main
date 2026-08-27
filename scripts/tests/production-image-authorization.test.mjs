@@ -21,15 +21,15 @@ import {
   assertImageEvidence,
   generateImageEvidence,
   imageEvidenceSha256,
+  runCli as runImageEvidenceCli,
   signImageEvidence,
   verifyImageEvidenceSignature,
 } from "../aws/production-green-stage-b-image-evidence.mjs";
-import { buildStageBImagePublicationIdentity } from "../aws/stage-b-image-publication-identity.mjs";
+import { buildStageBImagePublicationIdentity, publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
 import { readFreshProtectedMainIdentity } from "../aws/stage-b-deployment-identity.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
-const toolingSha = sourceSha;
 const imageReleaseSha = "594bab55f23ff8b2438c12b85b149ba0aebeed1e";
 const workflowRunId = "31582010244";
 const observedAt = "2026-08-12T10:00:00.000Z";
@@ -56,7 +56,7 @@ const records = [
 const artifactBytes = Buffer.from(`${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
 const artifactSha256 = crypto.createHash("sha256").update(artifactBytes).digest("hex");
 const publicationIdentity = buildStageBImagePublicationIdentity({
-  expectedToolingSha: sourceSha,
+  expectedPublicationSourceSha: imageReleaseSha,
   expectedReleaseSha: imageReleaseSha,
   artifactBytes,
   observed: {
@@ -65,7 +65,7 @@ const publicationIdentity = buildStageBImagePublicationIdentity({
     workflowFile: ".github/workflows/production-green-stage-b-images.yml",
     workflowName: "Production Green Stage B Images",
     event: "workflow_dispatch",
-    workflowDefinitionSha: sourceSha,
+    workflowDefinitionSha: imageReleaseSha,
     imageReleaseSha,
     headBranch: "main",
     conclusion: "success",
@@ -90,12 +90,14 @@ const describe = (repository, tag) => {
   const record = records.find((candidate) => candidate.repository === repository && candidate.image_tag === tag);
   return { digest: record.image_digest, imagePushedAt: observedAt };
 };
+const imageReuseEvidence = deriveStageBImageImpactReport({ imageReleaseSha, toolingSha: sourceSha });
 const imageEvidence = generateImageEvidence({
-  artifactBytes, toolingSha,
+  artifactBytes, publicationSourceSha: imageReleaseSha, currentSourceSha: sourceSha,
   imageReleaseSha,
   workflowRunId,
   artifactSha256,
   publicationIdentity,
+  imageReuseEvidence,
   verifierCallerArn: `arn:aws:iam::${STAGE_B.account}:root`,
   observedAt,
   describe,
@@ -103,7 +105,6 @@ const imageEvidence = generateImageEvidence({
 });
 const imageEvidenceSignature = signImageEvidence(imageEvidence, { now: observedAt, sign: () => "AQ==" });
 const verifyImageEvidence = ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true });
-const imageReuseEvidence = deriveStageBImageImpactReport({ imageReleaseSha, toolingSha: sourceSha });
 
 function produce(overrides = {}) {
   return createImageAuthorization({
@@ -128,7 +129,7 @@ const freshRecords = records.map((record) => {
 const freshArtifactBytes = Buffer.from(`${freshRecords.map((record) => JSON.stringify(record)).join("\n")}\n`);
 const freshArtifactSha256 = crypto.createHash("sha256").update(freshArtifactBytes).digest("hex");
 const freshPublicationIdentity = buildStageBImagePublicationIdentity({
-  expectedToolingSha: freshSourceSha,
+  expectedPublicationSourceSha: freshSourceSha,
   expectedReleaseSha: freshImageReleaseSha,
   artifactBytes: freshArtifactBytes,
   observed: {
@@ -150,7 +151,8 @@ const freshPublicationIdentity = buildStageBImagePublicationIdentity({
 });
 const freshImageEvidence = generateImageEvidence({
   artifactBytes: freshArtifactBytes,
-  toolingSha: freshSourceSha,
+  publicationSourceSha: freshSourceSha,
+  currentSourceSha: freshSourceSha,
   imageReleaseSha: freshImageReleaseSha,
   workflowRunId: freshWorkflowRunId,
   artifactSha256: freshArtifactSha256,
@@ -170,7 +172,7 @@ const previousReleaseRecords = freshRecords.map((record) => {
 const previousReleaseArtifactBytes = Buffer.from(`${previousReleaseRecords.map((record) => JSON.stringify(record)).join("\n")}\n`);
 const previousReleaseArtifactSha256 = crypto.createHash("sha256").update(previousReleaseArtifactBytes).digest("hex");
 const previousReleasePublicationIdentity = buildStageBImagePublicationIdentity({
-  expectedToolingSha: freshImpactReleaseSha,
+  expectedPublicationSourceSha: freshImpactReleaseSha,
   expectedReleaseSha: freshImpactReleaseSha,
   artifactBytes: previousReleaseArtifactBytes,
   observed: {
@@ -183,7 +185,8 @@ const previousReleasePublicationIdentity = buildStageBImagePublicationIdentity({
 });
 const previousReleaseImageEvidence = generateImageEvidence({
   artifactBytes: previousReleaseArtifactBytes,
-  toolingSha: freshImpactReleaseSha,
+  publicationSourceSha: freshImpactReleaseSha,
+  currentSourceSha: freshImpactReleaseSha,
   imageReleaseSha: freshImpactReleaseSha,
   workflowRunId: "31961264994",
   artifactSha256: previousReleaseArtifactSha256,
@@ -205,6 +208,125 @@ const freshAuthorizationInputs = {
   verifyImageEvidence: freshVerifyImageEvidence,
 };
 const freshAuthorization = createImageAuthorization(freshAuthorizationInputs);
+
+const producingSourceSha = "a63da17024415c2764452b86f1dcbce0af4ae9b8";
+const twoShaImageReleaseSha = "b3b477a37b50d7796ec9c3225c176f02f04023dc";
+const currentConsumingSourceSha = "a6fbcb95b6b8d968465dad6cc6315564fb21bf64";
+const twoShaWorkflowRunId = "33110140624";
+const twoShaDigests = Object.fromEntries(Object.keys(digests).map((service, index) => [service, `sha256:${String(index + 5).repeat(64)}`]));
+
+function twoShaPublicationFixture() {
+  const twoShaRecords = [
+    ["backend", "mscqr-backend", twoShaImageReleaseSha],
+    ["worker", "mscqr-worker", twoShaImageReleaseSha],
+    ["rls-executor", "mscqr-backend", `${twoShaImageReleaseSha}-rls-executor`],
+    ["rls-canary", "mscqr-backend", `${twoShaImageReleaseSha}-rls-canary`],
+  ].map(([service, repository, tag]) => ({
+    service, repository,
+    image_uri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}:${tag}`,
+    image_tag: tag,
+    image_digest: twoShaDigests[service],
+    image_ref: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}@${twoShaDigests[service]}`,
+  }));
+  const bytes = Buffer.from(`${twoShaRecords.map((record) => JSON.stringify(record)).join("\n")}\n`);
+  const artifactSha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+  const identity = buildStageBImagePublicationIdentity({
+    expectedPublicationSourceSha: producingSourceSha,
+    expectedReleaseSha: twoShaImageReleaseSha,
+    artifactBytes: bytes,
+    observed: {
+      workflowRunId: twoShaWorkflowRunId, workflowDatabaseId: "401", workflowFile: ".github/workflows/production-green-stage-b-images.yml",
+      workflowName: "Production Green Stage B Images", event: "workflow_dispatch", workflowDefinitionSha: producingSourceSha,
+      imageReleaseSha: twoShaImageReleaseSha, headBranch: "main", conclusion: "success", artifactId: "501",
+      artifactName: "production-green-stage-b-images", artifactExpired: false, artifactArchiveFilename: null,
+    },
+    observedAt,
+  });
+  return { bytes, artifactSha256, identity, records: twoShaRecords, reuseEvidence: deriveStageBImageImpactReport({ imageReleaseSha: twoShaImageReleaseSha, toolingSha: currentConsumingSourceSha }) };
+}
+
+test("real default composition preserves historical publication provenance while authorizing a63-to-a6 reuse", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-two-sha-image-reuse-"));
+  const fixture = twoShaPublicationFixture();
+  const artifactPath = path.join(directory, "stage-b-images.jsonl");
+  const identityPath = path.join(directory, "publication-identity.json");
+  const reusePath = path.join(directory, "reuse.json");
+  const evidencePath = path.join(directory, "image-evidence.json");
+  const signaturePath = path.join(directory, "image-evidence.signature.json");
+  fs.writeFileSync(artifactPath, fixture.bytes, { mode: 0o600 });
+  fs.writeFileSync(identityPath, `${JSON.stringify(fixture.identity)}\n`, { mode: 0o600 });
+  fs.writeFileSync(reusePath, `${JSON.stringify(fixture.reuseEvidence)}\n`, { mode: 0o600 });
+  const repositoryResponse = (repository) => ({ repositories: [{
+    repositoryName: repository,
+    repositoryArn: `arn:aws:ecr:eu-west-2:${STAGE_B.account}:repository/${repository}`,
+    registryId: STAGE_B.account,
+    repositoryUri: `${STAGE_B.account}.dkr.ecr.eu-west-2.amazonaws.com/${repository}`,
+    imageTagMutability: "IMMUTABLE", encryptionConfiguration: { encryptionType: "AES256" }, createdAt: observedAt,
+  }] });
+  const run = (args) => {
+    if (args[0] === "sts") return JSON.stringify({ Arn: `arn:aws:iam::${STAGE_B.account}:root` });
+    if (args[0] === "ecr" && args[1] === "describe-repositories") return JSON.stringify(repositoryResponse(args[args.indexOf("--repository-names") + 1]));
+    if (args[0] === "ecr" && args[1] === "describe-images") {
+      const repository = args[args.indexOf("--repository-name") + 1];
+      const tag = args[args.findIndex((value) => value.startsWith("imageTag="))].slice("imageTag=".length);
+      const record = fixture.records.find((candidate) => candidate.repository === repository && candidate.image_tag === tag);
+      return JSON.stringify({ imageDetails: [{ imageDigest: record.image_digest, imagePushedAt: observedAt }] });
+    }
+    throw new Error(`unexpected AWS operation: ${args.slice(0, 2).join(" ")}`);
+  };
+  try {
+    runImageEvidenceCli([
+      "--artifact", artifactPath,
+      "--publication-source-sha", producingSourceSha,
+      "--current-source-sha", currentConsumingSourceSha,
+      "--image-release-sha", twoShaImageReleaseSha,
+      "--workflow-run-id", twoShaWorkflowRunId,
+      "--artifact-sha256", fixture.artifactSha256,
+      "--publication-identity", identityPath,
+      "--publication-identity-sha256", publicationIdentitySha256(fixture.identity),
+      "--image-reuse-evidence", reusePath,
+      "--output", evidencePath,
+      "--signature-output", signaturePath,
+    ], { run, sign: () => "AQ==", observedAt, now: observedAt });
+    const evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+    const signature = JSON.parse(fs.readFileSync(signaturePath, "utf8"));
+    const authorization = createImageAuthorization({
+      sourceSha: currentConsumingSourceSha,
+      freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha },
+      imageEvidence: evidence,
+      imageEvidenceSignature: signature,
+      imageReuseEvidence: fixture.reuseEvidence,
+      now: observedAt,
+      verifyImageEvidence: ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true }),
+    });
+    assert.equal(evidence.publicationSourceSha, producingSourceSha);
+    assert.equal(evidence.currentSourceSha, currentConsumingSourceSha);
+    assert.equal(evidence.imageReleaseSha, twoShaImageReleaseSha);
+    assert.equal(evidence.publicationIdentity.workflowDefinitionSha, producingSourceSha);
+    assert.equal(evidence.publicationIdentity.imageReleaseSha, twoShaImageReleaseSha);
+    assert.equal(fixture.reuseEvidence.imageReleaseSha, twoShaImageReleaseSha);
+    assert.equal(fixture.reuseEvidence.toolingSha, currentConsumingSourceSha);
+    assert.equal(authorization.sourceSha, currentConsumingSourceSha);
+    assert.equal(authorization.imageEvidence.publicationSourceSha, producingSourceSha);
+    assert.equal(authorization.authorizationPath, "IMAGE_REUSE");
+    assert.equal(authorization.imageEvidence.images.length, 4);
+    assert.doesNotThrow(() => assertImageAuthorization(authorization, currentConsumingSourceSha, { now: observedAt, verifyImageEvidence: ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true }) }));
+
+    const base = ["--artifact", artifactPath, "--publication-source-sha", producingSourceSha, "--current-source-sha", currentConsumingSourceSha, "--image-release-sha", twoShaImageReleaseSha, "--workflow-run-id", twoShaWorkflowRunId, "--artifact-sha256", fixture.artifactSha256, "--publication-identity", identityPath, "--publication-identity-sha256", publicationIdentitySha256(fixture.identity), "--output", path.join(directory, "negative-evidence.json"), "--signature-output", path.join(directory, "negative-signature.json")];
+    assert.throws(() => runImageEvidenceCli(base, { run, sign: () => "AQ==", observedAt, now: observedAt }), /source bridge is malformed|requires canonical image-reuse compatibility evidence/);
+    assert.throws(() => runImageEvidenceCli([...base, "--image-reuse-evidence", reusePath], { run: (args) => args[0] === "ecr" && args[1] === "describe-images" ? JSON.stringify({ imageDetails: [{ imageDigest: `sha256:${"f".repeat(64)}`, imagePushedAt: observedAt }] }) : run(args), sign: () => "AQ==", observedAt, now: observedAt }), /does not match canonical artifact/);
+    assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: { ...evidence, publicationSourceSha: currentConsumingSourceSha }, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /source identities|publication identity|signature/);
+    assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: { ...evidence, imageReleaseSha: producingSourceSha }, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /source identities|publication identity|signature|image release/);
+    assert.throws(() => createImageAuthorization({ sourceSha: producingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: producingSourceSha, freshRemoteMainSha: producingSourceSha }, imageEvidence: evidence, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /source identities|protected-main/);
+    assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: evidence, imageEvidenceSignature: signature, imageReuseEvidence: { ...fixture.reuseEvidence, imageReleaseSha: producingSourceSha }, now: observedAt, verifyImageEvidence: () => true }), /independently derived|exact image-release-to-current-source pair|protected-main SHA/);
+    assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: { ...evidence, workflowRunId: "33110140625" }, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /workflow/);
+    assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: { ...evidence, canonicalArtifactSha256: "0".repeat(64) }, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /artifact/);
+    assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: { ...evidence, publicationIdentity: { ...evidence.publicationIdentity, workflowDefinitionSha: currentConsumingSourceSha } }, imageEvidenceSignature: signature, imageReuseEvidence: fixture.reuseEvidence, now: observedAt, verifyImageEvidence: () => true }), /publication identity|producing source/);
+    assert.throws(() => createImageAuthorization({ sourceSha: currentConsumingSourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: currentConsumingSourceSha, freshRemoteMainSha: currentConsumingSourceSha }, imageEvidence: evidence, imageEvidenceSignature: signature, imageReuseEvidence: { ...fixture.reuseEvidence, imageReuseCompatible: false, newImagesRequired: true }, now: observedAt, verifyImageEvidence: () => true }), /independently derived|exact publication-to-current-source pair/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("canonical 594-to-96 reuse evidence produces downstream-accepted authorization", () => {
   const authorization = produce();
@@ -244,7 +366,7 @@ test("fresh publication rejects stale or cross-boundary evidence", () => {
     imageReuseEvidence: freshImageImpactEvidence,
     now: observedAt,
     verifyImageEvidence,
-  }), /protected-main|workflow|publication|bound/);
+  }), /protected-main|workflow|publication|bound|source identities/);
   assert.throws(() => assertImageAuthorization({ ...freshAuthorization, authorizationPath: "IMAGE_REUSE", evidenceSha256: "0".repeat(64), authorizationSha256: "0".repeat(64) }, freshSourceSha, { now: observedAt, verifyImageEvidence: freshVerifyImageEvidence }), /hash|path/);
   assert.throws(() => createImageAuthorization({
     sourceSha: freshSourceSha,
@@ -266,7 +388,7 @@ test("fresh publication rejects a fully valid previous-release build", () => {
     imageReuseEvidence: freshImageImpactEvidence,
     now: observedAt,
     verifyImageEvidence: previousReleaseVerifyImageEvidence,
-  }), /protected-main|workflow|publication|release/);
+  }), /protected-main|workflow|publication|release|source identities/);
 });
 
 test("fresh publication fails closed for every required source and supply-chain binding", () => {
@@ -317,7 +439,7 @@ test("downstream rejects stale, tampered, and partial authorization envelopes", 
 
 test("canonical image evidence and reuse validators are the only producer gates", () => {
   assert.equal(imageEvidenceSha256(imageEvidence), produce().imageEvidenceSha256);
-  assert.doesNotThrow(() => assertImageEvidence(imageEvidence, { signatureArtifact: imageEvidenceSignature, toolingSha, imageReleaseSha, workflowRunId, artifactSha256, now: observedAt, verifySignature: verifyImageEvidence }));
+  assert.doesNotThrow(() => assertImageEvidence(imageEvidence, { signatureArtifact: imageEvidenceSignature, publicationSourceSha: imageReleaseSha, currentSourceSha: sourceSha, imageReleaseSha, workflowRunId, artifactSha256, now: observedAt, verifySignature: verifyImageEvidence }));
   assert.doesNotThrow(() => assertImageImpactReport({ report: imageReuseEvidence, imageReleaseSha, toolingSha: sourceSha, toolingInputTreeSha256: imageReuseEvidence.toolingInputTreeSha256, changedFiles: imageReuseEvidence.classifiedChangedFiles }));
   assert.equal(imageReuseEvidence.classificationRulesVersion, STAGE_B_IMAGE_REUSE_RULES_VERSION);
 });

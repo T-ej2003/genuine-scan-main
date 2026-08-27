@@ -15,22 +15,25 @@ image_release_sha
   -> Terraform image variables and current task-definition images
 ```
 
-The image-evidence report is schema version 3 and contains `imageReleaseSha`; it does
-not contain `toolingSha`. It carries authoritative `DescribeRepositories` evidence for
-each unique image repository, requiring `imageTagMutability=IMMUTABLE`, and the explicit
-capability `revocationModel=time-bounded-no-supersession-registry`. This is deliberate:
+The image-evidence report is schema version 4. It keeps `publicationSourceSha` (the
+historical workflow/artifact source), `currentSourceSha` (the protected source consuming
+the images), and `imageReleaseSha` as distinct fields. Those extra fields appear only for
+cross-source reuse and include the canonical compatibility-report SHA; a direct fresh
+publication proves the same identity through its existing exact workflow and release bindings.
+It carries authoritative `DescribeRepositories` evidence for each unique image repository,
+requiring `imageTagMutability=IMMUTABLE`, and the explicit capability
+`revocationModel=time-bounded-no-supersession-registry`. This is deliberate:
 there is no authenticated supersession registry in the current contract, so the report
 does not claim `superseded: false`; immediate revocation is unavailable until that
 separate capability exists. Image evidence authenticates the immutable image publication
 chain, while plan-bound artifacts authenticate the joined deployment.
 
-The publication-identity report is schema version 2 and keeps the workflow definition
-SHA separate from the image release SHA. `workflowDefinitionSha` must equal the
-protected tooling checkout that executed the workflow, while `imageReleaseSha` must
-equal the source bound to the immutable images. When those values differ, image
-authorization must include the independently derived canonical reuse report for the
-exact `imageReleaseSha -> toolingSha` pair; a valid-looking SHA or an arbitrary older
-image cannot cross this boundary.
+The publication-identity report is schema version 2 and keeps the workflow definition SHA
+separate from the current consuming source. `workflowDefinitionSha` is the immutable
+historical publication source and must never be rewritten to equal a later protected
+checkout. When a consumer differs, image authorization must include the independently
+derived canonical reuse report for the exact `imageReleaseSha -> currentSourceSha` pair;
+a valid-looking SHA or an arbitrary older image cannot cross this boundary.
 
 Image provenance uses a reviewed 24-hour validity window. Permission preflight remains
 independently plan-bound with a 60-minute validity window; the reference audit has its

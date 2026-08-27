@@ -57,7 +57,7 @@ const PHASES = Object.freeze([
   ["image-impact-classification", "scripts/aws/validate-stage-b-image-reuse.mjs"],
   ["image-workflow-dispatch", "scripts/aws/dispatch-production-green-stage-b-images.mjs"],
   ["image-artifact-verification", ".github/workflows/production-green-stage-b-image-build.yml"],
-  ["schema-v3-image-evidence", "scripts/aws/production-green-stage-b-image-evidence.mjs"],
+  ["schema-v4-image-evidence", "scripts/aws/production-green-stage-b-image-evidence.mjs"],
   ["administrator-release-oidc-trust-convergence", "scripts/aws/converge-production-release-oidc-trust.mjs"],
   ["administrator-normal-backend-activation-convergence", "scripts/aws/production-normal-backend-activation.mjs"],
   ["administrator-iam-simulation", "scripts/aws/validate-production-green-stage-b-permissions.mjs"],
@@ -124,8 +124,8 @@ const NORMAL_ACTIVATION_CAPABILITIES = Object.freeze([
 ]);
 
 const FIXED = Object.freeze([
-  ["admin-image-repositories", "schema-v3-image-evidence", "ADMINISTRATOR", "ecr:DescribeRepositories", "ADMIN_DIRECT_READ", "scripts/aws/production-green-stage-b-image-evidence.mjs"],
-  ["admin-image-records", "schema-v3-image-evidence", "ADMINISTRATOR", "ecr:DescribeImages", "ADMIN_DIRECT_READ", "scripts/aws/production-green-stage-b-image-evidence.mjs"],
+  ["admin-image-repositories", "schema-v4-image-evidence", "ADMINISTRATOR", "ecr:DescribeRepositories", "ADMIN_DIRECT_READ", "scripts/aws/production-green-stage-b-image-evidence.mjs"],
+  ["admin-image-records", "schema-v4-image-evidence", "ADMINISTRATOR", "ecr:DescribeImages", "ADMIN_DIRECT_READ", "scripts/aws/production-green-stage-b-image-evidence.mjs"],
   ["admin-role", "administrator-iam-simulation", "ADMINISTRATOR", "iam:GetRole", "ADMIN_DIRECT_READ", "scripts/aws/validate-production-green-stage-b-permissions.mjs"],
   ["admin-role-inline-list", "administrator-iam-simulation", "ADMINISTRATOR", "iam:ListRolePolicies", "ADMIN_DIRECT_READ", "scripts/aws/validate-production-green-stage-b-permissions.mjs"],
   ["admin-role-inline-read", "administrator-iam-simulation", "ADMINISTRATOR", "iam:GetRolePolicy", "ADMIN_DIRECT_READ", "scripts/aws/validate-production-green-stage-b-permissions.mjs"],
@@ -410,7 +410,7 @@ export function buildStageBDeploymentCapabilityGraph() {
       { id: "backend-health-recovery-service-deployment-details", action: "ecs:DescribeServiceDeployments" },
       { id: "backend-health-recovery-service-revision-details", action: "ecs:DescribeServiceRevisions" },
       { id: "runtime-candidate-secret-resource-policy", action: "secretsmanager:GetResourcePolicy" }], sourceScan: discoverAwsCliActions(),
-    artifactContracts: ["protected-checkout", "image-impact", "schema-v3-image-evidence", "stage-a-handoff", "tfvars-binding-report", "refresh-only", "saved-plan", "canonical-plan-json", "reference-audit", "plan-capability-manifest", "signed-permission-report"],
+    artifactContracts: ["protected-checkout", "image-impact", "schema-v4-image-evidence", "stage-a-handoff", "tfvars-binding-report", "refresh-only", "saved-plan", "canonical-plan-json", "reference-audit", "plan-capability-manifest", "signed-permission-report"],
     stateContracts: ["stage-a-exact-object-lineage-minimum-serial-sha", "stage-b-direct-key-lineage-minimum-serial-sha", "stage-b-serial-stable-plan-to-apply"],
     freshnessContracts: [{ artifact: "image-evidence", maxAgeSeconds: 86400 }, { artifact: "reference-audit", maxAgeSeconds: STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS }, { artifact: "permission-report", maxAgeSeconds: STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS }],
     configurationContracts: ["head-equals-origin-main", "clean-non-shallow-checkout", "direct-production-s3-key", "strict-backend-metadata", "tf-workspace-default", "no-workspace-select-or-migration", "checker-user-mfa-live-trust-to-independent-role-chain", "release-gate-exact-production-environment-oidc-to-release-deployer", "structural-normal-resource-universe-append-only-retained-history", "no-service-database-alb-dns-traffic-or-secret-value-change"],

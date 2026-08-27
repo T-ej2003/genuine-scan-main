@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from "./production-green-stage-b-contract.mjs";
+import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson, canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { APPROVED_PREFLIGHT_GENERATOR_ARNS } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_PLAN_PROFILES } from "./stage-b-plan-approval-contract.mjs";
 import { STAGE_B_IMPORTED_BACKEND_ROLLOVER_ACTIONS, assertStageBImportedBackendRolloverActions, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
@@ -14,9 +14,10 @@ import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPriv
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { createRootAttestationKmsVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
 import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
+import { assertStageBImageReuseResult, deriveStageBImageImpactReport } from "./validate-stage-b-image-reuse.mjs";
 
-export const IMAGE_EVIDENCE_SCHEMA_VERSION = 3;
-export const IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION = 3;
+export const IMAGE_EVIDENCE_SCHEMA_VERSION = 4;
+export const IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION = 4;
 export const IMAGE_EVIDENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const IMAGE_EVIDENCE_CLOCK_SKEW_MS = 60 * 1000;
 export const IMAGE_EVIDENCE_VALIDITY_MODEL = "immutable-image-provenance-24h";
@@ -150,6 +151,11 @@ function requireImageReleaseSha(value) {
   return value;
 }
 
+function requireSourceSha(value, label) {
+  if (!/^[a-f0-9]{40}$/.test(String(value || ""))) throw new Error(`${label} must be a full 40-character SHA.`);
+  return value;
+}
+
 function requireDigest(value, label) {
   if (!/^sha256:[a-f0-9]{64}$/.test(String(value || ""))) throw new Error(`${label} must be an immutable SHA256 digest.`);
   return value;
@@ -263,14 +269,38 @@ export function readImageRepositoryEvidence(repository, { observedAt = new Date(
   }, repository, observedAt);
 }
 
-export function generateImageEvidence({ artifactBytes, toolingSha, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity, verifierCallerArn, observedAt = new Date().toISOString(), describe = describeImage, repositories }) {
-  if (!/^[a-f0-9]{40}$/.test(String(toolingSha || ""))) throw new Error("Image evidence tooling SHA must be a full 40-character SHA.");
+function assertImageEvidenceSourceIdentity(report, { publicationSourceSha, currentSourceSha, imageReleaseSha = report?.imageReleaseSha, allowUnboundReuseEvidence = false } = {}) {
+  requireSourceSha(publicationSourceSha, "Image evidence publication source SHA");
+  requireSourceSha(currentSourceSha, "Image evidence current source SHA");
+  requireImageReleaseSha(imageReleaseSha);
+  const directPublication = publicationSourceSha === currentSourceSha && imageReleaseSha === currentSourceSha;
+  if (directPublication
+    ? report?.publicationSourceSha !== undefined || report?.currentSourceSha !== undefined || report?.imageReuseEvidenceSha256 !== undefined
+    : report?.publicationSourceSha !== publicationSourceSha || report?.currentSourceSha !== currentSourceSha) throw new Error("Image evidence producing source and current consumer source identities are not the expected pair.");
+  if (report.publicationIdentity?.workflowDefinitionSha !== publicationSourceSha || report.publicationIdentity?.imageReleaseSha !== imageReleaseSha) throw new Error("Image evidence publication identity is not bound to its producing source.");
+  if (directPublication ? report.imageReuseEvidenceSha256 !== undefined : !allowUnboundReuseEvidence && !/^[a-f0-9]{64}$/.test(report.imageReuseEvidenceSha256 || "")) throw new Error("Cross-source image evidence requires canonical image-reuse compatibility evidence.");
+  return directPublication;
+}
+
+export function assertImageEvidenceReuseBridge(report, { imageReuseEvidence, currentSourceSha } = {}) {
+  const directPublication = assertImageEvidenceSourceIdentity(report, { publicationSourceSha: report?.publicationSourceSha || report?.imageReleaseSha, currentSourceSha, imageReleaseSha: report?.imageReleaseSha });
+  if (directPublication) return true;
+  if (!imageReuseEvidence || typeof imageReuseEvidence !== "object" || Array.isArray(imageReuseEvidence)) throw new Error("Cross-source image evidence requires canonical image-reuse compatibility evidence.");
+  const derived = deriveStageBImageImpactReport({ imageReleaseSha: report.imageReleaseSha, toolingSha: report.currentSourceSha });
+  if (canonicalSha256(imageReuseEvidence) !== canonicalSha256(derived) || imageReuseEvidence.imageReleaseSha !== report.imageReleaseSha || imageReuseEvidence.toolingSha !== report.currentSourceSha || report.imageReuseEvidenceSha256 !== canonicalSha256(imageReuseEvidence)) throw new Error("Image-reuse compatibility evidence is not bound to the exact image-release-to-current-source pair.");
+  assertStageBImageReuseResult({ ...derived, imageBuildInputsChanged: derived.newImagesRequired });
+  return true;
+}
+
+export function generateImageEvidence({ artifactBytes, publicationSourceSha, currentSourceSha, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity, imageReuseEvidence, verifierCallerArn, observedAt = new Date().toISOString(), describe = describeImage, repositories }) {
+  requireSourceSha(publicationSourceSha, "Image evidence publication source SHA");
+  requireSourceSha(currentSourceSha, "Image evidence current source SHA");
   requireImageReleaseSha(imageReleaseSha);
   if (!/^\d+$/.test(String(workflowRunId || ""))) throw new Error("Canonical workflow run ID is required.");
   requireVerifier(verifierCallerArn);
   const observedAtMs = Date.parse(observedAt);
   if (!Number.isFinite(observedAtMs)) throw new Error("Image evidence observation timestamp is malformed.");
-  assertStageBImagePublicationIdentity(publicationIdentity, { expectedToolingSha: toolingSha, expectedReleaseSha: imageReleaseSha, canonicalArtifactSha256: artifactSha256 });
+  assertStageBImagePublicationIdentity(publicationIdentity, { expectedPublicationSourceSha: publicationSourceSha, expectedReleaseSha: imageReleaseSha, canonicalArtifactSha256: artifactSha256 });
   if (String(publicationIdentity.workflowRunId) !== String(workflowRunId)) throw new Error("Image evidence publication identity is bound to a different workflow run.");
   const artifactImages = parseArtifact(artifactBytes, { imageReleaseSha, artifactSha256 });
   const repositoryEvidence = requireRepositoryEvidence(repositories, [...new Set(artifactImages.map(({ repository }) => repository))], observedAt);
@@ -279,7 +309,7 @@ export function generateImageEvidence({ artifactBytes, toolingSha, imageReleaseS
     if (live.digest !== image.digest) throw new Error(`ECR digest does not match canonical artifact for ${image.service}.`);
     return { ...image, ...live };
   }).sort((a, b) => a.service.localeCompare(b.service));
-  return {
+  const report = {
     schemaVersion: IMAGE_EVIDENCE_SCHEMA_VERSION,
     imageReleaseSha,
     workflowRunId: String(workflowRunId),
@@ -294,6 +324,13 @@ export function generateImageEvidence({ artifactBytes, toolingSha, imageReleaseS
     repositories: repositoryEvidence,
     images,
   };
+  if (publicationSourceSha !== currentSourceSha || imageReleaseSha !== currentSourceSha) {
+    report.publicationSourceSha = publicationSourceSha;
+    report.currentSourceSha = currentSourceSha;
+    report.imageReuseEvidenceSha256 = imageReuseEvidence ? canonicalSha256(imageReuseEvidence) : null;
+  }
+  assertImageEvidenceSourceIdentity(report, { publicationSourceSha, currentSourceSha, imageReleaseSha, allowUnboundReuseEvidence: true });
+  return report;
 }
 
 export function signImageEvidence(report, { now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, sign } = {}) {
@@ -309,11 +346,15 @@ export function signImageEvidence(report, { now = new Date().toISOString(), keyA
   return { schemaVersion: IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION, keyId: keyArn, keyArn, signingAlgorithm, reportSha256, imageReleaseSha: report.imageReleaseSha, workflowRunId: report.workflowRunId, publicationIdentitySha256: report.publicationIdentitySha256, canonicalArtifactSha256: report.canonicalArtifactSha256, signatureBase64, signedAt: now };
 }
 
-export function verifyImageEvidenceSignature({ report, toolingSha, signatureArtifact, now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, run, verify }) {
+export function verifyImageEvidenceSignature({ report, publicationSourceSha, currentSourceSha, signatureArtifact, now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, run, verify }) {
   rejectLegacyProvenanceClaims(report);
   if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION || report.revocationModel !== IMAGE_EVIDENCE_REVOCATION_MODEL) throw new Error("Image evidence revocation model or schema is unsupported.");
   requireRepositoryEvidence(report.repositories, [...new Set((report.images || []).map(({ repository }) => repository))], report.observedAt);
-  assertStageBImagePublicationIdentity(report?.publicationIdentity, { expectedToolingSha: toolingSha || report?.publicationIdentity?.workflowDefinitionSha, expectedReleaseSha: report?.imageReleaseSha, canonicalArtifactSha256: report?.canonicalArtifactSha256 });
+  const expectedPublicationSourceSha = publicationSourceSha || report?.publicationSourceSha || report?.imageReleaseSha;
+  const expectedCurrentSourceSha = currentSourceSha || report?.currentSourceSha || report?.imageReleaseSha;
+  assertImageEvidenceSourceIdentity(report, { publicationSourceSha: expectedPublicationSourceSha, currentSourceSha: expectedCurrentSourceSha });
+  assertStageBImagePublicationIdentity(report?.publicationIdentity, { expectedPublicationSourceSha, expectedReleaseSha: report?.imageReleaseSha, canonicalArtifactSha256: report?.canonicalArtifactSha256 });
+  if (String(report?.workflowRunId) !== String(report?.publicationIdentity?.workflowRunId)) throw new Error("Image evidence workflow run does not match historical publication identity.");
   if (publicationIdentitySha256(report.publicationIdentity) !== report.publicationIdentitySha256) throw new Error("Image evidence publication identity hash is wrong.");
   if (!signatureArtifact || signatureArtifact.schemaVersion !== IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION || signatureArtifact.keyId !== keyArn || signatureArtifact.keyArn !== keyArn || signatureArtifact.signingAlgorithm !== signingAlgorithm || signatureArtifact.imageReleaseSha !== report?.imageReleaseSha || String(signatureArtifact.workflowRunId) !== String(report?.workflowRunId) || signatureArtifact.publicationIdentitySha256 !== report?.publicationIdentitySha256 || signatureArtifact.canonicalArtifactSha256 !== report?.canonicalArtifactSha256) throw new Error("Image evidence signature identity or algorithm is wrong.");
   const reportSha256 = imageEvidenceSha256(report);
@@ -327,9 +368,11 @@ export function verifyImageEvidenceSignature({ report, toolingSha, signatureArti
   return true;
 }
 
-export function assertImageEvidence(report, { signatureArtifact, verifySignature = verifyImageEvidenceSignature, toolingSha, imageReleaseSha, workflowRunId, artifactSha256, now = new Date().toISOString() } = {}) {
+export function assertImageEvidence(report, { signatureArtifact, verifySignature = verifyImageEvidenceSignature, publicationSourceSha, currentSourceSha, imageReleaseSha, workflowRunId, artifactSha256, now = new Date().toISOString() } = {}) {
   rejectLegacyProvenanceClaims(report);
-  assertStageBImagePublicationIdentity(report?.publicationIdentity, { expectedToolingSha: toolingSha, expectedReleaseSha: imageReleaseSha, canonicalArtifactSha256: artifactSha256 });
+  assertImageEvidenceSourceIdentity(report, { publicationSourceSha, currentSourceSha, imageReleaseSha });
+  assertStageBImagePublicationIdentity(report?.publicationIdentity, { expectedPublicationSourceSha: publicationSourceSha, expectedReleaseSha: imageReleaseSha, canonicalArtifactSha256: artifactSha256 });
+  if (String(report?.workflowRunId) !== String(report?.publicationIdentity?.workflowRunId)) throw new Error("Image evidence workflow run does not match historical publication identity.");
   if (publicationIdentitySha256(report.publicationIdentity) !== report.publicationIdentitySha256) throw new Error("Image evidence publication identity hash is wrong.");
   if (!verifySignature({ report, signatureArtifact, now })) throw new Error("Authenticated image evidence signature verification failed.");
   if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION || report.imageReleaseSha !== imageReleaseSha || String(report.workflowRunId) !== String(workflowRunId) || report.canonicalArtifactSha256 !== artifactSha256) throw new Error("Image evidence is bound to a different image release, workflow, or canonical artifact.");
@@ -350,19 +393,21 @@ export function assertImageEvidence(report, { signatureArtifact, verifySignature
 function requiredOption(argv, option) { const index = argv.indexOf(option); const value = index === -1 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${option} is required.`); return value; }
 
 export function runCli(argv = process.argv.slice(2), deps = {}) {
-  const artifactPath = requiredOption(argv, "--artifact"); const toolingSha = requiredOption(argv, "--tooling-sha"); const imageReleaseSha = requiredOption(argv, "--image-release-sha"); const workflowRunId = requiredOption(argv, "--workflow-run-id"); const artifactSha256 = requiredOption(argv, "--artifact-sha256"); const publicationIdentityPath = assertStageBArtifactPath({ artifactPath: requiredOption(argv, "--publication-identity"), repositoryRoot, label: "Stage B publication identity", allowExisting: true }); const publicationIdentitySha256Value = requiredOption(argv, "--publication-identity-sha256"); const outputPath = assertStageBArtifactPath({ artifactPath: requiredOption(argv, "--output"), repositoryRoot, label: "Stage B image evidence", allowExisting: false }); const signaturePath = assertStageBArtifactPath({ artifactPath: requiredOption(argv, "--signature-output"), repositoryRoot, label: "Stage B image-evidence signature", allowExisting: false });
+  const artifactPath = requiredOption(argv, "--artifact"); const publicationSourceSha = requiredOption(argv, "--publication-source-sha"); const currentSourceSha = requiredOption(argv, "--current-source-sha"); const imageReleaseSha = requiredOption(argv, "--image-release-sha"); const workflowRunId = requiredOption(argv, "--workflow-run-id"); const artifactSha256 = requiredOption(argv, "--artifact-sha256"); const publicationIdentityPath = assertStageBArtifactPath({ artifactPath: requiredOption(argv, "--publication-identity"), repositoryRoot, label: "Stage B publication identity", allowExisting: true }); const publicationIdentitySha256Value = requiredOption(argv, "--publication-identity-sha256"); const reuseEvidencePath = argv.includes("--image-reuse-evidence") ? assertStageBArtifactPath({ artifactPath: requiredOption(argv, "--image-reuse-evidence"), repositoryRoot, label: "Stage B image-reuse evidence", allowExisting: true }) : undefined; const outputPath = assertStageBArtifactPath({ artifactPath: requiredOption(argv, "--output"), repositoryRoot, label: "Stage B image evidence", allowExisting: false }); const signaturePath = assertStageBArtifactPath({ artifactPath: requiredOption(argv, "--signature-output"), repositoryRoot, label: "Stage B image-evidence signature", allowExisting: false });
   if (path.dirname(outputPath) !== path.dirname(signaturePath)) throw new Error("Stage B image evidence and signature must use one private directory.");
   ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot, create: true });
   const rootRun = deps.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default" });
   const verifierCallerArn = deps.getCaller ? deps.getCaller() : JSON.parse(rootRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn;
   const observedAt = deps.observedAt || new Date().toISOString();
   const artifactBytes = fs.readFileSync(artifactPath);
-  const publicationIdentity = readStageBImagePublicationIdentity(publicationIdentityPath, { identitySha256: publicationIdentitySha256Value, expectedToolingSha: toolingSha, expectedReleaseSha: imageReleaseSha, canonicalArtifactBytes: artifactBytes });
+  const publicationIdentity = readStageBImagePublicationIdentity(publicationIdentityPath, { identitySha256: publicationIdentitySha256Value, expectedPublicationSourceSha: publicationSourceSha, expectedReleaseSha: imageReleaseSha, canonicalArtifactBytes: artifactBytes });
+  const imageReuseEvidence = reuseEvidencePath ? JSON.parse(fs.readFileSync(reuseEvidencePath, "utf8")) : undefined;
   const rawImageReader = describeImages(rootRun);
   const imageReader = deps.describe || ((repository, tag) => describeImage(repository, tag, rawImageReader));
   const repositoryReader = deps.describeRepository || describeRepositories(rootRun);
   const repositories = [...new Set(Object.values(SERVICES).map(({ repository }) => repository))].map((repository) => readImageRepositoryEvidence(repository, { observedAt, describe: repositoryReader }));
-  const report = generateImageEvidence({ artifactBytes, toolingSha, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity, verifierCallerArn, describe: imageReader, observedAt, repositories });
+  const report = generateImageEvidence({ artifactBytes, publicationSourceSha, currentSourceSha, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity, imageReuseEvidence, verifierCallerArn, describe: imageReader, observedAt, repositories });
+  assertImageEvidenceReuseBridge(report, { imageReuseEvidence, currentSourceSha });
   const signer = deps.sign || createRootAttestationKmsSigner({ run: rootRun });
   const signature = signImageEvidence(report, { sign: signer, now: deps.now });
   writeStageBPrivateFilesAtomic({ repositoryRoot, files: [

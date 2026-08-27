@@ -31,12 +31,12 @@ export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = d
   const artifactBytes = Buffer.from(`${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
   const artifactSha256 = crypto.createHash("sha256").update(artifactBytes).digest("hex");
   const publicationIdentity = buildStageBImagePublicationIdentity({
-    expectedToolingSha: sourceSha,
+    expectedPublicationSourceSha: imageReleaseSha,
     expectedReleaseSha: imageReleaseSha,
     artifactBytes,
     observed: {
       workflowRunId, workflowDatabaseId: "401", workflowFile: ".github/workflows/production-green-stage-b-images.yml",
-      workflowName: "Production Green Stage B Images", event: "workflow_dispatch", workflowDefinitionSha: sourceSha, imageReleaseSha,
+      workflowName: "Production Green Stage B Images", event: "workflow_dispatch", workflowDefinitionSha: imageReleaseSha, imageReleaseSha,
       headBranch: "main", conclusion: "success", artifactId: "501", artifactName: "production-green-stage-b-images",
       artifactExpired: false, artifactArchiveFilename: null,
     },
@@ -49,15 +49,16 @@ export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = d
     repositoryUri: `${STAGE_B.account}.dkr.ecr.eu-west-2.amazonaws.com/${repository}`,
     imageTagMutability: "IMMUTABLE", encryptionConfiguration: { encryptionType: "AES256" }, createdAt: observedAt, observedAt,
   }));
+  const imageReuseEvidence = deriveStageBImageImpactReport({ imageReleaseSha: impactImageReleaseSha, toolingSha: sourceSha });
   const imageEvidence = generateImageEvidence({
-    artifactBytes, toolingSha: sourceSha, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity,
+    artifactBytes, publicationSourceSha: imageReleaseSha, currentSourceSha: sourceSha, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity,
+    imageReuseEvidence: imageReleaseSha === sourceSha ? undefined : imageReuseEvidence,
     verifierCallerArn: `arn:aws:iam::${STAGE_B.account}:root`, observedAt,
     describe: (repository, tag) => ({ digest: records.find((record) => record.repository === repository && record.image_tag === tag).image_digest, imagePushedAt: observedAt }),
     repositories,
   });
   const imageEvidenceSignature = signImageEvidence(imageEvidence, { now: observedAt, sign: () => "AQ==" });
   const verifyImageEvidence = ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true });
-  const imageReuseEvidence = deriveStageBImageImpactReport({ imageReleaseSha: impactImageReleaseSha, toolingSha: sourceSha });
   const authorization = createImageAuthorization({ sourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: sourceSha, freshRemoteMainSha: sourceSha }, imageEvidence, imageEvidenceSignature, imageReuseEvidence, now: observedAt, verifyImageEvidence });
   return { authorization, now: observedAt, verifyImageEvidence, imageReleaseSha, workflowRunId, digests: imageDigests };
 }
