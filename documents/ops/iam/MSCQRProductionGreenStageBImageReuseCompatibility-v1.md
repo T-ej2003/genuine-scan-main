@@ -1,23 +1,61 @@
 # Stage B image-reuse compatibility
 
-The reviewed comparison is anchored by the two-SHA image boundary:
+The machine-readable JSON in this directory is the canonical reviewed artifact.
+This Markdown file documents that artifact for human review only; it is not an
+authorization input or provenance authority.
+
+The reviewed comparison is anchored by the canonical image-reuse boundary:
 
 ```text
-image release: 29bf92a14d5e832575009bd76b16886feff62cbd
-tooling:       a37fe2559f15094494122825a7d7365ca1218120
-report identity: tooling-input-tree-sha256
-tooling tree:  a2bcf00ea3bbfa636e41843ffb1f17c744fc077c055c772c30aecb2322395802
+image release: b3b477a37b50d7796ec9c3225c176f02f04023dc
+comparison base: b3b477a37b50d7796ec9c3225c176f02f04023dc
+tooling revision: 6bc78143cc1c11c645b87a9e1c4ca3b875b1aabf
+tooling input tree: f4edaed5593336f2bf67051735122838cf3df63cc4eb21dbcfdb5429503b2fe8
+rules version: stage-b-image-reuse-v4
+image reuse compatible: true
+image build inputs changed: false
 ```
 
 The canonical report classifies the protected workflow change as
 `trustedToolingOnly` only after proving that the exact release publication step is
 unchanged, the Dockerfile/build context/package installation remain under
 `release-source`, and signing/verification helpers execute from the protected tooling
-checkout. The immutable release source remains `29bf…`; the trusted tooling source is
+checkout. The immutable release source remains `b3b477a37b50d7796ec9c3225c176f02f04023dc`;
+the trusted tooling source is
 separate. All other changed paths must still classify as non-image-affecting, and any
 application, Dockerfile, dependency, build-argument, or unknown change remains
 image-affecting or fail-closed. `imageAffectingFiles` is empty and
 `imageBuildInputsChanged` is false only for this authenticated boundary.
+
+The canonical changed-file classification is:
+
+| file | category | imageAffecting |
+| --- | --- | --- |
+| documents/ops/iam/MSCQRProductionGreenStageBArtifactContracts-v1.json | documentationOnly | false |
+| documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json | documentationOnly | false |
+| documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.md | documentationOnly | false |
+| documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json | documentationOnly | false |
+| documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_TWO_SHA_IDENTITY.md | documentationOnly | false |
+| scripts/apply-production-green-stage-b.mjs | toolingOnly | false |
+| scripts/aws/dispatch-production-green-stage-b-images.mjs | toolingOnly | false |
+| scripts/aws/generate-production-green-stage-b-capability-graph.mjs | toolingOnly | false |
+| scripts/aws/generate-production-green-stage-b-tfvars.mjs | toolingOnly | false |
+| scripts/aws/production-cutover-control-plane.mjs | toolingOnly | false |
+| scripts/aws/production-green-stage-b-image-evidence.mjs | toolingOnly | false |
+| scripts/aws/production-image-authorization.mjs | toolingOnly | false |
+| scripts/aws/production-release-dispatch-contract.mjs | toolingOnly | false |
+| scripts/aws/stage-b-artifact-contract.mjs | toolingOnly | false |
+| scripts/aws/stage-b-image-publication-identity.mjs | toolingOnly | false |
+| scripts/aws/validate-stage-b-image-reuse.mjs | toolingOnly | false |
+| scripts/tests/fixtures/canonical-image-authorization.mjs | testOnly | false |
+| scripts/tests/production-green-stage-b-deployment-identity.test.mjs | testOnly | false |
+| scripts/tests/production-green-stage-b-image-dispatch.test.mjs | testOnly | false |
+| scripts/tests/production-green-stage-b-image-evidence.test.mjs | testOnly | false |
+| scripts/tests/production-green-stage-b-image-impact.test.mjs | testOnly | false |
+| scripts/tests/production-green-stage-b-permission-preflight.test.mjs | testOnly | false |
+| scripts/tests/production-green-stage-b-tfvars-generator.test.mjs | testOnly | false |
+| scripts/tests/production-image-authorization.test.mjs | testOnly | false |
+| scripts/tests/stage-b-artifact-contract.test.mjs | testOnly | false |
 
 The report contains `comparisonBaseSha` for the image release, the complete classified
 diff, and a SHA256 of the tooling input tree with the JSON and Markdown evidence excluded.
@@ -34,12 +72,11 @@ The fingerprint also covers every `build-and-attest` step through immutable-imag
 publication; only the two explicitly named trusted-tooling checkout steps are excluded.
 An unreviewed pre-publication step or source mutation therefore fails closed.
 Runtime validation
-recomputes that fingerprint and requires the release and protected-tooling values to match. The
-production wrapper separately authenticates the exact pair by requiring
-`HEAD == tooling_sha == origin/main`; CI review mode validates a proposed tree without
-claiming it is protected main. Any future image-build input change invalidates the report
-and requires a new exact-SHA image publication. A stale report for another release SHA
-cannot authorize this release.
+recomputes that fingerprint and requires the release and protected-tooling values to match.
+The production validator separately authenticates the protected checkout and the exact
+tooling-input tree represented above. Any future image-build input change invalidates the
+report and requires a new exact-SHA image publication. A stale report for another release
+SHA cannot authorize this release.
 
 ## Publication identity and tag namespaces
 
