@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertSignedRuntimeDependencyInventory, buildLegacyExecutionRuntimePolicy, ecsTaskTrustSha256, runtimeCandidateIdentity, RUNTIME_CONSUMABILITY } from "./production-ecs-runtime-consumability.mjs";
@@ -9,6 +7,7 @@ import { canonicalJson, canonicalSha256 } from "./stage-b-task-definition-recove
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
+import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ROLE_NAME = "mscqr-ecs-execution-role";
@@ -122,14 +121,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
   const execute = argv.includes("--execute");
   const authorization = execute ? read(required(argv, "--authorization"), required(argv, "--authorization-sha256"), "Production ECS runtime policy convergence authorization") : undefined;
   const run = deps.run || createAwsCliAdapter(deps.execFileSync);
-  const verifyInventory = deps.verifyInventory || (({ digest, signature, keyArn, signingAlgorithm }) => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-runtime-inventory-verify-"));
-    try {
-      const digestFile = path.join(directory, "digest"); const signatureFile = path.join(directory, "signature");
-      fs.writeFileSync(digestFile, digest, { mode: 0o600, flag: "wx" }); fs.writeFileSync(signatureFile, signature, { mode: 0o600, flag: "wx" });
-      return run(["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestFile}`, "--message-type", "DIGEST", "--signature", `fileb://${signatureFile}`, "--signing-algorithm", signingAlgorithm]).SignatureValid === true;
-    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
-  });
+  const verifyInventory = deps.verifyInventory || createRootAttestationKmsVerifier({ run });
   return convergeProductionEcsRuntimePolicy({ sourceSha, candidate, candidateFileSha256, runtimeInventoryEnvelope, verifyInventory, authorization, execute, aws: run, protectedMain: deps.protectedMain });
 }
 

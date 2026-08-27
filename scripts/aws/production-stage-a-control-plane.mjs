@@ -128,6 +128,20 @@ export const STAGE_A_ROOT_DROP_PROVIDER_READ_ACTIONS = Object.freeze([
   "kms:ListResourceTags",
 ]);
 
+export function buildStageAApprovalKeyPolicy() {
+  const checkerArn = `arn:aws:iam::368992683803:role/${STAGE_A_CHECKER_ROLE_TRUST.name}`;
+  return { Version: "2012-10-17", Statement: [
+    { Sid: "AccountAdministration", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:root" }, Action: "kms:*", Resource: "*" },
+    { Sid: "IndependentCheckerSigns", Effect: "Allow", Principal: { AWS: checkerArn }, Action: ["kms:GetPublicKey", "kms:Sign", "kms:Verify"], Resource: "*" },
+    { Sid: "DenyNonCheckerApprovalSigning", Effect: "Deny", Principal: "*", Action: "kms:Sign", Resource: "*", Condition: { StringNotEquals: { "aws:PrincipalArn": checkerArn } } },
+  ] };
+}
+
+export function assertStageAApprovalKeyPolicyDocument(document) {
+  if (stablePolicyJson(document) !== stablePolicyJson(buildStageAApprovalKeyPolicy())) throw new Error("Stage A approval key policy is not checker-sign-exclusive.");
+  return true;
+}
+
 export function buildStageARootDropKeyPolicy({ releaseRoleArn = STAGE_A_ROOT_DROP_RELEASE_ROLE_ARN } = {}) {
   return {
     Version: "2012-10-17",

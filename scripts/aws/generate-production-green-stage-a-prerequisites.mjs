@@ -6,7 +6,7 @@ import { TextDecoder } from "node:util";
 import { fileURLToPath } from "node:url";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
-import { assertStageARootDropKeyPolicyDocument, normalizeStageACheckerPrincipalAws, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "./production-stage-a-control-plane.mjs";
+import { assertStageAApprovalKeyPolicyDocument, assertStageARootDropKeyPolicyDocument, normalizeStageACheckerPrincipalAws, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "./production-stage-a-control-plane.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
@@ -195,7 +195,9 @@ function stageAValues(state, options = {}) {
     if (!new RegExp(`^arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/[a-f0-9-]{36}$`).test(rootDropKey.arn || "") || rootDropKey.key_usage !== "SIGN_VERIFY" || rootDropKey.customer_master_key_spec !== "RSA_3072" || rootDropAlias.arn !== STAGE_B.rootDropKmsKeyArn || rootDropAlias.target_key_arn !== rootDropKey.arn) throw new Error("Stage A root-drop key and alias identities are wrong.");
     assertStageARootDropKeyPolicyDocument(parsePolicy(rootDropKey.policy, "Stage A root-drop key"));
   }
-  if (oneResource(state, "aws_kms_key", "approval").arn !== STAGE_B.approvalKmsKeyArn || oneResource(state, "aws_secretsmanager_secret", "approval").arn !== STAGE_B.approvalSecretArn) throw new Error("Stage A approval resource identities are wrong.");
+  const approvalKey = oneResource(state, "aws_kms_key", "approval");
+  if (approvalKey.arn !== STAGE_B.approvalKmsKeyArn || oneResource(state, "aws_secretsmanager_secret", "approval").arn !== STAGE_B.approvalSecretArn) throw new Error("Stage A approval resource identities are wrong.");
+  assertStageAApprovalKeyPolicyDocument(parsePolicy(approvalKey.policy, "Stage A approval key"));
   assertExactPolicy(parsePolicy(oneResource(state, "aws_iam_role", "executor").assume_role_policy, "Stage A executor trust"), { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Service: "ecs-tasks.amazonaws.com" }, Action: "sts:AssumeRole" }] }, "Stage A executor trust");
   assertExactPolicy(parsePolicy(oneResource(state, "aws_iam_role", "broker").assume_role_policy, "Stage A broker trust"), { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Service: "lambda.amazonaws.com" }, Action: "sts:AssumeRole" }] }, "Stage A broker trust");
   const checkerPolicy = oneResource(state, "aws_iam_role_policy", "checker_assume_target");

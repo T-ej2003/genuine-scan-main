@@ -157,8 +157,11 @@ test("Stage A Terraform changes are classified as infrastructure-only without im
 });
 
 test("Terraform classification stays bounded and runtime image behavior remains fail-closed", () => {
-  const stageB = "infra/aws/terraform/production-green-stage-b/main.tf";
-  assert.equal(classifyStageBImageReusePath(stageB).category, "terraformOnly");
+  for (const file of [
+    "infra/aws/terraform/production-green-stage-b/main.tf",
+    "infra/aws/terraform/production-green-stage-b-image-publisher/main.tf",
+    "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf",
+  ]) assert.equal(classifyStageBImageReusePath(file).category, "terraformOnly");
   assert.equal(classifyStageBImageReusePath("infra/aws/terraform/unrelated/main.tf").category, "unknown");
 
   const backend = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ["backend/src/app.ts"] });

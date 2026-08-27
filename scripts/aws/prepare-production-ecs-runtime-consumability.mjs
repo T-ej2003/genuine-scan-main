@@ -15,6 +15,8 @@ import { readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./sta
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
+import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? null : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
@@ -46,16 +48,8 @@ function withSignatureFiles(callback) {
   finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 
-const signer = (run, directory) => ({ digest, keyArn, signingAlgorithm }) => {
-  const digestFile = path.join(directory, "digest");
-  fs.writeFileSync(digestFile, digest, { mode: 0o600, flag: "wx" });
-  return JSON.parse(run(["kms", "sign", "--key-id", keyArn, "--message", `fileb://${digestFile}`, "--message-type", "DIGEST", "--signing-algorithm", signingAlgorithm])).Signature;
-};
-const verifier = (run, directory) => ({ digest, signature, keyArn, signingAlgorithm }) => {
-  const digestFile = path.join(directory, "verify-digest"); const signatureFile = path.join(directory, "verify-signature");
-  fs.writeFileSync(digestFile, digest, { mode: 0o600, flag: "wx" }); fs.writeFileSync(signatureFile, signature, { mode: 0o600, flag: "wx" });
-  return JSON.parse(run(["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestFile}`, "--message-type", "DIGEST", "--signature", `fileb://${signatureFile}`, "--signing-algorithm", signingAlgorithm])).SignatureValid === true;
-};
+const signer = (run) => createRootAttestationKmsSigner({ run });
+const verifier = (run) => createRootAttestationKmsVerifier({ run });
 const persist = (outputFile, value, label) => {
   const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
   writeStageBPrivateFilesAtomic({ repositoryRoot: root, overwrite: false, files: [{ filePath: outputFile, bytes, label }] });

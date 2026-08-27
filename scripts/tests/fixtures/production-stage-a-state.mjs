@@ -1,5 +1,5 @@
 import { STAGE_B } from "../../aws/production-green-stage-b-contract.mjs";
-import { STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "../../aws/production-stage-a-control-plane.mjs";
+import { buildStageAApprovalKeyPolicy, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "../../aws/production-stage-a-control-plane.mjs";
 
 export const STAGE_A_LINEAGE = "02afb75a-f902-ab8a-f4c1-751d4aef7837";
 export const STAGE_A_STATE_OBJECT = "mscqr/production/rls-green/stage-a/terraform.tfstate";
@@ -36,7 +36,7 @@ export function productionStageAState({ serial = 42, endpointSecurityGroupId = "
       resource("aws_iam_role", "executor", { arn: STAGE_B.executorRoleArn, assume_role_policy: policy({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Service: "ecs-tasks.amazonaws.com" }, Action: "sts:AssumeRole" }] }) }),
       resource("aws_iam_role", "broker", { arn: STAGE_B.brokerRoleArn, assume_role_policy: policy({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Service: "lambda.amazonaws.com" }, Action: "sts:AssumeRole" }] }) }),
       resource("aws_iam_role", "checker", { arn: STAGE_B.checkerRoleArn, assume_role_policy: policy({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: STAGE_A_CHECKER_ROLE_TRUST.principal }, Action: STAGE_A_CHECKER_ROLE_TRUST.action }] }) }),
-      resource("aws_kms_key", "approval", { arn: STAGE_B.approvalKmsKeyArn }),
+      resource("aws_kms_key", "approval", { arn: STAGE_B.approvalKmsKeyArn, policy: policy(buildStageAApprovalKeyPolicy()) }),
       resource("aws_kms_key", "root_drop", { arn: "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111", key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072", policy: policy({ Version: "2012-10-17", Statement: [
         { Sid: "AccountAdministration", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:root" }, Action: "kms:*", Resource: "*" },
         { Sid: "DenyNonRootRootDropSigning", Effect: "Deny", Principal: "*", Action: ["kms:Sign", "kms:Verify"], Resource: "*", Condition: { StringNotEquals: { "aws:PrincipalArn": "arn:aws:iam::368992683803:root" } } },

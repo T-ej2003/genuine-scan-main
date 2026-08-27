@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRecoveryAttestation, publishRecoveryAttestation, signRecoveryAttestation, STAGE_B_PARTIAL_APPLY_RECOVERY_CALLER, STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN, STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM } from "./stage-b-partial-apply-recovery-contract.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const readOption = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
@@ -21,10 +22,7 @@ const assertInput = (input) => {
     return { ...item, path: path.resolve(item.path) };
   }) };
 };
-const kmsSign = (run) => ({ digest }) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-recovery-kms-")); const filePath = path.join(dir, "digest");
-  try { fs.writeFileSync(filePath, digest, { mode: 0o600, flag: "wx" }); return JSON.parse(run(["kms", "sign", "--key-id", STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN, "--message", `fileb://${filePath}`, "--message-type", "DIGEST", "--signing-algorithm", STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM, "--output", "json"])).Signature; } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-};
+const kmsSign = (run) => createRootAttestationKmsSigner({ run });
 const caller = (run) => JSON.parse(run(["sts", "get-caller-identity", "--output", "json"])).Arn;
 
 export function produceRecoveryAttestation({ inputPath, reportPath, signaturePath, getCaller = caller, sign = kmsSign } = {}) {

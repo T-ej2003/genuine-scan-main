@@ -226,7 +226,8 @@ resource "aws_kms_key" "approval" {
   deletion_window_in_days  = 30
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Sid = "AccountAdministration", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:root" }, Action = "kms:*", Resource = "*" },
-    { Sid = "IndependentCheckerSigns", Effect = "Allow", Principal = { AWS = aws_iam_role.checker.arn }, Action = ["kms:GetPublicKey", "kms:Sign", "kms:Verify"], Resource = "*" }
+    { Sid = "IndependentCheckerSigns", Effect = "Allow", Principal = { AWS = aws_iam_role.checker.arn }, Action = ["kms:GetPublicKey", "kms:Sign", "kms:Verify"], Resource = "*" },
+    { Sid = "DenyNonCheckerApprovalSigning", Effect = "Deny", Principal = "*", Action = "kms:Sign", Resource = "*", Condition = { StringNotEquals = { "aws:PrincipalArn" = aws_iam_role.checker.arn } } }
   ] })
   tags = local.tags
 }

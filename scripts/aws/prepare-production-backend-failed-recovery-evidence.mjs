@@ -11,6 +11,8 @@ import { canonicalSha256, taskDefinitionFingerprint } from "./stage-b-task-defin
 import { readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
+import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? null : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
@@ -143,16 +145,8 @@ export function prepareProductionBackendFailedRecoveryEvidence({ sourceSha, mani
     return [name, artifact.bytes];
   }));
   });
-  const kms = ({ digest, signature, keyArn, signingAlgorithm }, operation) => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-failed-recovery-sign-"));
-    try {
-      const digestFile = path.join(directory, "digest"); fs.writeFileSync(digestFile, digest, { mode: 0o600, flag: "wx" });
-      const args = ["kms", operation, "--key-id", keyArn, "--message", `fileb://${digestFile}`, "--message-type", "DIGEST", "--signing-algorithm", signingAlgorithm];
-      if (signature) { const signatureFile = path.join(directory, "signature"); fs.writeFileSync(signatureFile, signature, { mode: 0o600, flag: "wx" }); args.push("--signature", `fileb://${signatureFile}`); }
-      return JSON.parse(run("aws", [...args, "--region", "eu-west-2", "--output", "json", "--no-cli-pager"]));
-    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
-  };
-  const envelope = createAuthenticatedFailedRecoveryEvidence({ records, signedAt: new Date(now ?? Date.now()).toISOString(), verifyRuntime: (input) => kms(input, "verify").SignatureValid === true, sign: (input) => kms(input, "sign").Signature });
+  const awsRun = (args) => run("aws", args);
+  const envelope = createAuthenticatedFailedRecoveryEvidence({ records, signedAt: new Date(now ?? Date.now()).toISOString(), verifyRuntime: createRootAttestationKmsVerifier({ run: awsRun }), sign: createRootAttestationKmsSigner({ run: awsRun }) });
   const output = path.resolve(outputFile);
   writeStageBPrivateFilesAtomic({ repositoryRoot: root, overwrite: false, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(envelope, null, 2)}\n`), label: "Authenticated failed recovery evidence" }] });
   return { outputFile: output, envelopeSha256: envelope.envelopeSha256 };

@@ -7,6 +7,28 @@ locals {
   }
 }
 
+resource "aws_kms_key" "root_attestation" {
+  description              = "Root-only MSCQR production evidence attestation key"
+  key_usage                = "SIGN_VERIFY"
+  customer_master_key_spec = "RSA_3072"
+  deletion_window_in_days  = 30
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Sid = "AccountAdministration", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:root" }, Action = "kms:*", Resource = "*" },
+    { Sid = "DenyNonRootAttestationSigning", Effect = "Deny", Principal = "*", Action = "kms:Sign", Resource = "*", Condition = { StringNotEquals = { "aws:PrincipalArn" = "arn:aws:iam::368992683803:root" } } },
+    { Sid = "ReleaseVerifiesRootAttestations", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer" }, Action = ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetPublicKey", "kms:ListResourceTags", "kms:Verify"], Resource = "*" },
+  ] })
+  tags = {
+    ManagedBy   = "Terraform"
+    Environment = "production"
+    Stack       = "production-root-attestation"
+  }
+}
+
+resource "aws_kms_alias" "root_attestation" {
+  name          = "alias/mscqr-production-root-attestation"
+  target_key_id = aws_kms_key.root_attestation.key_id
+}
+
 resource "aws_iam_policy" "publisher_permissions_boundary" {
   name        = "MSCQRProductionStageBImagePublisherBoundary"
   description = "Immutable maximum permissions for the production-green Stage B image publisher."

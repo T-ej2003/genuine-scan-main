@@ -374,25 +374,6 @@
     },
     {
       "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
-      "action": "kms:Verify",
-      "capabilityId": "runtime-admin-verify-inventory-convergence",
-      "identity": "ADMINISTRATOR",
-      "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
-      ],
-      "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
-      ],
-      "executionPrincipal": "ADMINISTRATOR",
-      "sourcePolicyPresent": true,
-      "generatedManifestPresent": true,
-      "capabilityGraphPresent": true,
-      "administratorPreflightPresent": true,
-      "runtimePreflightPresent": true,
-      "negativeTestPresent": true
-    },
-    {
-      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
       "action": "sts:GetCallerIdentity",
       "capabilityId": "runtime-admin-identify",
       "identity": "ADMINISTRATOR",
@@ -411,12 +392,12 @@
       "negativeTestPresent": true
     },
     {
-      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFile": "scripts/aws/production-root-attestation-signer.mjs",
       "action": "kms:Sign",
       "capabilityId": "runtime-admin-sign",
       "identity": "ADMINISTRATOR",
       "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "reachableMode": [
         "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
@@ -430,17 +411,17 @@
       "negativeTestPresent": true
     },
     {
-      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
       "action": "kms:Verify",
-      "capabilityId": "runtime-admin-verify-inventory-evidence",
-      "identity": "ADMINISTRATOR",
+      "capabilityId": "release-root-attestation-verify",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "reachableMode": [
         "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
       ],
-      "executionPrincipal": "ADMINISTRATOR",
+      "executionPrincipal": "RELEASE_DEPLOYER",
       "sourcePolicyPresent": true,
       "generatedManifestPresent": true,
       "capabilityGraphPresent": true,
@@ -742,17 +723,17 @@
       "negativeTestPresent": true
     },
     {
-      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
       "action": "kms:DescribeKey",
-      "capabilityId": "runtime-admin-describe-runtime-key",
-      "identity": "ADMINISTRATOR",
+      "capabilityId": "release-root-attestation-describe-key",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "reachableMode": [
         "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
       ],
-      "executionPrincipal": "ADMINISTRATOR",
+      "executionPrincipal": "RELEASE_DEPLOYER",
       "sourcePolicyPresent": true,
       "generatedManifestPresent": true,
       "capabilityGraphPresent": true,
@@ -761,17 +742,36 @@
       "negativeTestPresent": true
     },
     {
-      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
       "action": "kms:GetKeyPolicy",
-      "capabilityId": "runtime-admin-read-runtime-key-policy",
-      "identity": "ADMINISTRATOR",
+      "capabilityId": "release-root-attestation-read-key-policy",
+      "identity": "RELEASE_DEPLOYER",
       "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "reachableMode": [
         "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
       ],
-      "executionPrincipal": "ADMINISTRATOR",
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+      "action": "kms:ListResourceTags",
+      "capabilityId": "release-root-attestation-read-key-tags",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
       "sourcePolicyPresent": true,
       "generatedManifestPresent": true,
       "capabilityGraphPresent": true,
@@ -802,25 +802,6 @@
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
       "action": "kms:GetKeyPolicy",
       "capabilityId": "manifest-refresh-stage-a-storage-approval-key-policy",
-      "identity": "RELEASE_DEPLOYER",
-      "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
-      ],
-      "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
-      ],
-      "executionPrincipal": "RELEASE_DEPLOYER",
-      "sourcePolicyPresent": true,
-      "generatedManifestPresent": true,
-      "capabilityGraphPresent": true,
-      "administratorPreflightPresent": true,
-      "runtimePreflightPresent": true,
-      "negativeTestPresent": true
-    },
-    {
-      "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
-      "action": "kms:Verify",
-      "capabilityId": "release-verify-signature",
       "identity": "RELEASE_DEPLOYER",
       "resources": [
         "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"

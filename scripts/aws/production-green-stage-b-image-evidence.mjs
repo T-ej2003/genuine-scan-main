@@ -12,6 +12,8 @@ import { assertStageBImportedBackendMetadataNormalization, isStageBPartialApplyD
 import { assertStageBImagePublicationIdentity, publicationIdentitySha256, readStageBImagePublicationIdentity } from "./stage-b-image-publication-identity.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createRootAttestationKmsVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
+import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
 
 export const IMAGE_EVIDENCE_SCHEMA_VERSION = 3;
 export const IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION = 3;
@@ -20,8 +22,8 @@ export const IMAGE_EVIDENCE_CLOCK_SKEW_MS = 60 * 1000;
 export const IMAGE_EVIDENCE_VALIDITY_MODEL = "immutable-image-provenance-24h";
 export const IMAGE_EVIDENCE_REPOSITORY_MUTABILITY = "IMMUTABLE";
 export const IMAGE_EVIDENCE_REVOCATION_MODEL = "time-bounded-no-supersession-registry";
-export const IMAGE_EVIDENCE_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
-export const IMAGE_EVIDENCE_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
+export const IMAGE_EVIDENCE_SIGNING_KEY_ARN = ROOT_ATTESTATION_KEY_ALIAS_ARN;
+export const IMAGE_EVIDENCE_SIGNING_ALGORITHM = ROOT_ATTESTATION_SIGNING_ALGORITHM;
 export const APPROVED_IMAGE_EVIDENCE_VERIFIER_ARNS = APPROVED_PREFLIGHT_GENERATOR_ARNS;
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -320,7 +322,7 @@ export function verifyImageEvidenceSignature({ report, toolingSha, signatureArti
   if (!Number.isFinite(signedAtMs) || signedAtMs > nowMs + IMAGE_EVIDENCE_CLOCK_SKEW_MS || nowMs - signedAtMs > IMAGE_EVIDENCE_MAX_AGE_MS) throw new Error("Image evidence signature is stale or malformed.");
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureArtifact.signatureBase64 || "")) throw new Error("Image evidence signature is malformed.");
   if (typeof verify !== "function" && typeof run !== "function") throw new Error("Image evidence signature verification requires an explicit trusted verifier or command runner.");
-  const verifySignature = verify || (({ digest, signature }) => withTempBytes("stage-b-image-evidence-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(run(["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json"])).SignatureValid === true));
+  const verifySignature = verify || createRootAttestationKmsVerifier({ run });
   if (!verifySignature({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), reportSha256 })) throw new Error("Image evidence signature verification failed.");
   return true;
 }
@@ -360,7 +362,7 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
   const repositoryReader = deps.describeRepository || describeRepositories(rootRun);
   const repositories = [...new Set(Object.values(SERVICES).map(({ repository }) => repository))].map((repository) => readImageRepositoryEvidence(repository, { observedAt, describe: repositoryReader }));
   const report = generateImageEvidence({ artifactBytes, toolingSha, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity, verifierCallerArn, describe: imageReader, observedAt, repositories });
-  const signer = deps.sign || (({ digest }) => withTempBytes("stage-b-image-evidence-sign-", { digest }, ({ digest: digestPath }) => JSON.parse(rootRun(["kms", "sign", "--key-id", IMAGE_EVIDENCE_SIGNING_KEY_ARN, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signing-algorithm", IMAGE_EVIDENCE_SIGNING_ALGORITHM, "--output", "json"])).Signature));
+  const signer = deps.sign || createRootAttestationKmsSigner({ run: rootRun });
   const signature = signImageEvidence(report, { sign: signer, now: deps.now });
   writeStageBPrivateFilesAtomic({ repositoryRoot, files: [
     { filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), label: "Stage B image evidence" },

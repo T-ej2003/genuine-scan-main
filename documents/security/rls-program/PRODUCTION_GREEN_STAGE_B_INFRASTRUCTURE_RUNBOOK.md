@@ -6,6 +6,22 @@ The bootstrap MFA session is requested with `aws sts get-session-token --duratio
 
 Deployment-bound evidence remains valid only while its exact bindings remain unchanged and its age is below `3600` seconds. Evidence freshness does not extend AWS credentials, and valid AWS credentials do not replace evidence freshness. Image evidence retains its separate 24-hour contract; normal application-user sessions and MFA/browser challenges are unchanged. Saved-plan validity remains binding-based rather than time-only.
 
+## Pre-Stage-A root attestation trust anchor
+
+Before producing administrator or release-preflight checker-trust evidence, authenticate
+`alias/mscqr-production-root-attestation` through the source-owned metadata, tag, and exact
+key-policy checks. This asymmetric key is owned by the isolated
+`production-green-stage-b-publisher-bootstrap` Terraform root so it exists before Stage A:
+only account root may sign, and the release deployer may authenticate and verify but may not
+sign. The Stage A approval key remains checker-sign-exclusive and is not a substitute.
+
+For an existing environment where this new key is absent, stop at a separate human
+authorization boundary and apply only the reviewed saved publisher-bootstrap plan that adds
+the key and alias. Do not produce evidence, run Stage A, or reuse prior signatures until the
+immutable key ARN, alias, policy, metadata, and tags authenticate. The exact bootstrap and
+rollback contract is documented in
+`infra/aws/terraform/production-green-stage-b-publisher-bootstrap/README.md`.
+
 ## Administrator preflight producer lifecycle
 
 Start exactly one initial administrator capability producer through the reviewed lifecycle launcher:

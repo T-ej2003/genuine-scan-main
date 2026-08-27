@@ -17,6 +17,8 @@ import { buildTemporaryCapabilityEvidence } from "./production-stage-a-temporary
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { assertSimulationContextCardinality, iamSimulationContextArgs } from "./iam-simulation-context.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createRootAttestationKmsVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
+import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
 
 export { assertSimulationContextCardinality } from "./iam-simulation-context.mjs";
 
@@ -66,8 +68,8 @@ export function assertStageBPermissionEvidenceKind(report, expectedKind, expecte
   }
   return true;
 }
-export const PERMISSION_REPORT_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
-export const PERMISSION_REPORT_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
+export const PERMISSION_REPORT_SIGNING_KEY_ARN = ROOT_ATTESTATION_KEY_ALIAS_ARN;
+export const PERMISSION_REPORT_SIGNING_ALGORITHM = ROOT_ATTESTATION_SIGNING_ALGORITHM;
 const BROKER_ROLE_NAME = STAGE_B_BROKER_POLICY.roleName;
 const BROKER_MANAGED_POLICY_ARN = STAGE_B_BROKER_POLICY.arn;
 const BROKER_MANAGED_POLICY_NAME = STAGE_B_BROKER_POLICY.name;
@@ -1108,19 +1110,14 @@ export function assertPermissionReportHashDomains({ report, signatureArtifact, r
 }
 
 export function createPermissionReportKmsVerifier({ run } = {}) {
-  if (typeof run !== "function") throw new Error("Permission report signature verification requires an explicit trusted command runner.");
-  return ({ keyArn, signingAlgorithm, digest, signature }) => withTempBytes("mscqr-stage-b-permission-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(run([
-    "kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json",
-  ])).SignatureValid === true);
+  return createRootAttestationKmsVerifier({ run });
 }
 
 export function createPermissionReportKmsSigner({ run } = {}) {
-  if (typeof run !== "function") throw new Error("Permission report signing requires an explicit trusted command runner.");
+  const sign = createRootAttestationKmsSigner({ run });
   return (report, options = {}) => signPermissionReport(report, {
     ...options,
-    sign: ({ keyArn, signingAlgorithm, digest }) => withTempBytes("mscqr-stage-b-permission-sign-", { digest }, ({ digest: digestPath }) => JSON.parse(run([
-      "kms", "sign", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signing-algorithm", signingAlgorithm, "--output", "json",
-    ])).Signature),
+    sign,
   });
 }
 

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
-import { assertCanonicalTerraformSerialNumber, parseCanonicalTerraformSerialCliText, assertRecoveryOnlyPlan, assertRecoveryPlanDelta, assertRecoveryAttestation, assertVerifiedStageBRecovery, classifyRecoveryResidue, createRecoveryAttestation, signRecoveryAttestation, verifyRecoveryAttestation } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
+import { assertCanonicalTerraformSerialNumber, parseCanonicalTerraformSerialCliText, assertRecoveryOnlyPlan, assertRecoveryPlanDelta, assertRecoveryAttestation, assertVerifiedStageBRecovery, classifyRecoveryResidue, createRecoveryAttestation, createStageBRecoveryKmsVerifier, signRecoveryAttestation, verifyRecoveryAttestation } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
+import { buildRootAttestationKeyPolicy, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
 
 const digest = "a".repeat(64);
 const current = (overrides = {}) => ({ protectedSourceSha: "523817e71755616ed004a5dea03ea4e10672723b", terraformLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", terraformSerial: 78, refreshReportSha256: digest, terraformAddress: "aws_lambda_alias.reviewed", resourceMode: "managed", resourceModule: null, resourceType: "aws_lambda_alias", resourceName: "reviewed", functionName: "mscqr-production-rls-approval-broker", aliasName: "reviewed", stateVersion: "3", configuredDesiredVersion: "3", liveVersion: "2", changedAttributes: ["function_version"], routingConfigurationChanged: false, descriptionChanged: false, functionIdentityChanged: false, aliasIdentityChanged: false, additionalManagedResourceDrift: false, ...overrides });
@@ -74,6 +75,21 @@ test("signature and report hash domains are verified before recovery classificat
   assert.throws(() => verifyRecoveryAttestation({ report: { ...value, currentObservedEvidence: current({ liveVersion: "1" }) }, signature, reportBytes, signatureBytes, verify: () => true }), /canonical report|hash domain|residue/);
   assert.throws(() => verifyRecoveryAttestation({ report: value, signature, reportBytes: Buffer.from("tampered"), signatureBytes, verify: () => true }), /canonical report/);
   assert.throws(() => verifyRecoveryAttestation({ report: value, signature: { ...signature, signatureBase64: "Ag==" }, reportBytes, signatureBytes: Buffer.from(`${JSON.stringify({ ...signature, signatureBase64: "Ag==" }, null, 2)}\n`), verify: ({ signature: bytes }) => bytes.equals(Buffer.from([1])) }), /verification failed/);
+});
+
+test("production recovery verifier authenticates the root-exclusive key before signature verification", () => {
+  const calls = [];
+  const keyArn = "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111";
+  const responses = {
+    "describe-key": { KeyMetadata: { Arn: keyArn, KeyId: keyArn.split("/").at(-1), Description: ROOT_ATTESTATION_KEY_DESCRIPTION, KeyUsage: "SIGN_VERIFY", KeySpec: "RSA_3072", KeyState: "Enabled", Enabled: true, KeyManager: "CUSTOMER", Origin: "AWS_KMS", MultiRegion: false } },
+    "get-key-policy": { Policy: JSON.stringify(buildRootAttestationKeyPolicy()) },
+    "list-resource-tags": { Tags: Object.entries(ROOT_ATTESTATION_TAGS).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) },
+    verify: { SignatureValid: true },
+  };
+  const verify = createStageBRecoveryKmsVerifier({ run: (args) => { calls.push(args); return JSON.stringify(responses[args[1]]); } });
+  assert.equal(verify({ digest: Buffer.alloc(32), signature: Buffer.from([1]) }), true);
+  assert.deepEqual(calls.map((args) => args[1]), ["describe-key", "get-key-policy", "list-resource-tags", "verify"]);
+  assert.equal(calls.at(-1).includes(keyArn), true);
 });
 
 test("central recovery verification rejects unsigned or forged derived classifications", () => {

@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, reserveStageBSharedApplyAttempt, runApply, showSavedPlan, stageBApplyArtifactSetIdentity, stageBApplyAttemptPath, stageBEffectiveOperatorHome } from "../apply-production-green-stage-b.mjs";
 import { stageBApplyAttemptS3Key } from "../aws/stage-b-terraform-backend-contract.mjs";
+import { buildRootAttestationKeyPolicy, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import {
   canonicalizeJson,
@@ -1467,7 +1468,14 @@ test("production-default permission verification uses the release profile runner
   const calls = [];
   const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
     profile: "mscqr-production-release-deployer",
-    exec: (file, args, options) => { calls.push({ file, args, options }); return JSON.stringify({ SignatureValid: true }); },
+    exec: (file, args, options) => {
+      calls.push({ file, args, options });
+      const operation = args[1]; const keyArn = "arn:aws:kms:eu-west-2:368992683803:key/11111111-2222-3333-4444-555555555555";
+      return JSON.stringify(operation === "describe-key" ? { KeyMetadata: { Arn: keyArn, KeyId: keyArn.split("/").at(-1), Description: ROOT_ATTESTATION_KEY_DESCRIPTION, KeyUsage: "SIGN_VERIFY", KeySpec: "RSA_3072", KeyState: "Enabled", Enabled: true, KeyManager: "CUSTOMER", Origin: "AWS_KMS", MultiRegion: false } }
+        : operation === "get-key-policy" ? { Policy: JSON.stringify(buildRootAttestationKeyPolicy()) }
+          : operation === "list-resource-tags" ? { Tags: Object.entries(ROOT_ATTESTATION_TAGS).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) }
+            : { SignatureValid: true });
+    },
   });
   const previousProfile = process.env.AWS_PROFILE;
   process.env.AWS_PROFILE = "hostile-default-profile";
@@ -1477,11 +1485,10 @@ test("production-default permission verification uses the release profile runner
     if (previousProfile === undefined) delete process.env.AWS_PROFILE;
     else process.env.AWS_PROFILE = previousProfile;
   }
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 4);
   assert.equal(calls[0].file, "aws");
-  assert.equal(calls[0].args[0], "kms");
-  assert.equal(calls[0].args[1], "verify");
-  assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-production-release-deployer");
+  assert.deepEqual(calls.map(({ args }) => args.slice(0, 2)), [["kms", "describe-key"], ["kms", "get-key-policy"], ["kms", "list-resource-tags"], ["kms", "verify"]]);
+  assert.equal(calls.every(({ options }) => options.env.AWS_PROFILE === "mscqr-production-release-deployer"), true);
 });
 
 test("permission verification rejects an omitted trusted verifier instead of using ambient credentials", () => {

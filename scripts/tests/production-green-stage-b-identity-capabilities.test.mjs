@@ -59,7 +59,7 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 42, capabilities: 334, uniqueActions: 131, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 42, capabilities: 338, uniqueActions: 131, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
@@ -67,7 +67,7 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   assert.equal(first.capabilities.find(({ id }) => id === "manifest-release-deployer-ecs-exec").identity, "ADMINISTRATOR");
   assert.equal(first.capabilities.filter(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:PutSecretValue" && resources.includes("arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho")).length, 1);
   assert.equal(first.capabilities.filter(({ identity, action, resources }) => identity === "RELEASE_DEPLOYER" && action === "secretsmanager:PutSecretValue" && resources.includes("arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho")).length, 0);
-  assert.equal(first.capabilities.filter(({ id, identity, action, resources }) => id === "administrator-release-preflight-trust-attestation-sign" && identity === "ADMINISTRATOR" && action === "kms:Sign" && resources.includes("arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478")).length, 1);
+  assert.equal(first.capabilities.filter(({ id, identity, action, resources }) => id === "administrator-release-preflight-trust-attestation-sign" && identity === "ADMINISTRATOR" && action === "kms:Sign" && resources.includes("arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation")).length, 1);
   assert.equal(first.capabilities.filter(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "kms:Sign").length, 0);
   for (const [id, action, mutation] of [
     ["manifest-refresh-stage-a-production-artifacts-bucket-policy", "s3:GetBucketPolicy", false],

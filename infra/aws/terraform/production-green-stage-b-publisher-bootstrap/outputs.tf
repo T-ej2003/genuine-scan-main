@@ -14,3 +14,10 @@ output "trust_policy_sha256" {
 output "permissions_policy_sha256" {
   value = filesha256("${path.module}/permissions-policy.json")
 }
+output "root_attestation_key_arn" {
+  value = aws_kms_key.root_attestation.arn
+}
+
+output "root_attestation_key_alias_arn" {
+  value = aws_kms_alias.root_attestation.arn
+}

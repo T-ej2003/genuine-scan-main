@@ -11,6 +11,7 @@ import { ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPE
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 import { IMAGE_EVIDENCE_SIGNING_KEY_ARN } from "./production-green-stage-b-image-evidence.mjs";
 import { ROOT_DROP_SIGNING_KEY_ARN } from "./production-root-drop-evidence.mjs";
+import { ROOT_ATTESTATION_KEY_ALIAS_ARN } from "./production-root-attestation-key.mjs";
 import { PRODUCTION_RELEASE_ROLE_ARN, assertProductionReleaseOidcSourceContract } from "./production-release-oidc-contract.mjs";
 import { NORMAL_ACTIVATION } from "./production-normal-backend-activation-policy.mjs";
 
@@ -22,6 +23,7 @@ const manifestPath = "documents/ops/iam/MSCQRProductionGreenStageBPermissionMani
 const publisherPolicyPath = "infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json";
 const terraformPath = "infra/aws/terraform/production-green-stage-b/main.tf";
 const checkerPolicyPath = "infra/aws/terraform/production-green-stage-a/main.tf";
+const rootAttestationPolicyPath = "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf";
 const awsCliSourceFiles = [
   "scripts/plan-production-green-stage-b.mjs", "scripts/apply-production-green-stage-b.mjs",
   "scripts/aws/create-production-green-stage-b-approval.mjs", "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
@@ -29,6 +31,7 @@ const awsCliSourceFiles = [
   "scripts/aws/production-green-stage-b-identity-capabilities.mjs", "scripts/aws/run-production-green-stage-b-preflight.mjs",
   "scripts/aws/validate-production-green-stage-b-permissions.mjs", "scripts/aws/production-checker-chain-contract.mjs",
   "scripts/aws/production-release-preflight-checker-attestation.mjs",
+  "scripts/aws/production-root-attestation-key.mjs", "scripts/aws/production-root-attestation-signer.mjs",
   "scripts/aws/publish-production-green-stage-b-approval.mjs", "scripts/aws/check-production-green-stage-b-approval-publication.mjs",
   "scripts/aws/recover-stage-b-backend-task-definition.mjs", "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
   "scripts/aws/recover-production-backend-health.mjs",
@@ -150,6 +153,13 @@ const ROOT_DROP_SIGNING = Object.freeze({
   classification: "ROOT_DROP_SIGN", probe: "structural", policy: { sourceFile: "scripts/aws/produce-production-root-drop-evidence.mjs", sid: "root-drop-signing-boundary", livePolicyArn: null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: true,
 });
 
+const ROOT_ATTESTATION_RELEASE_CAPABILITIES = Object.freeze([
+  ["release-root-attestation-describe-key", "kms:DescribeKey"],
+  ["release-root-attestation-read-key-policy", "kms:GetKeyPolicy"],
+  ["release-root-attestation-read-key-tags", "kms:ListResourceTags"],
+  ["release-root-attestation-verify", "kms:Verify"],
+]);
+
 const RUNTIME_ADMIN_CAPABILITIES = Object.freeze([
   ["runtime-admin-identify", "runtime-consumability-evidence", "sts:GetCallerIdentity", ["*"] , false],
   ["runtime-admin-get-role", "runtime-consumability-evidence", "iam:GetRole", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role", "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"], false],
@@ -165,12 +175,12 @@ const RUNTIME_ADMIN_CAPABILITIES = Object.freeze([
   ["runtime-admin-read-repository-policy", "runtime-consumability-evidence", "ecr:GetRepositoryPolicy", ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"], false],
   ["runtime-admin-describe-log-groups", "runtime-consumability-evidence", "logs:DescribeLogGroups", ["*"], false],
   ["runtime-admin-describe-runtime-image", "runtime-consumability-evidence", "ecr:DescribeImages", ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"], false],
-  ["runtime-admin-describe-runtime-key", "runtime-consumability-evidence", "kms:DescribeKey", [STAGE_B.approvalKmsKeyArn], false],
-  ["runtime-admin-read-runtime-key-policy", "runtime-consumability-evidence", "kms:GetKeyPolicy", [STAGE_B.approvalKmsKeyArn], false],
+  ["runtime-admin-describe-runtime-key", "runtime-consumability-evidence", "kms:DescribeKey", [ROOT_ATTESTATION_KEY_ALIAS_ARN], false],
+  ["runtime-admin-read-runtime-key-policy", "runtime-consumability-evidence", "kms:GetKeyPolicy", [ROOT_ATTESTATION_KEY_ALIAS_ARN], false],
   ["runtime-admin-simulate", "runtime-consumability-evidence", "iam:SimulatePrincipalPolicy", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role", "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"], false],
-  ["runtime-admin-sign", "runtime-consumability-evidence", "kms:Sign", [STAGE_B.approvalKmsKeyArn], true],
-  ["runtime-admin-verify-inventory-evidence", "runtime-consumability-evidence", "kms:Verify", [STAGE_B.approvalKmsKeyArn], false],
-  ["runtime-admin-verify-inventory-convergence", "runtime-consumability-convergence", "kms:Verify", [STAGE_B.approvalKmsKeyArn], false],
+  ["runtime-admin-sign", "runtime-consumability-evidence", "kms:Sign", [ROOT_ATTESTATION_KEY_ALIAS_ARN], true],
+  ["runtime-admin-verify-inventory-evidence", "runtime-consumability-evidence", "kms:Verify", [ROOT_ATTESTATION_KEY_ALIAS_ARN], false],
+  ["runtime-admin-verify-inventory-convergence", "runtime-consumability-convergence", "kms:Verify", [ROOT_ATTESTATION_KEY_ALIAS_ARN], false],
   ["runtime-admin-converge-inline", "runtime-consumability-convergence", "iam:PutRolePolicy", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"], true],
 ]);
 
@@ -263,12 +273,19 @@ function checkerAuthority(entry) {
 }
 
 function administratorAttestationAuthority() {
-  const source = fs.readFileSync(path.join(root, checkerPolicyPath), "utf8");
+  const source = fs.readFileSync(path.join(root, rootAttestationPolicyPath), "utf8");
   const administratorStatement = '{ Sid = "AccountAdministration", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:root" }, Action = "kms:*", Resource = "*" }';
-  if (!source.includes('resource "aws_kms_key" "approval"') || !source.includes(administratorStatement)) {
+  if (!source.includes('resource "aws_kms_key" "root_attestation"') || !source.includes(administratorStatement)
+    || !source.includes('Sid = "DenyNonRootAttestationSigning"')) {
     throw new Error("No reviewed root administrator authority can attest release-preflight checker trust before Stage A.");
   }
-  return { sourceFile: checkerPolicyPath, sid: "AccountAdministration", livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(source)) };
+  return { sourceFile: rootAttestationPolicyPath, sid: "AccountAdministration", livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(source)) };
+}
+
+function rootAttestationVerifyAuthority() {
+  const source = fs.readFileSync(path.join(root, rootAttestationPolicyPath), "utf8");
+  if (!source.includes('Sid = "ReleaseVerifiesRootAttestations"') || !source.includes('"kms:Verify"')) throw new Error("No reviewed release authority verifies root attestations.");
+  return { sourceFile: rootAttestationPolicyPath, sid: "ReleaseVerifiesRootAttestations", livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(source)) };
 }
 
 function terraformRuntimeActions() {
@@ -340,10 +357,16 @@ export function buildStageBDeploymentCapabilityGraph() {
     action: "sts:GetCallerIdentity", resources: ["*"], context: { account: STAGE_B.account, region: STAGE_B.region }, classification: "ADMIN_RELEASE_PREFLIGHT_ATTESTATION_READ",
     probe: "administrator-live-read", probeIds: [], policy: administratorAttestationAuthority(), required: true, mutation: false,
   });
+  const rootAttestationRelease = ROOT_ATTESTATION_RELEASE_CAPABILITIES.map(([id, action]) => ({
+    id, phase: "release-direct-read-preflight", identity: "RELEASE_DEPLOYER", executor: "aws-cli",
+    sourceFile: "scripts/aws/production-root-attestation-key.mjs", sourceFunction: id, action, resources: [ROOT_ATTESTATION_KEY_ALIAS_ARN],
+    context: { account: STAGE_B.account, region: STAGE_B.region }, classification: "RELEASE_DIRECT_READ", probe: "direct", probeIds: [`root-attestation-${action.toLowerCase().replace(':', '-')}`],
+    policy: rootAttestationVerifyAuthority(), required: true, mutation: false,
+  }));
   checkerCapabilities.push({
     id: "administrator-release-preflight-trust-attestation-sign", phase: "release-preflight-checker-trust-attestation", identity: "ADMINISTRATOR", executor: "aws-cli",
     sourceFile: "scripts/aws/production-release-preflight-checker-attestation.mjs", sourceFunction: "runReleasePreflightCheckerTrustAttestationCli",
-    action: "kms:Sign", resources: [STAGE_B.approvalKmsKeyArn], context: { account: STAGE_B.account, region: STAGE_B.region }, classification: "ADMIN_RELEASE_PREFLIGHT_ATTESTATION_SIGNING",
+    action: "kms:Sign", resources: [ROOT_ATTESTATION_KEY_ALIAS_ARN], context: { account: STAGE_B.account, region: STAGE_B.region }, classification: "ADMIN_RELEASE_PREFLIGHT_ATTESTATION_SIGNING",
     probe: "structural", probeIds: [], policy: administratorAttestationAuthority(), required: true, mutation: true,
   });
   const operatorCapabilities = [[ECS_EXEC_OPERATOR_REQUIRED, false], [ECS_EXEC_OPERATOR_FORBIDDEN, true]].flatMap(([entries, forbidden]) => entries.map((entry) => ({
@@ -371,11 +394,12 @@ export function buildStageBDeploymentCapabilityGraph() {
   });
   const forwardRecovery = FORWARD_RECOVERY_CAPABILITIES.map(([id, action, resources]) => {
     const entry = { id, action, resources };
-    return { id, phase: "existing-revision-forward-recovery", identity: "RELEASE_DEPLOYER", executor: "terraform", sourceFile: "scripts/aws/forward-recover-stage-b-existing-revision.mjs", sourceFunction: id, action, resources, context: { account: "368992683803", region: "eu-west-2" }, classification: /^(?:s3:PutObject|s3:DeleteObject)$/.test(action) ? "FORWARD_RECOVERY_IMPORT_MUTATION" : "FORWARD_RECOVERY_READ", probe: "administrator-simulation", probeIds: [], policy: authority(entry, false, policies), required: true, mutation: /^(?:s3:PutObject|s3:DeleteObject)$/.test(action) };
+    const policy = id === "forward-recovery-verify-image-evidence" ? rootAttestationVerifyAuthority() : authority(entry, false, policies);
+    return { id, phase: "existing-revision-forward-recovery", identity: "RELEASE_DEPLOYER", executor: "terraform", sourceFile: "scripts/aws/forward-recover-stage-b-existing-revision.mjs", sourceFunction: id, action, resources, context: { account: "368992683803", region: "eu-west-2" }, classification: /^(?:s3:PutObject|s3:DeleteObject)$/.test(action) ? "FORWARD_RECOVERY_IMPORT_MUTATION" : "FORWARD_RECOVERY_READ", probe: "administrator-simulation", probeIds: [], policy, required: true, mutation: /^(?:s3:PutObject|s3:DeleteObject)$/.test(action) };
   });
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: !/^(?:ecr:|kms:Verify|secretsmanager:Get|s3:Get)/.test(action) }));
   const runtimeAdmin = RUNTIME_ADMIN_CAPABILITIES.map(([id, phase, action, resources, mutation]) => ({ id, phase, identity: "ADMINISTRATOR", executor: "aws-cli", sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/prepare-production-ecs-runtime-consumability.mjs", sourceFunction: id, action, resources, context: { account: STAGE_B.account, region: STAGE_B.region }, classification: mutation ? "ADMIN_IAM_OR_SIGNING_MUTATION" : "ADMIN_RUNTIME_CLOSURE_READ", probe: action === "iam:SimulatePrincipalPolicy" ? "administrator-simulation" : "administrator-live-read", probeIds: [], policy: { sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/production-ecs-runtime-consumability.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation }));
-  const capabilities = [...fixed, ...normalActivation, ROOT_DROP_SIGNING, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, ...normalActivation, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
@@ -410,7 +434,7 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   if (normal.some(({ identity, action }) => identity !== "RELEASE_DEPLOYER" || ["ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition"].includes(action)) || normal.filter(({ action }) => action === "ecs:UpdateService").length !== 1) throw new Error("Normal backend activation capability boundary is not exact or reuses registration authority.");
   const checkerPublication = graph.capabilities.filter(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:PutSecretValue" && resources.includes(STAGE_B.approvalSecretArn));
   if (checkerPublication.length !== 1) throw new Error("Exact checker approval publication capability is absent or duplicated.");
-  const administratorAttestation = graph.capabilities.filter(({ id, identity, action, resources }) => id === "administrator-release-preflight-trust-attestation-sign" && identity === "ADMINISTRATOR" && action === "kms:Sign" && JSON.stringify(resources) === JSON.stringify([STAGE_B.approvalKmsKeyArn]));
+  const administratorAttestation = graph.capabilities.filter(({ id, identity, action, resources }) => id === "administrator-release-preflight-trust-attestation-sign" && identity === "ADMINISTRATOR" && action === "kms:Sign" && JSON.stringify(resources) === JSON.stringify([ROOT_ATTESTATION_KEY_ALIAS_ARN]));
   if (administratorAttestation.length !== 1 || graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "kms:Sign")) throw new Error("Release-preflight checker-trust signing boundary is not exact.");
   if (graph.capabilities.some(({ identity, action, resources }) => identity === "RELEASE_DEPLOYER" && ["secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"].includes(action) && resources.includes(STAGE_B.approvalSecretArn))) throw new Error("Release-deployer approval secret authority is present.");
   if (graph.capabilities.some(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:GetSecretValue" && resources.includes(STAGE_B.approvalSecretArn))) throw new Error("Checker approval secret read authority is present.");

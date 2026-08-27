@@ -3,6 +3,7 @@ import { BACKEND_HEALTH_RECOVERY, BACKEND_HEALTH_RECOVERY_STATUS, assertLegacyBa
 import { assertRuntimeConsumabilityEnvelopeSignature } from "./production-ecs-runtime-consumability.mjs";
 import { assertProductionEnvironmentApprovalIdentity, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
+import { ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
 import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
 
 const KIND = "AUTHENTICATED_BACKEND_FAILED_RECOVERY_EVIDENCE";
@@ -221,7 +222,7 @@ export function createAuthenticatedFailedRecoveryEvidence({ records, verifyRunti
     .map(({ taskDefinitionArn, taskDefinitionFingerprint }) => taskDefinitionArn || `pending:${taskDefinitionFingerprint}`);
   if (new Set(identities).size !== identities.length
     || new Set(summaries.map(({ workflowRunId }) => workflowRunId)).size !== summaries.length) throw new Error("Historical failed recovery evidence is duplicated or conflicting.");
-  const body = { schemaVersion: 1, kind: KIND, repository: REPOSITORY, records: encoded, signedAt, keyArn: STAGE_B.approvalKmsKeyArn, signingAlgorithm: STAGE_B_APPROVAL_ALGORITHM };
+  const body = { schemaVersion: 1, kind: KIND, repository: REPOSITORY, records: encoded, signedAt, keyArn: ROOT_ATTESTATION_KEY_ALIAS_ARN, signingAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM };
   const signedPayloadSha256 = canonicalSha256(body);
   const signatureBase64 = sign({ digest: Buffer.from(signedPayloadSha256, "hex"), keyArn: body.keyArn, signingAlgorithm: body.signingAlgorithm });
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureBase64 || "")) throw new Error("Historical failed recovery evidence signature is invalid.");
@@ -237,7 +238,7 @@ export function assertAuthenticatedFailedRecoveryEvidence(envelope, { verify, no
   const nowMs = Number(now); const signedAtMs = Date.parse(envelope?.signedAt);
   if (envelope?.schemaVersion !== 1 || envelope.kind !== KIND || envelope.repository !== REPOSITORY || !Array.isArray(envelope.records) || !envelope.records.length || envelope.records.length > MAX_HISTORY_RECORDS
     || Buffer.byteLength(JSON.stringify(envelope)) > MAX_HISTORY_BYTES
-    || envelope.keyArn !== STAGE_B.approvalKmsKeyArn || envelope.signingAlgorithm !== STAGE_B_APPROVAL_ALGORITHM
+    || envelope.keyArn !== ROOT_ATTESTATION_KEY_ALIAS_ARN || envelope.signingAlgorithm !== ROOT_ATTESTATION_SIGNING_ALGORITHM
     || !HEX.test(envelope.signedPayloadSha256 || "") || canonicalSha256(unsigned) !== envelope.signedPayloadSha256
     || !HEX.test(envelopeSha256 || "") || canonicalSha256(body) !== envelopeSha256
     || !Number.isFinite(nowMs) || !Number.isFinite(signedAtMs) || signedAtMs > nowMs + 5 * 60 * 1000

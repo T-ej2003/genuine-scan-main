@@ -9,12 +9,24 @@ import { RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_KIND, RELEASE_PREFLIGHT_CHE
 import { PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { createProductionCutoverRuntimeComposition } from "../aws/production-cutover-runtime-composition.mjs";
+import { buildRootAttestationKeyPolicy, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
 
 const sourceSha = "a".repeat(40);
 const administratorReportSha256 = "b".repeat(64);
 const now = new Date("2026-08-27T12:00:00.000Z");
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const report = () => ({ status: "ready-for-plan", sourceSha, administratorReportSha256, checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN } });
+const rootKeyArn = "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111";
+const sharedCheckerApprovalKeyArn = "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478";
+const rootKeyResponse = (args) => {
+  if (args[0] !== "kms") throw new Error("unexpected command");
+  if (args[1] === "describe-key") return { KeyMetadata: { Arn: rootKeyArn, KeyId: rootKeyArn.split("/").at(-1), Description: ROOT_ATTESTATION_KEY_DESCRIPTION, KeyUsage: "SIGN_VERIFY", KeySpec: "RSA_3072", KeyState: "Enabled", Enabled: true, KeyManager: "CUSTOMER", Origin: "AWS_KMS", MultiRegion: false } };
+  if (args[1] === "get-key-policy") return { Policy: JSON.stringify(buildRootAttestationKeyPolicy()) };
+  if (args[1] === "list-resource-tags") return { Tags: Object.entries(ROOT_ATTESTATION_TAGS).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) };
+  if (args[1] === "verify") return { SignatureValid: true };
+  if (args[1] === "sign") return { Signature: "AQ==" };
+  throw new Error("unexpected command");
+};
 
 function signedEvidence({ reportValue = report(), source = sourceSha, administratorHash = administratorReportSha256 } = {}) {
   const reportBytes = Buffer.from(`${JSON.stringify(reportValue)}\n`);
@@ -56,18 +68,17 @@ test("runtime-preparation production composition verifies checker attestation th
       profile: "mscqr-production-release-deployer",
       exec: (file, args, options) => {
         calls.push({ file, args, options });
-        return JSON.stringify({ SignatureValid: true });
+        return JSON.stringify(rootKeyResponse(args));
       },
     });
     const composition = createProductionCutoverRuntimeComposition({ releaseRun });
     const evidence = signedEvidence();
     authenticate(evidence, { verifySignature: composition.verifyReleasePreflightAttestationSignature });
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].file, "aws");
-    assert.deepEqual(calls[0].args.slice(0, 2), ["kms", "verify"]);
-    assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-production-release-deployer");
-    assert.notEqual(calls[0].options.env.AWS_PROFILE, "hostile-default-profile");
-    assert.equal(calls[0].options.env.AWS_DEFAULT_PROFILE, undefined);
+    assert.deepEqual(calls.map(({ args }) => args.slice(0, 2)), [["kms", "describe-key"], ["kms", "get-key-policy"], ["kms", "list-resource-tags"], ["kms", "verify"]]);
+    assert.equal(calls.every(({ file }) => file === "aws"), true);
+    assert.equal(calls.some(({ args }) => args[1] === "verify" && args.includes(rootKeyArn)), true);
+    assert.equal(calls.every(({ options }) => options.env.AWS_PROFILE === "mscqr-production-release-deployer"), true);
+    assert.equal(calls.every(({ options }) => options.env.AWS_PROFILE !== "hostile-default-profile" && options.env.AWS_DEFAULT_PROFILE === undefined), true);
   } finally {
     originalProfile === undefined ? delete process.env.AWS_PROFILE : process.env.AWS_PROFILE = originalProfile;
   }
@@ -92,6 +103,20 @@ test("semantic or self-hashed local release reports cannot become checker eviden
   const attestationBytes = Buffer.from(`${JSON.stringify(attestation)}\n`);
   const signatureBytes = Buffer.from(JSON.stringify({ ...attestation, reportFileSha256: sha256(attestationBytes) }));
   assert.throws(() => authenticateReleasePreflightCheckerTrustEvidence({ report: forged, reportBytes, attestation, attestationBytes, signatureArtifact: JSON.parse(signatureBytes), signatureBytes, sourceSha, administratorReportSha256, now, verifySignature: () => true }), /signature identity or algorithm is wrong/);
+});
+
+test("a checker-valid shared approval-key signature cannot impersonate the root attestation authority", () => {
+  const evidence = signedEvidence();
+  const checkerSignature = { ...evidence.signatureArtifact, keyArn: sharedCheckerApprovalKeyArn };
+  const checkerSignatureBytes = Buffer.from(`${JSON.stringify(checkerSignature)}\n`);
+  let cryptographicVerificationReached = false;
+  assert.throws(() => authenticate(evidence, {
+    signatureArtifact: checkerSignature,
+    signatureBytes: checkerSignatureBytes,
+    verifySignature: () => { cryptographicVerificationReached = true; return true; },
+  }), /signature identity or algorithm is wrong/);
+  assert.equal(cryptographicVerificationReached, false);
+  assert.equal(PERMISSION_REPORT_SIGNING_KEY_ARN, ROOT_ATTESTATION_KEY_ALIAS_ARN);
 });
 
 test("attestation rejects report tamper, substitutions, malformed signatures, and failed KMS verification", () => {

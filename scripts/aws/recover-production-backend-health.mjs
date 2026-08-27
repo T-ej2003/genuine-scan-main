@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
+import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
 import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
 import { resolveExistingArtifactSigningBindings } from "./production-artifact-signing-bootstrap.mjs";
 import { createAwsArtifactSigningAdapter } from "./production-artifact-signing-secrets-adapter.mjs";
@@ -86,14 +85,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   const awsText = (args) => run("aws", [...args, "--region", BACKEND_HEALTH_RECOVERY.region, "--output", "json", "--no-cli-pager"]);
   const verifyImageEvidenceSource = deps.verifyImageEvidence || ((input) => verifyImageEvidenceSignature({ ...input, run: awsText }));
   const aws = (args) => JSON.parse(awsText(args));
-  const verifyFailedRecoveryEvidence = deps.verifyFailedRecoveryEvidence || (({ digest, signature, keyArn, signingAlgorithm }) => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-failed-recovery-verify-"));
-    try {
-      const digestFile = path.join(directory, "digest"); const signatureFile = path.join(directory, "signature");
-      fs.writeFileSync(digestFile, digest, { mode: 0o600, flag: "wx" }); fs.writeFileSync(signatureFile, signature, { mode: 0o600, flag: "wx" });
-      return aws(["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestFile}`, "--message-type", "DIGEST", "--signature", `fileb://${signatureFile}`, "--signing-algorithm", signingAlgorithm]).SignatureValid === true;
-    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
-  });
+  const verifyFailedRecoveryEvidence = deps.verifyFailedRecoveryEvidence || createRootAttestationKmsVerifier({ run: aws });
   const authenticateFailedRecoveryEvidence = () => failedRecoveryEvidence.value === null
     ? Object.freeze({ envelopeSha256: null, referenceSha256: null, lineageSha256: EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256, recoveryHistory: Object.freeze([]), knownFailedRevisions: Object.freeze([]), interruptedRecoveries: Object.freeze([]) })
     : Object.freeze({ ...assertAuthenticatedFailedRecoveryEvidence(failedRecoveryEvidence.value, { verify: verifyFailedRecoveryEvidence, now: typeof deps.now === "function" ? deps.now() : deps.now || Date.now() }), referenceSha256: failedRecoveryEvidenceReference.value.referenceSha256 });
@@ -127,15 +119,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       : await refreshRuntimeResourceMetadata(candidate, runtimeClosure.value?.evidence?.resourceMetadata, aws, readKmsKey);
     const dependencies = deriveEcsRuntimeDependencies(candidate);
     const livePolicyIdentity = await (deps.collectLiveRolePolicyIdentity || collectLiveRolePolicyIdentity)(dependencies.map(({ principalArn }) => principalArn), aws, candidate);
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-runtime-closure-verify-"));
-    try {
-      const digest = path.join(directory, "digest"); const signature = path.join(directory, "signature");
-      return assertSignedRuntimeConsumabilityEvidence(runtimeClosure.value, { sourceSha, candidate, livePolicyIdentity, resourceMetadata, now: typeof deps.now === "function" ? deps.now() : deps.now || Date.now(), verify: ({ digest: digestBytes, signature: signatureBytes, keyArn, signingAlgorithm }) => {
-        fs.writeFileSync(digest, digestBytes, { mode: 0o600, flag: "wx" });
-        fs.writeFileSync(signature, signatureBytes, { mode: 0o600, flag: "wx" });
-        return aws(["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digest}`, "--message-type", "DIGEST", "--signature", `fileb://${signature}`, "--signing-algorithm", signingAlgorithm]).SignatureValid === true;
-      } });
-    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+    return assertSignedRuntimeConsumabilityEvidence(runtimeClosure.value, { sourceSha, candidate, livePolicyIdentity, resourceMetadata, now: typeof deps.now === "function" ? deps.now() : deps.now || Date.now(), verify: createRootAttestationKmsVerifier({ run: aws }) });
   });
 
   if (argv.includes("--prepare")) {

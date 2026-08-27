@@ -670,11 +670,11 @@
       "probe": "administrator-live-read",
       "probeIds": [],
       "policy": {
-        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sourceFile": "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf",
         "sid": "AccountAdministration",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
+        "expectedPolicySha256": "673a8e51efca3a711df7b3f92f10a9bfb216bc1e9d56d1fec031c974f699fe76"
       },
       "required": true,
       "mutation": false
@@ -688,7 +688,7 @@
       "sourceFunction": "runReleasePreflightCheckerTrustAttestationCli",
       "action": "kms:Sign",
       "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "context": {
         "account": "368992683803",
@@ -698,11 +698,11 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sourceFile": "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf",
         "sid": "AccountAdministration",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
+        "expectedPolicySha256": "673a8e51efca3a711df7b3f92f10a9bfb216bc1e9d56d1fec031c974f699fe76"
       },
       "required": true,
       "mutation": true
@@ -821,7 +821,7 @@
         "sid": "PublishExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
+        "expectedPolicySha256": "cb5923b4897aeeb681297a0209188b1473696f9ee4518039177e4c207d93f0d9"
       },
       "required": true,
       "mutation": true
@@ -1031,7 +1031,7 @@
       "sourceFunction": "forward-recovery-verify-image-evidence",
       "action": "kms:Verify",
       "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "context": {
         "account": "368992683803",
@@ -1041,11 +1041,11 @@
       "probe": "administrator-simulation",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
-        "sid": "VerifyExactStageBPermissionReportSignature",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
-        "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+        "sourceFile": "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf",
+        "sid": "ReleaseVerifiesRootAttestations",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "673a8e51efca3a711df7b3f92f10a9bfb216bc1e9d56d1fec031c974f699fe76"
       },
       "required": true,
       "mutation": false
@@ -9788,6 +9788,126 @@
       "mutation": false
     },
     {
+      "id": "release-root-attestation-describe-key",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+      "sourceFunction": "release-root-attestation-describe-key",
+      "action": "kms:DescribeKey",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "root-attestation-kms-describekey"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf",
+        "sid": "ReleaseVerifiesRootAttestations",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "673a8e51efca3a711df7b3f92f10a9bfb216bc1e9d56d1fec031c974f699fe76"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "release-root-attestation-read-key-policy",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+      "sourceFunction": "release-root-attestation-read-key-policy",
+      "action": "kms:GetKeyPolicy",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "root-attestation-kms-getkeypolicy"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf",
+        "sid": "ReleaseVerifiesRootAttestations",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "673a8e51efca3a711df7b3f92f10a9bfb216bc1e9d56d1fec031c974f699fe76"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "release-root-attestation-read-key-tags",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+      "sourceFunction": "release-root-attestation-read-key-tags",
+      "action": "kms:ListResourceTags",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "root-attestation-kms-listresourcetags"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf",
+        "sid": "ReleaseVerifiesRootAttestations",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "673a8e51efca3a711df7b3f92f10a9bfb216bc1e9d56d1fec031c974f699fe76"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "release-root-attestation-verify",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+      "sourceFunction": "release-root-attestation-verify",
+      "action": "kms:Verify",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "root-attestation-kms-verify"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf",
+        "sid": "ReleaseVerifiesRootAttestations",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "673a8e51efca3a711df7b3f92f10a9bfb216bc1e9d56d1fec031c974f699fe76"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "release-verify-signature",
       "phase": "release-direct-read-preflight",
       "identity": "RELEASE_DEPLOYER",
@@ -9796,7 +9916,7 @@
       "sourceFunction": "release-verify-signature",
       "action": "kms:Verify",
       "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "context": {
         "account": "368992683803",
@@ -9939,7 +10059,7 @@
       "sourceFunction": "runtime-admin-describe-runtime-key",
       "action": "kms:DescribeKey",
       "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "context": {
         "account": "368992683803",
@@ -10283,7 +10403,7 @@
       "sourceFunction": "runtime-admin-read-runtime-key-policy",
       "action": "kms:GetKeyPolicy",
       "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "context": {
         "account": "368992683803",
@@ -10340,7 +10460,7 @@
       "sourceFunction": "runtime-admin-sign",
       "action": "kms:Sign",
       "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "context": {
         "account": "368992683803",
@@ -10397,7 +10517,7 @@
       "sourceFunction": "runtime-admin-verify-inventory-convergence",
       "action": "kms:Verify",
       "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "context": {
         "account": "368992683803",
@@ -10425,7 +10545,7 @@
       "sourceFunction": "runtime-admin-verify-inventory-evidence",
       "action": "kms:Verify",
       "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "context": {
         "account": "368992683803",
@@ -11314,10 +11434,6 @@
     },
     {
       "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
-      "action": "kms:Verify"
-    },
-    {
-      "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
       "action": "sts:GetCallerIdentity"
     },
     {
@@ -11399,14 +11515,6 @@
     {
       "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
       "action": "kms:GetKeyPolicy"
-    },
-    {
-      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
-      "action": "kms:Sign"
-    },
-    {
-      "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
-      "action": "kms:Verify"
     },
     {
       "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
@@ -11685,14 +11793,6 @@
     },
     {
       "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs",
-      "action": "kms:Sign"
-    },
-    {
-      "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs",
-      "action": "kms:Verify"
-    },
-    {
-      "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs",
       "action": "sts:GetCallerIdentity"
     },
     {
@@ -11760,6 +11860,26 @@
       "action": "sts:GetCallerIdentity"
     },
     {
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+      "action": "kms:DescribeKey"
+    },
+    {
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+      "action": "kms:GetKeyPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+      "action": "kms:ListResourceTags"
+    },
+    {
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+      "action": "kms:Verify"
+    },
+    {
+      "sourceFile": "scripts/aws/production-root-attestation-signer.mjs",
+      "action": "kms:Sign"
+    },
+    {
       "sourceFile": "scripts/aws/production-root-drop-evidence.mjs",
       "action": "kms:GetPublicKey"
     },
@@ -11813,10 +11933,6 @@
     },
     {
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
-      "action": "kms:Verify"
-    },
-    {
-      "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
       "action": "sts:GetCallerIdentity"
     },
     {
@@ -11866,14 +11982,6 @@
     {
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
       "action": "iam:SimulatePrincipalPolicy"
-    },
-    {
-      "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
-      "action": "kms:Sign"
-    },
-    {
-      "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
-      "action": "kms:Verify"
     },
     {
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
