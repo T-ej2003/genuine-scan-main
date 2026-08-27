@@ -9,8 +9,8 @@ The reviewed comparison is anchored by the canonical image-reuse boundary:
 ```text
 image release: b3b477a37b50d7796ec9c3225c176f02f04023dc
 comparison base: b3b477a37b50d7796ec9c3225c176f02f04023dc
-tooling revision: 581aa410336b7eb103c93372c4ee4f3d447fc540
-tooling input tree: f4edaed5593336f2bf67051735122838cf3df63cc4eb21dbcfdb5429503b2fe8
+tooling revision: a446d7f8947be6d336b53007276f9e597aa2cb30
+tooling input tree: c3af4023ed8c30584794eec1c0b126d9ea93dfecaa43142b84effad967563511
 rules version: stage-b-image-reuse-v4
 image reuse compatible: true
 image build inputs changed: false
