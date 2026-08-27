@@ -19,7 +19,7 @@ const TASKS = "*";
 const RUNTIME_KMS_KEY = "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478";
 
 const CALLS = Object.freeze([
-  ["scripts/aws/production-release-preflight-checker-attestation.mjs", "sts:GetCallerIdentity", "checker-release-preflight-trust-attestation-identify", ["*"], "INDEPENDENT_CHECKER"],
+  ["scripts/aws/production-release-preflight-checker-attestation.mjs", "sts:GetCallerIdentity", "administrator-release-preflight-trust-attestation-identify", ["*"], "ADMINISTRATOR"],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecr:DescribeImages", "manifest-backend-health-recovery-describe-images", [REPOSITORY]],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:DescribeServiceDeployments", "manifest-backend-health-recovery-describe-service-deployments", [SERVICE, "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"]],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:DescribeServiceRevisions", "manifest-backend-health-recovery-describe-service-revisions", [SERVICE, "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"]],

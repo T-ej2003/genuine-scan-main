@@ -5,8 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
-import { CHECKER_TARGET_ROLE_ARN } from "../aws/production-checker-chain-contract.mjs";
-import { RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_KIND, authenticateReleasePreflightCheckerTrustEvidence, buildReleasePreflightCheckerTrustAttestation, runReleasePreflightCheckerTrustAttestationCli } from "../aws/production-release-preflight-checker-attestation.mjs";
+import { RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_KIND, RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN, authenticateReleasePreflightCheckerTrustEvidence, buildReleasePreflightCheckerTrustAttestation, runReleasePreflightCheckerTrustAttestationCli } from "../aws/production-release-preflight-checker-attestation.mjs";
 import { PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
 
 const sourceSha = "a".repeat(40);
@@ -43,7 +42,7 @@ test("authenticated checker attestation accepts only the exact canonical report 
   assert.equal(authenticated.checkerTrust.exact, true);
   assert.equal(authenticated.checkerTrust.mfaRequired, true);
   assert.equal(authenticated.attestation.releasePreflightReportSha256, sha256(evidence.reportBytes));
-  assert.equal(authenticated.attestation.signerRoleArn, CHECKER_TARGET_ROLE_ARN);
+  assert.equal(authenticated.attestation.signerArn, RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN);
 });
 
 test("semantic or self-hashed local release reports cannot become checker evidence without an independent signature", () => {
@@ -86,7 +85,7 @@ test("attestation rejects semantically valid substitutions before runtime config
   assert.equal(evidence.attestation.evidenceKind, RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_KIND);
 });
 
-test("attestation producer requires the exact independent checker session and writes a private detached pair", () => {
+test("root-attested checker trust is reachable before Stage A checker-role convergence and writes a private detached pair", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "release-preflight-attestation-"));
   try {
     const reportPath = path.join(directory, "release.json");
@@ -96,7 +95,7 @@ test("attestation producer requires the exact independent checker session and wr
     const argv = ["--source-sha", sourceSha, "--administrator-report-sha256", administratorReportSha256, "--release-preflight-report", reportPath, "--output", outputPath, "--signature-output", signaturePath];
     const protectedMain = { toolingSha: sourceSha, currentHead: sourceSha, originMainHead: sourceSha, porcelainStatus: "" };
     const result = runReleasePreflightCheckerTrustAttestationCli(argv, {
-      caller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/test",
+      caller: () => RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN,
       readProtectedMainCheckout: () => protectedMain,
       sign: (value, { reportBytes }) => signPermissionReport(value, { now: now.toISOString(), reportBytes, sign: () => "AQ==" }),
     });
@@ -105,7 +104,8 @@ test("attestation producer requires the exact independent checker session and wr
     assert.equal(fs.statSync(signaturePath).mode & 0o777, 0o600);
     assert.equal(result.keyArn, PERMISSION_REPORT_SIGNING_KEY_ARN);
     assert.equal(result.signingAlgorithm, PERMISSION_REPORT_SIGNING_ALGORITHM);
-    assert.equal(result.signerRoleArn, CHECKER_TARGET_ROLE_ARN);
-    assert.throws(() => runReleasePreflightCheckerTrustAttestationCli(argv, { caller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", readProtectedMainCheckout: () => protectedMain }), /exact independent checker session/);
+    assert.equal(result.signerArn, RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN);
+    assert.throws(() => runReleasePreflightCheckerTrustAttestationCli(argv, { caller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/test", readProtectedMainCheckout: () => protectedMain }), /exact root administrator preflight signer/);
+    assert.throws(() => runReleasePreflightCheckerTrustAttestationCli(argv, { caller: () => "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", readProtectedMainCheckout: () => protectedMain }), /exact root administrator preflight signer/);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

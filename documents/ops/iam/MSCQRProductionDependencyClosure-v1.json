@@ -6,15 +6,15 @@
     {
       "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs",
       "action": "sts:GetCallerIdentity",
-      "capabilityId": "checker-release-preflight-trust-attestation-identify",
-      "identity": "INDEPENDENT_CHECKER",
+      "capabilityId": "administrator-release-preflight-trust-attestation-identify",
+      "identity": "ADMINISTRATOR",
       "resources": [
         "*"
       ],
       "reachableMode": [
         "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
       ],
-      "executionPrincipal": "INDEPENDENT_CHECKER",
+      "executionPrincipal": "ADMINISTRATOR",
       "sourcePolicyPresent": true,
       "generatedManifestPresent": true,
       "capabilityGraphPresent": true,

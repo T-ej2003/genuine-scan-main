@@ -4,14 +4,14 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { CHECKER_TARGET_ROLE_ARN, assertReleasePreflightCheckerTrustEvidence } from "./production-checker-chain-contract.mjs";
-import { assertPermissionReportHashDomains, canonicalizeJson, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, signPermissionReport, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
+import { assertReleasePreflightCheckerTrustEvidence } from "./production-checker-chain-contract.mjs";
+import { APPROVED_PREFLIGHT_GENERATOR_ARNS, assertPermissionReportHashDomains, canonicalizeJson, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, signPermissionReport, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
-const CHECKER_SESSION = /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-rls-independent-checker\/[^/]+$/;
+export const RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN = APPROVED_PREFLIGHT_GENERATOR_ARNS[0];
 export const RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_KIND = "PRODUCTION_RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION";
 export const RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_PHASE = "release-preflight";
 export const RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_PURPOSE = "checker-trust-attestation";
@@ -39,7 +39,7 @@ export function buildReleasePreflightCheckerTrustAttestation({ report, reportByt
     sourceSha,
     administratorReportSha256,
     releasePreflightReportSha256: sha256(reportBytes),
-    signerRoleArn: CHECKER_TARGET_ROLE_ARN,
+    signerArn: RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN,
     checkerTrust: checked.checkerTrust,
   };
 }
@@ -55,7 +55,7 @@ export function assertReleasePreflightCheckerTrustAttestation(attestation, { rep
     sourceSha,
     administratorReportSha256,
     releasePreflightReportSha256: sha256(reportBytes),
-    signerRoleArn: CHECKER_TARGET_ROLE_ARN,
+    signerArn: RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN,
   };
   for (const [field, value] of Object.entries(expected)) if (attestation?.[field] !== value) throw new Error(`Release-preflight checker-trust attestation ${field} is invalid.`);
   const checkerTrust = attestation?.checkerTrust;
@@ -89,7 +89,7 @@ export function runReleasePreflightCheckerTrustAttestationCli(argv = process.arg
   if (!SHA40.test(sourceSha) || !SHA256.test(administratorReportSha256)) throw new Error("Release-preflight checker-trust attestation source bindings are invalid.");
   const protectedMain = readProtectedMainCheckout();
   if (!protectedMain || protectedMain.toolingSha !== sourceSha || protectedMain.currentHead !== sourceSha || protectedMain.originMainHead !== sourceSha || protectedMain.porcelainStatus) throw new Error("Release-preflight checker-trust attestation requires the exact clean protected-main source.");
-  if (!CHECKER_SESSION.test(String(caller() || ""))) throw new Error("Only the exact independent checker session may attest release-preflight checker trust.");
+  if (String(caller() || "") !== RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN) throw new Error("Only the exact root administrator preflight signer may attest release-preflight checker trust.");
   const reportPath = required(argv, "--release-preflight-report");
   const outputPath = assertStageBArtifactPath({ artifactPath: required(argv, "--output"), repositoryRoot: root, label: "Release-preflight checker-trust attestation", allowExisting: false });
   const signaturePath = assertStageBArtifactPath({ artifactPath: required(argv, "--signature-output"), repositoryRoot: root, label: "Release-preflight checker-trust attestation signature", allowExisting: false });
@@ -106,7 +106,7 @@ export function runReleasePreflightCheckerTrustAttestationCli(argv = process.arg
     { filePath: outputPath, bytes: attestationBytes, label: "Release-preflight checker-trust attestation" },
     { filePath: signaturePath, bytes: signatureBytes, label: "Release-preflight checker-trust attestation signature" },
   ] });
-  return { status: "attested", attestationPath: outputPath, attestationSha256: sha256(attestationBytes), signaturePath, signatureSha256: sha256(signatureBytes), signerRoleArn: CHECKER_TARGET_ROLE_ARN, keyArn: PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm: PERMISSION_REPORT_SIGNING_ALGORITHM };
+  return { status: "attested", attestationPath: outputPath, attestationSha256: sha256(attestationBytes), signaturePath, signatureSha256: sha256(signatureBytes), signerArn: RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN, keyArn: PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm: PERMISSION_REPORT_SIGNING_ALGORITHM };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) process.stdout.write(`${JSON.stringify(runReleasePreflightCheckerTrustAttestationCli())}\n`);

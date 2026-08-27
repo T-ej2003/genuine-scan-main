@@ -262,14 +262,13 @@ function checkerAuthority(entry) {
   return { sourceFile: checkerPolicyPath, sid: "PublishExactStageBApproval", livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(source)) };
 }
 
-function checkerAttestationAuthority() {
+function administratorAttestationAuthority() {
   const source = fs.readFileSync(path.join(root, checkerPolicyPath), "utf8");
-  if (!source.includes('Sid = "SignExactStageBApproval"')
-      || !source.includes('["kms:GetPublicKey", "kms:Sign", "kms:Verify"]')
-      || !source.includes("Resource = aws_kms_key.approval.arn")) {
-    throw new Error("No reviewed checker policy authorizes release-preflight checker-trust attestation signing.");
+  const administratorStatement = '{ Sid = "AccountAdministration", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:root" }, Action = "kms:*", Resource = "*" }';
+  if (!source.includes('resource "aws_kms_key" "approval"') || !source.includes(administratorStatement)) {
+    throw new Error("No reviewed root administrator authority can attest release-preflight checker trust before Stage A.");
   }
-  return { sourceFile: checkerPolicyPath, sid: "SignExactStageBApproval", livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(source)) };
+  return { sourceFile: checkerPolicyPath, sid: "AccountAdministration", livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(source)) };
 }
 
 function terraformRuntimeActions() {
@@ -336,16 +335,16 @@ export function buildStageBDeploymentCapabilityGraph() {
     probe: "structural", probeIds: [], policy: checkerAuthority(entry), required: true, mutation: true,
   }));
   checkerCapabilities.push({
-    id: "checker-release-preflight-trust-attestation-identify", phase: "release-preflight-checker-trust-attestation", identity: "INDEPENDENT_CHECKER", executor: "aws-cli",
+    id: "administrator-release-preflight-trust-attestation-identify", phase: "release-preflight-checker-trust-attestation", identity: "ADMINISTRATOR", executor: "aws-cli",
     sourceFile: "scripts/aws/production-release-preflight-checker-attestation.mjs", sourceFunction: "runReleasePreflightCheckerTrustAttestationCli",
-    action: "sts:GetCallerIdentity", resources: ["*"], context: { account: STAGE_B.account, region: STAGE_B.region }, classification: "CHECKER_RELEASE_PREFLIGHT_ATTESTATION_READ",
-    probe: "direct", probeIds: [], policy: { sourceFile: checkerPolicyPath, sid: "identity-boundary", livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(fs.readFileSync(path.join(root, checkerPolicyPath), "utf8"))) }, required: true, mutation: false,
+    action: "sts:GetCallerIdentity", resources: ["*"], context: { account: STAGE_B.account, region: STAGE_B.region }, classification: "ADMIN_RELEASE_PREFLIGHT_ATTESTATION_READ",
+    probe: "administrator-live-read", probeIds: [], policy: administratorAttestationAuthority(), required: true, mutation: false,
   });
   checkerCapabilities.push({
-    id: "checker-release-preflight-trust-attestation-sign", phase: "release-preflight-checker-trust-attestation", identity: "INDEPENDENT_CHECKER", executor: "aws-cli",
+    id: "administrator-release-preflight-trust-attestation-sign", phase: "release-preflight-checker-trust-attestation", identity: "ADMINISTRATOR", executor: "aws-cli",
     sourceFile: "scripts/aws/production-release-preflight-checker-attestation.mjs", sourceFunction: "runReleasePreflightCheckerTrustAttestationCli",
-    action: "kms:Sign", resources: [STAGE_B.approvalKmsKeyArn], context: { account: STAGE_B.account, region: STAGE_B.region }, classification: "CHECKER_RELEASE_PREFLIGHT_ATTESTATION_SIGNING",
-    probe: "structural", probeIds: [], policy: checkerAttestationAuthority(), required: true, mutation: true,
+    action: "kms:Sign", resources: [STAGE_B.approvalKmsKeyArn], context: { account: STAGE_B.account, region: STAGE_B.region }, classification: "ADMIN_RELEASE_PREFLIGHT_ATTESTATION_SIGNING",
+    probe: "structural", probeIds: [], policy: administratorAttestationAuthority(), required: true, mutation: true,
   });
   const operatorCapabilities = [[ECS_EXEC_OPERATOR_REQUIRED, false], [ECS_EXEC_OPERATOR_FORBIDDEN, true]].flatMap(([entries, forbidden]) => entries.map((entry) => ({
     id: `operator-${entry.id}`, phase: "runtime-verification", identity: "ECS_EXEC_VERIFIER_OPERATOR", executor: "ecs-exec-verifier",
@@ -411,8 +410,8 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   if (normal.some(({ identity, action }) => identity !== "RELEASE_DEPLOYER" || ["ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition"].includes(action)) || normal.filter(({ action }) => action === "ecs:UpdateService").length !== 1) throw new Error("Normal backend activation capability boundary is not exact or reuses registration authority.");
   const checkerPublication = graph.capabilities.filter(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:PutSecretValue" && resources.includes(STAGE_B.approvalSecretArn));
   if (checkerPublication.length !== 1) throw new Error("Exact checker approval publication capability is absent or duplicated.");
-  const checkerAttestation = graph.capabilities.filter(({ id, identity, action, resources }) => id === "checker-release-preflight-trust-attestation-sign" && identity === "INDEPENDENT_CHECKER" && action === "kms:Sign" && JSON.stringify(resources) === JSON.stringify([STAGE_B.approvalKmsKeyArn]));
-  if (checkerAttestation.length !== 1 || graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "kms:Sign")) throw new Error("Release-preflight checker-trust signing boundary is not exact.");
+  const administratorAttestation = graph.capabilities.filter(({ id, identity, action, resources }) => id === "administrator-release-preflight-trust-attestation-sign" && identity === "ADMINISTRATOR" && action === "kms:Sign" && JSON.stringify(resources) === JSON.stringify([STAGE_B.approvalKmsKeyArn]));
+  if (administratorAttestation.length !== 1 || graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "kms:Sign")) throw new Error("Release-preflight checker-trust signing boundary is not exact.");
   if (graph.capabilities.some(({ identity, action, resources }) => identity === "RELEASE_DEPLOYER" && ["secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"].includes(action) && resources.includes(STAGE_B.approvalSecretArn))) throw new Error("Release-deployer approval secret authority is present.");
   if (graph.capabilities.some(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:GetSecretValue" && resources.includes(STAGE_B.approvalSecretArn))) throw new Error("Checker approval secret read authority is present.");
   if (graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "ecs:ExecuteCommand" && !graph.capabilities.some(({ id }) => id === "manifest-release-deployer-ecs-exec"))) throw new Error("Release-deployer ECS Exec boundary is not represented.");

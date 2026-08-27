@@ -84,13 +84,31 @@ Runtime preparation records the raw-byte SHA-256 of every private eligibility ar
 the IAM report. Cutover consumers validate the private external path and exact recorded hash before
 parsing those same captured bytes; replacing a nested self-consistent proof therefore remains invalid.
 Release-preflight checker-trust evidence has two authorities: the release-deployer writes the
-read-only report, then the exact independent-checker session produces a detached
-`PRODUCTION_RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION` with
-`npm run stage-b:attest-release-preflight-checker-trust --`. The private 0600 attestation and KMS
-signature bind the report bytes, protected source SHA, administrator-report SHA, and exact Role-A
-MFA trust. Runtime preparation verifies this detached signature before emitting runtime config;
-unsigned, copied, or self-hashed release reports are rejected. The release-deployer remains
-verify-only and must never sign this attestation.
+read-only report, then the existing root administrator preflight signer produces a detached
+`PRODUCTION_RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION`. This is intentionally before Stage A:
+the independent checker target role may be created or have its trust converged by the Stage-A saved
+plan, so it cannot be required to attest the pre-Stage-A release report. The release-deployer
+remains verify-only and must never sign this attestation.
+
+Run the following only in the same verified root-administrator session used for the canonical
+`INITIAL_ADMIN_CAPABILITY` lifecycle. `ADMINISTRATOR_REPORT_SHA256` is the exact `report.sha256`
+field emitted by that lifecycle for the selected 0600 administrator report: it is calculated by the
+repository's atomic private-artifact writer over the file's persisted raw bytes. Reuse that emitted
+value; do not parse, reserialize, or recompute a JSON representation.
+
+```sh
+npm run stage-b:attest-release-preflight-checker-trust -- \
+  --source-sha "$PROTECTED_MAIN_SHA" \
+  --administrator-report-sha256 "$ADMINISTRATOR_REPORT_SHA256" \
+  --release-preflight-report "$RELEASE_PREFLIGHT_REPORT" \
+  --output "$PRIVATE_CUTOVER_DIR/release-preflight-checker-trust.attestation.json" \
+  --signature-output "$PRIVATE_CUTOVER_DIR/release-preflight-checker-trust.attestation.signature.json"
+```
+
+The command refuses every non-root caller and writes the private 0600 attestation/signature pair.
+Those artifacts bind the report bytes, protected source SHA, administrator-report SHA, and exact
+Role-A MFA trust. Runtime preparation verifies the detached signature before emitting runtime
+config; unsigned, copied, or self-hashed release reports are rejected.
 The coordinator's rotation fixture is similarly hashed from its persisted private bytes after prepare;
 ECS Exec and onboarding consume that exact hash-bound fixture and reject replacement before any probe.
 The source-bound authorization is produced only by `scripts/aws/production-image-authorization.mjs`.

@@ -652,6 +652,62 @@
       "mutation": false
     },
     {
+      "id": "administrator-release-preflight-trust-attestation-identify",
+      "phase": "release-preflight-checker-trust-attestation",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs",
+      "sourceFunction": "runReleasePreflightCheckerTrustAttestationCli",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RELEASE_PREFLIGHT_ATTESTATION_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "AccountAdministration",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "administrator-release-preflight-trust-attestation-sign",
+      "phase": "release-preflight-checker-trust-attestation",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs",
+      "sourceFunction": "runReleasePreflightCheckerTrustAttestationCli",
+      "action": "kms:Sign",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_RELEASE_PREFLIGHT_ATTESTATION_SIGNING",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "AccountAdministration",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "bootstrap-assume-release",
       "phase": "release-role-assumption",
       "identity": "BOOTSTRAP_OPERATOR",
@@ -763,62 +819,6 @@
       "policy": {
         "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
         "sid": "PublishExactStageBApproval",
-        "livePolicyArn": null,
-        "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
-      },
-      "required": true,
-      "mutation": true
-    },
-    {
-      "id": "checker-release-preflight-trust-attestation-identify",
-      "phase": "release-preflight-checker-trust-attestation",
-      "identity": "INDEPENDENT_CHECKER",
-      "executor": "aws-cli",
-      "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs",
-      "sourceFunction": "runReleasePreflightCheckerTrustAttestationCli",
-      "action": "sts:GetCallerIdentity",
-      "resources": [
-        "*"
-      ],
-      "context": {
-        "account": "368992683803",
-        "region": "eu-west-2"
-      },
-      "classification": "CHECKER_RELEASE_PREFLIGHT_ATTESTATION_READ",
-      "probe": "direct",
-      "probeIds": [],
-      "policy": {
-        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
-        "sid": "identity-boundary",
-        "livePolicyArn": null,
-        "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
-      },
-      "required": true,
-      "mutation": false
-    },
-    {
-      "id": "checker-release-preflight-trust-attestation-sign",
-      "phase": "release-preflight-checker-trust-attestation",
-      "identity": "INDEPENDENT_CHECKER",
-      "executor": "aws-cli",
-      "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs",
-      "sourceFunction": "runReleasePreflightCheckerTrustAttestationCli",
-      "action": "kms:Sign",
-      "resources": [
-        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
-      ],
-      "context": {
-        "account": "368992683803",
-        "region": "eu-west-2"
-      },
-      "classification": "CHECKER_RELEASE_PREFLIGHT_ATTESTATION_SIGNING",
-      "probe": "structural",
-      "probeIds": [],
-      "policy": {
-        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
-        "sid": "SignExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
         "expectedPolicySha256": "1ba13c5e9f19daf7821537cd1149c3c7e5f4a23ef3424a6286239d4aa8e7dc14"
