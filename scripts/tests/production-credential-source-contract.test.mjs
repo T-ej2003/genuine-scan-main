@@ -233,6 +233,17 @@ test("every direct production AWS root declares its credential provenance before
   for (const [file, source] of roots) assert.match(fs.readFileSync(file, "utf8"), new RegExp(`PRODUCTION_AWS_CREDENTIAL_SOURCE\\.${source}`), file);
 });
 
+test("every production activation-lifecycle reader receives an explicit source-bound AWS client", () => {
+  const checker = fs.readFileSync("scripts/check-production-activation-rotation.mjs", "utf8");
+  const lifecycle = fs.readFileSync("scripts/aws/manage-production-initial-activation-lifecycle.mjs", "utf8");
+  assert.match(checker, /createAws = createProductionInitialActivationAws/);
+  assert.match(checker, /createAws\(\{ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE\.GITHUB_OIDC_RELEASE_DEPLOYER, env \}\)/);
+  assert.match(checker, /assertCompletionAbsent\(\{ aws \}\)/);
+  assert.match(checker, /readClaim\(\{ aws, expected:/);
+  assert.match(lifecycle, /createProductionInitialActivationAws\(\{ credentialSource: required\(values, "--credential-source"\) \}\)/);
+  for (const call of ["createInitialActivationClaim({ claim, aws })", "readInitialActivationClaim({ expected, aws })", "readInitialActivationClaim({ expected: claim, aws })", "createInitialActivationCompletion({ completion, claim, claimSha256, claimVersionId: liveClaim.versionId, aws })"]) assert.match(lifecycle, new RegExp(call.replace(/[{}()]/g, "\\$&")));
+});
+
 test("direct Bash production AWS roots select an explicit credential source before AWS", () => {
   for (const file of ["scripts/aws/publish-ecs-images.sh", "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/rollback-ecs-service.sh"]) {
     const source = fs.readFileSync(file, "utf8");

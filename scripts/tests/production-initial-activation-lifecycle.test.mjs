@@ -9,6 +9,7 @@ import {
   buildInitialActivationCompletion,
   createInitialActivationClaim,
   createInitialActivationCompletion,
+  assertInitialActivationCompletionAbsent,
   assertOpaqueS3VersionId,
   readInitialActivationClaim,
   readInitialActivationCompletion,
@@ -71,6 +72,11 @@ test("S3 VersionId bindings remain opaque and exact", () => {
   assert.equal(readInitialActivationCompletion({ claim: createdClaim.value, claimSha256: createdClaim.sha256, claimVersionId: "claim+/=", aws: s3.aws }).versionId, "completion+/=");
   assert.equal(createInitialActivationCompletion({ completion, claim: createdClaim.value, claimSha256: createdClaim.sha256, claimVersionId: createdClaim.versionId, aws: s3.aws }).status, "ALREADY_EXISTS_MATCHING");
   assert.throws(() => readInitialActivationCompletion({ claim: createdClaim.value, claimSha256: createdClaim.sha256, claimVersionId: "claim=/=", aws: s3.aws }), /claim version/);
+});
+
+test("lifecycle readers remain injection-only", () => {
+  assert.throws(() => readInitialActivationClaim({ expected: claim() }), /Production initial activation AWS client must be injected/);
+  assert.throws(() => assertInitialActivationCompletionAbsent(), /Production initial activation AWS client must be injected/);
 });
 
 test("atomic fixed-key claim has one creator and matching retry", () => {

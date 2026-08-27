@@ -238,6 +238,8 @@ function runExisting(options = {}, extraArgs = []) {
       ...(expectedGitSha ? { EXPECTED_GIT_SHA: expectedGitSha } : {}),
       DEPLOYMENT_SOURCE_SHA: sourceSha,
       MSCQR_GOVERNED_ORCHESTRATOR: "1",
+      MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile",
+      MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer",
       ...(options.normalStageB ? {
         MSCQR_EXISTING_TASK_DEPLOYMENT_MODE: "normal-stage-b",
         NORMAL_ACTIVATION_BINDING_FILE: normalBinding,
@@ -612,6 +614,8 @@ test("explicit new-revision mode still registers before updating the service", (
     env: {
       ...process.env,
       PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+      MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile",
+      MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer",
       AWS_REGION: region,
       CLUSTER_NAME: cluster,
       SERVICE_NAME: service,
@@ -636,6 +640,8 @@ test("explicit new-revision mode rejects an incompatible payload before registra
     env: {
       ...process.env,
       PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+      MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile",
+      MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer",
       AWS_REGION: region,
       CLUSTER_NAME: cluster,
       SERVICE_NAME: service,
@@ -661,6 +667,8 @@ test("explicit new-revision mode retains its existing version verification behav
     env: {
       ...process.env,
       PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+      MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile",
+      MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer",
       AWS_REGION: region,
       CLUSTER_NAME: cluster,
       SERVICE_NAME: service,
