@@ -8,6 +8,7 @@ import {
   assertStageBTrustedToolingReuseResult,
   assertStageBTrustedWorkflowSeparation,
   computeStageBToolingInputTreeSha256,
+  deriveStageBToolingInputTreeSha256,
   imageImpactReportFor,
   imageReuseCompatibility,
   classifyStageBImageReusePath,
@@ -15,6 +16,7 @@ import {
   parseStageBClosureMode,
   STAGE_B_IMAGE_REUSE_RULES_VERSION,
   STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH,
+  reportFor,
 } from "../aws/validate-stage-b-image-reuse.mjs";
 
 const imageReleaseSha = "a".repeat(40);
@@ -97,6 +99,18 @@ test("image-reuse consumers accept only the current rules version", () => {
   for (const classificationRulesVersion of ["stage-b-image-reuse-v2", "stage-b-image-reuse-v3", "stage-b-image-reuse-v5", undefined]) {
     assert.throws(() => imageReuseCompatibility({ imageReleaseSha, toolingSha, currentHead: toolingSha, changedFiles: files, toolingInputTreeSha256, reviewedReport: { ...report, classificationRulesVersion } }), /rules are stale/);
   }
+});
+
+test("a committed reviewed report may retain its pre-report tooling revision", () => {
+  const imageReleaseSha = "29bf92a14d5e832575009bd76b16886feff62cbd";
+  const reportCommit = execFileSync("git", ["rev-parse", "798851e5"], { encoding: "utf8" }).trim();
+  const reportToolingSha = execFileSync("git", ["rev-parse", "0aa7831b317e32956a930b16d3e072eebc0bee07"], { encoding: "utf8" }).trim();
+  const changedFiles = execFileSync("git", ["diff", "--name-only", `${imageReleaseSha}..${reportCommit}`], { encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
+  const toolingInputTreeSha256 = deriveStageBToolingInputTreeSha256(reportCommit);
+  const reviewedReport = reportFor({ imageReleaseSha, toolingSha: reportToolingSha, changedFiles, toolingInputTreeSha256 });
+  assert.notEqual(reviewedReport.toolingSha, reportCommit);
+  assert.equal(reviewedReport.toolingInputTreeSha256, toolingInputTreeSha256);
+  assert.doesNotThrow(() => imageReuseCompatibility({ imageReleaseSha, toolingSha: reportCommit, currentHead: reportCommit, changedFiles, toolingInputTreeSha256, reviewedReport }));
 });
 
 test("the two-SHA workflow boundary rejects a release-build command change", () => {

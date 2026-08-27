@@ -333,7 +333,7 @@ test("real default composition preserves historical publication provenance while
       fs.writeFileSync(reviewedPath, `${JSON.stringify(reviewed)}\n`, { mode: 0o600 });
       return runImageEvidenceCli([...base, "--image-reuse-evidence", reviewedPath, "--output", path.join(directory, `${name}-evidence.json`), "--signature-output", path.join(directory, `${name}-signature.json`)], { run, sign: () => "AQ==", observedAt, now: observedAt });
     };
-    assert.throws(() => runWithReviewedReport("wrong-current", { ...fixture.reviewedReuseEvidence, toolingSha: producingSourceSha }), /current tooling SHA|different tooling SHA/);
+    assert.throws(() => runWithReviewedReport("malformed-tooling-sha", { ...fixture.reviewedReuseEvidence, toolingSha: "not-a-commit" }), /malformed|full commit SHA/);
     assert.throws(() => runWithReviewedReport("wrong-release", { ...fixture.reviewedReuseEvidence, imageReleaseSha: producingSourceSha }), /image release SHA|different image release/);
     assert.throws(() => runWithReviewedReport("incompatible", { ...fixture.reviewedReuseEvidence, imageReuseCompatible: false }), /Compatibility report compatibility result/);
     assert.throws(() => runWithReviewedReport("malformed", { schemaVersion: fixture.reviewedReuseEvidence.schemaVersion }), /Compatibility report/);

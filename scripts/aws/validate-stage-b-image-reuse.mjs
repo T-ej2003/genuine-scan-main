@@ -242,7 +242,7 @@ export function computeStageBToolingInputTreeSha256({ files, readFile, blobSha25
 function assertReviewedReport({ reviewedReport, imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles, trustedWorkflow }) {
   assert.equal(reviewedReport?.schemaVersion, STAGE_B_IMAGE_REUSE_SCHEMA_VERSION, "Compatibility report schema is unsupported.");
   assert.equal(reviewedReport.imageReleaseSha, imageReleaseSha, "Compatibility report is for a different image release SHA.");
-  assert.equal(reviewedReport.toolingSha, toolingSha, "Compatibility report is for a different current tooling SHA.");
+  assert(SHA.test(reviewedReport.toolingSha || ""), "Compatibility report tooling SHA is malformed.");
   assert.equal(reviewedReport.comparisonBaseSha, imageReleaseSha, "Compatibility report comparison base does not match the image release SHA.");
   assert.equal(reviewedReport.comparisonHeadIdentity, "tooling-input-tree-sha256", "Compatibility report comparison head identity is unsupported.");
   assert.equal(reviewedReport.toolingInputTreeSha256, toolingInputTreeSha256, "Compatibility report is for a different tooling input tree.");
