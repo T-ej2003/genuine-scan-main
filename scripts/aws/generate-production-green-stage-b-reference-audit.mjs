@@ -21,6 +21,7 @@ import { assertStageBImportedBackendMetadataNormalization, classifyStageBFreshIm
 import { isTerraformDeposedKey } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 export { batch, createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 
@@ -849,7 +850,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot, create: true });
   const planBytes = fs.readFileSync(options.planJsonPath);
   const plan = parseJson(planBytes.toString("utf8"), "Terraform plan JSON");
-  const reader = createAwsReader(options);
+  const reader = createAwsReader({ ...options, run: createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" }) });
   const terraformConfiguration = fs.readFileSync(stageBTerraformConfigurationPath, "utf8");
   const audit = generateReferenceAudit({ ...options, plan, planBytes, reader, terraformConfiguration });
   writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(audit, null, 2)}\n`), repositoryRoot, label: "Stage B reference audit" });

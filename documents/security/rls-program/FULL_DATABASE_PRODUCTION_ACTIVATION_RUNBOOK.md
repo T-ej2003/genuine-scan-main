@@ -131,13 +131,13 @@ This creates the isolated RDS instance, KMS keys, checker/executor roles, securi
 4. Build/publish the backend, worker, and executor images from the release SHA and resolve immutable ECR digests. `publish-ecs-images.sh` reuses an existing immutable release tag on the later activation run:
 
 ```sh
-AWS_REGION=eu-west-2 IMAGE_TAG='<approved-release-sha>' \
+  MSCQR_AWS_CREDENTIAL_SOURCE=named-profile MSCQR_AWS_NAMED_PROFILE=mscqr-production-release-deployer AWS_REGION=eu-west-2 IMAGE_TAG='<approved-release-sha>' \
   OUTPUT_FILE=/secure/operator/production-images.jsonl \
   scripts/aws/publish-ecs-images.sh backend
-AWS_REGION=eu-west-2 IMAGE_TAG='<approved-release-sha>' \
+  MSCQR_AWS_CREDENTIAL_SOURCE=named-profile MSCQR_AWS_NAMED_PROFILE=mscqr-production-release-deployer AWS_REGION=eu-west-2 IMAGE_TAG='<approved-release-sha>' \
   OUTPUT_FILE=/secure/operator/production-images.jsonl \
   scripts/aws/publish-ecs-images.sh worker
-AWS_REGION=eu-west-2 IMAGE_TAG='<approved-release-sha>' \
+  MSCQR_AWS_CREDENTIAL_SOURCE=named-profile MSCQR_AWS_NAMED_PROFILE=mscqr-production-release-deployer AWS_REGION=eu-west-2 IMAGE_TAG='<approved-release-sha>' \
   OUTPUT_FILE=/secure/operator/production-images.jsonl \
   scripts/aws/publish-ecs-images.sh rls-executor
 ```
@@ -151,8 +151,10 @@ explicitly signs the exact v2 input; the input contains every v2 field except
 
 ```sh
 node scripts/aws/create-production-green-stage-b-approval.mjs \
+  --credential-source inherited-checker-session \
   --input /secure/operator/production-rls-stage-b-approval-input.json
 node scripts/aws/create-production-green-stage-b-approval.mjs --sign \
+  --credential-source inherited-checker-session \
   --input /secure/operator/production-rls-stage-b-approval-input.json \
   --output /secure/operator/production-rls-approval.json
 ```

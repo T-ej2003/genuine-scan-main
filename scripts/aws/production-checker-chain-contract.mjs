@@ -7,6 +7,8 @@ export const CHECKER_SOURCE_ROLE_ARN = `arn:aws:iam::${CHECKER_ACCOUNT}:role/msc
 export const CHECKER_TARGET_ROLE_ARN = `arn:aws:iam::${CHECKER_ACCOUNT}:role/mscqr-production-rls-independent-checker`;
 export const CHECKER_SOURCE_ROLE_NAME = "mscqr-production-independent-checker";
 export const CHECKER_TARGET_ROLE_NAME = "mscqr-production-rls-independent-checker";
+const SHA40 = /^[a-f0-9]{40}$/;
+const SHA256 = /^[a-f0-9]{64}$/;
 
 const decodeDocument = (value) => normalizeIamPolicyDocument(value, "Checker policy document");
 
@@ -43,6 +45,14 @@ export function assertRoleATrustResponse(response) {
   const role = response?.Role;
   if (role?.Arn !== CHECKER_SOURCE_ROLE_ARN) throw new Error("Checker source-role identity is wrong.");
   return assertRoleATrustDocument(decodeDocument(role.AssumeRolePolicyDocument));
+}
+
+export function assertReleasePreflightCheckerTrustEvidence(report, { sourceSha, administratorReportSha256 } = {}) {
+  if (!SHA40.test(sourceSha || "") || !SHA256.test(administratorReportSha256 || "")) throw new Error("Release-preflight checker-trust expectations are invalid.");
+  if (!report || report.status !== "ready-for-plan" || report.sourceSha !== sourceSha || report.administratorReportSha256 !== administratorReportSha256) throw new Error("Release-preflight checker-trust evidence is not bound to the authenticated source and administrator report.");
+  const checkerTrust = report.checkerTrust;
+  if (checkerTrust?.exact !== true || checkerTrust?.mfaRequired !== true || checkerTrust.principal !== CHECKER_USER_ARN || checkerTrust.roleArn !== CHECKER_SOURCE_ROLE_ARN) throw new Error("Release-preflight checker Role-A MFA trust evidence is invalid.");
+  return Object.freeze({ sourceSha, administratorReportSha256, checkerTrust: Object.freeze({ ...checkerTrust }) });
 }
 
 export function assertRoleBTrustResponse(response) {

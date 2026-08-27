@@ -70,9 +70,11 @@
       "kind": "file",
       "producer": "scripts/aws/run-production-green-stage-b-preflight.mjs:runReleaseReadiness",
       "consumers": [
-        "scripts/aws/validate-stage-b-deployment-closure.mjs",
-        "scripts/plan-production-green-stage-b.mjs",
-        "scripts/apply-production-green-stage-b.mjs"
+        "scripts/aws/production-release-preflight-checker-attestation.mjs",
+        "scripts/aws/prepare-production-cutover-runtime.mjs",
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/forward-recover-stage-b-existing-revision.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -82,6 +84,46 @@
       "overwrite": false,
       "hashBound": true,
       "atomicGroup": "release-preflight-report",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "release-preflight-checker-trust-attestation",
+      "kind": "file",
+      "producer": "scripts/aws/production-release-preflight-checker-attestation.mjs:runReleasePreflightCheckerTrustAttestationCli",
+      "consumers": [
+        "scripts/aws/prepare-production-cutover-runtime.mjs",
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/production-cutover-production-adapters.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "atomicGroup": "release-preflight-checker-trust-attestation-pair",
+      "overwrite": false,
+      "hashBound": true,
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "release-preflight-checker-trust-attestation-signature",
+      "kind": "file",
+      "producer": "scripts/aws/production-release-preflight-checker-attestation.mjs:runReleasePreflightCheckerTrustAttestationCli",
+      "consumers": [
+        "scripts/aws/prepare-production-cutover-runtime.mjs",
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/production-cutover-production-adapters.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "atomicGroup": "release-preflight-checker-trust-attestation-pair",
+      "overwrite": false,
+      "hashBound": true,
       "allOrNone": true,
       "rollback": "remove-committed-or-restore-backups"
     },

@@ -1,12 +1,11 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { canonicalJson, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertStageBBrokerFunctionUpdate } from "./stage-b-deployment-contract.mjs";
 import { assertStageBPrivateFile, assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
+import { createRootAttestationKmsVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
 
 export const STAGE_B_PARTIAL_APPLY_RECOVERY_SCHEMA_VERSION = 1;
 export const STAGE_B_PARTIAL_APPLY_RECOVERY_EVIDENCE_KIND = "STAGE_B_PARTIAL_APPLY_RECOVERY_ATTESTATION";
@@ -15,8 +14,8 @@ export const STAGE_B_PARTIAL_APPLY_RECOVERY_SIGNATURE_SCHEMA_VERSION = 3;
 export const STAGE_B_PARTIAL_APPLY_RECOVERY_REFRESH_STATUS = "REVIEWED_PARTIAL_APPLY_RESIDUE";
 export const STAGE_B_PARTIAL_APPLY_RECOVERY_ADDRESS = "aws_lambda_alias.reviewed";
 export const STAGE_B_PARTIAL_APPLY_RECOVERY_CALLER = "arn:aws:iam::368992683803:root";
-export const STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN = STAGE_B.approvalKmsKeyArn;
-export const STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM = "RSASSA_PSS_SHA_256";
+export const STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN = ROOT_ATTESTATION_KEY_ALIAS_ARN;
+export const STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM = ROOT_ATTESTATION_SIGNING_ALGORITHM;
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const canonicalBytes = (value) => Buffer.from(canonicalJson(value));
@@ -129,17 +128,13 @@ export function assertRecoveryClassification(classification, { refreshReportSha2
   return true;
 }
 
-export function verifyStageBRecoverySignatureWithKms({ digest, signature } = {}) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-recovery-verify-"));
-  try {
-    const digestPath = path.join(directory, "digest"); const signaturePath = path.join(directory, "signature");
-    fs.writeFileSync(digestPath, digest, { mode: 0o600, flag: "wx" }); fs.writeFileSync(signaturePath, signature, { mode: 0o600, flag: "wx" });
-    const result = JSON.parse(execFileSync("aws", ["kms", "verify", "--key-id", STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM, "--output", "json"], { encoding: "utf8" }));
-    return result.SignatureValid === true;
-  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+export function createStageBRecoveryKmsVerifier({ run } = {}) {
+  const verify = createRootAttestationKmsVerifier({ run });
+  return ({ digest, signature } = {}) => verify({ keyArn: STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN, signingAlgorithm: STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM, digest, signature });
 }
 
-export function assertVerifiedStageBRecovery({ refreshReport, refreshReportBytes, refreshReportSha256, classification, classificationBytes, classificationSha256, attestation, attestationBytes, attestationSha256, signature, signatureBytes, signatureSha256, expectedSourceSha, expectedLineage, expectedSerial, now = new Date(), verifySignature = verifyStageBRecoverySignatureWithKms } = {}) {
+export function assertVerifiedStageBRecovery({ refreshReport, refreshReportBytes, refreshReportSha256, classification, classificationBytes, classificationSha256, attestation, attestationBytes, attestationSha256, signature, signatureBytes, signatureSha256, expectedSourceSha, expectedLineage, expectedSerial, now = new Date(), verifySignature } = {}) {
+  if (typeof verifySignature !== "function") throw new Error("Stage B recovery verification requires an explicit trusted signature verifier.");
   const canonicalExpectedSerial = assertCanonicalTerraformSerialNumber(expectedSerial, "Expected Terraform serial");
   for (const [label, bytes, expectedSha] of [["refresh report", refreshReportBytes, refreshReportSha256], ["recovery classification", classificationBytes, classificationSha256], ["recovery attestation", attestationBytes, attestationSha256], ["recovery signature", signatureBytes, signatureSha256]]) {
     if (!Buffer.isBuffer(bytes) || sha256(bytes) !== expectedSha) throw new Error(`Stage B ${label} bytes do not match their approved SHA256.`);

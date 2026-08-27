@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { buildStageAStateIdentity, parseAuthenticatedStateBytes, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
@@ -80,8 +79,9 @@ function safeError(error) {
 export function runReleaseReadPreflight({
   region = STAGE_B.region,
   outputDirectory,
-  run = (args) => execFileSync("aws", [...args, "--region", region, "--output", "json", "--no-cli-pager"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+  run,
 } = {}) {
+  if (typeof run !== "function") throw new Error("Stage B release preflight requires an explicit credential-bound AWS command runner.");
   if (region !== STAGE_B.region) throw new Error("Stage B release preflight region is wrong.");
   if (!path.isAbsolute(outputDirectory || "")) throw new Error("Stage B release preflight requires an absolute private output directory.");
   readIdentityCapabilityMatrix();

@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, reserveStageBSharedApplyAttempt, runApply, showSavedPlan, stageBApplyArtifactSetIdentity, stageBApplyAttemptPath, stageBEffectiveOperatorHome } from "../apply-production-green-stage-b.mjs";
 import { stageBApplyAttemptS3Key } from "../aws/stage-b-terraform-backend-contract.mjs";
+import { buildRootAttestationKeyPolicy, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import {
   canonicalizeJson,
@@ -55,6 +56,7 @@ import { buildStageBImagePublicationIdentity } from "../aws/stage-b-image-public
 import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { deriveContractDigests, generateStageBTfvars } from "../aws/generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const realForbiddenSimulations = JSON.parse(fs.readFileSync("scripts/tests/fixtures/aws-iam-simulate-principal-policy-stage-b-forbidden.json", "utf8"));
@@ -1456,6 +1458,45 @@ test("versioned binding authenticates both report hash domains and evidence iden
   assert.throws(() => verifyPermissionReportSignature({ report, signatureArtifact: artifact, reportBytes: Buffer.from(`${reportBytes} \n`), signatureBytes, now, verify: () => true }), /different report bytes/);
   const legacyArtifact = { ...artifact, schemaVersion: 2, hashDomain: "canonicalPayloadSha256" }; const legacyBytes = Buffer.from(`${JSON.stringify(legacyArtifact, null, 2)}\n`);
   assert.throws(() => verifyPermissionReportSignature({ report, signatureArtifact: legacyArtifact, reportBytes, signatureBytes: legacyBytes, now, verify: () => true }), /unsupported/);
+});
+
+test("production-default permission verification uses the release profile runner", () => {
+  const report = validReport();
+  const reportBytes = serializePermissionReport(report);
+  const artifact = signPermissionReport(report, { now, reportBytes, sign: () => "AQ==" });
+  const signatureBytes = Buffer.from(`${JSON.stringify(artifact, null, 2)}\n`);
+  const calls = [];
+  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "mscqr-production-release-deployer",
+    exec: (file, args, options) => {
+      calls.push({ file, args, options });
+      const operation = args[1]; const keyArn = "arn:aws:kms:eu-west-2:368992683803:key/11111111-2222-3333-4444-555555555555";
+      return JSON.stringify(operation === "describe-key" ? { KeyMetadata: { Arn: keyArn, KeyId: keyArn.split("/").at(-1), Description: ROOT_ATTESTATION_KEY_DESCRIPTION, KeyUsage: "SIGN_VERIFY", KeySpec: "RSA_3072", KeyState: "Enabled", Enabled: true, KeyManager: "CUSTOMER", Origin: "AWS_KMS", MultiRegion: false } }
+        : operation === "get-key-policy" ? { Policy: JSON.stringify(buildRootAttestationKeyPolicy()) }
+          : operation === "list-resource-tags" ? { Tags: Object.entries(ROOT_ATTESTATION_TAGS).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) }
+            : { SignatureValid: true });
+    },
+  });
+  const previousProfile = process.env.AWS_PROFILE;
+  process.env.AWS_PROFILE = "hostile-default-profile";
+  try {
+    assert.doesNotThrow(() => verifyPermissionReportSignature({ report, signatureArtifact: artifact, reportBytes, signatureBytes, now, run: releaseRun }));
+  } finally {
+    if (previousProfile === undefined) delete process.env.AWS_PROFILE;
+    else process.env.AWS_PROFILE = previousProfile;
+  }
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0].file, "aws");
+  assert.deepEqual(calls.map(({ args }) => args.slice(0, 2)), [["kms", "describe-key"], ["kms", "get-key-policy"], ["kms", "list-resource-tags"], ["kms", "verify"]]);
+  assert.equal(calls.every(({ options }) => options.env.AWS_PROFILE === "mscqr-production-release-deployer"), true);
+});
+
+test("permission verification rejects an omitted trusted verifier instead of using ambient credentials", () => {
+  const report = validReport();
+  const reportBytes = serializePermissionReport(report);
+  const artifact = signPermissionReport(report, { now, reportBytes, sign: () => "AQ==" });
+  const signatureBytes = Buffer.from(`${JSON.stringify(artifact, null, 2)}\n`);
+  assert.throws(() => verifyPermissionReportSignature({ report, signatureArtifact: artifact, reportBytes, signatureBytes, now }), /explicit trusted verifier or command runner/);
 });
 
 test("release-deployer cannot generate a report or sign through the CLI", () => {

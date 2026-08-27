@@ -45,6 +45,17 @@ test("the reviewed two-SHA workflow boundary keeps the exact 29bf release image-
   assert.equal(report.imageReuseCompatible, true);
 });
 
+test("an explicit OIDC publisher transport transition is security-checked without becoming an image-content change", () => {
+  const releaseWorkflow = "29bf92a14d5e832575009bd76b16886feff62cbd";
+  const toolingWorkflow = "a37fe2559f15094494122825a7d7365ca1218120";
+  const read = (replacement) => (sha) => {
+    const source = execFileSync("git", ["show", `${sha}:${STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH}`], { encoding: "utf8" });
+    return sha === toolingWorkflow ? replacement(source) : source;
+  };
+  assert.doesNotThrow(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseWorkflow, toolingSha: toolingWorkflow, readFile: read((source) => source.replace("run: ./scripts/aws/publish-ecs-images.sh production-green-stage-b", "run: MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer ./scripts/aws/publish-ecs-images.sh production-green-stage-b")) }));
+  assert.throws(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseWorkflow, toolingSha: toolingWorkflow, readFile: read((source) => source.replace("run: ./scripts/aws/publish-ecs-images.sh production-green-stage-b", "run: MSCQR_AWS_CREDENTIAL_SOURCE=github-access-keys ./scripts/aws/publish-ecs-images.sh production-green-stage-b")) }), /publication inputs/);
+});
+
 test("trusted workflow publication inputs are complete and inherited image inputs fail closed", () => {
   const releaseSha = "29bf92a14d5e832575009bd76b16886feff62cbd";
   const protectedSha = "a37fe2559f15094494122825a7d7365ca1218120";
@@ -68,7 +79,7 @@ test("trusted workflow publication inputs are complete and inherited image input
   assert.doesNotThrow(() => assertStageBTrustedWorkflowSeparation({ imageReleaseSha: releaseSha, toolingSha: protectedSha, readFile: read((source) => source.replace("attest \"$image_ref\" spdxjson", "attest \"$image_ref\" spdxjson # attestation-only")) }));
 });
 
-test("trustedToolingOnly reuse requires the authenticated v3 publication proof", () => {
+test("trustedToolingOnly reuse requires the authenticated current publication proof", () => {
   const releaseSha = "29bf92a14d5e832575009bd76b16886feff62cbd";
   const toolingSha = "a37fe2559f15094494122825a7d7365ca1218120";
   const result = imageImpactReportFor({ imageReleaseSha: releaseSha, toolingSha, toolingInputTreeSha256: "d".repeat(64), changedFiles: [STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH] });
@@ -82,7 +93,7 @@ test("image-reuse consumers accept only the current rules version", () => {
   const files = [{ file: "scripts/plan-production-green-stage-b.mjs", category: "toolingOnly", imageAffecting: false }];
   const report = compatibilityReport(files);
   assert.equal(imageReuseCompatibility({ imageReleaseSha: imageReleaseSha, toolingSha, currentHead: toolingSha, changedFiles: files, toolingInputTreeSha256, reviewedReport: report }).classificationRulesVersion, STAGE_B_IMAGE_REUSE_RULES_VERSION);
-  for (const classificationRulesVersion of ["stage-b-image-reuse-v2", "stage-b-image-reuse-v4", undefined]) {
+  for (const classificationRulesVersion of ["stage-b-image-reuse-v2", "stage-b-image-reuse-v3", "stage-b-image-reuse-v5", undefined]) {
     assert.throws(() => imageReuseCompatibility({ imageReleaseSha, toolingSha, currentHead: toolingSha, changedFiles: files, toolingInputTreeSha256, reviewedReport: { ...report, classificationRulesVersion } }), /rules are stale/);
   }
 });
@@ -146,8 +157,11 @@ test("Stage A Terraform changes are classified as infrastructure-only without im
 });
 
 test("Terraform classification stays bounded and runtime image behavior remains fail-closed", () => {
-  const stageB = "infra/aws/terraform/production-green-stage-b/main.tf";
-  assert.equal(classifyStageBImageReusePath(stageB).category, "terraformOnly");
+  for (const file of [
+    "infra/aws/terraform/production-green-stage-b/main.tf",
+    "infra/aws/terraform/production-green-stage-b-image-publisher/main.tf",
+    "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf",
+  ]) assert.equal(classifyStageBImageReusePath(file).category, "terraformOnly");
   assert.equal(classifyStageBImageReusePath("infra/aws/terraform/unrelated/main.tf").category, "unknown");
 
   const backend = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ["backend/src/app.ts"] });

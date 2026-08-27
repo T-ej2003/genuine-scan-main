@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import { buildRootAttestationKeyPolicy, assertRootAttestationKeyPolicy, ROOT_ATTESTATION_KEY_ALIAS_ARN } from "../aws/production-root-attestation-key.mjs";
+import { buildStageAApprovalKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b-publisher-bootstrap";
 const account = "368992683803";
@@ -94,12 +96,17 @@ test("unrelated infrastructure and secret-capable actions are explicitly denied 
   }
 });
 
-test("bootstrap root owns only the bootstrap role and its inline policy and records one-time break-glass evidence", () => {
+test("bootstrap root owns only the bootstrap role, boundary, and pre-Stage-A root attestation key", () => {
   const main = fs.readFileSync(`${root}/main.tf`, "utf8");
+  const outputs = fs.readFileSync(`${root}/outputs.tf`, "utf8");
   assert.match(main, /resource "aws_iam_policy" "publisher_permissions_boundary"/);
   assert.match(main, /resource "aws_iam_role" "publisher_bootstrap"/);
   assert.match(main, /resource "aws_iam_role_policy" "publisher_bootstrap"/);
-  assert.doesNotMatch(main, /aws_(ecs|rds|db|lambda|secretsmanager|kms|security_group|ecr)_/);
+  assert.match(main, /resource "aws_kms_key" "root_attestation"/);
+  assert.match(main, /resource "aws_kms_alias" "root_attestation"/);
+  assert.match(outputs, /root_attestation_key_arn/);
+  assert.match(outputs, /root_attestation_key_alias_arn/);
+  assert.doesNotMatch(main, /aws_(ecs|rds|db|lambda|secretsmanager|security_group|ecr)_/);
   assert.equal(backend.rootApplyAllowed, false);
   assert.equal(backend.oneTimeBreakGlassBootstrapRequired, true);
   assert.equal(backend.publisherPermissionsBoundary, publisherBoundary);
@@ -107,4 +114,17 @@ test("bootstrap root owns only the bootstrap role and its inline policy and reco
   assert.equal(evidence.noImagePublication, true);
   assert.equal(evidence.noSecretValueAccess, true);
   assert.equal(evidence.publisherPermissionsBoundaryArn, publisherBoundary);
+});
+
+test("root attestations and checker approvals use cryptographically exclusive signers", () => {
+  assert.equal(ROOT_ATTESTATION_KEY_ALIAS_ARN, `arn:aws:kms:eu-west-2:${account}:alias/mscqr-production-root-attestation`);
+  assert.equal(assertRootAttestationKeyPolicy(buildRootAttestationKeyPolicy()), true);
+  const rootPolicy = buildRootAttestationKeyPolicy();
+  const rootDeny = rootPolicy.Statement.find(({ Sid }) => Sid === "DenyNonRootAttestationSigning");
+  assert.equal(rootDeny.Condition.StringNotEquals["aws:PrincipalArn"], `arn:aws:iam::${account}:root`);
+  assert.equal(rootPolicy.Statement.some(({ Sid, Action }) => Sid === "ReleaseVerifiesRootAttestations" && Action.includes("kms:Sign")), false);
+  const approvalPolicy = buildStageAApprovalKeyPolicy();
+  const checkerArn = `arn:aws:iam::${account}:role/mscqr-production-rls-independent-checker`;
+  assert.equal(approvalPolicy.Statement.find(({ Sid }) => Sid === "IndependentCheckerSigns").Principal.AWS, checkerArn);
+  assert.equal(approvalPolicy.Statement.find(({ Sid }) => Sid === "DenyNonCheckerApprovalSigning").Condition.StringNotEquals["aws:PrincipalArn"], checkerArn);
 });

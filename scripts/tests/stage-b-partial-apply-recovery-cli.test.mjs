@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { parseCanonicalTerraformSerialCliText, createRecoveryAttestation, signRecoveryAttestation } from "../aws/stage-b-partial-apply-recovery-contract.mjs";
 import { runCli } from "../aws/classify-stage-b-partial-apply-recovery.mjs";
+import { buildRootAttestationKeyPolicy, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 const classifier = path.join(repositoryRoot, "scripts/aws/classify-stage-b-partial-apply-recovery.mjs");
@@ -26,7 +27,14 @@ function fixture() {
   const attestationBytes = writePrivate(path.join(directory, "attestation.json"), Buffer.from(`${JSON.stringify(report, null, 2)}\n`));
   const signatureBytes = writePrivate(path.join(directory, "signature.json"), Buffer.from(`${JSON.stringify(signature, null, 2)}\n`));
   const fakeBin = path.join(directory, "bin"); fs.mkdirSync(fakeBin, { mode: 0o700 });
-  const fakeAws = path.join(fakeBin, "aws"); fs.writeFileSync(fakeAws, "#!/bin/sh\nprintf '{\"SignatureValid\":true}\n'\n", { mode: 0o700, flag: "wx" });
+  const keyArn = "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111";
+  const responses = {
+    "describe-key": { KeyMetadata: { Arn: keyArn, KeyId: keyArn.split("/").at(-1), Description: ROOT_ATTESTATION_KEY_DESCRIPTION, KeyUsage: "SIGN_VERIFY", KeySpec: "RSA_3072", KeyState: "Enabled", Enabled: true, KeyManager: "CUSTOMER", Origin: "AWS_KMS", MultiRegion: false } },
+    "get-key-policy": { Policy: JSON.stringify(buildRootAttestationKeyPolicy()) },
+    "list-resource-tags": { Tags: Object.entries(ROOT_ATTESTATION_TAGS).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) },
+    verify: { SignatureValid: true },
+  };
+  const fakeAws = path.join(fakeBin, "aws"); fs.writeFileSync(fakeAws, `#!/bin/sh\ncase "$2" in\n${Object.entries(responses).map(([operation, response]) => `  ${operation}) printf '%s\\n' '${JSON.stringify(response)}' ;;`).join("\n")}\n  *) exit 91 ;;\nesac\n`, { mode: 0o700, flag: "wx" });
   const args = ["--refresh-report", path.join(directory, "refresh.json"), "--refresh-report-sha256", refreshReportSha256, "--attestation", path.join(directory, "attestation.json"), "--attestation-sha256", sha256(attestationBytes), "--signature", path.join(directory, "signature.json"), "--signature-sha256", sha256(signatureBytes), "--source-sha", current.protectedSourceSha, "--lineage", current.terraformLineage, "--serial", String(current.terraformSerial)];
   return { directory, fakeBin, args, expectedStatus: "REVIEWED_PARTIAL_APPLY_RESIDUE" };
 }
@@ -45,6 +53,12 @@ test("executable CLI produces one classification artifact without the Promise Ty
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stderr, /runCli\(\.\.\.\)\.then is not a function/);
   assert.equal(JSON.parse(fs.readFileSync(output, "utf8")).status, value.expectedStatus);
+});
+
+test("executable recovery composition authenticates the root-exclusive key before KMS Verify", () => {
+  const source = fs.readFileSync(classifier, "utf8");
+  assert.match(source, /createStageBRecoveryKmsVerifier\(\{ run: releaseRun \}\)/);
+  assert.doesNotMatch(source, /\["kms", "verify"/);
 });
 
 test("executable CLI fails closed on invalid input without publishing classification", () => {

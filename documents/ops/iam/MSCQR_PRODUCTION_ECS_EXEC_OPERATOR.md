@@ -18,9 +18,11 @@ and verify that task. It contains no service deployment, task registration, `iam
 ## Invocation boundary
 
 Run `scripts/aws/verify-production-rotation-via-ecs-exec.mjs` only under an assumed session for
-the verifier role. The helper checks the caller ARN before any ECS discovery and rejects the
-release-deployer or any other identity. The fixture is transferred through the controlled PTY
-stdin path; it is not a command-line argument or task-definition environment value.
+the verifier role, with `--credential-source inherited-ecs-exec-verifier-session`. The helper
+forwards only that STS session, rejects profile/default credential selection, checks the caller
+ARN before any ECS discovery, and rejects the release-deployer or any other identity. The fixture
+is transferred through the controlled PTY stdin path; it is not a command-line argument or
+task-definition environment value.
 
 Administrator preflight reports release-deployer and verifier evaluations separately. The report is
 invalid unless the exact Stage-A ingress, deployment, rollback, PassRole, release-deployer ECS Exec

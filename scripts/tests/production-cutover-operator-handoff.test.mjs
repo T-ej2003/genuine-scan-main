@@ -3,11 +3,12 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 import { buildProductionCutoverChildEnvironment, parseProductionCutoverOperatorArgs, runProductionCutoverOperator } from "../aws/run-production-cutover-operator.mjs";
 import { promptProductionHiddenInput } from "../security/production-interactive-mfa-provider.mjs";
+import { ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 
 const sourceSha = "a".repeat(40);
 const configSha = "b".repeat(64);
 const argv = ["--config", "/private/runtime/rotation-config.json", "--config-sha256", configSha, "--source-sha", sourceSha, "--rotation-id", "rotation-20260826060632-b15b3f51"];
-const values = Object.freeze({ MSCQR_VERIFIER_MFA_SERIAL: "arn:aws:iam::368992683803:mfa/operator", MSCQR_ONBOARDING_EMAIL: "administration@example.invalid", MSCQR_ONBOARDING_PASSWORD: "fixture-admin-value", MSCQR_CANARY_ORDINARY_EMAIL: "canary@example.invalid", MSCQR_CANARY_ORDINARY_PASSWORD: "fixture-canary-value" });
+const values = Object.freeze({ MSCQR_VERIFIER_MFA_SERIAL: ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN, MSCQR_ONBOARDING_EMAIL: "administration@example.invalid", MSCQR_ONBOARDING_PASSWORD: "fixture-admin-value", MSCQR_CANARY_ORDINARY_EMAIL: "canary@example.invalid", MSCQR_CANARY_ORDINARY_PASSWORD: "fixture-canary-value" });
 
 const inputFor = (prompt) => values[prompt.includes("verifier MFA serial") ? "MSCQR_VERIFIER_MFA_SERIAL" : prompt.includes("administrator email") ? "MSCQR_ONBOARDING_EMAIL" : prompt.includes("administrator password") ? "MSCQR_ONBOARDING_PASSWORD" : prompt.includes("tenant-canary email") ? "MSCQR_CANARY_ORDINARY_EMAIL" : "MSCQR_CANARY_ORDINARY_PASSWORD"];
 
@@ -34,7 +35,7 @@ test("operator handoff collects exactly five hidden pre-launch inputs and leaves
     argv,
     stdin: { isTTY: true },
     stdout: { isTTY: true, write: (value) => output.push(value) },
-    parentEnvironment: { HOME: "/operator", PATH: "/usr/bin", UNRELATED_SECRET: "must-not-pass", MSCQR_ONBOARDING_PASSWORD: "fixture-old-value" },
+    parentEnvironment: { HOME: "/operator", PATH: "/usr/bin", AWS_CONFIG_FILE: "/hostile/config", AWS_SHARED_CREDENTIALS_FILE: "/hostile/credentials", AWS_SDK_LOAD_CONFIG: "1", AWS_CA_BUNDLE: "/hostile/ca", UNRELATED_SECRET: "must-not-pass", MSCQR_ONBOARDING_PASSWORD: "fixture-old-value" },
     prompt: async (request) => { prompts.push(request); return inputFor(request.prompt); },
     spawnChild: childThatExits({ capture: (value) => { spawned = { ...value, environment: { ...value.options.env } }; } }),
   });
@@ -44,6 +45,7 @@ test("operator handoff collects exactly five hidden pre-launch inputs and leaves
   assert.equal(prompts.some(({ prompt }) => /MFA code|MFA_BOOTSTRAP|onboarding MFA|tenant-canary MFA/.test(prompt)), false);
   assert.deepEqual(spawned.options.stdio, "inherit");
   assert.equal(spawned.environment.UNRELATED_SECRET, undefined);
+  for (const name of ["AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_SDK_LOAD_CONFIG", "AWS_CA_BUNDLE"]) assert.equal(spawned.environment[name], undefined);
   assert.equal(spawned.environment.MSCQR_VERIFIER_MFA_CODE, undefined);
   assert.equal(spawned.environment.HOME, "/operator");
   for (const [name, value] of Object.entries(values)) assert.equal(spawned.environment[name], value);
@@ -54,7 +56,8 @@ test("operator handoff collects exactly five hidden pre-launch inputs and leaves
 test("operator handoff fails closed before a child exists for empty or malformed input", async () => {
   let spawns = 0;
   await assert.rejects(() => runProductionCutoverOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async () => "", spawnChild: () => { spawns += 1; } }), /MSCQR_VERIFIER_MFA_SERIAL entry failed/);
-  await assert.rejects(() => runProductionCutoverOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async (request) => request.prompt.includes("administrator password") ? "" : "valid", spawnChild: () => { spawns += 1; } }), /MSCQR_ONBOARDING_PASSWORD entry failed/);
+  await assert.rejects(() => runProductionCutoverOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async (request) => request.prompt.includes("administrator password") ? "" : inputFor(request.prompt), spawnChild: () => { spawns += 1; } }), /MSCQR_ONBOARDING_PASSWORD entry failed/);
+  await assert.rejects(() => runProductionCutoverOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async (request) => request.prompt.includes("verifier MFA serial") ? "123456" : inputFor(request.prompt), spawnChild: () => { spawns += 1; } }), /MSCQR_VERIFIER_MFA_SERIAL entry failed/);
   await assert.rejects(() => runProductionCutoverOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async () => { throw new Error("fixture-sensitive-value"); }, spawnChild: () => { spawns += 1; } }), (error) => error.message === "Interactive MSCQR_VERIFIER_MFA_SERIAL entry failed." && !error.message.includes("fixture-sensitive-value"));
   assert.equal(spawns, 0);
 });

@@ -243,7 +243,10 @@ function assertIamReport(report, sourceSha) {
   if (report.iamEvaluationCensus?.invalid !== 0 || (report.iamEvaluationCensus?.failures || []).length !== 0) throw new Error("IAM census contains failed evaluations.");
   assertCutoverCriticalEvidence(report);
   assertPreCutoverTemporaryCapabilityAbsent(report.temporaryKmsCapability, { sourceSha });
-  if (report.checkerTrust?.exact !== true || report.checkerTrust?.mfaRequired !== true) throw new Error("Live Role-A MFA trust evidence is required before checker readiness.");
+}
+
+function assertCheckerTrustEvidence(evidence, sourceSha) {
+  if (evidence?.sourceSha !== sourceSha || evidence?.checkerTrust?.exact !== true || evidence?.checkerTrust?.mfaRequired !== true) throw new Error("Authenticated release-preflight Role-A MFA trust evidence is required before checker readiness.");
 }
 
 /**
@@ -251,7 +254,7 @@ function assertIamReport(report, sourceSha) {
  * Every adapter is required to return sanitized, hash-bound evidence.
  */
 export async function runProductionCutoverControlPlane(input = {}) {
-  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, identities: suppliedIdentities, verifyRootDropSignature, checkerChain, stageA, artifactSigning, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, checkerTrustEvidence, identities: suppliedIdentities, verifyRootDropSignature, checkerChain, stageA, artifactSigning, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
   if (!SHA40.test(sourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
   const mutations = [];
   const results = { protectedMain: { valid: true, sourceSha, evidenceSha256: imageAuthorization?.evidenceSha256 } , imageAuthorization };
@@ -259,6 +262,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
   assertImageAuthorization(imageAuthorization, sourceSha, imageAuthorizationValidation);
 
   assertIamReport(iamReport, sourceSha);
+  assertCheckerTrustEvidence(checkerTrustEvidence, sourceSha);
   if (typeof iam?.reconcile === "function") recordMutation(mutations, "M1_IAM_RECONCILIATION", await iam.reconcile());
   results.iamPreflight = { ...iamReport, sourceSha, evidenceSha256: (iamReport.evidence || iamReport).evidenceSha256 };
 

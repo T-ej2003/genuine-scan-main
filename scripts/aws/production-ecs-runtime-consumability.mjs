@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { canonicalSha256, taskDefinitionFingerprint } from "./stage-b-task-definition-recovery-contract.mjs";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
+import { ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
 import { deriveEcsRuntimeDependencies, RUNTIME_ACCOUNT as ACCOUNT, RUNTIME_REGION as REGION, RUNTIME_ROLE_ARN as ROLE_ARN } from "./production-ecs-runtime-dependencies.mjs";
 export { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
 
@@ -262,7 +263,7 @@ export function assertRuntimeDependencyInventory(inventory, { sourceSha, candida
 
 export function signRuntimeDependencyInventory(inventory, { sign, signedAt = new Date().toISOString() } = {}) {
   if (typeof sign !== "function" || !Number.isFinite(Date.parse(signedAt)) || !HEX.test(inventory?.inventorySha256 || "")) throw new Error("Runtime inventory signing inputs are invalid.");
-  const binding = { schemaVersion: 1, kind: "SIGNED_PRODUCTION_ECS_RUNTIME_DEPENDENCY_INVENTORY", inventorySha256: inventory.inventorySha256, keyArn: STAGE_B.approvalKmsKeyArn, signingAlgorithm: STAGE_B_APPROVAL_ALGORITHM, signedAt };
+  const binding = { schemaVersion: 1, kind: "SIGNED_PRODUCTION_ECS_RUNTIME_DEPENDENCY_INVENTORY", inventorySha256: inventory.inventorySha256, keyArn: ROOT_ATTESTATION_KEY_ALIAS_ARN, signingAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM, signedAt };
   const signedBindingSha256 = canonicalSha256(binding);
   const signatureBase64 = sign({ digest: Buffer.from(signedBindingSha256, "hex"), keyArn: binding.keyArn, signingAlgorithm: binding.signingAlgorithm });
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureBase64 || "")) throw new Error("Runtime inventory signature is invalid.");
@@ -274,8 +275,8 @@ export function assertSignedRuntimeDependencyInventory(envelope, { sourceSha, ca
   const { envelopeSha256, ...body } = envelope || {};
   const nowMs = Number(now); const signedAtMs = Date.parse(envelope?.signedAt);
   const binding = { schemaVersion: envelope?.schemaVersion, kind: envelope?.kind, inventorySha256: envelope?.inventory?.inventorySha256, keyArn: envelope?.keyArn, signingAlgorithm: envelope?.signingAlgorithm, signedAt: envelope?.signedAt };
-  if (envelope?.schemaVersion !== 1 || envelope.kind !== "SIGNED_PRODUCTION_ECS_RUNTIME_DEPENDENCY_INVENTORY" || envelope.keyArn !== STAGE_B.approvalKmsKeyArn
-    || envelope.signingAlgorithm !== STAGE_B_APPROVAL_ALGORITHM || !HEX.test(envelopeSha256 || "") || canonicalSha256(body) !== envelopeSha256
+  if (envelope?.schemaVersion !== 1 || envelope.kind !== "SIGNED_PRODUCTION_ECS_RUNTIME_DEPENDENCY_INVENTORY" || envelope.keyArn !== ROOT_ATTESTATION_KEY_ALIAS_ARN
+    || envelope.signingAlgorithm !== ROOT_ATTESTATION_SIGNING_ALGORITHM || !HEX.test(envelopeSha256 || "") || canonicalSha256(body) !== envelopeSha256
     || !HEX.test(envelope.signedBindingSha256 || "") || canonicalSha256(binding) !== envelope.signedBindingSha256
     || !Number.isFinite(nowMs) || !Number.isFinite(signedAtMs) || signedAtMs > nowMs + CLOCK_SKEW_MS || nowMs - signedAtMs > RUNTIME_AUTHORIZATION_MAX_AGE_MS
     || typeof verify !== "function" || verify({ digest: Buffer.from(envelope.signedBindingSha256 || "", "hex"), signature: Buffer.from(envelope.signatureBase64 || "", "base64"), keyArn: envelope.keyArn, signingAlgorithm: envelope.signingAlgorithm }) !== true) {
@@ -388,9 +389,9 @@ export function assertRuntimeConsumabilityEvidence(evidence, { sourceSha, candid
 
 export function signRuntimeConsumabilityEvidence(evidence, { sign, signedAt = new Date().toISOString() } = {}) {
   if (typeof sign !== "function" || !Number.isFinite(Date.parse(signedAt)) || !HEX.test(evidence?.evidenceSha256 || "")) throw new Error("Runtime closure signing inputs are invalid.");
-  const binding = { schemaVersion: 2, kind: "SIGNED_PRODUCTION_ECS_RUNTIME_CONSUMABILITY", evidenceSha256: evidence.evidenceSha256, keyArn: STAGE_B.approvalKmsKeyArn, signingAlgorithm: STAGE_B_APPROVAL_ALGORITHM, signedAt };
+  const binding = { schemaVersion: 2, kind: "SIGNED_PRODUCTION_ECS_RUNTIME_CONSUMABILITY", evidenceSha256: evidence.evidenceSha256, keyArn: ROOT_ATTESTATION_KEY_ALIAS_ARN, signingAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM, signedAt };
   const signedBindingSha256 = canonicalSha256(binding);
-  const signatureBase64 = sign({ digest: Buffer.from(signedBindingSha256, "hex"), keyArn: STAGE_B.approvalKmsKeyArn, signingAlgorithm: STAGE_B_APPROVAL_ALGORITHM });
+  const signatureBase64 = sign({ digest: Buffer.from(signedBindingSha256, "hex"), keyArn: ROOT_ATTESTATION_KEY_ALIAS_ARN, signingAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM });
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureBase64 || "")) throw new Error("Runtime closure signature is invalid.");
   const body = { schemaVersion: binding.schemaVersion, kind: binding.kind, evidence, keyArn: binding.keyArn, signingAlgorithm: binding.signingAlgorithm, signedAt, signedBindingSha256, signatureBase64 };
   return Object.freeze({ ...body, envelopeSha256: canonicalSha256(body) });
@@ -407,8 +408,8 @@ export function assertRuntimeConsumabilityEnvelopeSignature(envelope, { verify }
   const { envelopeSha256, ...body } = envelope || {};
   const { evidenceSha256, ...evidenceBody } = envelope?.evidence || {};
   const binding = { schemaVersion: envelope?.schemaVersion, kind: envelope?.kind, evidenceSha256: envelope?.evidence?.evidenceSha256, keyArn: envelope?.keyArn, signingAlgorithm: envelope?.signingAlgorithm, signedAt: envelope?.signedAt };
-  if (envelope?.schemaVersion !== 2 || envelope.kind !== "SIGNED_PRODUCTION_ECS_RUNTIME_CONSUMABILITY" || envelope.keyArn !== STAGE_B.approvalKmsKeyArn
-    || envelope.signingAlgorithm !== STAGE_B_APPROVAL_ALGORITHM || !HEX.test(envelopeSha256 || "") || canonicalSha256(body) !== envelopeSha256
+  if (envelope?.schemaVersion !== 2 || envelope.kind !== "SIGNED_PRODUCTION_ECS_RUNTIME_CONSUMABILITY" || envelope.keyArn !== ROOT_ATTESTATION_KEY_ALIAS_ARN
+    || envelope.signingAlgorithm !== ROOT_ATTESTATION_SIGNING_ALGORITHM || !HEX.test(envelopeSha256 || "") || canonicalSha256(body) !== envelopeSha256
     || !HEX.test(evidenceSha256 || "") || canonicalSha256(evidenceBody) !== evidenceSha256
     || !HEX.test(envelope.signedBindingSha256 || "") || canonicalSha256(binding) !== envelope.signedBindingSha256
     || typeof verify !== "function" || verify({ digest: Buffer.from(envelope.signedBindingSha256 || "", "hex"), signature: Buffer.from(envelope.signatureBase64 || "", "base64"), keyArn: envelope.keyArn, signingAlgorithm: envelope.signingAlgorithm }) !== true) {

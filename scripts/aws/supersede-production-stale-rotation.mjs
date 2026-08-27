@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
-import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { createInitialDualSlotSecretsManagerClient, supersedeStalePendingRotation, bootstrapInitialDualSlotRotation } from "./production-initial-dual-slot-bootstrap.mjs";
 
 const parse = (argv) => {
@@ -26,7 +26,7 @@ const sourceSha = fresh.headSha;
 const rotationId = args.get("rotation-id");
 const staleRotationId = args.get("stale-rotation-id");
 if (!rotationId || !staleRotationId || !args.get("stale-source-sha")) throw new Error("Replacement and stale rotation identities are required.");
-const run = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
+const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
 const client = createInitialDualSlotSecretsManagerClient({ profile: "mscqr-production-release-deployer" });
 await client.assertCredentialIdentity();
 const service = JSON.parse(run(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2"])).services?.[0];

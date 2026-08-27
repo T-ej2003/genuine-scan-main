@@ -26,12 +26,16 @@ import {
   assertStageBPermissionEvidenceKind,
   INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND,
   signPermissionReport,
+  createPermissionReportKmsSigner,
   verifyPermissionReportSignature,
 } from "./validate-production-green-stage-b-permissions.mjs";
 import { collectLiveEcsExecOperatorEvidence } from "./production-ecs-exec-operator-contract.mjs";
 import { assertStageARootDropKeyPolicySource } from "./production-stage-a-control-plane.mjs";
 import { buildTemporaryCapabilityEvidence } from "./production-stage-a-temporary-kms-capability.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
+import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment } from "./production-credential-source-contract.mjs";
+import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -65,18 +69,20 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   const partialApplyRecovery = argv.includes("--partial-apply-recovery");
   const freshImagePartialApplyRecovery = argv.includes("--fresh-image-partial-apply-recovery");
   const recoveryMode = resolveStageBRecoveryMode({ recoveryOnly: false, partialApplyRecovery, freshImagePartialApplyRecovery });
-  generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff, phase: "POST_APPLY" });
+  const releaseAwsRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", exec: (command, args, options) => run(command, args, options) });
+  generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff, phase: "POST_APPLY", run: (args) => releaseAwsRun(args) });
   const generated = generateStageBTfvars({
     imageEvidence: value(argv, "--image-evidence"), imageEvidenceSignature: value(argv, "--image-evidence-signature"), stateBackup: stageBState,
     stageAInput: handoff, stageAStateBackup: stageAState, brokerPackagePath: value(argv, "--broker-package"), toolingSha, toolingTreeSha256,
     imageReleaseSha: value(argv, "--image-release-sha"), workflowRunId: value(argv, "--workflow-run-id"), canonicalArtifactSha256: value(argv, "--canonical-artifact-sha256"),
     environment: "production", outputPath: tfvars, bindingReportPath: bindingReport, partialApplyRecovery, freshImagePartialApplyRecovery,
+    verifySignature: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseAwsRun(args) }),
     ...(["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(recoveryMode) ? { recovery: { refreshReportPath: value(argv, "--refresh-report"), observationBindingPath: value(argv, "--refresh-binding-report") } } : {}),
   });
   generateStageBTerraformBackendConfig({ outputPath: backendConfig });
   ensureStageBPrivateDirectory({ directory: terraformDataDir, repositoryRoot: root, create: true, normalize: true });
   const terraformRoot = path.join(root, "infra/aws/terraform/production-green-stage-b");
-  const env = { ...process.env, TF_DATA_DIR: terraformDataDir, TF_WORKSPACE: "default" };
+  const env = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: REGION }), TF_DATA_DIR: terraformDataDir, TF_WORKSPACE: "default" };
   run("terraform", [`-chdir=${terraformRoot}`, "init", `-backend-config=${backendConfig}`, "-input=false", "-lockfile=readonly", "-no-color"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const backendMetadata = ensureStageBTerraformBackendMetadataPrivate({ terraformDataDir, repositoryRoot: root, normalize: true });
   const metadata = JSON.parse(fs.readFileSync(backendMetadata.backendMetadataPath, "utf8")).backend;
@@ -86,20 +92,22 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   return { backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, tfvarsSha256: generated.tfvarsSha256, ...backendMetadata };
 }
 
-export function runProductionPreflightCli(argv = process.argv.slice(2), {
-  caller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"], { encoding: "utf8" })).Arn,
-  collectPolicies = collectLiveReleasePolicyEvidence,
-  collectEcsExecOperatorEvidence = collectLiveEcsExecOperatorEvidence,
-  permissionPreflight = runPermissionPreflight,
-  sign = signPermissionReport,
-  verify = verifyPermissionReportSignature,
-  releasePreflight = runReleaseReadPreflight,
-  continueReadiness = (argv) => continueReleaseReadiness(argv),
-  validateCapabilityGraph = assertStageBDeploymentCapabilityGraph,
-  readStageATerraformSource = () => fs.readFileSync(path.join(root, "infra/aws/terraform/production-green-stage-a/main.tf"), "utf8"),
-  readProtectedMainCheckout = () => readStageBProtectedMainCheckout({ cwd: root }),
-} = {}) {
-  const identity = value(argv, "--identity"); const output = value(argv, "--output"); const capabilityGraph = validateCapabilityGraph(); const observedCaller = caller();
+export function runProductionPreflightCli(argv = process.argv.slice(2), dependencies = {}) {
+  const identity = value(argv, "--identity");
+  const profile = identity === "administrator" ? "default" : identity === "release-deployer" ? "mscqr-production-release-deployer" : undefined;
+  const commandRun = dependencies.commandRun || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile });
+  const caller = dependencies.caller || (() => JSON.parse(commandRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn);
+  const collectPolicies = dependencies.collectPolicies || (() => collectLiveReleasePolicyEvidence({ run: commandRun }));
+  const collectEcsExecOperatorEvidence = dependencies.collectEcsExecOperatorEvidence || (() => collectLiveEcsExecOperatorEvidence({ run: commandRun }));
+  const permissionPreflight = dependencies.permissionPreflight || runPermissionPreflight;
+  const sign = dependencies.sign || createPermissionReportKmsSigner({ run: commandRun });
+  const verify = dependencies.verify;
+  const releasePreflight = dependencies.releasePreflight || runReleaseReadPreflight;
+  const continueReadiness = dependencies.continueReadiness || ((args) => continueReleaseReadiness(args));
+  const validateCapabilityGraph = dependencies.validateCapabilityGraph || assertStageBDeploymentCapabilityGraph;
+  const readStageATerraformSource = dependencies.readStageATerraformSource || (() => fs.readFileSync(path.join(root, "infra/aws/terraform/production-green-stage-a/main.tf"), "utf8"));
+  const readProtectedMainCheckout = dependencies.readProtectedMainCheckout || (() => readStageBProtectedMainCheckout({ cwd: root }));
+  const output = value(argv, "--output"); const capabilityGraph = validateCapabilityGraph(); const observedCaller = caller();
   if (identity === "administrator") {
     if (value(argv, "--phase") !== "initial") throw new Error("Administrator capability preflight requires --phase initial.");
     if (!APPROVED_PREFLIGHT_GENERATOR_ARNS.includes(observedCaller)) throw new Error("Administrator production preflight requires the approved root identity.");
@@ -139,16 +147,23 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
   }
   if (identity === "release-deployer") {
     if (!new RegExp(`^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`).test(observedCaller)) throw new Error("Release production preflight requires the exact release-deployer identity.");
+    if (argv.filter((argument) => argument === "--tooling-sha").length !== 1) throw new Error("Release production preflight requires exactly one --tooling-sha.");
+    const sourceSha = value(argv, "--tooling-sha");
+    if (!SHA40.test(sourceSha)) throw new Error("Release production preflight requires a full protected source SHA.");
+    const protectedMain = readProtectedMainCheckout();
+    if (!protectedMain || protectedMain.toolingSha !== sourceSha || protectedMain.currentHead !== sourceSha || protectedMain.originMainHead !== sourceSha || protectedMain.porcelainStatus) throw new Error("Release production preflight requires the exact clean protected-main source.");
     const adminReportBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report"))); const adminReport = JSON.parse(adminReportBytes);
     const administratorSignatureBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report-signature")));
     const signature = JSON.parse(administratorSignatureBytes);
-    verify({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
+    const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+    (verify || ((options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) })))({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
     assertStageBPermissionEvidenceKind(adminReport, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
     if (adminReport.purpose !== "pre-plan-capability" || adminReport.status !== "valid" || adminReport.simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Administrator pre-plan capability report is invalid.");
     assertCutoverCriticalEvidence(adminReport);
     if (canonicalizeJson(adminReport.capabilityGraph) !== canonicalizeJson(capabilityGraph)) throw new Error("Administrator pre-plan capability graph is stale.");
     assertReleasePolicyEvidence(adminReport.policyEvidence);
-    const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)) });
+    const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)), run: (args) => releaseRun(args) });
+    report.sourceSha = sourceSha;
     report.requiredReads["kms:Verify"] = "allowed";
     report.administratorReportSha256 = sha256(adminReportBytes);
     report.policyVersions = adminReport.policyEvidence.policies.map(({ arn, defaultVersionId, liveSha256 }) => ({ arn, defaultVersionId, liveSha256 }));

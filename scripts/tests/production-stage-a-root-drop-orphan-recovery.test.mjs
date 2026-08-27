@@ -604,9 +604,7 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
     assert.equal(observedAws[0].env.AWS_PROFILE, "release");
     assert.equal(observedAws[0].env.AWS_REGION, STAGE_B.region);
     assert.equal(observedAws[0].env.AWS_DEFAULT_REGION, STAGE_B.region);
-    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(observedAws[0].env[key], undefined);
-    assert.equal(observedAws[0].env.AWS_CONFIG_FILE, "/tmp/config");
-    assert.equal(observedAws[0].env.AWS_SHARED_CREDENTIALS_FILE, "/tmp/credentials");
+    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE"]) assert.equal(observedAws[0].env[key], undefined);
     let adoptionCensusProfile;
     const result = await runAdoption({ argv: ["--census", censusPath, "--stage-a-state", statePath, "--stage-a-state-identity", identityPath, "--admin-profile", "administrator", "--release-profile", "release", "--terraform-root", terraformRoot, "--plan-path", planPath, "--execute"], runGit: cleanGit(), readRootDropCensus: ({ profile, adminProfile, releaseProfile }) => { adoptionCensusProfile = { profile, adminProfile, releaseProfile }; return suppliedCensus; }, readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }), execFile: (command, args, options) => {
       observedTerraform.push({ command, args, env: options.env });
@@ -628,11 +626,9 @@ test("orphan AWS reads and every Terraform subprocess use the selected release e
       assert.equal(env.AWS_PROFILE, "release");
       assert.equal(env.AWS_REGION, STAGE_B.region);
       assert.equal(env.AWS_DEFAULT_REGION, STAGE_B.region);
-      for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(env[key], undefined);
+      for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE"]) assert.equal(env[key], undefined);
       for (const key of ["TF_DATA_DIR", "TF_WORKSPACE", "TF_CLI_CONFIG_FILE", "TF_CLI_ARGS", "TF_CLI_ARGS_init", "TF_CLI_ARGS_import", "TF_CLI_ARGS_plan", "TF_CLI_ARGS_apply"]) assert.equal(env[key], undefined);
       for (const key of STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS) assert.equal(env[key], stageAVars[key]);
-      assert.equal(env.AWS_CONFIG_FILE, "/tmp/config");
-      assert.equal(env.AWS_SHARED_CREDENTIALS_FILE, "/tmp/credentials");
     }
     assert.deepEqual({ AWS_PROFILE: process.env.AWS_PROFILE, AWS_REGION: process.env.AWS_REGION, AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION }, { AWS_PROFILE: "administrator", AWS_REGION: "us-east-1", AWS_DEFAULT_REGION: "us-east-1" });
   } finally { restore(); rmSync(directory, { recursive: true, force: true }); }

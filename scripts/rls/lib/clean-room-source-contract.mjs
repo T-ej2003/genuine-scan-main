@@ -56,6 +56,8 @@ export const cleanRoomSourcePaths = [...new Set([
   "scripts/aws/apply-production-full-rls-release.mjs",
   "scripts/aws/deploy-ecs-service.sh",
   "scripts/aws/publish-ecs-images.sh",
+  "scripts/aws/production-credential-source-contract.mjs",
+  "scripts/aws/production-credential-source.sh",
   "scripts/smoke-release.mjs",
   "scripts/lib/staging-smoke-totp.mjs",
   ".github/workflows/release-gate.yml",

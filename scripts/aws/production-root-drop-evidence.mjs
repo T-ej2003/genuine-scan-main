@@ -1,9 +1,9 @@
 import { constants, createHash, createPublicKey, verify } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -30,14 +30,15 @@ export function buildRootDropEvidence({ payload, signatureBase64, signingKeyArn 
   return { ...signed, evidenceSha256: hash(signed) };
 }
 
-export function verifyRootDropEvidenceWithKms({ message, signature, keyArn = ROOT_DROP_SIGNING_KEY_ARN, signingAlgorithm = ROOT_DROP_SIGNING_ALGORITHM, profile = ROOT_DROP_VERIFY_PROFILE } = {}) {
+export function verifyRootDropEvidenceWithKms({ message, signature, keyArn = ROOT_DROP_SIGNING_KEY_ARN, signingAlgorithm = ROOT_DROP_SIGNING_ALGORITHM, run } = {}) {
+  const releaseRun = run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: ROOT_DROP_VERIFY_PROFILE });
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-root-drop-verify-"));
   const messagePath = path.join(directory, "message");
   const signaturePath = path.join(directory, "signature");
   try {
     writeFileSync(messagePath, message, { mode: 0o600, flag: "wx" });
     writeFileSync(signaturePath, signature, { mode: 0o600, flag: "wx" });
-    const result = JSON.parse(execFileSync("aws", ["kms", "get-public-key", "--key-id", keyArn, "--profile", profile, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+    const result = JSON.parse(releaseRun(["kms", "get-public-key", "--key-id", keyArn, "--output", "json", "--no-cli-pager"]));
     if (typeof result.PublicKey !== "string") return false;
     const publicKey = createPublicKey({ key: Buffer.from(result.PublicKey, "base64"), format: "der", type: "spki" });
     return verify("sha256", message, { key: publicKey, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, signature);

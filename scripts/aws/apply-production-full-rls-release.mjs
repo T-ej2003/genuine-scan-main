@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { PRODUCTION_GREEN } from "../../backend/scripts/production-full-rls-green-executor.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -58,10 +59,14 @@ export function validateProductionReleaseEnvironment(env = process.env) {
   return config;
 }
 
-const defaultAws = (args) => {
-  const result = spawnSync("aws", [...args, "--region", REGION, "--output", "json"], { encoding: "utf8" });
+export const createProductionFullRlsReleaseAws = ({ credentialSource, env = process.env, spawn = spawnSync } = {}) => {
+  if (credentialSource !== PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER) throw new Error("Production full-RLS release requires the GitHub OIDC release-deployer credential source.");
+  const commandEnvironment = createProductionAwsCredentialEnvironment({ credentialSource, env, region: REGION });
+  return (args) => {
+  const result = spawn("aws", [...args, "--region", REGION, "--output", "json"], { encoding: "utf8", env: commandEnvironment });
   if (result.status !== 0) throw new Error("Protected production broker command failed; provider detail suppressed.");
   return result.stdout.trim() ? JSON.parse(result.stdout) : {};
+  };
 };
 
 const invokeBroker = (mode, config, aws, directory) => {
@@ -127,9 +132,11 @@ const readReceipt = (mode, config, aws, directory, startedAt) => {
 
 export async function applyProductionFullRlsRelease({
   env = process.env,
-  aws = defaultAws,
+  aws,
+  credentialSource,
   outputPath = env.PRODUCTION_RLS_RELEASE_RECEIPT_PATH,
 } = {}) {
+  aws ||= createProductionFullRlsReleaseAws({ credentialSource, env });
   const config = validateProductionReleaseEnvironment(env);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-production-rls-"));
   const receipts = [];
@@ -189,7 +196,10 @@ export async function applyProductionFullRlsRelease({
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  applyProductionFullRlsRelease().catch(() => {
+  const argv = process.argv.slice(2);
+  const credentialSource = argv.length === 2 && argv[0] === "--credential-source" ? argv[1] : undefined;
+  if (!credentialSource) throw new Error("--credential-source is required.");
+  applyProductionFullRlsRelease({ credentialSource }).catch(() => {
     process.stderr.write('{"status":"blocked","reason":"production-full-rls-release-failed"}\n');
     process.exitCode = 1;
   });

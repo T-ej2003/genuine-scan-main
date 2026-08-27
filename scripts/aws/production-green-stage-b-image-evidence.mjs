@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +11,9 @@ import { STAGE_B_IMPORTED_BACKEND_ROLLOVER_ACTIONS, assertStageBImportedBackendR
 import { assertStageBImportedBackendMetadataNormalization, isStageBPartialApplyDeposedTaskDefinitionCleanup, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
 import { assertStageBImagePublicationIdentity, publicationIdentitySha256, readStageBImagePublicationIdentity } from "./stage-b-image-publication-identity.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createRootAttestationKmsVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
+import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
 
 export const IMAGE_EVIDENCE_SCHEMA_VERSION = 3;
 export const IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION = 3;
@@ -20,8 +22,8 @@ export const IMAGE_EVIDENCE_CLOCK_SKEW_MS = 60 * 1000;
 export const IMAGE_EVIDENCE_VALIDITY_MODEL = "immutable-image-provenance-24h";
 export const IMAGE_EVIDENCE_REPOSITORY_MUTABILITY = "IMMUTABLE";
 export const IMAGE_EVIDENCE_REVOCATION_MODEL = "time-bounded-no-supersession-registry";
-export const IMAGE_EVIDENCE_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
-export const IMAGE_EVIDENCE_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
+export const IMAGE_EVIDENCE_SIGNING_KEY_ARN = ROOT_ATTESTATION_KEY_ALIAS_ARN;
+export const IMAGE_EVIDENCE_SIGNING_ALGORITHM = ROOT_ATTESTATION_SIGNING_ALGORITHM;
 export const APPROVED_IMAGE_EVIDENCE_VERIFIER_ARNS = APPROVED_PREFLIGHT_GENERATOR_ARNS;
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -177,13 +179,10 @@ function parseArtifact(artifactBytes, { imageReleaseSha, artifactSha256 }) {
   }).sort((a, b) => a.service.localeCompare(b.service));
 }
 
-function describeImages(repository, tag) {
-  return JSON.parse(execFileSync("aws", [
-    "ecr", "describe-images", "--region", STAGE_B.region, "--repository-name", repository, "--image-ids", `imageTag=${tag}`, "--output", "json", "--no-cli-pager",
-  ], { encoding: "utf8" }));
-}
+const describeImages = (run) => (repository, tag) => JSON.parse(run(["ecr", "describe-images", "--repository-name", repository, "--image-ids", `imageTag=${tag}`, "--output", "json", "--no-cli-pager"]));
 
-export function readImageEvidence(repository, tag, { describe = describeImages } = {}) {
+export function readImageEvidence(repository, tag, { describe } = {}) {
+  if (typeof describe !== "function") throw new Error("Image evidence requires an explicit credential-bound ECR reader.");
   const response = describe(repository, tag);
   if (!response || !Array.isArray(response.imageDetails) || response.imageDetails.length !== 1) throw new Error(`ECR evidence must resolve exactly one image for ${repository}:${tag}.`);
   const image = response.imageDetails[0];
@@ -191,15 +190,11 @@ export function readImageEvidence(repository, tag, { describe = describeImages }
   return { digest: requireDigest(image.imageDigest, `${repository}:${tag} digest`), imagePushedAt: image.imagePushedAt };
 }
 
-function describeImage(repository, tag, describe = describeImages) {
+function describeImage(repository, tag, describe) {
   return readImageEvidence(repository, tag, { describe });
 }
 
-function describeRepositories(repository) {
-  return JSON.parse(execFileSync("aws", [
-    "ecr", "describe-repositories", "--registry-id", STAGE_B.account, "--region", STAGE_B.region, "--repository-names", repository, "--output", "json", "--no-cli-pager",
-  ], { encoding: "utf8" }));
-}
+const describeRepositories = (run) => (repository) => JSON.parse(run(["ecr", "describe-repositories", "--registry-id", STAGE_B.account, "--repository-names", repository, "--output", "json", "--no-cli-pager"]));
 
 const IMAGE_REPOSITORY_EVIDENCE_KEYS = new Set(["repositoryName", "repositoryArn", "registryId", "repositoryUri", "imageTagMutability", "imageTagMutabilityExclusionFilters", "encryptionConfiguration", "createdAt", "observedAt"]);
 
@@ -250,7 +245,8 @@ function requireRepositoryEvidence(repositories, requiredRepositories, observedA
   }).sort((a, b) => a.repositoryName.localeCompare(b.repositoryName));
 }
 
-export function readImageRepositoryEvidence(repository, { observedAt = new Date().toISOString(), describe = describeRepositories } = {}) {
+export function readImageRepositoryEvidence(repository, { observedAt = new Date().toISOString(), describe } = {}) {
+  if (typeof describe !== "function") throw new Error("Image repository evidence requires an explicit credential-bound ECR reader.");
   const response = describe(repository);
   if (!response || typeof response !== "object" || Array.isArray(response) || !Array.isArray(response.repositories) || response.repositories.length !== 1) throw new Error(`ECR repository evidence must resolve exactly one repository for ${repository}.`);
   const source = response.repositories[0];
@@ -300,7 +296,8 @@ export function generateImageEvidence({ artifactBytes, toolingSha, imageReleaseS
   };
 }
 
-export function signImageEvidence(report, { now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, sign = ({ digest }) => withTempBytes("stage-b-image-evidence-sign-", { digest }, ({ digest: digestPath }) => JSON.parse(execFileSync("aws", ["kms", "sign", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signing-algorithm", signingAlgorithm, "--output", "json"], { encoding: "utf8" })).Signature) } = {}) {
+export function signImageEvidence(report, { now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, sign } = {}) {
+  if (typeof sign !== "function") throw new Error("Image evidence signing requires an explicit trusted signer.");
   if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION) throw new Error("Only a valid image-evidence report may be signed.");
   rejectLegacyProvenanceClaims(report);
   requireRepositoryEvidence(report.repositories, [...new Set((report.images || []).map(({ repository }) => repository))], report.observedAt);
@@ -312,7 +309,7 @@ export function signImageEvidence(report, { now = new Date().toISOString(), keyA
   return { schemaVersion: IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION, keyId: keyArn, keyArn, signingAlgorithm, reportSha256, imageReleaseSha: report.imageReleaseSha, workflowRunId: report.workflowRunId, publicationIdentitySha256: report.publicationIdentitySha256, canonicalArtifactSha256: report.canonicalArtifactSha256, signatureBase64, signedAt: now };
 }
 
-export function verifyImageEvidenceSignature({ report, toolingSha, signatureArtifact, now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, env = process.env, verify = ({ digest, signature }) => withTempBytes("stage-b-image-evidence-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(execFileSync("aws", ["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json"], { encoding: "utf8", env })).SignatureValid === true) }) {
+export function verifyImageEvidenceSignature({ report, toolingSha, signatureArtifact, now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, run, verify }) {
   rejectLegacyProvenanceClaims(report);
   if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION || report.revocationModel !== IMAGE_EVIDENCE_REVOCATION_MODEL) throw new Error("Image evidence revocation model or schema is unsupported.");
   requireRepositoryEvidence(report.repositories, [...new Set((report.images || []).map(({ repository }) => repository))], report.observedAt);
@@ -324,7 +321,9 @@ export function verifyImageEvidenceSignature({ report, toolingSha, signatureArti
   const signedAtMs = Date.parse(signatureArtifact.signedAt); const nowMs = Date.parse(now);
   if (!Number.isFinite(signedAtMs) || signedAtMs > nowMs + IMAGE_EVIDENCE_CLOCK_SKEW_MS || nowMs - signedAtMs > IMAGE_EVIDENCE_MAX_AGE_MS) throw new Error("Image evidence signature is stale or malformed.");
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureArtifact.signatureBase64 || "")) throw new Error("Image evidence signature is malformed.");
-  if (!verify({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), reportSha256 })) throw new Error("Image evidence signature verification failed.");
+  if (typeof verify !== "function" && typeof run !== "function") throw new Error("Image evidence signature verification requires an explicit trusted verifier or command runner.");
+  const verifySignature = verify || createRootAttestationKmsVerifier({ run });
+  if (!verifySignature({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), reportSha256 })) throw new Error("Image evidence signature verification failed.");
   return true;
 }
 
@@ -354,13 +353,17 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
   const artifactPath = requiredOption(argv, "--artifact"); const toolingSha = requiredOption(argv, "--tooling-sha"); const imageReleaseSha = requiredOption(argv, "--image-release-sha"); const workflowRunId = requiredOption(argv, "--workflow-run-id"); const artifactSha256 = requiredOption(argv, "--artifact-sha256"); const publicationIdentityPath = assertStageBArtifactPath({ artifactPath: requiredOption(argv, "--publication-identity"), repositoryRoot, label: "Stage B publication identity", allowExisting: true }); const publicationIdentitySha256Value = requiredOption(argv, "--publication-identity-sha256"); const outputPath = assertStageBArtifactPath({ artifactPath: requiredOption(argv, "--output"), repositoryRoot, label: "Stage B image evidence", allowExisting: false }); const signaturePath = assertStageBArtifactPath({ artifactPath: requiredOption(argv, "--signature-output"), repositoryRoot, label: "Stage B image-evidence signature", allowExisting: false });
   if (path.dirname(outputPath) !== path.dirname(signaturePath)) throw new Error("Stage B image evidence and signature must use one private directory.");
   ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot, create: true });
-  const verifierCallerArn = deps.getCaller ? deps.getCaller() : JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"], { encoding: "utf8" })).Arn;
+  const rootRun = deps.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default" });
+  const verifierCallerArn = deps.getCaller ? deps.getCaller() : JSON.parse(rootRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn;
   const observedAt = deps.observedAt || new Date().toISOString();
   const artifactBytes = fs.readFileSync(artifactPath);
   const publicationIdentity = readStageBImagePublicationIdentity(publicationIdentityPath, { identitySha256: publicationIdentitySha256Value, expectedToolingSha: toolingSha, expectedReleaseSha: imageReleaseSha, canonicalArtifactBytes: artifactBytes });
-  const repositories = [...new Set(Object.values(SERVICES).map(({ repository }) => repository))].map((repository) => readImageRepositoryEvidence(repository, { observedAt, describe: deps.describeRepository || describeRepositories }));
-  const report = generateImageEvidence({ artifactBytes, toolingSha, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity, verifierCallerArn, describe: deps.describe || describeImage, observedAt, repositories });
-  const signature = (deps.sign || signImageEvidence)(report, deps.sign ? { sign: deps.sign, now: deps.now } : {});
+  const imageReader = deps.describe || describeImages(rootRun);
+  const repositoryReader = deps.describeRepository || describeRepositories(rootRun);
+  const repositories = [...new Set(Object.values(SERVICES).map(({ repository }) => repository))].map((repository) => readImageRepositoryEvidence(repository, { observedAt, describe: repositoryReader }));
+  const report = generateImageEvidence({ artifactBytes, toolingSha, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity, verifierCallerArn, describe: imageReader, observedAt, repositories });
+  const signer = deps.sign || createRootAttestationKmsSigner({ run: rootRun });
+  const signature = signImageEvidence(report, { sign: signer, now: deps.now });
   writeStageBPrivateFilesAtomic({ repositoryRoot, files: [
     { filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(report, null, 2)}\n`), label: "Stage B image evidence" },
     { filePath: signaturePath, bytes: Buffer.from(`${JSON.stringify(signature, null, 2)}\n`), label: "Stage B image-evidence signature" },

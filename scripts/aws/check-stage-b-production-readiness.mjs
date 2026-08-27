@@ -46,7 +46,7 @@ export async function assertStageBProductionReadiness({
   await checkImports();
   const region = env.AWS_REGION || env.AWS_DEFAULT_REGION;
   if (region !== expectedRegion) throw new Error("AWS_REGION or AWS_DEFAULT_REGION must be eu-west-2 before evidence generation.");
-  if (!/^arn:aws:kms:eu-west-2:368992683803:key\/[0-9a-f-]{36}$/.test(STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN)) throw new Error("Stage B recovery KMS key contract is malformed.");
+  if (STAGE_B_PARTIAL_APPLY_RECOVERY_KEY_ARN !== "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation") throw new Error("Stage B recovery KMS key contract is malformed.");
   if (STAGE_B_PARTIAL_APPLY_RECOVERY_ALGORITHM !== "RSASSA_PSS_SHA_256") throw new Error("Stage B recovery KMS algorithm contract is unsupported.");
   const disk = fs.statfsSync(parent);
   if (!Number.isSafeInteger(disk.bavail) || disk.bavail <= 0) throw new Error("Readiness artifact parent has no available disk blocks.");

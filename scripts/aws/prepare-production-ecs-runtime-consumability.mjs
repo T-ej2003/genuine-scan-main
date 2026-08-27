@@ -2,7 +2,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   assertSignedRuntimeDependencyInventory,
@@ -15,6 +14,9 @@ import {
 import { readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
+import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? null : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
@@ -29,9 +31,8 @@ const privateJson = (filePath, expectedSha256, label) => {
   if (captured.sha256 !== expectedSha256) throw new Error(`${label} bytes changed before closure.`);
   return decode(captured);
 };
-const defaultRun = (args) => execFileSync("aws", [...args, "--region", "eu-west-2", "--output", "json", "--no-cli-pager"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-
 async function administratorContext({ sourceSha, candidateFile, candidateFileSha256, run, protectedMain }) {
+  if (typeof run !== "function") throw new Error("Runtime closure requires an explicit administrator AWS command runner.");
   protectedMain({ cwd: root, expectedSourceSha: sourceSha });
   const artifact = candidateArtifact(candidateFile, candidateFileSha256);
   const aws = async (args) => JSON.parse(run(args));
@@ -47,23 +48,15 @@ function withSignatureFiles(callback) {
   finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 
-const signer = (run, directory) => ({ digest, keyArn, signingAlgorithm }) => {
-  const digestFile = path.join(directory, "digest");
-  fs.writeFileSync(digestFile, digest, { mode: 0o600, flag: "wx" });
-  return JSON.parse(run(["kms", "sign", "--key-id", keyArn, "--message", `fileb://${digestFile}`, "--message-type", "DIGEST", "--signing-algorithm", signingAlgorithm])).Signature;
-};
-const verifier = (run, directory) => ({ digest, signature, keyArn, signingAlgorithm }) => {
-  const digestFile = path.join(directory, "verify-digest"); const signatureFile = path.join(directory, "verify-signature");
-  fs.writeFileSync(digestFile, digest, { mode: 0o600, flag: "wx" }); fs.writeFileSync(signatureFile, signature, { mode: 0o600, flag: "wx" });
-  return JSON.parse(run(["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestFile}`, "--message-type", "DIGEST", "--signature", `fileb://${signatureFile}`, "--signing-algorithm", signingAlgorithm])).SignatureValid === true;
-};
+const signer = (run) => createRootAttestationKmsSigner({ run });
+const verifier = (run) => createRootAttestationKmsVerifier({ run });
 const persist = (outputFile, value, label) => {
   const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
   writeStageBPrivateFilesAtomic({ repositoryRoot: root, overwrite: false, files: [{ filePath: outputFile, bytes, label }] });
   return readStageBPrivateFileBytes({ filePath: outputFile, repositoryRoot: root, label }).sha256;
 };
 
-export async function prepareProductionEcsRuntimeInventory({ sourceSha, candidateFile, candidateFileSha256, outputFile, run = defaultRun, protectedMain = readFreshProtectedMainIdentity, now = new Date().toISOString() } = {}) {
+export async function prepareProductionEcsRuntimeInventory({ sourceSha, candidateFile, candidateFileSha256, outputFile, run, protectedMain = readFreshProtectedMainIdentity, now = new Date().toISOString() } = {}) {
   const context = await administratorContext({ sourceSha, candidateFile, candidateFileSha256, run, protectedMain });
   const resourceMetadata = await collectRuntimeResourceMetadata(context.candidate, context.aws, { readKmsKey: context.readKmsKey });
   const inventory = buildRuntimeDependencyInventory({ sourceSha, candidate: context.candidate, candidateFileSha256: context.candidateFileSha256, resourceMetadata, generatedAt: now });
@@ -72,7 +65,7 @@ export async function prepareProductionEcsRuntimeInventory({ sourceSha, candidat
   return { outputFile, outputSha256, inventorySha256: inventory.inventorySha256, candidateFileSha256: inventory.candidateFileSha256, candidateCanonicalSha256: inventory.candidateCanonicalSha256, candidateFingerprint: inventory.candidateFingerprint, dependencyCount: inventory.dependencies.length };
 }
 
-export async function prepareProductionEcsRuntimeConsumability({ sourceSha, candidateFile, candidateFileSha256, inventoryFile, inventoryFileSha256, outputFile, run = defaultRun, protectedMain = readFreshProtectedMainIdentity, now = new Date().toISOString() } = {}) {
+export async function prepareProductionEcsRuntimeConsumability({ sourceSha, candidateFile, candidateFileSha256, inventoryFile, inventoryFileSha256, outputFile, run, protectedMain = readFreshProtectedMainIdentity, now = new Date().toISOString() } = {}) {
   const context = await administratorContext({ sourceSha, candidateFile, candidateFileSha256, run, protectedMain });
   const envelope = privateJson(inventoryFile, inventoryFileSha256, "Production ECS runtime dependency inventory");
   const inventory = withSignatureFiles((directory) => assertSignedRuntimeDependencyInventory(envelope, { sourceSha, candidate: context.candidate, candidateFileSha256: context.candidateFileSha256, now: Date.parse(now), verify: verifier(run, directory) }));
@@ -86,8 +79,9 @@ export async function prepareProductionEcsRuntimeConsumability({ sourceSha, cand
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const mode = required(process.argv, "--mode");
   const common = { sourceSha: required(process.argv, "--source-sha"), candidateFile: required(process.argv, "--candidate"), candidateFileSha256: required(process.argv, "--candidate-file-sha256"), outputFile: path.resolve(required(process.argv, "--output")) };
-  const operation = mode === "inventory" ? prepareProductionEcsRuntimeInventory(common)
-    : mode === "consumability" ? prepareProductionEcsRuntimeConsumability({ ...common, inventoryFile: required(process.argv, "--runtime-inventory"), inventoryFileSha256: required(process.argv, "--runtime-inventory-sha256") })
+  const rootRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default" });
+  const operation = mode === "inventory" ? prepareProductionEcsRuntimeInventory({ ...common, run: rootRun })
+    : mode === "consumability" ? prepareProductionEcsRuntimeConsumability({ ...common, inventoryFile: required(process.argv, "--runtime-inventory"), inventoryFileSha256: required(process.argv, "--runtime-inventory-sha256"), run: rootRun })
       : Promise.reject(new Error("--mode must be inventory or consumability."));
   operation.then((result) => process.stdout.write(`${JSON.stringify(result)}\n`)).catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
 }

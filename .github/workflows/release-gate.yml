@@ -534,6 +534,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          source scripts/aws/production-credential-source.sh
+          export MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer
+          configure_production_aws_credential_source
           account_id="$(aws sts get-caller-identity --query Account --output text)"
           if [ "$account_id" != "$AWS_ACCOUNT_ID_EXPECTED" ]; then
             echo "::error::AWS role resolved to account ${account_id}; expected ${AWS_ACCOUNT_ID_EXPECTED}."
@@ -561,6 +564,9 @@ jobs:
         if: ${{ inputs.release_mode == 'normal' }}
         run: |
           set -euo pipefail
+          source scripts/aws/production-credential-source.sh
+          export MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer
+          configure_production_aws_credential_source
           account_id="$(aws sts get-caller-identity --query Account --output text)"
           echo "account_id=$account_id" >> "$GITHUB_OUTPUT"
           echo "backend_metadata_file=$RUNNER_TEMP/backend-deployment.json" >> "$GITHUB_OUTPUT"
@@ -580,6 +586,7 @@ jobs:
           printf '%s' "$IMAGE_AUTHORIZATION_JSON" > "$image_file"
           chmod 600 "$image_file"
           node scripts/aws/verify-production-release-image-authorization.mjs \
+            --credential-source github-oidc-release-deployer \
             --source-sha "$SOURCE_SHA" \
             --authorization "$image_file" \
             --authorization-sha256 "$IMAGE_AUTHORIZATION_SHA256" \
@@ -591,6 +598,9 @@ jobs:
         if: ${{ inputs.release_mode == 'normal' }}
         run: |
           set -euo pipefail
+          source scripts/aws/production-credential-source.sh
+          export MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer
+          configure_production_aws_credential_source
           frontend_task="$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$FRONTEND_SERVICE_NAME" --query 'services[0].taskDefinition' --output text)"
           if [ "$frontend_task" != "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:20" ]; then
             echo "::error::Normal Stage-B activation requires the reviewed mscqr-frontend:20 task definition."
@@ -632,6 +642,7 @@ jobs:
           fi
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode prepare \
+            --credential-source github-oidc-release-deployer \
             --source-sha "$SOURCE_SHA" \
             --workflow-run-id "$GITHUB_RUN_ID" \
             --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
@@ -652,6 +663,7 @@ jobs:
           activation_task_definition="$(node -e 'const value=require(process.argv[1]); process.stdout.write(String(value.targetArn || ""))' "$ACTIVATION_BINDING_FILE")"
           result="$(node scripts/aws/manage-production-initial-activation-lifecycle.mjs \
             --mode claim \
+            --credential-source github-oidc-release-deployer \
             --state-file "$PRODUCTION_INITIAL_OVERLAP_STATE_FILE" \
             --state-sha256 "$PRODUCTION_INITIAL_OVERLAP_STATE_SHA256" \
             --source-sha "$PRODUCTION_INITIAL_OVERLAP_SOURCE_SHA" \
@@ -695,6 +707,7 @@ jobs:
           node scripts/check-production-activation-rotation.mjs
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode verify \
+            --credential-source github-oidc-release-deployer \
             --source-sha "$SOURCE_SHA" \
             --workflow-run-id "$GITHUB_RUN_ID" \
             --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
@@ -702,7 +715,7 @@ jobs:
             --image-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
             --binding "$ACTIVATION_BINDING_FILE" \
             --binding-sha256 "$ACTIVATION_BINDING_SHA256"
-          node scripts/aws/apply-production-full-rls-release.mjs
+          node scripts/aws/apply-production-full-rls-release.mjs --credential-source github-oidc-release-deployer
 
       - name: Upload immutable production database receipt
         if: ${{ inputs.release_mode == 'normal' }}
@@ -726,6 +739,7 @@ jobs:
           receipt_sha256="$(sha256sum "$RLS_RECEIPT" | cut -d' ' -f1)"
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode execute \
+            --credential-source github-oidc-release-deployer \
             --source-sha "$SOURCE_SHA" \
             --workflow-run-id "$GITHUB_RUN_ID" \
             --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
@@ -847,6 +861,7 @@ jobs:
           failed_sha="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).evidenceSha256)' "$failed_result")"
           node scripts/aws/recover-production-backend-health.mjs \
             --prepare \
+            --credential-source github-oidc-release-deployer \
             --source-sha "$SOURCE_SHA" \
             --environment-approval "${{ steps.production-environment-approval.outputs.evidence_file }}" \
             --environment-approval-sha256 "${{ steps.production-environment-approval.outputs.evidence_sha256 }}" \
@@ -883,6 +898,7 @@ jobs:
           set -euo pipefail
           node scripts/aws/recover-production-backend-health.mjs \
             --execute \
+            --credential-source github-oidc-release-deployer \
             --source-sha "$SOURCE_SHA" \
             --environment-approval "${{ steps.production-environment-approval.outputs.evidence_file }}" \
             --environment-approval-sha256 "${{ steps.production-environment-approval.outputs.evidence_sha256 }}" \

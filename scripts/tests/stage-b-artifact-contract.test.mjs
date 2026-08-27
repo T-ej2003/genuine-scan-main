@@ -103,6 +103,35 @@ test("reference-audit contract registers every production consumer", () => {
   assert.equal(new Set(referenceAudit.consumers).size, referenceAudit.consumers.length);
 });
 
+test("release-preflight checker artifacts declare every direct reader and publish their detached pair atomically", () => {
+  const expected = {
+    "release-preflight-report": [
+      "scripts/aws/production-release-preflight-checker-attestation.mjs",
+      "scripts/aws/prepare-production-cutover-runtime.mjs",
+      "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+      "scripts/aws/production-cutover-production-adapters.mjs",
+      "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+    ],
+    "release-preflight-checker-trust-attestation": [
+      "scripts/aws/prepare-production-cutover-runtime.mjs",
+      "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+      "scripts/aws/production-cutover-production-adapters.mjs",
+    ],
+    "release-preflight-checker-trust-attestation-signature": [
+      "scripts/aws/prepare-production-cutover-runtime.mjs",
+      "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+      "scripts/aws/production-cutover-production-adapters.mjs",
+    ],
+  };
+  const artifacts = Object.fromEntries(STAGE_B_ARTIFACT_CONTRACTS.filter(({ id }) => Object.hasOwn(expected, id)).map((artifact) => [artifact.id, artifact]));
+  assert.deepEqual(Object.fromEntries(Object.entries(artifacts).map(([id, artifact]) => [id, artifact.consumers])), expected);
+  const generated = canonicalStageBArtifactContracts().artifacts.filter(({ id }) => Object.hasOwn(expected, id));
+  assert.deepEqual(Object.fromEntries(generated.map(({ id, consumers }) => [id, consumers])), expected);
+  const paired = generated.filter(({ atomicGroup }) => atomicGroup === "release-preflight-checker-trust-attestation-pair");
+  assert.deepEqual(paired.map(({ id }) => id).sort(), ["release-preflight-checker-trust-attestation", "release-preflight-checker-trust-attestation-signature"]);
+  assert(paired.every(({ allOrNone, rollback }) => allOrNone === true && rollback === "remove-committed-or-restore-backups"));
+});
+
 test("real release-read and backend producers normalize generated permissions", () => {
   const directory = path.join(root, "release"); fs.mkdirSync(directory, { recursive: true, mode: 0o755 }); fs.chmodSync(directory, 0o755);
   const stateBytes = Buffer.from(`${JSON.stringify(state)}\n`);

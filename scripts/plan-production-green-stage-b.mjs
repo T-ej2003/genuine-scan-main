@@ -23,6 +23,7 @@ import { assertStageBTfvarsBinding } from "./aws/generate-production-green-stage
 import { assertStageBBrokerFunctionUpdate, assertStageBImportedBackendMetadataNormalization, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, assertStageBFreshImageRecoveryCensus, assertStageBRecoveryRefreshStatus, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, resolveStageBRecoveryMode, STAGE_B_BROKER_PUBLISH_PROVIDER_METADATA_FIELDS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./aws/stage-b-deployment-contract.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./aws/stage-b-terraform-backend-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./aws/production-credential-source-contract.mjs";
 import { assertStageBTerraformWorkspace, assertStageBTerraformWorkspaceArguments } from "./aws/stage-b-terraform-workspace.mjs";
 import { assertStageBRecoveryProvenance, assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./aws/stage-b-artifact-contract.mjs";
@@ -914,7 +915,7 @@ export function approveCapturedStageBPlan({ tfvars, cliOptions, protectedMainChe
   const capture = readStageBPlanEvidence(captureReportPath, process.cwd(), "Stage B plan capture report");
   if (capture.sha256 !== captureReportSha256) throw new Error("Stage B plan capture report SHA256 mismatch.");
   const auditBytes = fs.readFileSync(auditPath); const audit = JSON.parse(auditBytes);
-  const trustedCallerArn = deps.getCallerArn ? deps.getCallerArn() : JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn;
+  const trustedCallerArn = deps.getCallerArn ? deps.getCallerArn() : (() => { throw new Error("Stage B plan approval requires an explicit credential-bound release caller."); })();
   if (sha256(planJsonBytes) !== (readOption(cliOptions, "--plan-json-sha256") || hashes.planJsonSha256)) throw new Error("Stage B plan JSON SHA256 does not match the selected plan JSON.");
   const plan = JSON.parse(planJsonBytes.toString("utf8"));
   const classification = (deps.validatePlan || assertStageBPlan)(plan, { referenceAudit: audit, referenceAuditBytes: auditBytes, referenceAuditSha256: auditSha256, planJsonBytes, planJsonSha256: hashes.planJsonSha256, trustedCallerArn, terraformConfiguration: fs.readFileSync(path.resolve(root, "main.tf"), "utf8"), strictResourceContract: true, requireSemanticCompleteness: true, recoveryOnly: inputs.recoveryOnly, partialApplyRecovery: inputs.partialApplyRecovery, freshImagePartialApplyRecovery: inputs.freshImagePartialApplyRecovery, protectedMainCheckout, terraformWorkspace: { envWorkspace: process.env.TF_WORKSPACE, observedWorkspace: assertStageBPlanningWorkspace({ env: process.env, argv: [tfvars, ...cliOptions] }).toString() } });
@@ -934,7 +935,7 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   const result = cliOptions.includes("--recovery")
     ? recoverCapturedStageBPlan({ tfvars, cliOptions, protectedMainCheckout })
     : cliOptions.includes("--approval-only")
-    ? approveCapturedStageBPlan({ tfvars, cliOptions, protectedMainCheckout })
+    ? approveCapturedStageBPlan({ tfvars, cliOptions, protectedMainCheckout, deps: { getCallerArn: () => JSON.parse(createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" })(["sts", "get-caller-identity", "--output", "json"])).Arn } })
     : captureStageBPlan({ tfvars, cliOptions, protectedMainCheckout });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import os from "node:os";
 import path from "node:path";
-import { createProductionCommandRunner, createProductionCutoverAdapters } from "./production-cutover-production-adapters.mjs";
+import { createProductionCutoverRuntimeComposition } from "./production-cutover-runtime-composition.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime } from "./production-cutover-runtime-bootstrap.mjs";
 
@@ -12,9 +12,15 @@ const capture = (name, label = name) => readStageBPrivateFileBytes({ filePath: r
 const read = (name, label) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(capture(name, label).bytes));
 const imageAuthorizationPath = required("image-authorization");
 const iamEvidencePath = required("iam-evidence");
+const releasePreflightEvidencePath = required("release-preflight-evidence");
+const releasePreflightAttestationPath = required("release-preflight-attestation");
+const releasePreflightAttestationSignaturePath = required("release-preflight-attestation-signature");
 const temporaryKmsCapabilityPath = args.get("temporary-kms-capability");
 const imageAuthorization = read("image-authorization", "Image authorization evidence");
 const iamEvidence = read("iam-evidence", "IAM evidence");
+capture("release-preflight-evidence", "Release-preflight checker-trust evidence");
+capture("release-preflight-attestation", "Release-preflight checker-trust attestation");
+capture("release-preflight-attestation-signature", "Release-preflight checker-trust attestation signature");
 if (temporaryKmsCapabilityPath) readStageBPrivateFileBytes({ filePath: temporaryKmsCapabilityPath, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
 for (const [name, label] of [["artifact-binding", "Artifact-signing runtime binding"], ["root-drop-evidence", "Root-drop evidence"], ["stage-a-plan", "Preserved Stage-A saved plan"], ["stage-a-recovery-evidence", "Stage-A recovery evidence"], ["stage-a-state", "Stage-A state"], ["stage-a-handoff", "Stage-A handoff"], ["stage-b-state", "Historical Stage-B state"], ["current-stage-b-state", "Current Stage-B state"], ["stage-b-tfvars", "Canonical Stage B tfvars"], ["stage-b-tfvars-binding-report", "Canonical Stage B tfvars binding report"]]) if (args.has(name)) capture(name, label);
 const rotationBindingCapture = args.has("rotation-bindings") ? capture("rotation-bindings", "Rotation secret binding manifest") : null;
@@ -27,11 +33,12 @@ const decode = (captured) => JSON.parse(new TextDecoder("utf-8", { fatal: true }
 const rotationBindings = rotationBindingCapture ? decode(rotationBindingCapture) : undefined;
 const rotationSupersessionEvidence = rotationSupersessionCapture ? decode(rotationSupersessionCapture) : undefined;
 const onboardingPaths = args.has("onboarding-paths") ? read("onboarding-paths") : undefined;
+const composition = createProductionCutoverRuntimeComposition();
+const { releaseRun } = composition;
 const loadCurrentTaskDefinition = () => {
-  const run = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
-  const currentService = JSON.parse(run(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2"])).services?.[0];
+  const currentService = JSON.parse(releaseRun(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2"])).services?.[0];
   if (!currentService?.taskDefinition) throw new Error("Current production task definition is unavailable.");
-  return JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", currentService.taskDefinition, "--include", "TAGS"]));
+  return JSON.parse(releaseRun(["ecs", "describe-task-definition", "--task-definition", currentService.taskDefinition, "--include", "TAGS"]));
 };
 const approval = {
   ticket: required("ticket"),
@@ -49,6 +56,9 @@ const result = prepareProductionCutoverRuntime({
   rotationId: rotationBindings?.rotationId,
   imageAuthorization,
   iamEvidence,
+  releasePreflightEvidenceFile: path.resolve(releasePreflightEvidencePath),
+  releasePreflightAttestationFile: path.resolve(releasePreflightAttestationPath),
+  releasePreflightAttestationSignatureFile: path.resolve(releasePreflightAttestationSignaturePath),
   artifactBindingFile: required("artifact-binding"),
   rootDropEvidenceFile: required("root-drop-evidence"),
   temporaryKmsCapabilityFile: temporaryKmsCapabilityPath,
@@ -65,7 +75,7 @@ const result = prepareProductionCutoverRuntime({
   stageBTfvarsBindingReportPath: required("stage-b-tfvars-binding-report"),
   stageBTfvarsBindingReportSha256: required("stage-b-tfvars-binding-report-sha256"),
   stageBTerraformDataDir: required("stage-b-terraform-data-dir"),
-  constructAdapters: ({ config, sourceSha, rotationId, runtimeConfigSha256 }) => createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256 }),
+  ...composition,
 });
 process.stdout.write(`${JSON.stringify({
   RUNTIME_DIRECTORY: result.runtimeDirectory,

@@ -12,7 +12,7 @@ import { createInitialDualSlotSecretsManagerClient, generatePendingMaterial, INI
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { fixtureInput, sourceSha as rehearsalSourceSha } from "./production-cutover-rehearsal.test.mjs";
 import { runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
-import { createProductionCommandRunner } from "../aws/production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { productionStageAIngress, productionStageAState, STAGE_A_LINEAGE, STAGE_A_STATE_OBJECT } from "./fixtures/production-stage-a-state.mjs";
 
 const sourceSha = "8".repeat(40);
@@ -88,7 +88,7 @@ test("credential provider runtime export is the profile-bound INI provider", () 
 
 test("profile-bound AWS command runners cannot fall back to ambient static credentials", () => {
   let options;
-  const run = createProductionCommandRunner({ profile: "mscqr-production-root-operator", exec: (_file, _args, received) => { options = received; return "{}"; } });
+  const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-root-operator", exec: (_file, _args, received) => { options = received; return "{}"; } });
   run(["sts", "get-caller-identity"]);
   assert.equal(options.env.AWS_PROFILE, "mscqr-production-root-operator");
   for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(Object.hasOwn(options.env, key), false);

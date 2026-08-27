@@ -1,7 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { establishEcsExecVerifierSession } from "./establish-production-ecs-exec-verifier-session.mjs";
+import { assertVerifierMfaSerial, establishEcsExecVerifierSession } from "./establish-production-ecs-exec-verifier-session.mjs";
 import { ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
+import { createAssumedRoleSessionEnvironment, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const ACCOUNT = "368992683803";
 export const RELEASE_ROLE_ARN = `arn:aws:iam::${ACCOUNT}:role/mscqr-production-release-deployer`;
@@ -10,12 +11,8 @@ export const VERIFIER_SESSION_MIN_REMAINING_MS = 60_000;
 
 const parse = (output) => JSON.parse(String(output || "{}"));
 
-export function createAwsStsRunner({ profile, region = "eu-west-2", run = execFileSync, now = Date.now } = {}) {
-  const env = { ...process.env, AWS_REGION: region, AWS_DEFAULT_REGION: region };
-  if (profile) {
-    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) delete env[key];
-    env.AWS_PROFILE = profile;
-  }
+export function createAwsStsRunner({ profile, credentialSource = PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, region = "eu-west-2", run = execFileSync, now = Date.now } = {}) {
+  const env = createProductionAwsCredentialEnvironment({ credentialSource, profile, region });
   let verifierCredentials = null;
   let verifierCallerArn = null;
   let verifierExpiration = null;
@@ -33,17 +30,7 @@ export function createAwsStsRunner({ profile, region = "eu-west-2", run = execFi
   };
   const verifierEnvironment = () => {
     assertVerifierSessionUsable();
-    const env = {
-      ...process.env,
-      AWS_ACCESS_KEY_ID: verifierCredentials.AccessKeyId,
-      AWS_SECRET_ACCESS_KEY: verifierCredentials.SecretAccessKey,
-      AWS_SESSION_TOKEN: verifierCredentials.SessionToken,
-      AWS_REGION: region,
-      AWS_DEFAULT_REGION: region,
-    };
-    delete env.AWS_PROFILE;
-    delete env.AWS_DEFAULT_PROFILE;
-    return env;
+    return createAssumedRoleSessionEnvironment({ credentials: verifierCredentials, region });
   };
   const invoke = (args, overrideEnv = env) => run("aws", [...args, "--region", region, "--output", "json", "--no-cli-pager"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: overrideEnv });
   const runAsVerifier = (args) => {
@@ -92,10 +79,12 @@ export async function establishReleaseDeployerIdentity({ adapter } = {}) {
 }
 
 export async function establishVerifierIdentity({ adapter, mfaSerial, mfaCode, getMfaCode } = {}) {
-  const result = await establishEcsExecVerifierSession({ adapter, mfaSerial, mfaCode, getMfaCode });
+  const result = await establishEcsExecVerifierSession({ adapter, mfaSerial: assertVerifierMfaSerial(mfaSerial), mfaCode, getMfaCode });
   if (result.roleArn !== ECS_EXEC_OPERATOR_ROLE_ARN) throw new Error("Verifier identity is outside the reviewed role.");
   return result;
 }
+
+export { assertVerifierMfaSerial } from "./establish-production-ecs-exec-verifier-session.mjs";
 
 function cryptoSha(value) {
   return createHash("sha256").update(value).digest("hex");

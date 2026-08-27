@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
+import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
 import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
 import { resolveExistingArtifactSigningBindings } from "./production-artifact-signing-bootstrap.mjs";
 import { createAwsArtifactSigningAdapter } from "./production-artifact-signing-secrets-adapter.mjs";
@@ -28,8 +27,10 @@ import { assertSignedRuntimeConsumabilityEvidence, collectLiveRolePolicyIdentity
 import { assertAuthenticatedFailedRecoveryEvidence } from "./production-backend-failed-recovery-evidence.mjs";
 import { assertFailedRecoveryEvidenceReference } from "./production-backend-failed-recovery-evidence-reference.mjs";
 import { collectEcsServiceTasks } from "./production-ecs-task-census.mjs";
+import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const RELEASE_PROFILE = "mscqr-production-release-deployer";
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const hex256 = /^[a-f0-9]{64}$/;
@@ -60,22 +61,16 @@ function readAuthenticatedJson(filePath, expectedSha256, label) {
   return { ...captured, value: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes)) };
 }
 
-const cleanEnv = (base = process.env, profile) => {
-  const env = { ...base, AWS_REGION: BACKEND_HEALTH_RECOVERY.region, AWS_DEFAULT_REGION: BACKEND_HEALTH_RECOVERY.region };
-  if (profile) env.AWS_PROFILE = profile;
-  if (profile) for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) delete env[key];
-  return env;
-};
-
 export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), deps = {}) {
   const sourceSha = required(argv, "--source-sha");
   const environmentApproval = readAuthenticatedJson(required(argv, "--environment-approval"), required(argv, "--environment-approval-sha256"), "GitHub environment approval evidence");
   const imageFile = required(argv, "--image-authorization");
   const imageSha = required(argv, "--image-authorization-sha256");
-  const profile = option(argv, "--aws-profile");
-  const env = cleanEnv(deps.baseEnv, profile);
-  const githubContext = { repository: env.GITHUB_REPOSITORY, workflowRef: env.GITHUB_WORKFLOW_REF, eventName: env.GITHUB_EVENT_NAME, workflowRunId: env.GITHUB_RUN_ID, workflowRunAttempt: env.GITHUB_RUN_ATTEMPT, githubActions: env.GITHUB_ACTIONS, now: deps.now };
-  const verifyImageEvidenceSource = deps.verifyImageEvidence || ((input) => verifyImageEvidenceSignature({ ...input, env }));
+  const credentialSource = required(argv, "--credential-source");
+  if (credentialSource !== PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER) throw new Error("Backend health recovery requires the GitHub OIDC release-deployer credential source.");
+  const operatorEnvironment = deps.baseEnv || process.env;
+  const env = createProductionAwsCredentialEnvironment({ credentialSource, env: operatorEnvironment, region: BACKEND_HEALTH_RECOVERY.region });
+  const githubContext = { repository: operatorEnvironment.GITHUB_REPOSITORY, workflowRef: operatorEnvironment.GITHUB_WORKFLOW_REF, eventName: operatorEnvironment.GITHUB_EVENT_NAME, workflowRunId: operatorEnvironment.GITHUB_RUN_ID, workflowRunAttempt: operatorEnvironment.GITHUB_RUN_ATTEMPT, githubActions: operatorEnvironment.GITHUB_ACTIONS, now: deps.now };
   let verifiedImageEvidence;
   const verifyImageEvidence = (input) => verifiedImageEvidence ??= verifyImageEvidenceSource(input);
   const image = readAuthenticatedJson(imageFile, imageSha, "Backend recovery image authorization");
@@ -88,15 +83,9 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   if (!deps.readProtectedMain && execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }).trim()) throw new Error("Backend recovery requires a clean protected-main checkout.");
   const run = deps.exec || ((command, args) => execFileSync(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   const awsText = (args) => run("aws", [...args, "--region", BACKEND_HEALTH_RECOVERY.region, "--output", "json", "--no-cli-pager"]);
+  const verifyImageEvidenceSource = deps.verifyImageEvidence || ((input) => verifyImageEvidenceSignature({ ...input, run: awsText }));
   const aws = (args) => JSON.parse(awsText(args));
-  const verifyFailedRecoveryEvidence = deps.verifyFailedRecoveryEvidence || (({ digest, signature, keyArn, signingAlgorithm }) => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-failed-recovery-verify-"));
-    try {
-      const digestFile = path.join(directory, "digest"); const signatureFile = path.join(directory, "signature");
-      fs.writeFileSync(digestFile, digest, { mode: 0o600, flag: "wx" }); fs.writeFileSync(signatureFile, signature, { mode: 0o600, flag: "wx" });
-      return aws(["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestFile}`, "--message-type", "DIGEST", "--signature", `fileb://${signatureFile}`, "--signing-algorithm", signingAlgorithm]).SignatureValid === true;
-    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
-  });
+  const verifyFailedRecoveryEvidence = deps.verifyFailedRecoveryEvidence || createRootAttestationKmsVerifier({ run: aws });
   const authenticateFailedRecoveryEvidence = () => failedRecoveryEvidence.value === null
     ? Object.freeze({ envelopeSha256: null, referenceSha256: null, lineageSha256: EMPTY_RECOVERY_HISTORY_LINEAGE_SHA256, recoveryHistory: Object.freeze([]), knownFailedRevisions: Object.freeze([]), interruptedRecoveries: Object.freeze([]) })
     : Object.freeze({ ...assertAuthenticatedFailedRecoveryEvidence(failedRecoveryEvidence.value, { verify: verifyFailedRecoveryEvidence, now: typeof deps.now === "function" ? deps.now() : deps.now || Date.now() }), referenceSha256: failedRecoveryEvidenceReference.value.referenceSha256 });
@@ -130,15 +119,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       : await refreshRuntimeResourceMetadata(candidate, runtimeClosure.value?.evidence?.resourceMetadata, aws, readKmsKey);
     const dependencies = deriveEcsRuntimeDependencies(candidate);
     const livePolicyIdentity = await (deps.collectLiveRolePolicyIdentity || collectLiveRolePolicyIdentity)(dependencies.map(({ principalArn }) => principalArn), aws, candidate);
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-runtime-closure-verify-"));
-    try {
-      const digest = path.join(directory, "digest"); const signature = path.join(directory, "signature");
-      return assertSignedRuntimeConsumabilityEvidence(runtimeClosure.value, { sourceSha, candidate, livePolicyIdentity, resourceMetadata, now: typeof deps.now === "function" ? deps.now() : deps.now || Date.now(), verify: ({ digest: digestBytes, signature: signatureBytes, keyArn, signingAlgorithm }) => {
-        fs.writeFileSync(digest, digestBytes, { mode: 0o600, flag: "wx" });
-        fs.writeFileSync(signature, signatureBytes, { mode: 0o600, flag: "wx" });
-        return aws(["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digest}`, "--message-type", "DIGEST", "--signature", `fileb://${signature}`, "--signing-algorithm", signingAlgorithm]).SignatureValid === true;
-      } });
-    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+    return assertSignedRuntimeConsumabilityEvidence(runtimeClosure.value, { sourceSha, candidate, livePolicyIdentity, resourceMetadata, now: typeof deps.now === "function" ? deps.now() : deps.now || Date.now(), verify: createRootAttestationKmsVerifier({ run: aws }) });
   });
 
   if (argv.includes("--prepare")) {
@@ -157,7 +138,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     assertLegacyBackendRecoveryAuthorization(preliminary, {
       sourceSha, currentTaskDefinitionArn: preliminary.currentTaskDefinitionArn, recoveryImageDigest: preliminary.recoveryImageDigest,
       imageAuthorization: image.value, imageValidation: { verifyImageEvidence }, environmentApproval: environmentApproval.value,
-      artifactSigningBindingSha256: preliminaryBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256: authenticatedFailedRecoveryEvidence.envelopeSha256, failedRecoveryEvidenceReferenceSha256: authenticatedFailedRecoveryEvidence.referenceSha256, recoveryHistory: authenticatedFailedRecoveryEvidence.recoveryHistory, knownFailedRevisions: authenticatedFailedRecoveryEvidence.knownFailedRevisions, interruptedRecoveries: authenticatedFailedRecoveryEvidence.interruptedRecoveries, githubContext, executionActor: env.GITHUB_ACTOR,
+      artifactSigningBindingSha256: preliminaryBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256: authenticatedFailedRecoveryEvidence.envelopeSha256, failedRecoveryEvidenceReferenceSha256: authenticatedFailedRecoveryEvidence.referenceSha256, recoveryHistory: authenticatedFailedRecoveryEvidence.recoveryHistory, knownFailedRevisions: authenticatedFailedRecoveryEvidence.knownFailedRevisions, interruptedRecoveries: authenticatedFailedRecoveryEvidence.interruptedRecoveries, githubContext, executionActor: operatorEnvironment.GITHUB_ACTOR,
     });
     const artifactSigning = await resolveArtifactSigning();
     if (artifactSigning?.verification?.valid !== true || artifactSigning?.created?.length || artifactSigning?.uninitializedSecretRefs?.length) throw new Error("Existing canonical artifact-signing bindings are not fully initialized and verified.");
@@ -192,7 +173,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       knownFailedRevisions: authenticatedFailedRecoveryEvidence.knownFailedRevisions,
       interruptedRecoveries: authenticatedFailedRecoveryEvidence.interruptedRecoveries,
       githubContext,
-      executionActor: env.GITHUB_ACTOR,
+      executionActor: operatorEnvironment.GITHUB_ACTOR,
     });
     const output = path.resolve(required(argv, "--output"));
     writeStageBPrivateFilesAtomic({ repositoryRoot: root, overwrite: false, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(authorization, null, 2)}\n`), label: "Backend recovery authorization" }] });
@@ -206,7 +187,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     imageReleaseSha: authorization.value.imageReleaseSha, imageAuthorization: image.value, imageValidation: { verifyImageEvidence },
     environmentApproval: environmentApproval.value, artifactSigningBindingSha256: authorization.value.artifactSigningBindingSha256,
     runtimeConsumabilitySha256: authorization.value.runtimeConsumabilitySha256, failedRecoveryEvidenceSha256: null, failedRecoveryEvidenceReferenceSha256: null, recoveryHistory: [], knownFailedRevisions: [], interruptedRecoveries: [],
-    githubContext, executionActor: env.GITHUB_ACTOR,
+    githubContext, executionActor: operatorEnvironment.GITHUB_ACTOR,
   });
   const evidenceOut = path.resolve(required(argv, "--evidence-out"));
   const healthUrl = assertProductionBackendReadinessUrl(required(argv, "--health-url"));
@@ -273,7 +254,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     knownFailedRevisions: authenticatedFailedRecoveryEvidence.knownFailedRevisions,
     interruptedRecoveries: authenticatedFailedRecoveryEvidence.interruptedRecoveries,
     githubContext,
-    executionActor: env.GITHUB_ACTOR,
+    executionActor: operatorEnvironment.GITHUB_ACTOR,
   });
   let artifactSigning;
   try {
@@ -292,7 +273,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
       recoveryHistory: authenticatedFailedRecoveryEvidence.recoveryHistory,
       knownFailedRevisions: authenticatedFailedRecoveryEvidence.knownFailedRevisions,
       interruptedRecoveries: authenticatedFailedRecoveryEvidence.interruptedRecoveries,
-      githubContext, executionActor: env.GITHUB_ACTOR,
+      githubContext, executionActor: operatorEnvironment.GITHUB_ACTOR,
     });
   } catch (error) {
     await record({
@@ -390,7 +371,7 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     artifactSigningBindings: artifactSigning.bindings, artifactSigningBindingSha256: artifactSigning.evidenceSha256,
     runtimeConsumabilitySha256: authorization.value.runtimeConsumabilitySha256,
     authenticatedFailedRecoveryEvidence,
-    githubContext, executionActor: env.GITHUB_ACTOR, candidate,
+    githubContext, executionActor: operatorEnvironment.GITHUB_ACTOR, candidate,
   }, {
     census,
     now: typeof deps.now === "function" ? deps.now : () => deps.now || Date.now(),

@@ -28,6 +28,11 @@ import { assertAuthenticatedCurrentStageBState, readAuthenticatedStageARecoveryS
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
+import { authenticateReleasePreflightCheckerTrustEvidence, createReleasePreflightCheckerTrustSignatureVerifier } from "./production-release-preflight-checker-attestation.mjs";
+import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
+import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+
+export { PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -63,24 +68,17 @@ export function createConditionalMfaResolvers({ env = process.env, interactiveMf
     },
   };
 }
-const profileEnvironment = (profile, env = process.env) => {
-  const result = { ...env, AWS_REGION: REGION, AWS_DEFAULT_REGION: REGION };
-  if (profile) {
-    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) delete result[key];
-    result.AWS_PROFILE = profile;
-  }
-  return result;
-};
+const credentialEnvironment = ({ credentialSource, profile, env = process.env, injected = false } = {}) => createProductionAwsCredentialEnvironment({ credentialSource, profile, env, region: REGION, injected });
 
-export function createProductionCommandRunner({ profile, region = REGION, exec = execFileSync } = {}) {
-  const env = { ...profileEnvironment(profile), AWS_REGION: region, AWS_DEFAULT_REGION: region };
+export function createProductionCommandRunner({ credentialSource, profile, region = REGION, env: parentEnvironment = process.env, exec = execFileSync } = {}) {
+  const environment = credentialEnvironment({ credentialSource, profile, env: parentEnvironment, injected: credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST && exec !== execFileSync });
   return (args) => {
     if (!Array.isArray(args) || args.length === 0) throw new Error("Production command arguments are required.");
     const command = args[0] === "aws" ? args.slice(1) : [...args];
     const isAwsService = AWS_SERVICE_COMMANDS.has(command[0]);
     const normalized = isAwsService && !command.includes("--region") ? [...command, "--region", region] : command;
     const executable = isAwsService ? "aws" : normalized[0];
-    return exec(executable, normalized.slice(isAwsService ? 0 : 1), { cwd: process.cwd(), env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return exec(executable, normalized.slice(isAwsService ? 0 : 1), { cwd: process.cwd(), env: environment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   };
 }
 
@@ -108,8 +106,8 @@ export function describeStageAIngress({ run, endpointSecurityGroupId, runtimeSec
 }
 
 export function createProductionOverlapDeploymentAdapter({ run, runScript = execFileSync, profile, credentialSource, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh"), cluster = CLUSTER, service = SERVICE, expectedCurrentTaskDefinitionArn, readinessFile, readinessSha256, sourceSha, rotationId, imageDigest, expectedFamily = "mscqr-production-rls-green-backend-candidate", versionUrl, expectedGitSha } = {}) {
-  const localProfile = profile === "mscqr-production-release-deployer" && credentialSource === undefined;
-  const githubOidc = credentialSource === "github-oidc-release-deployer" && profile === undefined;
+  const localProfile = profile === "mscqr-production-release-deployer" && credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE;
+  const githubOidc = credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER && profile === undefined;
   if (typeof run !== "function" || typeof runScript !== "function" || !path.isAbsolute(deployScript) || (!localProfile && !githubOidc)) throw new Error("Production overlap deployment requires one exact release-deployer credential source.");
   return {
     run: async ({ taskDefinitionArn, readinessSha256: suppliedReadinessSha256, rotationStateSha256: suppliedRotationStateSha256 }) => {
@@ -122,7 +120,9 @@ export function createProductionOverlapDeploymentAdapter({ run, runScript = exec
       const metadataFile = path.join(temporaryDirectory, "deployment.json");
       try {
         const env = {
-          ...profileEnvironment(profile),
+          ...credentialEnvironment({ credentialSource, profile }),
+          MSCQR_AWS_CREDENTIAL_SOURCE: credentialSource,
+          ...(profile ? { MSCQR_AWS_NAMED_PROFILE: profile } : {}),
           CLUSTER_NAME: cluster,
           SERVICE_NAME: service,
           CONTAINER_NAME: CONTAINER,
@@ -184,9 +184,9 @@ const runtimeProofCommand = ({ sourceSha, rotationId, deploymentSha, healthUrl, 
   ].join("; ");
 };
 
-export function createProductionRotationInfrastructureAdapter({ run = execFileSync, releaseProfile, root = path.resolve("infra/aws/terraform/production-green-stage-b"), config } = {}) {
+export function createProductionRotationInfrastructureAdapter({ run = execFileSync, releaseProfile, credentialSource = PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, root = path.resolve("infra/aws/terraform/production-green-stage-b"), config } = {}) {
   if (!config?.stageBTfvarsPath || !config.stageBTfvarsBindingReportPath || !config.stageBTfvarsBindingReportSha256 || !config.rotationTerraformInputFile || !config.rotationTerraformPlanFile || !config.stageBTerraformDataDir) throw new Error("Canonical rotation Terraform inputs are required.");
-  const terraformEnv = { ...profileEnvironment(releaseProfile), TF_DATA_DIR: config.stageBTerraformDataDir, TF_WORKSPACE: "default" };
+  const terraformEnv = { ...credentialEnvironment({ credentialSource, profile: releaseProfile }), TF_DATA_DIR: config.stageBTerraformDataDir, TF_WORKSPACE: "default" };
   const terraform = (args, encoding = "utf8") => run("terraform", [`-chdir=${root}`, ...args], { cwd: process.cwd(), env: terraformEnv, encoding, stdio: ["ignore", "pipe", "pipe"] });
   return {
     async run({ sourceSha, rotationId, secretBindings }) {
@@ -222,11 +222,12 @@ export function createProductionRotationInfrastructureAdapter({ run = execFileSy
   };
 }
 
-export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier", interactiveMfaCodeProvider, verifierMfaCodeProvider = promptProductionMfaCode } = {}) {
+export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier", interactiveMfaCodeProvider, verifierMfaCodeProvider = promptProductionMfaCode, verifyReleasePreflightAttestationSignature } = {}) {
   if (!config || typeof config !== "object" || !/^[a-f0-9]{64}$/.test(runtimeConfigSha256 || "")) throw new Error("Hash-authenticated production cutover adapter configuration is required.");
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || config.sourceSha !== sourceSha || typeof rotationId !== "string" || config.rotationId !== rotationId) throw new Error("Production cutover adapter identity does not match its runtime config.");
   if (releaseProfile !== "mscqr-production-release-deployer" || verifierProfile !== "mscqr-production-ecs-exec-verifier") throw new Error("Production cutover adapter profiles do not match the asymmetric identity contract.");
-  const releaseRun = createProductionCommandRunner({ profile: releaseProfile });
+  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: releaseProfile });
+  const releasePreflightAttestationVerifier = verifyReleasePreflightAttestationSignature || createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun });
   const releaseSts = createAwsStsRunner({ profile: releaseProfile });
   const verifierSts = createAwsStsRunner({ profile: config.bootstrapProfile || verifierProfile });
   let verifierSession = null;
@@ -271,6 +272,29 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     assertPreCutoverTemporaryCapabilityAbsent(report.temporaryKmsCapability, { sourceSha });
     return report;
   };
+  const readCheckerTrustEvidence = () => {
+    const readBound = (filePath, expectedSha256, label) => {
+      const captured = readStageBPrivateFileBytes({ filePath, repositoryRoot: process.cwd(), label });
+      if (captured.sha256 !== expectedSha256) throw new Error(`${label} changed after runtime preparation.`);
+      return { bytes: captured.bytes, value: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes)) };
+    };
+    const report = readBound(config.releasePreflightEvidenceFile, config.releasePreflightEvidenceFileSha256, "Release-preflight checker-trust evidence");
+    const attestation = readBound(config.releasePreflightAttestationFile, config.releasePreflightAttestationFileSha256, "Release-preflight checker-trust attestation");
+    const signature = readBound(config.releasePreflightAttestationSignatureFile, config.releasePreflightAttestationSignatureFileSha256, "Release-preflight checker-trust attestation signature");
+    return authenticateReleasePreflightCheckerTrustEvidence({
+      report: report.value,
+      reportBytes: report.bytes,
+      attestation: attestation.value,
+      attestationBytes: attestation.bytes,
+      signatureArtifact: signature.value,
+      signatureBytes: signature.bytes,
+      sourceSha,
+      administratorReportSha256: config.iamEvidenceFileSha256,
+      expectedAttestationFileSha256: config.releasePreflightAttestationFileSha256,
+      expectedSignatureFileSha256: config.releasePreflightAttestationSignatureFileSha256,
+      verifySignature: releasePreflightAttestationVerifier,
+    });
+  };
   const artifact = createAwsArtifactSigningAdapter({
     run: async (args) => releaseRun(args),
     sourceSha,
@@ -292,7 +316,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   });
   const checkerChain = createLiveCheckerChainAssertionAdapter({ run: releaseRun });
   const overlapRegistration = createAwsOverlapTaskRegistrationAdapter({ run: async (args) => releaseRun(args) });
-  const rotationInfrastructure = createProductionRotationInfrastructureAdapter({ run: execFileSync, releaseProfile, config });
+  const rotationInfrastructure = createProductionRotationInfrastructureAdapter({ run: execFileSync, releaseProfile, credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, config });
   const inventoryExecute = createProductionRuntimeInventoryAdapter({
     ecs: verifierEcs,
     getVerifierSession: requireVerifierSession,
@@ -301,6 +325,8 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   const preDeploymentInventory = createProductionPreDeploymentInventoryAdapter({ run: async (args) => releaseRun(args), sourceSha, imageDigest: config.overlapTaskInput?.backendImage, config });
   return {
     iam: { report: readIamEvidence(), reconcile: async () => ({ mutationCount: 0 }) },
+    imageAuthorizationValidation: { verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }) },
+    checkerTrustEvidence: readCheckerTrustEvidence(),
     checkerChain,
     identities: {
       establish: async () => {
@@ -349,7 +375,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     readiness: config.readinessEvidenceFile ? {
       persist: async (evidence) => persistOverlapReadinessEvidence({ outputPath: config.readinessEvidenceFile, evidence }),
     } : undefined,
-    deployOverlap: createProductionOverlapDeploymentAdapter({ run: releaseRun, profile: releaseProfile, readinessFile: config.readinessEvidenceFile, sourceSha, rotationId, imageDigest: config.backendImageDigest, expectedCurrentTaskDefinitionArn: config.expectedCurrentTaskDefinitionArn, versionUrl: config.rotationHealthUrl, expectedGitSha: sourceSha }),
+    deployOverlap: createProductionOverlapDeploymentAdapter({ run: releaseRun, profile: releaseProfile, credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, readinessFile: config.readinessEvidenceFile, sourceSha, rotationId, imageDigest: config.backendImageDigest, expectedCurrentTaskDefinitionArn: config.expectedCurrentTaskDefinitionArn, versionUrl: config.rotationHealthUrl, expectedGitSha: sourceSha }),
     postDeploy: { run: async ({ taskDefinitionArn, verifierSession: suppliedVerifierSession }) => {
       if (suppliedVerifierSession !== requireVerifierSession()) throw new Error("Post-deploy verification received a verifier session different from the established cutover session.");
       const service = await verifierEcs.describeService();

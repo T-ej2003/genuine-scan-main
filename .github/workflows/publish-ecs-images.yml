@@ -77,8 +77,10 @@ jobs:
 
           if [ -n "$AWS_ROLE_TO_ASSUME" ]; then
             echo "mode=oidc" >> "$GITHUB_OUTPUT"
+            echo "credential_source=github-oidc-release-deployer" >> "$GITHUB_OUTPUT"
           elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
             echo "mode=keys" >> "$GITHUB_OUTPUT"
+            echo "credential_source=github-access-keys" >> "$GITHUB_OUTPUT"
           else
             echo "::error::Configure repository variable AWS_ROLE_TO_ASSUME for OIDC, or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY as fallback secrets."
             exit 1
@@ -122,9 +124,13 @@ jobs:
 
       - name: Resolve immutable image metadata
         id: image-meta
+        env:
+          MSCQR_AWS_CREDENTIAL_SOURCE: ${{ steps.auth-mode.outputs.credential_source }}
         run: |
           set -euo pipefail
 
+          source scripts/aws/production-credential-source.sh
+          configure_production_aws_credential_source
           echo "image_tag=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
           echo "resolved_ref=${{ inputs.git_ref != '' && inputs.git_ref || github.ref_name }}" >> "$GITHUB_OUTPUT"
@@ -132,6 +138,8 @@ jobs:
           : > "$RUNNER_TEMP/published-images.jsonl"
 
       - name: Enforce ECR repository controls
+        env:
+          MSCQR_AWS_CREDENTIAL_SOURCE: ${{ steps.auth-mode.outputs.credential_source }}
         run: |
           set -euo pipefail
           ./scripts/aws/apply-ecr-repository-controls.sh "$SERVICES"
@@ -141,6 +149,7 @@ jobs:
           IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
           AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
           OUTPUT_FILE: ${{ steps.image-meta.outputs.images_file }}
+          MSCQR_AWS_CREDENTIAL_SOURCE: ${{ steps.auth-mode.outputs.credential_source }}
         run: |
           set -euo pipefail
           ./scripts/aws/publish-ecs-images.sh "$SERVICES"

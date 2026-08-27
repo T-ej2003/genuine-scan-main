@@ -19,6 +19,8 @@ import { buildStageBImagePublicationIdentity, publicationIdentitySha256 } from "
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "../aws/stage-b-deployment-contract.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
+import { buildRootAttestationKeyPolicy, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
 
 const imageReleaseSha = "7245a6036492f875654c414473737e33c1422f3c";
 const toolingSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
@@ -156,6 +158,41 @@ test("administrator evidence proves all four exact release tag-to-digest binding
     { service: "rls-executor", repository: "mscqr-backend", tag: `${imageReleaseSha}-rls-executor`, digest: `sha256:${"3".repeat(64)}` },
     { service: "worker", repository: "mscqr-worker", tag: imageReleaseSha, digest: `sha256:${"2".repeat(64)}` },
   ]);
+});
+
+test("production-default image verification uses the release profile runner", () => {
+  const report = reportFixture();
+  const signatureArtifact = signatureFixture(report);
+  const calls = [];
+  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "mscqr-production-release-deployer",
+    exec: (file, args, options) => {
+      calls.push({ file, args, options });
+      const operation = args[1]; const keyArn = "arn:aws:kms:eu-west-2:368992683803:key/11111111-2222-3333-4444-555555555555";
+      return JSON.stringify(operation === "describe-key" ? { KeyMetadata: { Arn: keyArn, KeyId: keyArn.split("/").at(-1), Description: ROOT_ATTESTATION_KEY_DESCRIPTION, KeyUsage: "SIGN_VERIFY", KeySpec: "RSA_3072", KeyState: "Enabled", Enabled: true, KeyManager: "CUSTOMER", Origin: "AWS_KMS", MultiRegion: false } }
+        : operation === "get-key-policy" ? { Policy: JSON.stringify(buildRootAttestationKeyPolicy()) }
+          : operation === "list-resource-tags" ? { Tags: Object.entries(ROOT_ATTESTATION_TAGS).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) }
+            : { SignatureValid: true });
+    },
+  });
+  const previousProfile = process.env.AWS_PROFILE;
+  process.env.AWS_PROFILE = "hostile-default-profile";
+  try {
+    assert.doesNotThrow(() => verifyImageEvidenceSignature({ report, toolingSha, signatureArtifact, now: observedAt, run: releaseRun }));
+  } finally {
+    if (previousProfile === undefined) delete process.env.AWS_PROFILE;
+    else process.env.AWS_PROFILE = previousProfile;
+  }
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0].file, "aws");
+  assert.deepEqual(calls.map(({ args }) => args.slice(0, 2)), [["kms", "describe-key"], ["kms", "get-key-policy"], ["kms", "list-resource-tags"], ["kms", "verify"]]);
+  assert.equal(calls.every(({ options }) => options.env.AWS_PROFILE === "mscqr-production-release-deployer"), true);
+});
+
+test("image verification rejects an omitted trusted verifier instead of using ambient credentials", () => {
+  const report = reportFixture();
+  const signatureArtifact = signatureFixture(report);
+  assert.throws(() => verifyImageEvidenceSignature({ report, toolingSha, signatureArtifact, now: observedAt }), /explicit trusted verifier or command runner/);
 });
 
 test("release role is not an approved image-evidence verifier", () => {

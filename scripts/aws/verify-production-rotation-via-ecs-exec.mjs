@@ -5,6 +5,7 @@ import path from "node:path";
 import { assertSelectedTargetTask, assertTaskBelongsToExactPrimaryDeployment, requireExecuteCommandEnabled, selectAndRevalidateExactTarget } from "./ecs-exec-target-selection.mjs";
 import { ECS_EXEC_OPERATOR_CALLER_PATTERN, ECS_EXEC_OPERATOR_ROLE_ARN, ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 import { canonicalProductionEcsClusterArn, PRODUCTION_ECS_CLUSTER_NAME } from "./production-green-stage-b-contract.mjs";
+import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PTY_HELPER = path.join(ROOT, "scripts/aws/ecs-exec-fixture-pty.py");
@@ -51,6 +52,9 @@ const expectedDeploymentSha = fullSha(args.get("deployment-sha") || process.env.
 const expectedReleaseSha = fullSha(args.get("release-sha") || args.get("expected-release-sha") || process.env.ROTATION_RELEASE_GIT_SHA || "", "release-sha");
 const rotationId = safeIdentifier(args.get("rotation-id") || process.env.ROTATION_ID || "", "rotation-id");
 const invocationRef = safeIdentifier(args.get("invocation-ref") || process.env.ROTATION_RUNTIME_INVOCATION_REF || "", "invocation-ref");
+const credentialSource = required("credential-source");
+if (credentialSource !== PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION) throw new Error("ECS Exec rotation verification requires the inherited exact verifier-session credential source");
+const awsEnvironment = createProductionAwsCredentialEnvironment({ credentialSource });
 const healthUrl = required("health-url");
 const parsedHealthUrl = new URL(healthUrl);
 if (parsedHealthUrl.protocol !== "https:") throw new Error("health-url must use HTTPS");
@@ -64,6 +68,7 @@ const awsJson = (awsArgs) => {
     cwd: ROOT,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
+    env: awsEnvironment,
     maxBuffer: 8 * 1024 * 1024,
   });
   if (result.error || result.status !== 0) throw new Error("AWS read-only discovery failed");
@@ -139,7 +144,7 @@ const pty = spawnSync("python3", [
   "--interactive",
   "--command",
   `sh -c ${shellQuote(remoteCommand)}`,
-], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 4 * 1024 * 1024 });
+], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: awsEnvironment, maxBuffer: 4 * 1024 * 1024 });
 const transcript = String(pty.stdout || "");
 if (transcript.includes(fixtureBytes.toString("utf8"))) throw new Error("fixture appeared in the ECS Exec transcript");
 if (pty.error || pty.status !== 0) throw new Error("ECS Exec runtime verifier failed");

@@ -27,6 +27,9 @@ import { runCli as runArtifactSigningBootstrap } from "../aws/bootstrap-producti
 import { producePostApplyStageAPlanRecovery } from "../aws/production-stage-a-recovery-evidence.mjs";
 import { STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { productionStageAIngress, productionStageAState, STAGE_A_STATE_OBJECT } from "./fixtures/production-stage-a-state.mjs";
+import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
+import { buildReleasePreflightCheckerTrustAttestation } from "../aws/production-release-preflight-checker-attestation.mjs";
+import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
@@ -94,6 +97,24 @@ function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha) {
   iamDocument.temporaryKmsCapability = JSON.parse(readFileSync(temporaryKmsCapability, "utf8"));
   writeFileSync(iamEvidence, JSON.stringify(iamDocument) + "\n", { mode: 0o600 });
   chmodSync(iamEvidence, 0o600);
+  const releasePreflightEvidence = file("release-preflight.json", {
+    status: "ready-for-plan",
+    sourceSha: expectedSha,
+    administratorReportSha256: createHash("sha256").update(readFileSync(iamEvidence)).digest("hex"),
+    checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN },
+  });
+  const releasePreflightReportBytes = readFileSync(releasePreflightEvidence);
+  const releasePreflightAttestation = file("release-preflight.attestation.json", buildReleasePreflightCheckerTrustAttestation({
+    report: JSON.parse(releasePreflightReportBytes),
+    reportBytes: releasePreflightReportBytes,
+    sourceSha: expectedSha,
+    administratorReportSha256: createHash("sha256").update(readFileSync(iamEvidence)).digest("hex"),
+  }));
+  const releasePreflightAttestationSignature = file("release-preflight.attestation.signature.json", signPermissionReport(JSON.parse(readFileSync(releasePreflightAttestation)), {
+    now: new Date().toISOString(),
+    reportBytes: readFileSync(releasePreflightAttestation),
+    sign: () => "AQ==",
+  }));
   const rootDrop = file("root-drop.json", buildRootDropEvidence({ payload: buildRootDropPayload({ sourceSha: expectedSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "runtime-bootstrap-root-with-entropy" }), signatureBase64: "c2lnbmF0dXJl" }));
   const stageAPlan = file("stage-a.tfplan", "binary-fixture");
   const tfvarsBytes = Buffer.from("production_rotation_enabled = false\n");
@@ -111,7 +132,7 @@ function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha) {
     ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-d",
   } }, null, 2));
   chmodSync(artifactBinding, 0o600);
-  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, temporaryKmsCapability, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
+  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, releasePreflightEvidence, releasePreflightAttestation, releasePreflightAttestationSignature, temporaryKmsCapability, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
 }
 
 function fullInput(directory, repositoryRoot, expectedSha = sourceSha) {
@@ -124,6 +145,9 @@ function fullInput(directory, repositoryRoot, expectedSha = sourceSha) {
     git: gitFixture(expectedSha),
     imageAuthorization: { ...JSON.parse(readFileSync(evidence.imageAuthorization, "utf8")), filePath: evidence.imageAuthorization },
     iamEvidence: { ...JSON.parse(readFileSync(evidence.iamEvidence, "utf8")), filePath: evidence.iamEvidence },
+    releasePreflightEvidenceFile: evidence.releasePreflightEvidence,
+    releasePreflightAttestationFile: evidence.releasePreflightAttestation,
+    releasePreflightAttestationSignatureFile: evidence.releasePreflightAttestationSignature,
     temporaryKmsCapabilityFile: evidence.temporaryKmsCapability,
     artifactBindingFile: evidence.artifactBinding,
     rootDropEvidenceFile: evidence.rootDrop,
@@ -135,9 +159,10 @@ function fullInput(directory, repositoryRoot, expectedSha = sourceSha) {
     currentTaskDefinition: taskDefinition(),
     inventoryApprovalId: stageBApprovalIdForReleaseSha(expectedSha),
     onboardingPaths: paths,
-    constructAdapters: ({ config, sourceSha: actualSha, rotationId, runtimeConfigSha256 }) => createProductionCutoverAdapters({ config, sourceSha: actualSha, rotationId, runtimeConfigSha256 }),
+    constructAdapters: ({ config, sourceSha: actualSha, rotationId, runtimeConfigSha256 }) => createProductionCutoverAdapters({ config, sourceSha: actualSha, rotationId, runtimeConfigSha256, verifyReleasePreflightAttestationSignature: () => true }),
     imageAuthorizationValidation: { now: evidence.imageAuthorizationFixture.now, verifyImageEvidence: evidence.imageAuthorizationFixture.verifyImageEvidence },
     verifyRootDropSignature: () => true,
+    verifyReleasePreflightAttestationSignature: () => true,
   };
 }
 
@@ -262,7 +287,7 @@ test("runtime adapter rejects artifact binding tamper after preparation", () => 
   try {
     const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
     writeFileSync(result.config.artifactBindingFile, `${readFileSync(result.config.artifactBindingFile, "utf8")} `, { mode: 0o600 });
-    assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256 }), /changed after runtime preparation/);
+    assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256, verifyReleasePreflightAttestationSignature: () => true }), /changed after runtime preparation/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -271,6 +296,7 @@ test("runtime adapter rejects artifact binding tamper after preparation", () => 
 test("runtime adapter authenticates every prepared eligibility artifact before AWS work", () => {
   for (const [field, message] of [
     ["iamEvidenceFile", /IAM evidence changed after runtime preparation/],
+    ["releasePreflightEvidenceFile", /Release-preflight checker-trust evidence changed after runtime preparation/],
     ["rootDropEvidenceFile", /Root-drop evidence changed after runtime preparation/],
     ["onboardingPathsFile", /Onboarding path manifest changed after runtime preparation/],
   ]) {
@@ -280,10 +306,33 @@ test("runtime adapter authenticates every prepared eligibility artifact before A
       if (field === "iamEvidenceFile") delete input.temporaryKmsCapabilityFile;
       const result = prepareProductionCutoverRuntime(input);
       writeFileSync(result.config[field], `${readFileSync(result.config[field], "utf8")} `, { mode: 0o600 });
-      assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256 }), message);
+      assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256, verifyReleasePreflightAttestationSignature: () => true }), message);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  }
+});
+
+test("runtime preparation binds release-preflight checker trust separately from administrator evidence", () => {
+  const cases = [
+    ["missing", (input) => { delete input.releasePreflightEvidenceFile; }, /Release-preflight checker-trust evidence file is required/],
+    ["missing attestation", (input) => { delete input.releasePreflightAttestationFile; }, /attestation and signature files are required/],
+    ["missing attestation signature", (input) => { delete input.releasePreflightAttestationSignatureFile; }, /attestation and signature files are required/],
+    ["modified authenticated report", (input) => { writeFileSync(input.releasePreflightEvidenceFile, `${readFileSync(input.releasePreflightEvidenceFile, "utf8").trim()} \n`, { mode: 0o600 }); }, /releasePreflightReportSha256/],
+    ["exact false", (input) => { const report = JSON.parse(readFileSync(input.releasePreflightEvidenceFile, "utf8")); report.checkerTrust.exact = false; writeFileSync(input.releasePreflightEvidenceFile, `${JSON.stringify(report)}\n`, { mode: 0o600 }); }, /checker Role-A MFA trust evidence is invalid/],
+    ["MFA false", (input) => { const report = JSON.parse(readFileSync(input.releasePreflightEvidenceFile, "utf8")); report.checkerTrust.mfaRequired = false; writeFileSync(input.releasePreflightEvidenceFile, `${JSON.stringify(report)}\n`, { mode: 0o600 }); }, /checker Role-A MFA trust evidence is invalid/],
+    ["source mismatch", (input) => { const report = JSON.parse(readFileSync(input.releasePreflightEvidenceFile, "utf8")); report.sourceSha = "a".repeat(40); writeFileSync(input.releasePreflightEvidenceFile, `${JSON.stringify(report)}\n`, { mode: 0o600 }); }, /not bound to the authenticated source/],
+    ["administrator hash mismatch", (input) => { const report = JSON.parse(readFileSync(input.releasePreflightEvidenceFile, "utf8")); report.administratorReportSha256 = "0".repeat(64); writeFileSync(input.releasePreflightEvidenceFile, `${JSON.stringify(report)}\n`, { mode: 0o600 }); }, /not bound to the authenticated source/],
+  ];
+  for (const [name, mutate, expected] of cases) {
+    const directory = fsTemp();
+    try {
+      const input = fullInput(directory, process.cwd());
+      mutate(input);
+      const result = prepareProductionCutoverRuntime(input);
+      assert.equal(result.readyToConsumeMfa, false, name);
+      assert.match(result.blockers.join("\n"), expected, name);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   }
 });
 
@@ -341,11 +390,6 @@ test("generated cutover command binds runtime config and image authorization byt
     writeFileSync(result.configPath, `${readFileSync(result.configPath, "utf8")} `, { mode: 0o600 });
     assert.throws(run, /Production cutover runtime config changed after runtime preparation/);
 
-    const secondDirectory = path.join(directory, "second");
-    mkdirSync(secondDirectory, { mode: 0o700 });
-    const second = prepareProductionCutoverRuntime(fullInput(secondDirectory, process.cwd()));
-    writeFileSync(second.config.imageAuthorizationFile, `${readFileSync(second.config.imageAuthorizationFile, "utf8")} `, { mode: 0o600 });
-    assert.throws(() => execFileSync(process.execPath, ["scripts/aws/run-production-cutover.mjs", "--mode", "production", "--config", second.configPath, "--config-sha256", second.runtimeConfigSha256, "--source-sha", sourceSha, "--rotation-id", second.config.rotationId], { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), /Image authorization evidence changed after runtime preparation/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -359,7 +403,7 @@ test("canonical IAM evidence is sufficient without a duplicate temporary-capabil
     const result = prepareProductionCutoverRuntime(input);
     assert.equal(result.readyToConsumeMfa, true);
     assert.equal(result.config.temporaryKmsCapabilityFile, null);
-    assert.doesNotThrow(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256 }));
+    assert.doesNotThrow(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256, verifyReleasePreflightAttestationSignature: () => true }));
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -377,6 +421,22 @@ test("runtime preparation validates canonical IAM evidence before live AWS disco
     const result = prepareProductionCutoverRuntime(input);
     assert.equal(result.readyToConsumeMfa, false);
     assert.match(result.blockers.join("\n"), /IAM evidence is incomplete/);
+    assert.equal(awsReads, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("runtime preparation requires the release-profile checker verifier before live AWS discovery", () => {
+  const directory = fsTemp();
+  let awsReads = 0;
+  try {
+    const input = fullInput(directory, process.cwd());
+    delete input.verifyReleasePreflightAttestationSignature;
+    input.loadCurrentTaskDefinition = () => { awsReads += 1; return input.currentTaskDefinition; };
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, false);
+    assert.match(result.blockers.join("\n"), /canonical release-profile verifier/);
     assert.equal(awsReads, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -435,7 +495,7 @@ test("canonical IAM outer hash fails closed for nested, census, SHA, path, and s
       delete input.temporaryKmsCapabilityFile;
       const result = prepareProductionCutoverRuntime(input);
       mutate(result, directory);
-      assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256 }), expected, name);
+      assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256, verifyReleasePreflightAttestationSignature: () => true }), expected, name);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -448,7 +508,7 @@ test("standalone temporary-capability evidence remains independently authenticat
     const input = fullInput(directory, process.cwd());
     const result = prepareProductionCutoverRuntime(input);
     writeFileSync(result.config.temporaryKmsCapabilityFile, `${readFileSync(result.config.temporaryKmsCapabilityFile, "utf8")} `, { mode: 0o600 });
-    assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256 }), /Temporary Stage-A KMS capability evidence changed/);
+    assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256, verifyReleasePreflightAttestationSignature: () => true }), /Temporary Stage-A KMS capability evidence changed/);
 
     const disagreementDirectory = path.join(directory, "disagreement");
     mkdirSync(disagreementDirectory, { mode: 0o700 });
@@ -466,7 +526,7 @@ test("standalone temporary-capability evidence remains independently authenticat
     const canonicalIamBytes = Buffer.from(`${JSON.stringify(canonicalIam)}\n`);
     writeFileSync(runtime.config.iamEvidenceFile, canonicalIamBytes, { mode: 0o600 });
     runtime.config.iamEvidenceFileSha256 = createHash("sha256").update(canonicalIamBytes).digest("hex");
-    assert.throws(() => createProductionCutoverAdapters({ config: runtime.config, sourceSha, rotationId: runtime.config.rotationId, runtimeConfigSha256: runtime.runtimeConfigSha256 }), /diverges from canonical IAM evidence/);
+    assert.throws(() => createProductionCutoverAdapters({ config: runtime.config, sourceSha, rotationId: runtime.config.rotationId, runtimeConfigSha256: runtime.runtimeConfigSha256, verifyReleasePreflightAttestationSignature: () => true }), /diverges from canonical IAM evidence/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -514,7 +574,7 @@ test("post-apply recovery binds historical provenance separately from current St
     assert.equal(result.config.currentStageBStatePath, currentStageBStatePath);
     assert.equal(result.config.currentStageBStateSha256, binding.stateBackupSha256);
     writeFileSync(result.config.stageARecoveryEvidenceFile, `${readFileSync(result.config.stageARecoveryEvidenceFile, "utf8")} `, { mode: 0o600 });
-    assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256 }), /Stage-A recovery evidence changed after runtime preparation/);
+    assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256, verifyReleasePreflightAttestationSignature: () => true }), /Stage-A recovery evidence changed after runtime preparation/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

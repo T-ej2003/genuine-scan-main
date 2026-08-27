@@ -10,15 +10,17 @@ import { canonicalizeJson } from "./validate-production-green-stage-b-permission
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const PRODUCTION_DEPENDENCY_CLOSURE_PATH = "documents/ops/iam/MSCQRProductionDependencyClosure-v1.json";
 const BASE_PROTECTED_SHA = "e35c0bd0447eff85ec78ab46b18ab2d2e018cbcb";
-const BASE_CALL_COUNT = 107;
-const BASE_CALL_SHA256 = "b5d706d0bbcef12cd259553281068dff82e5d92f5f347a1634ab8f89c1109c39";
+const BASE_CALL_COUNT = 105;
+const BASE_CALL_SHA256 = "6375adfa99abc59a847b125a2654e7b5224a7fa80302364ec61a0c6a1a8875fe";
 const SERVICE = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2";
 const REPOSITORY = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend";
 const RUNTIME_REPOSITORIES = [REPOSITORY, "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"];
 const TASKS = "*";
 const RUNTIME_KMS_KEY = "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478";
+const ROOT_ATTESTATION_KEY = "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation";
 
 const CALLS = Object.freeze([
+  ["scripts/aws/production-release-preflight-checker-attestation.mjs", "sts:GetCallerIdentity", "administrator-release-preflight-trust-attestation-identify", ["*"], "ADMINISTRATOR"],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecr:DescribeImages", "manifest-backend-health-recovery-describe-images", [REPOSITORY]],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:DescribeServiceDeployments", "manifest-backend-health-recovery-describe-service-deployments", [SERVICE, "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"]],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:DescribeServiceRevisions", "manifest-backend-health-recovery-describe-service-revisions", [SERVICE, "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"]],
@@ -37,10 +39,9 @@ const CALLS = Object.freeze([
   ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "iam:GetRolePolicy", "runtime-admin-get-inline", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"], "ADMINISTRATOR"],
   ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "iam:ListAttachedRolePolicies", "runtime-admin-list-attached", ["*"], "ADMINISTRATOR"],
   ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "iam:PutRolePolicy", "runtime-admin-converge-inline", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"], "ADMINISTRATOR"],
-  ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "kms:Verify", "runtime-admin-verify-inventory-convergence", [RUNTIME_KMS_KEY], "ADMINISTRATOR"],
   ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "sts:GetCallerIdentity", "runtime-admin-identify", ["*"], "ADMINISTRATOR"],
-  ["scripts/aws/prepare-production-ecs-runtime-consumability.mjs", "kms:Sign", "runtime-admin-sign", ["arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"], "ADMINISTRATOR"],
-  ["scripts/aws/prepare-production-ecs-runtime-consumability.mjs", "kms:Verify", "runtime-admin-verify-inventory-evidence", [RUNTIME_KMS_KEY], "ADMINISTRATOR"],
+  ["scripts/aws/production-root-attestation-signer.mjs", "kms:Sign", "runtime-admin-sign", [ROOT_ATTESTATION_KEY], "ADMINISTRATOR"],
+  ["scripts/aws/production-root-attestation-key.mjs", "kms:Verify", "release-root-attestation-verify", [ROOT_ATTESTATION_KEY]],
   ["scripts/aws/prepare-production-ecs-runtime-consumability.mjs", "sts:GetCallerIdentity", "runtime-admin-identify", ["*"], "ADMINISTRATOR"],
   ["scripts/aws/production-ecs-runtime-consumability.mjs", "iam:GetPolicy", "manifest-backend-health-recovery-runtime-get-managed", ["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"]],
   ["scripts/aws/production-ecs-runtime-consumability.mjs", "iam:GetPolicyVersion", "manifest-backend-health-recovery-runtime-get-managed-version", ["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"]],
@@ -56,11 +57,11 @@ const CALLS = Object.freeze([
   ["scripts/aws/production-ecs-runtime-consumability.mjs", "ecr:DescribeImages", "runtime-admin-describe-runtime-image", RUNTIME_REPOSITORIES, "ADMINISTRATOR"],
   ["scripts/aws/production-ecs-runtime-consumability.mjs", "ecr:GetRepositoryPolicy", "manifest-backend-health-recovery-runtime-repository-policy", RUNTIME_REPOSITORIES],
   ["scripts/aws/production-ecs-runtime-consumability.mjs", "logs:DescribeLogGroups", "manifest-refresh-stage-a-provider-log-groups", ["*"]],
-  ["scripts/aws/prepare-production-ecs-runtime-consumability.mjs", "kms:DescribeKey", "runtime-admin-describe-runtime-key", [RUNTIME_KMS_KEY], "ADMINISTRATOR"],
-  ["scripts/aws/prepare-production-ecs-runtime-consumability.mjs", "kms:GetKeyPolicy", "runtime-admin-read-runtime-key-policy", [RUNTIME_KMS_KEY], "ADMINISTRATOR"],
+  ["scripts/aws/production-root-attestation-key.mjs", "kms:DescribeKey", "release-root-attestation-describe-key", [ROOT_ATTESTATION_KEY]],
+  ["scripts/aws/production-root-attestation-key.mjs", "kms:GetKeyPolicy", "release-root-attestation-read-key-policy", [ROOT_ATTESTATION_KEY]],
+  ["scripts/aws/production-root-attestation-key.mjs", "kms:ListResourceTags", "release-root-attestation-read-key-tags", [ROOT_ATTESTATION_KEY]],
   ["scripts/aws/recover-production-backend-health.mjs", "kms:DescribeKey", "manifest-refresh-stage-a-storage-approval-key-describe", [RUNTIME_KMS_KEY]],
   ["scripts/aws/recover-production-backend-health.mjs", "kms:GetKeyPolicy", "manifest-refresh-stage-a-storage-approval-key-policy", [RUNTIME_KMS_KEY]],
-  ["scripts/aws/recover-production-backend-health.mjs", "kms:Verify", "release-verify-signature", ["arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"]],
 ].map(([sourceFile, action, capabilityId, resources, identity = "RELEASE_DEPLOYER"]) => Object.freeze({ sourceFile, action, capabilityId, identity, resources: Object.freeze(resources) })));
 
 const MODE_CAPABILITIES = Object.freeze({

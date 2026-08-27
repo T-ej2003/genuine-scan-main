@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +16,9 @@ import { assertEcsExecOperatorEvidence, assertEcsExecOperatorLiveEvidence, asser
 import { buildTemporaryCapabilityEvidence } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { assertSimulationContextCardinality, iamSimulationContextArgs } from "./iam-simulation-context.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createRootAttestationKmsVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
+import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
 
 export { assertSimulationContextCardinality } from "./iam-simulation-context.mjs";
 
@@ -66,8 +68,8 @@ export function assertStageBPermissionEvidenceKind(report, expectedKind, expecte
   }
   return true;
 }
-export const PERMISSION_REPORT_SIGNING_KEY_ARN = STAGE_B.approvalKmsKeyArn;
-export const PERMISSION_REPORT_SIGNING_ALGORITHM = STAGE_B_APPROVAL_ALGORITHM;
+export const PERMISSION_REPORT_SIGNING_KEY_ARN = ROOT_ATTESTATION_KEY_ALIAS_ARN;
+export const PERMISSION_REPORT_SIGNING_ALGORITHM = ROOT_ATTESTATION_SIGNING_ALGORITHM;
 const BROKER_ROLE_NAME = STAGE_B_BROKER_POLICY.roleName;
 const BROKER_MANAGED_POLICY_ARN = STAGE_B_BROKER_POLICY.arn;
 const BROKER_MANAGED_POLICY_NAME = STAGE_B_BROKER_POLICY.name;
@@ -250,7 +252,8 @@ function applicableConditionKeys(conditionKeyOrigins, action) {
     .map(([key]) => key));
 }
 
-export function collectLiveReleasePolicyEvidence({ run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+export function collectLiveReleasePolicyEvidence({ run } = {}) {
+  if (typeof run !== "function") throw new Error("Release policy evidence requires an explicit credential-bound AWS command runner.");
   const roleName = RELEASE_ROLE_ARN.split("/").at(-1);
   const attached = JSON.parse(run(["iam", "list-attached-role-policies", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).AttachedPolicies || [];
   const inlinePolicyNames = JSON.parse(run(["iam", "list-role-policies", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).PolicyNames || [];
@@ -971,7 +974,8 @@ export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = 
   };
 }
 
-export function simulatePrincipalPolicy({ roleArn, evaluation: item, conditionKeyOrigins, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
+export function simulatePrincipalPolicy({ roleArn, evaluation: item, conditionKeyOrigins, run }) {
+  if (typeof run !== "function") throw new Error("IAM simulation requires an explicit credential-bound AWS command runner.");
   const args = [
     "iam", "simulate-principal-policy",
     "--policy-source-arn", roleArn,
@@ -1020,7 +1024,8 @@ export function runSimulationCensus({ roleArn, evaluations, simulate }) {
   });
 }
 
-export function inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions, run = (args) => execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) }) {
+export function inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions, run }) {
+  if (typeof run !== "function") throw new Error("CloudTrail inspection requires an explicit credential-bound AWS command runner.");
   const response = JSON.parse(run([
     "cloudtrail", "lookup-events",
     "--lookup-attributes", `AttributeKey=Username,AttributeValue=${sessionName}`,
@@ -1060,10 +1065,9 @@ export function signPermissionReport(report, {
   keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN,
   signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM,
   reportBytes = serializePermissionReport(report),
-  sign = ({ digest }) => withTempBytes("mscqr-stage-b-permission-sign-", { digest }, ({ digest: digestPath }) => JSON.parse(execFileSync("aws", [
-    "kms", "sign", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signing-algorithm", signingAlgorithm, "--output", "json",
-  ], { encoding: "utf8" })).Signature),
+  sign,
 } = {}) {
+  if (typeof sign !== "function") throw new Error("Permission report signing requires an explicit trusted signer.");
   if (report?.schemaVersion !== PERMISSION_PREFLIGHT_SCHEMA_VERSION || report.status !== "valid") throw new Error("Only a valid permission report may be signed.");
   if (keyArn !== PERMISSION_REPORT_SIGNING_KEY_ARN || signingAlgorithm !== PERMISSION_REPORT_SIGNING_ALGORITHM) throw new Error("Permission report signing contract is wrong.");
   const canonicalPayloadSha256 = sha256(Buffer.from(canonicalizeJson(report)));
@@ -1105,15 +1109,27 @@ export function assertPermissionReportHashDomains({ report, signatureArtifact, r
   return { canonicalPayloadSha256, reportFileSha256, signedBindingSha256, signatureFileSha256, bindingPayload };
 }
 
-export function verifyPermissionReportSignature({ report, signatureArtifact, reportBytes = serializePermissionReport(report), signatureBytes, expectedReportFileSha256, expectedSignatureFileSha256, now = new Date().toISOString(), keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM, verify = ({ digest, signature }) => withTempBytes("mscqr-stage-b-permission-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(execFileSync("aws", [
-  "kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json",
-], { encoding: "utf8" })).SignatureValid === true) }) {
+export function createPermissionReportKmsVerifier({ run } = {}) {
+  return createRootAttestationKmsVerifier({ run });
+}
+
+export function createPermissionReportKmsSigner({ run } = {}) {
+  const sign = createRootAttestationKmsSigner({ run });
+  return (report, options = {}) => signPermissionReport(report, {
+    ...options,
+    sign,
+  });
+}
+
+export function verifyPermissionReportSignature({ report, signatureArtifact, reportBytes = serializePermissionReport(report), signatureBytes, expectedReportFileSha256, expectedSignatureFileSha256, now = new Date().toISOString(), keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM, run, verify } = {}) {
   if (!signatureArtifact || signatureArtifact.keyId !== keyArn || signatureArtifact.keyArn !== keyArn || signatureArtifact.signingAlgorithm !== signingAlgorithm) throw new Error("Permission report signature identity or algorithm is wrong.");
   const effectiveSignatureBytes = signatureBytes || serializePermissionReport(signatureArtifact);
   const domains = assertPermissionReportHashDomains({ report, signatureArtifact, reportBytes, signatureBytes: effectiveSignatureBytes, expectedReportFileSha256, expectedSignatureFileSha256 });
   assertStageBDeploymentEvidenceFreshness(signatureArtifact.signedAt, { now, evidenceType: "Permission report signature" });
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureArtifact.signatureBase64 || "")) throw new Error("Permission report signature is malformed.");
-  if (!verify({ keyArn, signingAlgorithm, digest: Buffer.from(domains.signedBindingSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), canonicalPayloadSha256: domains.canonicalPayloadSha256, reportFileSha256: domains.reportFileSha256, signedBindingSha256: domains.signedBindingSha256, bindingPayload: domains.bindingPayload })) throw new Error("Permission report signature verification failed.");
+  if (typeof verify !== "function" && typeof run !== "function") throw new Error("Permission report signature verification requires an explicit trusted verifier or command runner.");
+  const verifySignature = verify || createPermissionReportKmsVerifier({ run });
+  if (!verifySignature({ keyArn, signingAlgorithm, digest: Buffer.from(domains.signedBindingSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), canonicalPayloadSha256: domains.canonicalPayloadSha256, reportFileSha256: domains.reportFileSha256, signedBindingSha256: domains.signedBindingSha256, bindingPayload: domains.bindingPayload })) throw new Error("Permission report signature verification failed.");
   return true;
 }
 
@@ -1285,7 +1301,12 @@ export function runPermissionPreflight({
   return report;
 }
 
-export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.parse(execFileSync("aws", ["sts", "get-caller-identity", "--output", "json"], { encoding: "utf8" })).Arn, collectPolicyEvidence = collectLiveReleasePolicyEvidence, runPreflight = runPermissionPreflight, signReport = signPermissionReport } = {}) {
+export function runCli(argv = process.argv.slice(2), dependencies = {}) {
+  const rootRun = dependencies.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default" });
+  const getCaller = dependencies.getCaller || (() => JSON.parse(rootRun(["sts", "get-caller-identity", "--output", "json"])).Arn);
+  const collectPolicyEvidence = dependencies.collectPolicyEvidence || (() => collectLiveReleasePolicyEvidence({ run: rootRun }));
+  const runPreflight = dependencies.runPreflight || runPermissionPreflight;
+  const signReport = dependencies.signReport || createPermissionReportKmsSigner({ run: rootRun });
   const options = parseCli(argv);
   assertStageBPrivateFile({ filePath: options.planJsonPath, repositoryRoot: stageBRoot, label: "Stage B plan JSON" });
   assertStageBPrivateFile({ filePath: options.canonicalPlanJsonPath, repositoryRoot: stageBRoot, label: "Stage B canonical plan JSON" });
@@ -1311,7 +1332,7 @@ export function runCli(argv = process.argv.slice(2), { getCaller = () => JSON.pa
   const referenceAudit = referenceAuditBytes ? JSON.parse(referenceAuditBytes) : undefined;
   const manifest = JSON.parse(fs.readFileSync(path.resolve(options.manifestPath), "utf8"));
   const terraformConfiguration = fs.readFileSync(path.join(stageBRoot, "infra/aws/terraform/production-green-stage-b/main.tf"), "utf8");
-  const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, canonicalPlanJsonBytes, savedPlanBytes, planApprovalReport, planApprovalReportBytes, referenceAudit, referenceAuditBytes, terraformConfiguration, policyEvidence: collectPolicyEvidence() });
+  const report = runPreflight({ ...options, reportGeneratorCallerArn: observedCallerArn, simulatedRoleArn: options.simulatedRoleArn, manifest, plan, planBytes, canonicalPlanJsonBytes, savedPlanBytes, planApprovalReport, planApprovalReportBytes, referenceAudit, referenceAuditBytes, terraformConfiguration, policyEvidence: collectPolicyEvidence(), simulate: ({ roleArn, evaluation }) => simulatePrincipalPolicy({ roleArn, evaluation, conditionKeyOrigins: roleArn === ECS_EXEC_OPERATOR_ROLE_ARN ? operatorPolicyConditionKeyOrigins() : sourcePolicyConditionKeyOrigins(), run: rootRun }), cloudTrail: ({ sessionName, startTime, endTime, requiredActions }) => inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions, run: rootRun }) });
   assertStageBPermissionEvidenceKind(report, PLAN_BOUND_PERMISSION_EVIDENCE_KIND, "plan-bound");
   process.stdout.write(`${JSON.stringify({ status: report.status, outputPath, planSha256: report.planSha256, allowedCount: report.allowedCount, deniedCount: report.deniedCount })}\n`);
   if (report.status !== "valid") {

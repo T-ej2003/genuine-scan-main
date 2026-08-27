@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { createProductionCommandRunner, describeStageAIngress } from "./production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, describeStageAIngress, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { assertStageAStateContract, parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
@@ -18,7 +18,7 @@ for (let i = 0; i < process.argv.slice(2).length; i += 2) {
 for (const key of ["stage-a-state", "stage-a-handoff", "stage-b-state", "output"]) if (!args.get(key)) throw new Error(`--${key} is required.`);
 const gitRun = (argv) => execFileSync("git", argv, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 const fresh = readFreshProtectedMainIdentity({ run: gitRun, expectedSourceSha: args.get("source-sha") });
-const run = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
+const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
 const stageAStatePath = assertStageBPrivateFile({ filePath: args.get("stage-a-state"), repositoryRoot: process.cwd(), label: "Stage-A state" }).path;
 const stageAState = parseAuthenticatedStateBytes(readFileSync(stageAStatePath));
 const stageAContract = assertStageAStateContract(stageAState, { phase: "POST_APPLY" });

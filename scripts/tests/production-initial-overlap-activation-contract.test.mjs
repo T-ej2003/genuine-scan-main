@@ -327,6 +327,17 @@ test("production closure consumes the exact verified-overlap state bytes", async
     writeFileSync(stateFile, rawState, { mode: 0o600 });
     const claim = claimFor(value);
     const claimValue = JSON.parse(claim.claimRaw);
+    const lifecycleAws = (args) => {
+      assert.deepEqual(args.slice(0, 2), ["s3api", "get-object"]);
+      const key = args[args.indexOf("--key") + 1];
+      if (key.endsWith("completion.json")) return { ok: false, missing: true };
+      if (key.endsWith("claim.json")) {
+        writeFileSync(args.at(-1), claim.claimRaw);
+        return { ok: true, value: { VersionId: "v1" } };
+      }
+      throw new Error("unexpected lifecycle object");
+    };
+    let credentialSource;
     const result = await checkProductionActivationRotation({
       env: {
         PRODUCTION_ACTIVATION_ROTATION_CONTRACT: "AUTHENTICATED_OVERLAP",
@@ -341,10 +352,10 @@ test("production closure consumes the exact verified-overlap state bytes", async
         PRODUCTION_INITIAL_OVERLAP_CLAIM_SHA256: claim.claimSha256,
         PRODUCTION_INITIAL_OVERLAP_ACTIVATION_TRANSACTION_ID: claimValue.activationTransactionId,
       },
-      assertCompletionAbsent: () => true,
-      readClaim: () => ({ value: claimValue, sha256: claim.claimSha256, versionId: "v1" }),
+      createAws: ({ credentialSource: source }) => { credentialSource = source; return lifecycleAws; },
     });
     assert.equal(result.contract, PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP);
+    assert.equal(credentialSource, "github-oidc-release-deployer");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -367,24 +378,26 @@ test("real producer-consumer disk rehearsal accepts the documented cluster ARN a
       listed: { taskArns: [taskArn] },
       described: { tasks: [{ taskArn, clusterArn: STAGE_B.clusterArn, taskDefinitionArn, lastStatus: "RUNNING", healthStatus: "HEALTHY", group: "service:mscqr-backend-servi-euw2", startedBy: deploymentId, containers: [{ name: "backend", imageDigest }], tags: [{ key: "MSCQRExecTarget", value: "production-backend" }], managedAgents: [{ name: "ExecuteCommandAgent", lastStatus: "RUNNING" }] }], failures: [] },
     };
+    const proof = { rotationId, phase: "overlap", deploymentSha, runtimeInvocationRef: "runtime-proof-roundtrip", observedAt: observed, healthObservedAt: healthObserved, healthHttpStatus: 200, healthReleaseGitSha: sourceSha, expectedReleaseGitSha: sourceSha, ...runtimeChecks };
+    const fakeTranscript = `MSCQR_PROOF_BEGIN\n${JSON.stringify(proof)}\nMSCQR_PROOF_END\n`;
     const aws = path.join(bin, "aws");
     writeFileSync(aws, `#!/usr/bin/env node
-const fixture = JSON.parse(process.env.FAKE_AWS_FIXTURE);
+const fixture = ${JSON.stringify(awsFixture)};
+const proof = ${JSON.stringify(proof)};
 const args = process.argv.slice(2); const key = args[0] + " " + args[1];
-const clusterAt = args.indexOf("--cluster"); if (clusterAt >= 0 && args[clusterAt + 1] !== process.env.FAKE_CLUSTER_ARN) process.exit(9);
+const clusterAt = args.indexOf("--cluster"); if (clusterAt >= 0 && args[clusterAt + 1] !== ${JSON.stringify(STAGE_B.clusterArn)}) process.exit(9);
 const responses = { "sts get-caller-identity": fixture.caller, "ecs describe-services": fixture.service, "ecs describe-clusters": fixture.cluster, "ecs describe-task-definition": fixture.taskDefinition, "ecs list-tasks": fixture.listed, "ecs describe-tasks": fixture.described };
-if (!responses[key]) process.exit(8); process.stdout.write(JSON.stringify(responses[key]));
+if (key === "ecs execute-command") { process.stdout.write("MSCQR_FIXTURE_READY\\n"); process.stdin.once("data", () => { process.stdout.write(${JSON.stringify(fakeTranscript)}); process.exit(0); }); process.stdin.resume(); }
+else if (!responses[key]) process.exit(8); else process.stdout.write(JSON.stringify(responses[key]));
 `, { mode: 0o700 }); chmodSync(aws, 0o700);
-    const python = path.join(bin, "python3");
-    writeFileSync(python, "#!/bin/sh\nprintf 'MSCQR_PROOF_BEGIN\\n%s\\nMSCQR_PROOF_END\\n' \"$FAKE_RUNTIME_PROOF\"\n", { mode: 0o700 }); chmodSync(python, 0o700);
-    const proof = { rotationId, phase: "overlap", deploymentSha, runtimeInvocationRef: "runtime-proof-roundtrip", observedAt: observed, healthObservedAt: healthObserved, healthHttpStatus: 200, healthReleaseGitSha: sourceSha, expectedReleaseGitSha: sourceSha, ...runtimeChecks };
     const runVerifier = (cluster, output) => execFileSync(process.execPath, [
       "scripts/aws/verify-production-rotation-via-ecs-exec.mjs",
       "--cluster", cluster, "--service", "mscqr-backend-servi-euw2", "--task-definition", taskDefinitionArn,
       "--image-digest", imageDigest, "--release-sha", sourceSha, "--deployment-sha", deploymentSha,
       "--rotation-id", rotationId, "--invocation-ref", "runtime-proof-roundtrip", "--phase", "overlap",
+      "--credential-source", "inherited-ecs-exec-verifier-session",
       "--fixture-file", fixtureFile, "--health-url", "https://www.mscqr.com/api/health", "--proof-output", output,
-    ], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_AWS_FIXTURE: JSON.stringify(awsFixture), FAKE_CLUSTER_ARN: STAGE_B.clusterArn, FAKE_RUNTIME_PROOF: JSON.stringify(proof) } });
+    ], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, AWS_ACCESS_KEY_ID: "fixture-access", AWS_SECRET_ACCESS_KEY: "fixture-secret", AWS_SESSION_TOKEN: "fixture-token" } });
     runVerifier(STAGE_B.clusterArn, proofFile);
     assert.equal(JSON.parse(readFileSync(proofFile, "utf8")).targetCluster, STAGE_B.clusterArn);
     const shortNameProofFile = path.join(directory, "runtime-proof-short-name.json");

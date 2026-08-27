@@ -18,6 +18,7 @@ import { extractProductionBackendRecoveryDispatchBundle } from "../aws/extract-p
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
+import { buildRootAttestationKeyPolicy, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
 
 const sourceSha = "b64274e155434ae9390d28762d40a37801be5362";
 const legacy = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
@@ -45,6 +46,7 @@ test("real file boundaries support inventory, CAS convergence, post-convergence 
   let simulations = 0; let writes = 0;
   const aws = (args) => {
     const operation = args.slice(0, 2).join(" "); const valueAfter = (flag) => args[args.indexOf(flag) + 1];
+    const rootKeyArn = "arn:aws:kms:eu-west-2:368992683803:key/11111111-2222-3333-4444-555555555555";
     if (operation === "sts get-caller-identity") return { Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-bootstrap-mfa/operator" };
     if (operation === "ecr describe-images") return { imageDetails: [{ registryId: "368992683803", repositoryName: valueAfter("--repository-name"), imageDigest: valueAfter("--image-ids").slice("imageDigest=".length) }] };
     if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
@@ -55,6 +57,9 @@ test("real file boundaries support inventory, CAS convergence, post-convergence 
     if (operation === "logs describe-log-groups") { const logGroupName = valueAfter("--log-group-name-prefix"); return { logGroups: [{ logGroupName, logGroupArn: `arn:aws:logs:eu-west-2:368992683803:log-group:${logGroupName}`, creationTime: 1, storedBytes: 0 }] }; }
     if (operation === "kms sign") return { Signature: "AQ==" };
     if (operation === "kms verify") return { SignatureValid: true };
+    if (operation === "kms describe-key") return { KeyMetadata: { Arn: rootKeyArn, KeyId: rootKeyArn.split("/").at(-1), Description: ROOT_ATTESTATION_KEY_DESCRIPTION, KeyUsage: "SIGN_VERIFY", KeySpec: "RSA_3072", KeyState: "Enabled", Enabled: true, KeyManager: "CUSTOMER", Origin: "AWS_KMS", MultiRegion: false } };
+    if (operation === "kms get-key-policy") return { Policy: JSON.stringify(buildRootAttestationKeyPolicy()) };
+    if (operation === "kms list-resource-tags") return { Tags: Object.entries(ROOT_ATTESTATION_TAGS).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) };
     if (operation === "iam get-role") return { Role: { Arn: prepared.candidate.executionRoleArn, AssumeRolePolicyDocument: RUNTIME_CONSUMABILITY.ecsTaskTrust } };
     if (operation === "iam list-role-policies") return { PolicyNames: ["mscqr-ecs-secrets-read"] };
     if (operation === "iam get-role-policy") return { RoleName: "mscqr-ecs-execution-role", PolicyName: "mscqr-ecs-secrets-read", PolicyDocument: structuredClone(runtimePolicy) };
@@ -86,7 +91,7 @@ test("real file boundaries support inventory, CAS convergence, post-convergence 
   const historicalFiles = [["recoveryEvidence", historicalRecoveryBytes], ["environmentApproval", historicalEnvironmentBytes], ["runtimeConsumability", fs.readFileSync(evidenceFile)]];
   const historicalManifest = { schemaVersion: 1, records: [Object.fromEntries(historicalFiles.map(([name, value]) => { const file = path.join(directory, `historical-${name}.json`); fs.writeFileSync(file, value, { mode: 0o600, flag: "wx" }); return [name, { file, sha256: crypto.createHash("sha256").update(value).digest("hex") }]; }))] };
   const historicalManifestFile = path.join(directory, "historical-manifest.json"); const historicalManifestBytes = Buffer.from(`${JSON.stringify(historicalManifest, null, 2)}\n`); fs.writeFileSync(historicalManifestFile, historicalManifestBytes, { mode: 0o600, flag: "wx" });
-  prepareProductionBackendFailedRecoveryEvidence({ sourceSha, manifestFile: historicalManifestFile, manifestSha256: crypto.createHash("sha256").update(historicalManifestBytes).digest("hex"), outputFile: failedEvidenceFile, now: Date.parse("2026-08-24T18:02:00.000Z"), protectedMain: () => {}, run: (_command, args) => JSON.stringify(args[1] === "verify" ? { SignatureValid: true } : { Signature: "AQ==" }) });
+  prepareProductionBackendFailedRecoveryEvidence({ sourceSha, manifestFile: historicalManifestFile, manifestSha256: crypto.createHash("sha256").update(historicalManifestBytes).digest("hex"), outputFile: failedEvidenceFile, now: Date.parse("2026-08-24T18:02:00.000Z"), protectedMain: () => {}, run: (_command, args) => JSON.stringify(aws(args)) });
   const failedRecoveryEvidence = JSON.parse(fs.readFileSync(failedEvidenceFile));
   const failedEvidenceBytes = fs.readFileSync(failedEvidenceFile);
   const asset = { id: 202, name: `backend-failed-recovery-evidence-${failedRecoveryEvidence.envelopeSha256}.json`, state: "uploaded", size: failedEvidenceBytes.length, digest: `sha256:${hashFile(failedEvidenceFile)}` };

@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { PRODUCTION_RELEASE_OIDC_ROLLOUT_PATH, assertProductionReleaseOidcRolloutEnabled, assertProductionReleaseOidcRolloutManifest, convergeAndEnableProductionReleaseOidc } from "./production-release-oidc-contract.mjs";
 
@@ -51,7 +51,7 @@ if (mode === "assert-release-gate-enabled") {
   const sourceSha = requireValue("--source-sha");
   requireProtectedMain(sourceSha);
   assertProductionReleaseOidcRolloutManifest();
-  const result = convergeAndEnableProductionReleaseOidc({ run: createProductionCommandRunner({ profile: requireValue("--admin-profile") }), sourceSha, writeRolloutManifest });
+  const result = convergeAndEnableProductionReleaseOidc({ run: createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: requireValue("--admin-profile") }), sourceSha, writeRolloutManifest });
   process.stdout.write(`${JSON.stringify({ status: result.status, authority: "AWS_IAM_GET_ROLE_AND_STS", initialState: result.initialState, iamWrites: result.iamWrites, nextSourcePhase: "OIDC_ATTEMPT_ENABLED" })}\n`);
 } else {
   throw new Error("--mode must be converge or assert-release-gate-enabled.");

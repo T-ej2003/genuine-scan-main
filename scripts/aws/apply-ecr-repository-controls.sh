@@ -11,6 +11,8 @@ Apply production ECR hardening controls for the MSCQR ECS images:
 - lifecycle policy for stale images
 
 Environment:
+  MSCQR_AWS_CREDENTIAL_SOURCE Required: github-oidc-release-deployer, github-access-keys, or named-profile.
+  MSCQR_AWS_NAMED_PROFILE Required only for named-profile execution.
   AWS_REGION          Required AWS region for ECR.
   BACKEND_ECR_REPO    Optional. Default: mscqr-backend
   FRONTEND_ECR_REPO   Optional. Default: mscqr-web
@@ -19,7 +21,7 @@ Environment:
   UNTAGGED_DAYS       Optional. Default: 7
 
 Examples:
-  AWS_REGION=eu-west-2 ./scripts/aws/apply-ecr-repository-controls.sh all
+  MSCQR_AWS_CREDENTIAL_SOURCE=named-profile MSCQR_AWS_NAMED_PROFILE=mscqr-production-release-deployer AWS_REGION=eu-west-2 ./scripts/aws/apply-ecr-repository-controls.sh all
 EOF
 }
 
@@ -41,6 +43,11 @@ case "$SERVICE_SCOPE" in
     exit 1
     ;;
 esac
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=production-credential-source.sh
+source "$SCRIPT_DIR/production-credential-source.sh"
+configure_production_aws_credential_source
 
 if ! command -v aws >/dev/null 2>&1; then
   echo "aws CLI is required." >&2
