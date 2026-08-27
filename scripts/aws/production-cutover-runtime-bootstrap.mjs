@@ -395,7 +395,7 @@ export function prepareProductionCutoverRuntime({
       return { readyToConsumeMfa: false, blockers: failedManifest.blockers, runtimeDirectory: directory, manifestPath, phasePaths: paths, protectedMainSha: protectedSha };
     }
   }
-  const command = `node scripts/aws/run-production-cutover.mjs --mode production --config ${shellQuote(configPath)} --config-sha256 ${runtimeConfigSha256} --source-sha ${staticBindings.sourceSha} --rotation-id ${staticBindings.rotationId}`;
+  const command = `npm run stage-b:run-cutover-operator -- --config ${shellQuote(configPath)} --config-sha256 ${runtimeConfigSha256} --source-sha ${staticBindings.sourceSha} --rotation-id ${staticBindings.rotationId}`;
   return { readyToConsumeMfa: true, runtimeDirectory: directory, configPath, runtimeConfigSha256, manifestPath, staticBindingSha256: manifest.staticBindingSha256, protectedMainSha: protectedSha, nextCommand: command, config: staticBindings, phasePaths: paths };
 }
 

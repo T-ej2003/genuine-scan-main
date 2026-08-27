@@ -61,8 +61,10 @@ It validates the complete adapter graph before live ECS discovery, then atomical
 identifier-only rotation config, redacted manifest, canonical onboarding paths, and rotation Terraform
 input in a 0700 runtime directory; all four are 0600 outputs.
 It never creates rotation state or the rotation fixture. Those remain outputs of the coordinator's
-`--prepare` phase. The command emits one exact `run-production-cutover.mjs` command only after all
-pre-MFA inputs are valid. The pre-MFA bootstrap does not collect onboarding MFA. The onboarding
+`--prepare` phase. The command emits one exact `stage-b:run-cutover-operator` command only after all
+pre-MFA inputs are valid. The launcher obtains the required verifier and strict-onboarding inputs
+from the controlling terminal with echo disabled, then invokes the governed entrypoint without
+putting them in command arguments, files, or evidence. The pre-MFA bootstrap does not collect onboarding MFA. The onboarding
 adapter reads `MSCQR_ONBOARDING_MFA_CODE` only after the live login response enters the MFA challenge
 boundary; the code is never written to rotation config, manifests, command lines, or evidence.
 The rotation config's logical `qr.previousKeyVersion` must equal the live task's
