@@ -6,12 +6,22 @@ import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from 
 import { createProductionAwsCommandRunner } from "../aws/production-credential-source-contract.mjs";
 import { createProductionBackendFailedRecoveryEvidenceAwsRunner } from "../aws/prepare-production-backend-failed-recovery-evidence.mjs";
 import { createReleaseGateImageAuthorizationRunner } from "../aws/verify-production-release-image-authorization.mjs";
+import { createProductionCutoverRuntimeComposition } from "../aws/production-cutover-runtime-composition.mjs";
 
 const oidc = Object.freeze({
   AWS_ACCESS_KEY_ID: "fixture-access",
   AWS_SECRET_ACCESS_KEY: "s",
   AWS_SESSION_TOKEN: "t",
   AWS_REGION: "eu-west-2",
+  AWS_PROFILE: "hostile-profile",
+  AWS_DEFAULT_PROFILE: "hostile-default",
+  AWS_CONFIG_FILE: "/hostile/config",
+  AWS_SHARED_CREDENTIALS_FILE: "/hostile/credentials",
+  PATH: process.env.PATH,
+});
+const accessKeys = Object.freeze({
+  AWS_ACCESS_KEY_ID: "fixture-access-key",
+  AWS_SECRET_ACCESS_KEY: "s",
   AWS_PROFILE: "hostile-profile",
   AWS_DEFAULT_PROFILE: "hostile-default",
   AWS_CONFIG_FILE: "/hostile/config",
@@ -65,11 +75,42 @@ test("local governed composition removes ambient credentials and pins the exact 
   assert.equal(calls[0].options.env.AWS_SHARED_CREDENTIALS_FILE, oidc.AWS_SHARED_CREDENTIALS_FILE);
 });
 
+test("runtime preparation's real composition root pins the release profile before KMS verification", () => {
+  const calls = [];
+  const composition = createProductionCutoverRuntimeComposition({
+    env: oidc,
+    exec: (file, args, options) => { calls.push({ file, args, options }); return JSON.stringify({ SignatureValid: true }); },
+  });
+  composition.releaseRun(["kms", "verify", "--key-id", "fixture"]);
+  assert.equal(calls[0].file, "aws");
+  assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-production-release-deployer");
+  for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(calls[0].options.env[name], undefined);
+});
+
 test("credential source is explicit and OIDC fails before AWS execution when its session is absent", () => {
   let calls = 0;
   assert.throws(() => createProductionCommandRunner({ profile: "mscqr-production-release-deployer", exec: () => { calls += 1; } }), /credential source must be explicit/);
   assert.throws(() => createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, env: { PATH: process.env.PATH }, exec: () => { calls += 1; } }), /AWS_ACCESS_KEY_ID/);
   assert.equal(calls, 0);
+});
+
+test("GitHub access-key composition preserves an optional session token without selecting a profile", () => {
+  const calls = [];
+  const run = createProductionAwsCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_ACCESS_KEYS,
+    env: accessKeys,
+    exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; },
+  });
+  run(["sts", "get-caller-identity"]);
+  assert.equal(calls[0].options.env.AWS_ACCESS_KEY_ID, accessKeys.AWS_ACCESS_KEY_ID);
+  assert.equal(calls[0].options.env.AWS_SECRET_ACCESS_KEY, accessKeys.AWS_SECRET_ACCESS_KEY);
+  assert.equal(calls[0].options.env.AWS_SESSION_TOKEN, undefined);
+  assert.equal(calls[0].options.env.AWS_PROFILE, undefined);
+  assert.equal(calls[0].options.env.AWS_DEFAULT_PROFILE, undefined);
+  const withToken = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_ACCESS_KEYS, env: { ...accessKeys, AWS_SESSION_TOKEN: "t" }, exec: (_file, _args, options) => options.env });
+  assert.equal(withToken(["sts", "get-caller-identity"]).AWS_SESSION_TOKEN, "t");
+  assert.throws(() => createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_ACCESS_KEYS, env: { PATH: process.env.PATH }, exec: () => { throw new Error("must not execute"); } }), /AWS_ACCESS_KEY_ID/);
+  assert.throws(() => createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_ACCESS_KEYS, env: { ...accessKeys, AWS_SECRET_ACCESS_KEY: "" }, exec: () => { throw new Error("must not execute"); } }), /AWS_SECRET_ACCESS_KEY/);
 });
 
 test("root and preflight AWS-only composition pin a named profile instead of inheriting a session", () => {
@@ -124,23 +165,47 @@ test("release-gate workflow explicitly selects OIDC for every AWS-capable CLI ro
   assert.match(workflow, /aws-actions\/configure-aws-credentials@v6[\s\S]*role-to-assume: \$\{\{ env\.PRODUCTION_RELEASE_ROLE_ARN \}\}/);
 });
 
-test("workflow shell AWS calls initialize the OIDC source before execution", () => {
-  for (const file of [".github/workflows/release-gate.yml", ".github/workflows/publish-ecs-images.yml"]) {
-    const workflow = fs.readFileSync(file, "utf8");
-    for (const section of workflow.split(/^\s*- name:/m).filter((value) => /\baws\s+(?:sts|ecs)\b/.test(value))) {
-      assert.match(section, /source scripts\/aws\/production-credential-source\.sh/);
-      assert.match(section, /MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer/);
-      assert.match(section, /configure_production_aws_credential_source/);
-    }
+test("workflow shell AWS calls select their authenticated credential mode before execution", () => {
+  const releaseGate = fs.readFileSync(".github/workflows/release-gate.yml", "utf8");
+  for (const section of releaseGate.split(/^\s*- name:/m).filter((value) => /\baws\s+(?:sts|ecs)\b/.test(value))) {
+    assert.match(section, /source scripts\/aws\/production-credential-source\.sh/);
+    assert.match(section, /MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer/);
+    assert.match(section, /configure_production_aws_credential_source/);
   }
+  const publisher = fs.readFileSync(".github/workflows/publish-ecs-images.yml", "utf8");
+  assert.match(publisher, /echo "mode=oidc"[\s\S]{0,120}credential_source=github-oidc-release-deployer/);
+  assert.match(publisher, /echo "mode=keys"[\s\S]{0,120}credential_source=github-access-keys/);
+  assert.equal([...publisher.matchAll(/MSCQR_AWS_CREDENTIAL_SOURCE: \$\{\{ steps\.auth-mode\.outputs\.credential_source \}\}/g)].length, 3);
+  assert.doesNotMatch(publisher, /MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer/);
 });
 
-test("production image publisher workflows remain OIDC roots and do not select the local release profile", () => {
-  for (const file of [".github/workflows/production-green-stage-b-image-build.yml", ".github/workflows/production-green-backend-image-publish.yml", ".github/workflows/publish-ecs-images.yml"]) {
+test("production image publisher workflows select explicit OIDC or the documented keys fallback and never a local profile", () => {
+  for (const file of [".github/workflows/production-green-stage-b-image-build.yml", ".github/workflows/production-green-backend-image-publish.yml"]) {
     const workflow = fs.readFileSync(file, "utf8");
     assert.match(workflow, /aws-actions\/configure-aws-credentials@v6/);
     assert.doesNotMatch(workflow, /mscqr-production-release-deployer/);
   }
+  const publisher = fs.readFileSync(".github/workflows/publish-ecs-images.yml", "utf8");
+  assert.match(publisher, /if: steps\.auth-mode\.outputs\.mode == 'oidc'/);
+  assert.match(publisher, /if: steps\.auth-mode\.outputs\.mode == 'keys'/);
+  assert.doesNotMatch(publisher, /mscqr-production-release-deployer/);
+});
+
+test("every GitHub workflow credential root is classified by its authenticated mode", () => {
+  const oidcWorkflows = [
+    ".github/workflows/auto-failover-monitor.yml", ".github/workflows/aws-dr-alb-apply.yml", ".github/workflows/aws-dr-cleanup-apply.yml", ".github/workflows/aws-dr-db-apply.yml", ".github/workflows/aws-dr-dns-apply.yml", ".github/workflows/aws-dr-hardening-apply.yml", ".github/workflows/aws-dr-object-storage-apply.yml", ".github/workflows/aws-dr-operations.yml", ".github/workflows/aws-dr-regional-readiness.yml", ".github/workflows/aws-dr-snapshot-apply.yml", ".github/workflows/production-green-backend-image-publish.yml", ".github/workflows/production-green-stage-b-image-build.yml", ".github/workflows/release-gate.yml", ".github/workflows/staging-terraform-remote-state-drift.yml",
+  ];
+  const configured = fs.readdirSync(".github/workflows").filter((name) => name.endsWith(".yml") && fs.readFileSync(`.github/workflows/${name}`, "utf8").includes("aws-actions/configure-aws-credentials@v6")).sort();
+  assert.deepEqual(configured, [...oidcWorkflows, ".github/workflows/publish-ecs-images.yml"].map((file) => file.split("/").at(-1)).sort());
+  for (const file of oidcWorkflows) {
+    const workflow = fs.readFileSync(file, "utf8");
+    assert.match(workflow, /aws-actions\/configure-aws-credentials@v6[\s\S]{0,360}role-to-assume:/, file);
+    assert.doesNotMatch(workflow, /aws-access-key-id:/, file);
+  }
+  const publisher = fs.readFileSync(".github/workflows/publish-ecs-images.yml", "utf8");
+  assert.match(publisher, /mode=oidc[\s\S]{0,160}credential_source=github-oidc-release-deployer/);
+  assert.match(publisher, /mode=keys[\s\S]{0,160}credential_source=github-access-keys/);
+  assert.match(publisher, /aws-session-token: \$\{\{ secrets\.AWS_SESSION_TOKEN \}\}/);
 });
 
 test("operator documentation declares the exact non-profile verifier and checker session sources", () => {
@@ -176,17 +241,27 @@ test("direct Bash production AWS roots select an explicit credential source befo
   }
   const contract = fs.readFileSync("scripts/aws/production-credential-source.sh", "utf8");
   assert.match(contract, /github-oidc-release-deployer/);
+  assert.match(contract, /github-access-keys/);
   assert.match(contract, /named-profile/);
   assert.match(contract, /unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN/);
   assert.match(contract, /unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE AWS_SDK_LOAD_CONFIG AWS_SECURITY_TOKEN/);
 });
 
-test("the shell credential boundary preserves OIDC only or pins a local profile without an AWS call", () => {
+test("the shell credential boundary preserves OIDC or access keys, or pins a local profile without an AWS call", () => {
   const shell = "source scripts/aws/production-credential-source.sh; configure_production_aws_credential_source; printf '%s|%s|%s|%s' \"${AWS_PROFILE:-}\" \"${AWS_ACCESS_KEY_ID:-}\" \"${AWS_SESSION_TOKEN:-}\" \"${AWS_EC2_METADATA_DISABLED:-}\"";
   const oidcResult = execFileSync("bash", ["-c", shell], { encoding: "utf8", env: { ...oidc, MSCQR_AWS_CREDENTIAL_SOURCE: "github-oidc-release-deployer" } });
   assert.equal(oidcResult, `|${oidc.AWS_ACCESS_KEY_ID}|${oidc.AWS_SESSION_TOKEN}|true`);
+  const keysResult = execFileSync("bash", ["-c", shell], { encoding: "utf8", env: { ...accessKeys, MSCQR_AWS_CREDENTIAL_SOURCE: "github-access-keys" } });
+  assert.equal(keysResult, `|${accessKeys.AWS_ACCESS_KEY_ID}||true`);
   const localResult = execFileSync("bash", ["-c", shell], { encoding: "utf8", env: { ...oidc, MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile", MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer" } });
   assert.equal(localResult, "mscqr-production-release-deployer|||true");
+  const strictShell = `set -e; ${shell}`;
+  const failsClosed = (env, message) => assert.throws(
+    () => execFileSync("bash", ["-c", strictShell], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] }),
+    (error) => message.test(String(error.stderr)),
+  );
+  failsClosed({ ...accessKeys, MSCQR_AWS_CREDENTIAL_SOURCE: "unknown" }, /must explicitly select/);
+  failsClosed({ ...accessKeys, MSCQR_AWS_CREDENTIAL_SOURCE: "github-oidc-release-deployer" }, /AWS_SESSION_TOKEN is required/);
 });
 
 test("every direct AWS source in scripts/aws has an explicit audited credential boundary", () => {

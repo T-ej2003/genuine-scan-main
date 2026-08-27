@@ -11,7 +11,7 @@ Apply production ECR hardening controls for the MSCQR ECS images:
 - lifecycle policy for stale images
 
 Environment:
-  MSCQR_AWS_CREDENTIAL_SOURCE Required: github-oidc-release-deployer or named-profile.
+  MSCQR_AWS_CREDENTIAL_SOURCE Required: github-oidc-release-deployer, github-access-keys, or named-profile.
   MSCQR_AWS_NAMED_PROFILE Required only for named-profile execution.
   AWS_REGION          Required AWS region for ECR.
   BACKEND_ECR_REPO    Optional. Default: mscqr-backend

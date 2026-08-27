@@ -53,7 +53,7 @@ const deriveProvenance = () => ({ toolingTreeSha256: bindings.toolingTreeSha256,
 const deriveImageReuse = ({ imageReleaseSha: release, toolingSha }) => ({
   schemaVersion: 2, imageReleaseSha: release, toolingSha, toolingInputTreeSha256: bindings.toolingTreeSha256,
   comparisonBaseSha: release, comparisonHeadIdentity: "tooling-input-tree-sha256", comparisonHeadSha256: bindings.toolingTreeSha256,
-  classificationRulesVersion: "stage-b-image-reuse-v3", imageReuseCompatible: true, imageBuildInputsChanged: false,
+  classificationRulesVersion: "stage-b-image-reuse-v4", imageReuseCompatible: true, imageBuildInputsChanged: false,
   classifiedChangedFiles: [], imageAffectingFiles: [], reportMatchesRecomputedDiff: true,
 });
 

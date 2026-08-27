@@ -4,7 +4,8 @@ import { createReleasePreflightCheckerTrustSignatureVerifier } from "./productio
 
 export const PRODUCTION_RELEASE_PROFILE = "mscqr-production-release-deployer";
 
-export function createProductionCutoverRuntimeComposition({ releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: PRODUCTION_RELEASE_PROFILE }) } = {}) {
+export function createProductionCutoverRuntimeComposition({ releaseRun, env, exec } = {}) {
+  releaseRun ||= createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: PRODUCTION_RELEASE_PROFILE, ...(env ? { env } : {}), ...(exec ? { exec } : {}) });
   if (typeof releaseRun !== "function") throw new Error("Production cutover runtime requires the canonical release command runner.");
   const verifyReleasePreflightAttestationSignature = createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun });
   return Object.freeze({

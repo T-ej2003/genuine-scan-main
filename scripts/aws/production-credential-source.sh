@@ -10,13 +10,18 @@ configure_production_aws_credential_source() {
       : "${AWS_SESSION_TOKEN:?GitHub OIDC AWS_SESSION_TOKEN is required}"
       unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE AWS_SDK_LOAD_CONFIG AWS_SECURITY_TOKEN
       ;;
+    github-access-keys)
+      : "${AWS_ACCESS_KEY_ID:?GitHub access-key AWS_ACCESS_KEY_ID is required}"
+      : "${AWS_SECRET_ACCESS_KEY:?GitHub access-key AWS_SECRET_ACCESS_KEY is required}"
+      unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE AWS_SDK_LOAD_CONFIG AWS_SECURITY_TOKEN
+      ;;
     named-profile)
       : "${MSCQR_AWS_NAMED_PROFILE:?MSCQR_AWS_NAMED_PROFILE is required for named-profile execution}"
       unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN AWS_DEFAULT_PROFILE AWS_SDK_LOAD_CONFIG
       export AWS_PROFILE="$MSCQR_AWS_NAMED_PROFILE"
       ;;
     *)
-      echo "MSCQR_AWS_CREDENTIAL_SOURCE must explicitly select github-oidc-release-deployer or named-profile." >&2
+      echo "MSCQR_AWS_CREDENTIAL_SOURCE must explicitly select github-oidc-release-deployer, github-access-keys, or named-profile." >&2
       return 1
       ;;
   esac

@@ -9,7 +9,7 @@ import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvid
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const STAGE_B_IMAGE_REUSE_SCHEMA_VERSION = 2;
-export const STAGE_B_IMAGE_REUSE_RULES_VERSION = "stage-b-image-reuse-v3";
+export const STAGE_B_IMAGE_REUSE_RULES_VERSION = "stage-b-image-reuse-v4";
 export const COMPATIBILITY_REPORT_REPO_PATH = "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json";
 export const STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION = 1;
 export const IMAGE_IMPACT_REPORT_REPO_PATH = "documents/ops/iam/MSCQRProductionGreenStageBImageImpact-v1.json";
@@ -117,7 +117,7 @@ function parseEnvBlock(block, label) {
 }
 
 function normalizeWorkflowText(value) {
-  return value.replaceAll("release-source/", "").replaceAll("\n      TRUSTED_TOOLING_SHA: ${{ github.sha }}", "").replaceAll("\n          path: release-source", "").replaceAll("\n        working-directory: release-source", "").replaceAll("$GITHUB_WORKSPACE/scripts/aws/", "./scripts/aws/").replaceAll('node "./scripts/aws/', "node scripts/aws/").replaceAll('stage-b-release-gate.mjs" ', "stage-b-release-gate.mjs ");
+  return value.replaceAll("release-source/", "").replaceAll("\n      TRUSTED_TOOLING_SHA: ${{ github.sha }}", "").replaceAll("\n          path: release-source", "").replaceAll("\n        working-directory: release-source", "").replaceAll("$GITHUB_WORKSPACE/scripts/aws/", "./scripts/aws/").replaceAll('node "./scripts/aws/', "node scripts/aws/").replaceAll('stage-b-release-gate.mjs" ', "stage-b-release-gate.mjs ").replace("run: MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer ./scripts/aws/publish-ecs-images.sh production-green-stage-b", "run: ./scripts/aws/publish-ecs-images.sh production-green-stage-b");
 }
 
 function effectivePublicationEnv(source, publishStep) {
@@ -195,10 +195,10 @@ export function assertStageBTrustedWorkflowSeparation({ imageReleaseSha, tooling
 
   const releasePublishStep = workflowStep(releaseWorkflow, "Publish immutable backend, worker, executor, and canary images", "Bind image digest outputs");
   const toolingPublishStep = workflowStep(toolingWorkflow, "Publish immutable backend, worker, executor, and canary images", "Bind image digest outputs");
-  assert.equal(withoutReleaseWorkingDirectory(toolingPublishStep), releasePublishStep, "Trusted workflow changes altered the release image publication inputs.");
+  assert.equal(normalizeWorkflowText(withoutReleaseWorkingDirectory(toolingPublishStep)), normalizeWorkflowText(releasePublishStep), "Trusted workflow changes altered the release image publication inputs.");
   assert.match(toolingWorkflow, /IMAGE_TAG: \$\{\{ inputs\.release_sha \}\}/, "Trusted workflow must bind the image tag to release_sha.");
   assert.match(toolingWorkflow, /ref: \$\{\{ inputs\.release_sha \}\}\s+path: release-source\s+fetch-depth: 0/, "Trusted workflow must isolate the release checkout.");
-  assert.match(toolingWorkflow, /working-directory: release-source\s+run: \.\/scripts\/aws\/publish-ecs-images\.sh production-green-stage-b/, "Trusted workflow must build from the release checkout.");
+  assert.match(toolingWorkflow, /working-directory: release-source\s+run: (?:MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer )?\.\/scripts\/aws\/publish-ecs-images\.sh production-green-stage-b/, "Trusted workflow must build from the release checkout.");
   assert.match(toolingWorkflow, /run: npm ci && npm --prefix backend ci\s+working-directory: release-source/, "Trusted workflow must install release-source dependencies.");
   assert.match(toolingWorkflow, /\$GITHUB_WORKSPACE\/scripts\/aws\/cosign-idempotent-sign-and-attest\.sh/, "Trusted signing tooling must come from the protected tooling checkout.");
   assert.match(toolingWorkflow, /\$GITHUB_WORKSPACE\/scripts\/aws\/verify-release-artifacts\.sh/, "Trusted verification tooling must come from the protected tooling checkout.");

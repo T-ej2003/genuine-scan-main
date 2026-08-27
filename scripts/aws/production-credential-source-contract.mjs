@@ -5,6 +5,7 @@ const REGION = "eu-west-2";
 export const PRODUCTION_AWS_CREDENTIAL_SOURCE = Object.freeze({
   NAMED_PROFILE: "named-profile",
   GITHUB_OIDC_RELEASE_DEPLOYER: "github-oidc-release-deployer",
+  GITHUB_ACCESS_KEYS: "github-access-keys",
   INHERITED_CHECKER_SESSION: "inherited-checker-session",
   INHERITED_ECS_EXEC_VERIFIER_SESSION: "inherited-ecs-exec-verifier-session",
   INJECTED_TEST: "injected-test",
@@ -27,6 +28,11 @@ export function createProductionAwsCredentialEnvironment({ credentialSource, pro
     if (typeof profile !== "string" || !profile) throw new Error("Named-profile production AWS execution requires an explicit profile.");
     return Object.freeze({ ...copy(env, [...SAFE_PROCESS_KEYS, "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE"]), AWS_PROFILE: profile, AWS_REGION: region, AWS_DEFAULT_REGION: region, AWS_EC2_METADATA_DISABLED: "true" });
   }
+  if (credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_ACCESS_KEYS) {
+    if (profile !== undefined) throw new Error("Access-key production AWS execution cannot select a local profile.");
+    const session = Object.fromEntries(SESSION_KEYS.slice(0, 2).map((key) => [key, required(env, key)]));
+    return Object.freeze({ ...copy(env, SAFE_PROCESS_KEYS), ...session, ...copy(env, ["AWS_SESSION_TOKEN"]), AWS_REGION: region, AWS_DEFAULT_REGION: region, AWS_EC2_METADATA_DISABLED: "true" });
+  }
   if ([PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION, PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION].includes(credentialSource)) {
     if (profile !== undefined) throw new Error("Session-backed production AWS execution cannot select a local profile.");
     const session = Object.fromEntries(SESSION_KEYS.slice(0, 3).map((key) => [key, required(env, key)]));
@@ -39,6 +45,11 @@ export function createProductionAwsCredentialEnvironment({ credentialSource, pro
 
 export function assertGithubOidcReleaseDeployerEnvironment(env = process.env) {
   createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, env });
+  return true;
+}
+
+export function assertGithubAccessKeysEnvironment(env = process.env) {
+  createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_ACCESS_KEYS, env });
   return true;
 }
 
@@ -66,5 +77,8 @@ export const productionAwsCredentialSourceContract = Object.freeze({
   namedProfileStrips: SESSION_KEYS,
   oidcRequires: SESSION_KEYS.slice(0, 3),
   oidcStrips: PROFILE_KEYS,
+  accessKeysRequires: SESSION_KEYS.slice(0, 2),
+  accessKeysOptional: ["AWS_SESSION_TOKEN"],
+  accessKeysStrips: PROFILE_KEYS,
   checkerSessionRequires: SESSION_KEYS.slice(0, 3),
 });

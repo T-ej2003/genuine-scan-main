@@ -10,7 +10,7 @@ docker buildx. The default output is an ECS/Fargate-ready linux/amd64 manifest
 tagged with the immutable current git SHA.
 
 Environment:
-  MSCQR_AWS_CREDENTIAL_SOURCE Required: github-oidc-release-deployer or named-profile.
+  MSCQR_AWS_CREDENTIAL_SOURCE Required: github-oidc-release-deployer, github-access-keys, or named-profile.
   MSCQR_AWS_NAMED_PROFILE Required only for named-profile execution.
   AWS_REGION         Required AWS region for ECR.
   AWS_ACCOUNT_ID     Optional. Auto-detected via STS when omitted.
