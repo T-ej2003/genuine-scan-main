@@ -52,7 +52,7 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
 
 test("Stage B release readiness requires the completed Stage A contract", () => {
   const source = fs.readFileSync("scripts/aws/run-production-green-stage-b-preflight.mjs", "utf8");
-  assert.match(source, /generateStageAPrerequisites\(\{[^;]+phase: "POST_APPLY" \}\);/);
+  assert.match(source, /generateStageAPrerequisites\(\{[^;]+phase: "POST_APPLY", run: \(args\) => releaseAwsRun\(args\) \}\);/);
   assert.doesNotMatch(source, /recoveryMode === "NORMAL" \? "PRE_APPLY"/);
 });
 

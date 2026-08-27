@@ -109,6 +109,9 @@ The command refuses every non-root caller and writes the private 0600 attestatio
 Those artifacts bind the report bytes, protected source SHA, administrator-report SHA, and exact
 Role-A MFA trust. Runtime preparation verifies the detached signature before emitting runtime
 config; unsigned, copied, or self-hashed release reports are rejected.
+Release-owned KMS verification in runtime preparation and cutover is always routed through the
+explicit `mscqr-production-release-deployer` command runner. It never relies on `AWS_PROFILE`, a
+default profile, or ambient parent-process credentials.
 The coordinator's rotation fixture is similarly hashed from its persisted private bytes after prepare;
 ECS Exec and onboarding consume that exact hash-bound fixture and reject replacement before any probe.
 The source-bound authorization is produced only by `scripts/aws/production-image-authorization.mjs`.

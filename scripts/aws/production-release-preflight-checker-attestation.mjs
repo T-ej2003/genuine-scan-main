@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertReleasePreflightCheckerTrustEvidence } from "./production-checker-chain-contract.mjs";
-import { APPROVED_PREFLIGHT_GENERATOR_ARNS, assertPermissionReportHashDomains, canonicalizeJson, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, signPermissionReport, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
+import { APPROVED_PREFLIGHT_GENERATOR_ARNS, assertPermissionReportHashDomains, canonicalizeJson, createPermissionReportKmsVerifier, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, signPermissionReport, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -63,7 +63,13 @@ export function assertReleasePreflightCheckerTrustAttestation(attestation, { rep
   return Object.freeze({ ...expected, checkerTrust: Object.freeze({ ...checkerTrust }) });
 }
 
+export function createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun } = {}) {
+  if (typeof releaseRun !== "function") throw new Error("Release-preflight checker-trust verification requires the canonical release command runner.");
+  return createPermissionReportKmsVerifier({ run: releaseRun });
+}
+
 export function authenticateReleasePreflightCheckerTrustEvidence({ report, reportBytes, attestation, attestationBytes, signatureArtifact, signatureBytes, sourceSha, administratorReportSha256, expectedAttestationFileSha256, expectedSignatureFileSha256, now, verifySignature } = {}) {
+  if (typeof verifySignature !== "function") throw new Error("Release-preflight checker-trust verification requires an explicit trusted verifier.");
   const checked = assertReleasePreflightCheckerTrustEvidence(report, { sourceSha, administratorReportSha256 });
   const verifiedAttestation = assertReleasePreflightCheckerTrustAttestation(attestation, { reportBytes, sourceSha, administratorReportSha256 });
   verifyPermissionReportSignature({
@@ -74,7 +80,7 @@ export function authenticateReleasePreflightCheckerTrustEvidence({ report, repor
     expectedReportFileSha256: expectedAttestationFileSha256,
     expectedSignatureFileSha256,
     ...(now ? { now } : {}),
-    ...(verifySignature ? { verify: verifySignature } : {}),
+    verify: verifySignature,
   });
   return Object.freeze({ sourceSha, administratorReportSha256, reportSha256: sha256(reportBytes), attestation: verifiedAttestation, checkerTrust: Object.freeze({ ...checked.checkerTrust }) });
 }

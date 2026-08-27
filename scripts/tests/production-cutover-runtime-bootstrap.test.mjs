@@ -427,6 +427,22 @@ test("runtime preparation validates canonical IAM evidence before live AWS disco
   }
 });
 
+test("runtime preparation requires the release-profile checker verifier before live AWS discovery", () => {
+  const directory = fsTemp();
+  let awsReads = 0;
+  try {
+    const input = fullInput(directory, process.cwd());
+    delete input.verifyReleasePreflightAttestationSignature;
+    input.loadCurrentTaskDefinition = () => { awsReads += 1; return input.currentTaskDefinition; };
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, false);
+    assert.match(result.blockers.join("\n"), /canonical release-profile verifier/);
+    assert.equal(awsReads, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("runtime preparation rejects fixture-bound nested KMS absence evidence before a standalone proof", () => {
   const directory = fsTemp();
   try {

@@ -11,6 +11,7 @@ import { deriveStageBImageImpactReport, deriveStageBToolingInputTreeSha256 } fro
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { calculateCleanRoomSourceContract } from "../rls/lib/clean-room-source-contract.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
+import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
 import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
 
@@ -132,7 +133,8 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   const imageAuthorization = JSON.parse(fs.readFileSync(imageAuthorizationFile.path, "utf8"));
   const protectedCheckout = readProtectedCheckout();
   const env = buildRecoveryAwsEnvironment(profile, baseEnv);
-  const imageAuthorizationValidation = { verifyImageEvidence: (input) => verifyImageEvidence({ ...input, env }) };
+  const releaseRun = createProductionCommandRunner({ profile, exec: (command, args) => exec(command, args, env) });
+  const imageAuthorizationValidation = { verifyImageEvidence: (input) => verifyImageEvidence({ ...input, run: releaseRun }) };
   const deriveProvenance = ({ sourceSha: provenanceSha = sourceSha } = {}) => deriveCanonicalRecoveryProvenance({ sourceSha: provenanceSha, repositoryRoot: root });
   const journal = createFileJournal({ filePath: outputs.journal });
   const existingJournal = journal.read();

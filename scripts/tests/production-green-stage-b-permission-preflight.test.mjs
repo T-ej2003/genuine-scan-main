@@ -1484,6 +1484,14 @@ test("production-default permission verification uses the release profile runner
   assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-production-release-deployer");
 });
 
+test("permission verification rejects an omitted trusted verifier instead of using ambient credentials", () => {
+  const report = validReport();
+  const reportBytes = serializePermissionReport(report);
+  const artifact = signPermissionReport(report, { now, reportBytes, sign: () => "AQ==" });
+  const signatureBytes = Buffer.from(`${JSON.stringify(artifact, null, 2)}\n`);
+  assert.throws(() => verifyPermissionReportSignature({ report, signatureArtifact: artifact, reportBytes, signatureBytes, now }), /explicit trusted verifier or command runner/);
+});
+
 test("release-deployer cannot generate a report or sign through the CLI", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-signing-caller-"));
   const planPath = path.join(directory, "plan.json"); const savedPath = path.join(directory, "plan.tfplan"); const manifestPath = path.join(directory, "manifest.json");

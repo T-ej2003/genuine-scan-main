@@ -30,6 +30,7 @@ import { assertFailedRecoveryEvidenceReference } from "./production-backend-fail
 import { collectEcsServiceTasks } from "./production-ecs-task-census.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const RELEASE_PROFILE = "mscqr-production-release-deployer";
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const hex256 = /^[a-f0-9]{64}$/;
@@ -72,10 +73,10 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   const environmentApproval = readAuthenticatedJson(required(argv, "--environment-approval"), required(argv, "--environment-approval-sha256"), "GitHub environment approval evidence");
   const imageFile = required(argv, "--image-authorization");
   const imageSha = required(argv, "--image-authorization-sha256");
-  const profile = option(argv, "--aws-profile");
+  const profile = required(argv, "--aws-profile");
+  if (profile !== RELEASE_PROFILE) throw new Error("Backend health recovery requires the canonical release-deployer AWS profile.");
   const env = cleanEnv(deps.baseEnv, profile);
   const githubContext = { repository: env.GITHUB_REPOSITORY, workflowRef: env.GITHUB_WORKFLOW_REF, eventName: env.GITHUB_EVENT_NAME, workflowRunId: env.GITHUB_RUN_ID, workflowRunAttempt: env.GITHUB_RUN_ATTEMPT, githubActions: env.GITHUB_ACTIONS, now: deps.now };
-  const verifyImageEvidenceSource = deps.verifyImageEvidence || ((input) => verifyImageEvidenceSignature({ ...input, env }));
   let verifiedImageEvidence;
   const verifyImageEvidence = (input) => verifiedImageEvidence ??= verifyImageEvidenceSource(input);
   const image = readAuthenticatedJson(imageFile, imageSha, "Backend recovery image authorization");
@@ -87,7 +88,8 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
   if (protectedMain.headSha !== sourceSha || protectedMain.freshRemoteMainSha !== sourceSha) throw new Error("Backend recovery requires the exact fresh protected-main source.");
   if (!deps.readProtectedMain && execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }).trim()) throw new Error("Backend recovery requires a clean protected-main checkout.");
   const run = deps.exec || ((command, args) => execFileSync(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-  const awsText = (args) => run("aws", [...args, "--region", BACKEND_HEALTH_RECOVERY.region, "--output", "json", "--no-cli-pager"]);
+  const awsText = (args) => run("aws", [...args, "--profile", profile, "--region", BACKEND_HEALTH_RECOVERY.region, "--output", "json", "--no-cli-pager"]);
+  const verifyImageEvidenceSource = deps.verifyImageEvidence || ((input) => verifyImageEvidenceSignature({ ...input, run: awsText }));
   const aws = (args) => JSON.parse(awsText(args));
   const verifyFailedRecoveryEvidence = deps.verifyFailedRecoveryEvidence || (({ digest, signature, keyArn, signingAlgorithm }) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-failed-recovery-verify-"));

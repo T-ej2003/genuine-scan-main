@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 import os from "node:os";
 import path from "node:path";
-import { createProductionCommandRunner, createProductionCutoverAdapters } from "./production-cutover-production-adapters.mjs";
-import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
+import { createProductionCutoverRuntimeComposition } from "./production-cutover-runtime-composition.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime } from "./production-cutover-runtime-bootstrap.mjs";
 
@@ -34,7 +33,8 @@ const decode = (captured) => JSON.parse(new TextDecoder("utf-8", { fatal: true }
 const rotationBindings = rotationBindingCapture ? decode(rotationBindingCapture) : undefined;
 const rotationSupersessionEvidence = rotationSupersessionCapture ? decode(rotationSupersessionCapture) : undefined;
 const onboardingPaths = args.has("onboarding-paths") ? read("onboarding-paths") : undefined;
-const releaseRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
+const composition = createProductionCutoverRuntimeComposition();
+const { releaseRun } = composition;
 const loadCurrentTaskDefinition = () => {
   const currentService = JSON.parse(releaseRun(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2"])).services?.[0];
   if (!currentService?.taskDefinition) throw new Error("Current production task definition is unavailable.");
@@ -75,8 +75,7 @@ const result = prepareProductionCutoverRuntime({
   stageBTfvarsBindingReportPath: required("stage-b-tfvars-binding-report"),
   stageBTfvarsBindingReportSha256: required("stage-b-tfvars-binding-report-sha256"),
   stageBTerraformDataDir: required("stage-b-terraform-data-dir"),
-  imageAuthorizationValidation: { verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }) },
-  constructAdapters: ({ config, sourceSha, rotationId, runtimeConfigSha256 }) => createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256 }),
+  ...composition,
 });
 process.stdout.write(`${JSON.stringify({
   RUNTIME_DIRECTORY: result.runtimeDirectory,

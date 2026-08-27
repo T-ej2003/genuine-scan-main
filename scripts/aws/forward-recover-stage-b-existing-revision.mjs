@@ -10,6 +10,7 @@ import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.m
 import { deriveStageBImageImpactReport } from "./validate-stage-b-image-reuse.mjs";
 import { deriveCanonicalRecoveryProvenance, collectCanonicalBackendRecoveryCensus, preflightCanonicalRecoveryOutputs } from "./recover-stage-b-backend-task-definition.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
+import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
 import { runAmbiguousImportSupersession, runExistingRevisionForwardRecovery, STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION, STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY } from "./stage-b-existing-revision-forward-recovery-contract.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
@@ -193,6 +194,7 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
   const protectedCheckout = readProtectedCheckout();
   const env = buildForwardRecoveryTerraformEnvironment(terraformDataDir, buildForwardRecoveryAwsEnvironment(profile, baseEnv));
   const run = (command, args) => execFile(command, args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const releaseRun = createProductionCommandRunner({ profile, exec: (command, args) => run(command, args) });
   const aws = (args) => JSON.parse(run("aws", [...args, "--region", "eu-west-2", "--profile", profile, "--output", "json"]));
   const terraform = (args) => JSON.parse(run("terraform", [`-chdir=${terraformRoot}`, ...args]));
   const validateBackend = () => assertForwardRecoveryTerraformBackend({ env, repositoryRoot: root, runTerraform: (args) => run("terraform", [`-chdir=${terraformRoot}`, ...args]) });
@@ -217,7 +219,7 @@ export async function runForwardRecoveryCli(argv = process.argv.slice(2), { exec
     sourceSha,
     protectedCheckout,
     imageAuthorization,
-    imageAuthorizationValidation: { verifyImageEvidence: (input) => verifyImageEvidence({ ...input, env }) },
+    imageAuthorizationValidation: { verifyImageEvidence: (input) => verifyImageEvidence({ ...input, run: releaseRun }) },
     deriveProvenance: ({ sourceSha: value }) => deriveCanonicalRecoveryProvenance({ sourceSha: value, repositoryRoot: root }),
     proveDescendant,
     deriveImageReuse: ({ imageReleaseSha, toolingSha }) => { const report = deriveStageBImageImpactReport({ imageReleaseSha, toolingSha }); return { ...report, imageBuildInputsChanged: report.newImagesRequired }; },

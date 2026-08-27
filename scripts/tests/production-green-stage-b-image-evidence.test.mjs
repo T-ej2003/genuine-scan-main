@@ -181,6 +181,12 @@ test("production-default image verification uses the release profile runner", ()
   assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-production-release-deployer");
 });
 
+test("image verification rejects an omitted trusted verifier instead of using ambient credentials", () => {
+  const report = reportFixture();
+  const signatureArtifact = signatureFixture(report);
+  assert.throws(() => verifyImageEvidenceSignature({ report, toolingSha, signatureArtifact, now: observedAt }), /explicit trusted verifier or command runner/);
+});
+
 test("release role is not an approved image-evidence verifier", () => {
   assert.throws(() => reportFixture({ verifierCallerArn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-release-deployer/session` }), /approved administrator/);
 });

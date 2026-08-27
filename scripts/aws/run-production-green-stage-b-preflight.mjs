@@ -68,7 +68,7 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   const freshImagePartialApplyRecovery = argv.includes("--fresh-image-partial-apply-recovery");
   const recoveryMode = resolveStageBRecoveryMode({ recoveryOnly: false, partialApplyRecovery, freshImagePartialApplyRecovery });
   const releaseAwsRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer", exec: (command, args, options) => run(command, args, options) });
-  generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff, phase: "POST_APPLY" });
+  generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff, phase: "POST_APPLY", run: (args) => releaseAwsRun(args) });
   const generated = generateStageBTfvars({
     imageEvidence: value(argv, "--image-evidence"), imageEvidenceSignature: value(argv, "--image-evidence-signature"), stateBackup: stageBState,
     stageAInput: handoff, stageAStateBackup: stageAState, brokerPackagePath: value(argv, "--broker-package"), toolingSha, toolingTreeSha256,

@@ -7,6 +7,8 @@ import test from "node:test";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_KIND, RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN, authenticateReleasePreflightCheckerTrustEvidence, buildReleasePreflightCheckerTrustAttestation, runReleasePreflightCheckerTrustAttestationCli } from "../aws/production-release-preflight-checker-attestation.mjs";
 import { PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
+import { createProductionCommandRunner } from "../aws/production-cutover-production-adapters.mjs";
+import { createProductionCutoverRuntimeComposition } from "../aws/production-cutover-runtime-composition.mjs";
 
 const sourceSha = "a".repeat(40);
 const administratorReportSha256 = "b".repeat(64);
@@ -43,6 +45,44 @@ test("authenticated checker attestation accepts only the exact canonical report 
   assert.equal(authenticated.checkerTrust.mfaRequired, true);
   assert.equal(authenticated.attestation.releasePreflightReportSha256, sha256(evidence.reportBytes));
   assert.equal(authenticated.attestation.signerArn, RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN);
+});
+
+test("runtime-preparation production composition verifies checker attestation through the explicit release profile", () => {
+  const calls = [];
+  const originalProfile = process.env.AWS_PROFILE;
+  process.env.AWS_PROFILE = "hostile-default-profile";
+  try {
+    const releaseRun = createProductionCommandRunner({
+      profile: "mscqr-production-release-deployer",
+      exec: (file, args, options) => {
+        calls.push({ file, args, options });
+        return JSON.stringify({ SignatureValid: true });
+      },
+    });
+    const composition = createProductionCutoverRuntimeComposition({ releaseRun });
+    const evidence = signedEvidence();
+    authenticate(evidence, { verifySignature: composition.verifyReleasePreflightAttestationSignature });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].file, "aws");
+    assert.deepEqual(calls[0].args.slice(0, 2), ["kms", "verify"]);
+    assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-production-release-deployer");
+    assert.notEqual(calls[0].options.env.AWS_PROFILE, "hostile-default-profile");
+    assert.equal(calls[0].options.env.AWS_DEFAULT_PROFILE, undefined);
+  } finally {
+    originalProfile === undefined ? delete process.env.AWS_PROFILE : process.env.AWS_PROFILE = originalProfile;
+  }
+});
+
+test("checker attestation rejects a missing production verifier before any KMS command", () => {
+  const evidence = signedEvidence();
+  assert.throws(() => authenticateReleasePreflightCheckerTrustEvidence({
+    ...evidence,
+    sourceSha,
+    administratorReportSha256,
+    expectedAttestationFileSha256: sha256(evidence.attestationBytes),
+    expectedSignatureFileSha256: sha256(evidence.signatureBytes),
+    now,
+  }), /explicit trusted verifier/);
 });
 
 test("semantic or self-hashed local release reports cannot become checker evidence without an independent signature", () => {

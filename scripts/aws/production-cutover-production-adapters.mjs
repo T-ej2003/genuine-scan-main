@@ -28,8 +28,7 @@ import { assertAuthenticatedCurrentStageBState, readAuthenticatedStageARecoveryS
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
-import { verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
+import { authenticateReleasePreflightCheckerTrustEvidence, createReleasePreflightCheckerTrustSignatureVerifier } from "./production-release-preflight-checker-attestation.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 
 const ACCOUNT = "368992683803";
@@ -230,6 +229,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || config.sourceSha !== sourceSha || typeof rotationId !== "string" || config.rotationId !== rotationId) throw new Error("Production cutover adapter identity does not match its runtime config.");
   if (releaseProfile !== "mscqr-production-release-deployer" || verifierProfile !== "mscqr-production-ecs-exec-verifier") throw new Error("Production cutover adapter profiles do not match the asymmetric identity contract.");
   const releaseRun = createProductionCommandRunner({ profile: releaseProfile });
+  const releasePreflightAttestationVerifier = verifyReleasePreflightAttestationSignature || createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun });
   const releaseSts = createAwsStsRunner({ profile: releaseProfile });
   const verifierSts = createAwsStsRunner({ profile: config.bootstrapProfile || verifierProfile });
   let verifierSession = null;
@@ -283,7 +283,6 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     const report = readBound(config.releasePreflightEvidenceFile, config.releasePreflightEvidenceFileSha256, "Release-preflight checker-trust evidence");
     const attestation = readBound(config.releasePreflightAttestationFile, config.releasePreflightAttestationFileSha256, "Release-preflight checker-trust attestation");
     const signature = readBound(config.releasePreflightAttestationSignatureFile, config.releasePreflightAttestationSignatureFileSha256, "Release-preflight checker-trust attestation signature");
-    const verifySignature = verifyReleasePreflightAttestationSignature || ((options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) }));
     return authenticateReleasePreflightCheckerTrustEvidence({
       report: report.value,
       reportBytes: report.bytes,
@@ -295,7 +294,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       administratorReportSha256: config.iamEvidenceFileSha256,
       expectedAttestationFileSha256: config.releasePreflightAttestationFileSha256,
       expectedSignatureFileSha256: config.releasePreflightAttestationSignatureFileSha256,
-      verifySignature,
+      verifySignature: releasePreflightAttestationVerifier,
     });
   };
   const artifact = createAwsArtifactSigningAdapter({

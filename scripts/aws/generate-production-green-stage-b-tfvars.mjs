@@ -17,6 +17,7 @@ import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-cont
 import { assertStageAStateIdentity, parseAuthenticatedStateBytes, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber, assertVerifiedStageBRecovery } from "./stage-b-partial-apply-recovery-contract.mjs";
+import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
 
 export const STAGE_B_TFVARS_SCHEMA_VERSION = 1;
 export const STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION = 2;
@@ -651,5 +652,9 @@ export function parseCli(argv = process.argv.slice(2)) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  try { const result = generateStageBTfvars(parseCli()); console.log(JSON.stringify({ outputPath: result.outputPath, bindingReportPath: result.bindingReportPath, tfvarsSha256: result.tfvarsSha256 }, null, 2)); } catch (error) { console.error(error.message); process.exitCode = 1; }
+  try {
+    const releaseRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
+    const result = generateStageBTfvars({ ...parseCli(), verifySignature: (options) => verifyImageEvidenceSignature({ ...options, run: releaseRun }) });
+    console.log(JSON.stringify({ outputPath: result.outputPath, bindingReportPath: result.bindingReportPath, tfvarsSha256: result.tfvarsSha256 }, null, 2));
+  } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

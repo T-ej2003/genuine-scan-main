@@ -1105,15 +1105,21 @@ export function assertPermissionReportHashDomains({ report, signatureArtifact, r
   return { canonicalPayloadSha256, reportFileSha256, signedBindingSha256, signatureFileSha256, bindingPayload };
 }
 
-export function verifyPermissionReportSignature({ report, signatureArtifact, reportBytes = serializePermissionReport(report), signatureBytes, expectedReportFileSha256, expectedSignatureFileSha256, now = new Date().toISOString(), keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM, run = (args) => execFileSync("aws", args, { encoding: "utf8" }), verify } = {}) {
+export function createPermissionReportKmsVerifier({ run } = {}) {
+  if (typeof run !== "function") throw new Error("Permission report signature verification requires an explicit trusted command runner.");
+  return ({ keyArn, signingAlgorithm, digest, signature }) => withTempBytes("mscqr-stage-b-permission-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(run([
+    "kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json",
+  ])).SignatureValid === true);
+}
+
+export function verifyPermissionReportSignature({ report, signatureArtifact, reportBytes = serializePermissionReport(report), signatureBytes, expectedReportFileSha256, expectedSignatureFileSha256, now = new Date().toISOString(), keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM, run, verify } = {}) {
   if (!signatureArtifact || signatureArtifact.keyId !== keyArn || signatureArtifact.keyArn !== keyArn || signatureArtifact.signingAlgorithm !== signingAlgorithm) throw new Error("Permission report signature identity or algorithm is wrong.");
   const effectiveSignatureBytes = signatureBytes || serializePermissionReport(signatureArtifact);
   const domains = assertPermissionReportHashDomains({ report, signatureArtifact, reportBytes, signatureBytes: effectiveSignatureBytes, expectedReportFileSha256, expectedSignatureFileSha256 });
   assertStageBDeploymentEvidenceFreshness(signatureArtifact.signedAt, { now, evidenceType: "Permission report signature" });
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureArtifact.signatureBase64 || "")) throw new Error("Permission report signature is malformed.");
-  const verifySignature = verify || (({ digest, signature }) => withTempBytes("mscqr-stage-b-permission-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(run([
-    "kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json",
-  ])).SignatureValid === true));
+  if (typeof verify !== "function" && typeof run !== "function") throw new Error("Permission report signature verification requires an explicit trusted verifier or command runner.");
+  const verifySignature = verify || createPermissionReportKmsVerifier({ run });
   if (!verifySignature({ keyArn, signingAlgorithm, digest: Buffer.from(domains.signedBindingSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), canonicalPayloadSha256: domains.canonicalPayloadSha256, reportFileSha256: domains.reportFileSha256, signedBindingSha256: domains.signedBindingSha256, bindingPayload: domains.bindingPayload })) throw new Error("Permission report signature verification failed.");
   return true;
 }

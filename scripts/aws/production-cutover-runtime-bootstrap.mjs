@@ -230,6 +230,7 @@ export function prepareProductionCutoverRuntime({
   let rotationTerraformInputFile;
   try {
     if (!protectedSha || !SHA40.test(protectedSha)) throw new Error("protected-main source SHA is unresolved.");
+    if (typeof verifyReleasePreflightAttestationSignature !== "function") throw new Error("Release-preflight checker-trust verification requires the canonical release-profile verifier.");
     if (!rotationBindings) throw new Error("rotation secret binding manifest is required; current/previous/pending JWT/QR bindings are not derivable from the legacy live task.");
     const rotationId = requestedRotationId || `rotation-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
     if (!ROTATION_ID.test(rotationId)) throw new Error("Requested rotation ID is invalid.");
@@ -262,7 +263,7 @@ export function prepareProductionCutoverRuntime({
       administratorReportSha256: preparedIamEvidence.sha256,
       expectedAttestationFileSha256: releasePreflightAttestation.sha256,
       expectedSignatureFileSha256: releasePreflightAttestationSignature.sha256,
-      ...(verifyReleasePreflightAttestationSignature ? { verifySignature: verifyReleasePreflightAttestationSignature } : {}),
+      verifySignature: verifyReleasePreflightAttestationSignature,
     });
     const temporaryKmsCapability = temporaryKmsCapabilityFile ? readInputFile(temporaryKmsCapabilityFile, repositoryRoot, "Temporary Stage-A KMS capability evidence") : null;
     if (temporaryKmsCapability) {

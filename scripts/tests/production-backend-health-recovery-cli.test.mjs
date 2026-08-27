@@ -61,7 +61,7 @@ function privateFixture() {
   return { dir, image, imageBytes, approvalPath, approvalBytes, environmentApproval, environmentPath, environmentBytes, runtimePath, runtimeBytes, failedReferencePath, failedReferenceBytes, failedPath, failedBytes, imageFixture };
 }
 
-const environmentArgs = (fixture) => ["--environment-approval", fixture.environmentPath, "--environment-approval-sha256", sha(fixture.environmentBytes), "--runtime-consumability", fixture.runtimePath, "--runtime-consumability-sha256", sha(fixture.runtimeBytes), "--failed-recovery-evidence-reference", fixture.failedReferencePath, "--failed-recovery-evidence-reference-sha256", sha(fixture.failedReferenceBytes), "--failed-recovery-evidence", fixture.failedPath, "--failed-recovery-evidence-sha256", sha(fixture.failedBytes)];
+const environmentArgs = (fixture) => ["--aws-profile", "mscqr-production-release-deployer", "--environment-approval", fixture.environmentPath, "--environment-approval-sha256", sha(fixture.environmentBytes), "--runtime-consumability", fixture.runtimePath, "--runtime-consumability-sha256", sha(fixture.runtimeBytes), "--failed-recovery-evidence-reference", fixture.failedReferencePath, "--failed-recovery-evidence-reference-sha256", sha(fixture.failedReferenceBytes), "--failed-recovery-evidence", fixture.failedPath, "--failed-recovery-evidence-sha256", sha(fixture.failedBytes)];
 const deps = (fixture, overrides = {}) => ({
   baseEnv: githubEnv, now, readProtectedMain: () => ({ headSha: sourceSha, freshRemoteMainSha: sourceSha }),
   verifyImageEvidence: fixture.imageFixture.verifyImageEvidence,

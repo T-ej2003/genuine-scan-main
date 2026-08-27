@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
-import { assertImageEvidence, imageEvidenceSha256 } from "./production-green-stage-b-image-evidence.mjs";
+import { assertImageEvidence, imageEvidenceSha256, verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import {
   deriveStageBImageImpactReport,
   assertStageBImageReuseResult,
@@ -14,6 +14,7 @@ import {
   writeStageBPrivateFileAtomic,
 } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
+import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -198,6 +199,7 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
   const { value: imageEvidence } = readJsonPrivate(imageEvidencePath, "Image evidence");
   const { value: imageEvidenceSignature } = readJsonPrivate(imageSignaturePath, "Image evidence signature");
   const { value: imageReuseEvidence } = readJsonPrivate(imageReuseEvidencePath, "Image-reuse evidence");
+  const releaseRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
   const authorization = createImageAuthorization({
     sourceSha,
     freshProtectedMain,
@@ -205,7 +207,7 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
     imageEvidenceSignature,
     imageReuseEvidence,
     now: deps.now,
-    verifyImageEvidence: deps.verifyImageEvidence,
+    verifyImageEvidence: deps.verifyImageEvidence || ((options) => verifyImageEvidenceSignature({ ...options, run: releaseRun })),
   });
   const result = writeImageAuthorization({ outputPath, authorization });
   process.stdout.write(`${JSON.stringify({ outputPath: result.path, evidenceSha256: authorization.evidenceSha256, sourceSha, imageReleaseSha: authorization.imageReleaseSha, workflowRunId: authorization.workflowRunId, authorizationPath: authorization.authorizationPath, imageReuseCompatible: authorization.imageReuseCompatible }, null, 2)}\n`);

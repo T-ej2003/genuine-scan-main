@@ -2,6 +2,8 @@
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { assertImageAuthorization } from "./production-cutover-control-plane.mjs";
+import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { readBoundStageBPrivateJson } from "./stage-b-artifact-contract.mjs";
 
 const repositories = { backend: "mscqr-backend", worker: "mscqr-worker", "rls-executor": "mscqr-backend", "rls-canary": "mscqr-backend" };
@@ -20,7 +22,8 @@ export function runCli(argv = process.argv.slice(2)) {
   }
   const required = (name) => { const value = args.get(name); if (!value) throw new Error(`${name} is required.`); return value; };
   const authorization = readBoundStageBPrivateJson({ filePath: required("--authorization"), expectedSha256: required("--authorization-sha256"), label: "Normal release image authorization" });
-  const refs = verifyProductionReleaseImageAuthorization({ authorization, sourceSha: required("--source-sha") });
+  const releaseRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
+  const refs = verifyProductionReleaseImageAuthorization({ authorization, sourceSha: required("--source-sha"), verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: releaseRun }) });
   fs.appendFileSync(required("--github-output"), Object.entries(refs).map(([service, ref]) => `${service.replaceAll("-", "_")}_image_ref=${ref}\n`).join(""));
   return refs;
 }
