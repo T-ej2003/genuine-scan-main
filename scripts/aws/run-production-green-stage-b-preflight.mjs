@@ -32,6 +32,8 @@ import { collectLiveEcsExecOperatorEvidence } from "./production-ecs-exec-operat
 import { assertStageARootDropKeyPolicySource } from "./production-stage-a-control-plane.mjs";
 import { buildTemporaryCapabilityEvidence } from "./production-stage-a-temporary-kms-capability.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -65,12 +67,14 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   const partialApplyRecovery = argv.includes("--partial-apply-recovery");
   const freshImagePartialApplyRecovery = argv.includes("--fresh-image-partial-apply-recovery");
   const recoveryMode = resolveStageBRecoveryMode({ recoveryOnly: false, partialApplyRecovery, freshImagePartialApplyRecovery });
+  const releaseAwsRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer", exec: (command, args, options) => run(command, args, options) });
   generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff, phase: "POST_APPLY" });
   const generated = generateStageBTfvars({
     imageEvidence: value(argv, "--image-evidence"), imageEvidenceSignature: value(argv, "--image-evidence-signature"), stateBackup: stageBState,
     stageAInput: handoff, stageAStateBackup: stageAState, brokerPackagePath: value(argv, "--broker-package"), toolingSha, toolingTreeSha256,
     imageReleaseSha: value(argv, "--image-release-sha"), workflowRunId: value(argv, "--workflow-run-id"), canonicalArtifactSha256: value(argv, "--canonical-artifact-sha256"),
     environment: "production", outputPath: tfvars, bindingReportPath: bindingReport, partialApplyRecovery, freshImagePartialApplyRecovery,
+    verifySignature: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseAwsRun(args) }),
     ...(["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(recoveryMode) ? { recovery: { refreshReportPath: value(argv, "--refresh-report"), observationBindingPath: value(argv, "--refresh-binding-report") } } : {}),
   });
   generateStageBTerraformBackendConfig({ outputPath: backendConfig });
@@ -92,7 +96,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
   collectEcsExecOperatorEvidence = collectLiveEcsExecOperatorEvidence,
   permissionPreflight = runPermissionPreflight,
   sign = signPermissionReport,
-  verify = verifyPermissionReportSignature,
+  verify,
   releasePreflight = runReleaseReadPreflight,
   continueReadiness = (argv) => continueReleaseReadiness(argv),
   validateCapabilityGraph = assertStageBDeploymentCapabilityGraph,
@@ -147,7 +151,8 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), {
     const adminReportBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report"))); const adminReport = JSON.parse(adminReportBytes);
     const administratorSignatureBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report-signature")));
     const signature = JSON.parse(administratorSignatureBytes);
-    verify({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
+    const releaseRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
+    (verify || ((options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) })))({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
     assertStageBPermissionEvidenceKind(adminReport, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
     if (adminReport.purpose !== "pre-plan-capability" || adminReport.status !== "valid" || adminReport.simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Administrator pre-plan capability report is invalid.");
     assertCutoverCriticalEvidence(adminReport);

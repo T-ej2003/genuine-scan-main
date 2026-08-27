@@ -2,6 +2,7 @@
 import os from "node:os";
 import path from "node:path";
 import { createProductionCommandRunner, createProductionCutoverAdapters } from "./production-cutover-production-adapters.mjs";
+import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime } from "./production-cutover-runtime-bootstrap.mjs";
 
@@ -33,11 +34,11 @@ const decode = (captured) => JSON.parse(new TextDecoder("utf-8", { fatal: true }
 const rotationBindings = rotationBindingCapture ? decode(rotationBindingCapture) : undefined;
 const rotationSupersessionEvidence = rotationSupersessionCapture ? decode(rotationSupersessionCapture) : undefined;
 const onboardingPaths = args.has("onboarding-paths") ? read("onboarding-paths") : undefined;
+const releaseRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
 const loadCurrentTaskDefinition = () => {
-  const run = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
-  const currentService = JSON.parse(run(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2"])).services?.[0];
+  const currentService = JSON.parse(releaseRun(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2"])).services?.[0];
   if (!currentService?.taskDefinition) throw new Error("Current production task definition is unavailable.");
-  return JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", currentService.taskDefinition, "--include", "TAGS"]));
+  return JSON.parse(releaseRun(["ecs", "describe-task-definition", "--task-definition", currentService.taskDefinition, "--include", "TAGS"]));
 };
 const approval = {
   ticket: required("ticket"),
@@ -74,6 +75,7 @@ const result = prepareProductionCutoverRuntime({
   stageBTfvarsBindingReportPath: required("stage-b-tfvars-binding-report"),
   stageBTfvarsBindingReportSha256: required("stage-b-tfvars-binding-report-sha256"),
   stageBTerraformDataDir: required("stage-b-terraform-data-dir"),
+  imageAuthorizationValidation: { verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }) },
   constructAdapters: ({ config, sourceSha, rotationId, runtimeConfigSha256 }) => createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256 }),
 });
 process.stdout.write(`${JSON.stringify({

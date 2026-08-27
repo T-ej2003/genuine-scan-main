@@ -55,6 +55,7 @@ import { buildStageBImagePublicationIdentity } from "../aws/stage-b-image-public
 import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { deriveContractDigests, generateStageBTfvars } from "../aws/generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { createProductionCommandRunner } from "../aws/production-cutover-production-adapters.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const realForbiddenSimulations = JSON.parse(fs.readFileSync("scripts/tests/fixtures/aws-iam-simulate-principal-policy-stage-b-forbidden.json", "utf8"));
@@ -1456,6 +1457,31 @@ test("versioned binding authenticates both report hash domains and evidence iden
   assert.throws(() => verifyPermissionReportSignature({ report, signatureArtifact: artifact, reportBytes: Buffer.from(`${reportBytes} \n`), signatureBytes, now, verify: () => true }), /different report bytes/);
   const legacyArtifact = { ...artifact, schemaVersion: 2, hashDomain: "canonicalPayloadSha256" }; const legacyBytes = Buffer.from(`${JSON.stringify(legacyArtifact, null, 2)}\n`);
   assert.throws(() => verifyPermissionReportSignature({ report, signatureArtifact: legacyArtifact, reportBytes, signatureBytes: legacyBytes, now, verify: () => true }), /unsupported/);
+});
+
+test("production-default permission verification uses the release profile runner", () => {
+  const report = validReport();
+  const reportBytes = serializePermissionReport(report);
+  const artifact = signPermissionReport(report, { now, reportBytes, sign: () => "AQ==" });
+  const signatureBytes = Buffer.from(`${JSON.stringify(artifact, null, 2)}\n`);
+  const calls = [];
+  const releaseRun = createProductionCommandRunner({
+    profile: "mscqr-production-release-deployer",
+    exec: (file, args, options) => { calls.push({ file, args, options }); return JSON.stringify({ SignatureValid: true }); },
+  });
+  const previousProfile = process.env.AWS_PROFILE;
+  process.env.AWS_PROFILE = "hostile-default-profile";
+  try {
+    assert.doesNotThrow(() => verifyPermissionReportSignature({ report, signatureArtifact: artifact, reportBytes, signatureBytes, now, run: releaseRun }));
+  } finally {
+    if (previousProfile === undefined) delete process.env.AWS_PROFILE;
+    else process.env.AWS_PROFILE = previousProfile;
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].file, "aws");
+  assert.equal(calls[0].args[0], "kms");
+  assert.equal(calls[0].args[1], "verify");
+  assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-production-release-deployer");
 });
 
 test("release-deployer cannot generate a report or sign through the CLI", () => {

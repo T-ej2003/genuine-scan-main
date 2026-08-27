@@ -29,6 +29,8 @@ import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
+import { verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
+import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -281,6 +283,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     const report = readBound(config.releasePreflightEvidenceFile, config.releasePreflightEvidenceFileSha256, "Release-preflight checker-trust evidence");
     const attestation = readBound(config.releasePreflightAttestationFile, config.releasePreflightAttestationFileSha256, "Release-preflight checker-trust attestation");
     const signature = readBound(config.releasePreflightAttestationSignatureFile, config.releasePreflightAttestationSignatureFileSha256, "Release-preflight checker-trust attestation signature");
+    const verifySignature = verifyReleasePreflightAttestationSignature || ((options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) }));
     return authenticateReleasePreflightCheckerTrustEvidence({
       report: report.value,
       reportBytes: report.bytes,
@@ -292,7 +295,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       administratorReportSha256: config.iamEvidenceFileSha256,
       expectedAttestationFileSha256: config.releasePreflightAttestationFileSha256,
       expectedSignatureFileSha256: config.releasePreflightAttestationSignatureFileSha256,
-      ...(verifyReleasePreflightAttestationSignature ? { verifySignature: verifyReleasePreflightAttestationSignature } : {}),
+      verifySignature,
     });
   };
   const artifact = createAwsArtifactSigningAdapter({
@@ -325,6 +328,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   const preDeploymentInventory = createProductionPreDeploymentInventoryAdapter({ run: async (args) => releaseRun(args), sourceSha, imageDigest: config.overlapTaskInput?.backendImage, config });
   return {
     iam: { report: readIamEvidence(), reconcile: async () => ({ mutationCount: 0 }) },
+    imageAuthorizationValidation: { verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }) },
     checkerTrustEvidence: readCheckerTrustEvidence(),
     checkerChain,
     identities: {

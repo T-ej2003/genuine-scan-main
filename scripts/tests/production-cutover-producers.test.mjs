@@ -156,6 +156,13 @@ test("production AWS command runner executes service operations through aws", ()
   }
 });
 
+test("production cutover defaults bind every KMS verifier to the release runner", () => {
+  const source = fs.readFileSync("scripts/aws/production-cutover-production-adapters.mjs", "utf8");
+  assert.match(source, /verifyPermissionReportSignature\(\{ \.\.\.options, run: \(args\) => releaseRun\(args\) \}\)/);
+  assert.match(source, /verifyImageEvidenceSignature\(\{ \.\.\.options, run: \(args\) => releaseRun\(args\) \}\)/);
+  assert.match(source, /imageAuthorizationValidation: \{ verifyImageEvidence:/);
+});
+
 test("production inventory targets the stable backend, not the pending overlap revision", () => {
   const source = fs.readFileSync("scripts/aws/production-cutover-production-adapters.mjs", "utf8");
   assert.match(source, /expectedTaskDefinitionArn: config\.inventoryTaskDefinitionArn \|\| config\.expectedCurrentTaskDefinitionArn/);

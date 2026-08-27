@@ -312,7 +312,7 @@ export function signImageEvidence(report, { now = new Date().toISOString(), keyA
   return { schemaVersion: IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION, keyId: keyArn, keyArn, signingAlgorithm, reportSha256, imageReleaseSha: report.imageReleaseSha, workflowRunId: report.workflowRunId, publicationIdentitySha256: report.publicationIdentitySha256, canonicalArtifactSha256: report.canonicalArtifactSha256, signatureBase64, signedAt: now };
 }
 
-export function verifyImageEvidenceSignature({ report, toolingSha, signatureArtifact, now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, env = process.env, verify = ({ digest, signature }) => withTempBytes("stage-b-image-evidence-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(execFileSync("aws", ["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json"], { encoding: "utf8", env })).SignatureValid === true) }) {
+export function verifyImageEvidenceSignature({ report, toolingSha, signatureArtifact, now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, env = process.env, run = (args) => execFileSync("aws", args, { encoding: "utf8", env }), verify }) {
   rejectLegacyProvenanceClaims(report);
   if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION || report.revocationModel !== IMAGE_EVIDENCE_REVOCATION_MODEL) throw new Error("Image evidence revocation model or schema is unsupported.");
   requireRepositoryEvidence(report.repositories, [...new Set((report.images || []).map(({ repository }) => repository))], report.observedAt);
@@ -324,7 +324,8 @@ export function verifyImageEvidenceSignature({ report, toolingSha, signatureArti
   const signedAtMs = Date.parse(signatureArtifact.signedAt); const nowMs = Date.parse(now);
   if (!Number.isFinite(signedAtMs) || signedAtMs > nowMs + IMAGE_EVIDENCE_CLOCK_SKEW_MS || nowMs - signedAtMs > IMAGE_EVIDENCE_MAX_AGE_MS) throw new Error("Image evidence signature is stale or malformed.");
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureArtifact.signatureBase64 || "")) throw new Error("Image evidence signature is malformed.");
-  if (!verify({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), reportSha256 })) throw new Error("Image evidence signature verification failed.");
+  const verifySignature = verify || (({ digest, signature }) => withTempBytes("stage-b-image-evidence-verify-", { digest, signature }, ({ digest: digestPath, signature: signaturePath }) => JSON.parse(run(["kms", "verify", "--key-id", keyArn, "--message", `fileb://${digestPath}`, "--message-type", "DIGEST", "--signature", `fileb://${signaturePath}`, "--signing-algorithm", signingAlgorithm, "--output", "json"])).SignatureValid === true));
+  if (!verifySignature({ keyArn, signingAlgorithm, digest: Buffer.from(reportSha256, "hex"), signature: Buffer.from(signatureArtifact.signatureBase64, "base64"), reportSha256 })) throw new Error("Image evidence signature verification failed.");
   return true;
 }
 

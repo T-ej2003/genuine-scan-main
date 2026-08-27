@@ -38,6 +38,7 @@ import { assertStageBPlanApprovedBinding } from "./aws/stage-b-plan-approval-con
 import { assertRecoveryOnlyPlan, assertVerifiedStageBRecovery } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
 import { captureStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs";
 import { findTerraformCliArgEnvKeys } from "./plan-staging-terraform.mjs";
+import { createProductionCommandRunner } from "./aws/production-cutover-production-adapters.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -371,7 +372,8 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   if (env.MSCQR_STAGE_B_APPLY_ENABLED !== "true" || env.MSCQR_STAGE_B_APPLY_CONFIRM !== requiredConfirmation) throw new Error("Stage B apply gate is not enabled.");
   assertStageBApplyTerraformEnvironment(env);
   const artifacts = parseCli(argv); const callerArn = deps.getCaller();
-  const defaultDeps = { getCaller: currentCaller, showPlan: (planPath) => showSavedPlan(planPath, { env }), validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) };
+  const releaseRun = createProductionCommandRunner({ profile: "mscqr-production-release-deployer" });
+  const defaultDeps = { getCaller: currentCaller, showPlan: (planPath) => showSavedPlan(planPath, { env }), validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, verifyPermissionSignature: (options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) }), verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }), apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" }) };
   const effectiveDeps = { ...defaultDeps, ...deps };
   if (typeof deps.showPlan !== "function" && typeof deps.getBackendMetadata !== "function") {
     const backendMetadata = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: env.TF_DATA_DIR, backendMetadataPath: path.join(path.resolve(env.TF_DATA_DIR || ""), "terraform.tfstate"), repositoryRoot: root });
