@@ -11,10 +11,10 @@ schema version: 2
 identity model: tooling-input-tree-sha256
 image release: a63da17024415c2764452b86f1dcbce0af4ae9b8
 comparison base: a63da17024415c2764452b86f1dcbce0af4ae9b8
-tooling revision: 349c78c8c8f4bdfb964769ded517b41eaa911549
+tooling revision: ce8b5c3dcdad0e93653a434860c5a77c4e06a216
 comparison head identity: tooling-input-tree-sha256
-comparison head: d5c0ed5655e677199f0f44ff6500f23718440be0d9af18b99e754058a8336186
-tooling input tree: d5c0ed5655e677199f0f44ff6500f23718440be0d9af18b99e754058a8336186
+comparison head: e4679e3f39aac88689509527c8d36567eb418128e6b748cbc9d3d7dad8f546f8
+tooling input tree: e4679e3f39aac88689509527c8d36567eb418128e6b748cbc9d3d7dad8f546f8
 rules version: stage-b-image-reuse-v4
 image reuse compatible: true
 image build inputs changed: false
