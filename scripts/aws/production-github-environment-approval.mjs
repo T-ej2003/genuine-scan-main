@@ -10,9 +10,15 @@ export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
   repository: "T-ej2003/genuine-scan-main",
   environment: "production",
   workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main",
+  stageAReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-stage-a-reconciliation.yml@refs/heads/main",
   eventName: "workflow_dispatch",
   maxAgeMs: 30 * 60 * 1000,
 });
+
+const approvedWorkflowRefs = new Set([
+  PRODUCTION_ENVIRONMENT_APPROVAL.workflowRef,
+  PRODUCTION_ENVIRONMENT_APPROVAL.stageAReconciliationWorkflowRef,
+]);
 
 const SHA = /^[a-f0-9]{40}$/;
 const RUN_ID = /^[1-9][0-9]*$/;
@@ -50,7 +56,7 @@ const assertEvidenceReviewers = (reviewers) => {
 
 export function createProductionEnvironmentApprovalEvidence({ environmentConfig, repository, environment, sourceSha, workflowRef, eventName, workflowRunId, workflowRunAttempt, executionActor, observedAt = new Date().toISOString() } = {}) {
   if (repository !== PRODUCTION_ENVIRONMENT_APPROVAL.repository || environment !== PRODUCTION_ENVIRONMENT_APPROVAL.environment || environmentConfig?.name !== environment) throw new Error("GitHub production environment identity is invalid.");
-  if (!SHA.test(sourceSha || "") || workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.workflowRef || eventName !== PRODUCTION_ENVIRONMENT_APPROVAL.eventName
+  if (!SHA.test(sourceSha || "") || !approvedWorkflowRefs.has(workflowRef) || eventName !== PRODUCTION_ENVIRONMENT_APPROVAL.eventName
     || !RUN_ID.test(String(workflowRunId || "")) || !RUN_ID.test(String(workflowRunAttempt || ""))) throw new Error("GitHub environment approval source or workflow identity is invalid.");
   const rules = (environmentConfig.protection_rules || []).filter((rule) => rule?.type === "required_reviewers");
   if (rules.length !== 1 || typeof rules[0].prevent_self_review !== "boolean") throw new Error("Production environment required-reviewer policy is invalid.");
@@ -82,7 +88,7 @@ export function assertProductionEnvironmentApprovalEvidence(evidence, { sourceSh
   const actor = requiredText(evidence.executionActor, "evidence.executionActor");
   const reviewers = assertEvidenceReviewers(evidence.configuredReviewers);
   if (environment !== PRODUCTION_ENVIRONMENT_APPROVAL.environment || evidence.environment !== environment
-    || githubActions !== "true" || workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.workflowRef || evidence.workflowRef !== workflowRef
+    || githubActions !== "true" || !approvedWorkflowRefs.has(workflowRef) || evidence.workflowRef !== workflowRef
     || eventName !== PRODUCTION_ENVIRONMENT_APPROVAL.eventName || evidence.eventName !== eventName
     || evidence.workflowRunId !== String(workflowRunId || "") || !RUN_ID.test(evidence.workflowRunId)
     || evidence.workflowRunAttempt !== String(workflowRunAttempt || "") || !RUN_ID.test(evidence.workflowRunAttempt)
@@ -102,7 +108,7 @@ export function assertProductionEnvironmentApprovalIdentity(evidence, { sourceSh
     || repository !== PRODUCTION_ENVIRONMENT_APPROVAL.repository || evidence.repository !== repository
     || evidence.environment !== PRODUCTION_ENVIRONMENT_APPROVAL.environment
     || evidence.sourceSha !== sourceSha || !SHA.test(sourceSha || "")
-    || evidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.workflowRef || evidence.eventName !== PRODUCTION_ENVIRONMENT_APPROVAL.eventName
+    || !approvedWorkflowRefs.has(evidence.workflowRef) || evidence.eventName !== PRODUCTION_ENVIRONMENT_APPROVAL.eventName
     || !RUN_ID.test(evidence.workflowRunId) || !RUN_ID.test(evidence.workflowRunAttempt)
     || !Number.isSafeInteger(evidence.environmentId) || evidence.environmentId < 1
     || !Number.isSafeInteger(evidence.requiredReviewerCount) || evidence.requiredReviewerCount !== reviewers.length

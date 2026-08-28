@@ -11,10 +11,10 @@ schema version: 2
 identity model: tooling-input-tree-sha256
 image release: a63da17024415c2764452b86f1dcbce0af4ae9b8
 comparison base: a63da17024415c2764452b86f1dcbce0af4ae9b8
-tooling revision: 26c11d95baf0700fb21ca6d5bfd53bfc29e4a988
+tooling revision: ddbd1dfe86683c5263c61a6e0efa3fd9790a391c
 comparison head identity: tooling-input-tree-sha256
-comparison head: 1c9ecb0f1316f0c9ebfcbfdd22ee46cbfc3c99b8b990ef6ffedde8bb77d5478a
-tooling input tree: 1c9ecb0f1316f0c9ebfcbfdd22ee46cbfc3c99b8b990ef6ffedde8bb77d5478a
+comparison head: 7dd6c0c3fa3ad6600333935b1acad02208efd1a29ce9fb9f7ab5d8bdfba18563
+tooling input tree: 7dd6c0c3fa3ad6600333935b1acad02208efd1a29ce9fb9f7ab5d8bdfba18563
 rules version: stage-b-image-reuse-v4
 image reuse compatible: true
 image build inputs changed: false
@@ -27,6 +27,7 @@ The canonical changed-file classification is:
 
 | file | category | imageAffecting |
 | --- | --- | --- |
+| .github/workflows/authorize-production-stage-a-reconciliation.yml | ciOnly | false |
 | documents/ops/iam/MSCQRProductionGreenStageBArtifactContracts-v1.json | documentationOnly | false |
 | documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json | documentationOnly | false |
 | documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.md | documentationOnly | false |
@@ -39,9 +40,11 @@ The canonical changed-file classification is:
 | scripts/aws/generate-production-green-stage-b-tfvars.mjs | toolingOnly | false |
 | scripts/aws/production-cutover-control-plane.mjs | toolingOnly | false |
 | scripts/aws/production-cutover-production-adapters.mjs | toolingOnly | false |
+| scripts/aws/production-github-environment-approval.mjs | toolingOnly | false |
 | scripts/aws/production-green-stage-b-image-evidence.mjs | toolingOnly | false |
 | scripts/aws/production-image-authorization.mjs | toolingOnly | false |
 | scripts/aws/production-release-dispatch-contract.mjs | toolingOnly | false |
+| scripts/aws/production-stage-a-approval-key-reconciliation-authorization.mjs | toolingOnly | false |
 | scripts/aws/run-production-green-stage-b-preflight.mjs | toolingOnly | false |
 | scripts/aws/stage-b-artifact-contract.mjs | toolingOnly | false |
 | scripts/aws/stage-b-image-publication-identity.mjs | toolingOnly | false |
@@ -55,4 +58,5 @@ The canonical changed-file classification is:
 | scripts/tests/production-green-stage-b-permission-preflight.test.mjs | testOnly | false |
 | scripts/tests/production-green-stage-b-tfvars-generator.test.mjs | testOnly | false |
 | scripts/tests/production-image-authorization.test.mjs | testOnly | false |
+| scripts/tests/production-stage-a-approval-key-reconciliation-authorization.test.mjs | testOnly | false |
 | scripts/tests/stage-b-artifact-contract.test.mjs | testOnly | false |
