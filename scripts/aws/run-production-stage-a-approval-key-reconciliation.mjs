@@ -238,7 +238,7 @@ export function createApprovalKeyReconciliationCapabilityRunner({ authorization,
         } catch (error) {
           const recovered = readTopologyWithRecovery(readTopology);
           const recoveredTemporaryVersions = exactTemporaryVersions(recovered, temporaryPolicy);
-          if (recoveredTemporaryVersions.length === 0) capabilityState = "ABSENT";
+          if (recoveredTemporaryVersions.length > 1) throw new Error("Temporary Stage-A approval-key policy version identity is not unique after CreatePolicyVersion outcome recovery.");
           operationError = error;
         }
         if (!operationError) {

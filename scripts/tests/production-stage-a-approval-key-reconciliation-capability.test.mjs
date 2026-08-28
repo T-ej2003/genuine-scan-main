@@ -85,7 +85,7 @@ test("unknown CreatePolicyVersion outcomes are recovered by exact policy identit
 
 test("unrecoverable capability topology fails closed instead of skipping cleanup", () => {
   const unrecoverable = lifecycle({ createThrowsAfterMutation: true, failAllRecoveryReads: true });
-  assert.throws(() => unrecoverable.runner.execute(), /CRITICAL_TEMPORARY_CAPABILITY_CLEANUP_FAILURE/);
+  assert.throws(() => unrecoverable.runner.execute(), (error) => error.code === "CRITICAL_TEMPORARY_CAPABILITY_CLEANUP_FAILURE" && error.capabilityState === "UNKNOWN" && error.capabilityMutationAttempted === true);
   assert.equal(unrecoverable.applies(), 0);
 });
 
