@@ -36,7 +36,6 @@ export function runProductionDualSlotRebaselineAuthorizationCli(argv = process.a
     liveReferenceAuditSha256: required(argv, "--live-reference-audit-sha256"),
     observedSlotIdentitiesSha256: required(argv, "--observed-slot-identities-sha256"),
     reason: required(argv, "--reason"),
-    approvedBy: required(argv, "--approved-by"),
     approverRole: required(argv, "--approver-role"),
     verificationRef: required(argv, "--verification-ref"),
   });

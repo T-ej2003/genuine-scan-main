@@ -11,9 +11,10 @@ test("rebaseline authorization workflow keeps dispatch inputs out of executable 
   assert.ok(runBodies.length >= 3);
   assert.equal(runBodies.some((body) => body.includes("${{ inputs.")), false);
   assert.equal(workflow.includes("environment: production"), true);
+  assert.match(workflow, /actions:\s*read/);
   assert.equal(workflow.includes("--untracked-files=no"), false);
   assert.match(workflow, /git status --porcelain=v1 --untracked-files=all/);
-  for (const name of ["SOURCE_SHA", "HISTORICAL_ROTATION_ID", "ROTATION_ID", "ABANDONMENT_EVIDENCE_SHA256", "BASELINE_IDENTITY_SHA256", "RESOURCES_JSON", "WRITE_IDENTITIES_JSON", "EXPECTED_SECRET_VALUE_WRITES", "EXPECTED_SECRET_DELETES", "LIVE_REFERENCE_AUDIT", "LIVE_REFERENCE_AUDIT_SHA256", "OBSERVED_SLOT_IDENTITIES_SHA256", "REASON", "APPROVED_BY", "APPROVER_ROLE", "VERIFICATION_REF"]) assert.match(workflow, new RegExp(`^          ${name}: \\$\\{\\{ inputs\\.`, "m"));
+  for (const name of ["SOURCE_SHA", "HISTORICAL_ROTATION_ID", "ROTATION_ID", "ABANDONMENT_EVIDENCE_SHA256", "BASELINE_IDENTITY_SHA256", "RESOURCES_JSON", "WRITE_IDENTITIES_JSON", "EXPECTED_SECRET_VALUE_WRITES", "EXPECTED_SECRET_DELETES", "LIVE_REFERENCE_AUDIT", "LIVE_REFERENCE_AUDIT_SHA256", "OBSERVED_SLOT_IDENTITIES_SHA256", "REASON", "APPROVER_ROLE", "VERIFICATION_REF"]) assert.match(workflow, new RegExp(`^          ${name}: \\$\\{\\{ inputs\\.`, "m"));
   assert.equal(/gh api[^\n]*--output/.test(workflow), false);
   assert.equal(/terraform\s+(plan|apply)|UpdateService|RegisterTaskDefinition|aws-access-key/i.test(workflow), false);
   assert.equal(workflow.trimEnd().endsWith("retention-days: 90"), true);
@@ -40,7 +41,8 @@ test("every strict shell step binds its non-default inputs in that same step", (
   assert.match(postInstall, /SOURCE_SHA: \$\{\{ inputs\.source_sha \}\}/);
   assert.match(postInstall, /test "\$\(git rev-parse HEAD\)" = "\$SOURCE_SHA"/);
   assert.match(environment, /SOURCE_SHA: \$\{\{ inputs\.source_sha \}\}/);
-  for (const variable of ["SOURCE_SHA", "HISTORICAL_ROTATION_ID", "ROTATION_ID", "ABANDONMENT_EVIDENCE_SHA256", "BASELINE_IDENTITY_SHA256", "RESOURCES_JSON", "WRITE_IDENTITIES_JSON", "WRITE_PAYLOAD_IDENTITIES_JSON", "EXPECTED_SECRET_VALUE_WRITES", "EXPECTED_SECRET_DELETES", "LIVE_REFERENCE_AUDIT", "LIVE_REFERENCE_AUDIT_SHA256", "OBSERVED_SLOT_IDENTITIES_SHA256", "REASON", "APPROVED_BY", "APPROVER_ROLE", "VERIFICATION_REF", "ENVIRONMENT_APPROVAL_SHA"]) assert.match(producer, new RegExp(`${variable}:`));
+  assert.match(environment, /--require-actual-approval/);
+  for (const variable of ["SOURCE_SHA", "HISTORICAL_ROTATION_ID", "ROTATION_ID", "ABANDONMENT_EVIDENCE_SHA256", "BASELINE_IDENTITY_SHA256", "RESOURCES_JSON", "WRITE_IDENTITIES_JSON", "WRITE_PAYLOAD_IDENTITIES_JSON", "EXPECTED_SECRET_VALUE_WRITES", "EXPECTED_SECRET_DELETES", "LIVE_REFERENCE_AUDIT", "LIVE_REFERENCE_AUDIT_SHA256", "OBSERVED_SLOT_IDENTITIES_SHA256", "REASON", "APPROVER_ROLE", "VERIFICATION_REF", "ENVIRONMENT_APPROVAL_SHA"]) assert.match(producer, new RegExp(`${variable}:`));
 });
 
 test("strict workflow shells have an explicit source for every referenced uppercase variable", () => {

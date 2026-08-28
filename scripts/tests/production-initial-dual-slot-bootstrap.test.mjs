@@ -9,6 +9,7 @@ import { bootstrapInitialDualSlotRotation, deriveLegacyRotationBaseline, INITIAL
 import { buildProductionRotationConfig, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
 import { prepare } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
+import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 
 const jwt = createRequire(path.resolve("backend/package.json"))("jsonwebtoken");
 
@@ -77,6 +78,7 @@ function tempOutput() {
   return { directory, file: path.join(directory, "rotation-bindings.json") };
 }
 function fsTemp() { return mkdtempSync(path.join(os.tmpdir(), "mscqr-initial-dual-slot-")); }
+const verifyInitialBindingOrigin = ({ bindings }) => ({ kind: bindings.kind, producer: bindings.producer, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, bindingSha256: canonicalSha256(bindings) });
 
 test("clean legacy topology creates exact dual-slot resources and identifier-only manifest", async () => {
   const fixture = fakeSecrets(); const output = tempOutput();
@@ -168,6 +170,7 @@ test("generated bindings satisfy the existing cutover coordinator config contrac
       sourceSha, rotationId, liveCurrentKeyVersion: "2026-04-20",
       approval: { ticket: "MSCQR-PROD-CUTOVER-2026-08-12", approvedBy: "approved", approverRole: "release", reason: "rotation", verificationRef: "https://example.invalid/ref", minimumGraceSeconds: 2592000 },
       bindings: result.bindings,
+      verifyInitialBindingOrigin,
     });
     assert.equal(config.jwt.currentSecretId, legacy.jwt);
     assert.equal(config.qr.previousKeyVersion, "2026-04-20");
@@ -193,6 +196,7 @@ test("FULL_INITIAL_MIGRATION_SIMULATION keeps envelopes out of ECS and rotates Q
       sourceSha, rotationId, liveCurrentKeyVersion: "2026-04-20",
       approval: { ticket: "MSCQR-PROD-CUTOVER-2026-08-12", approvedBy: "approved", approverRole: "release", reason: "rotation", verificationRef: "https://example.invalid/ref", minimumGraceSeconds: 2592000 },
       bindings: bootstrapped.bindings,
+      verifyInitialBindingOrigin,
     });
     const stateFile = path.join(directory, "state.json"); const fixtureFile = path.join(directory, "fixture.json");
     await prepare({ config, sm: fixture, identity: "arn:aws:sts::368992683803:assumed-role/release/test", inventoryEvidenceSha256: null, values: new Map([["state-file", stateFile], ["fixture-file", fixtureFile]]) });

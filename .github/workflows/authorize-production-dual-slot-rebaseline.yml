@@ -17,12 +17,12 @@ on:
       live_reference_audit_sha256: { description: Canonical live reference audit SHA256, required: true, type: string }
       observed_slot_identities_sha256: { description: Canonical observed historical slot identities SHA256, required: true, type: string }
       reason: { description: Operation-specific reason, required: true, type: string }
-      approved_by: { description: Independent approver identity, required: true, type: string }
       approver_role: { description: Independent approver role, required: true, type: string }
       verification_ref: { description: Verification reference, required: true, type: string }
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   authorize-dual-slot-rebaseline:
@@ -80,7 +80,7 @@ jobs:
             --output "$RUNNER_TEMP/dual-slot-rebaseline/environment-approval.json" \
             --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" \
             --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
-            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR"
+            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
           echo "sha256=$(sha256sum "$RUNNER_TEMP/dual-slot-rebaseline/environment-approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
       - name: Produce exact rebaseline authorization artifact
         env:
@@ -98,7 +98,6 @@ jobs:
           LIVE_REFERENCE_AUDIT_SHA256: ${{ inputs.live_reference_audit_sha256 }}
           OBSERVED_SLOT_IDENTITIES_SHA256: ${{ inputs.observed_slot_identities_sha256 }}
           REASON: ${{ inputs.reason }}
-          APPROVED_BY: ${{ inputs.approved_by }}
           APPROVER_ROLE: ${{ inputs.approver_role }}
           VERIFICATION_REF: ${{ inputs.verification_ref }}
           ENVIRONMENT_APPROVAL_SHA: ${{ steps.environment-approval.outputs.sha256 }}
@@ -115,7 +114,7 @@ jobs:
             --write-payload-identities-json "$WRITE_PAYLOAD_IDENTITIES_JSON" \
             --expected-secret-value-writes "$EXPECTED_SECRET_VALUE_WRITES" --expected-secret-deletes "$EXPECTED_SECRET_DELETES" \
             --live-reference-audit "$LIVE_REFERENCE_AUDIT" --live-reference-audit-sha256 "$LIVE_REFERENCE_AUDIT_SHA256" \
-            --observed-slot-identities-sha256 "$OBSERVED_SLOT_IDENTITIES_SHA256" --reason "$REASON" --approved-by "$APPROVED_BY" \
+            --observed-slot-identities-sha256 "$OBSERVED_SLOT_IDENTITIES_SHA256" --reason "$REASON" \
             --approver-role "$APPROVER_ROLE" --verification-ref "$VERIFICATION_REF"
       - uses: actions/upload-artifact@v4
         with:

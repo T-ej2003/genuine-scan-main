@@ -4,7 +4,7 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
 import path from "node:path";
-import { assertProductionEnvironmentApprovalIdentity, assertProductionEnvironmentReviewer, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
+import { assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalIdentity, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
 
 export const PRODUCTION_DUAL_SLOT_REBASELINE = Object.freeze({ schemaVersion: 1, kind: "PRODUCTION_DUAL_SLOT_REBASELINE", repository: "T-ej2003/genuine-scan-main", environment: "production", accountId: "368992683803", region: "eu-west-2", maxSecretValueWrites: 7 });
 export const REBASELINE_SLOTS = Object.freeze({ jwtPending: "mscqr/prod/rotation/jwt-pending", qrPrivatePending: "mscqr/prod/rotation/qr-private-pending", qrPublicPending: "mscqr/prod/rotation/qr-public-pending", jwtPrevious: "mscqr/prod/rotation/jwt-previous", qrPublicPrevious: "mscqr/prod/rotation/qr-public-previous", qrCurrentVersion: "mscqr/prod/rotation/qr-current-version", qrPreviousVersion: "mscqr/prod/rotation/qr-previous-version" });
@@ -472,15 +472,16 @@ export function createProductionDualSlotRebaselineAuthorization(input = {}) {
   if (input.rotationId === input.historicalRotationId) fail("Rebaseline rotation must be new.");
   if (input.liveReferenceAudit !== "PASS" || !SHA256.test(input.liveReferenceAuditSha256 || "") || !SHA256.test(input.observedSlotIdentitiesSha256 || "")) fail("Rebaseline authorization requires a passing bound live-reference audit.");
   if (input.expectedSecretValueWrites !== 7 || input.expectedSecretDeletes !== 0) fail("Rebaseline authorization mutation counts are invalid.");
-  for (const [name, value] of Object.entries({ reason: input.reason, approvedBy: input.approvedBy, approverRole: input.approverRole, verificationRef: input.verificationRef })) text(value, name);
-  assertProductionEnvironmentReviewer(evidence, { approvedBy: input.approvedBy, executionActor: evidence.executionActor });
+  for (const [name, value] of Object.entries({ reason: input.reason, approverRole: input.approverRole, verificationRef: input.verificationRef })) text(value, name);
+  const approvedBy = assertProductionEnvironmentActualReviewer(evidence, { sourceSha: input.sourceSha, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository, executionActor: evidence.executionActor });
+  if (input.approvedBy !== undefined && input.approvedBy !== approvedBy) fail("Dispatcher-supplied approver identity does not match the authenticated GitHub approval event.");
   const body = {
     schemaVersion: 1, kind: REBASELINE_AUTHORIZATION_KIND, operation: PRODUCTION_DUAL_SLOT_REBASELINE.kind,
     environment: "production", accountId: PRODUCTION_DUAL_SLOT_REBASELINE.accountId, region: PRODUCTION_DUAL_SLOT_REBASELINE.region,
     sourceSha: input.sourceSha, historicalRotationId: input.historicalRotationId, rotationId: input.rotationId,
     abandonmentEvidenceSha256: assertSha256(input.abandonmentEvidenceSha256, "abandonmentEvidenceSha256"), baselineIdentitySha256: input.baselineIdentitySha256, resources,
     writeIdentities: Object.freeze({ ...identities }), writePayloadIdentities: payloadIdentities, expectedSecretValueWrites: 7, expectedSecretDeletes: 0,
-    liveReferenceAudit: input.liveReferenceAudit, liveReferenceAuditSha256: input.liveReferenceAuditSha256, observedSlotIdentitiesSha256: input.observedSlotIdentitiesSha256, reason: input.reason, approvedBy: input.approvedBy,
+    liveReferenceAudit: input.liveReferenceAudit, liveReferenceAuditSha256: input.liveReferenceAuditSha256, observedSlotIdentitiesSha256: input.observedSlotIdentitiesSha256, reason: input.reason, approvedBy,
     approverRole: input.approverRole, verificationRef: input.verificationRef,
     protectedEnvironmentApprovalEvidence: evidence, protectedEnvironmentApprovalEvidenceSha256: evidence.evidenceSha256,
     exclusions: Object.freeze(["Terraform apply", "ECS RegisterTaskDefinition", "ECS UpdateService", "database mutation", "IAM mutation", "KMS policy mutation", "image publication", "network mutation", "DeleteSecret"]),
@@ -495,7 +496,7 @@ export function assertProductionDualSlotRebaselineAuthorization(value, { sourceS
   assertRotation(value.historicalRotationId, "historicalRotationId"); if (value.historicalRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID) fail("Rebaseline authorization historical rotation is not exact."); assertRotation(value.rotationId, "rotationId"); if (value.rotationId === value.historicalRotationId) fail("Rebaseline rotation is not new."); assertSha256(value.abandonmentEvidenceSha256, "abandonmentEvidenceSha256"); assertSha256(value.baselineIdentitySha256, "baselineIdentitySha256"); assertSlotMap(value.resources, "resources"); exactKeys(value.writeIdentities, REBASELINE_SLOT_ORDER, "writeIdentities"); assertRebaselineWritePayloadIdentities(value.writePayloadIdentities); for (const slot of REBASELINE_SLOT_ORDER) { assertVersion(value.writeIdentities[slot], `writeIdentities.${slot}`); if (value.writeIdentities[slot] !== deterministicWriteIdentity({ sourceSha, rotationId, slot, secretArn: value.resources[slot], baselineIdentitySha256: value.baselineIdentitySha256 })) fail(`writeIdentities.${slot} is not bound to the exact resource and baseline.`); }
   for (const name of ["reason", "approvedBy", "approverRole", "verificationRef"]) text(value[name], name);
   if (canonical(value.exclusions) !== canonical(["Terraform apply", "ECS RegisterTaskDefinition", "ECS UpdateService", "database mutation", "IAM mutation", "KMS policy mutation", "image publication", "network mutation", "DeleteSecret"])) fail("Rebaseline authorization exclusions are incomplete.");
-  assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository }); if (value.protectedEnvironmentApprovalEvidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256) fail("Rebaseline protected-environment evidence is not exact.");
+  assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository }); if (value.protectedEnvironmentApprovalEvidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256 || value.protectedEnvironmentApprovalEvidence.schemaVersion !== 3 || value.approvedBy !== value.protectedEnvironmentApprovalEvidence.actualApproval.userLogin) fail("Rebaseline protected-environment approval identity is not authenticated from the actual approval event.");
   if (resources && canonical(value.resources) !== canonical(assertSlotMap(resources, "resources"))) fail("Rebaseline authorization resources do not match."); const { authorizationSha256, ...body } = value; if (!SHA256.test(authorizationSha256 || "") || canonicalSha256(body) !== authorizationSha256) fail("Rebaseline authorization hash is invalid."); return value;
 }
 

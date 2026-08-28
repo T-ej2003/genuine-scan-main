@@ -30,6 +30,8 @@ import { productionStageAIngress, productionStageAState, STAGE_A_STATE_OBJECT } 
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { buildReleasePreflightCheckerTrustAttestation } from "../aws/production-release-preflight-checker-attestation.mjs";
 import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
+import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
+import { assertInitialDualSlotBindings } from "../aws/production-initial-dual-slot-bootstrap.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
@@ -88,6 +90,13 @@ function gitFixture(expectedSha = sourceSha) {
 function approval() {
   return { ticket: "CHG-ROTATION-0001", approvedBy: "security@example.invalid", approverRole: "Security Lead", reason: "Scheduled production security rotation", verificationRef: "https://example.invalid/approval/1", minimumGraceSeconds: PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS };
 }
+
+const verifyInitialBindingOrigin = ({ bindings: candidate }) => ({ kind: "PRODUCTION_INITIAL_DUAL_SLOT_ROTATION_BINDINGS", producer: "scripts/aws/production-initial-dual-slot-bootstrap.mjs:bootstrapInitialDualSlotRotation", sourceSha: candidate.sourceSha, rotationId: candidate.rotationId, bindingSha256: canonicalSha256(candidate) });
+const strictInitialBindingOrigin = ({ bindings: candidate }) => {
+  if (JSON.stringify(Object.keys(candidate).sort()) !== JSON.stringify(["ecs", "jwt", "kind", "legacy", "producer", "qr", "rotationId", "schemaVersion", "sourceSha"])) throw new Error("Live initial binding origin schema is not exact.");
+  assertInitialDualSlotBindings(candidate);
+  return verifyInitialBindingOrigin({ bindings: candidate });
+};
 
 function taskDefinition(taskBindings = bindings) {
   return { taskDefinition: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", containerDefinitions: [{ name: "backend", environment: [{ name: "PUBLIC_APP_URL", value: "https://www.mscqr.com" }, { name: "QR_SIGN_ACTIVE_KEY_VERSION", value: taskBindings.qr.previousKeyVersion }], secrets: [{ name: "JWT_SECRET", valueFrom: taskBindings.jwt.currentSecretId }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: taskBindings.qr.privateCurrentSecretId }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: taskBindings.qr.publicCurrentSecretId }] }] } };
@@ -169,6 +178,7 @@ function fullInput(directory, repositoryRoot, expectedSha = sourceSha) {
     imageAuthorizationValidation: { now: evidence.imageAuthorizationFixture.now, verifyImageEvidence: evidence.imageAuthorizationFixture.verifyImageEvidence },
     verifyRootDropSignature: () => true,
     verifyReleasePreflightAttestationSignature: () => true,
+    verifyInitialBindingOrigin,
   };
 }
 
@@ -198,13 +208,35 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
   }
 });
 
+test("outer runtime preparation rejects a rebaseline manifest relabeled as initial", () => {
+  const directory = fsTemp();
+  try {
+    const relabeled = { ...bindings, operation: "PRODUCTION_DUAL_SLOT_REBASELINE", historicalRotationId: "rotation-abandoned", abandonmentEvidenceSha256: "a".repeat(64), baselineCompletionSha256: "b".repeat(64), authorizationSha256: "c".repeat(64) };
+    const result = prepareProductionCutoverRuntime({ ...fullInput(directory, process.cwd()), rotationBindings: relabeled, verifyInitialBindingOrigin: strictInitialBindingOrigin });
+    assert.equal(result.readyToConsumeMfa, false);
+    assert.match(result.blockers.join(" "), /origin|schema|binding/i);
+    assert.equal(result.configPath, undefined);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("outer runtime preparation rejects an initial manifest relabeled as rebaseline", () => {
+  const directory = fsTemp();
+  try {
+    const relabeled = { ...bindings, kind: "PRODUCTION_DUAL_SLOT_REBASELINE_ROTATION_BINDINGS", producer: "scripts/aws/rebaseline-production-dual-slot.mjs:execute", operation: "PRODUCTION_DUAL_SLOT_REBASELINE" };
+    const result = prepareProductionCutoverRuntime({ ...fullInput(directory, process.cwd()), rotationBindings: relabeled, verifyInitialBindingOrigin: strictInitialBindingOrigin });
+    assert.equal(result.readyToConsumeMfa, false);
+    assert.match(result.blockers.join(" "), /origin|schema|binding/i);
+    assert.equal(result.configPath, undefined);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("source-advance bridge anchors legacy-current bindings to the live task definition", () => {
   const originalSourceSha = "5".repeat(40);
   const rotationId = "rotation-source-advance";
   const rotationBindings = { ...bindings, sourceSha: originalSourceSha, rotationId, legacy: { jwtCurrent: bindings.jwt.currentSecretId, qrPrivateCurrent: bindings.qr.privateCurrentSecretId, qrPublicCurrent: bindings.qr.publicCurrentSecretId, qrCurrentVersion: bindings.qr.previousKeyVersion } };
   const evidence = sourceAdvanceEvidence(originalSourceSha, rotationId, rotationBindings);
   const liveLegacyBaseline = { jwtCurrent: bindings.jwt.currentSecretId, qrPrivateCurrent: bindings.qr.privateCurrentSecretId, qrPublicCurrent: bindings.qr.publicCurrentSecretId, qrCurrentVersion: bindings.qr.previousKeyVersion };
-  const input = { currentSourceSha: sourceSha, rotationBindings, supersessionEvidence: evidence, liveLegacyBaseline, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === originalSourceSha && descendantSha === sourceSha };
+  const input = { currentSourceSha: sourceSha, rotationBindings, supersessionEvidence: evidence, liveLegacyBaseline, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === originalSourceSha && descendantSha === sourceSha, verifyInitialBindingOrigin };
   const bridge = buildInitialMigrationSourceAdvance(input);
   assert.equal(bridge.supersessionEvidence.sourceSha, originalSourceSha);
   assert.equal(bridge.currentSourceSha, sourceSha);
@@ -225,9 +257,9 @@ test("source-advance bridge anchors legacy-current bindings to the live task def
 
 test("same-source runtime binding still authenticates the live legacy baseline", () => {
   const liveLegacyBaseline = { jwtCurrent: bindings.jwt.currentSecretId, qrPrivateCurrent: bindings.qr.privateCurrentSecretId, qrPublicCurrent: bindings.qr.publicCurrentSecretId, qrCurrentVersion: bindings.qr.previousKeyVersion };
-  assert.equal(buildInitialMigrationSourceAdvance({ currentSourceSha: sourceSha, rotationBindings: bindings, liveLegacyBaseline }), undefined);
+  assert.equal(buildInitialMigrationSourceAdvance({ currentSourceSha: sourceSha, rotationBindings: bindings, liveLegacyBaseline, verifyInitialBindingOrigin }), undefined);
   const changed = { ...bindings, jwt: { ...bindings.jwt, currentSecretId: `${bindings.jwt.currentSecretId}-changed` } };
-  assert.throws(() => buildInitialMigrationSourceAdvance({ currentSourceSha: sourceSha, rotationBindings: changed, liveLegacyBaseline }), /authenticated live legacy/);
+  assert.throws(() => buildInitialMigrationSourceAdvance({ currentSourceSha: sourceSha, rotationBindings: changed, liveLegacyBaseline, verifyInitialBindingOrigin }), /authenticated live legacy/);
 });
 
 test("runtime config carries the authenticated source-advance bridge into coordinator approval bytes", () => {

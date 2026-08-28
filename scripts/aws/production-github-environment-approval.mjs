@@ -24,7 +24,7 @@ const approvedWorkflowRefs = new Set([
 
 const SHA = /^[a-f0-9]{40}$/;
 const RUN_ID = /^[1-9][0-9]*$/;
-const FIELDS = new Set(["schemaVersion", "kind", "repository", "environment", "environmentId", "sourceSha", "workflowRef", "eventName", "workflowRunId", "workflowRunAttempt", "executionActor", "configuredReviewers", "requiredReviewerCount", "preventSelfReview", "canAdminsBypass", "observedAt", "evidenceSha256"]);
+const FIELDS = new Set(["schemaVersion", "kind", "repository", "environment", "environmentId", "sourceSha", "workflowRef", "eventName", "workflowRunId", "workflowRunAttempt", "executionActor", "configuredReviewers", "requiredReviewerCount", "preventSelfReview", "canAdminsBypass", "observedAt", "actualApproval", "evidenceSha256"]);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
@@ -56,7 +56,12 @@ const assertEvidenceReviewers = (reviewers) => {
   return reviewers;
 };
 
-export function createProductionEnvironmentApprovalEvidence({ environmentConfig, repository, environment, sourceSha, workflowRef, eventName, workflowRunId, workflowRunAttempt, executionActor, observedAt = new Date().toISOString() } = {}) {
+function assertActualApproval(value, environmentId, environment) {
+  if (!value || Object.keys(value).length !== 5 || value.state !== "approved" || value.environmentId !== environmentId || value.environmentName !== environment || !Number.isSafeInteger(value.userId) || value.userId < 1 || typeof value.userLogin !== "string" || !/^[A-Za-z0-9-]+$/.test(value.userLogin)) throw new Error("GitHub environment actual approval evidence is invalid.");
+  return Object.freeze({ ...value });
+}
+
+export function createProductionEnvironmentApprovalEvidence({ environmentConfig, repository, environment, sourceSha, workflowRef, eventName, workflowRunId, workflowRunAttempt, executionActor, observedAt = new Date().toISOString(), actualApproval } = {}) {
   if (repository !== PRODUCTION_ENVIRONMENT_APPROVAL.repository || environment !== PRODUCTION_ENVIRONMENT_APPROVAL.environment || environmentConfig?.name !== environment) throw new Error("GitHub production environment identity is invalid.");
   if (!SHA.test(sourceSha || "") || !approvedWorkflowRefs.has(workflowRef) || eventName !== PRODUCTION_ENVIRONMENT_APPROVAL.eventName
     || !RUN_ID.test(String(workflowRunId || "")) || !RUN_ID.test(String(workflowRunAttempt || ""))) throw new Error("GitHub environment approval source or workflow identity is invalid.");
@@ -65,7 +70,7 @@ export function createProductionEnvironmentApprovalEvidence({ environmentConfig,
   const configuredReviewers = normalizeReviewers(rules[0].reviewers);
   if (environmentConfig.can_admins_bypass !== false) throw new Error("Production environment must disable administrator bypass.");
   const body = {
-    schemaVersion: PRODUCTION_ENVIRONMENT_APPROVAL.schemaVersion,
+    schemaVersion: actualApproval ? 3 : PRODUCTION_ENVIRONMENT_APPROVAL.schemaVersion,
     kind: PRODUCTION_ENVIRONMENT_APPROVAL.kind,
     repository,
     environment,
@@ -81,6 +86,7 @@ export function createProductionEnvironmentApprovalEvidence({ environmentConfig,
     preventSelfReview: rules[0].prevent_self_review,
     canAdminsBypass: false,
     observedAt,
+    ...(actualApproval ? { actualApproval: assertActualApproval(actualApproval, environmentConfig.id, environment) } : {}),
   };
   return Object.freeze({ ...body, evidenceSha256: canonicalSha256(body) });
 }
@@ -103,10 +109,10 @@ export function assertProductionEnvironmentApprovalEvidence(evidence, { sourceSh
 }
 
 export function assertProductionEnvironmentApprovalIdentity(evidence, { sourceSha, repository } = {}) {
-  if (!evidence || Object.keys(evidence).length !== FIELDS.size || Object.keys(evidence).some((field) => !FIELDS.has(field))) throw new Error("GitHub environment approval evidence schema is invalid.");
+  if (!evidence || ![2, 3].includes(evidence.schemaVersion) || Object.keys(evidence).some((field) => !FIELDS.has(field)) || (evidence.schemaVersion === 2 && Object.keys(evidence).length !== FIELDS.size - 1) || (evidence.schemaVersion === 3 && Object.keys(evidence).length !== FIELDS.size)) throw new Error("GitHub environment approval evidence schema is invalid.");
   requiredText(evidence.executionActor, "evidence.executionActor");
   const reviewers = assertEvidenceReviewers(evidence.configuredReviewers);
-  if (evidence.schemaVersion !== PRODUCTION_ENVIRONMENT_APPROVAL.schemaVersion || evidence.kind !== PRODUCTION_ENVIRONMENT_APPROVAL.kind
+  if (![PRODUCTION_ENVIRONMENT_APPROVAL.schemaVersion, 3].includes(evidence.schemaVersion) || evidence.kind !== PRODUCTION_ENVIRONMENT_APPROVAL.kind
     || repository !== PRODUCTION_ENVIRONMENT_APPROVAL.repository || evidence.repository !== repository
     || evidence.environment !== PRODUCTION_ENVIRONMENT_APPROVAL.environment
     || evidence.sourceSha !== sourceSha || !SHA.test(sourceSha || "")
@@ -117,6 +123,7 @@ export function assertProductionEnvironmentApprovalIdentity(evidence, { sourceSh
     || typeof evidence.preventSelfReview !== "boolean" || evidence.canAdminsBypass !== false) throw new Error("GitHub environment approval evidence is not bound to this protected recovery run.");
   const observed = new Date(evidence.observedAt);
   if (!Number.isFinite(observed.getTime()) || observed.toISOString() !== evidence.observedAt) throw new Error("GitHub environment approval evidence is stale or malformed.");
+  if (evidence.schemaVersion === 3) assertActualApproval(evidence.actualApproval, evidence.environmentId, evidence.environment);
   const { evidenceSha256, ...body } = evidence;
   if (!/^[a-f0-9]{64}$/.test(evidenceSha256 || "") || canonicalSha256(body) !== evidenceSha256) throw new Error("GitHub environment approval evidence hash is invalid.");
   return evidence;
@@ -130,12 +137,30 @@ export function assertProductionEnvironmentReviewer(evidence, { approvedBy, exec
   return reviewer;
 }
 
+export function assertProductionEnvironmentActualReviewer(evidence, { sourceSha, repository, executionActor } = {}) {
+  assertProductionEnvironmentApprovalIdentity(evidence, { sourceSha, repository });
+  if (evidence.schemaVersion !== 3) throw new Error("Actual approval evidence from GitHub is required.");
+  const actor = requiredText(executionActor, "executionActor");
+  if (evidence.actualApproval.userLogin.toLowerCase() === actor.toLowerCase() && evidence.preventSelfReview === true) throw new Error("GitHub environment approval cannot be self-approved while GitHub prevents self-review.");
+  return evidence.actualApproval.userLogin;
+}
+
 export async function fetchProductionEnvironmentApprovalEvidence(input, { fetchImpl = fetch } = {}) {
   const { token, repository, environment } = input;
   requiredText(token, "GitHub token");
   const response = await fetchImpl(`https://api.github.com/repos/${repository}/environments/${environment}`, { headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": "2022-11-28" } });
   if (!response.ok) throw new Error(`Unable to authenticate production environment protection rules (${response.status}).`);
-  return createProductionEnvironmentApprovalEvidence({ ...input, environmentConfig: await response.json(), token: undefined });
+  const environmentConfig = await response.json();
+  let actualApproval;
+  if (input.requireActualApproval) {
+    const approvalsResponse = await fetchImpl(`https://api.github.com/repos/${repository}/actions/runs/${input.workflowRunId}/approvals`, { headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": "2022-11-28" } });
+    if (!approvalsResponse.ok) throw new Error(`Unable to authenticate GitHub environment approval event (${approvalsResponse.status}).`);
+    const approvals = await approvalsResponse.json();
+    const matches = (Array.isArray(approvals) ? approvals : []).flatMap((approval) => (approval?.state === "approved" ? (approval.environments || []).filter((item) => item?.id === environmentConfig.id && item?.name === environment).map(() => ({ state: "approved", environmentId: environmentConfig.id, environmentName: environment, userId: approval.user?.id, userLogin: approval.user?.login })) : []));
+    if (matches.length !== 1) throw new Error("Exactly one authenticated GitHub environment approval event is required.");
+    actualApproval = matches[0];
+  }
+  return createProductionEnvironmentApprovalEvidence({ ...input, environmentConfig, actualApproval, token: undefined });
 }
 
 export async function runProductionEnvironmentApprovalCli(argv = process.argv.slice(2), deps = {}) {
@@ -151,6 +176,7 @@ export async function runProductionEnvironmentApprovalCli(argv = process.argv.sl
     workflowRunId: required(argv, "--workflow-run-id"),
     workflowRunAttempt: required(argv, "--workflow-run-attempt"),
     executionActor: required(argv, "--execution-actor"),
+    requireActualApproval: argv.includes("--require-actual-approval"),
   }, deps);
   writeStageBPrivateFilesAtomic({ repositoryRoot: root, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), label: "GitHub environment approval evidence" }] });
   return evidence;

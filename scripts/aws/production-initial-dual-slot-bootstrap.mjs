@@ -42,6 +42,8 @@ const ROTATION_ID = /^[A-Za-z0-9._-]{8,128}$/;
 const VERSION = /^[A-Za-z0-9._:-]{1,128}$/;
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const fingerprint = secureFingerprint;
+const canonical = (value) => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
+const canonicalSha256 = (value) => sha256(canonical(value));
 const materialFileFor = (outputFile) => `${path.resolve(outputFile)}.material`;
 const required = (value, label) => {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required.`);
@@ -178,6 +180,63 @@ export function assertInitialDualSlotBindings(bindings) {
   if (bindings?.schemaVersion !== 2 || bindings?.kind !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND || bindings?.producer !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER || !SHA40.test(bindings?.sourceSha || "") || !ROTATION_ID.test(bindings?.rotationId || "")) throw new Error("Initial dual-slot identity binding is invalid.");
   if (bindings?.ecs && JSON.stringify(bindings.ecs) !== JSON.stringify(rotationBindingsToTaskBindings(bindings))) throw new Error("Initial dual-slot ECS bindings do not match the canonical SDK bindings.");
   return true;
+}
+
+function assertInitialBindingSchemaClosed(bindings) {
+  const exact = (value, keys, label) => { if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...keys].sort())) throw new Error(`${label} schema is not closed.`); };
+  exact(bindings, ["schemaVersion", "kind", "producer", "sourceSha", "rotationId", "legacy", "jwt", "qr", "ecs"], "Initial dual-slot bindings");
+  exact(bindings.legacy, ["jwtCurrent", "qrPrivateCurrent", "qrPublicCurrent", "qrCurrentVersion"], "Initial dual-slot legacy bindings");
+  exact(bindings.jwt, ["currentSecretId", "previousSecretId", "pendingSecretId"], "Initial dual-slot JWT bindings");
+  exact(bindings.qr, ["privateCurrentSecretId", "privatePendingSecretId", "publicCurrentSecretId", "publicPreviousSecretId", "publicPendingSecretId", "currentKeyVersionSecretId", "previousKeyVersionSecretId", "previousKeyVersion", "pendingKeyVersion"], "Initial dual-slot QR bindings");
+  exact(bindings.ecs, ["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"], "Initial dual-slot ECS bindings");
+}
+
+function runnerJson(run, args, label) {
+  let value;
+  try { value = JSON.parse(String(run(args))); } catch { throw new Error(`${label} is not valid JSON.`); }
+  return value;
+}
+
+function assertInitialLivePayload(slot, payload, bindings) {
+  const expected = {
+    jwtPending: ["family", "materialFingerprint", "rotationId", "slot", "sourceSha", "value"],
+    qrPrivatePending: ["family", "keyVersion", "materialFingerprint", "rotationId", "slot", "sourceSha", "value"],
+    qrPublicPending: ["family", "keyVersion", "materialFingerprint", "rotationId", "slot", "sourceSha", "value"],
+    jwtPrevious: ["family", "initialMigration", "slot", "sourceSha", "value"],
+    qrPublicPrevious: ["family", "initialMigration", "slot", "sourceSha", "value"],
+    qrCurrentVersion: ["family", "initialMigration", "slot", "sourceSha", "value"],
+    qrPreviousVersion: ["family", "initialMigration", "slot", "sourceSha", "value"],
+  }[slot];
+  if (!payload || JSON.stringify(Object.keys(payload).sort()) !== JSON.stringify(expected)) throw new Error(`Initial ${slot} payload schema is not exact.`);
+  const shape = { jwtPending: ["jwt_secrets", "pending"], qrPrivatePending: ["qr_signing_keys", "pending-private"], qrPublicPending: ["qr_signing_keys", "pending-public"], jwtPrevious: ["jwt_secrets", "empty"], qrPublicPrevious: ["qr_signing_keys", "empty"], qrCurrentVersion: ["qr_key_versions", "current"], qrPreviousVersion: ["qr_key_versions", "previous-empty"] }[slot];
+  if (payload.family !== shape[0] || payload.slot !== shape[1] || payload.sourceSha !== bindings.sourceSha || typeof payload.value !== "string") throw new Error(`Initial ${slot} payload identity is not authenticated.`);
+  if (["jwtPending", "qrPrivatePending", "qrPublicPending"].includes(slot)) {
+    if (payload.rotationId !== bindings.rotationId || payload.materialFingerprint !== fingerprint(payload.value)) throw new Error(`Initial ${slot} payload provenance is not authenticated.`);
+  } else if (payload.initialMigration !== true || payload.value !== (slot === "qrCurrentVersion" ? bindings.legacy.qrCurrentVersion : "")) throw new Error(`Initial ${slot} baseline marker is not authenticated.`);
+  return Object.freeze({ payloadSha256: canonicalSha256(payload), materialFingerprint: payload.materialFingerprint || null, keyVersion: payload.keyVersion || null });
+}
+
+export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings } = {}) {
+  if (typeof run !== "function") throw new Error("Initial binding origin verification runner is required.");
+  assertInitialBindingSchemaClosed(bindings);
+  assertInitialDualSlotBindings(bindings);
+  const resources = { jwtPrevious: bindings.jwt.previousSecretId, jwtPending: bindings.jwt.pendingSecretId, qrPrivatePending: bindings.qr.privatePendingSecretId, qrPublicPrevious: bindings.qr.publicPreviousSecretId, qrPublicPending: bindings.qr.publicPendingSecretId, qrCurrentVersion: bindings.qr.currentKeyVersionSecretId, qrPreviousVersion: bindings.qr.previousKeyVersionSecretId };
+  const observedSlots = {};
+  for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
+    const arn = resources[slot];
+    const described = runnerJson(run, ["aws", "secretsmanager", "describe-secret", "--secret-id", arn], `Initial ${slot} description`);
+    if (described.Name !== name || described.ARN !== arn || !described.VersionIdsToStages || Object.keys(described.VersionIdsToStages).length !== 1) throw new Error(`Initial ${slot} resource identity is not authenticated.`);
+    const [[versionId, stages]] = Object.entries(described.VersionIdsToStages);
+    if (!Array.isArray(stages) || stages.length !== 1 || stages[0] !== "AWSCURRENT") throw new Error(`Initial ${slot} staging identity is not authenticated.`);
+    const value = runnerJson(run, ["aws", "secretsmanager", "get-secret-value", "--secret-id", arn, "--version-id", versionId], `Initial ${slot} value`);
+    if (value.VersionId !== versionId || typeof value.SecretString !== "string") throw new Error(`Initial ${slot} version identity is not authenticated.`);
+    let payload;
+    try { payload = JSON.parse(value.SecretString); } catch { throw new Error(`Initial ${slot} payload is malformed.`); }
+    observedSlots[slot] = { arn, versionId, stages: ["AWSCURRENT"], ...assertInitialLivePayload(slot, payload, bindings) };
+  }
+  if (observedSlots.qrPrivatePending.materialFingerprint && observedSlots.qrPrivatePending.materialFingerprint !== observedSlots.qrPublicPending.materialFingerprint) throw new Error("Initial QR pending payload identities are inconsistent.");
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_DUAL_SLOT_BINDING_ORIGIN", producer: INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources, observedSlots };
+  return Object.freeze({ ...body, bindingSha256: canonicalSha256(bindings), originSha256: canonicalSha256(body) });
 }
 
 export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, sourceSha, rotationId, legacyBindings, outputFile, repositoryRoot = process.cwd() } = {}) {
