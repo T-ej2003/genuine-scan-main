@@ -193,7 +193,7 @@ function restoreDefaultAndAuthenticate({ readTopology, setDefaultVersion, origin
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try { setDefaultVersion(originalDefaultVersionId); } catch (error) { lastError = error; }
     try {
-      return waitForConvergedTopology({ readTopology, sleep, label: "managed-policy default restoration", observe: (topology) => {
+      return waitForConvergedTopology({ readTopology, sleep, stableObservations: 2, label: "managed-policy default restoration", observe: (topology) => {
         if (topology.defaultVersionId === originalDefaultVersionId) { assertTopology(topology, steadyPolicy); return "CONVERGED"; }
         if (!exactTemporaryVersions(topology, temporaryPolicy).some(({ VersionId }) => VersionId === topology.defaultVersionId)) throw criticalCapabilityCleanupFailure("managed-policy default changed to an unexpected policy while restoring the original version", lastError);
         return "RETRY";

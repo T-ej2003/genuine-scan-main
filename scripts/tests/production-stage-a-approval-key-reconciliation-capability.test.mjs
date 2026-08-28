@@ -23,12 +23,13 @@ const authorization = () => createStageAApprovalKeyReconciliationAuthorization({
 const workflow = () => ({ id: 17, run_attempt: 2, path: ".github/workflows/authorize-production-stage-a-reconciliation.yml" });
 const artifact = () => ({ id: 9, name: "stage-a-approval-key-reconciliation-authorization", expired: false, digest: `sha256:${"d".repeat(64)}`, workflow_run: { id: 17, head_sha: sourceSha } });
 
-function lifecycle({ failApply = false, failCleanup = false, createThrowsAfterMutation = false, failAllRecoveryReads = false, failFirstRecoveryRead = false, setDefaultReportsFailure = false, deleteReportsFailure = false, makeCapabilityAbsentBeforeCleanup = false, returnedVersionId = "v2", staleCreateReads = 0, staleRestoreReads = 0, staleDeleteReads = 0 } = {}) {
-  const auth = authorization(); let defaultVersionId = "v1"; const versions = new Map([["v1", steadyPolicy]]); let applies = 0; const calls = []; const delays = []; let createAttempted = false; let recoveryReads = 0; let phase = "steady";
+function lifecycle({ failApply = false, failCleanup = false, createThrowsAfterMutation = false, failAllRecoveryReads = false, failFirstRecoveryRead = false, setDefaultReportsFailure = false, failFirstRestore = false, deleteReportsFailure = false, makeCapabilityAbsentBeforeCleanup = false, returnedVersionId = "v2", staleCreateReads = 0, staleRestoreReads = 0, staleRestoreOriginalReads = 0, staleDeleteReads = 0 } = {}) {
+  const auth = authorization(); let defaultVersionId = "v1"; const versions = new Map([["v1", steadyPolicy]]); let applies = 0; const calls = []; const delays = []; let createAttempted = false; let recoveryReads = 0; let restoreAttempts = 0; let phase = "steady";
   const snapshot = (temporary = false) => temporary ? { defaultVersionId: "v2", versions: [["v1", steadyPolicy], ["v2", buildTemporaryApprovalKeyCapabilityPolicy(steadyPolicy, auth)]].map(([VersionId, document]) => ({ VersionId, document })) } : { defaultVersionId: "v1", versions: [["v1", steadyPolicy]].map(([VersionId, document]) => ({ VersionId, document })) };
   const topology = () => {
     if (createAttempted && (failAllRecoveryReads || (failFirstRecoveryRead && recoveryReads++ === 0))) throw new Error("topology read failed");
     if (phase === "temporary" && staleCreateReads-- > 0) return snapshot();
+    if (phase === "temporary" && staleRestoreOriginalReads-- > 0) return snapshot();
     if (phase === "restored" && staleRestoreReads-- > 0) return snapshot(true);
     if (phase === "deleted" && staleDeleteReads-- > 0) return snapshot(true);
     return { defaultVersionId, versions: [...versions].map(([VersionId, document]) => ({ VersionId, document })) };
@@ -36,14 +37,14 @@ function lifecycle({ failApply = false, failCleanup = false, createThrowsAfterMu
   const runner = createApprovalKeyReconciliationCapabilityRunner({ authorization: auth, sourceSha, workflow: workflow(), artifact: artifact(), steadyPolicy,
     readTopology: topology,
     createTemporaryVersion: (document) => { calls.push("create"); createAttempted = true; versions.set("v2", document); defaultVersionId = "v2"; phase = "temporary"; if (createThrowsAfterMutation) throw new Error("create failed after remote acceptance"); return { VersionId: returnedVersionId }; },
-    setDefaultVersion: (versionId) => { calls.push(`restore:${versionId}`); if (failCleanup) throw new Error("restore failed"); defaultVersionId = versionId; phase = "restored"; if (setDefaultReportsFailure) throw new Error("restore response lost"); },
-    deletePolicyVersion: (versionId) => { calls.push(`delete:${versionId}`); versions.delete(versionId); phase = "deleted"; if (deleteReportsFailure) throw new Error("delete response lost"); },
+    setDefaultVersion: (versionId) => { calls.push(`restore:${versionId}`); const attempt = restoreAttempts++; if (failCleanup || (failFirstRestore && attempt === 0)) throw new Error("restore failed"); defaultVersionId = versionId; phase = "restored"; if (setDefaultReportsFailure) throw new Error("restore response lost"); },
+    deletePolicyVersion: (versionId) => { calls.push(`delete:${versionId}`); if (defaultVersionId === versionId) throw new Error("cannot delete default policy version"); versions.delete(versionId); phase = "deleted"; if (deleteReportsFailure) throw new Error("delete response lost"); },
     verifyEffectiveCapability: () => { calls.push("effective"); return true; },
     verifyCapabilityAbsent: () => { calls.push("absent"); return true; },
     executeAuthorization: () => { calls.push("apply"); applies += 1; if (makeCapabilityAbsentBeforeCleanup) { defaultVersionId = "v1"; versions.delete("v2"); phase = "deleted"; } if (failApply) throw new Error("apply failed"); return { applied: true }; },
     sleep: (milliseconds) => { delays.push(milliseconds); },
   });
-  return { auth, runner, topology, calls, delays, applies: () => applies };
+  return { auth, runner, topology, calls, delays, applies: () => applies, restoreAttempts: () => restoreAttempts };
 }
 
 test("approval-key capability is a single exact PutKeyPolicy statement and preserves steady state", () => {
@@ -104,6 +105,16 @@ test("successful stale IAM topology reads converge before create, restore, and d
   assert.equal(responseLost.runner.execute().applied, true);
   assert.equal(responseLost.applies(), 1);
   assert.equal(responseLost.delays.length >= 2, true);
+});
+
+test("restoration rejects a stale original-default observation before retrying", () => {
+  const delayed = lifecycle({ failFirstRestore: true, staleRestoreOriginalReads: 1 });
+  assert.equal(delayed.runner.execute().applied, true);
+  assert.equal(delayed.restoreAttempts(), 2);
+  assert.deepEqual(delayed.calls, ["create", "effective", "apply", "restore:v1", "restore:v1", "delete:v2", "absent"]);
+  assert.equal(delayed.topology().defaultVersionId, "v1");
+  assert.equal(delayed.topology().versions.some(({ VersionId }) => VersionId === "v2"), false);
+  assert.equal(delayed.delays.length >= 3, true);
 });
 
 test("unresolved successful stale reads fail closed before apply", () => {
