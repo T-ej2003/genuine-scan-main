@@ -1,0 +1,74 @@
+name: Authorize production Stage A approval-key reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Protected main source SHA, required: true, type: string }
+      saved_plan_sha256: { description: SHA256 of existing saved plan, required: true, type: string }
+      rendered_plan_sha256: { description: SHA256 of rendered plan JSON, required: true, type: string }
+      stage_a_state_lineage: { description: Stage A Terraform lineage, required: true, type: string }
+      stage_a_state_serial: { description: Stage A Terraform serial, required: true, type: string }
+      stage_a_state_sha256: { description: Stage A semantic state SHA256, required: true, type: string }
+      approval_key_arn: { description: Approval KMS key ARN, required: true, type: string }
+      before_policy_sha256: { description: Current approval policy SHA256, required: true, type: string }
+      after_policy_sha256: { description: Required approval policy SHA256, required: true, type: string }
+
+permissions:
+  contents: read
+
+jobs:
+  authorize-stage-a-reconciliation:
+    name: Authorize exact Stage A saved-plan reconciliation
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - name: Require protected source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git merge-base HEAD origin/main)" = "$(git rev-parse HEAD)"
+      - name: Authenticate protected environment approval
+        id: environment-approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/stage-a-authorization"
+          node scripts/aws/production-github-environment-approval.mjs \
+            --output "$RUNNER_TEMP/stage-a-authorization/environment-approval.json" \
+            --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
+            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR"
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/stage-a-authorization/environment-approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Produce exact authorization artifact
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SAVED_PLAN_SHA256: ${{ inputs.saved_plan_sha256 }}
+          RENDERED_PLAN_SHA256: ${{ inputs.rendered_plan_sha256 }}
+          STAGE_A_STATE_LINEAGE: ${{ inputs.stage_a_state_lineage }}
+          STAGE_A_STATE_SERIAL: ${{ inputs.stage_a_state_serial }}
+          STAGE_A_STATE_SHA256: ${{ inputs.stage_a_state_sha256 }}
+          APPROVAL_KEY_ARN: ${{ inputs.approval_key_arn }}
+          BEFORE_POLICY_SHA256: ${{ inputs.before_policy_sha256 }}
+          AFTER_POLICY_SHA256: ${{ inputs.after_policy_sha256 }}
+        run: |
+          node scripts/aws/production-stage-a-approval-key-reconciliation-authorization.mjs --authorize \
+            --output "$RUNNER_TEMP/stage-a-authorization/authorization.json" \
+            --environment-approval "$RUNNER_TEMP/stage-a-authorization/environment-approval.json" \
+            --environment-approval-sha256 "${{ steps.environment-approval.outputs.sha256 }}" \
+            --source-sha "$SOURCE_SHA" --saved-plan-sha256 "$SAVED_PLAN_SHA256" \
+            --rendered-plan-sha256 "$RENDERED_PLAN_SHA256" \
+            --stage-a-state-lineage "$STAGE_A_STATE_LINEAGE" --stage-a-state-serial "$STAGE_A_STATE_SERIAL" \
+            --stage-a-state-sha256 "$STAGE_A_STATE_SHA256" --approval-key-terraform-address aws_kms_key.approval \
+            --approval-key-arn "$APPROVAL_KEY_ARN" --before-policy-sha256 "$BEFORE_POLICY_SHA256" --after-policy-sha256 "$AFTER_POLICY_SHA256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-a-approval-key-reconciliation-authorization
+          path: ${{ runner.temp }}/stage-a-authorization/authorization.json
+          if-no-files-found: error
+          retention-days: 90

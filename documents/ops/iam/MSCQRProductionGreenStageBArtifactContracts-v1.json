@@ -686,7 +686,8 @@
       "kind": "file",
       "producer": "scripts/aws/production-github-environment-approval.mjs:runCli",
       "consumers": [
-        "scripts/aws/recover-production-backend-health.mjs"
+        "scripts/aws/recover-production-backend-health.mjs",
+        "scripts/aws/production-stage-a-approval-key-reconciliation-authorization.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -696,6 +697,25 @@
       "overwrite": false,
       "hashBound": true,
       "atomicGroup": "production-environment-approval",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stage-a-approval-key-reconciliation-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-stage-a-reconciliation.yml",
+      "consumers": [
+        "scripts/aws/production-stage-a-approval-key-reconciliation-authorization.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "stage-a-approval-key-reconciliation-authorization",
       "allOrNone": true,
       "rollback": "remove-committed-or-restore-backups"
     },
