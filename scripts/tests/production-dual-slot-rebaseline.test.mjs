@@ -11,7 +11,7 @@ import {
   generateRebaselineMaterial, assertBaselineCompletion, canonicalSha256, historicalSlotIdentity,
   REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, sha256,
 } from "../aws/production-dual-slot-rebaseline-contract.mjs";
-import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout } from "../aws/rebaseline-production-dual-slot.mjs";
+import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout, readPreparedDualSlotTopology } from "../aws/rebaseline-production-dual-slot.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { assertBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 
@@ -32,6 +32,7 @@ const material = generateRebaselineMaterial();
 const identity = buildRebaselineIdentity({ sourceSha, rotationId, resources, abandonmentEvidenceSha256: abandoned.evidenceSha256, legacyBaseline });
 const payloads = buildRebaselinePayloads({ sourceSha, rotationId, generatedMaterial: material, legacyBaseline });
 const writePlan = buildRebaselineWritePlan({ sourceSha, rotationId, resources, baselineIdentitySha256: identity.identitySha256, payloads });
+const preparation = buildRebaselinePreparation({ preconditions, sourceSha, rotationId, baselineIdentity: identity, writePlan });
 const temporary = () => { const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-test-")); chmodSync(directory, 0o700); return { directory, completionFile: path.join(directory, "completion.json"), bindingsFile: path.join(directory, "rotation-bindings.json") }; };
 
 function environmentEvidence() { return createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository, environment: "production", sourceSha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "checker", observedAt: "2026-08-28T10:01:00.000Z" }); }
@@ -57,6 +58,23 @@ function executionAdapters({ failAt = -1, liveReferenceAudit = audit } = {}) {
 }
 function execute(adapters, outputs, extra = {}) { return executeProductionDualSlotRebaseline({ preconditions, sourceSha, rotationId, baselineIdentity: identity, writePlan, authorization: authorization(), completionFile: outputs.completionFile, bindingsFile: outputs.bindingsFile, repositoryRoot: process.cwd(), ...adapters, ...extra }); }
 
+function cliTopologyClient(completedSlots = [], overrides = {}) {
+  const completed = new Set(completedSlots);
+  return { send: async (command) => {
+    const input = command.input;
+    const slot = Object.entries(REBASELINE_SLOTS).find(([, name]) => name === input.SecretId)?.[0] || Object.entries(resources).find(([, arn]) => arn === input.SecretId)?.[0];
+    if (!slot) throw new Error("unexpected secret identity");
+    const expected = writePlan.find((entry) => entry.slot === slot);
+    const oldVersionId = currentVersionIds[slot];
+    const currentVersionId = overrides[slot]?.versionId || (completed.has(slot) ? expected.clientRequestToken : oldVersionId);
+    const payload = overrides[slot]?.payload || (completed.has(slot) ? expected.payload : historicalPayload(slot, { source: slot === "qrPublicPending" ? REBASELINE_HISTORICAL_SOURCE_SHAS[1] : slot === "qrPreviousVersion" ? undefined : REBASELINE_HISTORICAL_SOURCE_SHAS[0] }));
+    const name = command.constructor.name;
+    if (name === "DescribeSecretCommand") return { Name: input.SecretId, ARN: resources[slot], VersionIdsToStages: { [currentVersionId]: ["AWSCURRENT"], ...(currentVersionId === oldVersionId ? {} : { [oldVersionId]: ["AWSPREVIOUS"] }) } };
+    if (name === "GetSecretValueCommand") return { SecretString: JSON.stringify(payload), VersionId: input.VersionId };
+    throw new Error(`unexpected command ${name}`);
+  } };
+}
+
 test("observed abandonment identities bind exact payloads without plaintext", () => {
   const preparation = buildRebaselinePreparation({ preconditions, sourceSha, rotationId, baselineIdentity: identity, writePlan });
   assert.equal(preparation.writePlan.length, 7); assertRebaselinePreparation(preparation, { sourceSha, rotationId }); assert.equal(JSON.stringify(abandoned).includes(material.jwt), false);
@@ -76,6 +94,27 @@ test("authorization binds observed historical and complete ECS audit identities"
   const value = authorization(); assert.equal(value.operation, PRODUCTION_DUAL_SLOT_REBASELINE.kind);
   assert.throws(() => assertProductionDualSlotRebaselineAuthorization({ ...value, observedSlotIdentitiesSha256: "0".repeat(64) }, { sourceSha, rotationId, resources }), /hash|identity/);
   assert.throws(() => assertRebaselinePreconditions({ ...preconditions, liveReferenceAuditSha256: "0".repeat(64) }), /bound|safe/);
+});
+
+test("production CLI topology reader resumes every authenticated H-to-N boundary", async () => {
+  for (let completed = 0; completed <= REBASELINE_SLOT_ORDER.length; completed += 1) {
+    const completedSlots = REBASELINE_SLOT_ORDER.slice(0, completed);
+    const topology = await readPreparedDualSlotTopology({ client: cliTopologyClient(completedSlots), preparation, writePlan });
+    assert.deepEqual(Object.values(topology.classifications).filter((value) => value === "REBASELINE_WRITE_ALREADY_COMPLETE").length, completed);
+    assert.deepEqual(Object.values(topology.classifications).filter((value) => value === "HISTORICAL_NOT_YET_WRITTEN").length, 7 - completed);
+  }
+});
+
+test("production CLI rejects every third topology state during resume", async () => {
+  const slot = REBASELINE_SLOT_ORDER[0];
+  const cases = [
+    { versionId: writePlan[0].clientRequestToken, payload: { ...writePlan[0].payload, value: "wrong-prepared-material" } },
+    { versionId: sha256("unexpected-version"), payload: writePlan[0].payload },
+    { versionId: writePlan[0].clientRequestToken, payload: { ...writePlan[0].payload, sourceSha: "b".repeat(40) } },
+    { versionId: writePlan[0].clientRequestToken, payload: writePlan[1].payload },
+    { versionId: currentVersionIds[slot], payload: { ...historicalPayload(slot), value: "replaced-historical-material" } },
+  ];
+  for (const value of cases) await assert.rejects(() => readPreparedDualSlotTopology({ client: cliTopologyClient([], { [slot]: value }), preparation, writePlan }), /authenticate|identity|historical|prepared|version/i);
 });
 
 test("seven-slot execution resumes at every write boundary and persists exact completion plus bindings", async () => {

@@ -12,7 +12,7 @@ import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPr
 import {
   PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_SLOTS, assertRebaselinePreconditions, buildAbandonmentEvidence,
   buildRebaselineIdentity, buildRebaselinePreparation, buildRebaselineWritePlan, buildRebaselinePayloads,
-  canonicalSha256, historicalSlotIdentity, loadOrCreateRebaselineMaterialJournal, executeProductionDualSlotRebaseline, resolveProductionDualSlotRebaselineAuthorizationArtifact,
+  canonicalSha256, historicalSlotIdentity, loadOrCreateRebaselineMaterialJournal, executeProductionDualSlotRebaseline, resolveProductionDualSlotRebaselineAuthorizationArtifact, assertAbandonmentEvidence,
   REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256,
 } from "./production-dual-slot-rebaseline-contract.mjs";
 
@@ -29,13 +29,16 @@ const parseArgs = (argv) => { const values = new Map(); for (let i = 0; i < argv
 const json = (bytes) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 const parseSecret = (response, label) => { if (typeof response?.SecretString !== "string") throw new Error(`${label} is not a reviewed JSON secret.`); const value = JSON.parse(response.SecretString); if (!value || typeof value !== "object" || typeof value.value !== "string") throw new Error(`${label} has an invalid rotation payload.`); return { value, payloadSha256: canonicalSha256(value) }; };
 
-export async function readDualSlotTopology({ client, names = REBASELINE_SLOTS, historicalRotationId = HISTORICAL_ROTATION_ID } = {}) {
+export async function readDualSlotTopology({ client, names = REBASELINE_SLOTS, historicalRotationId = HISTORICAL_ROTATION_ID, preparedState, preparedWritePlan } = {}) {
+  if ((preparedState && !preparedWritePlan) || (!preparedState && preparedWritePlan)) throw new Error("Prepared rebaseline topology requires both authenticated preparation and write plan.");
+  if (preparedState) assertAbandonmentEvidence(preparedState.abandonmentEvidence, { sourceSha: preparedState.sourceSha, resources: preparedState.resources, historicalTopologySha256: preparedState.historicalTopologySha256 });
+  const preparedBySlot = preparedWritePlan ? Object.fromEntries(preparedWritePlan.map((entry) => [entry.slot, entry])) : null;
   const resources = {};
   const currentVersionIds = {};
   const snapshots = {};
   for (const [slot, name] of Object.entries(names)) {
     const described = await client.send(new DescribeSecretCommand({ SecretId: name }));
-    if (described.Name !== name || typeof described.ARN !== "string") throw new Error(`Secret resource ${slot} is outside the exact rebaseline allowlist.`);
+    if (described.Name !== name || typeof described.ARN !== "string" || (preparedState && described.ARN !== preparedState.resources[slot])) throw new Error(`Secret resource ${slot} is outside the exact rebaseline allowlist.`);
     const current = Object.entries(described.VersionIdsToStages || {}).find(([, stages]) => stages.includes("AWSCURRENT"));
     if (!current) throw new Error(`Secret resource ${slot} has no authenticated AWSCURRENT version.`);
     const response = await client.send(new GetSecretValueCommand({ SecretId: described.ARN, VersionId: current[0] }));
@@ -43,10 +46,31 @@ export async function readDualSlotTopology({ client, names = REBASELINE_SLOTS, h
     resources[slot] = described.ARN;
     currentVersionIds[slot] = current[0];
     snapshots[slot] = { slot, arn: described.ARN, versions: Object.entries(described.VersionIdsToStages).map(([versionId, stages]) => ({ versionId, stages, ...(versionId === current[0] ? { payloadSha256: parsed.payloadSha256 } : {}) })) };
-    snapshots[slot].historicalIdentity = historicalSlotIdentity({ slot, secretArn: described.ARN, versionId: current[0], stages: current[1], payload: parsed.value });
+    if (!preparedState) {
+      snapshots[slot].historicalIdentity = historicalSlotIdentity({ slot, secretArn: described.ARN, versionId: current[0], stages: current[1], payload: parsed.value });
+      continue;
+    }
+    const historicalIdentity = preparedState.abandonmentEvidence.observedSlotIdentities[slot];
+    const historicalVersionId = preparedState.abandonmentEvidence.currentVersionIds[slot];
+    const expectedWrite = preparedBySlot[slot];
+    if (!expectedWrite) throw new Error(`Prepared rebaseline write identity for ${slot} is missing.`);
+    if (current[0] === historicalVersionId) {
+      const observed = historicalSlotIdentity({ slot, secretArn: described.ARN, versionId: current[0], stages: current[1], payload: parsed.value });
+      if (canonicalSha256(observed) !== canonicalSha256(historicalIdentity)) throw new Error(`Historical ${slot} identity changed during rebaseline resume.`);
+      snapshots[slot].classification = "HISTORICAL_NOT_YET_WRITTEN";
+    } else if (current[0] === expectedWrite.clientRequestToken) {
+      if (parsed.payloadSha256 !== expectedWrite.payloadSha256 || canonicalSha256(parsed.value) !== expectedWrite.payloadSha256 || current[1].length !== 1 || current[1][0] !== "AWSCURRENT") throw new Error(`Prepared ${slot} write identity does not authenticate.`);
+      snapshots[slot].classification = "REBASELINE_WRITE_ALREADY_COMPLETE";
+    } else throw new Error(`Current ${slot} version is neither authenticated historical state nor the exact prepared rebaseline write.`);
   }
-  const observedSlotIdentities = Object.freeze(Object.fromEntries(Object.entries(snapshots).map(([slot, snapshot]) => [slot, snapshot.historicalIdentity])));
-  return Object.freeze({ resources, currentVersionIds, snapshots, observedSlotIdentities, observedSlotIdentitiesSha256: canonicalSha256(observedSlotIdentities) });
+  const observedSlotIdentities = preparedState
+    ? preparedState.abandonmentEvidence.observedSlotIdentities
+    : Object.freeze(Object.fromEntries(Object.entries(snapshots).map(([slot, snapshot]) => [slot, snapshot.historicalIdentity])));
+  return Object.freeze({ resources, currentVersionIds, snapshots, observedSlotIdentities, observedSlotIdentitiesSha256: canonicalSha256(observedSlotIdentities), ...(preparedState ? { classifications: Object.freeze(Object.fromEntries(Object.entries(snapshots).map(([slot, snapshot]) => [slot, snapshot.classification]))) } : {}) });
+}
+
+export async function readPreparedDualSlotTopology({ client, preparation, writePlan } = {}) {
+  return readDualSlotTopology({ client, preparedState: preparation, preparedWritePlan: writePlan });
 }
 
 async function readSlotSnapshot(client, slot, secretArn, expectedVersionId, expectedIdentity = {}) {
@@ -177,9 +201,13 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } else if (args.has("execute")) {
     const preparationFile = path.resolve(required(args, "preparation")); const preparation = json(readStageBPrivateFileBytes({ filePath: preparationFile, repositoryRoot: process.cwd(), label: "Dual-slot rebaseline preparation" }).bytes);
-    const topology = await readDualSlotTopology({ client }); const audit = auditLiveProductionDualSlotReferences({ run, resources: topology.resources, databaseDependencies: preparation.databaseDependencies, externalConsumers: preparation.externalConsumers });
-    const currentPreconditions = { ...preparation, resources: topology.resources, abandonmentEvidence: { ...preparation.abandonmentEvidence, currentVersionIds: topology.currentVersionIds, observedSlotIdentities: topology.observedSlotIdentities, observedSlotIdentitiesSha256: topology.observedSlotIdentitiesSha256, liveReferenceAuditSha256: audit.auditSha256 }, liveReferenceAudit: audit.status, liveReferenceAuditSha256: audit.auditSha256, legacyRuntimeAuthoritative: audit.legacyRuntimeAuthoritative, dualSlotReferences: audit.dualSlotReferences, runningTasks: audit.runningTasks, pendingTasks: audit.pendingTasks, activeTaskDefinition: audit.activeTaskDefinition };
+    const checkout = readAuthenticatedRebaselineCheckout({ sourceSha, gitRun: (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), repositoryRoot: process.cwd() });
     const authorization = resolveProductionDualSlotRebaselineAuthorizationArtifact({ workflowRunId: required(args, "workflow-run-id"), workflowRunAttempt: required(args, "workflow-run-attempt"), sourceSha, rotationId: preparation.rotationId, resources: preparation.resources }).authorization;
+    const journal = loadOrCreateRebaselineMaterialJournal({ filePath: path.resolve(required(args, "material-journal")), repositoryRoot: process.cwd(), sourceSha: checkout.toolingSha, rotationId: preparation.rotationId, baselineIdentitySha256: preparation.baselineIdentity.identitySha256 });
+    const payloads = buildRebaselinePayloads({ sourceSha: checkout.toolingSha, rotationId: preparation.rotationId, generatedMaterial: journal.material, legacyBaseline: preparation.legacyBaseline });
+    const writePlan = buildRebaselineWritePlan({ sourceSha: checkout.toolingSha, rotationId: preparation.rotationId, resources: preparation.resources, baselineIdentitySha256: preparation.baselineIdentity.identitySha256, payloads });
+    const topology = await readPreparedDualSlotTopology({ client, preparation, writePlan }); const audit = auditLiveProductionDualSlotReferences({ run, resources: topology.resources, databaseDependencies: preparation.databaseDependencies, externalConsumers: preparation.externalConsumers });
+    const currentPreconditions = { ...preparation, resources: topology.resources, abandonmentEvidence: preparation.abandonmentEvidence, liveReferenceAudit: audit.status, liveReferenceAuditSha256: audit.auditSha256, legacyRuntimeAuthoritative: audit.legacyRuntimeAuthoritative, dualSlotReferences: audit.dualSlotReferences, runningTasks: audit.runningTasks, pendingTasks: audit.pendingTasks, activeTaskDefinition: audit.activeTaskDefinition };
     const result = await executePreparedProductionDualSlotRebaseline({ preparationFile, authorization, materialJournalFile: path.resolve(required(args, "material-journal")), completionFile: path.resolve(required(args, "completion-output")), bindingsFile: path.resolve(required(args, "rotation-bindings-output")), repositoryRoot: process.cwd(), sourceSha, currentPreconditions, client, adapters: createProductionRebaselineAdapters({ client, run, resources: topology.resources, preparation }) });
     process.stdout.write(`${JSON.stringify({ baselineComplete: result.baselineComplete, writes: result.writes, baselineBindingSha256: result.completion.baselineBindingSha256, completionPath: result.completionPath, completionSha256: result.completionSha256, rotationBindingsPath: result.bindingsPath, rotationBindingsSha256: result.bindingsSha256 }, null, 2)}\n`);
   } else throw new Error("Use --prepare or --execute.");
