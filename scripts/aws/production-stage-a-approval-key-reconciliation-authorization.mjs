@@ -27,6 +27,7 @@ const requireSha40 = (value, label) => { if (!SHA40.test(value || "")) throw new
 const policySha256 = (policy) => canonicalSha256(policy);
 const repository = PRODUCTION_ENVIRONMENT_APPROVAL.repository;
 const artifactName = "stage-a-approval-key-reconciliation-authorization";
+const maxArtifactArchiveBytes = 64 * 1024 * 1024;
 
 function parsePolicy(value, label) {
   try { return typeof value === "string" ? JSON.parse(value) : value; } catch { throw new Error(`${label} is malformed.`); }
@@ -43,12 +44,25 @@ export function assertStageAApprovalKeyReconciliationPlan(plan, { approvalKeyArn
   if (!beforeResource || typeof beforeResource !== "object" || !afterResource || typeof afterResource !== "object") throw new Error("Stage-A reconciliation plan resource values are incomplete.");
   const withoutPolicy = (value) => { const copy = { ...value }; delete copy.policy; return copy; };
   if (canonicalSha256(withoutPolicy(beforeResource)) !== canonicalSha256(withoutPolicy(afterResource))) throw new Error("Stage-A reconciliation plan changes a non-policy approval-key attribute.");
-  for (const field of ["before_unknown", "after_unknown", "before_sensitive", "after_sensitive"]) {
-    const value = entry.change?.[field];
-    if (value !== undefined && (!value || typeof value !== "object" || Array.isArray(value))) throw new Error(`Stage-A reconciliation plan ${field} metadata is invalid.`);
-    if (value && Object.keys(withoutPolicy(value)).length > 0) throw new Error("Stage-A reconciliation plan contains non-policy unknown or sensitive changes.");
-  }
-  if (entry.change?.before_unknown?.policy || entry.change?.after_unknown?.policy) throw new Error("Stage-A reconciliation plan policy must be known.");
+  const normalizeMetadata = (value, label) => {
+    if (value === undefined || value === null) return {};
+    if (typeof value !== "object" || Array.isArray(value)) throw new Error(`Stage-A reconciliation plan ${label} metadata is invalid.`);
+    const normalized = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (child === false || child === null) continue;
+      if (child === true) { normalized[key] = true; continue; }
+      if (typeof child !== "object" || Array.isArray(child)) throw new Error(`Stage-A reconciliation plan ${label} metadata is invalid.`);
+      const nested = normalizeMetadata(child, label);
+      if (Object.keys(nested).length > 0) normalized[key] = nested;
+    }
+    return normalized;
+  };
+  const metadata = Object.fromEntries(["before_unknown", "after_unknown", "before_sensitive", "after_sensitive"].map((field) => [field, normalizeMetadata(entry.change?.[field], field)]));
+  const nonPolicyMetadata = (field) => withoutPolicy(metadata[field]);
+  if (canonicalSha256(nonPolicyMetadata("before_unknown")) !== canonicalSha256(nonPolicyMetadata("after_unknown"))
+    || canonicalSha256(nonPolicyMetadata("before_sensitive")) !== canonicalSha256(nonPolicyMetadata("after_sensitive"))) throw new Error("Stage-A reconciliation plan contains non-policy unknown or sensitive changes.");
+  if (Object.keys(nonPolicyMetadata("before_unknown")).length > 0 || Object.keys(nonPolicyMetadata("after_unknown")).length > 0) throw new Error("Stage-A reconciliation plan contains actionable non-policy unknown changes.");
+  if (metadata.before_unknown.policy || metadata.after_unknown.policy) throw new Error("Stage-A reconciliation plan policy must be known.");
   const before = parsePolicy(entry.change?.before?.policy, "Stage-A approval-key before policy");
   const after = parsePolicy(entry.change?.after?.policy, "Stage-A approval-key after policy");
   if (entry.change?.before?.arn !== approvalKeyArn || entry.change?.after?.arn !== approvalKeyArn || policySha256(before) !== beforePolicySha256 || policySha256(after) !== afterPolicySha256) throw new Error("Stage-A reconciliation plan policy binding is not exact.");
@@ -129,7 +143,7 @@ export function executeStageAApprovalKeyReconciliation({ authorization, sourceSh
   return Object.freeze({ applied: true, appliedPlanSha256: executorPlan.sha256, authorizationSha256: authorization.authorizationSha256, semantics, preApplyState: state, postApplyState: next });
 }
 
-export function resolveStageAReconciliationAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, run = (command, args) => execFileSync(command, args, { encoding: "utf8" }), download = (id, file) => execFileSync("gh", ["api", `repos/${repository}/actions/artifacts/${id}/zip`, "--output", file]) } = {}) {
+export function resolveStageAReconciliationAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, run = (command, args, options = {}) => execFileSync(command, args, { encoding: options.encoding === null ? null : "utf8", maxBuffer: options.maxBuffer }), download } = {}) {
   if (!/^[1-9][0-9]*$/.test(String(workflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(workflowRunAttempt || "")) || !SHA40.test(sourceSha || "")) throw new Error("Stage-A authorization workflow coordinates are invalid.");
   const workflow = JSON.parse(run("gh", ["api", `repos/${repository}/actions/runs/${workflowRunId}`]));
   if (String(workflow.id) !== String(workflowRunId) || workflow.repository?.full_name !== repository || workflow.head_repository?.full_name !== repository || workflow.path !== ".github/workflows/authorize-production-stage-a-reconciliation.yml" || workflow.event !== "workflow_dispatch" || workflow.head_sha !== sourceSha || workflow.status !== "completed" || workflow.conclusion !== "success" || String(workflow.run_attempt) !== String(workflowRunAttempt)) throw new Error("Stage-A authorization workflow provenance is not authentic.");
@@ -137,9 +151,16 @@ export function resolveStageAReconciliationAuthorizationArtifact({ workflowRunId
   if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page?.artifacts))) throw new Error("Stage-A authorization artifact listing is malformed.");
   const matches = pages.flatMap((page) => page.artifacts).filter((artifact) => artifact.name === artifactName && artifact.expired === false && String(artifact.workflow_run?.id) === String(workflowRunId) && artifact.workflow_run?.head_sha === sourceSha && artifact.workflow_run?.repository_id === workflow.repository.id && /^sha256:[a-f0-9]{64}$/.test(artifact.digest || ""));
   if (matches.length !== 1) throw new Error("Stage-A authorization workflow must expose exactly one unexpired authorization artifact.");
-  const artifact = matches[0]; const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-authorization-")); const archive = path.join(directory, "authorization.zip");
+  const artifact = matches[0];
+  if (!Number.isSafeInteger(artifact.id) || artifact.id < 1) throw new Error("Stage-A authorization artifact ID is invalid.");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-authorization-")); const archive = path.join(directory, "authorization.zip");
   try {
-    download(artifact.id, archive);
+    const downloadArtifact = download || ((id, file) => {
+      const archiveBytes = run("gh", ["api", `repos/${repository}/actions/artifacts/${id}/zip`], { encoding: null, maxBuffer: maxArtifactArchiveBytes });
+      if (!Buffer.isBuffer(archiveBytes) || archiveBytes.length === 0) throw new Error("Stage-A authorization artifact download is empty or not binary.");
+      writeStageBPrivateFileExclusive({ filePath: file, bytes: archiveBytes, repositoryRoot: root, label: "Stage-A authorization artifact archive" });
+    });
+    downloadArtifact(artifact.id, archive);
     const archiveBytes = fs.readFileSync(archive);
     if (`sha256:${sha256(archiveBytes)}` !== artifact.digest) throw new Error("Stage-A authorization artifact archive digest is invalid.");
     const entries = String(run("unzip", ["-Z1", archive])).trim().split("\n").filter(Boolean);
