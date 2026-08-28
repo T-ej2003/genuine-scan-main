@@ -58,6 +58,8 @@ jobs:
       - name: Install locked authorization dependencies
         run: npm ci
       - name: Re-authenticate protected source after dependency installation
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
         shell: bash
         run: |
           set -euo pipefail

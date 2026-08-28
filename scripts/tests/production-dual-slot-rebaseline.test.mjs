@@ -9,9 +9,9 @@ import {
   buildRebaselinePreparation, assertRebaselinePreconditions, assertRebaselinePreparation,
   createProductionDualSlotRebaselineAuthorization, deterministicWriteIdentity, executeProductionDualSlotRebaseline,
   generateRebaselineMaterial, assertBaselineCompletion, canonicalSha256, historicalSlotIdentity,
-  REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, sha256,
+  REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, writeRebaselineMaterialJournal, sha256,
 } from "../aws/production-dual-slot-rebaseline-contract.mjs";
-import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout, readPreparedDualSlotTopology } from "../aws/rebaseline-production-dual-slot.mjs";
+import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout, readPreparedDualSlotTopology, runProductionDualSlotRebaselineCli } from "../aws/rebaseline-production-dual-slot.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { assertBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 
@@ -25,9 +25,9 @@ const legacyBaseline = { jwtCurrent: "arn:aws:secretsmanager:eu-west-2:368992683
 const shapes = { jwtPending: ["jwt_secrets", "pending"], qrPrivatePending: ["qr_signing_keys", "pending-private"], qrPublicPending: ["qr_signing_keys", "pending-public"], jwtPrevious: ["jwt_secrets", "empty"], qrPublicPrevious: ["qr_signing_keys", "empty"], qrCurrentVersion: ["qr_key_versions", "current"], qrPreviousVersion: ["qr_key_versions", "previous-empty"] };
 function historicalPayload(slot, { source = REBASELINE_HISTORICAL_SOURCE_SHAS[0], rotation = historicalRotationId, value = `historical-${slot}` } = {}) { const [family, payloadSlot] = shapes[slot]; return { value, family, slot: payloadSlot, initialMigration: true, ...(rotation === undefined ? {} : { rotationId: rotation }), ...(source === undefined ? {} : { sourceSha: source }) }; }
 const observedSlotIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, historicalSlotIdentity({ slot, secretArn: resources[slot], versionId: currentVersionIds[slot], stages: ["AWSCURRENT"], payload: historicalPayload(slot, { source: slot === "qrPublicPending" ? REBASELINE_HISTORICAL_SOURCE_SHAS[1] : slot === "qrPreviousVersion" ? undefined : undefined }) })]));
-const audit = Object.freeze({ dualSlotReferences: 0, legacyRuntimeAuthoritative: true, auditSha256: canonicalSha256({ audit: "fixture", resources }) });
-const abandoned = buildAbandonmentEvidence({ sourceSha, historicalRotationId, historicalSourceShas: REBASELINE_HISTORICAL_SOURCE_SHAS, resources, currentVersionIds, historicalTopologySha256, observedSlotIdentities, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.auditSha256, legacyRuntimeAuthoritative: true, observedAt: "2026-08-28T10:00:00.000Z" });
-const preconditions = { environment: "production", accountId: PRODUCTION_DUAL_SLOT_REBASELINE.accountId, region: PRODUCTION_DUAL_SLOT_REBASELINE.region, sourceSha, sourceCas: true, cleanWorktree: true, existingSecretResources: true, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.auditSha256, legacyRuntimeAuthoritative: true, databaseDependencies: 0, externalConsumers: 0, dualSlotReferences: 0, runningTasks: 2, pendingTasks: 0, activeTaskDefinition: "mscqr-backend:50", resources, historicalTopologySha256, abandonmentEvidence: abandoned };
+const audit = Object.freeze({ status: "PASS", dualSlotReferences: 0, legacyRuntimeAuthoritative: true, databaseDependencies: 0, externalConsumers: 0, auditSha256: canonicalSha256({ observation: "fixture", resources, tasks: ["task-a"] }), stableAuditSha256: canonicalSha256({ stable: "fixture", resources, taskDefinitions: ["mscqr-backend:50"] }) });
+const abandoned = buildAbandonmentEvidence({ sourceSha, historicalRotationId, historicalSourceShas: REBASELINE_HISTORICAL_SOURCE_SHAS, resources, currentVersionIds, historicalTopologySha256, observedSlotIdentities, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, legacyRuntimeAuthoritative: true, observedAt: "2026-08-28T10:00:00.000Z" });
+const preconditions = { environment: "production", accountId: PRODUCTION_DUAL_SLOT_REBASELINE.accountId, region: PRODUCTION_DUAL_SLOT_REBASELINE.region, sourceSha, sourceCas: true, cleanWorktree: true, existingSecretResources: true, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, legacyRuntimeAuthoritative: true, databaseDependencies: 0, externalConsumers: 0, dualSlotReferences: 0, runningTasks: 2, pendingTasks: 0, activeTaskDefinition: "mscqr-backend:50", resources, historicalTopologySha256, abandonmentEvidence: abandoned };
 const material = generateRebaselineMaterial();
 const identity = buildRebaselineIdentity({ sourceSha, rotationId, resources, abandonmentEvidenceSha256: abandoned.evidenceSha256, legacyBaseline });
 const payloads = buildRebaselinePayloads({ sourceSha, rotationId, generatedMaterial: material, legacyBaseline });
@@ -36,17 +36,20 @@ const preparation = buildRebaselinePreparation({ preconditions, sourceSha, rotat
 const temporary = () => { const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-test-")); chmodSync(directory, 0o700); return { directory, completionFile: path.join(directory, "completion.json"), bindingsFile: path.join(directory, "rotation-bindings.json") }; };
 
 function environmentEvidence() { return createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository, environment: "production", sourceSha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "checker", observedAt: "2026-08-28T10:01:00.000Z" }); }
-function authorization() { return createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: environmentEvidence(), sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256: identity.identitySha256, resources, writeIdentities: Object.fromEntries(writePlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken])), expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.auditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "Abandon pre-cutover state and establish a clean baseline", approvedBy: "checker", approverRole: "production-independent-checker", verificationRef: "ticket-rebaseline-1" }); }
+function authorization({ baselineIdentitySha256 = identity.identitySha256 } = {}) { return createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: environmentEvidence(), sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256, resources, writeIdentities: Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, deterministicWriteIdentity({ sourceSha, rotationId, slot, secretArn: resources[slot], baselineIdentitySha256 })])), expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "Abandon pre-cutover state and establish a clean baseline", approvedBy: "checker", approverRole: "production-independent-checker", verificationRef: "ticket-rebaseline-1" }); }
 function executionAdapters({ failAt = -1, liveReferenceAudit = audit } = {}) {
   const store = new Map(REBASELINE_SLOT_ORDER.map((slot) => [slot, [{
     versionId: currentVersionIds[slot], stages: ["AWSCURRENT"],
-    payloadSha256: historicalSlotIdentity({ slot, secretArn: resources[slot], versionId: currentVersionIds[slot], stages: ["AWSCURRENT"], payload: historicalPayload(slot) }).payloadSha256,
+    payloadSha256: observedSlotIdentities[slot].payloadSha256,
   }]]));
   let calls = 0;
   return {
     store,
-    readReferenceAudit: async () => liveReferenceAudit,
-    readSlot: async (slot, secretArn) => ({ arn: secretArn, versions: store.get(slot) }),
+    readReferenceAudit: async () => typeof liveReferenceAudit === "function" ? liveReferenceAudit() : liveReferenceAudit,
+    readSlot: async (slot, secretArn) => {
+      const versions = store.get(slot); const current = versions.find(({ stages }) => stages.includes("AWSCURRENT"));
+      return { arn: secretArn, versions, currentVersionId: current?.versionId, currentStages: current?.stages, currentPayloadSha256: current?.payloadSha256 };
+    },
     writeSlot: async ({ slot, secretArn, clientRequestToken, payload, payloadSha256 }) => {
       const entry = { versionId: clientRequestToken, stages: ["AWSCURRENT"], payloadSha256: payloadSha256 || canonicalSha256(payload) };
       store.set(slot, store.get(slot).map((version) => ({ ...version, stages: version.stages.includes("AWSCURRENT") ? ["AWSPREVIOUS"] : version.stages })).concat(entry));
@@ -83,7 +86,7 @@ test("observed abandonment identities bind exact payloads without plaintext", ()
   assert.throws(() => historicalSlotIdentity({ slot: "jwtPending", secretArn: resources.jwtPending, versionId: currentVersionIds.jwtPending, stages: ["AWSCURRENT"], payload: { ...historicalPayload("jwtPending"), family: "unrelated_json" } }), /kind/);
   assert.throws(() => historicalSlotIdentity({ slot: "jwtPending", secretArn: resources.jwtPending, versionId: currentVersionIds.jwtPending, stages: ["AWSCURRENT"], payload: { ...historicalPayload("jwtPending"), materialFingerprint: "tampered" } }), /fingerprint/);
   assert.throws(() => historicalSlotIdentity({ slot: "jwtPending", secretArn: resources.jwtPending, versionId: currentVersionIds.jwtPending, stages: ["AWSPREVIOUS"], payload: historicalPayload("jwtPending") }), /stages/);
-  assert.throws(() => buildAbandonmentEvidence({ sourceSha, historicalRotationId, historicalSourceShas: REBASELINE_HISTORICAL_SOURCE_SHAS, resources, currentVersionIds: { ...currentVersionIds, jwtPending: "changed-version" }, observedSlotIdentities, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.auditSha256, legacyRuntimeAuthoritative: true }), /exact|identity/);
+  assert.throws(() => buildAbandonmentEvidence({ sourceSha, historicalRotationId, historicalSourceShas: REBASELINE_HISTORICAL_SOURCE_SHAS, resources, currentVersionIds: { ...currentVersionIds, jwtPending: "changed-version" }, observedSlotIdentities, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, legacyRuntimeAuthoritative: true }), /exact|identity/);
   assert.doesNotThrow(() => historicalSlotIdentity({ slot: "qrPreviousVersion", secretArn: resources.qrPreviousVersion, versionId: currentVersionIds.qrPreviousVersion, stages: ["AWSCURRENT"], payload: historicalPayload("qrPreviousVersion", { source: undefined }) }));
   assert.doesNotThrow(() => historicalSlotIdentity({ slot: "qrPublicPending", secretArn: resources.qrPublicPending, versionId: currentVersionIds.qrPublicPending, stages: ["AWSCURRENT"], payload: historicalPayload("qrPublicPending", { source: REBASELINE_HISTORICAL_SOURCE_SHAS[1] }) }));
   const tampered = structuredClone(abandoned); tampered.observedSlotIdentities.jwtPending.payloadSha256 = "0".repeat(64);
@@ -94,6 +97,13 @@ test("authorization binds observed historical and complete ECS audit identities"
   const value = authorization(); assert.equal(value.operation, PRODUCTION_DUAL_SLOT_REBASELINE.kind);
   assert.throws(() => assertProductionDualSlotRebaselineAuthorization({ ...value, observedSlotIdentitiesSha256: "0".repeat(64) }, { sourceSha, rotationId, resources }), /hash|identity/);
   assert.throws(() => assertRebaselinePreconditions({ ...preconditions, liveReferenceAuditSha256: "0".repeat(64) }), /bound|safe/);
+});
+
+test("shared executor independently binds the authorization baseline and all seven deterministic writes", async () => {
+  const outputs = temporary(); const adapters = executionAdapters(); const auth = authorization();
+  await assert.rejects(() => executeProductionDualSlotRebaseline({ preconditions, sourceSha, rotationId, baselineIdentity: identity, writePlan, authorization: authorization({ baselineIdentitySha256: sha256("other-authorized-baseline") }), completionFile: outputs.completionFile, bindingsFile: outputs.bindingsFile, repositoryRoot: process.cwd(), ...adapters }), /baseline identity/i);
+  await assert.rejects(() => executeProductionDualSlotRebaseline({ preconditions, sourceSha, rotationId, baselineIdentity: identity, writePlan, authorization: { ...auth, writeIdentities: { ...auth.writeIdentities, jwtPending: sha256("cross-slot-token") } }, completionFile: outputs.completionFile, bindingsFile: outputs.bindingsFile, repositoryRoot: process.cwd(), ...adapters }), /writeIdentities|identity|hash/i);
+  assert.equal([...adapters.store.values()].every((versions) => versions.length === 1), true); rmSync(outputs.directory, { recursive: true, force: true });
 });
 
 test("production CLI topology reader resumes every authenticated H-to-N boundary", async () => {
@@ -117,8 +127,72 @@ test("production CLI rejects every third topology state during resume", async ()
   for (const value of cases) await assert.rejects(() => readPreparedDualSlotTopology({ client: cliTopologyClient([], { [slot]: value }), preparation, writePlan }), /authenticate|identity|historical|prepared|version/i);
 });
 
+test("production topology rejects ambiguous current staging and substituted Secret Manager reads", async () => {
+  const ambiguous = cliTopologyClient(); const sendAmbiguous = ambiguous.send;
+  ambiguous.send = async (command) => {
+    const response = await sendAmbiguous(command);
+    return command.constructor.name === "DescribeSecretCommand" ? { ...response, VersionIdsToStages: { ...response.VersionIdsToStages, [sha256("second-current")]: ["AWSCURRENT"] } } : response;
+  };
+  await assert.rejects(() => readPreparedDualSlotTopology({ client: ambiguous, preparation, writePlan }), /exactly one/i);
+  const substituted = cliTopologyClient(); const sendSubstituted = substituted.send;
+  substituted.send = async (command) => {
+    const response = await sendSubstituted(command);
+    return command.constructor.name === "GetSecretValueCommand" ? { ...response, VersionId: sha256("substituted-version") } : response;
+  };
+  await assert.rejects(() => readPreparedDualSlotTopology({ client: substituted, preparation, writePlan }), /substituted/i);
+});
+
+test("production execute CLI authenticates every H-to-N resume state before invoking its executor", async () => {
+  for (let completed = 0; completed <= 7; completed += 1) {
+    const outputs = temporary(); const preparationFile = path.join(outputs.directory, "preparation.json"); const journalFile = path.join(outputs.directory, "journal.json");
+    writeFileSync(preparationFile, JSON.stringify(preparation), { mode: 0o600 }); chmodSync(preparationFile, 0o600);
+    writeRebaselineMaterialJournal({ filePath: journalFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: material });
+    const captured = []; const client = { ...cliTopologyClient(REBASELINE_SLOT_ORDER.slice(0, completed)), assertCredentialIdentity: async () => {} };
+    const result = await runProductionDualSlotRebaselineCli({
+      argv: ["--execute", "--source-sha", sourceSha, "--rotation-id", rotationId, "--preparation", preparationFile, "--material-journal", journalFile, "--workflow-run-id", "123456", "--workflow-run-attempt", "1", "--completion-output", outputs.completionFile, "--rotation-bindings-output", outputs.bindingsFile],
+      repositoryRoot: process.cwd(), readCheckout: () => ({ toolingSha: sourceSha, porcelainStatus: "" }), createRun: () => () => "{}", createClient: () => client,
+      resolveAuthorization: () => ({ authorization: authorization() }), auditReferences: () => audit,
+      executePrepared: async (input) => { captured.push(input); return { baselineComplete: true, writes: 0, completion: { baselineBindingSha256: "c".repeat(64) }, completionPath: outputs.completionFile, completionSha256: "d".repeat(64), bindingsPath: outputs.bindingsFile, bindingsSha256: "e".repeat(64) }; }, output: () => {},
+    });
+    assert.equal(result.baselineComplete, true); assert.equal(captured.length, 1); assert.equal(captured[0].currentPreconditions.liveReferenceAuditSha256, audit.stableAuditSha256);
+    rmSync(outputs.directory, { recursive: true, force: true });
+  }
+});
+
+test("production execute CLI never regenerates missing resume material", async () => {
+  const outputs = temporary(); const preparationFile = path.join(outputs.directory, "preparation.json");
+  writeFileSync(preparationFile, JSON.stringify(preparation), { mode: 0o600 }); chmodSync(preparationFile, 0o600);
+  let topologyRead = false;
+  await assert.rejects(() => runProductionDualSlotRebaselineCli({
+    argv: ["--execute", "--source-sha", sourceSha, "--rotation-id", rotationId, "--preparation", preparationFile, "--material-journal", path.join(outputs.directory, "missing-journal.json"), "--workflow-run-id", "123456", "--workflow-run-attempt", "1", "--completion-output", outputs.completionFile, "--rotation-bindings-output", outputs.bindingsFile],
+    repositoryRoot: process.cwd(), readCheckout: () => ({ toolingSha: sourceSha, porcelainStatus: "" }), createRun: () => () => "{}", createClient: () => ({ assertCredentialIdentity: async () => {} }), resolveAuthorization: () => ({ authorization: authorization() }), readPreparedTopology: async () => { topologyRead = true; throw new Error("must not read topology"); }, output: () => {},
+  }), /material journal|ENOENT|does not exist/i);
+  assert.equal(topologyRead, false); rmSync(outputs.directory, { recursive: true, force: true });
+});
+
 test("seven-slot execution resumes at every write boundary and persists exact completion plus bindings", async () => {
   for (let failAt = 1; failAt <= 7; failAt += 1) { const outputs = temporary(); const adapters = executionAdapters({ failAt }); await assert.rejects(() => execute(adapters, outputs), /interruption/); const resumed = await execute(adapters, outputs); assert.equal(resumed.baselineComplete, true); assert.equal(JSON.stringify(resumed.completion).includes(material.jwt), false); assert.equal(readFileSync(outputs.completionFile, "utf8").includes(material.jwt), false); rmSync(outputs.directory, { recursive: true, force: true }); }
+});
+
+test("every partial write boundary resumes through harmless ECS task replacement but not a changed task-definition set", async () => {
+  for (let failAt = 0; failAt <= 7; failAt += 1) {
+    const outputs = temporary(); let observation = 0;
+    const adapters = executionAdapters({ failAt, liveReferenceAudit: () => ({ ...audit, auditSha256: canonicalSha256({ observation: observation++, taskArn: `replacement-${observation}` }) }) });
+    if (failAt > 0) await assert.rejects(() => execute(adapters, outputs), /interruption/);
+    const resumed = await execute(adapters, outputs); assert.equal(resumed.baselineComplete, true); assert.equal(resumed.writes, failAt === 0 ? 7 : 7 - failAt);
+    rmSync(outputs.directory, { recursive: true, force: true });
+  }
+  const outputs = temporary(); const unsafe = executionAdapters({ liveReferenceAudit: { ...audit, stableAuditSha256: "0".repeat(64) } });
+  await assert.rejects(() => execute(unsafe, outputs), /security topology/); assert.equal([...unsafe.store.values()].every((versions) => versions.length === 1), true);
+  rmSync(outputs.directory, { recursive: true, force: true });
+});
+
+test("executor rejects an unrecognized current secret version before another write", async () => {
+  const outputs = temporary(); const adapters = executionAdapters(); const slot = REBASELINE_SLOT_ORDER[0];
+  adapters.store.set(slot, [{ versionId: sha256("unexpected-current"), stages: ["AWSCURRENT"], payloadSha256: canonicalSha256({ value: "unrelated" }) }]);
+  await assert.rejects(() => execute(adapters, outputs), /neither the authenticated historical state nor the exact prepared write/);
+  assert.equal([...adapters.store.values()].every((versions) => versions.length === 1), true);
+  rmSync(outputs.directory, { recursive: true, force: true });
 });
 
 test("completion and bindings persistence crash windows resume with zero duplicate secret versions", async () => {
@@ -166,6 +240,34 @@ test("full live ECS audit rejects a legacy running revision when service points 
   const old = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50"; const current = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:51"; const legacy = [legacyBaseline.jwtCurrent, legacyBaseline.qrPrivateCurrent, legacyBaseline.qrPublicCurrent]; const definition = (arn, references = []) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: [...legacy, ...references].map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"][index] || `EXTRA_${index}`, valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } });
   const run = (args) => { if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition: current, desiredCount: 2, runningCount: 1, pendingCount: 1, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition: current }, { id: "rollback", status: "ACTIVE", taskDefinition: old }], deploymentController: { type: "ECS" } }] }); if (args[1] === "list-tasks") return JSON.stringify({ taskArns: args.includes("RUNNING") ? ["arn:aws:ecs:eu-west-2:368992683803:task/old"] : args.includes("PENDING") ? ["arn:aws:ecs:eu-west-2:368992683803:task/pending"] : [] }); if (args[1] === "describe-tasks") return JSON.stringify({ tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/old", taskDefinitionArn: old, lastStatus: "RUNNING", desiredStatus: "RUNNING" }, { taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/pending", taskDefinitionArn: old, lastStatus: "PENDING", desiredStatus: "RUNNING" }] }); if (args[1] === "describe-task-definition") return JSON.stringify(args[args.indexOf("--task-definition") + 1] === old ? definition(old, [resources.jwtPending]) : definition(current)); throw new Error(`unexpected ${args.join(" ")}`); };
   const result = auditLiveProductionDualSlotReferences({ run, resources }); assert.equal(result.status, "FAIL"); assert.equal(result.dualSlotReferences, 1); assert.equal(result.evidence.taskDefinitionArns.includes(old), true);
+});
+
+test("ECS audit distinguishes harmless task replacement from a safe-but-reauthorization-worthy definition change", () => {
+  const td50 = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50"; const td51 = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:51";
+  const legacy = [legacyBaseline.jwtCurrent, legacyBaseline.qrPrivateCurrent, legacyBaseline.qrPublicCurrent];
+  const definition = (arn) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: legacy.map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } });
+  const run = (taskArn, taskDefinition) => (args) => {
+    if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition, desiredCount: 2, runningCount: 2, pendingCount: 0, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition }], deploymentController: { type: "ECS" } }] });
+    if (args[1] === "list-tasks") return JSON.stringify({ taskArns: args.includes("RUNNING") ? [taskArn] : [] });
+    if (args[1] === "describe-tasks") return JSON.stringify({ tasks: [{ taskArn, taskDefinitionArn: taskDefinition, lastStatus: "RUNNING", desiredStatus: "RUNNING" }] });
+    if (args[1] === "describe-task-definition") return JSON.stringify(definition(args[args.indexOf("--task-definition") + 1]));
+    throw new Error(`unexpected ${args.join(" ")}`);
+  };
+  const first = auditLiveProductionDualSlotReferences({ run: run("arn:aws:ecs:eu-west-2:368992683803:task/old", td50), resources });
+  const replacement = auditLiveProductionDualSlotReferences({ run: run("arn:aws:ecs:eu-west-2:368992683803:task/new", td50), resources });
+  const changedDefinition = auditLiveProductionDualSlotReferences({ run: run("arn:aws:ecs:eu-west-2:368992683803:task/newer", td51), resources });
+  assert.equal(first.status, "PASS"); assert.notEqual(first.auditSha256, replacement.auditSha256); assert.equal(first.stableAuditSha256, replacement.stableAuditSha256);
+  assert.equal(changedDefinition.status, "PASS"); assert.notEqual(first.stableAuditSha256, changedDefinition.stableAuditSha256);
+});
+
+test("ECS audit fails closed when a listed task cannot be tied to an inspected definition", () => {
+  const run = (args) => {
+    if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50", deployments: [], deploymentController: { type: "ECS" } }] });
+    if (args[1] === "list-tasks") return JSON.stringify({ taskArns: args.includes("RUNNING") ? ["arn:aws:ecs:eu-west-2:368992683803:task/uninspectable"] : [] });
+    if (args[1] === "describe-tasks") return JSON.stringify({ tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/uninspectable" }] });
+    throw new Error(`unexpected ${args.join(" ")}`);
+  };
+  assert.throws(() => auditLiveProductionDualSlotReferences({ run, resources }), /inventory is incomplete/i);
 });
 
 test("protected checkout rejects tracked, staged, untracked, and substituted source state", () => {
