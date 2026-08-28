@@ -174,7 +174,8 @@ export function resolveStageAReconciliationAuthorizationArtifact({ workflowRunId
 
 export async function runCli(argv = process.argv.slice(2), deps = {}) {
   if (argv.includes("--execute")) {
-    const run = deps.run || ((command, args) => execFileSync(command, args, { encoding: "utf8" }));
+    const execute = deps.execFileSync || execFileSync;
+    const run = deps.run || ((command, args, options = {}) => execute(command, args, { encoding: options.encoding === null ? null : "utf8", maxBuffer: options.maxBuffer }));
     const sourceSha = required(argv, "--source-sha");
     const resolved = (deps.resolveAuthorizationArtifact || resolveStageAReconciliationAuthorizationArtifact)({ workflowRunId: required(argv, "--workflow-run-id"), workflowRunAttempt: required(argv, "--workflow-run-attempt"), sourceSha, run });
     const authorization = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(resolved.authorizationBytes));

@@ -8,7 +8,7 @@ import test from "node:test";
 import JSZip from "jszip";
 import { buildStageAApprovalKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
-import { assertStageAApprovalKeyReconciliationAuthorization, assertStageAApprovalKeyReconciliationPlan, createStageAApprovalKeyReconciliationAuthorization, executeStageAApprovalKeyReconciliation, materializeStageAReconciliationPlan, resolveStageAReconciliationAuthorizationArtifact, STAGE_A_RECONCILIATION_AUTHORIZATION } from "../aws/production-stage-a-approval-key-reconciliation-authorization.mjs";
+import { assertStageAApprovalKeyReconciliationAuthorization, assertStageAApprovalKeyReconciliationPlan, createStageAApprovalKeyReconciliationAuthorization, executeStageAApprovalKeyReconciliation, materializeStageAReconciliationPlan, resolveStageAReconciliationAuthorizationArtifact, runCli, STAGE_A_RECONCILIATION_AUTHORIZATION } from "../aws/production-stage-a-approval-key-reconciliation-authorization.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 
@@ -168,4 +168,44 @@ test("default artifact downloader uses binary gh stdout without shell or --outpu
     if (command === "gh" && args[1]?.endsWith("/artifacts")) return JSON.stringify([{ artifacts: [badArtifact] }]);
     return run(command, args, options);
   } }), /artifact ID|invalid/i);
+});
+
+test("real --execute composition forwards binary options while retaining textual output", async () => {
+  const { authorization, renderedPlanBytes, beforeState, afterState, savedPlanBytes } = fixture(); const bytes = Buffer.from(`${JSON.stringify(authorization)}\n`); const archive = await new JSZip().file("authorization.json", bytes).generateAsync({ type: "nodebuffer" });
+  const workflow = { id: 1, run_attempt: 1, path: ".github/workflows/authorize-production-stage-a-reconciliation.yml", event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", repository: { id: 1, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { id: 1, full_name: "T-ej2003/genuine-scan-main" }, actor: { login: "operator" } };
+  const artifact = { id: 2, name: "stage-a-approval-key-reconciliation-authorization", expired: false, digest: `sha256:${sha(archive)}`, workflow_run: { id: 1, head_sha: sourceSha, repository_id: 1 } }; const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-cli-test-")); temporaryDirectories.add(directory); const savedPlanPath = path.join(directory, "caller.tfplan"); fs.writeFileSync(savedPlanPath, savedPlanBytes); const previousHome = process.env.HOME; process.env.HOME = directory; let currentState = beforeState; let currentPolicy = beforePolicy; const calls = [];
+  const execBoundary = (command, args, options = {}) => {
+    calls.push({ command, args, options });
+    if (command === "gh") {
+      if (args[1].endsWith("/actions/runs/1")) return JSON.stringify(workflow);
+      if (args[1].endsWith("/actions/runs/1/artifacts")) return JSON.stringify([{ artifacts: [artifact] }]);
+      if (args[1].endsWith("/actions/artifacts/2/zip")) { assert.equal(options.encoding, null); assert.equal(options.maxBuffer, 64 * 1024 * 1024); return archive; }
+    }
+    if (command === "unzip") {
+      if (args[0] === "-Z1") return "authorization.json\n";
+      if (args[0] === "-Z") return "-rw------- 1 operator operator 1 authorization.json\n";
+      return bytes.toString("utf8");
+    }
+    assert.equal(options.encoding, "utf8");
+    if (command === "terraform" && args.includes("show")) return renderedPlanBytes.toString("utf8");
+    if (command === "terraform" && args.includes("state")) return JSON.stringify(currentState);
+    if (command === "terraform" && args.includes("apply")) { currentState = afterState; currentPolicy = afterPolicy; return ""; }
+    if (command === "aws") return JSON.stringify({ Policy: encodeURIComponent(JSON.stringify(currentPolicy)) });
+    throw new Error(`unexpected command: ${command}`);
+  };
+  try {
+    const result = await runCli(["--execute", "--source-sha", sourceSha, "--workflow-run-id", "1", "--workflow-run-attempt", "1", "--saved-plan", savedPlanPath], { execFileSync: execBoundary, readProtectedMain: () => ({ headSha: sourceSha, freshRemoteMainSha: sourceSha }) });
+    assert.equal(result.applied, true); assert.equal(calls.filter(({ command, args }) => command === "gh" && args[1].endsWith("/zip")).length, 1); assert.equal(calls.some(({ command, args }) => command === "gh" && args.includes("--output")), false); assert.equal(calls.some(({ options }) => options.encoding === null), true); assert.equal(calls.filter(({ options }) => options.encoding === "utf8").length > 0, true);
+  } finally { process.env.HOME = previousHome; }
+});
+
+test("an --execute runner that drops binary options fails closed", async () => {
+  const { authorization } = fixture(); const bytes = Buffer.from(`${JSON.stringify(authorization)}\n`); const archive = await new JSZip().file("authorization.json", bytes).generateAsync({ type: "nodebuffer" }); const workflow = { id: 1, run_attempt: 1, path: ".github/workflows/authorize-production-stage-a-reconciliation.yml", event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", repository: { id: 1, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { id: 1, full_name: "T-ej2003/genuine-scan-main" }, actor: { login: "operator" } }; const artifact = { id: 2, name: "stage-a-approval-key-reconciliation-authorization", expired: false, digest: `sha256:${sha(archive)}`, workflow_run: { id: 1, head_sha: sourceSha, repository_id: 1 } };
+  const droppingRun = (command, args) => {
+    if (command === "gh" && args[1].endsWith("/actions/runs/1")) return JSON.stringify(workflow);
+    if (command === "gh" && args[1].endsWith("/actions/runs/1/artifacts")) return JSON.stringify([{ artifacts: [artifact] }]);
+    if (command === "gh" && args[1].endsWith("/actions/artifacts/2/zip")) return archive.toString("utf8");
+    throw new Error("unexpected command after binary download");
+  };
+  await assert.rejects(() => runCli(["--execute", "--source-sha", sourceSha, "--workflow-run-id", "1", "--workflow-run-attempt", "1", "--saved-plan", path.join(os.tmpdir(), "missing.tfplan")], { run: droppingRun, readProtectedMain: () => ({ headSha: sourceSha, freshRemoteMainSha: sourceSha }) }), /empty|binary|ZIP|digest|archive/i);
 });
