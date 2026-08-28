@@ -340,6 +340,47 @@ test("administrator preflight binds live temporary-KMS absence evidence to prote
   assert.equal(JSON.parse(fs.readFileSync(releasePath, "utf8")).sourceSha, protectedSourceSha);
 });
 
+test("administrator preflight forwards its credential-bound command runner to every IAM simulation", () => {
+  const directory = temp(); const adminPath = path.join(directory, "admin.json"); const signaturePath = path.join(directory, "admin.signature.json");
+  const plan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
+  const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
+  const simulations = [];
+  const generatedAt = new Date().toISOString();
+  assert.equal(runPermissionPreflight({
+    reportGeneratorCallerArn: "arn:aws:iam::368992683803:root", simulatedRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+    manifest, plan, planBytes: Buffer.from(JSON.stringify(plan)), generatedAt, now: generatedAt, policyPublishedAt: generatedAt,
+    cloudTrailSessionName: "pre-plan-capability", policyEvidence: shapedPolicyEvidence(), ecsExecVerifierEvidence: buildEcsExecOperatorEvidence(), phase: "initial",
+    simulate: ({ evaluation }) => {
+      const decision = evaluation.expectedDecision || "allowed";
+      simulations.push({ action: evaluation.action, resource: evaluation.resource, decision, matchedStatements: evaluation.expectedDecision ? 0 : 1, missingContextValues: evaluation.expectedMissingContextValues || [] });
+      return simulations.at(-1);
+    },
+    cloudTrail: () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] }),
+  }).status, "valid");
+  const calls = [];
+  const commandRun = (args) => {
+    assert.deepEqual(args.slice(0, 2), ["iam", "simulate-principal-policy"]);
+    calls.push(args);
+    const expected = simulations.shift(); assert(expected);
+    const action = args[args.indexOf("--action-names") + 1]; const resource = args[args.indexOf("--resource-arns") + 1];
+    assert.equal(action, expected.action); assert.equal(resource, expected.resource);
+    return JSON.stringify({ EvaluationResults: [{ EvalActionName: action, EvalResourceName: resource, EvalDecision: expected.decision, MatchedStatements: Array.from({ length: expected.matchedStatements }, () => ({})), MissingContextValues: expected.missingContextValues }] });
+  };
+  const result = runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--source-sha", protectedSourceSha, "--output", adminPath, "--signature-output", signaturePath], {
+    commandRun,
+    caller: () => "arn:aws:iam::368992683803:root",
+    collectPolicies: shapedPolicyEvidence,
+    collectEcsExecOperatorEvidence: () => buildEcsExecOperatorEvidence(),
+    readProtectedMainCheckout: () => ({ toolingSha: protectedSourceSha, currentHead: protectedSourceSha, originMainHead: protectedSourceSha, porcelainStatus: "" }),
+    sign: () => ({}),
+  });
+  const report = JSON.parse(fs.readFileSync(adminPath, "utf8"));
+  assert.equal(result.status, "valid");
+  assert.equal(calls.length, report.iamEvaluationCensus.total);
+  assert.equal(simulations.length, 0);
+  assert.equal(report.iamEvaluationCensus.failures.filter(({ error }) => /explicit credential-bound AWS command runner/.test(error || "")).length, 0);
+});
+
 test("administrator preflight rejects a root-drop policy missing provider rotation readback", () => {
   const directory = temp(); let simulated = false;
   assert.throws(() => runProductionPreflightCli(["--identity", "administrator", "--phase", "initial", "--source-sha", protectedSourceSha, "--output", path.join(directory, "admin.json"), "--signature-output", path.join(directory, "admin.signature.json")], {
