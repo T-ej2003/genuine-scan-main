@@ -22,6 +22,7 @@ import {
 } from "../security/production-initial-migration-source-advance.mjs";
 import { assertBindingsMatchLegacyBaseline, deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
+import { assertBaselineCompletion, BASELINE_COMPLETE, PRODUCTION_DUAL_SLOT_REBASELINE } from "./production-dual-slot-rebaseline-contract.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -69,9 +70,15 @@ function assertBindings(bindings = {}) {
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(bindings.qr.previousKeyVersion)) throw new Error("qr.previousKeyVersion is invalid.");
   assertNoSecretMaterial(bindings, "Rotation secret binding manifest");
   const checked = { jwt: Object.freeze({ ...bindings.jwt }), qr: Object.freeze({ ...bindings.qr }) };
+  if (bindings.operation === PRODUCTION_DUAL_SLOT_REBASELINE.kind || bindings.baselineCompletionSha256) {
+    if (bindings.operation !== PRODUCTION_DUAL_SLOT_REBASELINE.kind || bindings.baselineCompletion?.kind !== BASELINE_COMPLETE) throw new Error("Completed dual-slot baseline evidence is required for rebaseline runtime consumption.");
+    assertBaselineCompletion(bindings.baselineCompletion, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources: { jwtPending: bindings.jwt.pendingSecretId, qrPrivatePending: bindings.qr.privatePendingSecretId, qrPublicPending: bindings.qr.publicPendingSecretId, jwtPrevious: bindings.jwt.previousSecretId, qrPublicPrevious: bindings.qr.publicPreviousSecretId, qrCurrentVersion: bindings.qr.currentKeyVersionSecretId, qrPreviousVersion: bindings.qr.previousKeyVersionSecretId }, authorizationBinding: bindings.baselineCompletion.authorizationBinding, historicalRotationId: bindings.historicalRotationId, abandonmentEvidenceSha256: bindings.abandonmentEvidenceSha256 });
+    if (bindings.abandonmentEvidence?.evidenceSha256 !== bindings.abandonmentEvidenceSha256) throw new Error("Rebaseline abandonment evidence is not bound to runtime bindings.");
+    if (bindings.baselineCompletion.baselineBindingSha256 !== bindings.baselineCompletionSha256) throw new Error("Rebaseline completion hash is not bound to runtime bindings.");
+  }
   const ecs = rotationBindingsToTaskBindings(checked);
   if (bindings.ecs && JSON.stringify(bindings.ecs) !== JSON.stringify(ecs)) throw new Error("ECS rotation bindings do not match the canonical base-ARN bindings.");
-  return Object.freeze({ ...checked, ecs: Object.freeze(ecs) });
+  return Object.freeze({ ...checked, ...(bindings.operation ? { operation: bindings.operation, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, baselineCompletionSha256: bindings.baselineCompletionSha256, baselineCompletion: bindings.baselineCompletion } : {}), ecs: Object.freeze(ecs) });
 }
 
 function readInputFile(filePath, repositoryRoot, label, parse = (bytes) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))) {
@@ -144,6 +151,7 @@ export function buildProductionRotationConfig({ sourceSha, rotationId, approval,
     verificationRef: checkedApproval.verificationRef,
     jwt: checkedBindings.jwt,
     qr: checkedBindings.qr,
+    ...(checkedBindings.operation ? { operation: checkedBindings.operation, baselineCompletionSha256: checkedBindings.baselineCompletionSha256, baselineCompletion: checkedBindings.baselineCompletion } : {}),
   };
 }
 

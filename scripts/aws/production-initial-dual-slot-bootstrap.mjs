@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, generateKeyPairSync, randomBytes } from "node:crypto";
+import { createHash, createPublicKey } from "node:crypto";
 import { createRequire } from "node:module";
 import { chmodSync, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -6,6 +6,7 @@ import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPriva
 import { rotationBindingsToTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
 import { productionSupersessionEvidenceIdentity } from "../security/production-initial-migration-source-advance.mjs";
 import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
+import { generateRebaselineMaterial, fingerprint as secureFingerprint } from "./production-dual-slot-rebaseline-contract.mjs";
 
 export { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 
@@ -38,7 +39,7 @@ const SHA40 = /^[a-f0-9]{40}$/;
 const ROTATION_ID = /^[A-Za-z0-9._-]{8,128}$/;
 const VERSION = /^[A-Za-z0-9._:-]{1,128}$/;
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
-const fingerprint = (value) => sha256(value).slice(0, 16);
+const fingerprint = secureFingerprint;
 const materialFileFor = (outputFile) => `${path.resolve(outputFile)}.material`;
 const required = (value, label) => {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required.`);
@@ -49,17 +50,7 @@ const notFound = (error) => /ResourceNotFoundException|not exist|can't find/i.te
 const emptySlot = (family, slot, sourceSha) => ({ value: "", family, slot, sourceSha, initialMigration: true });
 const versionSlot = (value, slot, sourceSha) => ({ value, family: "qr_key_versions", slot, sourceSha, initialMigration: true });
 
-export function generatePendingMaterial() {
-  const pair = generateKeyPairSync("ed25519", {
-    privateKeyEncoding: { format: "pem", type: "pkcs8" },
-    publicKeyEncoding: { format: "pem", type: "spki" },
-  });
-  const qrPrivate = pair.privateKey;
-  const qrPublic = pair.publicKey;
-  const jwt = randomBytes(48).toString("base64url");
-  const qrKeyVersion = sha256(qrPublic).slice(0, 16);
-  return { jwt, qrPrivate, qrPublic, qrKeyVersion };
-}
+export const generatePendingMaterial = generateRebaselineMaterial;
 
 function pendingPayloads({ rotationId, material }) {
   return {

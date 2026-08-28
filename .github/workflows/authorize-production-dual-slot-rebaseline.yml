@@ -1,0 +1,115 @@
+name: Authorize production dual-slot rebaseline
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Protected main source SHA, required: true, type: string }
+      historical_rotation_id: { description: Authenticated abandoned rotation ID, required: true, type: string }
+      rotation_id: { description: New rotation ID, required: true, type: string }
+      abandonment_evidence_sha256: { description: Abandonment evidence SHA256, required: true, type: string }
+      baseline_identity_sha256: { description: Baseline identity SHA256, required: true, type: string }
+      resources_json: { description: Exact seven secret ARN map as JSON, required: true, type: string }
+      write_identities_json: { description: Exact seven deterministic write identities as JSON, required: true, type: string }
+      expected_secret_value_writes: { description: Exact number of secret writes, required: true, type: string }
+      expected_secret_deletes: { description: Exact number of secret deletes, required: true, type: string }
+      live_reference_audit: { description: Authenticated live reference audit result, required: true, type: string }
+      reason: { description: Operation-specific reason, required: true, type: string }
+      approved_by: { description: Independent approver identity, required: true, type: string }
+      approver_role: { description: Independent approver role, required: true, type: string }
+      verification_ref: { description: Verification reference, required: true, type: string }
+
+permissions:
+  contents: read
+
+jobs:
+  authorize-dual-slot-rebaseline:
+    name: Authorize exact dual-slot rebaseline
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate protected source before dependencies
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_REPOSITORY: T-ej2003/genuine-scan-main
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          protected_main_sha="$(gh api "repos/$EXPECTED_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$SOURCE_SHA" = "$protected_main_sha"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          install -d -m 700 "$RUNNER_TEMP/dual-slot-rebaseline"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          git ls-files -z > "$RUNNER_TEMP/dual-slot-rebaseline/protected-source-files.zlist"
+          : > "$RUNNER_TEMP/dual-slot-rebaseline/protected-source-inputs.sha256"
+          while IFS= read -r -d '' file; do sha256sum -- "$file" >> "$RUNNER_TEMP/dual-slot-rebaseline/protected-source-inputs.sha256"; done < "$RUNNER_TEMP/dual-slot-rebaseline/protected-source-files.zlist"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked authorization dependencies
+        run: npm ci
+      - name: Re-authenticate protected source after dependency installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          : > "$RUNNER_TEMP/dual-slot-rebaseline/installed-source-inputs.sha256"
+          while IFS= read -r -d '' file; do sha256sum -- "$file" >> "$RUNNER_TEMP/dual-slot-rebaseline/installed-source-inputs.sha256"; done < "$RUNNER_TEMP/dual-slot-rebaseline/protected-source-files.zlist"
+          cmp --silent "$RUNNER_TEMP/dual-slot-rebaseline/protected-source-inputs.sha256" "$RUNNER_TEMP/dual-slot-rebaseline/installed-source-inputs.sha256"
+      - name: Authenticate protected environment approval
+        id: environment-approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/production-github-environment-approval.mjs \
+            --output "$RUNNER_TEMP/dual-slot-rebaseline/environment-approval.json" \
+            --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
+            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR"
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/dual-slot-rebaseline/environment-approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Produce exact rebaseline authorization artifact
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          HISTORICAL_ROTATION_ID: ${{ inputs.historical_rotation_id }}
+          ROTATION_ID: ${{ inputs.rotation_id }}
+          ABANDONMENT_EVIDENCE_SHA256: ${{ inputs.abandonment_evidence_sha256 }}
+          BASELINE_IDENTITY_SHA256: ${{ inputs.baseline_identity_sha256 }}
+          RESOURCES_JSON: ${{ inputs.resources_json }}
+          WRITE_IDENTITIES_JSON: ${{ inputs.write_identities_json }}
+          EXPECTED_SECRET_VALUE_WRITES: ${{ inputs.expected_secret_value_writes }}
+          EXPECTED_SECRET_DELETES: ${{ inputs.expected_secret_deletes }}
+          LIVE_REFERENCE_AUDIT: ${{ inputs.live_reference_audit }}
+          REASON: ${{ inputs.reason }}
+          APPROVED_BY: ${{ inputs.approved_by }}
+          APPROVER_ROLE: ${{ inputs.approver_role }}
+          VERIFICATION_REF: ${{ inputs.verification_ref }}
+          ENVIRONMENT_APPROVAL_SHA: ${{ steps.environment-approval.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/authorize-production-dual-slot-rebaseline.mjs --authorize \
+            --output "$RUNNER_TEMP/dual-slot-rebaseline/authorization.json" \
+            --environment-approval "$RUNNER_TEMP/dual-slot-rebaseline/environment-approval.json" \
+            --environment-approval-sha256 "$ENVIRONMENT_APPROVAL_SHA" \
+            --source-sha "$SOURCE_SHA" --historical-rotation-id "$HISTORICAL_ROTATION_ID" \
+            --rotation-id "$ROTATION_ID" --abandonment-evidence-sha256 "$ABANDONMENT_EVIDENCE_SHA256" \
+            --baseline-identity-sha256 "$BASELINE_IDENTITY_SHA256" \
+            --resources-json "$RESOURCES_JSON" --write-identities-json "$WRITE_IDENTITIES_JSON" \
+            --expected-secret-value-writes "$EXPECTED_SECRET_VALUE_WRITES" --expected-secret-deletes "$EXPECTED_SECRET_DELETES" \
+            --live-reference-audit "$LIVE_REFERENCE_AUDIT" --reason "$REASON" --approved-by "$APPROVED_BY" \
+            --approver-role "$APPROVER_ROLE" --verification-ref "$VERIFICATION_REF"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-dual-slot-rebaseline-authorization
+          path: ${{ runner.temp }}/dual-slot-rebaseline/authorization.json
+          if-no-files-found: error
+          retention-days: 90
