@@ -9,9 +9,9 @@ The canonical reviewed boundary is:
 ```text
 schema version: 2
 identity model: tooling-input-tree-sha256
-image release: b3b477a37b50d7796ec9c3225c176f02f04023dc
-comparison base: b3b477a37b50d7796ec9c3225c176f02f04023dc
-tooling revision: 87c5df98c26450d455f9e9a8fb354b20d30b3900
+image release: a63da17024415c2764452b86f1dcbce0af4ae9b8
+comparison base: a63da17024415c2764452b86f1dcbce0af4ae9b8
+tooling revision: 96590f1d524e6f383e8c5ef6650427ca03b02c11
 comparison head identity: tooling-input-tree-sha256
 comparison head: e029b5b06718056b5f1fefd961d01b470ed3b2607ee06c927894ce2f742db221
 tooling input tree: e029b5b06718056b5f1fefd961d01b470ed3b2607ee06c927894ce2f742db221
