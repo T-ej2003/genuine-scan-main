@@ -169,7 +169,7 @@ export function assertAbandonmentEvidence(evidence, { sourceSha, resources, hist
 export function assertRebaselinePreconditions(preconditions = {}) {
   if (preconditions.environment !== "production" || preconditions.accountId !== PRODUCTION_DUAL_SLOT_REBASELINE.accountId || preconditions.region !== PRODUCTION_DUAL_SLOT_REBASELINE.region) fail("Rebaseline environment identity is invalid.");
   assertSha40(preconditions.sourceSha, "sourceSha"); if (preconditions.sourceCas !== true || preconditions.cleanWorktree !== true) fail("Protected source CAS is not valid.");
-  if (preconditions.existingSecretResources !== true || preconditions.liveReferenceAudit !== "PASS" || !SHA256.test(preconditions.liveReferenceAuditSha256 || "") || preconditions.legacyRuntimeAuthoritative !== true || preconditions.databaseDependencies !== 0 || preconditions.externalConsumers !== 0 || preconditions.dualSlotReferences !== 0) fail("Rebaseline preconditions are not safe.");
+  if (preconditions.existingSecretResources !== true || preconditions.liveReferenceAudit !== "PASS" || !SHA256.test(preconditions.liveReferenceAuditSha256 || "") || preconditions.legacyRuntimeAuthoritative !== true || preconditions.liveLegacyBaselineCount !== 1 || preconditions.databaseDependencies !== 0 || preconditions.externalConsumers !== 0 || preconditions.dualSlotReferences !== 0) fail("Rebaseline preconditions are not safe.");
   if (!Number.isSafeInteger(preconditions.runningTasks) || preconditions.runningTasks < 0 || !Number.isSafeInteger(preconditions.pendingTasks) || preconditions.pendingTasks < 0 || typeof preconditions.activeTaskDefinition !== "string" || !preconditions.activeTaskDefinition) fail("Live ECS topology evidence is incomplete.");
   if (preconditions.historicalTopologySha256 !== undefined) assertSha256(preconditions.historicalTopologySha256, "historicalTopologySha256");
   const resources = assertSlotMap(preconditions.resources, "resources"); const abandonmentEvidence = assertAbandonmentEvidence(preconditions.abandonmentEvidence, { sourceSha: preconditions.sourceSha, resources, historicalTopologySha256: preconditions.historicalTopologySha256 });
@@ -299,7 +299,7 @@ function assertReadSnapshot(snapshot, expected, label, historicalIdentity) {
 }
 
 function assertStableLiveReferenceAudit(audit, expectedStableAuditSha256) {
-  if (!audit || audit.status !== "PASS" || audit.dualSlotReferences !== 0 || audit.legacyRuntimeAuthoritative !== true || audit.databaseDependencies !== 0 || audit.externalConsumers !== 0 || audit.stableAuditSha256 !== expectedStableAuditSha256) fail("Live reference audit no longer satisfies the authorization-bound security topology.");
+  if (!audit || audit.status !== "PASS" || audit.dualSlotReferences !== 0 || audit.legacyRuntimeAuthoritative !== true || audit.liveLegacyBaselineCount !== 1 || audit.databaseDependencies !== 0 || audit.externalConsumers !== 0 || audit.stableAuditSha256 !== expectedStableAuditSha256) fail("Live reference audit no longer satisfies the authorization-bound security topology.");
   return audit;
 }
 

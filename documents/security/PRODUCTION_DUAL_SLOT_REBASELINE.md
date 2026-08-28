@@ -78,6 +78,8 @@ Production execution requires the exact prepared rotation ID plus the private
 preparation and material-journal paths. Execution never generates material: a missing
 or mismatched journal fails before a write. Fresh ECS reference enumeration occurs before
 each write and before completion; desired RUNNING or STOPPED is only a census filter, while
-every described task whose lastStatus is not STOPPED remains live; incomplete
+every described task whose lastStatus is not STOPPED remains live. Every live service
+task-definition must expose the same canonical legacy JWT/QR baseline; zero or multiple
+live baselines fail closed. Incomplete
 task/deployment/task-definition reads also
 fail closed.
