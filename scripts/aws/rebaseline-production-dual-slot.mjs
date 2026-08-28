@@ -8,12 +8,12 @@ import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from 
 import { createInitialDualSlotSecretsManagerClient } from "./production-initial-dual-slot-bootstrap.mjs";
 import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
-import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
 import {
   PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_SLOTS, assertRebaselinePreconditions, buildAbandonmentEvidence,
   buildRebaselineIdentity, buildRebaselinePreparation, buildRebaselineWritePlan, buildRebaselinePayloads,
   canonicalSha256, historicalSlotIdentity, loadOrCreateRebaselineMaterialJournal, readRebaselineMaterialJournal, executeProductionDualSlotRebaseline, resolveProductionDualSlotRebaselineAuthorizationArtifact, assertAbandonmentEvidence,
-  REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256,
+  REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, assertProductionDualSlotRebaselineAuthorization, assertRebaselinePreparation, assertRebaselineRotationBindings, rebaselineWritePayloadIdentities, safeWriteDescriptors,
 } from "./production-dual-slot-rebaseline-contract.mjs";
 
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -23,12 +23,43 @@ const ACCOUNT = PRODUCTION_DUAL_SLOT_REBASELINE.accountId;
 const REGION = PRODUCTION_DUAL_SLOT_REBASELINE.region;
 const CLUSTER = "mscqr-prod-euw2-main";
 const SERVICE = "mscqr-backend-servi-euw2";
-const HISTORICAL_ROTATION_ID = "rotation-20260826060632-b15b3f51";
+const HISTORICAL_ROTATION_ID = REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID;
 const HISTORICAL_SOURCES = ["5506cbe3972a27a77c211f2891756c3b97de7197", "9f39d1c4f646467146c12c0587fd7ad585f3fe10"];
 const required = (args, name) => { const value = args.get(name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const parseArgs = (argv) => { const values = new Map(); for (let i = 0; i < argv.length; i += 1) { const key = argv[i]?.replace(/^--/, ""); if (["prepare", "execute"].includes(key)) { if (values.has(key)) throw new Error(`Duplicate argument: ${argv[i]}`); values.set(key, true); continue; } if (!key || !argv[i + 1] || argv[i + 1].startsWith("--") || values.has(key)) throw new Error(`Invalid or duplicate argument: ${argv[i]}`); values.set(key, argv[++i]); } return values; };
 const json = (bytes) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 const parseSecret = (response, label, expectedVersionId) => { if (expectedVersionId !== undefined && response?.VersionId !== expectedVersionId) throw new Error(`${label} returned a substituted secret version.`); if (typeof response?.SecretString !== "string") throw new Error(`${label} is not a reviewed JSON secret.`); const value = JSON.parse(response.SecretString); if (!value || typeof value !== "object" || typeof value.value !== "string") throw new Error(`${label} has an invalid rotation payload.`); return { value, payloadSha256: canonicalSha256(value) }; };
+
+export async function verifyLiveProductionDualSlotRebaseline({ client, bindings, authorization } = {}) {
+  assertRebaselineRotationBindings(bindings, { authorization });
+  const resources = {
+    jwtPending: bindings.jwt.pendingSecretId,
+    qrPrivatePending: bindings.qr.privatePendingSecretId,
+    qrPublicPending: bindings.qr.publicPendingSecretId,
+    jwtPrevious: bindings.jwt.previousSecretId,
+    qrPublicPrevious: bindings.qr.publicPreviousSecretId,
+    qrCurrentVersion: bindings.qr.currentKeyVersionSecretId,
+    qrPreviousVersion: bindings.qr.previousKeyVersionSecretId,
+  };
+  assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources });
+  const versionIds = {};
+  const payloadIdentities = {};
+  for (const [slot, secretArn] of Object.entries(resources)) {
+    const described = await client.send(new DescribeSecretCommand({ SecretId: secretArn }));
+    if (described.ARN !== secretArn) throw new Error(`Live ${slot} secret ARN is substituted.`);
+    const current = Object.entries(described.VersionIdsToStages || {}).filter(([, stages]) => Array.isArray(stages) && stages.includes("AWSCURRENT"));
+    const expectedVersionId = authorization.writeIdentities[slot];
+    if (current.length !== 1 || current[0][0] !== expectedVersionId || current[0][1].length !== 1 || current[0][1][0] !== "AWSCURRENT") throw new Error(`Live ${slot} secret is not the exact completed rebaseline version.`);
+    const parsed = parseSecret(await client.send(new GetSecretValueCommand({ SecretId: secretArn, VersionId: expectedVersionId })), `Live ${slot}`, expectedVersionId);
+    const expected = authorization.writePayloadIdentities[slot];
+    if (parsed.payloadSha256 !== expected.payloadSha256 || parsed.value.sourceSha !== bindings.sourceSha || parsed.value.rotationId !== bindings.rotationId || (parsed.value.materialType !== undefined ? parsed.value.materialType : parsed.value.baselineMarker) !== expected.materialType || (parsed.value.keyVersion || null) !== expected.keyVersion) throw new Error(`Live ${slot} secret payload does not match the protected rebaseline authorization.`);
+    versionIds[slot] = expectedVersionId;
+    payloadIdentities[slot] = expected;
+  }
+  const body = { kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, authorizationSha256: authorization.authorizationSha256, resources, versionIds, payloadIdentities };
+  return Object.freeze({ ...body, livePostWriteSha256: canonicalSha256(body) });
+}
+
 
 export async function readDualSlotTopology({ client, names = REBASELINE_SLOTS, historicalRotationId = HISTORICAL_ROTATION_ID, preparedState, preparedWritePlan } = {}) {
   if ((preparedState && !preparedWritePlan) || (!preparedState && preparedWritePlan)) throw new Error("Prepared rebaseline topology requires both authenticated preparation and write plan.");
@@ -168,7 +199,7 @@ export function readAuthenticatedRebaselineCheckout({ sourceSha, gitRun = (args)
   return checkout;
 }
 
-export async function prepareProductionDualSlotRebaseline({ sourceSha, rotationId, outputDirectory, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), client, topology: suppliedTopology, taskDefinition, liveReferenceAudit = {}, repositoryRoot = REPOSITORY_ROOT, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, afterAbandonmentPersist } = {}) {
+export async function prepareProductionDualSlotRebaseline({ sourceSha, rotationId, outputDirectory, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), client, topology: suppliedTopology, taskDefinition, liveReferenceAudit = {}, repositoryRoot = REPOSITORY_ROOT, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, afterAbandonmentPersist, afterPreparationPersist } = {}) {
   const directory = ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot, create: true, normalize: true, label: "Dual-slot rebaseline preparation directory" });
   const checkout = readAuthenticatedRebaselineCheckout({ sourceSha, gitRun, repositoryRoot });
   const topology = suppliedTopology || await readDualSlotTopology({ client });
@@ -183,25 +214,36 @@ export async function prepareProductionDualSlotRebaseline({ sourceSha, rotationI
     if (abandonmentEvidence.historicalRotationId !== HISTORICAL_ROTATION_ID || canonicalSha256(abandonmentEvidence.currentVersionIds) !== canonicalSha256(topology.currentVersionIds) || canonicalSha256(abandonmentEvidence.observedSlotIdentities) !== canonicalSha256(topology.observedSlotIdentities) || abandonmentEvidence.liveReferenceAuditSha256 !== audit.stableAuditSha256 || abandonmentEvidence.legacyRuntimeAuthoritative !== audit.legacyRuntimeAuthoritative) throw new Error("Existing dual-slot abandonment evidence does not match the authenticated preparation baseline.");
   } else {
     abandonmentEvidence = buildAbandonmentEvidence({ sourceSha: checkout.toolingSha, historicalRotationId: HISTORICAL_ROTATION_ID, historicalSourceShas: HISTORICAL_SOURCES, resources: topology.resources, currentVersionIds: topology.currentVersionIds, historicalTopologySha256, observedSlotIdentities: topology.observedSlotIdentities, liveReferenceAudit: audit.status, liveReferenceAuditSha256: audit.stableAuditSha256, legacyRuntimeAuthoritative: audit.legacyRuntimeAuthoritative });
+    writeStageBPrivateFileAtomicExclusive({ filePath: abandonmentFile, bytes: Buffer.from(`${JSON.stringify(abandonmentEvidence, null, 2)}\n`), repositoryRoot, label: "Dual-slot abandonment evidence" });
+    if (typeof afterAbandonmentPersist === "function") await afterAbandonmentPersist();
   }
   const preconditions = assertRebaselinePreconditions({ environment: "production", accountId: ACCOUNT, region: REGION, sourceSha: checkout.toolingSha, sourceCas: checkout.toolingSha === sourceSha, cleanWorktree: checkout.porcelainStatus === "", existingSecretResources: true, liveReferenceAudit: audit.status, liveReferenceAuditSha256: audit.stableAuditSha256, legacyRuntimeAuthoritative: audit.legacyRuntimeAuthoritative, databaseDependencies: audit.databaseDependencies, externalConsumers: audit.externalConsumers, dualSlotReferences: audit.dualSlotReferences, runningTasks: audit.runningTasks, pendingTasks: audit.pendingTasks, activeTaskDefinition: audit.activeTaskDefinition, resources: topology.resources, historicalTopologySha256, abandonmentEvidence });
   const rotation = buildRebaselineIdentity({ sourceSha: checkout.toolingSha, rotationId, resources: topology.resources, abandonmentEvidenceSha256: abandonmentEvidence.evidenceSha256, legacyBaseline: audit.legacy });
   const material = loadOrCreateRebaselineMaterialJournal({ filePath: path.join(directory, "rebaseline-material.json"), repositoryRoot, sourceSha: checkout.toolingSha, rotationId, baselineIdentitySha256: rotation.identitySha256 });
   const payloads = buildRebaselinePayloads({ sourceSha: checkout.toolingSha, rotationId, generatedMaterial: material.material, legacyBaseline: audit.legacy });
   const writePlan = buildRebaselineWritePlan({ sourceSha: checkout.toolingSha, rotationId, resources: topology.resources, baselineIdentitySha256: rotation.identitySha256, payloads });
-  const preparation = buildRebaselinePreparation({ preconditions, sourceSha: checkout.toolingSha, rotationId, baselineIdentity: rotation, writePlan });
-  if (!existingAbandonment) {
-    writeStageBPrivateFileAtomicExclusive({ filePath: abandonmentFile, bytes: Buffer.from(`${JSON.stringify(abandonmentEvidence, null, 2)}\n`), repositoryRoot, label: "Dual-slot abandonment evidence" });
-    if (typeof afterAbandonmentPersist === "function") await afterAbandonmentPersist();
-  }
   const preparationFile = path.join(directory, "rebaseline-preparation.json");
-  writeStageBPrivateFileAtomic({ filePath: preparationFile, bytes: Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`), repositoryRoot, label: "Dual-slot rebaseline preparation" });
-  return Object.freeze({ sourceSha: checkout.toolingSha, rotationId, abandonmentFile, preparationFile, preparationSha256: preparation.preparationSha256, writeIdentities: Object.fromEntries(writePlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken])), writeCount: 7, liveReferenceAuditSha256: audit.stableAuditSha256, liveReferenceObservationSha256: audit.auditSha256, observedSlotIdentitiesSha256: topology.observedSlotIdentitiesSha256 });
+  const proposedPreparation = buildRebaselinePreparation({ preconditions, sourceSha: checkout.toolingSha, rotationId, baselineIdentity: rotation, writePlan });
+  const existingPreparation = lstatSync(preparationFile, { throwIfNoEntry: false });
+  const preparation = existingPreparation
+    ? (() => {
+      if (!existingPreparation.isFile() || existingPreparation.isSymbolicLink()) throw new Error("Existing dual-slot rebaseline preparation must be a regular private file.");
+      const recovered = assertRebaselinePreparation(json(readStageBPrivateFileBytes({ filePath: preparationFile, repositoryRoot, label: "Dual-slot rebaseline preparation" }).bytes), { sourceSha: checkout.toolingSha, rotationId });
+      if (recovered.abandonmentEvidence.evidenceSha256 !== abandonmentEvidence.evidenceSha256) throw new Error("Existing dual-slot rebaseline preparation abandonment evidence does not match the authenticated resume contract.");
+      if (recovered.baselineIdentity.identitySha256 !== rotation.identitySha256) throw new Error("Existing dual-slot rebaseline preparation baseline identity does not match the authenticated resume contract.");
+      if (canonicalSha256(recovered.writePlan) !== canonicalSha256(safeWriteDescriptors(writePlan))) throw new Error("Existing dual-slot rebaseline preparation write plan does not match the authenticated resume contract.");
+      return recovered;
+    })()
+    : (() => {
+      writeStageBPrivateFileAtomicExclusive({ filePath: preparationFile, bytes: Buffer.from(`${JSON.stringify(proposedPreparation, null, 2)}\n`), repositoryRoot, label: "Dual-slot rebaseline preparation" });
+      return proposedPreparation;
+    })();
+  if (!existingPreparation && typeof afterPreparationPersist === "function") await afterPreparationPersist();
+  return Object.freeze({ sourceSha: checkout.toolingSha, rotationId, abandonmentFile, preparationFile, preparationSha256: preparation.preparationSha256, writeIdentities: Object.fromEntries(writePlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken])), writePayloadIdentities: rebaselineWritePayloadIdentities(writePlan), writeCount: 7, liveReferenceAuditSha256: audit.stableAuditSha256, liveReferenceObservationSha256: audit.auditSha256, observedSlotIdentitiesSha256: topology.observedSlotIdentitiesSha256 });
 }
 
 export async function executePreparedProductionDualSlotRebaseline({ preparationFile, authorization, materialJournalFile, completionFile, bindingsFile, repositoryRoot = REPOSITORY_ROOT, sourceSha, currentPreconditions, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), client, adapters, afterCompletionPersist, afterBindingsPersist } = {}) {
   const preparation = json(readStageBPrivateFileBytes({ filePath: preparationFile, repositoryRoot, label: "Dual-slot rebaseline preparation" }).bytes);
-  const { assertRebaselinePreparation, assertProductionDualSlotRebaselineAuthorization } = await import("./production-dual-slot-rebaseline-contract.mjs");
   assertRebaselinePreparation(preparation, { sourceSha, rotationId: preparation.rotationId });
   if (preparation.historicalTopologySha256 !== REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256) throw new Error("Rebaseline preparation historical topology is not the protected-source abandoned identity.");
   const checkout = readAuthenticatedRebaselineCheckout({ sourceSha, gitRun, repositoryRoot });
@@ -216,13 +258,13 @@ export async function executePreparedProductionDualSlotRebaseline({ preparationF
   const preparedBySlot = Object.fromEntries(preparation.writePlan.map((entry) => [entry.slot, entry]));
   for (const entry of writePlan) if (entry.payloadSha256 !== preparedBySlot[entry.slot]?.payloadSha256 || entry.secretArn !== preparedBySlot[entry.slot]?.secretArn || entry.clientRequestToken !== preparedBySlot[entry.slot]?.clientRequestToken) throw new Error(`Rebaseline material for ${entry.slot} does not match the authenticated preparation.`);
   const descriptors = Object.fromEntries(writePlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken]));
-  if (JSON.stringify(descriptors) !== JSON.stringify(authorization.writeIdentities)) throw new Error("Authorization write identities do not match the authenticated preparation.");
+  if (JSON.stringify(descriptors) !== JSON.stringify(authorization.writeIdentities) || canonicalSha256(rebaselineWritePayloadIdentities(writePlan)) !== canonicalSha256(authorization.writePayloadIdentities)) throw new Error("Authorization write identities do not match the authenticated preparation.");
   return executeProductionDualSlotRebaseline({ preconditions: current, sourceSha, rotationId: preparation.rotationId, baselineIdentity: preparation.baselineIdentity, writePlan, authorization, completionFile, bindingsFile, repositoryRoot, afterCompletionPersist, afterBindingsPersist, ...adapters });
 }
 
 export function createProductionRebaselineClient({ profile = "mscqr-production-release-deployer" } = {}) { return createInitialDualSlotSecretsManagerClient({ region: REGION, profile }); }
 
-export async function runProductionDualSlotRebaselineCli({ argv = process.argv.slice(2), repositoryRoot = REPOSITORY_ROOT, readCheckout = readAuthenticatedRebaselineCheckout, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), createRun = () => createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: REGION }), createClient = createProductionRebaselineClient, resolveAuthorization = resolveProductionDualSlotRebaselineAuthorizationArtifact, readTopology = readDualSlotTopology, readPreparedTopology = readPreparedDualSlotTopology, auditReferences = auditLiveProductionDualSlotReferences, executePrepared = executePreparedProductionDualSlotRebaseline, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, afterAbandonmentPersist, output = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`) } = {}) {
+export async function runProductionDualSlotRebaselineCli({ argv = process.argv.slice(2), repositoryRoot = REPOSITORY_ROOT, readCheckout = readAuthenticatedRebaselineCheckout, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), createRun = () => createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: REGION }), createClient = createProductionRebaselineClient, resolveAuthorization = resolveProductionDualSlotRebaselineAuthorizationArtifact, readTopology = readDualSlotTopology, readPreparedTopology = readPreparedDualSlotTopology, auditReferences = auditLiveProductionDualSlotReferences, executePrepared = executePreparedProductionDualSlotRebaseline, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, afterAbandonmentPersist, afterPreparationPersist, output = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`) } = {}) {
   const args = parseArgs(argv);
   const sourceSha = required(args, "source-sha");
   if (args.has("prepare")) {
@@ -232,14 +274,13 @@ export async function runProductionDualSlotRebaselineCli({ argv = process.argv.s
     const outputDirectory = path.resolve(required(args, "output-directory")); mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
     const topology = await readTopology({ client });
     const audit = auditReferences({ run, resources: topology.resources, databaseDependencies: Number(required(args, "database-dependencies")), externalConsumers: Number(required(args, "external-consumers")) });
-    const result = await prepareProductionDualSlotRebaseline({ sourceSha: checkout.toolingSha, rotationId: required(args, "rotation-id"), outputDirectory, client, topology, liveReferenceAudit: audit, repositoryRoot, gitRun, historicalTopologySha256, afterAbandonmentPersist });
+    const result = await prepareProductionDualSlotRebaseline({ sourceSha: checkout.toolingSha, rotationId: required(args, "rotation-id"), outputDirectory, client, topology, liveReferenceAudit: audit, repositoryRoot, gitRun, historicalTopologySha256, afterAbandonmentPersist, afterPreparationPersist });
     output(result);
     return result;
   } else if (args.has("execute")) {
     const checkout = readCheckout({ sourceSha, repositoryRoot });
     const requestedRotationId = required(args, "rotation-id");
     const preparationFile = path.resolve(required(args, "preparation")); const preparation = json(readStageBPrivateFileBytes({ filePath: preparationFile, repositoryRoot, label: "Dual-slot rebaseline preparation" }).bytes);
-    const { assertRebaselinePreparation } = await import("./production-dual-slot-rebaseline-contract.mjs");
     assertRebaselinePreparation(preparation, { sourceSha: checkout.toolingSha, rotationId: requestedRotationId });
     const run = createRun();
     const client = createClient(); await client.assertCredentialIdentity();

@@ -10,6 +10,7 @@ on:
       baseline_identity_sha256: { description: Baseline identity SHA256, required: true, type: string }
       resources_json: { description: Exact seven secret ARN map as JSON, required: true, type: string }
       write_identities_json: { description: Exact seven deterministic write identities as JSON, required: true, type: string }
+      write_payload_identities_json: { description: Exact seven safe payload identities as JSON, required: true, type: string }
       expected_secret_value_writes: { description: Exact number of secret writes, required: true, type: string }
       expected_secret_deletes: { description: Exact number of secret deletes, required: true, type: string }
       live_reference_audit: { description: Authenticated live reference audit result, required: true, type: string }
@@ -90,6 +91,7 @@ jobs:
           BASELINE_IDENTITY_SHA256: ${{ inputs.baseline_identity_sha256 }}
           RESOURCES_JSON: ${{ inputs.resources_json }}
           WRITE_IDENTITIES_JSON: ${{ inputs.write_identities_json }}
+          WRITE_PAYLOAD_IDENTITIES_JSON: ${{ inputs.write_payload_identities_json }}
           EXPECTED_SECRET_VALUE_WRITES: ${{ inputs.expected_secret_value_writes }}
           EXPECTED_SECRET_DELETES: ${{ inputs.expected_secret_deletes }}
           LIVE_REFERENCE_AUDIT: ${{ inputs.live_reference_audit }}
@@ -110,6 +112,7 @@ jobs:
             --rotation-id "$ROTATION_ID" --abandonment-evidence-sha256 "$ABANDONMENT_EVIDENCE_SHA256" \
             --baseline-identity-sha256 "$BASELINE_IDENTITY_SHA256" \
             --resources-json "$RESOURCES_JSON" --write-identities-json "$WRITE_IDENTITIES_JSON" \
+            --write-payload-identities-json "$WRITE_PAYLOAD_IDENTITIES_JSON" \
             --expected-secret-value-writes "$EXPECTED_SECRET_VALUE_WRITES" --expected-secret-deletes "$EXPECTED_SECRET_DELETES" \
             --live-reference-audit "$LIVE_REFERENCE_AUDIT" --live-reference-audit-sha256 "$LIVE_REFERENCE_AUDIT_SHA256" \
             --observed-slot-identities-sha256 "$OBSERVED_SLOT_IDENTITIES_SHA256" --reason "$REASON" --approved-by "$APPROVED_BY" \

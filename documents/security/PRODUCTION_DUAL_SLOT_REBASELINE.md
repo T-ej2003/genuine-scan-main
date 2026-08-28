@@ -45,6 +45,26 @@ primitive before any secret write is reachable. If preparation stops after aband
 publication, the next run authenticates and reuses that exact immutable evidence rather
 than regenerating its timestamp or historical snapshot; a divergent existing artifact is
 rejected.
+
+If a process stops after the private preparation is published but before it can report
+success, rerunning preparation authenticates and reuses the same source, abandonment,
+baseline, and seven safe write descriptors. It never regenerates material or replaces
+the immutable preparation file; a divergent preparation fails closed.
+
+The protected authorization says that the seven deterministic writes may occur; it is
+not proof that they did. Runtime preparation therefore re-resolves the protected
+environment authorization artifact and performs fresh `DescribeSecret` plus
+`GetSecretValue` reads for every exact authorized resource. It accepts a baseline only
+when each `AWSCURRENT` VersionId, staging label, non-secret canonical payload identity,
+and operation/source/rotation/slot metadata matches both the authorization and the
+prepared material. A locally constructed completion or binding file cannot substitute
+for this post-write observation. The later cutover control plane repeats the same
+authorization resolution and seven-slot read immediately before rotation preparation.
+That coordinator intentionally advances the baseline slots; immediately before overlap
+task-definition registration, its read-only `--status` path re-authenticates the
+persisted prepared-rotation state against the live ten-slot topology instead of
+incorrectly requiring the superseded baseline versions.
+
 Runtime preparation accepts only the declared rebaseline binding producer and requires
 an independently resolved protected-environment authorization artifact whose digest
 matches the completion. The operation performs no `DeleteSecret`, Terraform, ECS, database,

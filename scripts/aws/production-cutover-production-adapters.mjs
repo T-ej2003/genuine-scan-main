@@ -31,6 +31,7 @@ import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence, createReleasePreflightCheckerTrustSignatureVerifier } from "./production-release-preflight-checker-attestation.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { resolveProductionDualSlotRebaselineAuthorizationArtifact, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
 
 export { PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
@@ -72,13 +73,13 @@ const credentialEnvironment = ({ credentialSource, profile, env = process.env, i
 
 export function createProductionCommandRunner({ credentialSource, profile, region = REGION, env: parentEnvironment = process.env, exec = execFileSync } = {}) {
   const environment = credentialEnvironment({ credentialSource, profile, env: parentEnvironment, injected: credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST && exec !== execFileSync });
-  return (args) => {
+  return (args, { encoding = "utf8", maxBuffer } = {}) => {
     if (!Array.isArray(args) || args.length === 0) throw new Error("Production command arguments are required.");
     const command = args[0] === "aws" ? args.slice(1) : [...args];
     const isAwsService = AWS_SERVICE_COMMANDS.has(command[0]);
     const normalized = isAwsService && !command.includes("--region") ? [...command, "--region", region] : command;
     const executable = isAwsService ? "aws" : normalized[0];
-    return exec(executable, normalized.slice(isAwsService ? 0 : 1), { cwd: process.cwd(), env: environment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return exec(executable, normalized.slice(isAwsService ? 0 : 1), { cwd: process.cwd(), env: environment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });
   };
 }
 
@@ -222,11 +223,38 @@ export function createProductionRotationInfrastructureAdapter({ run = execFileSy
   };
 }
 
-export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier", interactiveMfaCodeProvider, verifierMfaCodeProvider = promptProductionMfaCode, verifyReleasePreflightAttestationSignature } = {}) {
+export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier", interactiveMfaCodeProvider, verifierMfaCodeProvider = promptProductionMfaCode, verifyReleasePreflightAttestationSignature, resolveRebaselineAuthorization = resolveProductionDualSlotRebaselineAuthorizationArtifact, createCommandRunner = createProductionCommandRunner } = {}) {
   if (!config || typeof config !== "object" || !/^[a-f0-9]{64}$/.test(runtimeConfigSha256 || "")) throw new Error("Hash-authenticated production cutover adapter configuration is required.");
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || config.sourceSha !== sourceSha || typeof rotationId !== "string" || config.rotationId !== rotationId) throw new Error("Production cutover adapter identity does not match its runtime config.");
   if (releaseProfile !== "mscqr-production-release-deployer" || verifierProfile !== "mscqr-production-ecs-exec-verifier") throw new Error("Production cutover adapter profiles do not match the asymmetric identity contract.");
-  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: releaseProfile });
+  if (typeof resolveRebaselineAuthorization !== "function" || typeof createCommandRunner !== "function") throw new Error("Rebaseline authorization adapters are invalid.");
+  const releaseRun = createCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: releaseProfile });
+  const rebaseline = config.rebaselineRuntime
+    ? {
+      revalidate: async () => {
+        const bindings = config.rebaselineRuntime.bindings;
+        const resources = {
+          jwtPending: bindings.jwt.pendingSecretId,
+          qrPrivatePending: bindings.qr.privatePendingSecretId,
+          qrPublicPending: bindings.qr.publicPendingSecretId,
+          jwtPrevious: bindings.jwt.previousSecretId,
+          qrPublicPrevious: bindings.qr.publicPreviousSecretId,
+          qrCurrentVersion: bindings.qr.currentKeyVersionSecretId,
+          qrPreviousVersion: bindings.qr.previousKeyVersionSecretId,
+        };
+        const authorization = resolveRebaselineAuthorization({
+          ...config.rebaselineRuntime.authorizationCoordinates,
+          sourceSha: bindings.sourceSha,
+          rotationId: bindings.rotationId,
+          resources,
+          run: (command, args, options) => releaseRun([command, ...args], options),
+        }).authorization;
+        const verified = verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization });
+        if (verified.livePostWriteSha256 !== config.livePostWriteSha256) throw new Error("Live rebaseline post-write state changed after runtime preparation.");
+        return verified;
+      },
+    }
+    : undefined;
   const releasePreflightAttestationVerifier = verifyReleasePreflightAttestationSignature || createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun });
   const releaseSts = createAwsStsRunner({ profile: releaseProfile });
   const verifierSts = createAwsStsRunner({ profile: config.bootstrapProfile || verifierProfile });
@@ -360,6 +388,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       }
       : { adapter: stageA, endpointSecurityGroupId: config.endpointSecurityGroupId, runtimeSecurityGroupId: config.runtimeSecurityGroupId },
     artifactSigning: artifact,
+    rebaseline,
     overlapTask: { input: config.overlapTaskInput, register: overlapRegistration, describe: async (arn) => parseJson(releaseRun, ["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]).taskDefinition },
     preDeploymentInventory: { execute: async ({ rotationId: currentRotationId }) => preDeploymentInventory.run({ rotationId: currentRotationId }) },
     inventory: { execute: inventoryExecute, taskDefinitionArn: config.inventoryTaskDefinitionArn || config.expectedCurrentTaskDefinitionArn },

@@ -19,6 +19,7 @@ export function runProductionDualSlotRebaselineAuthorizationCli(argv = process.a
   const evidence = capturedEvidence.value;
   const resources = JSON.parse(required(argv, "--resources-json"));
   const writeIdentities = JSON.parse(required(argv, "--write-identities-json"));
+  const writePayloadIdentities = JSON.parse(required(argv, "--write-payload-identities-json"));
   const authorization = createProductionDualSlotRebaselineAuthorization({
     protectedEnvironmentApprovalEvidence: evidence,
     sourceSha: required(argv, "--source-sha"),
@@ -28,6 +29,7 @@ export function runProductionDualSlotRebaselineAuthorizationCli(argv = process.a
     baselineIdentitySha256: required(argv, "--baseline-identity-sha256"),
     resources,
     writeIdentities,
+    writePayloadIdentities,
     expectedSecretValueWrites: Number(required(argv, "--expected-secret-value-writes")),
     expectedSecretDeletes: Number(required(argv, "--expected-secret-deletes")),
     liveReferenceAudit: required(argv, "--live-reference-audit"),

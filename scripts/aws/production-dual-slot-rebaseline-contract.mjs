@@ -18,6 +18,7 @@ export const REBASELINE_PREPARATION_KIND = "PRODUCTION_DUAL_SLOT_REBASELINE_PREP
 export const REBASELINE_ROTATION_BINDINGS_KIND = "PRODUCTION_DUAL_SLOT_REBASELINE_ROTATION_BINDINGS";
 export const REBASELINE_ROTATION_BINDINGS_PRODUCER = "scripts/aws/production-dual-slot-rebaseline-contract.mjs:buildRebaselineRotationBindings";
 export const REBASELINE_HISTORICAL_SOURCE_SHAS = Object.freeze(["5506cbe3972a27a77c211f2891756c3b97de7197", "9f39d1c4f646467146c12c0587fd7ad585f3fe10"]);
+export const REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID = "rotation-20260826060632-b15b3f51";
 // SHA-256 of private retained supersession evidence's exact {resources,versionIds}.
 // Production ARNs and version IDs remain private evidence, not committed source.
 export const REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256 = "80ec0c997561f13e4162e1aeaf9133dd58e4b5aa40f8eba5b13ee3474528e1ae";
@@ -81,7 +82,7 @@ export function historicalSlotIdentity({ slot, secretArn, versionId, stages, pay
   const sourceSha = payload.sourceSha === undefined ? undefined : assertSha40(payload.sourceSha, `Historical ${slot} sourceSha`);
   if (sourceSha !== undefined && !REBASELINE_HISTORICAL_SOURCE_SHAS.includes(sourceSha)) fail(`Historical ${slot} source provenance is not approved.`);
   const rotationId = payload.rotationId === undefined ? undefined : assertRotation(payload.rotationId, `Historical ${slot} rotationId`);
-  if (rotationId !== undefined && rotationId !== "rotation-20260826060632-b15b3f51") fail(`Historical ${slot} rotation provenance is not approved.`);
+  if (rotationId !== undefined && rotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID) fail(`Historical ${slot} rotation provenance is not approved.`);
   if (payload.materialFingerprint !== undefined && (typeof payload.materialFingerprint !== "string" || payload.materialFingerprint !== fingerprint(payload.value))) fail(`Historical ${slot} material fingerprint is not authentic.`);
   // The original bootstrap schema legitimately omitted sourceSha on marker payloads.
   if (sourceSha === undefined && payload.initialMigration !== true) fail(`Historical ${slot} source-less schema is not authentic.`);
@@ -105,7 +106,7 @@ function assertHistoricalSlotIdentity(value, { slot, secretArn, versionId } = {}
   if (!SHA256.test(value.payloadSha256 || "") || !SHA256.test(value.identitySha256 || "") || !/^INITIAL_DUAL_SLOT_(LEGACY_SOURCELESS|SOURCE_ADVANCE|ROTATION)_V1$/.test(value.payloadSchema || "")) fail("Historical slot identity hash or schema is invalid.");
   if (value.observedSourceSha !== undefined && !REBASELINE_HISTORICAL_SOURCE_SHAS.includes(value.observedSourceSha)) fail("Historical slot source provenance is invalid.");
   if (value.observedSourceSha === undefined && value.payloadSchema !== "INITIAL_DUAL_SLOT_LEGACY_SOURCELESS_V1") fail("Historical source-less payload schema is invalid.");
-  if (value.observedRotationId !== undefined && value.observedRotationId !== "rotation-20260826060632-b15b3f51") fail("Historical slot rotation provenance is invalid.");
+  if (value.observedRotationId !== undefined && value.observedRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID) fail("Historical slot rotation provenance is invalid.");
   const { identitySha256, ...body } = value; if (canonicalSha256(body) !== identitySha256) fail("Historical slot identity hash is invalid.");
   return value;
 }
@@ -141,7 +142,7 @@ export function assertGeneratedMaterial(material) {
 }
 
 export function buildAbandonmentEvidence({ sourceSha, historicalRotationId, historicalSourceShas, resources, currentVersionIds, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, observedSlotIdentities, liveReferenceAudit, liveReferenceAuditSha256, legacyRuntimeAuthoritative, observedAt = new Date().toISOString() } = {}) {
-  assertSha40(sourceSha, "sourceSha"); assertRotation(historicalRotationId, "historicalRotationId");
+  assertSha40(sourceSha, "sourceSha"); assertRotation(historicalRotationId, "historicalRotationId"); if (historicalRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID) fail("Historical rotation identity is not the approved abandoned pre-cutover rotation.");
   const checkedResources = assertSlotMap(resources, "resources"); exactKeys(currentVersionIds, REBASELINE_SLOT_ORDER, "currentVersionIds");
   for (const slot of REBASELINE_SLOT_ORDER) assertVersion(currentVersionIds[slot], `currentVersionIds.${slot}`);
   const checkedIdentities = assertHistoricalSlotIdentities(observedSlotIdentities, checkedResources, currentVersionIds, historicalTopologySha256);
@@ -154,7 +155,7 @@ export function buildAbandonmentEvidence({ sourceSha, historicalRotationId, hist
 export function assertAbandonmentEvidence(evidence, { sourceSha, resources, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256 } = {}) {
   exactKeys(evidence, ["schemaVersion", "kind", "environment", "accountId", "region", "sourceSha", "historicalRotationId", "historicalSourceShas", "resources", "currentVersionIds", "historicalTopologySha256", "observedSlotIdentities", "observedSlotIdentitiesSha256", "liveReferenceAudit", "liveReferenceAuditSha256", "legacyRuntimeAuthoritative", "observedAt", "evidenceSha256"], "Abandonment evidence");
   if (evidence.schemaVersion !== 2 || evidence.kind !== ABANDONED_PRE_CUTOVER || evidence.environment !== "production" || evidence.accountId !== PRODUCTION_DUAL_SLOT_REBASELINE.accountId || evidence.region !== PRODUCTION_DUAL_SLOT_REBASELINE.region || evidence.sourceSha !== sourceSha || evidence.liveReferenceAudit !== "PASS" || !SHA256.test(evidence.liveReferenceAuditSha256 || "") || evidence.legacyRuntimeAuthoritative !== true) fail("Abandonment evidence identity is invalid.");
-  assertRotation(evidence.historicalRotationId, "historicalRotationId"); assertHistoricalSources(evidence.historicalSourceShas);
+  assertRotation(evidence.historicalRotationId, "historicalRotationId"); if (evidence.historicalRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID) fail("Abandonment evidence historical rotation is not exact."); assertHistoricalSources(evidence.historicalSourceShas);
   const expectedResources = assertSlotMap(resources || evidence.resources, "resources"); if (canonical(evidence.resources) !== canonical(expectedResources)) fail("Abandonment evidence resources are not exact.");
   exactKeys(evidence.currentVersionIds, REBASELINE_SLOT_ORDER, "currentVersionIds"); for (const slot of REBASELINE_SLOT_ORDER) assertVersion(evidence.currentVersionIds[slot], `currentVersionIds.${slot}`);
   if (evidence.historicalTopologySha256 !== historicalTopologySha256) fail("Abandonment evidence historical topology identity is not exact.");
@@ -209,7 +210,26 @@ export function buildRebaselineWritePlan({ sourceSha, rotationId, resources, bas
   return Object.freeze(REBASELINE_SLOT_ORDER.map((slot) => { const payload = payloads[slot]; if (!payload || payload.sourceSha !== sourceSha || payload.rotationId !== rotationId) fail(`Payload ${slot} is not bound to the rebaseline.`); const clientRequestToken = deterministicWriteIdentity({ sourceSha, rotationId, slot, secretArn: checkedResources[slot], baselineIdentitySha256 }); return Object.freeze({ slot, secretArn: checkedResources[slot], clientRequestToken, payload, payloadSha256: canonicalSha256(payload), materialType: payload.materialType || payload.baselineMarker }); }));
 }
 
-export function safeWriteDescriptors(writePlan) { if (!Array.isArray(writePlan) || writePlan.length !== 7) fail("Rebaseline write plan is incomplete."); return Object.freeze(writePlan.map(({ slot, secretArn, clientRequestToken, payloadSha256, materialType }) => ({ slot, secretArn, clientRequestToken, payloadSha256, materialType }))); }
+export function rebaselineWritePayloadIdentities(writePlan) {
+  if (!Array.isArray(writePlan) || writePlan.length !== REBASELINE_SLOT_ORDER.length) fail("Rebaseline write plan is incomplete.");
+  const identities = Object.fromEntries(writePlan.map(({ slot, payload, payloadSha256, materialType }) => [slot, Object.freeze({ payloadSha256: assertSha256(payloadSha256, `payloadSha256.${slot}`), materialType: text(materialType, `materialType.${slot}`), keyVersion: payload?.keyVersion || null })]));
+  exactKeys(identities, REBASELINE_SLOT_ORDER, "writePayloadIdentities");
+  return Object.freeze(identities);
+}
+
+function assertRebaselineWritePayloadIdentities(value, label = "writePayloadIdentities") {
+  exactKeys(value, REBASELINE_SLOT_ORDER, label);
+  for (const slot of REBASELINE_SLOT_ORDER) {
+    exactKeys(value[slot], ["payloadSha256", "materialType", "keyVersion"], `${label}.${slot}`);
+    assertSha256(value[slot].payloadSha256, `${label}.${slot}.payloadSha256`);
+    text(value[slot].materialType, `${label}.${slot}.materialType`);
+    if (value[slot].keyVersion !== null && !LEGACY_VERSION_ID.test(value[slot].keyVersion || "")) fail(`${label}.${slot}.keyVersion is invalid.`);
+    if (["qrPrivatePending", "qrPublicPending"].includes(slot) !== (value[slot].keyVersion !== null)) fail(`${label}.${slot}.keyVersion is not exact.`);
+  }
+  return Object.freeze(Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, Object.freeze({ ...value[slot] })])));
+}
+
+export function safeWriteDescriptors(writePlan) { if (!Array.isArray(writePlan) || writePlan.length !== 7) fail("Rebaseline write plan is incomplete."); const payloadIdentities = rebaselineWritePayloadIdentities(writePlan); return Object.freeze(writePlan.map(({ slot, secretArn, clientRequestToken, payloadSha256, materialType }) => ({ slot, secretArn, clientRequestToken, payloadSha256, materialType, payloadIdentity: payloadIdentities[slot] }))); }
 
 export function buildRebaselinePreparation({ preconditions, sourceSha, rotationId, baselineIdentity, writePlan } = {}) {
   const checked = assertRebaselinePreconditions(preconditions); if (checked.sourceSha !== sourceSha || !baselineIdentity || baselineIdentity.identitySha256 !== buildRebaselineIdentity({ sourceSha, rotationId, resources: checked.resources, abandonmentEvidenceSha256: checked.abandonmentEvidence.evidenceSha256, legacyBaseline: baselineIdentity.legacyBaseline }).identitySha256) fail("Rebaseline preparation identity is invalid.");
@@ -220,7 +240,7 @@ export function buildRebaselinePreparation({ preconditions, sourceSha, rotationI
 export function assertRebaselinePreparation(value, { sourceSha, rotationId } = {}) {
   exactKeys(value, ["schemaVersion", "kind", "operation", "environment", "accountId", "region", "sourceCas", "cleanWorktree", "existingSecretResources", "sourceSha", "historicalRotationId", "rotationId", "abandonmentEvidence", "abandonmentEvidenceSha256", "historicalTopologySha256", "resources", "legacyBaseline", "baselineIdentity", "writePlan", "expectedSecretValueWrites", "expectedSecretDeletes", "liveReferenceAudit", "liveReferenceAuditSha256", "databaseDependencies", "externalConsumers", "dualSlotReferences", "runningTasks", "pendingTasks", "activeTaskDefinition", "preparationSha256"], "Rebaseline preparation");
   if (value.schemaVersion !== 2 || value.kind !== REBASELINE_PREPARATION_KIND || value.operation !== PRODUCTION_DUAL_SLOT_REBASELINE.kind || value.environment !== "production" || value.accountId !== PRODUCTION_DUAL_SLOT_REBASELINE.accountId || value.region !== PRODUCTION_DUAL_SLOT_REBASELINE.region || value.sourceSha !== sourceSha || value.rotationId !== rotationId || value.sourceCas !== true || value.cleanWorktree !== true || value.existingSecretResources !== true || value.expectedSecretValueWrites !== 7 || value.expectedSecretDeletes !== 0 || value.liveReferenceAudit !== "PASS" || !SHA256.test(value.liveReferenceAuditSha256 || "") || value.databaseDependencies !== 0 || value.externalConsumers !== 0 || value.dualSlotReferences !== 0) fail("Rebaseline preparation identity is invalid.");
-  assertRotation(value.historicalRotationId, "historicalRotationId"); assertSha256(value.historicalTopologySha256, "historicalTopologySha256"); assertAbandonmentEvidence(value.abandonmentEvidence, { sourceSha, resources: value.resources, historicalTopologySha256: value.historicalTopologySha256 }); if (value.abandonmentEvidenceSha256 !== value.abandonmentEvidence.evidenceSha256) fail("Rebaseline preparation abandonment evidence is not bound.");
+  assertRotation(value.historicalRotationId, "historicalRotationId"); if (value.historicalRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID) fail("Rebaseline preparation historical rotation is not exact."); assertSha256(value.historicalTopologySha256, "historicalTopologySha256"); assertAbandonmentEvidence(value.abandonmentEvidence, { sourceSha, resources: value.resources, historicalTopologySha256: value.historicalTopologySha256 }); if (value.abandonmentEvidenceSha256 !== value.abandonmentEvidence.evidenceSha256) fail("Rebaseline preparation abandonment evidence is not bound.");
   const identity = buildRebaselineIdentity({ sourceSha, rotationId, resources: value.resources, abandonmentEvidenceSha256: value.abandonmentEvidence.evidenceSha256, legacyBaseline: value.legacyBaseline }); if (canonical(value.baselineIdentity) !== canonical(identity)) fail("Rebaseline preparation baseline identity is invalid.");
   const plan = value.writePlan; if (!Array.isArray(plan) || plan.length !== 7 || plan.some((entry) => !entry || typeof entry.slot !== "string" || !REBASELINE_SLOT_ORDER.includes(entry.slot) || entry.secretArn !== value.resources[entry.slot] || !VERSION_ID.test(entry.clientRequestToken) || !SHA256.test(entry.payloadSha256))) fail("Rebaseline preparation write plan is invalid.");
   if (new Set(plan.map(({ slot }) => slot)).size !== 7) fail("Rebaseline preparation write plan has duplicate slots.");
@@ -283,23 +303,28 @@ function assertStableLiveReferenceAudit(audit, expectedStableAuditSha256) {
   return audit;
 }
 
-export function buildBaselineCompletion({ preconditions, sourceSha, rotationId, baselineIdentity, writePlan, finalSnapshots, authorizationBinding } = {}) {
+export function buildBaselineCompletion({ preconditions, sourceSha, rotationId, baselineIdentity, writePlan, finalSnapshots, authorizationBinding, authorizedWritePayloadIdentities } = {}) {
   const checked = assertRebaselinePreconditions(preconditions); if (checked.sourceSha !== sourceSha) fail("Completion source does not match preconditions."); assertRotation(rotationId, "rotationId");
   const expectedIdentity = buildRebaselineIdentity({ sourceSha, rotationId, resources: checked.resources, abandonmentEvidenceSha256: checked.abandonmentEvidence.evidenceSha256, legacyBaseline: baselineIdentity.legacyBaseline }); if (!baselineIdentity || baselineIdentity.identitySha256 !== expectedIdentity.identitySha256) fail("Baseline identity is invalid.");
   const expectedPlan = buildRebaselineWritePlan({ sourceSha, rotationId, resources: checked.resources, baselineIdentitySha256: baselineIdentity.identitySha256, payloads: Object.fromEntries(writePlan.map(({ slot, payload }) => [slot, payload])) }); if (!Array.isArray(finalSnapshots) || finalSnapshots.length !== 7) fail("Final seven-slot verification is incomplete.");
   for (const expected of expectedPlan) { const snapshot = finalSnapshots.find((candidate) => candidate.slot === expected.slot); if (assertReadSnapshot(snapshot, expected, `Final ${expected.slot}`) !== "COMPLETED") fail(`Final ${expected.slot} is not complete.`); }
   if (!SHA256.test(authorizationBinding || "")) fail("Authorization binding is required.");
-  const identity = { operation: PRODUCTION_DUAL_SLOT_REBASELINE.kind, schemaVersion: 2, sourceSha, rotationId, historicalRotationId: checked.historicalRotationId, abandonmentEvidenceSha256: checked.abandonmentEvidence.evidenceSha256, resources: checked.resources, versionIds: Object.fromEntries(expectedPlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken])), payloadIdentities: Object.fromEntries(expectedPlan.map(({ slot, payloadSha256, materialType, payload }) => [slot, { payloadSha256, materialType, ...(payload.keyVersion ? { keyVersion: payload.keyVersion } : {}) }])), liveReferenceAudit: checked.liveReferenceAudit, liveReferenceAuditSha256: checked.liveReferenceAuditSha256, authorizationBinding, expectedSecretValueWrites: 7, expectedSecretDeletes: 0 };
+  const payloadIdentities = rebaselineWritePayloadIdentities(expectedPlan);
+  if (canonical(assertRebaselineWritePayloadIdentities(authorizedWritePayloadIdentities)) !== canonical(payloadIdentities)) fail("Authorization payload identities do not match the authenticated write plan.");
+  const identity = { operation: PRODUCTION_DUAL_SLOT_REBASELINE.kind, schemaVersion: 2, sourceSha, rotationId, historicalRotationId: checked.historicalRotationId, abandonmentEvidenceSha256: checked.abandonmentEvidence.evidenceSha256, resources: checked.resources, versionIds: Object.fromEntries(expectedPlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken])), payloadIdentities, liveReferenceAudit: checked.liveReferenceAudit, liveReferenceAuditSha256: checked.liveReferenceAuditSha256, authorizationBinding, expectedSecretValueWrites: 7, expectedSecretDeletes: 0 };
   const completion = { schemaVersion: 2, kind: BASELINE_COMPLETE, ...identity };
   return Object.freeze({ ...completion, baselineBindingSha256: canonicalSha256(completion) });
 }
 
-export function assertBaselineCompletion(value, { sourceSha, rotationId, resources, authorizationBinding, historicalRotationId, abandonmentEvidenceSha256 } = {}) {
+export function assertBaselineCompletion(value, { sourceSha, rotationId, resources, authorizationBinding, historicalRotationId, abandonmentEvidenceSha256, writeIdentities, writePayloadIdentities, liveReferenceAuditSha256 } = {}) {
   exactKeys(value, ["schemaVersion", "kind", "operation", "sourceSha", "rotationId", "historicalRotationId", "abandonmentEvidenceSha256", "resources", "versionIds", "payloadIdentities", "liveReferenceAudit", "liveReferenceAuditSha256", "authorizationBinding", "expectedSecretValueWrites", "expectedSecretDeletes", "baselineBindingSha256"], "Baseline completion");
   if (value.schemaVersion !== 2 || value.kind !== BASELINE_COMPLETE || value.operation !== PRODUCTION_DUAL_SLOT_REBASELINE.kind || value.sourceSha !== sourceSha || value.rotationId !== rotationId || value.liveReferenceAudit !== "PASS" || !SHA256.test(value.liveReferenceAuditSha256 || "") || value.expectedSecretValueWrites !== 7 || value.expectedSecretDeletes !== 0) fail("Baseline completion identity is invalid.");
-  assertRotation(value.historicalRotationId, "historicalRotationId"); assertSha256(value.abandonmentEvidenceSha256, "abandonmentEvidenceSha256"); assertSlotMap(value.resources, "resources"); exactKeys(value.versionIds, REBASELINE_SLOT_ORDER, "versionIds"); exactKeys(value.payloadIdentities, REBASELINE_SLOT_ORDER, "payloadIdentities");
-  for (const slot of REBASELINE_SLOT_ORDER) { assertVersion(value.versionIds[slot], `versionIds.${slot}`); assertSha256(value.payloadIdentities[slot].payloadSha256, `payloadIdentities.${slot}.payloadSha256`); text(value.payloadIdentities[slot].materialType, `payloadIdentities.${slot}.materialType`); if (["qrPrivatePending", "qrPublicPending"].includes(slot)) text(value.payloadIdentities[slot].keyVersion, `payloadIdentities.${slot}.keyVersion`); }
+  assertRotation(value.historicalRotationId, "historicalRotationId"); assertSha256(value.abandonmentEvidenceSha256, "abandonmentEvidenceSha256"); assertSlotMap(value.resources, "resources"); exactKeys(value.versionIds, REBASELINE_SLOT_ORDER, "versionIds");
+  const checkedPayloadIdentities = assertRebaselineWritePayloadIdentities(value.payloadIdentities, "payloadIdentities");
   if (historicalRotationId !== undefined && value.historicalRotationId !== historicalRotationId) fail("Baseline completion historical rotation does not match."); if (abandonmentEvidenceSha256 !== undefined && value.abandonmentEvidenceSha256 !== abandonmentEvidenceSha256) fail("Baseline completion abandonment evidence does not match."); if (!SHA256.test(value.authorizationBinding || "")) fail("Baseline completion authorization binding is invalid."); if (resources && canonical(value.resources) !== canonical(assertSlotMap(resources, "resources"))) fail("Baseline completion resources do not match expected resources."); if (authorizationBinding !== undefined && value.authorizationBinding !== authorizationBinding) fail("Baseline completion authorization binding does not match.");
+  if (writeIdentities && canonical(value.versionIds) !== canonical(writeIdentities)) fail("Baseline completion version identities do not match authorization.");
+  if (writePayloadIdentities && canonical(checkedPayloadIdentities) !== canonical(assertRebaselineWritePayloadIdentities(writePayloadIdentities))) fail("Baseline completion payload identities do not match authorization.");
+  if (liveReferenceAuditSha256 && value.liveReferenceAuditSha256 !== liveReferenceAuditSha256) fail("Baseline completion live-reference audit does not match authorization.");
   const { baselineBindingSha256, ...identity } = value; if (!SHA256.test(baselineBindingSha256 || "") || canonicalSha256(identity) !== baselineBindingSha256) fail("Baseline completion hash is invalid."); return value;
 }
 
@@ -307,7 +332,7 @@ export function buildRebaselineRotationBindings({ sourceSha, rotationId, legacyB
   if (!completion || completion.kind !== BASELINE_COMPLETE) fail("Completed dual-slot baseline evidence is required for runtime binding.");
   const checkedAbandonment = assertAbandonmentEvidence(abandonmentEvidence, { sourceSha, resources, historicalTopologySha256: abandonmentEvidence?.historicalTopologySha256 });
   assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha, rotationId, resources });
-  assertBaselineCompletion(completion, { sourceSha, rotationId, resources, authorizationBinding: authorization.authorizationSha256, historicalRotationId: checkedAbandonment.historicalRotationId, abandonmentEvidenceSha256: checkedAbandonment.evidenceSha256 });
+  assertBaselineCompletion(completion, { sourceSha, rotationId, resources, authorizationBinding: authorization.authorizationSha256, historicalRotationId: checkedAbandonment.historicalRotationId, abandonmentEvidenceSha256: checkedAbandonment.evidenceSha256, writeIdentities: authorization.writeIdentities, writePayloadIdentities: authorization.writePayloadIdentities, liveReferenceAuditSha256: authorization.liveReferenceAuditSha256 });
   const checkedLegacyBaseline = assertLegacyBaseline(legacyBaseline);
   const expectedBaselineIdentity = buildRebaselineIdentity({ sourceSha, rotationId, resources, abandonmentEvidenceSha256: checkedAbandonment.evidenceSha256, legacyBaseline: checkedLegacyBaseline });
   if (authorization.baselineIdentitySha256 !== expectedBaselineIdentity.identitySha256) fail("Rebaseline runtime legacy baseline is not bound to the authorization.");
@@ -334,9 +359,45 @@ export function assertRebaselineRotationBindings(bindings, { authorization } = {
   if (bindings.jwt?.currentSecretId !== checkedLegacyBaseline.jwtCurrent || bindings.qr?.privateCurrentSecretId !== checkedLegacyBaseline.qrPrivateCurrent || bindings.qr?.publicCurrentSecretId !== checkedLegacyBaseline.qrPublicCurrent || bindings.qr?.previousKeyVersion !== checkedLegacyBaseline.qrCurrentVersion) fail("Rebaseline runtime legacy bindings are inconsistent.");
   const expectedBaselineIdentity = buildRebaselineIdentity({ sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources: checkedResources, abandonmentEvidenceSha256: checkedAbandonment.evidenceSha256, legacyBaseline: checkedLegacyBaseline });
   if (authorization.baselineIdentitySha256 !== expectedBaselineIdentity.identitySha256) fail("Rebaseline runtime legacy baseline is not bound to the authorization.");
-  assertBaselineCompletion(bindings.baselineCompletion, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources: checkedResources, authorizationBinding: authorization.authorizationSha256, historicalRotationId: bindings.historicalRotationId, abandonmentEvidenceSha256: bindings.abandonmentEvidenceSha256 });
+  assertBaselineCompletion(bindings.baselineCompletion, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources: checkedResources, authorizationBinding: authorization.authorizationSha256, historicalRotationId: bindings.historicalRotationId, abandonmentEvidenceSha256: bindings.abandonmentEvidenceSha256, writeIdentities: authorization.writeIdentities, writePayloadIdentities: authorization.writePayloadIdentities, liveReferenceAuditSha256: authorization.liveReferenceAuditSha256 });
   if (bindings.baselineCompletionSha256 !== bindings.baselineCompletion.baselineBindingSha256) fail("Rebaseline completion hash is not bound to runtime bindings.");
   return bindings;
+}
+
+export function verifyLiveProductionDualSlotRebaselineWithRunner({ run, bindings, authorization } = {}) {
+  if (typeof run !== "function") fail("Live post-write rebaseline command runner is required.");
+  assertRebaselineRotationBindings(bindings, { authorization });
+  const resources = {
+    jwtPending: bindings.jwt.pendingSecretId,
+    qrPrivatePending: bindings.qr.privatePendingSecretId,
+    qrPublicPending: bindings.qr.publicPendingSecretId,
+    jwtPrevious: bindings.jwt.previousSecretId,
+    qrPublicPrevious: bindings.qr.publicPreviousSecretId,
+    qrCurrentVersion: bindings.qr.currentKeyVersionSecretId,
+    qrPreviousVersion: bindings.qr.previousKeyVersionSecretId,
+  };
+  assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources });
+  const versionIds = {};
+  const payloadIdentities = {};
+  for (const [slot, secretArn] of Object.entries(resources)) {
+    const described = JSON.parse(run(["secretsmanager", "describe-secret", "--secret-id", secretArn, "--output", "json", "--no-cli-pager"]));
+    if (described.ARN !== secretArn) fail(`Live ${slot} secret ARN is substituted.`);
+    const current = Object.entries(described.VersionIdsToStages || {}).filter(([, stages]) => Array.isArray(stages) && stages.includes("AWSCURRENT"));
+    const expectedVersionId = authorization.writeIdentities[slot];
+    if (current.length !== 1 || current[0][0] !== expectedVersionId || current[0][1].length !== 1 || current[0][1][0] !== "AWSCURRENT") fail(`Live ${slot} secret is not the exact completed rebaseline version.`);
+    const response = JSON.parse(run(["secretsmanager", "get-secret-value", "--secret-id", secretArn, "--version-id", expectedVersionId, "--output", "json", "--no-cli-pager"]));
+    if (response?.VersionId !== expectedVersionId || typeof response?.SecretString !== "string") fail(`Live ${slot} secret version is substituted or unreadable.`);
+    let payload;
+    try { payload = JSON.parse(response.SecretString); } catch { fail(`Live ${slot} secret payload is not reviewed JSON.`); }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload) || typeof payload.value !== "string") fail(`Live ${slot} secret payload is malformed.`);
+    const expected = authorization.writePayloadIdentities[slot];
+    const expectedShape = HISTORICAL_SLOT_SHAPES[slot];
+    if (canonicalSha256(payload) !== expected.payloadSha256 || payload.sourceSha !== bindings.sourceSha || payload.rotationId !== bindings.rotationId || payload.family !== expectedShape.family || payload.slot !== expectedShape.slot || (payload.materialType !== undefined ? payload.materialType : payload.baselineMarker) !== expected.materialType || (payload.keyVersion || null) !== expected.keyVersion) fail(`Live ${slot} secret payload does not match the protected rebaseline authorization.`);
+    versionIds[slot] = expectedVersionId;
+    payloadIdentities[slot] = expected;
+  }
+  const body = { kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, authorizationSha256: authorization.authorizationSha256, resources, versionIds, payloadIdentities };
+  return Object.freeze({ ...body, livePostWriteSha256: canonicalSha256(body) });
 }
 
 export function persistExactPrivateJson({ filePath, value, repositoryRoot, label, fsOps = fs }) {
@@ -377,25 +438,25 @@ export async function executeProductionDualSlotRebaseline({ preconditions, sourc
   const expectedIdentity = buildRebaselineIdentity({ sourceSha, rotationId, resources: checked.resources, abandonmentEvidenceSha256: checked.abandonmentEvidence.evidenceSha256, legacyBaseline: baselineIdentity.legacyBaseline }); if (!baselineIdentity || baselineIdentity.identitySha256 !== expectedIdentity.identitySha256) fail("Rebaseline identity changed.");
   if (authorization.baselineIdentitySha256 !== baselineIdentity.identitySha256) fail("Rebaseline authorization baseline identity does not match execution.");
   const expectedPlan = buildRebaselineWritePlan({ sourceSha, rotationId, resources: checked.resources, baselineIdentitySha256: baselineIdentity.identitySha256, payloads: Object.fromEntries(writePlan.map(({ slot, payload }) => [slot, payload])) });
-  if (canonical(Object.fromEntries(expectedPlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken]))) !== canonical(authorization.writeIdentities)) fail("Rebaseline authorization write identities do not match execution.");
+  if (canonical(Object.fromEntries(expectedPlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken]))) !== canonical(authorization.writeIdentities) || canonical(rebaselineWritePayloadIdentities(expectedPlan)) !== canonical(authorization.writePayloadIdentities)) fail("Rebaseline authorization write identities do not match execution.");
   let writes = 0;
   const historicalBySlot = checked.abandonmentEvidence.observedSlotIdentities;
   const initialSnapshots = await Promise.all(expectedPlan.map(async (expected) => ({ expected, snapshot: await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha, rotationId, historicalIdentity: historicalBySlot[expected.slot] }) })));
   if (outputExists.some(Boolean) && initialSnapshots.some(({ expected, snapshot }) => assertReadSnapshot(snapshot, expected, `Output preflight ${expected.slot}`, historicalBySlot[expected.slot]) !== "COMPLETED")) fail("Existing durable rebaseline outputs cannot accompany an incomplete secret baseline.");
   for (const expected of expectedPlan) { assertStableLiveReferenceAudit(await readReferenceAudit(), checked.liveReferenceAuditSha256); const historicalIdentity = historicalBySlot[expected.slot]; const snapshot = await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha, rotationId, historicalIdentity }); if (assertReadSnapshot(snapshot, expected, `Pre-write ${expected.slot}`, historicalIdentity) === "COMPLETED") continue; const result = await writeSlot({ slot: expected.slot, secretArn: expected.secretArn, clientRequestToken: expected.clientRequestToken, payload: expected.payload, payloadSha256: expected.payloadSha256 }); writes += 1; if (result?.versionId !== expected.clientRequestToken || result?.arn !== expected.secretArn) fail(`Rebaseline write identity for ${expected.slot} is invalid.`); const verified = await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha, rotationId, historicalIdentity }); if (assertReadSnapshot(verified, expected, `Post-write ${expected.slot}`, historicalIdentity) !== "COMPLETED") fail(`Rebaseline write ${expected.slot} did not converge.`); }
   assertStableLiveReferenceAudit(await readReferenceAudit(), checked.liveReferenceAuditSha256);
-  const finalSnapshots = []; for (const expected of expectedPlan) finalSnapshots.push({ slot: expected.slot, ...(await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha, rotationId, historicalIdentity: historicalBySlot[expected.slot] })) }); const completion = buildBaselineCompletion({ preconditions: checked, sourceSha, rotationId, baselineIdentity, writePlan, finalSnapshots, authorizationBinding: authorization.authorizationSha256 });
+  const finalSnapshots = []; for (const expected of expectedPlan) finalSnapshots.push({ slot: expected.slot, ...(await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha, rotationId, historicalIdentity: historicalBySlot[expected.slot] })) }); const completion = buildBaselineCompletion({ preconditions: checked, sourceSha, rotationId, baselineIdentity, writePlan, finalSnapshots, authorizationBinding: authorization.authorizationSha256, authorizedWritePayloadIdentities: authorization.writePayloadIdentities });
   const completionCapture = persistExactPrivateJson({ filePath: completionFile, value: completion, repositoryRoot, label: "Dual-slot baseline completion evidence" });
   if (typeof afterCompletionPersist === "function") await afterCompletionPersist();
   const bindings = buildRebaselineRotationBindings({ sourceSha, rotationId, legacyBaseline: baselineIdentity.legacyBaseline, resources: checked.resources, abandonmentEvidence: checked.abandonmentEvidence, completion, authorization });
   const bindingsCapture = persistExactPrivateJson({ filePath: bindingsFile, value: bindings, repositoryRoot, label: "Dual-slot rebaseline runtime bindings" });
   if (typeof afterBindingsPersist === "function") await afterBindingsPersist();
-  assertBaselineCompletion(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(completionCapture.bytes)), { sourceSha, rotationId, resources: checked.resources, authorizationBinding: authorization.authorizationSha256 });
+  assertBaselineCompletion(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(completionCapture.bytes)), { sourceSha, rotationId, resources: checked.resources, authorizationBinding: authorization.authorizationSha256, writeIdentities: authorization.writeIdentities, writePayloadIdentities: authorization.writePayloadIdentities, liveReferenceAuditSha256: authorization.liveReferenceAuditSha256 });
   assertRebaselineRotationBindings(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bindingsCapture.bytes)), { authorization });
   return Object.freeze({ baselineComplete: true, writes, completion, bindings, completionPath: completionCapture.path, completionSha256: completionCapture.sha256, bindingsPath: bindingsCapture.path, bindingsSha256: bindingsCapture.sha256, writePlan: safeWriteDescriptors(expectedPlan) });
 }
 
-export function readBoundBaselineCompletion({ filePath, expectedSha256, authorization, repositoryRoot = process.cwd() } = {}) { const captured = readStageBPrivateFileBytes({ filePath, repositoryRoot, label: "Dual-slot baseline completion evidence" }); if (captured.sha256 !== expectedSha256) fail("Dual-slot baseline completion evidence changed."); const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes)); assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: value.sourceSha, rotationId: value.rotationId, resources: value.resources }); assertBaselineCompletion(value, { sourceSha: value.sourceSha, rotationId: value.rotationId, resources: value.resources, authorizationBinding: authorization.authorizationSha256 }); return Object.freeze({ value, sha256: captured.sha256, path: captured.path }); }
+export function readBoundBaselineCompletion({ filePath, expectedSha256, authorization, repositoryRoot = process.cwd() } = {}) { const captured = readStageBPrivateFileBytes({ filePath, repositoryRoot, label: "Dual-slot baseline completion evidence" }); if (captured.sha256 !== expectedSha256) fail("Dual-slot baseline completion evidence changed."); const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes)); assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: value.sourceSha, rotationId: value.rotationId, resources: value.resources }); assertBaselineCompletion(value, { sourceSha: value.sourceSha, rotationId: value.rotationId, resources: value.resources, authorizationBinding: authorization.authorizationSha256, writeIdentities: authorization.writeIdentities, writePayloadIdentities: authorization.writePayloadIdentities, liveReferenceAuditSha256: authorization.liveReferenceAuditSha256 }); return Object.freeze({ value, sha256: captured.sha256, path: captured.path }); }
 
 export function createProductionDualSlotRebaselineAuthorization(input = {}) {
   const evidence = input.protectedEnvironmentApprovalEvidence;
@@ -403,10 +464,11 @@ export function createProductionDualSlotRebaselineAuthorization(input = {}) {
   if (evidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef) fail("Rebaseline authorization requires the dedicated protected-environment workflow.");
   const resources = assertSlotMap(input.resources, "resources");
   const identities = input.writeIdentities;
+  const payloadIdentities = assertRebaselineWritePayloadIdentities(input.writePayloadIdentities);
   assertSha256(input.baselineIdentitySha256, "baselineIdentitySha256");
   exactKeys(identities, REBASELINE_SLOT_ORDER, "writeIdentities");
   for (const slot of REBASELINE_SLOT_ORDER) { assertVersion(identities[slot], `writeIdentities.${slot}`); if (identities[slot] !== deterministicWriteIdentity({ sourceSha: input.sourceSha, rotationId: input.rotationId, slot, secretArn: resources[slot], baselineIdentitySha256: input.baselineIdentitySha256 })) fail(`writeIdentities.${slot} is not bound to the exact resource and baseline.`); }
-  assertSha40(input.sourceSha, "sourceSha"); assertRotation(input.historicalRotationId, "historicalRotationId"); assertRotation(input.rotationId, "rotationId");
+  assertSha40(input.sourceSha, "sourceSha"); assertRotation(input.historicalRotationId, "historicalRotationId"); if (input.historicalRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID) fail("Rebaseline authorization historical rotation is not exact."); assertRotation(input.rotationId, "rotationId");
   if (input.rotationId === input.historicalRotationId) fail("Rebaseline rotation must be new.");
   if (input.liveReferenceAudit !== "PASS" || !SHA256.test(input.liveReferenceAuditSha256 || "") || !SHA256.test(input.observedSlotIdentitiesSha256 || "")) fail("Rebaseline authorization requires a passing bound live-reference audit.");
   if (input.expectedSecretValueWrites !== 7 || input.expectedSecretDeletes !== 0) fail("Rebaseline authorization mutation counts are invalid.");
@@ -417,7 +479,7 @@ export function createProductionDualSlotRebaselineAuthorization(input = {}) {
     environment: "production", accountId: PRODUCTION_DUAL_SLOT_REBASELINE.accountId, region: PRODUCTION_DUAL_SLOT_REBASELINE.region,
     sourceSha: input.sourceSha, historicalRotationId: input.historicalRotationId, rotationId: input.rotationId,
     abandonmentEvidenceSha256: assertSha256(input.abandonmentEvidenceSha256, "abandonmentEvidenceSha256"), baselineIdentitySha256: input.baselineIdentitySha256, resources,
-    writeIdentities: Object.freeze({ ...identities }), expectedSecretValueWrites: 7, expectedSecretDeletes: 0,
+    writeIdentities: Object.freeze({ ...identities }), writePayloadIdentities: payloadIdentities, expectedSecretValueWrites: 7, expectedSecretDeletes: 0,
     liveReferenceAudit: input.liveReferenceAudit, liveReferenceAuditSha256: input.liveReferenceAuditSha256, observedSlotIdentitiesSha256: input.observedSlotIdentitiesSha256, reason: input.reason, approvedBy: input.approvedBy,
     approverRole: input.approverRole, verificationRef: input.verificationRef,
     protectedEnvironmentApprovalEvidence: evidence, protectedEnvironmentApprovalEvidenceSha256: evidence.evidenceSha256,
@@ -427,10 +489,10 @@ export function createProductionDualSlotRebaselineAuthorization(input = {}) {
 }
 
 export function assertProductionDualSlotRebaselineAuthorization(value, { sourceSha, rotationId, resources } = {}) {
-  const fields = ["schemaVersion", "kind", "operation", "environment", "accountId", "region", "sourceSha", "historicalRotationId", "rotationId", "abandonmentEvidenceSha256", "baselineIdentitySha256", "resources", "writeIdentities", "expectedSecretValueWrites", "expectedSecretDeletes", "liveReferenceAudit", "liveReferenceAuditSha256", "observedSlotIdentitiesSha256", "reason", "approvedBy", "approverRole", "verificationRef", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "exclusions", "authorizationSha256"];
+  const fields = ["schemaVersion", "kind", "operation", "environment", "accountId", "region", "sourceSha", "historicalRotationId", "rotationId", "abandonmentEvidenceSha256", "baselineIdentitySha256", "resources", "writeIdentities", "writePayloadIdentities", "expectedSecretValueWrites", "expectedSecretDeletes", "liveReferenceAudit", "liveReferenceAuditSha256", "observedSlotIdentitiesSha256", "reason", "approvedBy", "approverRole", "verificationRef", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "exclusions", "authorizationSha256"];
   exactKeys(value, fields, "Rebaseline authorization");
   if (value.schemaVersion !== 1 || value.kind !== REBASELINE_AUTHORIZATION_KIND || value.operation !== PRODUCTION_DUAL_SLOT_REBASELINE.kind || value.environment !== "production" || value.accountId !== PRODUCTION_DUAL_SLOT_REBASELINE.accountId || value.region !== PRODUCTION_DUAL_SLOT_REBASELINE.region || value.sourceSha !== sourceSha || value.rotationId !== rotationId || value.expectedSecretValueWrites !== 7 || value.expectedSecretDeletes !== 0 || value.liveReferenceAudit !== "PASS" || !SHA256.test(value.liveReferenceAuditSha256 || "") || !SHA256.test(value.observedSlotIdentitiesSha256 || "")) fail("Rebaseline authorization identity is invalid.");
-  assertRotation(value.historicalRotationId, "historicalRotationId"); assertRotation(value.rotationId, "rotationId"); if (value.rotationId === value.historicalRotationId) fail("Rebaseline rotation is not new."); assertSha256(value.abandonmentEvidenceSha256, "abandonmentEvidenceSha256"); assertSha256(value.baselineIdentitySha256, "baselineIdentitySha256"); assertSlotMap(value.resources, "resources"); exactKeys(value.writeIdentities, REBASELINE_SLOT_ORDER, "writeIdentities"); for (const slot of REBASELINE_SLOT_ORDER) { assertVersion(value.writeIdentities[slot], `writeIdentities.${slot}`); if (value.writeIdentities[slot] !== deterministicWriteIdentity({ sourceSha, rotationId, slot, secretArn: value.resources[slot], baselineIdentitySha256: value.baselineIdentitySha256 })) fail(`writeIdentities.${slot} is not bound to the exact resource and baseline.`); }
+  assertRotation(value.historicalRotationId, "historicalRotationId"); if (value.historicalRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID) fail("Rebaseline authorization historical rotation is not exact."); assertRotation(value.rotationId, "rotationId"); if (value.rotationId === value.historicalRotationId) fail("Rebaseline rotation is not new."); assertSha256(value.abandonmentEvidenceSha256, "abandonmentEvidenceSha256"); assertSha256(value.baselineIdentitySha256, "baselineIdentitySha256"); assertSlotMap(value.resources, "resources"); exactKeys(value.writeIdentities, REBASELINE_SLOT_ORDER, "writeIdentities"); assertRebaselineWritePayloadIdentities(value.writePayloadIdentities); for (const slot of REBASELINE_SLOT_ORDER) { assertVersion(value.writeIdentities[slot], `writeIdentities.${slot}`); if (value.writeIdentities[slot] !== deterministicWriteIdentity({ sourceSha, rotationId, slot, secretArn: value.resources[slot], baselineIdentitySha256: value.baselineIdentitySha256 })) fail(`writeIdentities.${slot} is not bound to the exact resource and baseline.`); }
   for (const name of ["reason", "approvedBy", "approverRole", "verificationRef"]) text(value[name], name);
   if (canonical(value.exclusions) !== canonical(["Terraform apply", "ECS RegisterTaskDefinition", "ECS UpdateService", "database mutation", "IAM mutation", "KMS policy mutation", "image publication", "network mutation", "DeleteSecret"])) fail("Rebaseline authorization exclusions are incomplete.");
   assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository }); if (value.protectedEnvironmentApprovalEvidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256) fail("Rebaseline protected-environment evidence is not exact.");

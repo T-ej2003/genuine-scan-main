@@ -10,11 +10,12 @@ import {
   buildRebaselinePreparation, assertRebaselinePreconditions, assertRebaselinePreparation,
   createProductionDualSlotRebaselineAuthorization, deterministicWriteIdentity, executeProductionDualSlotRebaseline,
   generateRebaselineMaterial, assertBaselineCompletion, canonicalSha256, historicalSlotIdentity,
-  REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, writeRebaselineMaterialJournal, persistExactPrivateJson, sha256,
+  REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, writeRebaselineMaterialJournal, persistExactPrivateJson, rebaselineWritePayloadIdentities, verifyLiveProductionDualSlotRebaselineWithRunner, sha256,
 } from "../aws/production-dual-slot-rebaseline-contract.mjs";
-import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout, readPreparedDualSlotTopology, runProductionDualSlotRebaselineCli } from "../aws/rebaseline-production-dual-slot.mjs";
+import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout, readPreparedDualSlotTopology, runProductionDualSlotRebaselineCli, verifyLiveProductionDualSlotRebaseline } from "../aws/rebaseline-production-dual-slot.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
-import { assertBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { assertBindings, buildInitialMigrationSourceAdvance, buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 
 const sourceSha = "a".repeat(40);
 const historicalRotationId = "rotation-20260826060632-b15b3f51";
@@ -37,7 +38,7 @@ const preparation = buildRebaselinePreparation({ preconditions, sourceSha, rotat
 const temporary = () => { const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-test-")); chmodSync(directory, 0o700); return { directory, completionFile: path.join(directory, "completion.json"), bindingsFile: path.join(directory, "rotation-bindings.json") }; };
 
 function environmentEvidence() { return createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository, environment: "production", sourceSha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "checker", observedAt: "2026-08-28T10:01:00.000Z" }); }
-function authorization({ baselineIdentitySha256 = identity.identitySha256 } = {}) { return createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: environmentEvidence(), sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256, resources, writeIdentities: Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, deterministicWriteIdentity({ sourceSha, rotationId, slot, secretArn: resources[slot], baselineIdentitySha256 })])), expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "Abandon pre-cutover state and establish a clean baseline", approvedBy: "checker", approverRole: "production-independent-checker", verificationRef: "ticket-rebaseline-1" }); }
+function authorization({ baselineIdentitySha256 = identity.identitySha256, writePayloadIdentities = rebaselineWritePayloadIdentities(writePlan) } = {}) { return createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: environmentEvidence(), sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256, resources, writeIdentities: Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, deterministicWriteIdentity({ sourceSha, rotationId, slot, secretArn: resources[slot], baselineIdentitySha256 })])), writePayloadIdentities, expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "Abandon pre-cutover state and establish a clean baseline", approvedBy: "checker", approverRole: "production-independent-checker", verificationRef: "ticket-rebaseline-1" }); }
 function executionAdapters({ failAt = -1, liveReferenceAudit = audit } = {}) {
   const store = new Map(REBASELINE_SLOT_ORDER.map((slot) => [slot, [{
     versionId: currentVersionIds[slot], stages: ["AWSCURRENT"],
@@ -73,10 +74,25 @@ function cliTopologyClient(completedSlots = [], overrides = {}) {
     const currentVersionId = overrides[slot]?.versionId || (completed.has(slot) ? expected.clientRequestToken : oldVersionId);
     const payload = overrides[slot]?.payload || (completed.has(slot) ? expected.payload : historicalPayload(slot, { source: slot === "qrPublicPending" ? REBASELINE_HISTORICAL_SOURCE_SHAS[1] : slot === "qrPreviousVersion" ? undefined : REBASELINE_HISTORICAL_SOURCE_SHAS[0] }));
     const name = command.constructor.name;
-    if (name === "DescribeSecretCommand") return { Name: input.SecretId, ARN: resources[slot], VersionIdsToStages: { [currentVersionId]: ["AWSCURRENT"], ...(currentVersionId === oldVersionId ? {} : { [oldVersionId]: ["AWSPREVIOUS"] }) } };
+    if (name === "DescribeSecretCommand") return { Name: input.SecretId, ARN: overrides[slot]?.arn || resources[slot], VersionIdsToStages: { [currentVersionId]: overrides[slot]?.stages || ["AWSCURRENT"], ...(currentVersionId === oldVersionId ? {} : { [oldVersionId]: ["AWSPREVIOUS"] }) } };
     if (name === "GetSecretValueCommand") return { SecretString: JSON.stringify(payload), VersionId: input.VersionId };
     throw new Error(`unexpected command ${name}`);
   } };
+}
+
+function cliTopologyRunner(completedSlots = [], overrides = {}) {
+  const completed = new Set(completedSlots);
+  return (args) => {
+    const secretArn = args[args.indexOf("--secret-id") + 1];
+    const slot = Object.entries(resources).find(([, arn]) => arn === secretArn)?.[0];
+    if (!slot) throw new Error("unexpected secret identity");
+    const expected = writePlan.find((entry) => entry.slot === slot);
+    const currentVersionId = overrides[slot]?.versionId || (completed.has(slot) ? expected.clientRequestToken : currentVersionIds[slot]);
+    const payload = overrides[slot]?.payload || (completed.has(slot) ? expected.payload : historicalPayload(slot, { source: slot === "qrPublicPending" ? REBASELINE_HISTORICAL_SOURCE_SHAS[1] : slot === "qrPreviousVersion" ? undefined : REBASELINE_HISTORICAL_SOURCE_SHAS[0] }));
+    if (args[0] === "secretsmanager" && args[1] === "describe-secret") return JSON.stringify({ ARN: overrides[slot]?.arn || secretArn, VersionIdsToStages: { [currentVersionId]: overrides[slot]?.stages || ["AWSCURRENT"] } });
+    if (args[0] === "secretsmanager" && args[1] === "get-secret-value") return JSON.stringify({ VersionId: args[args.indexOf("--version-id") + 1], SecretString: JSON.stringify(payload) });
+    throw new Error("unexpected command");
+  };
 }
 
 test("observed abandonment identities bind exact payloads without plaintext", () => {
@@ -126,6 +142,67 @@ test("production CLI rejects every third topology state during resume", async ()
     { versionId: currentVersionIds[slot], payload: { ...historicalPayload(slot), value: "replaced-historical-material" } },
   ];
   for (const value of cases) await assert.rejects(() => readPreparedDualSlotTopology({ client: cliTopologyClient([], { [slot]: value }), preparation, writePlan }), /authenticate|identity|historical|prepared|version/i);
+});
+
+test("runtime consumes a rebaseline completion only after independent live seven-slot authentication", async () => {
+  const outputs = temporary();
+  try {
+    const result = await execute(executionAdapters(), outputs);
+    const forged = structuredClone(result.bindings);
+    forged.baselineCompletion.versionIds.jwtPending = sha256("forged-version");
+    const forgedCompletionIdentity = { ...forged.baselineCompletion }; delete forgedCompletionIdentity.baselineBindingSha256;
+    forged.baselineCompletion.baselineBindingSha256 = canonicalSha256(forgedCompletionIdentity);
+    forged.baselineCompletionSha256 = forged.baselineCompletion.baselineBindingSha256;
+    assert.throws(() => assertRebaselineRotationBindings(forged, { authorization: authorization() }), /version identities/i);
+    for (let completed = 0; completed < REBASELINE_SLOT_ORDER.length; completed += 1) {
+      await assert.rejects(() => verifyLiveProductionDualSlotRebaseline({ client: cliTopologyClient(REBASELINE_SLOT_ORDER.slice(0, completed)), bindings: result.bindings, authorization: authorization() }), /exact completed|payload/i);
+    }
+    const verified = await verifyLiveProductionDualSlotRebaseline({ client: cliTopologyClient(REBASELINE_SLOT_ORDER), bindings: result.bindings, authorization: authorization() });
+    assert.equal(verified.livePostWriteSha256.length, 64);
+    const slot = REBASELINE_SLOT_ORDER[0];
+    await assert.rejects(() => verifyLiveProductionDualSlotRebaseline({ client: cliTopologyClient(REBASELINE_SLOT_ORDER, { [slot]: { payload: { ...writePlan[0].payload, value: "wrong-material" } } }), bindings: result.bindings, authorization: authorization() }), /payload/i);
+    await assert.rejects(() => verifyLiveProductionDualSlotRebaseline({ client: cliTopologyClient(REBASELINE_SLOT_ORDER, { [slot]: { versionId: sha256("competing-current"), payload: writePlan[0].payload } }), bindings: result.bindings, authorization: authorization() }), /exact completed/i);
+    await assert.rejects(() => verifyLiveProductionDualSlotRebaseline({ client: cliTopologyClient(REBASELINE_SLOT_ORDER, { [slot]: { stages: ["AWSCURRENT", "AWSPREVIOUS"] } }), bindings: result.bindings, authorization: authorization() }), /exact completed/i);
+  } finally { rmSync(outputs.directory, { recursive: true, force: true }); }
+});
+
+test("the runtime CLI verifier grounds completion claims in live Secrets Manager reads", async () => {
+  const outputs = temporary();
+  try {
+    const result = await execute(executionAdapters(), outputs);
+    for (let completed = 0; completed < REBASELINE_SLOT_ORDER.length; completed += 1) assert.throws(() => verifyLiveProductionDualSlotRebaselineWithRunner({ run: cliTopologyRunner(REBASELINE_SLOT_ORDER.slice(0, completed)), bindings: result.bindings, authorization: authorization() }), /exact completed|payload/i);
+    assert.doesNotThrow(() => verifyLiveProductionDualSlotRebaselineWithRunner({ run: cliTopologyRunner(REBASELINE_SLOT_ORDER), bindings: result.bindings, authorization: authorization() }));
+  } finally { rmSync(outputs.directory, { recursive: true, force: true }); }
+});
+
+test("runtime call graph propagates independently resolved rebaseline authorization", async () => {
+  const outputs = temporary();
+  try {
+    const auth = authorization();
+    const result = await execute(executionAdapters(), outputs);
+    const liveLegacyBaseline = { ...legacyBaseline };
+    assert.equal(buildInitialMigrationSourceAdvance({ currentSourceSha: sourceSha, rotationBindings: result.bindings, rebaselineAuthorization: auth, liveLegacyBaseline }), undefined);
+    assert.throws(() => buildInitialMigrationSourceAdvance({ currentSourceSha: sourceSha, rotationBindings: result.bindings, liveLegacyBaseline }), /authorization/i);
+    assert.throws(() => buildInitialMigrationSourceAdvance({ currentSourceSha: sourceSha, rotationBindings: result.bindings, rebaselineAuthorization: { ...auth, sourceSha: "b".repeat(40) }, liveLegacyBaseline }), /authorization|hash|source/i);
+    assert.throws(() => buildInitialMigrationSourceAdvance({ currentSourceSha: sourceSha, rotationBindings: result.bindings, rebaselineAuthorization: { ...auth, rotationId: "rotation-other-authorized" }, liveLegacyBaseline }), /authorization|hash|rotation/i);
+    const config = buildProductionRotationConfig({ sourceSha, rotationId, approval: { ticket: "CHG-REBASELINE-1", approvedBy: "checker", approverRole: "production-independent-checker", reason: "fixture", verificationRef: "ticket-fixture", minimumGraceSeconds: 2592000 }, bindings: result.bindings, rebaselineAuthorization: auth, rebaselineAuthorizationCoordinates: { workflowRunId: "123456", workflowRunAttempt: "1" }, verifyRebaselineLivePostWrite: () => ({ kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha, rotationId, authorizationSha256: auth.authorizationSha256, resources, versionIds: auth.writeIdentities, payloadIdentities: auth.writePayloadIdentities, livePostWriteSha256: canonicalSha256({ kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha, rotationId, authorizationSha256: auth.authorizationSha256, resources, versionIds: auth.writeIdentities, payloadIdentities: auth.writePayloadIdentities }) }) });
+    assert.equal(config.operation, PRODUCTION_DUAL_SLOT_REBASELINE.kind);
+    const configInput = { sourceSha, rotationId, approval: { ticket: "CHG-REBASELINE-1", approvedBy: "checker", approverRole: "production-independent-checker", reason: "fixture", verificationRef: "ticket-fixture", minimumGraceSeconds: 2592000 }, bindings: result.bindings, rebaselineAuthorization: auth, verifyRebaselineLivePostWrite: () => ({ kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha, rotationId, authorizationSha256: auth.authorizationSha256, resources, versionIds: auth.writeIdentities, payloadIdentities: auth.writePayloadIdentities, livePostWriteSha256: canonicalSha256({ kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha, rotationId, authorizationSha256: auth.authorizationSha256, resources, versionIds: auth.writeIdentities, payloadIdentities: auth.writePayloadIdentities }) }) };
+    assert.throws(() => buildProductionRotationConfig({ ...configInput }), /coordinates/i);
+    assert.throws(() => buildProductionRotationConfig({ ...configInput, rebaselineAuthorizationCoordinates: { workflowRunId: "123456", workflowRunAttempt: "1" }, rebaselineAuthorization: undefined }), /authorization/i);
+  } finally { rmSync(outputs.directory, { recursive: true, force: true }); }
+});
+
+test("production command runner preserves binary authorization-artifact options", () => {
+  let captured;
+  const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST, exec: (file, args, options) => {
+    captured = { file, args, options };
+    return Buffer.from("artifact");
+  } });
+  assert.deepEqual(run(["gh", "api", "repos/example/actions/artifacts/1/zip"], { encoding: null, maxBuffer: 1234 }), Buffer.from("artifact"));
+  assert.equal(captured.file, "gh");
+  assert.equal(captured.options.encoding, null);
+  assert.equal(captured.options.maxBuffer, 1234);
 });
 
 test("production topology rejects ambiguous current staging and substituted Secret Manager reads", async () => {
@@ -186,6 +263,30 @@ test("production prepare CLI reuses authenticated abandonment evidence after a p
   crash = false;
   const resumed = await runProductionDualSlotRebaselineCli({ ...common });
   assert.equal(resumed.writeCount, 7); assert.deepEqual(readFileSync(abandonmentPath), firstEvidence); assert.equal(existsSync(resumed.preparationFile), true);
+  rmSync(outputs.directory, { recursive: true, force: true });
+});
+
+test("production prepare CLI resumes an exact preparation published before its process acknowledgement", async () => {
+  const outputs = temporary();
+  const auditWithLegacy = { ...audit, legacy: legacyBaseline, runningTasks: 2, pendingTasks: 0, activeTaskDefinition: "fixture-backend:1" };
+  const common = {
+    argv: ["--prepare", "--source-sha", sourceSha, "--rotation-id", rotationId, "--output-directory", outputs.directory, "--database-dependencies", "0", "--external-consumers", "0"],
+    repositoryRoot: process.cwd(), readCheckout: () => ({ toolingSha: sourceSha, porcelainStatus: "" }), createRun: () => () => "{}", createClient: () => ({ assertCredentialIdentity: async () => {} }), historicalTopologySha256,
+    gitRun: (gitArgs) => { if (gitArgs[0] === "fetch" || gitArgs[0] === "merge-base") return ""; if (gitArgs[0] === "status") return ""; if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--is-shallow-repository") return "false"; if (gitArgs[0] === "rev-parse" && (gitArgs[1] === "FETCH_HEAD" || gitArgs[1] === "HEAD")) return `${sourceSha}\n`; if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--git-path") return ".git/absent"; if (gitArgs[0] === "symbolic-ref") return "refs/remotes/origin/main"; throw new Error(`unexpected git ${gitArgs.join(" ")}`); },
+    readTopology: async () => ({ resources, currentVersionIds, observedSlotIdentities, observedSlotIdentitiesSha256: canonicalSha256(observedSlotIdentities) }), auditReferences: () => auditWithLegacy, output: () => {},
+  };
+  await assert.rejects(() => runProductionDualSlotRebaselineCli({ ...common, afterPreparationPersist: async () => { throw new Error("injected post-preparation crash"); } }), /injected post-preparation crash/);
+  const preparationPath = path.join(outputs.directory, "rebaseline-preparation.json");
+  const firstPreparation = readFileSync(preparationPath);
+  const resumed = await runProductionDualSlotRebaselineCli(common);
+  assert.equal(resumed.preparationSha256.length, 64);
+  assert.deepEqual(readFileSync(preparationPath), firstPreparation);
+  const divergent = JSON.parse(readFileSync(preparationPath, "utf8"));
+  divergent.writePlan[0].clientRequestToken = sha256("divergent-preparation-write");
+  const { preparationSha256, ...preparationBody } = divergent;
+  divergent.preparationSha256 = canonicalSha256(preparationBody);
+  writeFileSync(preparationPath, `${JSON.stringify(divergent)}\n`);
+  await assert.rejects(() => runProductionDualSlotRebaselineCli(common), /write plan|preparation/i);
   rmSync(outputs.directory, { recursive: true, force: true });
 });
 
@@ -281,7 +382,7 @@ test("durable output preflight fails before any secret write when an existing ou
 
 test("runtime admits only a declared rebaseline producer anchored to independent authorization", async () => {
   const outputs = temporary(); const result = await execute(executionAdapters(), outputs); const auth = authorization();
-  assertBaselineCompletion(result.completion, { sourceSha, rotationId, resources, authorizationBinding: auth.authorizationSha256 }); assertRebaselineRotationBindings(result.bindings, { authorization: auth }); assert.doesNotThrow(() => assertBindings(result.bindings, { rebaselineAuthorization: auth }));
+  assertBaselineCompletion(result.completion, { sourceSha, rotationId, resources, authorizationBinding: auth.authorizationSha256, writePayloadIdentities: auth.writePayloadIdentities }); assertRebaselineRotationBindings(result.bindings, { authorization: auth }); assert.doesNotThrow(() => assertBindings(result.bindings, { rebaselineAuthorization: auth }));
   const stripped = { ...result.bindings }; delete stripped.operation; delete stripped.baselineCompletionSha256; assert.throws(() => assertBindings(stripped, { rebaselineAuthorization: auth }), /schema|producer|rebaseline/i);
   const fabricated = { ...result.completion, authorizationBinding: "f".repeat(64) }; fabricated.baselineBindingSha256 = canonicalSha256(Object.fromEntries(Object.entries(fabricated).filter(([key]) => key !== "baselineBindingSha256"))); const bad = { ...result.bindings, baselineCompletion: fabricated, baselineCompletionSha256: fabricated.baselineBindingSha256 }; assert.throws(() => assertBindings(bad, { rebaselineAuthorization: auth }), /authorization/i);
   assert.doesNotThrow(() => readBoundBaselineCompletion({ filePath: outputs.completionFile, expectedSha256: result.completionSha256, authorization: auth }));

@@ -928,6 +928,34 @@ test("rotation prepare authenticates persisted state before authorizing the next
   }
 });
 
+test("rebaseline registration requires a fresh read-only prepared-rotation status", async () => {
+  const directory = fsTemp();
+  try {
+    const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
+    writeFileSync(result.phasePaths.rotationStateFile, JSON.stringify({ rotationId: result.config.rotationId, phase: "overlap-deploy-required", sourceSha }), { mode: 0o600 });
+    chmodSync(result.phasePaths.rotationStateFile, 0o600);
+    writeFileSync(result.phasePaths.rotationFixtureFile, JSON.stringify({ payload: null, signature: null, token: null }), { mode: 0o600 });
+    chmodSync(result.phasePaths.rotationFixtureFile, 0o600);
+    const stateSha256 = createHash("sha256").update(readFileSync(result.phasePaths.rotationStateFile)).digest("hex");
+    const calls = [];
+    const prepare = createProductionRotationPrepareAdapter({
+      coordinator: "backend/scripts/security/rotate-production-signing-material.mjs",
+      configFile: result.configPath,
+      configSha256: result.runtimeConfigSha256,
+      stateFile: result.phasePaths.rotationStateFile,
+      fixtureFile: result.phasePaths.rotationFixtureFile,
+      run: async (args) => { calls.push(args); return JSON.stringify({ mode: "status", phase: "overlap-deploy-required", records: { jwtCurrent: { versionId: "fixture" } } }); },
+    });
+    assert.equal((await prepare.revalidate({ rotationId: result.config.rotationId, rotationStateSha256: stateSha256 })).valid, true);
+    assert.deepEqual(calls[0].slice(1, 3), ["backend/scripts/security/rotate-production-signing-material.mjs", "--status"]);
+    await assert.rejects(() => prepare.revalidate({ rotationId: result.config.rotationId, rotationStateSha256: "0".repeat(64) }), /state changed/i);
+    assert.equal(calls.length, 1);
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("rotation task bindings never include secret values or pending-only fields", () => {
   const result = rotationBindingsToTaskBindings(bindings);
   assert.equal(Object.keys(result).sort().join(","), ["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PREVIOUS_KEY_VERSION", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_PREVIOUS"].sort().join(","));

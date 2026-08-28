@@ -4,7 +4,7 @@ import path from "node:path";
 import { createProductionCutoverRuntimeComposition } from "./production-cutover-runtime-composition.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime } from "./production-cutover-runtime-bootstrap.mjs";
-import { REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, REBASELINE_ROTATION_BINDINGS_KIND, resolveProductionDualSlotRebaselineAuthorizationArtifact } from "./production-dual-slot-rebaseline-contract.mjs";
+import { REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, REBASELINE_ROTATION_BINDINGS_KIND, resolveProductionDualSlotRebaselineAuthorizationArtifact, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
 
 const args = parseBootstrapArgs(process.argv.slice(2));
 const required = (name) => { const value = args.get(name); if (!value) throw new Error(`--${name} is required.`); return value; };
@@ -34,9 +34,12 @@ const decode = (captured) => JSON.parse(new TextDecoder("utf-8", { fatal: true }
 const rotationBindings = rotationBindingCapture ? decode(rotationBindingCapture) : undefined;
 const rotationSupersessionEvidence = rotationSupersessionCapture ? decode(rotationSupersessionCapture) : undefined;
 if (rotationBindings?.kind === REBASELINE_ROTATION_BINDINGS_KIND && rotationBindings.abandonmentEvidence?.historicalTopologySha256 !== REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256) throw new Error("Rebaseline rotation bindings do not contain the protected-source abandoned topology identity.");
-const rebaselineAuthorization = rotationBindings?.kind === REBASELINE_ROTATION_BINDINGS_KIND
+const rebaselineAuthorizationCoordinates = rotationBindings?.kind === REBASELINE_ROTATION_BINDINGS_KIND
+  ? { workflowRunId: required("rebaseline-authorization-run-id"), workflowRunAttempt: required("rebaseline-authorization-run-attempt") }
+  : undefined;
+const rebaselineAuthorization = rebaselineAuthorizationCoordinates
   ? resolveProductionDualSlotRebaselineAuthorizationArtifact({
-    workflowRunId: required("rebaseline-authorization-run-id"), workflowRunAttempt: required("rebaseline-authorization-run-attempt"),
+    ...rebaselineAuthorizationCoordinates,
     sourceSha: rotationBindings.sourceSha, rotationId: rotationBindings.rotationId,
     resources: { jwtPending: rotationBindings.jwt.pendingSecretId, qrPrivatePending: rotationBindings.qr.privatePendingSecretId, qrPublicPending: rotationBindings.qr.publicPendingSecretId, jwtPrevious: rotationBindings.jwt.previousSecretId, qrPublicPrevious: rotationBindings.qr.publicPreviousSecretId, qrCurrentVersion: rotationBindings.qr.currentKeyVersionSecretId, qrPreviousVersion: rotationBindings.qr.previousKeyVersionSecretId },
   }).authorization
@@ -44,6 +47,9 @@ const rebaselineAuthorization = rotationBindings?.kind === REBASELINE_ROTATION_B
 const onboardingPaths = args.has("onboarding-paths") ? read("onboarding-paths") : undefined;
 const composition = createProductionCutoverRuntimeComposition();
 const { releaseRun } = composition;
+const verifyRebaselineLivePostWrite = rotationBindings?.kind === REBASELINE_ROTATION_BINDINGS_KIND
+  ? ({ bindings, authorization }) => verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization })
+  : undefined;
 const loadCurrentTaskDefinition = () => {
   const currentService = JSON.parse(releaseRun(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2"])).services?.[0];
   if (!currentService?.taskDefinition) throw new Error("Current production task definition is unavailable.");
@@ -62,6 +68,8 @@ const result = prepareProductionCutoverRuntime({
   approval,
   rotationBindings,
   rebaselineAuthorization,
+  rebaselineAuthorizationCoordinates,
+  verifyRebaselineLivePostWrite,
   rotationSupersessionEvidence,
   rotationId: rotationBindings?.rotationId,
   imageAuthorization,

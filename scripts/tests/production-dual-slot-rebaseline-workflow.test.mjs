@@ -40,7 +40,7 @@ test("every strict shell step binds its non-default inputs in that same step", (
   assert.match(postInstall, /SOURCE_SHA: \$\{\{ inputs\.source_sha \}\}/);
   assert.match(postInstall, /test "\$\(git rev-parse HEAD\)" = "\$SOURCE_SHA"/);
   assert.match(environment, /SOURCE_SHA: \$\{\{ inputs\.source_sha \}\}/);
-  for (const variable of ["SOURCE_SHA", "HISTORICAL_ROTATION_ID", "ROTATION_ID", "ABANDONMENT_EVIDENCE_SHA256", "BASELINE_IDENTITY_SHA256", "RESOURCES_JSON", "WRITE_IDENTITIES_JSON", "EXPECTED_SECRET_VALUE_WRITES", "EXPECTED_SECRET_DELETES", "LIVE_REFERENCE_AUDIT", "LIVE_REFERENCE_AUDIT_SHA256", "OBSERVED_SLOT_IDENTITIES_SHA256", "REASON", "APPROVED_BY", "APPROVER_ROLE", "VERIFICATION_REF", "ENVIRONMENT_APPROVAL_SHA"]) assert.match(producer, new RegExp(`${variable}:`));
+  for (const variable of ["SOURCE_SHA", "HISTORICAL_ROTATION_ID", "ROTATION_ID", "ABANDONMENT_EVIDENCE_SHA256", "BASELINE_IDENTITY_SHA256", "RESOURCES_JSON", "WRITE_IDENTITIES_JSON", "WRITE_PAYLOAD_IDENTITIES_JSON", "EXPECTED_SECRET_VALUE_WRITES", "EXPECTED_SECRET_DELETES", "LIVE_REFERENCE_AUDIT", "LIVE_REFERENCE_AUDIT_SHA256", "OBSERVED_SLOT_IDENTITIES_SHA256", "REASON", "APPROVED_BY", "APPROVER_ROLE", "VERIFICATION_REF", "ENVIRONMENT_APPROVAL_SHA"]) assert.match(producer, new RegExp(`${variable}:`));
 });
 
 test("strict workflow shells have an explicit source for every referenced uppercase variable", () => {
@@ -60,4 +60,5 @@ test("malicious dispatch values remain environment data at the Node argument bou
   assert.match(shell, /--source-sha "\$SOURCE_SHA"/);
   assert.match(shell, /--resources-json "\$RESOURCES_JSON"/);
   assert.match(shell, /--write-identities-json "\$WRITE_IDENTITIES_JSON"/);
+  assert.match(shell, /--write-payload-identities-json "\$WRITE_PAYLOAD_IDENTITIES_JSON"/);
 });
