@@ -127,6 +127,25 @@ async function readSlotSnapshot(client, slot, secretArn, expectedVersionId, expe
 
 function awsJson(run, args) { return JSON.parse(run(["ecs", ...args])); }
 function chunks(values, size = 100) { return Array.from({ length: Math.ceil(values.length / size) }, (_, index) => values.slice(index * size, index * size + size)); }
+function listAllTaskArns(run, args) {
+  const taskArns = new Set(); const tokens = new Set(); let nextToken;
+  for (let page = 0; page < 10; page += 1) {
+    const pageArgs = [...args, "--page-size", "100", "--max-items", "100"];
+    if (nextToken) pageArgs.push("--starting-token", nextToken);
+    const response = awsJson(run, pageArgs);
+    if (!response || !Array.isArray(response.taskArns)) throw new Error("ECS task census page is malformed.");
+    for (const taskArn of response.taskArns) {
+      if (typeof taskArn !== "string" || !taskArn.startsWith("arn:aws:ecs:eu-west-2:368992683803:task/")) throw new Error("ECS task census returned an invalid task ARN.");
+      taskArns.add(taskArn);
+      if (taskArns.size > 1000) throw new Error("ECS task census exceeds the bounded task limit.");
+    }
+    const token = response.nextToken ?? response.NextToken;
+    if (token === undefined || token === null || token === "") return [...taskArns].sort();
+    if (typeof token !== "string" || tokens.has(token)) throw new Error("ECS task census pagination token is malformed or cyclic.");
+    tokens.add(token); nextToken = token;
+  }
+  throw new Error("ECS task census exceeds the bounded page limit.");
+}
 
 export function auditLiveProductionDualSlotReferences({ run, resources, databaseDependencies = 0, externalConsumers = 0 } = {}) {
   const service = awsJson(run, ["describe-services", "--cluster", CLUSTER, "--services", SERVICE]).services?.[0];
@@ -135,24 +154,26 @@ export function auditLiveProductionDualSlotReferences({ run, resources, database
   if (!["ECS", "CODE_DEPLOY", "EXTERNAL"].includes(deploymentController)) throw new Error("ECS deployment controller topology is unsupported.");
   const serviceTaskArns = new Set();
   const clusterTaskArns = new Set();
-  for (const status of ["RUNNING", "PENDING"]) {
-    const serviceListed = awsJson(run, ["list-tasks", "--cluster", CLUSTER, "--service-name", SERVICE, "--desired-status", status]).taskArns || [];
-    const clusterListed = awsJson(run, ["list-tasks", "--cluster", CLUSTER, "--desired-status", status]).taskArns || [];
-    if (!Array.isArray(serviceListed) || !Array.isArray(clusterListed)) throw new Error(`ECS ${status} task inventory is malformed.`);
+  for (const desiredStatus of ["RUNNING", "STOPPED"]) {
+    const serviceListed = listAllTaskArns(run, ["list-tasks", "--cluster", CLUSTER, "--service-name", SERVICE, "--desired-status", desiredStatus]);
+    const clusterListed = listAllTaskArns(run, ["list-tasks", "--cluster", CLUSTER, "--desired-status", desiredStatus]);
     serviceListed.forEach((arn) => { serviceTaskArns.add(arn); clusterTaskArns.add(arn); });
     clusterListed.forEach((arn) => clusterTaskArns.add(arn));
   }
   const tasks = [];
   for (const batch of chunks([...clusterTaskArns].sort())) {
     if (batch.length === 0) continue;
-    const described = awsJson(run, ["describe-tasks", "--cluster", CLUSTER, "--tasks", ...batch]).tasks;
-    if (!Array.isArray(described) || described.length !== batch.length || new Set(described.map(({ taskArn }) => taskArn)).size !== batch.length || described.some(({ taskArn, taskDefinitionArn }) => !batch.includes(taskArn) || !taskDefinitionArn)) throw new Error("ECS task description inventory is incomplete.");
+    const response = awsJson(run, ["describe-tasks", "--cluster", CLUSTER, "--tasks", ...batch]);
+    const described = response.tasks;
+    if (Array.isArray(response.failures) && response.failures.length > 0) throw new Error("ECS task description inventory contains failures.");
+    if (!Array.isArray(described) || described.length !== batch.length || new Set(described.map(({ taskArn }) => taskArn)).size !== batch.length || described.some(({ taskArn, taskDefinitionArn, lastStatus, desiredStatus }) => !batch.includes(taskArn) || !taskDefinitionArn || typeof lastStatus !== "string" || typeof desiredStatus !== "string")) throw new Error("ECS task description inventory is incomplete.");
     tasks.push(...described);
   }
   const deployments = (service.deployments || []).filter((deployment) => deployment?.status === "PRIMARY" || deployment?.status === "ACTIVE").map(({ id, status, taskDefinition }) => ({ id, status, taskDefinition })).sort((a, b) => String(a.id).localeCompare(String(b.id)));
   if (deployments.some(({ id, taskDefinition }) => !id || !taskDefinition)) throw new Error("ECS active deployment topology is incomplete.");
-  const serviceTaskDefinitionArns = new Set([service.taskDefinition, ...deployments.map(({ taskDefinition }) => taskDefinition), ...tasks.filter(({ taskArn }) => serviceTaskArns.has(taskArn)).map(({ taskDefinitionArn }) => taskDefinitionArn)].filter(Boolean));
-  const taskDefinitionArns = new Set([...serviceTaskDefinitionArns, ...tasks.map(({ taskDefinitionArn }) => taskDefinitionArn)].filter(Boolean));
+  const liveTasks = tasks.filter(({ lastStatus }) => lastStatus !== "STOPPED");
+  const serviceTaskDefinitionArns = new Set([service.taskDefinition, ...deployments.map(({ taskDefinition }) => taskDefinition), ...liveTasks.filter(({ taskArn }) => serviceTaskArns.has(taskArn)).map(({ taskDefinitionArn }) => taskDefinitionArn)].filter(Boolean));
+  const taskDefinitionArns = new Set([...serviceTaskDefinitionArns, ...liveTasks.map(({ taskDefinitionArn }) => taskDefinitionArn)].filter(Boolean));
   if (deploymentController !== "ECS") {
     const taskSets = awsJson(run, ["describe-task-sets", "--cluster", CLUSTER, "--service", SERVICE]).taskSets;
     if (!Array.isArray(taskSets)) throw new Error("ECS task-set topology is unavailable.");
@@ -168,7 +189,7 @@ export function auditLiveProductionDualSlotReferences({ run, resources, database
   const active = taskDefinitions.find(({ requestedArn }) => requestedArn === service.taskDefinition)?.definition;
   if (!active) throw new Error("Current service task definition was not fully audited.");
   const legacy = deriveLegacyRotationBaseline(active);
-  const evidence = { service: { arn: service.serviceArn, desiredCount: service.desiredCount, runningCount: service.runningCount, pendingCount: service.pendingCount, taskDefinition: service.taskDefinition, deploymentController }, deployments, tasks: tasks.map(({ taskArn, taskDefinitionArn, lastStatus, desiredStatus }) => ({ taskArn, taskDefinitionArn, lastStatus, desiredStatus, serviceTask: serviceTaskArns.has(taskArn) })).sort((a, b) => a.taskArn.localeCompare(b.taskArn)), taskDefinitionArns: [...taskDefinitionArns].sort(), serviceTaskDefinitionArns: [...serviceTaskDefinitionArns].sort(), perTaskDefinition, databaseDependencies, externalConsumers };
+  const evidence = { service: { arn: service.serviceArn, desiredCount: service.desiredCount, runningCount: service.runningCount, pendingCount: service.pendingCount, taskDefinition: service.taskDefinition, deploymentController }, deployments, tasks: tasks.map(({ taskArn, taskDefinitionArn, lastStatus, desiredStatus }) => ({ taskArn, taskDefinitionArn, lastStatus, desiredStatus, live: lastStatus !== "STOPPED", serviceTask: serviceTaskArns.has(taskArn) })).sort((a, b) => a.taskArn.localeCompare(b.taskArn)), taskDefinitionArns: [...taskDefinitionArns].sort(), serviceTaskDefinitionArns: [...serviceTaskDefinitionArns].sort(), perTaskDefinition, databaseDependencies, externalConsumers };
   const stableEvidence = { cluster: CLUSTER, service: { arn: service.serviceArn, deploymentController, taskDefinition: service.taskDefinition }, serviceTaskDefinitionArns: [...serviceTaskDefinitionArns].sort(), serviceTaskDefinitionReferences: perTaskDefinition.filter(({ taskDefinitionArn }) => serviceTaskDefinitionArns.has(taskDefinitionArn)), legacy, databaseDependencies, externalConsumers, externalDualSlotReferences: perTaskDefinition.filter(({ taskDefinitionArn }) => !serviceTaskDefinitionArns.has(taskDefinitionArn)).flatMap(({ dualSlotReferences }) => dualSlotReferences).sort() };
   const auditSha256 = canonicalSha256(evidence);
   const stableAuditSha256 = canonicalSha256(stableEvidence);

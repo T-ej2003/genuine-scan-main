@@ -9,7 +9,7 @@ exact current version, stages, schema, historical metadata, and safe payload ide
 of every historical slot. The retained historical Secrets Manager VersionId is the
 immutable payload authority; the newly observed safe payload hash/fingerprint must
 match the corresponding schema and metadata before the version can be abandoned. It
-authenticates the complete live ECS task/deployment reference set and the legacy runtime
+authenticates the complete paginated live ECS task/deployment reference set and the legacy runtime
 baseline, then creates one private material journal. The audit retains a raw observation
 hash for forensics, but authorization binds the stable security topology: service and
 task-definition identities, every secret-reference audit, legacy authority, and zero
@@ -77,5 +77,7 @@ requires the dedicated protected-environment authorization artifact.
 Production execution requires the exact prepared rotation ID plus the private
 preparation and material-journal paths. Execution never generates material: a missing
 or mismatched journal fails before a write. Fresh ECS reference enumeration occurs before
-each write and before completion; incomplete task/deployment/task-definition reads also
+each write and before completion; desired RUNNING or STOPPED is only a census filter, while
+every described task whose lastStatus is not STOPPED remains live; incomplete
+task/deployment/task-definition reads also
 fail closed.
