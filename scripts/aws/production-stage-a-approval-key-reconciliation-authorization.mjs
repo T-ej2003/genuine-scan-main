@@ -174,29 +174,8 @@ export function resolveStageAReconciliationAuthorizationArtifact({ workflowRunId
 
 export async function runCli(argv = process.argv.slice(2), deps = {}) {
   if (argv.includes("--execute")) {
-    const execute = deps.execFileSync || execFileSync;
-    const run = deps.run || ((command, args, options = {}) => execute(command, args, { encoding: options.encoding === null ? null : "utf8", maxBuffer: options.maxBuffer }));
-    const sourceSha = required(argv, "--source-sha");
-    const resolved = (deps.resolveAuthorizationArtifact || resolveStageAReconciliationAuthorizationArtifact)({ workflowRunId: required(argv, "--workflow-run-id"), workflowRunAttempt: required(argv, "--workflow-run-attempt"), sourceSha, run });
-    const authorization = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(resolved.authorizationBytes));
-    if (authorization?.protectedEnvironmentApprovalEvidence?.workflowRunId !== String(resolved.workflow.id) || authorization?.protectedEnvironmentApprovalEvidence?.workflowRunAttempt !== String(resolved.workflow.run_attempt) || authorization?.protectedEnvironmentApprovalEvidence?.executionActor?.toLowerCase() !== String(resolved.workflow.actor?.login || "").toLowerCase()) throw new Error("Stage-A authorization environment approval is not bound to the resolved workflow run.");
-    const checkout = (deps.readProtectedMain || readFreshProtectedMainIdentity)({ cwd: root, expectedSourceSha: sourceSha });
-    if (checkout.headSha !== sourceSha || checkout.freshRemoteMainSha !== sourceSha) throw new Error("Stage-A executor is not at the authorized protected source.");
-    const savedPlanPath = path.resolve(required(argv, "--saved-plan")); const savedPlanBytes = fs.readFileSync(savedPlanPath);
-    const consumeDirectory = path.join(process.env.HOME || "", ".mscqr", "production-stage-a", "reconciliation-attempts");
-    ensureStageBPrivateDirectory({ directory: consumeDirectory, repositoryRoot: root, create: true, label: "Stage-A reconciliation consumption directory" });
-    const executorSavedPlanPath = path.join(consumeDirectory, `${authorization.authorizationSha256}.tfplan`);
-    const executorPlan = materializeStageAReconciliationPlan({ savedPlanBytes, expectedSha256: authorization.savedPlanSha256, applyPlanPath: executorSavedPlanPath, repositoryRoot: root });
-    const renderedPlanBytes = Buffer.from(run("terraform", [`-chdir=${STAGE_A_RECONCILIATION_AUTHORIZATION.terraformRoot}`, "show", "-json", executorPlan.path]));
-    const readState = () => run("terraform", [`-chdir=${STAGE_A_RECONCILIATION_AUTHORIZATION.terraformRoot}`, "state", "pull"]);
-    const readPolicy = () => {
-      const output = JSON.parse(run("aws", ["kms", "get-key-policy", "--key-id", authorization.approvalKeyArn, "--policy-name", "default", "--output", "json", "--no-cli-pager"]));
-      return parsePolicy(decodeURIComponent(output.Policy), "Live Stage-A approval-key policy");
-    };
-    return executeStageAApprovalKeyReconciliation({ authorization, sourceSha, savedPlanBytes, renderedPlanBytes, executorSavedPlanPath, repositoryRoot: root, readState, readPolicy,
-      recordConsumption: () => writeStageBPrivateFileExclusive({ filePath: path.join(consumeDirectory, `${authorization.authorizationSha256}.json`), bytes: Buffer.from(`${JSON.stringify({ authorizationSha256: authorization.authorizationSha256, attemptedAt: new Date().toISOString() })}\n`), repositoryRoot: root, label: "Stage-A reconciliation consumption record" }),
-      applySavedPlan: ({ path: applyPath, sha256: appliedPlanSha256 }) => { if (appliedPlanSha256 !== authorization.savedPlanSha256 || applyPath !== executorSavedPlanPath) throw new Error("Stage-A executor apply artifact binding is invalid."); return run("terraform", [`-chdir=${STAGE_A_RECONCILIATION_AUTHORIZATION.terraformRoot}`, "apply", "-input=false", applyPath]); },
-    });
+    const { runCli: runCapabilityCli } = await import("./run-production-stage-a-approval-key-reconciliation.mjs");
+    return runCapabilityCli(argv, deps);
   }
   if (!argv.includes("--authorize")) throw new Error("Stage-A reconciliation CLI requires --authorize or --execute.");
   const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--output")), repositoryRoot: root, label: "Stage-A reconciliation authorization", allowExisting: false });

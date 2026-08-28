@@ -3,19 +3,24 @@
   "identityModel": "tooling-input-tree-sha256",
   "imageReleaseSha": "a63da17024415c2764452b86f1dcbce0af4ae9b8",
   "comparisonBaseSha": "a63da17024415c2764452b86f1dcbce0af4ae9b8",
-  "toolingSha": "ce8b5c3dcdad0e93653a434860c5a77c4e06a216",
+  "toolingSha": "ea6b4fa0dd8e83be40636dae5a9d85b3d09b4765",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
-  "comparisonHeadSha256": "e4679e3f39aac88689509527c8d36567eb418128e6b748cbc9d3d7dad8f546f8",
-  "toolingInputTreeSha256": "e4679e3f39aac88689509527c8d36567eb418128e6b748cbc9d3d7dad8f546f8",
+  "comparisonHeadSha256": "3b8eb4991462c0ac6f18cc69286aecc77fc4da494576470eced769e2d440f0dd",
+  "toolingInputTreeSha256": "3b8eb4991462c0ac6f18cc69286aecc77fc4da494576470eced769e2d440f0dd",
   "imageReuseCompatible": true,
   "imageBuildInputsChanged": false,
   "classificationRulesVersion": "stage-b-image-reuse-v4",
-  "generatedAt": "2026-08-28T11:53:42+01:00",
+  "generatedAt": "2026-08-28T14:21:43+01:00",
   "generatorVersion": "validate-stage-b-image-reuse@3",
   "classifiedChangedFiles": [
     {
       "file": ".github/workflows/authorize-production-stage-a-reconciliation.yml",
       "category": "ciOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "documents/ops/iam/MSCQR_PRODUCTION_STAGE_A_APPROVAL_KEY_RECONCILIATION_CAPABILITY-v1.md",
+      "category": "documentationOnly",
       "imageAffecting": false
     },
     {
@@ -46,6 +51,11 @@
     {
       "file": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_TWO_SHA_IDENTITY.md",
       "category": "documentationOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "package.json",
+      "category": "toolingOnly",
       "imageAffecting": false
     },
     {
@@ -105,6 +115,11 @@
     },
     {
       "file": "scripts/aws/run-production-green-stage-b-preflight.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/run-production-stage-a-approval-key-reconciliation.mjs",
       "category": "toolingOnly",
       "imageAffecting": false
     },
@@ -170,6 +185,11 @@
     },
     {
       "file": "scripts/tests/production-stage-a-approval-key-reconciliation-authorization.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-stage-a-approval-key-reconciliation-capability.test.mjs",
       "category": "testOnly",
       "imageAffecting": false
     },

@@ -26,12 +26,39 @@ jobs:
         with:
           ref: ${{ inputs.source_sha }}
           fetch-depth: 0
-      - name: Require protected source
+          persist-credentials: false
+      - name: Authenticate protected source before dependencies
         env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_REPOSITORY: T-ej2003/genuine-scan-main
           SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
         run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          protected_main_sha="$(gh api "repos/$EXPECTED_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$SOURCE_SHA" = "$protected_main_sha"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          test "$(git merge-base HEAD origin/main)" = "$(git rev-parse HEAD)"
+          install -d -m 700 "$RUNNER_TEMP/stage-a-authorization"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          git ls-files -z > "$RUNNER_TEMP/stage-a-authorization/protected-source-files.zlist"
+          : > "$RUNNER_TEMP/stage-a-authorization/protected-source-inputs.sha256"
+          while IFS= read -r -d '' file; do sha256sum -- "$file" >> "$RUNNER_TEMP/stage-a-authorization/protected-source-inputs.sha256"; done < "$RUNNER_TEMP/stage-a-authorization/protected-source-files.zlist"
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked authorization dependencies
+        run: npm ci
+      - name: Re-authenticate protected source after dependency installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain --untracked-files=no)"
+          : > "$RUNNER_TEMP/stage-a-authorization/installed-source-inputs.sha256"
+          while IFS= read -r -d '' file; do sha256sum -- "$file" >> "$RUNNER_TEMP/stage-a-authorization/installed-source-inputs.sha256"; done < "$RUNNER_TEMP/stage-a-authorization/protected-source-files.zlist"
+          cmp --silent "$RUNNER_TEMP/stage-a-authorization/protected-source-inputs.sha256" "$RUNNER_TEMP/stage-a-authorization/installed-source-inputs.sha256"
       - name: Authenticate protected environment approval
         id: environment-approval
         env:

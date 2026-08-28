@@ -705,7 +705,8 @@
       "kind": "file",
       "producer": ".github/workflows/authorize-production-stage-a-reconciliation.yml",
       "consumers": [
-        "scripts/aws/production-stage-a-approval-key-reconciliation-authorization.mjs"
+        "scripts/aws/production-stage-a-approval-key-reconciliation-authorization.mjs",
+        "scripts/aws/run-production-stage-a-approval-key-reconciliation.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
