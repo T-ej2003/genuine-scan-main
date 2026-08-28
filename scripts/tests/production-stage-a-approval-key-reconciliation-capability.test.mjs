@@ -23,19 +23,27 @@ const authorization = () => createStageAApprovalKeyReconciliationAuthorization({
 const workflow = () => ({ id: 17, run_attempt: 2, path: ".github/workflows/authorize-production-stage-a-reconciliation.yml" });
 const artifact = () => ({ id: 9, name: "stage-a-approval-key-reconciliation-authorization", expired: false, digest: `sha256:${"d".repeat(64)}`, workflow_run: { id: 17, head_sha: sourceSha } });
 
-function lifecycle({ failApply = false, failCleanup = false, createThrowsAfterMutation = false, failAllRecoveryReads = false, failFirstRecoveryRead = false, setDefaultReportsFailure = false, deleteReportsFailure = false, makeCapabilityAbsentBeforeCleanup = false, returnedVersionId = "v2" } = {}) {
-  const auth = authorization(); let defaultVersionId = "v1"; const versions = new Map([["v1", steadyPolicy]]); let applies = 0; const calls = []; let createAttempted = false; let recoveryReads = 0;
-  const topology = () => { if (createAttempted && (failAllRecoveryReads || (failFirstRecoveryRead && recoveryReads++ === 0))) throw new Error("topology read failed"); return { defaultVersionId, versions: [...versions].map(([VersionId, document]) => ({ VersionId, document })) }; };
+function lifecycle({ failApply = false, failCleanup = false, createThrowsAfterMutation = false, failAllRecoveryReads = false, failFirstRecoveryRead = false, setDefaultReportsFailure = false, deleteReportsFailure = false, makeCapabilityAbsentBeforeCleanup = false, returnedVersionId = "v2", staleCreateReads = 0, staleRestoreReads = 0, staleDeleteReads = 0 } = {}) {
+  const auth = authorization(); let defaultVersionId = "v1"; const versions = new Map([["v1", steadyPolicy]]); let applies = 0; const calls = []; const delays = []; let createAttempted = false; let recoveryReads = 0; let phase = "steady";
+  const snapshot = (temporary = false) => temporary ? { defaultVersionId: "v2", versions: [["v1", steadyPolicy], ["v2", buildTemporaryApprovalKeyCapabilityPolicy(steadyPolicy, auth)]].map(([VersionId, document]) => ({ VersionId, document })) } : { defaultVersionId: "v1", versions: [["v1", steadyPolicy]].map(([VersionId, document]) => ({ VersionId, document })) };
+  const topology = () => {
+    if (createAttempted && (failAllRecoveryReads || (failFirstRecoveryRead && recoveryReads++ === 0))) throw new Error("topology read failed");
+    if (phase === "temporary" && staleCreateReads-- > 0) return snapshot();
+    if (phase === "restored" && staleRestoreReads-- > 0) return snapshot(true);
+    if (phase === "deleted" && staleDeleteReads-- > 0) return snapshot(true);
+    return { defaultVersionId, versions: [...versions].map(([VersionId, document]) => ({ VersionId, document })) };
+  };
   const runner = createApprovalKeyReconciliationCapabilityRunner({ authorization: auth, sourceSha, workflow: workflow(), artifact: artifact(), steadyPolicy,
     readTopology: topology,
-    createTemporaryVersion: (document) => { calls.push("create"); createAttempted = true; versions.set("v2", document); defaultVersionId = "v2"; if (createThrowsAfterMutation) throw new Error("create failed after remote acceptance"); return { VersionId: returnedVersionId }; },
-    setDefaultVersion: (versionId) => { calls.push(`restore:${versionId}`); if (failCleanup) throw new Error("restore failed"); defaultVersionId = versionId; if (setDefaultReportsFailure) throw new Error("restore response lost"); },
-    deletePolicyVersion: (versionId) => { calls.push(`delete:${versionId}`); versions.delete(versionId); if (deleteReportsFailure) throw new Error("delete response lost"); },
+    createTemporaryVersion: (document) => { calls.push("create"); createAttempted = true; versions.set("v2", document); defaultVersionId = "v2"; phase = "temporary"; if (createThrowsAfterMutation) throw new Error("create failed after remote acceptance"); return { VersionId: returnedVersionId }; },
+    setDefaultVersion: (versionId) => { calls.push(`restore:${versionId}`); if (failCleanup) throw new Error("restore failed"); defaultVersionId = versionId; phase = "restored"; if (setDefaultReportsFailure) throw new Error("restore response lost"); },
+    deletePolicyVersion: (versionId) => { calls.push(`delete:${versionId}`); versions.delete(versionId); phase = "deleted"; if (deleteReportsFailure) throw new Error("delete response lost"); },
     verifyEffectiveCapability: () => { calls.push("effective"); return true; },
     verifyCapabilityAbsent: () => { calls.push("absent"); return true; },
-    executeAuthorization: () => { calls.push("apply"); applies += 1; if (makeCapabilityAbsentBeforeCleanup) { defaultVersionId = "v1"; versions.delete("v2"); } if (failApply) throw new Error("apply failed"); return { applied: true }; },
+    executeAuthorization: () => { calls.push("apply"); applies += 1; if (makeCapabilityAbsentBeforeCleanup) { defaultVersionId = "v1"; versions.delete("v2"); phase = "deleted"; } if (failApply) throw new Error("apply failed"); return { applied: true }; },
+    sleep: (milliseconds) => { delays.push(milliseconds); },
   });
-  return { auth, runner, topology, calls, applies: () => applies };
+  return { auth, runner, topology, calls, delays, applies: () => applies };
 }
 
 test("approval-key capability is a single exact PutKeyPolicy statement and preserves steady state", () => {
@@ -68,19 +76,41 @@ test("capability applies once only after establishment and restores then deletes
   const cleanupFailure = lifecycle({ failCleanup: true }); assert.throws(() => cleanupFailure.runner.execute(), /CRITICAL_TEMPORARY_CAPABILITY_CLEANUP_FAILURE/); assert.equal(cleanupFailure.calls.includes("apply"), true); assert.equal(cleanupFailure.calls.filter((call) => call === "restore:v1").length, 2);
 });
 
-test("unknown CreatePolicyVersion outcomes are recovered by exact policy identity and never reach apply", () => {
+test("unknown CreatePolicyVersion outcomes converge by exact policy identity before apply", () => {
   const remoteAccepted = lifecycle({ createThrowsAfterMutation: true, returnedVersionId: "v999" });
-  assert.throws(() => remoteAccepted.runner.execute(), /create failed/);
-  assert.equal(remoteAccepted.applies(), 0);
+  assert.equal(remoteAccepted.runner.execute().applied, true);
+  assert.equal(remoteAccepted.applies(), 1);
   assert.equal(remoteAccepted.topology().defaultVersionId, "v1");
   assert.equal(remoteAccepted.topology().versions.some(({ VersionId }) => VersionId === "v2"), false);
-  assert.deepEqual(remoteAccepted.calls, ["create", "restore:v1", "delete:v2", "absent"]);
+  assert.deepEqual(remoteAccepted.calls, ["create", "effective", "apply", "restore:v1", "delete:v2", "absent"]);
 
   const delayedRecovery = lifecycle({ createThrowsAfterMutation: true, failFirstRecoveryRead: true });
-  assert.throws(() => delayedRecovery.runner.execute(), /create failed/);
-  assert.equal(delayedRecovery.applies(), 0);
+  assert.equal(delayedRecovery.runner.execute().applied, true);
+  assert.equal(delayedRecovery.applies(), 1);
   assert.equal(delayedRecovery.topology().defaultVersionId, "v1");
   assert.equal(delayedRecovery.topology().versions.some(({ VersionId }) => VersionId === "v2"), false);
+});
+
+test("successful stale IAM topology reads converge before create, restore, and delete are accepted", () => {
+  const delayed = lifecycle({ staleCreateReads: 3, staleRestoreReads: 2, staleDeleteReads: 2 });
+  assert.equal(delayed.runner.execute().applied, true);
+  assert.equal(delayed.applies(), 1);
+  assert.equal(delayed.delays.length >= 7, true);
+  assert.equal(delayed.delays.every((milliseconds) => milliseconds >= 100), true);
+  assert.equal(delayed.topology().defaultVersionId, "v1");
+  assert.equal(delayed.topology().versions.some(({ VersionId }) => VersionId === "v2"), false);
+
+  const responseLost = lifecycle({ createThrowsAfterMutation: true, staleCreateReads: 2 });
+  assert.equal(responseLost.runner.execute().applied, true);
+  assert.equal(responseLost.applies(), 1);
+  assert.equal(responseLost.delays.length >= 2, true);
+});
+
+test("unresolved successful stale reads fail closed before apply", () => {
+  const unresolved = lifecycle({ staleCreateReads: Number.POSITIVE_INFINITY });
+  assert.throws(() => unresolved.runner.execute(), (error) => error.code === "CRITICAL_TEMPORARY_CAPABILITY_CLEANUP_FAILURE" && error.capabilityState === "UNKNOWN");
+  assert.equal(unresolved.applies(), 0);
+  assert.equal(unresolved.delays.length > 0, true);
 });
 
 test("unrecoverable capability topology fails closed instead of skipping cleanup", () => {
@@ -123,18 +153,27 @@ test("full managed-policy capacity prunes only a dated non-default authenticated
     createTemporaryVersion: (document) => { calls.push("create"); versions.set("v6", document); defaultVersionId = "v6"; return { VersionId: "v6" }; },
     setDefaultVersion: (versionId) => { calls.push(`restore:${versionId}`); defaultVersionId = versionId; },
     deletePolicyVersion: (versionId) => { calls.push(`delete:${versionId}`); versions.delete(versionId); },
-    verifyEffectiveCapability: () => { calls.push("effective"); return true; }, verifyCapabilityAbsent: () => { calls.push("absent"); return true; }, executeAuthorization: () => { calls.push("apply"); return { applied: true }; },
+    verifyEffectiveCapability: () => { calls.push("effective"); return true; }, verifyCapabilityAbsent: () => { calls.push("absent"); return true; }, executeAuthorization: () => { calls.push("apply"); return { applied: true }; }, sleep: () => {},
   });
   const result = runner.execute();
   assert.equal(result.capacityDeletedVersionId, "v2");
   assert.deepEqual(calls, ["delete:v2", "create", "effective", "apply", "restore:v1", "delete:v6", "absent"]);
 });
 
-test("authorization workflow has deterministic clean-runner dependencies and no mutation capability", async () => {
+test("authorization workflow authenticates protected source before lifecycle code and rechecks inputs afterward", async () => {
   const workflowSource = fs.readFileSync(".github/workflows/authorize-production-stage-a-reconciliation.yml", "utf8");
   assert.match(workflowSource, /actions\/setup-node@v6/); assert.match(workflowSource, /node-version: 24/); assert.match(workflowSource, /run: npm ci/);
   assert.doesNotMatch(workflowSource, /npm install|npm install -g|configure-aws-credentials|terraform (?:plan|apply)|update-service|stage-b/i);
   assert.match(workflowSource, /cache: npm/);
+  const protectedSource = workflowSource.indexOf("Authenticate protected source before dependencies"); const install = workflowSource.indexOf("Install locked authorization dependencies"); const npm = workflowSource.indexOf("run: npm ci"); const postInstall = workflowSource.indexOf("Re-authenticate protected source after dependency installation"); const producer = workflowSource.indexOf("Authenticate protected environment approval");
+  assert.equal(protectedSource >= 0 && protectedSource < npm && npm < postInstall && postInstall < producer, true);
+  const preInstall = workflowSource.slice(protectedSource, install);
+  assert.match(preInstall, /gh api "repos\/\$EXPECTED_REPOSITORY\/branches\/main"/); assert.match(preInstall, /test "\$SOURCE_SHA" = "\$protected_main_sha"/); assert.match(preInstall, /test "\$\(git rev-parse HEAD\)" = "\$SOURCE_SHA"/);
+  assert.doesNotMatch(preInstall, /origin\/main|merge-base/);
+  const preInstallScript = preInstall.match(/run: \|\n([\s\S]*?)\n\s*- name:/)?.[1] || "";
+  assert.doesNotMatch(preInstallScript, /\bnpm\b|\bnode\b|scripts\//);
+  const integrity = workflowSource.slice(postInstall, producer);
+  assert.match(integrity, /git status --porcelain --untracked-files=no/); assert.match(integrity, /cmp --silent/); assert.match(integrity, /protected-source-inputs\.sha256/);
   assert.equal(fs.existsSync("package-lock.json"), true);
   assert.equal(typeof (await import("jszip")).default, "function");
 });
@@ -189,7 +228,7 @@ test("governed CLI composes approved artifact, temporary capability, one saved-p
     throw new Error("unexpected Terraform command");
   };
   try {
-    const result = await authorizationCli(["--execute", "--source-sha", sourceSha, "--workflow-run-id", "17", "--workflow-run-attempt", "2", "--saved-plan", planPath, "--admin-profile", "root", "--release-profile", "release"], { run, adminRun, releaseAws, releaseRun, readProtectedCheckout: () => ({ toolingSha: sourceSha }) });
+    const result = await authorizationCli(["--execute", "--source-sha", sourceSha, "--workflow-run-id", "17", "--workflow-run-attempt", "2", "--saved-plan", planPath, "--admin-profile", "root", "--release-profile", "release"], { run, adminRun, releaseAws, releaseRun, sleep: () => {}, readProtectedCheckout: () => ({ toolingSha: sourceSha }) });
     assert.equal(result.applied, true); assert.equal(result.temporaryCapabilityRemoved, true); assert.equal(defaultVersion, "v1"); assert.equal(versions.has("v2"), false);
     const zip = calls.find(({ command, args }) => command === "gh" && args[1].endsWith("/zip")); assert.equal(zip.options.encoding, null); assert.equal(calls.some(({ command, args }) => command === "terraform" && args.includes("apply") && args.includes(planPath)), false);
   } finally { process.env.HOME = oldHome; fs.rmSync(directory, { recursive: true, force: true }); }

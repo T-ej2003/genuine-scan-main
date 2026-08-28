@@ -144,52 +144,112 @@ const criticalCapabilityCleanupFailure = (message, cause) => {
   return error;
 };
 
-function readTopologyWithRecovery(readTopology) {
+const CAPABILITY_CONVERGENCE_ATTEMPTS = 6;
+const capabilityConvergenceDelay = (attempt) => Math.min(1_000, 100 * (2 ** attempt));
+const sleepForCapabilityConvergence = (milliseconds) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+
+function waitForConvergedTopology({ readTopology, observe, sleep, stableObservations = 1, label } = {}) {
   let lastError;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try { return assertPolicyVersionTopology(readTopology()); } catch (error) { lastError = error; }
+  let stable = 0;
+  for (let attempt = 0; attempt < CAPABILITY_CONVERGENCE_ATTEMPTS; attempt += 1) {
+    try {
+      const topology = assertPolicyVersionTopology(readTopology());
+      const observation = observe(topology);
+      if (observation === "CONVERGED") {
+        stable += 1;
+        if (stable >= stableObservations) return topology;
+      } else {
+        stable = 0;
+      }
+    } catch (error) {
+      if (error?.code === "CRITICAL_TEMPORARY_CAPABILITY_CLEANUP_FAILURE") throw error;
+      lastError = error;
+      stable = 0;
+    }
+    if (attempt < CAPABILITY_CONVERGENCE_ATTEMPTS - 1) sleep(capabilityConvergenceDelay(attempt));
   }
-  throw criticalCapabilityCleanupFailure("authoritative managed-policy topology could not be recovered after a mutation attempt", lastError);
+  throw criticalCapabilityCleanupFailure(`${label} did not converge to an authenticated IAM topology`, lastError);
 }
 
 function exactTemporaryVersions(topology, temporaryPolicy) {
   return topology.versions.filter(({ document }) => same(document, temporaryPolicy));
 }
 
-function restoreDefaultAndAuthenticate({ readTopology, setDefaultVersion, originalDefaultVersionId, temporaryPolicy, steadyPolicy } = {}) {
+function awaitTemporaryCapability({ readTopology, temporaryPolicy, steadyPolicy, authorization, sleep } = {}) {
+  const topology = waitForConvergedTopology({ readTopology, sleep, label: "temporary capability creation", observe: (candidate) => {
+    const temporaryVersions = exactTemporaryVersions(candidate, temporaryPolicy);
+    if (temporaryVersions.length > 1) throw criticalCapabilityCleanupFailure("multiple exact temporary capability policy versions were observed after creation");
+    if (temporaryVersions.length === 0) return "RETRY";
+    const [temporary] = temporaryVersions;
+    assertTemporaryApprovalKeyCapabilityPolicy(temporary.document, { steadyPolicy, authorization });
+    if (candidate.defaultVersionId !== temporary.VersionId) return "RETRY";
+    return "CONVERGED";
+  } });
+  return exactTemporaryVersions(topology, temporaryPolicy)[0];
+}
+
+function restoreDefaultAndAuthenticate({ readTopology, setDefaultVersion, originalDefaultVersionId, temporaryPolicy, steadyPolicy, sleep } = {}) {
   let lastError;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try { setDefaultVersion(originalDefaultVersionId); } catch (error) { lastError = error; }
-    const topology = readTopologyWithRecovery(readTopology);
-    if (topology.defaultVersionId === originalDefaultVersionId) {
-      try { assertTopology(topology, steadyPolicy); return topology; } catch (error) { throw criticalCapabilityCleanupFailure("previous managed-policy default was not restored to the authenticated steady policy", error); }
+    try {
+      return waitForConvergedTopology({ readTopology, sleep, label: "managed-policy default restoration", observe: (topology) => {
+        if (topology.defaultVersionId === originalDefaultVersionId) { assertTopology(topology, steadyPolicy); return "CONVERGED"; }
+        if (!exactTemporaryVersions(topology, temporaryPolicy).some(({ VersionId }) => VersionId === topology.defaultVersionId)) throw criticalCapabilityCleanupFailure("managed-policy default changed to an unexpected policy while restoring the original version", lastError);
+        return "RETRY";
+      } });
+    } catch (error) {
+      if (error?.code !== "CRITICAL_TEMPORARY_CAPABILITY_CLEANUP_FAILURE") throw error;
+      lastError = error;
     }
-    const active = topology.versions.find(({ VersionId }) => VersionId === topology.defaultVersionId);
-    if (!active || !exactTemporaryVersions(topology, temporaryPolicy).some(({ VersionId }) => VersionId === topology.defaultVersionId)) throw criticalCapabilityCleanupFailure("managed-policy default changed to an unexpected policy while restoring the original version", lastError);
   }
   throw criticalCapabilityCleanupFailure("previous managed-policy default could not be restored", lastError);
 }
 
-function deleteVersionAndAuthenticate({ readTopology, deletePolicyVersion, versionId } = {}) {
+function deleteVersionAndAuthenticate({ readTopology, deletePolicyVersion, versionId, originalDefaultVersionId, temporaryPolicy, steadyPolicy, sleep } = {}) {
   let lastError;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try { deletePolicyVersion(versionId); } catch (error) { lastError = error; }
-    const topology = readTopologyWithRecovery(readTopology);
-    if (!topology.versions.some(({ VersionId }) => VersionId === versionId)) return topology;
-    if (topology.defaultVersionId === versionId) throw criticalCapabilityCleanupFailure(`temporary policy version ${versionId} became default during cleanup`, lastError);
+    try {
+      return waitForConvergedTopology({ readTopology, sleep, stableObservations: 2, label: `temporary policy version ${versionId} deletion`, observe: (topology) => {
+        if (topology.versions.some(({ VersionId }) => VersionId === versionId)) {
+          return "RETRY";
+        }
+        if (topology.defaultVersionId !== originalDefaultVersionId) throw criticalCapabilityCleanupFailure("managed-policy default changed while deleting the temporary version", lastError);
+        if (exactTemporaryVersions(topology, temporaryPolicy).length !== 0) throw criticalCapabilityCleanupFailure("a different temporary capability version remained after deletion", lastError);
+        assertTopology(topology, steadyPolicy);
+        return "CONVERGED";
+      } });
+    } catch (error) {
+      if (error?.code !== "CRITICAL_TEMPORARY_CAPABILITY_CLEANUP_FAILURE") throw error;
+      lastError = error;
+    }
   }
   throw criticalCapabilityCleanupFailure(`temporary policy version ${versionId} could not be deleted`, lastError);
 }
 
-function cleanupTemporaryCapability({ readTopology, setDefaultVersion, deletePolicyVersion, verifyCapabilityAbsent, originalDefaultVersionId, temporaryPolicy, steadyPolicy } = {}) {
-  let topology = readTopologyWithRecovery(readTopology);
+function cleanupTemporaryCapability({ readTopology, setDefaultVersion, deletePolicyVersion, verifyCapabilityAbsent, originalDefaultVersionId, temporaryPolicy, steadyPolicy, temporaryVersionId, sleep } = {}) {
+  if (!temporaryVersionId) throw criticalCapabilityCleanupFailure("temporary capability was attempted but was not positively identified for cleanup");
+  let topology = waitForConvergedTopology({ readTopology, sleep, stableObservations: 2, label: "temporary capability cleanup discovery", observe: (candidate) => {
+    const temporaryVersions = exactTemporaryVersions(candidate, temporaryPolicy);
+    if (temporaryVersions.length > 1) throw criticalCapabilityCleanupFailure("multiple exact temporary capability policy versions were observed during cleanup");
+    if (temporaryVersions.length === 0) {
+      if (candidate.defaultVersionId !== originalDefaultVersionId) throw criticalCapabilityCleanupFailure("managed-policy default changed while temporary capability visibility was unresolved");
+      assertTopology(candidate, steadyPolicy);
+      return "CONVERGED";
+    }
+    return "CONVERGED";
+  } });
   let temporaryVersions = exactTemporaryVersions(topology, temporaryPolicy);
-  if (temporaryVersions.some(({ VersionId }) => VersionId === topology.defaultVersionId)) topology = restoreDefaultAndAuthenticate({ readTopology, setDefaultVersion, originalDefaultVersionId, temporaryPolicy, steadyPolicy });
+  if (temporaryVersions.length === 0) {
+    try { if (verifyCapabilityAbsent() !== true) throw new Error("temporary approval-key capability remains effective after cleanup"); } catch (error) { throw criticalCapabilityCleanupFailure("temporary approval-key capability absence was not authenticated", error); }
+    return topology;
+  }
+  if (temporaryVersions[0].VersionId !== temporaryVersionId) throw criticalCapabilityCleanupFailure("cleanup discovered a temporary capability version different from the authenticated version");
+  if (topology.defaultVersionId === temporaryVersionId) topology = restoreDefaultAndAuthenticate({ readTopology, setDefaultVersion, originalDefaultVersionId, temporaryPolicy, steadyPolicy, sleep });
   else if (topology.defaultVersionId !== originalDefaultVersionId) throw criticalCapabilityCleanupFailure("managed-policy default is neither the original nor the exact temporary capability");
   assertTopology(topology, steadyPolicy);
-  temporaryVersions = exactTemporaryVersions(topology, temporaryPolicy);
-  for (const { VersionId } of temporaryVersions) topology = deleteVersionAndAuthenticate({ readTopology, deletePolicyVersion, versionId: VersionId });
-  if (exactTemporaryVersions(topology, temporaryPolicy).length !== 0) throw criticalCapabilityCleanupFailure("temporary capability policy versions remain after cleanup");
+  topology = deleteVersionAndAuthenticate({ readTopology, deletePolicyVersion, versionId: temporaryVersionId, originalDefaultVersionId, temporaryPolicy, steadyPolicy, sleep });
   try { assertTopology(topology, steadyPolicy); } catch (error) { throw criticalCapabilityCleanupFailure("steady managed-policy topology was not authenticated after cleanup", error); }
   try {
     if (verifyCapabilityAbsent() !== true) throw new Error("temporary approval-key capability remains effective after cleanup");
@@ -204,7 +264,7 @@ function selectSafeCapacityVersion(topology, steadyPolicy) {
   return candidates.sort((left, right) => String(left.CreateDate).localeCompare(String(right.CreateDate)) || left.VersionId.localeCompare(right.VersionId))[0];
 }
 
-export function createApprovalKeyReconciliationCapabilityRunner({ authorization, sourceSha, workflow, artifact, steadyPolicy, readTopology, createTemporaryVersion, setDefaultVersion, deletePolicyVersion, verifyEffectiveCapability, verifyCapabilityAbsent, executeAuthorization } = {}) {
+export function createApprovalKeyReconciliationCapabilityRunner({ authorization, sourceSha, workflow, artifact, steadyPolicy, readTopology, createTemporaryVersion, setDefaultVersion, deletePolicyVersion, verifyEffectiveCapability, verifyCapabilityAbsent, executeAuthorization, sleep = sleepForCapabilityConvergence } = {}) {
   assertStageAApprovalKeyReconciliationAuthorization(authorization, { sourceSha });
   if (typeof readTopology !== "function" || typeof createTemporaryVersion !== "function" || typeof setDefaultVersion !== "function" || typeof deletePolicyVersion !== "function" || typeof verifyEffectiveCapability !== "function" || typeof verifyCapabilityAbsent !== "function" || typeof executeAuthorization !== "function") throw new Error("Stage-A approval-key capability runner dependencies are incomplete.");
   assertApprovalKeyReconciliationSteadyPolicy(steadyPolicy);
@@ -233,21 +293,10 @@ export function createApprovalKeyReconciliationCapabilityRunner({ authorization,
         }
         temporaryCapabilityMutationAttempted = true;
         capabilityState = "UNKNOWN";
-        try {
-          createTemporaryVersion(temporaryPolicy);
-        } catch (error) {
-          const recovered = readTopologyWithRecovery(readTopology);
-          const recoveredTemporaryVersions = exactTemporaryVersions(recovered, temporaryPolicy);
-          if (recoveredTemporaryVersions.length > 1) throw new Error("Temporary Stage-A approval-key policy version identity is not unique after CreatePolicyVersion outcome recovery.");
-          operationError = error;
-        }
-        if (!operationError) {
-          const activeTopology = readTopologyWithRecovery(readTopology);
-          const temporaryVersions = exactTemporaryVersions(activeTopology, temporaryPolicy);
-          if (temporaryVersions.length !== 1) throw new Error("Temporary Stage-A approval-key policy version identity is not unique.");
-          temporaryVersionId = temporaryVersions[0].VersionId;
-          if (activeTopology.defaultVersionId !== temporaryVersionId) throw new Error("Temporary Stage-A approval-key capability did not become the default policy version.");
-          assertTemporaryApprovalKeyCapabilityPolicy(temporaryVersions[0].document, { steadyPolicy, authorization });
+        try { createTemporaryVersion(temporaryPolicy); } catch { /* Live IAM topology, not the CLI response, decides the outcome. */ }
+        const temporaryVersion = awaitTemporaryCapability({ readTopology, temporaryPolicy, steadyPolicy, authorization, sleep });
+        temporaryVersionId = temporaryVersion.VersionId;
+        {
           capabilityState = "EFFECTIVE";
           const evidence = buildApprovalKeyReconciliationCapabilityEvidence({ authorization, workflow, artifact, previousDefaultVersionId, temporaryVersionId });
           assertApprovalKeyReconciliationCapabilityEvidence(evidence, { authorization, workflow, artifact });
@@ -260,7 +309,7 @@ export function createApprovalKeyReconciliationCapabilityRunner({ authorization,
       } finally {
         if (temporaryCapabilityMutationAttempted) {
           capabilityState = "UNKNOWN";
-          cleanupTemporaryCapability({ readTopology, setDefaultVersion, deletePolicyVersion, verifyCapabilityAbsent, originalDefaultVersionId: previousDefaultVersionId, temporaryPolicy, steadyPolicy });
+          cleanupTemporaryCapability({ readTopology, setDefaultVersion, deletePolicyVersion, verifyCapabilityAbsent, originalDefaultVersionId: previousDefaultVersionId, temporaryPolicy, steadyPolicy, temporaryVersionId, sleep });
           capabilityState = "ABSENT";
         }
       }
@@ -345,6 +394,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     deletePolicyVersion: (versionId) => adminRun(["iam", "delete-policy-version", "--policy-arn", STAGE_A_APPROVAL_KEY_RECONCILIATION_CAPABILITY.policyArn, "--version-id", versionId]),
     verifyEffectiveCapability: () => assertSimulation(adminRun, authorization, "allowed"),
     verifyCapabilityAbsent: () => assertSimulation(adminRun, authorization, "implicitDeny"),
+    sleep: deps.sleep,
     executeAuthorization: () => {
       const postCapabilityCheckout = (deps.readProtectedCheckout || readStageBProtectedMainCheckout)({ cwd: root });
       if (postCapabilityCheckout.toolingSha !== sourceSha) throw new Error("Stage-A approval-key protected source changed after temporary capability creation.");

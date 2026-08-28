@@ -16,7 +16,9 @@ The release-deployer remains without `kms:PutKeyPolicy` in steady state. The exe
 
 Before the Terraform apply, the executor rechecks source, clean protected checkout, authorization artifact provenance, plan bytes and semantics, Stage-A state, and approval-key policy. It permits one apply of the executor-owned saved-plan copy.
 
-The capability lifecycle treats every CreatePolicyVersion, default-version restoration, and temporary-version deletion attempt as unknown until a bounded live topology read authenticates the resulting state. Recovery locates the temporary version by the exact capability policy document, never by a predicted or response-only version ID. Terraform is unreachable while capability state is unknown.
+The authorization-only workflow authenticates the requested checkout against the GitHub API's protected `main` identity before `npm ci` or any repository Node program runs. It hashes every tracked protected-source input before dependency installation and requires both a clean tracked worktree and identical hashes afterward.
+
+The capability lifecycle treats every CreatePolicyVersion, default-version restoration, and temporary-version deletion attempt as unknown until bounded, delayed IAM topology convergence authenticates the resulting state. Recovery locates the temporary version by the exact capability policy document, never by a predicted or response-only version ID. Creation must be positively observed as the default policy before Terraform is reachable; deletion requires consecutive delayed observations of absence. Terraform is unreachable while capability state is unknown.
 
 Cleanup runs after both success and failure: restore the prior managed-policy default version, verify it, delete the temporary non-default version, and verify the release-deployer is again denied `kms:PutKeyPolicy`. A cleanup authentication failure is `CRITICAL_TEMPORARY_CAPABILITY_CLEANUP_FAILURE`; no further production action may proceed.
 
