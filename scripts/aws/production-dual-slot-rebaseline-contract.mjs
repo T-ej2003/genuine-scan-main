@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
-import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
+import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
 import path from "node:path";
 import { assertProductionEnvironmentApprovalIdentity, assertProductionEnvironmentReviewer, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
 
@@ -241,10 +241,10 @@ export function assertRebaselineMaterialJournal(value, { sourceSha, rotationId, 
   return value;
 }
 
-export function writeRebaselineMaterialJournal({ filePath, repositoryRoot = process.cwd(), sourceSha, rotationId, baselineIdentitySha256, generatedMaterial } = {}) {
+export function writeRebaselineMaterialJournal({ filePath, repositoryRoot = process.cwd(), sourceSha, rotationId, baselineIdentitySha256, generatedMaterial, fsOps = fs } = {}) {
   const journal = createRebaselineMaterialJournal({ sourceSha, rotationId, baselineIdentitySha256, generatedMaterial });
-  ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(filePath)), repositoryRoot, create: true, normalize: true, label: "Dual-slot rebaseline material journal directory" });
-  writeStageBPrivateFileExclusive({ filePath, bytes: Buffer.from(`${JSON.stringify(journal)}\n`), repositoryRoot, label: "Dual-slot rebaseline material journal" });
+  ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(filePath)), repositoryRoot, create: true, normalize: true, fsOps, label: "Dual-slot rebaseline material journal directory" });
+  writeStageBPrivateFileAtomicExclusive({ filePath, bytes: Buffer.from(`${JSON.stringify(journal)}\n`), repositoryRoot, fsOps, label: "Dual-slot rebaseline material journal" });
   return Object.freeze({ journal, material: generatedMaterial, sha256: journal.journalSha256, path: path.resolve(filePath) });
 }
 
@@ -335,17 +335,10 @@ export function assertRebaselineRotationBindings(bindings, { authorization } = {
   return bindings;
 }
 
-function persistExactPrivateJson({ filePath, value, repositoryRoot, label }) {
-  ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(filePath)), repositoryRoot, create: true, normalize: true, label: `${label} directory` });
+export function persistExactPrivateJson({ filePath, value, repositoryRoot, label, fsOps = fs }) {
+  ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(filePath)), repositoryRoot, create: true, normalize: true, fsOps, label: `${label} directory` });
   const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
-  try { writeStageBPrivateFileExclusive({ filePath, bytes, repositoryRoot, label }); } catch (error) {
-    if (!/EEXIST|already exists/i.test(String(error?.code || error?.message || error))) throw error;
-    const existing = readStageBPrivateFileBytes({ filePath, repositoryRoot, label });
-    if (!existing.bytes.equals(bytes)) throw new Error(`${label} already exists with a different authenticated identity.`);
-  }
-  const captured = readStageBPrivateFileBytes({ filePath, repositoryRoot, label });
-  if (!captured.bytes.equals(bytes)) fail(`${label} changed after persistence.`);
-  return captured;
+  return writeStageBPrivateFileAtomicExclusive({ filePath, bytes, repositoryRoot, fsOps, label });
 }
 
 function assertDurableOutputWritable(filePath) {

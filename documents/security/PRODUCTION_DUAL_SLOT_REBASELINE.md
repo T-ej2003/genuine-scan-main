@@ -28,7 +28,14 @@ any third state fails closed. Any mismatch fails closed.
 `BASELINE_COMPLETE` is emitted only after a fresh read authenticates all seven exact
 versions and `AWSCURRENT` stages. Completion and canonical rotation bindings are
 durable private outputs; a retry after a persistence interruption reuses the exact
-seven deterministic versions and emits the same artifacts without another write.
+seven deterministic versions and emits the same artifacts without another write. They
+are published through a same-directory private temporary file, complete-write
+verification, file and directory synchronization, and atomic no-replace publication.
+The no-replace step uses POSIX hard-link publication followed by temporary-name
+cleanup; plain rename could replace a concurrently-created immutable final. A crash can
+leave an orphan temporary file or a complete final, and retries ignore orphan names,
+authenticate exact finals, and never overwrite them. The material journal uses the same
+primitive before any secret write is reachable.
 Runtime preparation accepts only the declared rebaseline binding producer and requires
 an independently resolved protected-environment authorization artifact whose digest
 matches the completion. The operation performs no `DeleteSecret`, Terraform, ECS, database,

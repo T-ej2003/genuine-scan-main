@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,7 +10,7 @@ import {
   buildRebaselinePreparation, assertRebaselinePreconditions, assertRebaselinePreparation,
   createProductionDualSlotRebaselineAuthorization, deterministicWriteIdentity, executeProductionDualSlotRebaseline,
   generateRebaselineMaterial, assertBaselineCompletion, canonicalSha256, historicalSlotIdentity,
-  REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, writeRebaselineMaterialJournal, sha256,
+  REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, writeRebaselineMaterialJournal, persistExactPrivateJson, sha256,
 } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout, readPreparedDualSlotTopology, runProductionDualSlotRebaselineCli } from "../aws/rebaseline-production-dual-slot.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
@@ -201,6 +202,42 @@ test("completion and bindings persistence crash windows resume with zero duplica
     await assert.rejects(() => execute(adapters, outputs, { [hook]: async () => { if (!injected) { injected = true; throw new Error(`crash after ${hook}`); } } }), /crash/);
     const resumed = await execute(adapters, outputs); assert.equal(resumed.writes, 0); assert.equal(resumed.baselineComplete, true); rmSync(outputs.directory, { recursive: true, force: true });
   }
+});
+
+test("immutable JSON publication never leaves a partial final path across crash points", () => {
+  const value = { schemaVersion: 1, kind: "crash-safe-fixture", identity: "a".repeat(64) };
+  const crashMethods = ["openSync", "writeSync", "fsyncSync", "closeSync", "linkSync"];
+  for (const method of crashMethods) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-persist-crash-")); chmodSync(directory, 0o700);
+    const filePath = path.join(directory, "completion.json"); let crashed = false;
+    const fsOps = new Proxy(fs, { get(target, property) { const operation = target[property]; if (property !== method || typeof operation !== "function") return operation; return (...args) => { if (!crashed) { crashed = true; throw new Error(`injected ${method} crash`); } return operation(...args); }; } });
+    assert.throws(() => persistExactPrivateJson({ filePath, value, repositoryRoot: process.cwd(), label: "Crash fixture", fsOps }), /crash/);
+    assert.equal(fs.existsSync(filePath), false); assert.doesNotThrow(() => persistExactPrivateJson({ filePath, value, repositoryRoot: process.cwd(), label: "Crash fixture" }));
+    assert.deepEqual(JSON.parse(readFileSync(filePath, "utf8")), value); rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("immutable JSON publication resumes exact finals, ignores orphan temps, and rejects races or replacements", () => {
+  const value = { schemaVersion: 1, kind: "publication-fixture", identity: "b".repeat(64) }; const other = { ...value, identity: "c".repeat(64) };
+  const scenarios = [
+    (directory, filePath) => { writeFileSync(path.join(directory, ".stage-b-private-orphan.tmp"), "truncated", { mode: 0o600 }); },
+    (directory, filePath) => { writeFileSync(path.join(directory, ".stage-b-private-complete.tmp"), `${JSON.stringify(value)}\n`, { mode: 0o600 }); },
+  ];
+  for (const seedOrphan of scenarios) { const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-persist-orphan-")); chmodSync(directory, 0o700); const filePath = path.join(directory, "bindings.json"); seedOrphan(directory, filePath); assert.doesNotThrow(() => persistExactPrivateJson({ filePath, value, repositoryRoot: process.cwd(), label: "Orphan fixture" })); rmSync(directory, { recursive: true, force: true }); }
+  for (const seed of [value, other]) { const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-persist-final-")); chmodSync(directory, 0o700); const filePath = path.join(directory, "bindings.json"); writeFileSync(filePath, `${JSON.stringify(seed, null, 2)}\n`, { mode: 0o600 }); if (seed === value) assert.doesNotThrow(() => persistExactPrivateJson({ filePath, value, repositoryRoot: process.cwd(), label: "Existing fixture" })); else assert.throws(() => persistExactPrivateJson({ filePath, value, repositoryRoot: process.cwd(), label: "Existing fixture" }), /different|identity/i); rmSync(directory, { recursive: true, force: true }); }
+  for (const raceValue of [value, other]) { const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-persist-race-")); chmodSync(directory, 0o700); const filePath = path.join(directory, "completion.json"); const fsOps = new Proxy(fs, { get(target, property) { const operation = target[property]; if (property !== "linkSync") return operation; return (temporary, final) => { writeFileSync(final, `${JSON.stringify(raceValue, null, 2)}\n`, { mode: 0o600, flag: "wx" }); return operation.call(target, temporary, final); }; } }); if (raceValue === value) assert.doesNotThrow(() => persistExactPrivateJson({ filePath, value, repositoryRoot: process.cwd(), label: "Race fixture", fsOps })); else assert.throws(() => persistExactPrivateJson({ filePath, value, repositoryRoot: process.cwd(), label: "Race fixture", fsOps }), /different|identity/i); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("publication failure after no-replace link leaves a complete final that retries safely", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-persist-after-link-")); chmodSync(directory, 0o700); const filePath = path.join(directory, "completion.json"); const value = { kind: "after-link", identity: "d".repeat(64) }; let fsyncCalls = 0;
+  const fsOps = new Proxy(fs, { get(target, property) { const operation = target[property]; if (property !== "fsyncSync") return operation; return (...args) => { fsyncCalls += 1; if (fsyncCalls === 2) throw new Error("injected post-publication crash"); return operation(...args); }; } });
+  assert.throws(() => persistExactPrivateJson({ filePath, value, repositoryRoot: process.cwd(), label: "Post-link fixture", fsOps }), /post-publication/); assert.deepEqual(JSON.parse(readFileSync(filePath, "utf8")), value); assert.doesNotThrow(() => persistExactPrivateJson({ filePath, value, repositoryRoot: process.cwd(), label: "Post-link fixture" })); rmSync(directory, { recursive: true, force: true });
+});
+
+test("material journal uses the same crash-safe immutable publication path", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-journal-crash-")); chmodSync(directory, 0o700); const filePath = path.join(directory, "material-journal.json"); let failed = false;
+  const fsOps = new Proxy(fs, { get(target, property) { const operation = target[property]; if (property !== "writeSync") return operation; return (...args) => { if (!failed) { failed = true; throw new Error("injected journal write crash"); } return operation(...args); }; } });
+  assert.throws(() => writeRebaselineMaterialJournal({ filePath, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: material, fsOps }), /journal write crash/); assert.equal(fs.existsSync(filePath), false); assert.doesNotThrow(() => writeRebaselineMaterialJournal({ filePath, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: material })); rmSync(directory, { recursive: true, force: true });
 });
 
 test("durable output preflight fails before any secret write when an existing output accompanies a partial baseline", async () => {

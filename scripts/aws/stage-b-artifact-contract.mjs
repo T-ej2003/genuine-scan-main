@@ -218,6 +218,72 @@ export function writeStageBPrivateFileAtomic({ filePath, bytes, repositoryRoot, 
   return writeStageBPrivateFilesAtomic({ files: [{ filePath, bytes, label }], repositoryRoot, overwrite, fsOps })[0];
 }
 
+// Publish one immutable artifact without ever replacing an existing final path.
+// link(2) is the POSIX no-replace publication primitive; rename(2) would race by
+// replacing a concurrently-created final artifact.
+export function writeStageBPrivateFileAtomicExclusive({ filePath, bytes, repositoryRoot, fsOps = fs, label = "Stage B private file" } = {}) {
+  const resolved = assertStageBArtifactPath({ artifactPath: filePath, repositoryRoot, label, allowExisting: true, fsOps });
+  const expected = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  const parent = ensureStageBPrivateDirectory({ directory: path.dirname(resolved), repositoryRoot, create: true, fsOps });
+  const authenticateExisting = () => {
+    const captured = readStageBPrivateFileBytes({ filePath: resolved, repositoryRoot, fsOps, label });
+    if (!captured.bytes.equals(expected)) throw new Error(`${label} already exists with a different authenticated identity.`);
+    return captured;
+  };
+  if (fsOps.lstatSync(resolved, { throwIfNoEntry: false })) return authenticateExisting();
+
+  const temporary = path.join(parent, `.stage-b-private-${crypto.randomUUID()}.tmp`);
+  let descriptor;
+  let published = false;
+  const removeTemporary = () => {
+    const stat = fsOps.lstatSync(temporary, { throwIfNoEntry: false });
+    if (stat) {
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`${label} temporary output is not a regular file.`);
+      fsOps.unlinkSync(temporary);
+    }
+  };
+  const syncDirectory = () => {
+    let directoryDescriptor;
+    try {
+      directoryDescriptor = fsOps.openSync(parent, fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0));
+      fsOps.fsyncSync(directoryDescriptor);
+    } finally {
+      if (directoryDescriptor !== undefined) fsOps.closeSync(directoryDescriptor);
+    }
+  };
+  try {
+    descriptor = fsOps.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), STAGE_B_PRIVATE_FILE_MODE);
+    fsOps.chmodSync(temporary, STAGE_B_PRIVATE_FILE_MODE);
+    let offset = 0;
+    while (offset < expected.length) offset += fsOps.writeSync(descriptor, expected, offset, expected.length - offset, null);
+    if (fsOps.fstatSync(descriptor).size !== expected.length) throw new Error(`${label} temporary write was incomplete.`);
+    fsOps.fsyncSync(descriptor);
+    fsOps.closeSync(descriptor);
+    descriptor = undefined;
+    if (!fsOps.readFileSync(temporary).equals(expected)) throw new Error(`${label} temporary bytes changed before publication.`);
+    try {
+      fsOps.linkSync(temporary, resolved);
+      published = true;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      removeTemporary();
+      return authenticateExisting();
+    }
+    syncDirectory();
+    removeTemporary();
+    syncDirectory();
+    return authenticateExisting();
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try { fsOps.closeSync(descriptor); } catch {}
+    }
+    if (!published) {
+      try { removeTemporary(); } catch {}
+    }
+    throw error;
+  }
+}
+
 export function writeStageBPrivateFileExclusive({ filePath, bytes, repositoryRoot, fsOps = fs, label = "Stage B private file" } = {}) {
   const resolved = assertStageBArtifactPath({ artifactPath: filePath, repositoryRoot, label, allowExisting: true, fsOps });
   ensureStageBPrivateDirectory({ directory: path.dirname(resolved), repositoryRoot, create: true, fsOps });

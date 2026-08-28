@@ -8,7 +8,7 @@ import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from 
 import { createInitialDualSlotSecretsManagerClient } from "./production-initial-dual-slot-bootstrap.mjs";
 import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
-import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import {
   PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_SLOTS, assertRebaselinePreconditions, buildAbandonmentEvidence,
   buildRebaselineIdentity, buildRebaselinePreparation, buildRebaselineWritePlan, buildRebaselinePayloads,
@@ -181,7 +181,7 @@ export async function prepareProductionDualSlotRebaseline({ sourceSha, rotationI
   const writePlan = buildRebaselineWritePlan({ sourceSha: checkout.toolingSha, rotationId, resources: topology.resources, baselineIdentitySha256: rotation.identitySha256, payloads });
   const preparation = buildRebaselinePreparation({ preconditions, sourceSha: checkout.toolingSha, rotationId, baselineIdentity: rotation, writePlan });
   const abandonmentFile = path.join(directory, "abandonment-evidence.json");
-  writeStageBPrivateFileExclusive({ filePath: abandonmentFile, bytes: Buffer.from(`${JSON.stringify(abandonmentEvidence, null, 2)}\n`), repositoryRoot, label: "Dual-slot abandonment evidence" });
+  writeStageBPrivateFileAtomicExclusive({ filePath: abandonmentFile, bytes: Buffer.from(`${JSON.stringify(abandonmentEvidence, null, 2)}\n`), repositoryRoot, label: "Dual-slot abandonment evidence" });
   const preparationFile = path.join(directory, "rebaseline-preparation.json");
   writeStageBPrivateFileAtomic({ filePath: preparationFile, bytes: Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`), repositoryRoot, label: "Dual-slot rebaseline preparation" });
   return Object.freeze({ sourceSha: checkout.toolingSha, rotationId, abandonmentFile, preparationFile, preparationSha256: preparation.preparationSha256, writeIdentities: Object.fromEntries(writePlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken])), writeCount: 7, liveReferenceAuditSha256: audit.stableAuditSha256, liveReferenceObservationSha256: audit.auditSha256, observedSlotIdentitiesSha256: topology.observedSlotIdentitiesSha256 });
