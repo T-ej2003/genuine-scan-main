@@ -4,6 +4,7 @@ import path from "node:path";
 import { createProductionCutoverRuntimeComposition } from "./production-cutover-runtime-composition.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime } from "./production-cutover-runtime-bootstrap.mjs";
+import { REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, REBASELINE_ROTATION_BINDINGS_KIND, resolveProductionDualSlotRebaselineAuthorizationArtifact } from "./production-dual-slot-rebaseline-contract.mjs";
 
 const args = parseBootstrapArgs(process.argv.slice(2));
 const required = (name) => { const value = args.get(name); if (!value) throw new Error(`--${name} is required.`); return value; };
@@ -32,6 +33,14 @@ imageAuthorization.filePath = path.resolve(required("image-authorization"));
 const decode = (captured) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes));
 const rotationBindings = rotationBindingCapture ? decode(rotationBindingCapture) : undefined;
 const rotationSupersessionEvidence = rotationSupersessionCapture ? decode(rotationSupersessionCapture) : undefined;
+if (rotationBindings?.kind === REBASELINE_ROTATION_BINDINGS_KIND && rotationBindings.abandonmentEvidence?.historicalTopologySha256 !== REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256) throw new Error("Rebaseline rotation bindings do not contain the protected-source abandoned topology identity.");
+const rebaselineAuthorization = rotationBindings?.kind === REBASELINE_ROTATION_BINDINGS_KIND
+  ? resolveProductionDualSlotRebaselineAuthorizationArtifact({
+    workflowRunId: required("rebaseline-authorization-run-id"), workflowRunAttempt: required("rebaseline-authorization-run-attempt"),
+    sourceSha: rotationBindings.sourceSha, rotationId: rotationBindings.rotationId,
+    resources: { jwtPending: rotationBindings.jwt.pendingSecretId, qrPrivatePending: rotationBindings.qr.privatePendingSecretId, qrPublicPending: rotationBindings.qr.publicPendingSecretId, jwtPrevious: rotationBindings.jwt.previousSecretId, qrPublicPrevious: rotationBindings.qr.publicPreviousSecretId, qrCurrentVersion: rotationBindings.qr.currentKeyVersionSecretId, qrPreviousVersion: rotationBindings.qr.previousKeyVersionSecretId },
+  }).authorization
+  : undefined;
 const onboardingPaths = args.has("onboarding-paths") ? read("onboarding-paths") : undefined;
 const composition = createProductionCutoverRuntimeComposition();
 const { releaseRun } = composition;
@@ -52,6 +61,7 @@ const result = prepareProductionCutoverRuntime({
   outputDirectory,
   approval,
   rotationBindings,
+  rebaselineAuthorization,
   rotationSupersessionEvidence,
   rotationId: rotationBindings?.rotationId,
   imageAuthorization,

@@ -22,6 +22,8 @@ const { STSClient, GetCallerIdentityCommand } = requireBackend("@aws-sdk/client-
 const { fromIni } = requireBackend("@aws-sdk/credential-provider-ini");
 
 export const INITIAL_DUAL_SLOT_SCHEMA_VERSION = 1;
+export const INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND = "PRODUCTION_INITIAL_DUAL_SLOT_ROTATION_BINDINGS";
+export const INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER = "scripts/aws/production-initial-dual-slot-bootstrap.mjs:bootstrapInitialDualSlotRotation";
 export const INITIAL_DUAL_SLOT_ACCOUNT = "368992683803";
 export const INITIAL_DUAL_SLOT_REGION = "eu-west-2";
 export const INITIAL_DUAL_SLOT_NAMES = Object.freeze({
@@ -173,7 +175,7 @@ export function assertInitialDualSlotBindings(bindings) {
   const refs = [bindings?.jwt?.currentSecretId, bindings?.jwt?.previousSecretId, bindings?.jwt?.pendingSecretId, bindings?.qr?.privateCurrentSecretId, bindings?.qr?.privatePendingSecretId, bindings?.qr?.publicCurrentSecretId, bindings?.qr?.publicPreviousSecretId, bindings?.qr?.publicPendingSecretId, bindings?.qr?.currentKeyVersionSecretId, bindings?.qr?.previousKeyVersionSecretId];
   if (refs.some((value) => !SECRET_ARN.test(String(value || ""))) || new Set(refs).size !== refs.length) throw new Error("Initial dual-slot bindings must contain distinct production secret ARNs.");
   if (!VERSION.test(bindings?.qr?.previousKeyVersion || "")) throw new Error("Initial dual-slot previous QR key version is invalid.");
-  if (!SHA40.test(bindings?.sourceSha || "") || !ROTATION_ID.test(bindings?.rotationId || "")) throw new Error("Initial dual-slot identity binding is invalid.");
+  if (bindings?.schemaVersion !== 2 || bindings?.kind !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND || bindings?.producer !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER || !SHA40.test(bindings?.sourceSha || "") || !ROTATION_ID.test(bindings?.rotationId || "")) throw new Error("Initial dual-slot identity binding is invalid.");
   if (bindings?.ecs && JSON.stringify(bindings.ecs) !== JSON.stringify(rotationBindingsToTaskBindings(bindings))) throw new Error("Initial dual-slot ECS bindings do not match the canonical SDK bindings.");
   return true;
 }
@@ -224,7 +226,9 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
   await ensure({ arn: resources.qrCurrentVersion, name: "QR current key version", expected: versionSlot(baseline.qrCurrentVersion, "current", sourceSha), rotationId });
   await ensure({ arn: resources.qrPreviousVersion, name: "QR previous key version", expected: versionSlot("", "previous-empty", sourceSha), rotationId });
   const bindings = {
-    schemaVersion: INITIAL_DUAL_SLOT_SCHEMA_VERSION,
+    schemaVersion: 2,
+    kind: INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND,
+    producer: INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER,
     sourceSha,
     rotationId,
     legacy: baseline,

@@ -248,6 +248,7 @@
       "kind": "file",
       "producer": "scripts/aws/production-dual-slot-rebaseline-contract.mjs:executeProductionDualSlotRebaseline",
       "consumers": [
+        "scripts/aws/production-dual-slot-rebaseline-contract.mjs",
         "scripts/aws/production-cutover-runtime-bootstrap.mjs",
         "scripts/aws/prepare-production-cutover-runtime.mjs"
       ],
@@ -259,6 +260,25 @@
       "overwrite": false,
       "hashBound": true,
       "atomicGroup": "dual-slot-rebaseline-completion",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "dual-slot-rebaseline-rotation-bindings",
+      "kind": "file",
+      "producer": "scripts/aws/production-dual-slot-rebaseline-contract.mjs:executeProductionDualSlotRebaseline",
+      "consumers": [
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/prepare-production-cutover-runtime.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "dual-slot-rebaseline-rotation-bindings",
       "allOrNone": true,
       "rollback": "remove-committed-or-restore-backups"
     },

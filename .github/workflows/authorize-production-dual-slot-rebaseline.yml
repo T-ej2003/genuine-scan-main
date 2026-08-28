@@ -13,6 +13,8 @@ on:
       expected_secret_value_writes: { description: Exact number of secret writes, required: true, type: string }
       expected_secret_deletes: { description: Exact number of secret deletes, required: true, type: string }
       live_reference_audit: { description: Authenticated live reference audit result, required: true, type: string }
+      live_reference_audit_sha256: { description: Canonical live reference audit SHA256, required: true, type: string }
+      observed_slot_identities_sha256: { description: Canonical observed historical slot identities SHA256, required: true, type: string }
       reason: { description: Operation-specific reason, required: true, type: string }
       approved_by: { description: Independent approver identity, required: true, type: string }
       approver_role: { description: Independent approver role, required: true, type: string }
@@ -45,7 +47,7 @@ jobs:
           test "$SOURCE_SHA" = "$protected_main_sha"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           install -d -m 700 "$RUNNER_TEMP/dual-slot-rebaseline"
-          test -z "$(git status --porcelain --untracked-files=no)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
           git ls-files -z > "$RUNNER_TEMP/dual-slot-rebaseline/protected-source-files.zlist"
           : > "$RUNNER_TEMP/dual-slot-rebaseline/protected-source-inputs.sha256"
           while IFS= read -r -d '' file; do sha256sum -- "$file" >> "$RUNNER_TEMP/dual-slot-rebaseline/protected-source-inputs.sha256"; done < "$RUNNER_TEMP/dual-slot-rebaseline/protected-source-files.zlist"
@@ -60,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          test -z "$(git status --porcelain --untracked-files=no)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
           : > "$RUNNER_TEMP/dual-slot-rebaseline/installed-source-inputs.sha256"
           while IFS= read -r -d '' file; do sha256sum -- "$file" >> "$RUNNER_TEMP/dual-slot-rebaseline/installed-source-inputs.sha256"; done < "$RUNNER_TEMP/dual-slot-rebaseline/protected-source-files.zlist"
           cmp --silent "$RUNNER_TEMP/dual-slot-rebaseline/protected-source-inputs.sha256" "$RUNNER_TEMP/dual-slot-rebaseline/installed-source-inputs.sha256"
@@ -89,6 +91,8 @@ jobs:
           EXPECTED_SECRET_VALUE_WRITES: ${{ inputs.expected_secret_value_writes }}
           EXPECTED_SECRET_DELETES: ${{ inputs.expected_secret_deletes }}
           LIVE_REFERENCE_AUDIT: ${{ inputs.live_reference_audit }}
+          LIVE_REFERENCE_AUDIT_SHA256: ${{ inputs.live_reference_audit_sha256 }}
+          OBSERVED_SLOT_IDENTITIES_SHA256: ${{ inputs.observed_slot_identities_sha256 }}
           REASON: ${{ inputs.reason }}
           APPROVED_BY: ${{ inputs.approved_by }}
           APPROVER_ROLE: ${{ inputs.approver_role }}
@@ -105,7 +109,8 @@ jobs:
             --baseline-identity-sha256 "$BASELINE_IDENTITY_SHA256" \
             --resources-json "$RESOURCES_JSON" --write-identities-json "$WRITE_IDENTITIES_JSON" \
             --expected-secret-value-writes "$EXPECTED_SECRET_VALUE_WRITES" --expected-secret-deletes "$EXPECTED_SECRET_DELETES" \
-            --live-reference-audit "$LIVE_REFERENCE_AUDIT" --reason "$REASON" --approved-by "$APPROVED_BY" \
+            --live-reference-audit "$LIVE_REFERENCE_AUDIT" --live-reference-audit-sha256 "$LIVE_REFERENCE_AUDIT_SHA256" \
+            --observed-slot-identities-sha256 "$OBSERVED_SLOT_IDENTITIES_SHA256" --reason "$REASON" --approved-by "$APPROVED_BY" \
             --approver-role "$APPROVER_ROLE" --verification-ref "$VERIFICATION_REF"
       - uses: actions/upload-artifact@v4
         with:

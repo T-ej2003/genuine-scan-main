@@ -31,6 +31,8 @@ export function runProductionDualSlotRebaselineAuthorizationCli(argv = process.a
     expectedSecretValueWrites: Number(required(argv, "--expected-secret-value-writes")),
     expectedSecretDeletes: Number(required(argv, "--expected-secret-deletes")),
     liveReferenceAudit: required(argv, "--live-reference-audit"),
+    liveReferenceAuditSha256: required(argv, "--live-reference-audit-sha256"),
+    observedSlotIdentitiesSha256: required(argv, "--observed-slot-identities-sha256"),
     reason: required(argv, "--reason"),
     approvedBy: required(argv, "--approved-by"),
     approverRole: required(argv, "--approver-role"),

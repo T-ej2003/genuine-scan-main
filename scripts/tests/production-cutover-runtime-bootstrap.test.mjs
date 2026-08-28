@@ -35,20 +35,26 @@ const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
 const image = "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@" + digest;
 const paths = PRODUCTION_ONBOARDING_PATHS;
+const secretArn = (name) => ["arn", "aws", "secretsmanager", "eu-west-2", "368992683803", `secret:${name}`].join(":");
 const bindings = {
+  schemaVersion: 2,
+  kind: "PRODUCTION_INITIAL_DUAL_SLOT_ROTATION_BINDINGS",
+  producer: "scripts/aws/production-initial-dual-slot-bootstrap.mjs:bootstrapInitialDualSlotRotation",
+  sourceSha,
+  rotationId: "rotation-initial-fixture",
   jwt: {
-    currentSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-current-a",
-    previousSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-previous-b",
-    pendingSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-pending-c",
+    currentSecretId: secretArn("mscqr/prod/jwt-current-a"),
+    previousSecretId: secretArn("mscqr/prod/jwt-previous-b"),
+    pendingSecretId: secretArn("mscqr/prod/jwt-pending-c"),
   },
   qr: {
-    privateCurrentSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr-private-current-d",
-    privatePendingSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr-private-pending-e",
-    publicCurrentSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr-public-current-f",
-    publicPreviousSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr-public-previous-g",
-    currentKeyVersionSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr-current-version-i",
-    previousKeyVersionSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr-previous-version-j",
-    publicPendingSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr-public-pending-h",
+    privateCurrentSecretId: secretArn("mscqr/prod/qr-private-current-d"),
+    privatePendingSecretId: secretArn("mscqr/prod/qr-private-pending-e"),
+    publicCurrentSecretId: secretArn("mscqr/prod/qr-public-current-f"),
+    publicPreviousSecretId: secretArn("mscqr/prod/qr-public-previous-g"),
+    currentKeyVersionSecretId: secretArn("mscqr/prod/qr-current-version-i"),
+    previousKeyVersionSecretId: secretArn("mscqr/prod/qr-previous-version-j"),
+    publicPendingSecretId: secretArn("mscqr/prod/qr-public-pending-h"),
     previousKeyVersion: "qr-v1",
   },
 };
@@ -126,10 +132,10 @@ function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha) {
   const artifactBinding = artifactSigningRuntimeBindingPath(expectedSha);
   mkdirSync(path.dirname(artifactBinding), { recursive: true, mode: 0o700 }); chmodSync(path.dirname(artifactBinding), 0o700);
   writeFileSync(artifactBinding, JSON.stringify({ schemaVersion: 2, generatedBy: "scripts/aws/production-artifact-signing-bootstrap.mjs", sourceSha: expectedSha, bindings: {
-    ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-a",
-    ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-key-current-b",
-    ARTIFACT_SIGN_ACTIVE_KEY_VERSION: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/active-key-version-c",
-    ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-d",
+    ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: secretArn("mscqr/production/rls-green/artifact-signing/private-key-current-a"),
+    ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: secretArn("mscqr/production/rls-green/artifact-signing/public-key-current-b"),
+    ARTIFACT_SIGN_ACTIVE_KEY_VERSION: secretArn("mscqr/production/rls-green/artifact-signing/active-key-version-c"),
+    ARTIFACT_SIGN_PUBLIC_KEYS_JSON: secretArn("mscqr/production/rls-green/artifact-signing/public-keys-json-d"),
   } }, null, 2));
   chmodSync(artifactBinding, 0o600);
   return { imageAuthorization, imageAuthorizationFixture, iamEvidence, releasePreflightEvidence, releasePreflightAttestation, releasePreflightAttestationSignature, temporaryKmsCapability, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
@@ -257,7 +263,7 @@ test("artifact bootstrap keeps a clean checkout executable through runtime prepa
   const contract = loadArtifactSigningBootstrapContract();
   const run = async (args) => {
     const name = args[args.indexOf("--secret-id") + 1];
-    return JSON.stringify({ Name: name, ARN: `arn:aws:secretsmanager:eu-west-2:368992683803:secret:${name}-AbCd12`, VersionIdsToStages: { current: ["AWSCURRENT"] } });
+    return JSON.stringify({ Name: name, ARN: secretArn(`${name}-AbCd12`), VersionIdsToStages: { current: ["AWSCURRENT"] } });
   };
   const evidenceDirectory = path.join(directory, "evidence");
   mkdirSync(evidenceDirectory, { mode: 0o700 });
@@ -650,10 +656,10 @@ test("overlap task rejects duplicate secret names instead of ambiguous bindings"
 test("overlap task rejects legacy/ECS reference confusion and double JSON-key suffixes", () => {
   const secretBindings = {
     ...rotationBindingsToTaskBindings(bindings),
-    ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-private",
-    ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-public",
-    ARTIFACT_SIGN_ACTIVE_KEY_VERSION: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-version",
-    ARTIFACT_SIGN_PUBLIC_KEYS_JSON: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-registry",
+    ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: secretArn("artifact-private"),
+    ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: secretArn("artifact-public"),
+    ARTIFACT_SIGN_ACTIVE_KEY_VERSION: secretArn("artifact-version"),
+    ARTIFACT_SIGN_PUBLIC_KEYS_JSON: secretArn("artifact-registry"),
     ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read",
   };
   const input = {
