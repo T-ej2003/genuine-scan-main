@@ -3,14 +3,14 @@
   "identityModel": "tooling-input-tree-sha256",
   "imageReleaseSha": "a63da17024415c2764452b86f1dcbce0af4ae9b8",
   "comparisonBaseSha": "a63da17024415c2764452b86f1dcbce0af4ae9b8",
-  "toolingSha": "96590f1d524e6f383e8c5ef6650427ca03b02c11",
+  "toolingSha": "c737daeccf684fcc3ed93a20032cf1ae41076f52",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
-  "comparisonHeadSha256": "e029b5b06718056b5f1fefd961d01b470ed3b2607ee06c927894ce2f742db221",
-  "toolingInputTreeSha256": "e029b5b06718056b5f1fefd961d01b470ed3b2607ee06c927894ce2f742db221",
+  "comparisonHeadSha256": "e9798d891e5512a1ec4ca36234a9bec5828fc60b357ee7a9846f8f66c15587ca",
+  "toolingInputTreeSha256": "e9798d891e5512a1ec4ca36234a9bec5828fc60b357ee7a9846f8f66c15587ca",
   "imageReuseCompatible": true,
   "imageBuildInputsChanged": false,
   "classificationRulesVersion": "stage-b-image-reuse-v4",
-  "generatedAt": "2026-08-28T00:39:17+01:00",
+  "generatedAt": "2026-08-28T01:21:41+01:00",
   "generatorVersion": "validate-stage-b-image-reuse@3",
   "classifiedChangedFiles": [
     {
@@ -84,6 +84,11 @@
       "imageAffecting": false
     },
     {
+      "file": "scripts/aws/run-production-green-stage-b-preflight.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
       "file": "scripts/aws/stage-b-artifact-contract.mjs",
       "category": "toolingOnly",
       "imageAffecting": false
@@ -105,6 +110,11 @@
     },
     {
       "file": "scripts/tests/production-green-stage-b-deployment-identity.test.mjs",
+      "category": "testOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/tests/production-green-stage-b-identity-capabilities.test.mjs",
       "category": "testOnly",
       "imageAffecting": false
     },
