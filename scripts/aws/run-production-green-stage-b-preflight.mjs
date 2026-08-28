@@ -22,6 +22,9 @@ import {
   canonicalizeJson,
   collectLiveReleasePolicyEvidence,
   runPermissionPreflight,
+  simulatePrincipalPolicy,
+  operatorPolicyConditionKeyOrigins,
+  sourcePolicyConditionKeyOrigins,
   assertCutoverCriticalEvidence,
   assertStageBPermissionEvidenceKind,
   INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND,
@@ -29,7 +32,7 @@ import {
   createPermissionReportKmsSigner,
   verifyPermissionReportSignature,
 } from "./validate-production-green-stage-b-permissions.mjs";
-import { collectLiveEcsExecOperatorEvidence } from "./production-ecs-exec-operator-contract.mjs";
+import { collectLiveEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 import { assertStageARootDropKeyPolicySource } from "./production-stage-a-control-plane.mjs";
 import { buildTemporaryCapabilityEvidence } from "./production-stage-a-temporary-kms-capability.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
@@ -125,6 +128,14 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
       reportGeneratorCallerArn: observedCaller, simulatedRoleArn: RELEASE_ROLE_ARN, manifest, plan, planBytes,
       generatedAt, now: generatedAt, ecsExecVerifierEvidence: collectEcsExecOperatorEvidence(),
       policyPublishedAt: generatedAt, cloudTrailSessionName: "pre-plan-capability", policyEvidence: collectPolicies(),
+      simulate: ({ roleArn, evaluation }) => simulatePrincipalPolicy({
+        roleArn,
+        evaluation,
+        conditionKeyOrigins: roleArn === ECS_EXEC_OPERATOR_ROLE_ARN
+          ? operatorPolicyConditionKeyOrigins()
+          : sourcePolicyConditionKeyOrigins(),
+        run: commandRun,
+      }),
       cloudTrail: () => ({ status: "clear", eventsChecked: 0, unresolvedDenials: [] }), purpose: "pre-plan-capability",
       phase: "initial",
     });
