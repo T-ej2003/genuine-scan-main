@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   assertProductionEnvironmentApprovalEvidence,
+  assertProductionEnvironmentActualReviewer,
   assertProductionEnvironmentReviewer,
   createProductionEnvironmentApprovalEvidence,
   fetchProductionEnvironmentApprovalEvidence,
@@ -48,6 +49,17 @@ test("configured solo and independent reviewers follow GitHub's authenticated se
   assert.throws(() => assertProductionEnvironmentReviewer(solo, { approvedBy: "mallory", executionActor: "alice" }), /not a configured/);
   const selfBlocked = evidence({ environmentConfig: config({ protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 1, login: "alice" } }] }] }) });
   assert.throws(() => assertProductionEnvironmentReviewer(selfBlocked, { approvedBy: "alice", executionActor: "alice" }), /prevents self-review/);
+});
+
+test("P2 regression: configured reviewer text is not actual approval evidence", () => {
+  assert.throws(() => assertProductionEnvironmentActualReviewer(evidence(), { sourceSha, repository: context.repository, executionActor: "alice" }), /actual approval/i);
+});
+
+test("actual environment approval identity comes from GitHub approval records", async () => {
+  const actual = await fetchProductionEnvironmentApprovalEvidence({ ...context, token: "fixture-token", requireActualApproval: true }, { fetchImpl: async (url) => ({ ok: true, json: async () => url.endsWith("/approvals") ? [{ state: "approved", user: { id: 2, login: "actual-reviewer" }, environments: [{ id: 14514600120, name: "production" }] }] : config() }) });
+  assert.equal(actual.schemaVersion, 3);
+  assert.equal(actual.actualApproval.userLogin, "actual-reviewer");
+  assert.throws(() => assertProductionEnvironmentActualReviewer({ ...actual, actualApproval: { ...actual.actualApproval, userLogin: "configured-only" } }, { sourceSha, repository: context.repository, executionActor: "alice" }), /hash|actual/i);
 });
 
 test("tamper, wrong bindings, and stale environment evidence fail closed", () => {

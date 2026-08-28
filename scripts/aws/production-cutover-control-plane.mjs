@@ -255,7 +255,7 @@ function assertCheckerTrustEvidence(evidence, sourceSha) {
  * Every adapter is required to return sanitized, hash-bound evidence.
  */
 export async function runProductionCutoverControlPlane(input = {}) {
-  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, checkerTrustEvidence, identities: suppliedIdentities, verifyRootDropSignature, checkerChain, stageA, artifactSigning, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, checkerTrustEvidence, identities: suppliedIdentities, verifyRootDropSignature, checkerChain, stageA, artifactSigning, rebaseline, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
   if (!SHA40.test(sourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
   const mutations = [];
   const results = { protectedMain: { valid: true, sourceSha, evidenceSha256: imageAuthorization?.evidenceSha256 } , imageAuthorization };
@@ -324,6 +324,10 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.inventory = results.preDeploymentInventory;
   results.runtimeInventory = results.preDeploymentInventory;
 
+  if (rebaseline) {
+    if (typeof rebaseline.revalidate !== "function") throw new Error("Rebaseline post-write revalidation is required before rotation preparation.");
+    results.rebaselinePreRotation = await rebaseline.revalidate({ sourceSha, rotationId, secretBindings: runtimeOverlapTask.input?.secretBindings });
+  }
   const rotation = await rotationPrepare.run({ inventory: inventoryResult, rotationId });
   if (rotation?.prepared !== true || rotation.rotationId !== rotationId || !SHA256.test(rotation.rotationStateSha256 || "") || !SHA256.test(rotation.rotationFixtureSha256 || "") || (expectedRotationStateSha256 !== undefined && rotation.rotationStateSha256 !== expectedRotationStateSha256)) throw new Error("Rotation preparation is not bound to the persisted state and fixture.");
   const rotationStateSha256 = rotation.rotationStateSha256;
@@ -348,6 +352,10 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.rotationInfrastructure = { ...rotationInfraResult, sourceSha, rotationId, rotationStateSha256, rotationPrepared: true };
 
   assertOverlapInputBinding(runtimeOverlapTask, imageAuthorization, results.artifactSigning, sourceSha);
+  if (rebaseline) {
+    if (typeof rotationPrepare.revalidate !== "function") throw new Error("Live prepared rotation revalidation is required before ECS registration.");
+    results.rebaselinePreRegistration = await rotationPrepare.revalidate({ rotationId, rotationStateSha256 });
+  }
   const task = await registerOverlapTaskDefinition(runtimeOverlapTask);
   recordMutation(mutations, "M4_REGISTER_TASK_DEFINITION", task);
   results.overlapTaskDefinition = { ...task, sourceSha, rotationId, rotationStateSha256, rotationPrepared: true, rotationInfraConverged: true, activeKeyVersion: artifact.activeKeyVersion, bindings: task.input?.secretBindings || runtimeOverlapTask.input?.secretBindings };

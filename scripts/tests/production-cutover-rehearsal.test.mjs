@@ -628,6 +628,24 @@ test("post-prepare overlap registration uses JSON-key references for promoted cu
   }
 });
 
+test("rebaseline live post-write state is reauthenticated immediately before ECS registration", async () => {
+  const input = fixtureInput();
+  let registered = false;
+  let revalidations = 0;
+  let rotationRevalidations = 0;
+  input.rebaseline = { revalidate: async () => { revalidations += 1; return { livePostWriteSha256: "a".repeat(64) }; } };
+  input.rotationPrepare.revalidate = async ({ rotationId: observedRotationId, rotationStateSha256: observedStateSha256 }) => { rotationRevalidations += 1; assert.equal(observedRotationId, rotationId); assert.equal(observedStateSha256, rotationStateSha256); return { valid: true, phase: "overlap-deploy-required" }; };
+  input.overlapTask.register = async (payload) => { registered = true; return { taskDefinition: { taskDefinitionArn }, input: payload }; };
+  await runProductionCutoverControlPlane(input);
+  assert.equal(revalidations, 1);
+  assert.equal(rotationRevalidations, 1);
+  assert.equal(registered, true);
+  const blocked = fixtureInput({ rebaseline: { revalidate: async () => ({ livePostWriteSha256: "a".repeat(64) }) } });
+  blocked.rotationPrepare.revalidate = async () => { throw new Error("prepared rotation live state changed"); };
+  await assert.rejects(() => runProductionCutoverControlPlane(blocked), /prepared rotation live state changed/);
+  assert.equal(blocked._mutations.includes("M4_REGISTER_TASK_DEFINITION"), false);
+});
+
 test("a bootstrap result that disagrees with the artifact adapter fails before registration", async () => {
   const input = fixtureInput();
   const runtimeBindings = Object.fromEntries(["ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"].map((name, index) => [name, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:wrong-runtime-${index}-Unique` ]));

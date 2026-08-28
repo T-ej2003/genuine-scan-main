@@ -2,8 +2,11 @@
 import os from "node:os";
 import path from "node:path";
 import { createProductionCutoverRuntimeComposition } from "./production-cutover-runtime-composition.mjs";
+import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime } from "./production-cutover-runtime-bootstrap.mjs";
+import { REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, resolveProductionDualSlotRebaselineAuthorizationArtifact, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
+import { verifyLiveInitialDualSlotBindingWithRunner } from "./production-initial-dual-slot-bootstrap.mjs";
 
 const args = parseBootstrapArgs(process.argv.slice(2));
 const required = (name) => { const value = args.get(name); if (!value) throw new Error(`--${name} is required.`); return value; };
@@ -32,9 +35,26 @@ imageAuthorization.filePath = path.resolve(required("image-authorization"));
 const decode = (captured) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes));
 const rotationBindings = rotationBindingCapture ? decode(rotationBindingCapture) : undefined;
 const rotationSupersessionEvidence = rotationSupersessionCapture ? decode(rotationSupersessionCapture) : undefined;
+if (rotationBindings?.abandonmentEvidence?.historicalTopologySha256 !== undefined && rotationBindings.abandonmentEvidence.historicalTopologySha256 !== REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256) throw new Error("Rebaseline rotation bindings do not contain the protected-source abandoned topology identity.");
+if (rotationBindings?.abandonmentEvidence?.historicalTopologySha256 === undefined && args.has("rebaseline-authorization-run-id")) throw new Error("Rebaseline authorization coordinates cannot be supplied without authenticated rebaseline evidence.");
+const rebaselineAuthorizationCoordinates = args.has("rebaseline-authorization-run-id") || args.has("rebaseline-authorization-run-attempt")
+  ? { workflowRunId: required("rebaseline-authorization-run-id"), workflowRunAttempt: required("rebaseline-authorization-run-attempt") }
+  : undefined;
+const rebaselineAuthorization = rebaselineAuthorizationCoordinates
+  ? resolveProductionDualSlotRebaselineAuthorizationArtifact({
+    ...rebaselineAuthorizationCoordinates,
+    sourceSha: rotationBindings.sourceSha, rotationId: rotationBindings.rotationId,
+    resources: { jwtPending: rotationBindings.jwt.pendingSecretId, qrPrivatePending: rotationBindings.qr.privatePendingSecretId, qrPublicPending: rotationBindings.qr.publicPendingSecretId, jwtPrevious: rotationBindings.jwt.previousSecretId, qrPublicPrevious: rotationBindings.qr.publicPreviousSecretId, qrCurrentVersion: rotationBindings.qr.currentKeyVersionSecretId, qrPreviousVersion: rotationBindings.qr.previousKeyVersionSecretId },
+    run: createProductionGithubCommandRunner(),
+  }).authorization
+  : undefined;
 const onboardingPaths = args.has("onboarding-paths") ? read("onboarding-paths") : undefined;
 const composition = createProductionCutoverRuntimeComposition();
 const { releaseRun } = composition;
+const verifyRebaselineLivePostWrite = rebaselineAuthorizationCoordinates
+  ? ({ bindings, authorization }) => verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization })
+  : undefined;
+const verifyInitialBindingOrigin = ({ bindings }) => verifyLiveInitialDualSlotBindingWithRunner({ run: releaseRun, bindings });
 const loadCurrentTaskDefinition = () => {
   const currentService = JSON.parse(releaseRun(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2"])).services?.[0];
   if (!currentService?.taskDefinition) throw new Error("Current production task definition is unavailable.");
@@ -52,6 +72,10 @@ const result = prepareProductionCutoverRuntime({
   outputDirectory,
   approval,
   rotationBindings,
+  rebaselineAuthorization,
+  rebaselineAuthorizationCoordinates,
+  verifyRebaselineLivePostWrite,
+  verifyInitialBindingOrigin,
   rotationSupersessionEvidence,
   rotationId: rotationBindings?.rotationId,
   imageAuthorization,

@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import test from "node:test";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
-import { createProductionAwsCommandRunner } from "../aws/production-credential-source-contract.mjs";
+import { createProductionAwsCommandRunner, createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
 import { createProductionBackendFailedRecoveryEvidenceAwsRunner } from "../aws/prepare-production-backend-failed-recovery-evidence.mjs";
 import { createReleaseGateImageAuthorizationRunner } from "../aws/verify-production-release-image-authorization.mjs";
 import { createProductionCutoverRuntimeComposition } from "../aws/production-cutover-runtime-composition.mjs";
@@ -95,6 +95,44 @@ test("local governed composition removes ambient credentials and pins the exact 
   assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-production-release-deployer");
   for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]) assert.equal(calls[0].options.env[name], undefined);
   assertAwsOverridesAbsent({ ...calls[0].options.env, AWS_PROFILE: undefined });
+});
+
+test("AWS command environments never inherit GitHub control-plane credentials", () => {
+  const calls = [];
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "mscqr-production-release-deployer",
+    env: { ...oidc, GH_TOKEN: "fixture-gh-token", GITHUB_TOKEN: "fixture-github-token" },
+    exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; },
+  });
+  run(["secretsmanager", "describe-secret", "--secret-id", "fixture"]);
+  assert.equal(calls[0].options.env.GH_TOKEN, undefined);
+  assert.equal(calls[0].options.env.GITHUB_TOKEN, undefined);
+});
+
+test("GitHub authorization runner supports token and credential-store domains without AWS credentials", () => {
+  for (const input of [
+    { GH_TOKEN: "fixture-gh-token" },
+    { GITHUB_TOKEN: "fixture-github-token" },
+    { HOME: "/operator" },
+    { HOME: "/operator", GH_TOKEN: "fixture-gh-token", GITHUB_TOKEN: "fixture-github-token" },
+  ]) {
+    let captured;
+    const run = createProductionGithubCommandRunner({ env: { PATH: "/usr/bin", ...input, AWS_ACCESS_KEY_ID: "fixture-aws-key" }, exec: (file, args, options) => { captured = { file, args, options }; return "{}"; } });
+    run("gh", ["api", "repos/T-ej2003/genuine-scan-main/actions/runs/123"]);
+    assert.equal(captured.file, "gh");
+    assert.equal(captured.options.env.AWS_ACCESS_KEY_ID, undefined);
+    assert.equal(captured.options.env.GH_TOKEN, input.GH_TOKEN);
+    assert.equal(captured.options.env.GITHUB_TOKEN, input.GITHUB_TOKEN);
+    assert.equal(captured.options.env.HOME, input.HOME);
+  }
+});
+
+test("GitHub authorization runner rejects write-shaped gh api invocations", () => {
+  const run = createProductionGithubCommandRunner({ env: { GH_TOKEN: "fixture-token" }, exec: () => "{}" });
+  for (const flag of ["--method", "-X", "--input", "--field", "-f", "--raw-field", "-F", "--method=POST", "-XPOST"]) assert.throws(() => run("gh", ["api", "repos/T-ej2003/genuine-scan-main/actions/runs/123", flag, "value"]), /reviewed read-only/);
+  assert.throws(() => run("gh", ["api", "repos/example/repository"]), /reviewed read-only/);
+  assert.throws(() => run("unzip", ["-p", "/tmp/authorization.zip", "other.json"]), /reviewed local/);
 });
 
 test("runtime preparation's real composition root pins the release profile before KMS verification", () => {

@@ -166,6 +166,123 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "dual-slot-rebaseline-abandonment-evidence",
+      "kind": "file",
+      "producer": "scripts/aws/rebaseline-production-dual-slot.mjs:prepareProductionDualSlotRebaseline",
+      "consumers": [
+        "scripts/aws/authorize-production-dual-slot-rebaseline.mjs",
+        "scripts/aws/production-dual-slot-rebaseline-contract.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "dual-slot-rebaseline-abandonment-evidence",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "dual-slot-rebaseline-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/rebaseline-production-dual-slot.mjs:prepareProductionDualSlotRebaseline",
+      "consumers": [
+        "scripts/aws/rebaseline-production-dual-slot.mjs",
+        "scripts/aws/production-dual-slot-rebaseline-contract.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "dual-slot-rebaseline-preparation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "dual-slot-rebaseline-material-journal",
+      "kind": "file",
+      "producer": "scripts/aws/rebaseline-production-dual-slot.mjs:prepareProductionDualSlotRebaseline",
+      "consumers": [
+        "scripts/aws/rebaseline-production-dual-slot.mjs",
+        "scripts/aws/production-dual-slot-rebaseline-contract.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "secretMaterial": true,
+      "atomicGroup": "dual-slot-rebaseline-material-journal",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "dual-slot-rebaseline-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-dual-slot-rebaseline.yml",
+      "consumers": [
+        "scripts/aws/rebaseline-production-dual-slot.mjs",
+        "scripts/aws/production-dual-slot-rebaseline-contract.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "dual-slot-rebaseline-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "dual-slot-rebaseline-completion",
+      "kind": "file",
+      "producer": "scripts/aws/production-dual-slot-rebaseline-contract.mjs:executeProductionDualSlotRebaseline",
+      "consumers": [
+        "scripts/aws/production-dual-slot-rebaseline-contract.mjs",
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/prepare-production-cutover-runtime.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "dual-slot-rebaseline-completion",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "dual-slot-rebaseline-rotation-bindings",
+      "kind": "file",
+      "producer": "scripts/aws/production-dual-slot-rebaseline-contract.mjs:executeProductionDualSlotRebaseline",
+      "consumers": [
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/prepare-production-cutover-runtime.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "dual-slot-rebaseline-rotation-bindings",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "artifact-signing-runtime-binding",
       "kind": "file",
       "producer": "scripts/aws/production-artifact-signing-bootstrap.mjs:resolveArtifactSigningBindings",

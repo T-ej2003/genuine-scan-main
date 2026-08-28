@@ -218,6 +218,72 @@ export function writeStageBPrivateFileAtomic({ filePath, bytes, repositoryRoot, 
   return writeStageBPrivateFilesAtomic({ files: [{ filePath, bytes, label }], repositoryRoot, overwrite, fsOps })[0];
 }
 
+// Publish one immutable artifact without ever replacing an existing final path.
+// link(2) is the POSIX no-replace publication primitive; rename(2) would race by
+// replacing a concurrently-created final artifact.
+export function writeStageBPrivateFileAtomicExclusive({ filePath, bytes, repositoryRoot, fsOps = fs, label = "Stage B private file" } = {}) {
+  const resolved = assertStageBArtifactPath({ artifactPath: filePath, repositoryRoot, label, allowExisting: true, fsOps });
+  const expected = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  const parent = ensureStageBPrivateDirectory({ directory: path.dirname(resolved), repositoryRoot, create: true, fsOps });
+  const authenticateExisting = () => {
+    const captured = readStageBPrivateFileBytes({ filePath: resolved, repositoryRoot, fsOps, label });
+    if (!captured.bytes.equals(expected)) throw new Error(`${label} already exists with a different authenticated identity.`);
+    return captured;
+  };
+  if (fsOps.lstatSync(resolved, { throwIfNoEntry: false })) return authenticateExisting();
+
+  const temporary = path.join(parent, `.stage-b-private-${crypto.randomUUID()}.tmp`);
+  let descriptor;
+  let published = false;
+  const removeTemporary = () => {
+    const stat = fsOps.lstatSync(temporary, { throwIfNoEntry: false });
+    if (stat) {
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`${label} temporary output is not a regular file.`);
+      fsOps.unlinkSync(temporary);
+    }
+  };
+  const syncDirectory = () => {
+    let directoryDescriptor;
+    try {
+      directoryDescriptor = fsOps.openSync(parent, fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0));
+      fsOps.fsyncSync(directoryDescriptor);
+    } finally {
+      if (directoryDescriptor !== undefined) fsOps.closeSync(directoryDescriptor);
+    }
+  };
+  try {
+    descriptor = fsOps.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), STAGE_B_PRIVATE_FILE_MODE);
+    fsOps.chmodSync(temporary, STAGE_B_PRIVATE_FILE_MODE);
+    let offset = 0;
+    while (offset < expected.length) offset += fsOps.writeSync(descriptor, expected, offset, expected.length - offset, null);
+    if (fsOps.fstatSync(descriptor).size !== expected.length) throw new Error(`${label} temporary write was incomplete.`);
+    fsOps.fsyncSync(descriptor);
+    fsOps.closeSync(descriptor);
+    descriptor = undefined;
+    if (!fsOps.readFileSync(temporary).equals(expected)) throw new Error(`${label} temporary bytes changed before publication.`);
+    try {
+      fsOps.linkSync(temporary, resolved);
+      published = true;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      removeTemporary();
+      return authenticateExisting();
+    }
+    syncDirectory();
+    removeTemporary();
+    syncDirectory();
+    return authenticateExisting();
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try { fsOps.closeSync(descriptor); } catch {}
+    }
+    if (!published) {
+      try { removeTemporary(); } catch {}
+    }
+    throw error;
+  }
+}
+
 export function writeStageBPrivateFileExclusive({ filePath, bytes, repositoryRoot, fsOps = fs, label = "Stage B private file" } = {}) {
   const resolved = assertStageBArtifactPath({ artifactPath: filePath, repositoryRoot, label, allowExisting: true, fsOps });
   ensureStageBPrivateDirectory({ directory: path.dirname(resolved), repositoryRoot, create: true, fsOps });
@@ -241,6 +307,12 @@ export const STAGE_B_ARTIFACT_CONTRACTS = Object.freeze([
   { id: "release-preflight-checker-trust-attestation-signature", kind: "file", producer: "scripts/aws/production-release-preflight-checker-attestation.mjs:runReleasePreflightCheckerTrustAttestationCli", consumers: ["scripts/aws/prepare-production-cutover-runtime.mjs", "scripts/aws/production-cutover-runtime-bootstrap.mjs", "scripts/aws/production-cutover-production-adapters.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, atomicGroup: "release-preflight-checker-trust-attestation-pair", overwrite: false, hashBound: true },
   { id: "image-manifest", kind: "file", producer: "external:protected image workflow artifact", consumers: ["scripts/aws/production-green-stage-b-image-evidence.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true, externalProducer: true },
   { id: "initial-dual-slot-rotation-bindings", kind: "file", producer: "scripts/aws/production-initial-dual-slot-bootstrap.mjs:bootstrapInitialDualSlotRotation", consumers: ["scripts/aws/prepare-production-cutover-runtime.mjs", "scripts/aws/production-cutover-runtime-bootstrap.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
+  { id: "dual-slot-rebaseline-abandonment-evidence", kind: "file", producer: "scripts/aws/rebaseline-production-dual-slot.mjs:prepareProductionDualSlotRebaseline", consumers: ["scripts/aws/authorize-production-dual-slot-rebaseline.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
+  { id: "dual-slot-rebaseline-preparation", kind: "file", producer: "scripts/aws/rebaseline-production-dual-slot.mjs:prepareProductionDualSlotRebaseline", consumers: ["scripts/aws/rebaseline-production-dual-slot.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
+  { id: "dual-slot-rebaseline-material-journal", kind: "file", producer: "scripts/aws/rebaseline-production-dual-slot.mjs:prepareProductionDualSlotRebaseline", consumers: ["scripts/aws/rebaseline-production-dual-slot.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true, secretMaterial: true },
+  { id: "dual-slot-rebaseline-authorization", kind: "file", producer: ".github/workflows/authorize-production-dual-slot-rebaseline.yml", consumers: ["scripts/aws/rebaseline-production-dual-slot.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true, externalProducer: true },
+  { id: "dual-slot-rebaseline-completion", kind: "file", producer: "scripts/aws/production-dual-slot-rebaseline-contract.mjs:executeProductionDualSlotRebaseline", consumers: ["scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-cutover-runtime-bootstrap.mjs", "scripts/aws/prepare-production-cutover-runtime.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
+  { id: "dual-slot-rebaseline-rotation-bindings", kind: "file", producer: "scripts/aws/production-dual-slot-rebaseline-contract.mjs:executeProductionDualSlotRebaseline", consumers: ["scripts/aws/production-cutover-runtime-bootstrap.mjs", "scripts/aws/prepare-production-cutover-runtime.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
   { id: "artifact-signing-runtime-binding", kind: "file", producer: "scripts/aws/production-artifact-signing-bootstrap.mjs:resolveArtifactSigningBindings", consumers: ["scripts/aws/production-cutover-runtime-bootstrap.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-cutover-control-plane.mjs", "scripts/aws/recover-production-backend-health.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: true, hashBound: true },
   { id: "stage-a-state-backup", kind: "file", producer: "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight", consumers: ["scripts/aws/generate-production-green-stage-a-prerequisites.mjs", "scripts/aws/generate-production-green-stage-b-tfvars.mjs", "scripts/refresh-production-green-stage-b.mjs", "scripts/aws/validate-stage-b-deployment-closure.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: false, overwrite: false, hashBound: true },
   { id: "stage-a-state-identity", kind: "file", producer: "scripts/aws/production-green-stage-b-identity-capabilities.mjs:runReleaseReadPreflight", consumers: ["scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: true, hashBound: true },

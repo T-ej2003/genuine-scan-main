@@ -9,15 +9,17 @@ import { bootstrapInitialDualSlotRotation, deriveLegacyRotationBaseline, INITIAL
 import { buildProductionRotationConfig, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
 import { prepare } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
+import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 
 const jwt = createRequire(path.resolve("backend/package.json"))("jsonwebtoken");
 
-const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
+const sourceSha = "f".repeat(40);
 const rotationId = "rotation-initial-20260812";
+const secretArn = (name) => ["arn", "aws", "secretsmanager", "eu-west-2", "368992683803", `secret:${name}`].join(":");
 const legacy = {
-  jwt: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
-  qrPrivate: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
-  qrPublic: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex",
+  jwt: secretArn("fixture-jwt-legacy"),
+  qrPrivate: secretArn("fixture-qr-private-legacy"),
+  qrPublic: secretArn("fixture-qr-public-legacy"),
 };
 const taskDefinition = {
   taskDefinition: {
@@ -34,7 +36,7 @@ const taskDefinition = {
   },
 };
 
-const arn = (name) => `arn:aws:secretsmanager:eu-west-2:368992683803:secret:${name}-AbCd12`;
+const arn = (name) => secretArn(`${name}-AbCd12`);
 
 function fakeSecrets({ failCreateAt = null } = {}) {
   const states = new Map();
@@ -76,6 +78,7 @@ function tempOutput() {
   return { directory, file: path.join(directory, "rotation-bindings.json") };
 }
 function fsTemp() { return mkdtempSync(path.join(os.tmpdir(), "mscqr-initial-dual-slot-")); }
+const verifyInitialBindingOrigin = ({ bindings }) => ({ kind: bindings.kind, producer: bindings.producer, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, bindingSha256: canonicalSha256(bindings) });
 
 test("clean legacy topology creates exact dual-slot resources and identifier-only manifest", async () => {
   const fixture = fakeSecrets(); const output = tempOutput();
@@ -136,7 +139,7 @@ test("legacy current ARN mismatch is rejected before any resource write", async 
 
 test("malformed and duplicate slot bindings are rejected", () => {
   const base = {
-    sourceSha, rotationId,
+    schemaVersion: 2, kind: "PRODUCTION_INITIAL_DUAL_SLOT_ROTATION_BINDINGS", producer: "scripts/aws/production-initial-dual-slot-bootstrap.mjs:bootstrapInitialDualSlotRotation", sourceSha, rotationId,
     jwt: { currentSecretId: legacy.jwt, previousSecretId: arn("jwt-prev"), pendingSecretId: arn("jwt-pending") },
     qr: { privateCurrentSecretId: legacy.qrPrivate, privatePendingSecretId: arn("qr-private-pending"), publicCurrentSecretId: legacy.qrPublic, publicPreviousSecretId: arn("qr-public-previous"), publicPendingSecretId: arn("qr-public-pending"), currentKeyVersionSecretId: arn("qr-current-version"), previousKeyVersionSecretId: arn("qr-previous-version"), previousKeyVersion: "2026-04-20" },
   };
@@ -167,6 +170,7 @@ test("generated bindings satisfy the existing cutover coordinator config contrac
       sourceSha, rotationId, liveCurrentKeyVersion: "2026-04-20",
       approval: { ticket: "MSCQR-PROD-CUTOVER-2026-08-12", approvedBy: "approved", approverRole: "release", reason: "rotation", verificationRef: "https://example.invalid/ref", minimumGraceSeconds: 2592000 },
       bindings: result.bindings,
+      verifyInitialBindingOrigin,
     });
     assert.equal(config.jwt.currentSecretId, legacy.jwt);
     assert.equal(config.qr.previousKeyVersion, "2026-04-20");
@@ -192,6 +196,7 @@ test("FULL_INITIAL_MIGRATION_SIMULATION keeps envelopes out of ECS and rotates Q
       sourceSha, rotationId, liveCurrentKeyVersion: "2026-04-20",
       approval: { ticket: "MSCQR-PROD-CUTOVER-2026-08-12", approvedBy: "approved", approverRole: "release", reason: "rotation", verificationRef: "https://example.invalid/ref", minimumGraceSeconds: 2592000 },
       bindings: bootstrapped.bindings,
+      verifyInitialBindingOrigin,
     });
     const stateFile = path.join(directory, "state.json"); const fixtureFile = path.join(directory, "fixture.json");
     await prepare({ config, sm: fixture, identity: "arn:aws:sts::368992683803:assumed-role/release/test", inventoryEvidenceSha256: null, values: new Map([["state-file", stateFile], ["fixture-file", fixtureFile]]) });
@@ -216,7 +221,7 @@ test("FULL_INITIAL_MIGRATION_SIMULATION keeps envelopes out of ECS and rotates Q
     assert.notEqual(promoted.qrCurrentVersion.value, promoted.qrPreviousVersion.value);
 
     const rotationEcs = rotationBindingsToPostPrepareTaskBindings(config);
-    const artifact = Object.fromEntries(["private", "public", "active", "registry"].map((name) => [`ARTIFACT_SIGN_${name === "private" ? "PRIVATE_KEY_CURRENT" : name === "public" ? "PUBLIC_KEY_CURRENT" : name === "active" ? "ACTIVE_KEY_VERSION" : "PUBLIC_KEYS_JSON"}`, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:artifact-${name}`]));
+    const artifact = Object.fromEntries(["private", "public", "active", "registry"].map((name) => [`ARTIFACT_SIGN_${name === "private" ? "PRIVATE_KEY_CURRENT" : name === "public" ? "PUBLIC_KEY_CURRENT" : name === "active" ? "ACTIVE_KEY_VERSION" : "PUBLIC_KEYS_JSON"}`, secretArn(`artifact-${name}`)]));
     const task = buildOverlapTaskDefinition({ backendImage: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:" + "a".repeat(64), releaseSha: sourceSha, backendLogGroup: "/ecs/rotation", postPrepare: true, secretBindings: { ...rotationEcs, ...artifact, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } });
     const taskSecrets = Object.fromEntries(task.taskDefinition.containerDefinitions[0].secrets.map(({ name, valueFrom }) => [name, valueFrom]));
     for (const name of ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"]) assert.match(taskSecrets[name], /:value::$/);

@@ -74,5 +74,15 @@ export function createProductionRotationPrepareAdapter({ run, coordinator, confi
         rmSync(temporaryDirectory, { recursive: true, force: true });
       }
     },
+    async revalidate({ rotationId, rotationStateSha256 } = {}) {
+      if (!/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "") || !SHA256.test(rotationStateSha256 || "")) throw new Error("Rotation post-prepare identity is invalid.");
+      const config = readBoundStageBPrivateJson({ filePath: configFile, expectedSha256: configSha256, repositoryRoot, label: "Production cutover runtime config" });
+      if (config.rotationId !== rotationId) throw new Error("Rotation post-prepare config identity changed.");
+      const persistedState = readStageBPrivateFileBytes({ filePath: stateFile, repositoryRoot, label: "Persisted rotation state" });
+      if (persistedState.sha256 !== rotationStateSha256) throw new Error("Persisted rotation state changed before ECS registration.");
+      const response = lastJsonLine(await run(["node", coordinator, "--status", "--config", configFile, "--config-sha256", configSha256, "--state-file", stateFile]));
+      if (response.mode !== "status" || response.phase !== "overlap-deploy-required" || !response.records || typeof response.records !== "object") throw new Error("Live rotation state no longer authenticates the prepared overlap.");
+      return { valid: true, rotationId, rotationStateSha256, phase: response.phase };
+    },
   };
 }
