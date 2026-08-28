@@ -46,7 +46,7 @@ const STAGE_B_STATE_URI = `s3://${STATE_BUCKET}/env:/production/mscqr/production
 const ROTATION_EXECUTION_POLICY_ADDRESS = 'aws_iam_role_policy.execution["backend"]';
 const ROTATION_EXECUTION_ROLE = "mscqr-production-rls-green-backend-execution";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
-const AWS_SERVICE_COMMANDS = new Set(["ec2", "ecs", "ecr", "iam", "kms", "logs", "rds", "s3", "secretsmanager", "ssm", "sts"]);
+const AWS_SERVICE_COMMANDS = new Set(["ec2", "ecs", "ecr", "iam", "kms", "lambda", "logs", "rds", "s3", "s3api", "secretsmanager", "ssm", "sts"]);
 const MFA_PROMPTS = Object.freeze({ verifier: "Production verifier MFA code: ", onboarding: "Production strict-onboarding administrator MFA code: ", canary: "Production strict-onboarding tenant-canary MFA code: " });
 
 export function createConditionalMfaResolvers({ env = process.env, interactiveMfaCodeProvider = promptProductionMfaCode, resolveTenantMfaCode = resolveSmokeAdminMfaCode } = {}) {

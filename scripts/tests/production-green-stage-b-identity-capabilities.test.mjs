@@ -13,6 +13,7 @@ import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAS
 import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { ECR_DOCUMENTED_NO_RESOURCE_POLICY, MALFORMED_ECR_REPOSITORY_POLICIES } from "./fixtures/ecr-repository-policy-fixtures.mjs";
@@ -42,6 +43,39 @@ const allowed = (args) => {
   if (args[0] === "iam" && args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: ["inline"] });
   return "{}";
 };
+
+test("release preflight routes every S3 and Lambda probe through the credential-bound AWS runner", () => {
+  const calls = [];
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "mscqr-production-release-deployer",
+    env: { PATH: process.env.PATH },
+    exec: (file, args, options) => {
+      calls.push({ file, args, options });
+      const normalized = [...args];
+      const region = normalized.indexOf("--region");
+      if (region !== -1) normalized.splice(region, 2);
+      return allowed(normalized);
+    },
+  });
+  const report = runReleaseReadPreflight({ outputDirectory: temp(), run });
+  const affected = calls.filter(({ args }) => ["s3api", "lambda"].includes(args[0]));
+
+  assert.equal(report.status, "valid");
+  assert.deepEqual(affected.map(({ file, args }) => [file, args[0], args[1]]), [
+    ["aws", "s3api", "get-bucket-location"],
+    ["aws", "s3api", "get-object"],
+    ["aws", "s3api", "get-object"],
+    ["aws", "lambda", "get-function-configuration"],
+    ["aws", "lambda", "get-alias"],
+  ]);
+  assert.equal(calls.filter(({ file }) => file === "s3api").length, 0);
+  assert.equal(calls.filter(({ file }) => file === "lambda").length, 0);
+  assert.equal(affected.every(({ options }) => options.env.AWS_PROFILE === "mscqr-production-release-deployer"), true);
+
+  run(["node", "fixture.mjs"]);
+  assert.equal(calls.at(-1).file, "node");
+});
 
 test("identity matrix assigns IAM simulation only to administrator", () => {
   const matrix = readIdentityCapabilityMatrix();

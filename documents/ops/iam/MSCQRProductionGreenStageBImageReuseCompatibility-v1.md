@@ -11,10 +11,10 @@ schema version: 2
 identity model: tooling-input-tree-sha256
 image release: a63da17024415c2764452b86f1dcbce0af4ae9b8
 comparison base: a63da17024415c2764452b86f1dcbce0af4ae9b8
-tooling revision: c737daeccf684fcc3ed93a20032cf1ae41076f52
+tooling revision: 26c11d95baf0700fb21ca6d5bfd53bfc29e4a988
 comparison head identity: tooling-input-tree-sha256
-comparison head: e9798d891e5512a1ec4ca36234a9bec5828fc60b357ee7a9846f8f66c15587ca
-tooling input tree: e9798d891e5512a1ec4ca36234a9bec5828fc60b357ee7a9846f8f66c15587ca
+comparison head: 1c9ecb0f1316f0c9ebfcbfdd22ee46cbfc3c99b8b990ef6ffedde8bb77d5478a
+tooling input tree: 1c9ecb0f1316f0c9ebfcbfdd22ee46cbfc3c99b8b990ef6ffedde8bb77d5478a
 rules version: stage-b-image-reuse-v4
 image reuse compatible: true
 image build inputs changed: false
@@ -38,6 +38,7 @@ The canonical changed-file classification is:
 | scripts/aws/generate-production-green-stage-b-capability-graph.mjs | toolingOnly | false |
 | scripts/aws/generate-production-green-stage-b-tfvars.mjs | toolingOnly | false |
 | scripts/aws/production-cutover-control-plane.mjs | toolingOnly | false |
+| scripts/aws/production-cutover-production-adapters.mjs | toolingOnly | false |
 | scripts/aws/production-green-stage-b-image-evidence.mjs | toolingOnly | false |
 | scripts/aws/production-image-authorization.mjs | toolingOnly | false |
 | scripts/aws/production-release-dispatch-contract.mjs | toolingOnly | false |

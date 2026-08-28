@@ -3,14 +3,14 @@
   "identityModel": "tooling-input-tree-sha256",
   "imageReleaseSha": "a63da17024415c2764452b86f1dcbce0af4ae9b8",
   "comparisonBaseSha": "a63da17024415c2764452b86f1dcbce0af4ae9b8",
-  "toolingSha": "c737daeccf684fcc3ed93a20032cf1ae41076f52",
+  "toolingSha": "26c11d95baf0700fb21ca6d5bfd53bfc29e4a988",
   "comparisonHeadIdentity": "tooling-input-tree-sha256",
-  "comparisonHeadSha256": "e9798d891e5512a1ec4ca36234a9bec5828fc60b357ee7a9846f8f66c15587ca",
-  "toolingInputTreeSha256": "e9798d891e5512a1ec4ca36234a9bec5828fc60b357ee7a9846f8f66c15587ca",
+  "comparisonHeadSha256": "1c9ecb0f1316f0c9ebfcbfdd22ee46cbfc3c99b8b990ef6ffedde8bb77d5478a",
+  "toolingInputTreeSha256": "1c9ecb0f1316f0c9ebfcbfdd22ee46cbfc3c99b8b990ef6ffedde8bb77d5478a",
   "imageReuseCompatible": true,
   "imageBuildInputsChanged": false,
   "classificationRulesVersion": "stage-b-image-reuse-v4",
-  "generatedAt": "2026-08-28T01:21:41+01:00",
+  "generatedAt": "2026-08-28T09:14:51+01:00",
   "generatorVersion": "validate-stage-b-image-reuse@3",
   "classifiedChangedFiles": [
     {
@@ -65,6 +65,11 @@
     },
     {
       "file": "scripts/aws/production-cutover-control-plane.mjs",
+      "category": "toolingOnly",
+      "imageAffecting": false
+    },
+    {
+      "file": "scripts/aws/production-cutover-production-adapters.mjs",
       "category": "toolingOnly",
       "imageAffecting": false
     },
