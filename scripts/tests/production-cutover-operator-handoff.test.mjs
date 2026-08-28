@@ -35,7 +35,7 @@ test("operator handoff collects exactly five hidden pre-launch inputs and leaves
     argv,
     stdin: { isTTY: true },
     stdout: { isTTY: true, write: (value) => output.push(value) },
-    parentEnvironment: { HOME: "/operator", PATH: "/usr/bin", AWS_CONFIG_FILE: "/hostile/config", AWS_SHARED_CREDENTIALS_FILE: "/hostile/credentials", AWS_SDK_LOAD_CONFIG: "1", AWS_CA_BUNDLE: "/hostile/ca", UNRELATED_SECRET: "must-not-pass", MSCQR_ONBOARDING_PASSWORD: "fixture-old-value" },
+    parentEnvironment: { HOME: "/operator", PATH: "/usr/bin", GH_TOKEN: "fixture-gh-token", GITHUB_TOKEN: "fixture-github-token", AWS_CONFIG_FILE: "/hostile/config", AWS_SHARED_CREDENTIALS_FILE: "/hostile/credentials", AWS_SDK_LOAD_CONFIG: "1", AWS_CA_BUNDLE: "/hostile/ca", UNRELATED_SECRET: "must-not-pass", MSCQR_ONBOARDING_PASSWORD: "fixture-old-value" },
     prompt: async (request) => { prompts.push(request); return inputFor(request.prompt); },
     spawnChild: childThatExits({ capture: (value) => { spawned = { ...value, environment: { ...value.options.env } }; } }),
   });
@@ -48,6 +48,8 @@ test("operator handoff collects exactly five hidden pre-launch inputs and leaves
   for (const name of ["AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_SDK_LOAD_CONFIG", "AWS_CA_BUNDLE"]) assert.equal(spawned.environment[name], undefined);
   assert.equal(spawned.environment.MSCQR_VERIFIER_MFA_CODE, undefined);
   assert.equal(spawned.environment.HOME, "/operator");
+  assert.equal(spawned.environment.GH_TOKEN, undefined);
+  assert.equal(spawned.environment.GITHUB_TOKEN, undefined);
   for (const [name, value] of Object.entries(values)) assert.equal(spawned.environment[name], value);
   assert.equal(JSON.stringify(spawned.args).includes(values.MSCQR_ONBOARDING_PASSWORD), false);
   assert.deepEqual(output, []);

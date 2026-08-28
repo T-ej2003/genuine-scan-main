@@ -16,6 +16,7 @@ import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheck
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { assertBindings, buildInitialMigrationSourceAdvance, buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
+import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
 
 const sourceSha = "a".repeat(40);
 const historicalRotationId = "rotation-20260826060632-b15b3f51";
@@ -133,7 +134,7 @@ test("production CLI topology reader resumes every authenticated H-to-N boundary
   }
 });
 
-test("RED P1 reproduction: a rebaseline binding relabeled as initial bypasses the rebaseline gate", async () => {
+test("production rebaseline binding relabeled as initial cannot bypass the rebaseline gate", async () => {
   const outputs = temporary();
   try {
     const result = await execute(executionAdapters(), outputs);
@@ -214,6 +215,7 @@ test("runtime call graph propagates independently resolved rebaseline authorizat
     assert.throws(() => buildInitialMigrationSourceAdvance({ currentSourceSha: sourceSha, rotationBindings: result.bindings, rebaselineAuthorization: { ...auth, rotationId: "rotation-other-authorized" }, liveLegacyBaseline, verifyRebaselineLivePostWrite: () => ({}), verifyInitialBindingOrigin }), /authorization|hash|rotation|origin/i);
     const config = buildProductionRotationConfig({ sourceSha, rotationId, approval: { ticket: "CHG-REBASELINE-1", approvedBy: "checker", approverRole: "production-independent-checker", reason: "fixture", verificationRef: "ticket-fixture", minimumGraceSeconds: 2592000 }, bindings: result.bindings, rebaselineAuthorization: auth, rebaselineAuthorizationCoordinates: { workflowRunId: "123456", workflowRunAttempt: "1" }, verifyRebaselineLivePostWrite: () => ({ kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha, rotationId, authorizationSha256: auth.authorizationSha256, resources, versionIds: auth.writeIdentities, payloadIdentities: auth.writePayloadIdentities, livePostWriteSha256: canonicalSha256({ kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha, rotationId, authorizationSha256: auth.authorizationSha256, resources, versionIds: auth.writeIdentities, payloadIdentities: auth.writePayloadIdentities }) }), verifyInitialBindingOrigin });
     assert.equal(config.operation, PRODUCTION_DUAL_SLOT_REBASELINE.kind);
+    assert.deepEqual(config.rebaselineRuntime.authorization, auth);
     const configInput = { sourceSha, rotationId, approval: { ticket: "CHG-REBASELINE-1", approvedBy: "checker", approverRole: "production-independent-checker", reason: "fixture", verificationRef: "ticket-fixture", minimumGraceSeconds: 2592000 }, bindings: result.bindings, rebaselineAuthorization: auth, verifyRebaselineLivePostWrite: () => ({ kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha, rotationId, authorizationSha256: auth.authorizationSha256, resources, versionIds: auth.writeIdentities, payloadIdentities: auth.writePayloadIdentities, livePostWriteSha256: canonicalSha256({ kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha, rotationId, authorizationSha256: auth.authorizationSha256, resources, versionIds: auth.writeIdentities, payloadIdentities: auth.writePayloadIdentities }) }), verifyInitialBindingOrigin };
     assert.throws(() => buildProductionRotationConfig({ ...configInput }), /coordinates/i);
     assert.throws(() => buildProductionRotationConfig({ ...configInput, rebaselineAuthorizationCoordinates: { workflowRunId: "123456", workflowRunAttempt: "1" }, rebaselineAuthorization: undefined }), /authorization/i);
@@ -430,7 +432,7 @@ test("runtime legacy/current secret identifiers are anchored to the authorized b
 
 test("runtime authorization resolver derives the expected digest from GitHub provenance, never the completion", () => {
   const auth = authorization(); const archive = Buffer.from("zip-fixture"); const seen = [];
-  const run = (command, args, options) => {
+  const execute = (command, args, options) => {
     seen.push({ command, args, options });
     if (command === "gh" && args[1] === "repos/T-ej2003/genuine-scan-main/actions/runs/123456") return JSON.stringify({ id: 123456, repository: { id: 9, full_name: PRODUCTION_DUAL_SLOT_REBASELINE.repository }, head_repository: { full_name: PRODUCTION_DUAL_SLOT_REBASELINE.repository }, path: ".github/workflows/authorize-production-dual-slot-rebaseline.yml", event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1, actor: { login: "operator" } });
     if (command === "gh" && args[1].endsWith("/artifacts")) return JSON.stringify([{ artifacts: [{ id: 91, name: "production-dual-slot-rebaseline-authorization", expired: false, workflow_run: { id: 123456, head_sha: sourceSha, repository_id: 9 }, digest: `sha256:${sha256(archive)}` }] }]);
@@ -440,6 +442,7 @@ test("runtime authorization resolver derives the expected digest from GitHub pro
     if (command === "unzip" && args[0] === "-p") return JSON.stringify(auth);
     throw new Error(`unexpected ${command} ${args.join(" ")}`);
   };
+  const run = createProductionGithubCommandRunner({ env: { GH_TOKEN: "fixture-github-token" }, exec: execute });
   const resolved = resolveProductionDualSlotRebaselineAuthorizationArtifact({ workflowRunId: "123456", workflowRunAttempt: "1", sourceSha, rotationId, resources, run });
   assert.equal(resolved.authorization.authorizationSha256, auth.authorizationSha256); const zip = seen.find(({ args }) => args[1].endsWith("/zip")); assert.equal(zip.options.encoding, null); assert.equal(zip.args.includes("--output"), false);
 });

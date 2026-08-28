@@ -208,6 +208,37 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
   }
 });
 
+test("rebaseline revalidation never performs a late GitHub lookup inside the sanitized AWS environment", async () => {
+  const directory = fsTemp();
+  try {
+    const prepared = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
+    let ghLookupAttempted = false;
+    const config = {
+      ...prepared.config,
+      rebaselineRuntime: { bindings, authorizationCoordinates: { workflowRunId: "123", workflowRunAttempt: "1" } },
+      livePostWriteSha256: "a".repeat(64),
+    };
+    assert.throws(() => createProductionCutoverAdapters({
+      config,
+      sourceSha,
+      rotationId: config.rotationId,
+      runtimeConfigSha256: prepared.runtimeConfigSha256,
+      verifyReleasePreflightAttestationSignature: () => true,
+      createCommandRunner: () => (args) => {
+        if (args[0] === "gh") {
+          ghLookupAttempted = true;
+          throw new Error("GitHub token missing after AWS environment sanitization");
+        }
+        return "{}";
+      },
+    }), /pre-mutation authenticated rebaseline authorization/i);
+    assert.equal(ghLookupAttempted, false);
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("outer runtime preparation rejects a rebaseline manifest relabeled as initial", () => {
   const directory = fsTemp();
   try {

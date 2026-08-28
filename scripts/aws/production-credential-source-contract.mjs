@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import path from "node:path";
 
 const REGION = "eu-west-2";
 
@@ -23,6 +24,7 @@ const CREDENTIAL_REDIRECT_KEYS = Object.freeze([
   "AWS_EC2_METADATA_SERVICE_ENDPOINT", "AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE",
 ]);
 const SAFE_PROCESS_KEYS = Object.freeze(["HOME", "PATH", "TMPDIR", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS"]);
+const GITHUB_AUTH_KEYS = Object.freeze(["GH_TOKEN", "GITHUB_TOKEN"]);
 
 const copy = (source, keys) => Object.fromEntries(keys.filter((key) => typeof source?.[key] === "string" && source[key]).map((key) => [key, source[key]]));
 const required = (env, key) => {
@@ -81,6 +83,28 @@ export function createProductionAwsCommandRunner({ credentialSource, profile, en
   };
 }
 
+export function createProductionGithubCommandRunner({ env = process.env, exec = execFileSync } = {}) {
+  const githubEnvironment = Object.freeze({ ...copy(env, SAFE_PROCESS_KEYS), ...copy(env, GITHUB_AUTH_KEYS) });
+  const localEnvironment = Object.freeze(copy(env, SAFE_PROCESS_KEYS));
+  return (command, args, { encoding = "utf8", maxBuffer } = {}) => {
+    if (command === "gh") {
+      const endpoint = args?.[1];
+      const allowedFlags = new Set(["--paginate", "--slurp"]);
+      const allowedEndpoint = /^repos\/T-ej2003\/genuine-scan-main\/actions\/(?:runs\/[1-9][0-9]*(?:\/artifacts)?|artifacts\/[1-9][0-9]*\/zip)$/.test(endpoint || "");
+      if (!Array.isArray(args) || args[0] !== "api" || !allowedEndpoint || args.slice(2).some((value) => !allowedFlags.has(value))) throw new Error("Production GitHub runner permits only the reviewed read-only authorization API calls.");
+      return exec("gh", args, { cwd: process.cwd(), env: githubEnvironment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });
+    }
+    if (command === "unzip") {
+      const archive = args?.[0] === "-Z" ? args?.[2] : args?.[1];
+      const archivePathValid = typeof archive === "string" && path.isAbsolute(archive) && path.basename(archive) === "authorization.zip";
+      const allowed = Array.isArray(args) && archivePathValid && ((args.length === 2 && args[0] === "-Z1") || (args.length === 3 && args[0] === "-Z" && args[1] === "-l") || (args.length === 3 && args[0] === "-p" && args[2] === "authorization.json"));
+      if (!allowed) throw new Error("Production GitHub runner permits only the reviewed local authorization archive reads.");
+      return exec("unzip", args, { cwd: process.cwd(), env: localEnvironment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });
+    }
+    throw new Error("Production GitHub runner command is outside the reviewed authorization contract.");
+  };
+}
+
 export const productionAwsCredentialSourceContract = Object.freeze({
   region: REGION,
   namedProfileStrips: Object.freeze([...SESSION_KEYS, ...CREDENTIAL_REDIRECT_KEYS]),
@@ -90,4 +114,5 @@ export const productionAwsCredentialSourceContract = Object.freeze({
   accessKeysOptional: ["AWS_SESSION_TOKEN"],
   accessKeysStrips: CREDENTIAL_REDIRECT_KEYS,
   checkerSessionRequires: SESSION_KEYS.slice(0, 3),
+  githubAuthKeys: GITHUB_AUTH_KEYS,
 });

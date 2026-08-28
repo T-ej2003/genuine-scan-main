@@ -22,7 +22,7 @@ import {
 } from "../security/production-initial-migration-source-advance.mjs";
 import { assertBindingsMatchLegacyBaseline, deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
-import { assertRebaselineRotationBindings, BASELINE_COMPLETE, PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_ROTATION_BINDINGS_KIND, REBASELINE_ROTATION_BINDINGS_PRODUCER } from "./production-dual-slot-rebaseline-contract.mjs";
+import { assertProductionDualSlotRebaselineAuthorization, assertRebaselineRotationBindings, BASELINE_COMPLETE, PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_ROTATION_BINDINGS_KIND, REBASELINE_ROTATION_BINDINGS_PRODUCER } from "./production-dual-slot-rebaseline-contract.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -170,6 +170,9 @@ export function buildProductionRotationConfig({ sourceSha, rotationId, approval,
   }
   if (!SHA40.test(overlapDeploymentSha || "")) throw new Error("overlapDeploymentSha must be a full protected-main SHA.");
   const checkedRebaselineCoordinates = checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? assertRebaselineAuthorizationCoordinates(rebaselineAuthorizationCoordinates) : undefined;
+  const checkedRebaselineAuthorization = checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND
+    ? assertProductionDualSlotRebaselineAuthorization(rebaselineAuthorization, { sourceSha, rotationId, resources: { jwtPending: checkedBindings.jwt.pendingSecretId, qrPrivatePending: checkedBindings.qr.privatePendingSecretId, qrPublicPending: checkedBindings.qr.publicPendingSecretId, jwtPrevious: checkedBindings.jwt.previousSecretId, qrPublicPrevious: checkedBindings.qr.publicPreviousSecretId, qrCurrentVersion: checkedBindings.qr.currentKeyVersionSecretId, qrPreviousVersion: checkedBindings.qr.previousKeyVersionSecretId } })
+    : undefined;
   return {
     region: REGION,
     expectedRoleArn: RELEASE_ROLE_ARN,
@@ -184,7 +187,7 @@ export function buildProductionRotationConfig({ sourceSha, rotationId, approval,
     verificationRef: checkedApproval.verificationRef,
     jwt: checkedBindings.jwt,
     qr: checkedBindings.qr,
-    ...(checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? { operation: checkedBindings.operation, baselineCompletionSha256: checkedBindings.baselineCompletionSha256, baselineCompletion: checkedBindings.baselineCompletion, rebaselineRuntime: { bindings: checkedBindings, authorizationCoordinates: checkedRebaselineCoordinates }, ...(checkedBindings.livePostWrite ? { livePostWriteSha256: checkedBindings.livePostWrite.livePostWriteSha256 } : {}) } : {}),
+    ...(checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? { operation: checkedBindings.operation, baselineCompletionSha256: checkedBindings.baselineCompletionSha256, baselineCompletion: checkedBindings.baselineCompletion, rebaselineRuntime: { bindings: checkedBindings, authorization: checkedRebaselineAuthorization, authorizationCoordinates: checkedRebaselineCoordinates }, ...(checkedBindings.livePostWrite ? { livePostWriteSha256: checkedBindings.livePostWrite.livePostWriteSha256 } : {}) } : {}),
   };
 }
 

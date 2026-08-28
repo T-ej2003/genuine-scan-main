@@ -5,6 +5,7 @@ import { lstatSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
+import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 import { createInitialDualSlotSecretsManagerClient } from "./production-initial-dual-slot-bootstrap.mjs";
 import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
@@ -284,7 +285,7 @@ export async function runProductionDualSlotRebaselineCli({ argv = process.argv.s
     assertRebaselinePreparation(preparation, { sourceSha: checkout.toolingSha, rotationId: requestedRotationId });
     const run = createRun();
     const client = createClient(); await client.assertCredentialIdentity();
-    const authorization = resolveAuthorization({ workflowRunId: required(args, "workflow-run-id"), workflowRunAttempt: required(args, "workflow-run-attempt"), sourceSha: checkout.toolingSha, rotationId: requestedRotationId, resources: preparation.resources }).authorization;
+    const authorization = resolveAuthorization({ workflowRunId: required(args, "workflow-run-id"), workflowRunAttempt: required(args, "workflow-run-attempt"), sourceSha: checkout.toolingSha, rotationId: requestedRotationId, resources: preparation.resources, run: createProductionGithubCommandRunner() }).authorization;
     const journal = readRebaselineMaterialJournal({ filePath: path.resolve(required(args, "material-journal")), repositoryRoot, sourceSha: checkout.toolingSha, rotationId: requestedRotationId, baselineIdentitySha256: preparation.baselineIdentity.identitySha256 });
     const payloads = buildRebaselinePayloads({ sourceSha: checkout.toolingSha, rotationId: preparation.rotationId, generatedMaterial: journal.material, legacyBaseline: preparation.legacyBaseline });
     const writePlan = buildRebaselineWritePlan({ sourceSha: checkout.toolingSha, rotationId: preparation.rotationId, resources: preparation.resources, baselineIdentitySha256: preparation.baselineIdentity.identitySha256, payloads });

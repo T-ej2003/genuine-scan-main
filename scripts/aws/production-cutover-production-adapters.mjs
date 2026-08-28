@@ -31,7 +31,7 @@ import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence, createReleasePreflightCheckerTrustSignatureVerifier } from "./production-release-preflight-checker-attestation.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { resolveProductionDualSlotRebaselineAuthorizationArtifact, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
+import { assertProductionDualSlotRebaselineAuthorization, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
 
 export { PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
@@ -223,37 +223,35 @@ export function createProductionRotationInfrastructureAdapter({ run = execFileSy
   };
 }
 
-export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier", interactiveMfaCodeProvider, verifierMfaCodeProvider = promptProductionMfaCode, verifyReleasePreflightAttestationSignature, resolveRebaselineAuthorization = resolveProductionDualSlotRebaselineAuthorizationArtifact, createCommandRunner = createProductionCommandRunner } = {}) {
+export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier", interactiveMfaCodeProvider, verifierMfaCodeProvider = promptProductionMfaCode, verifyReleasePreflightAttestationSignature, createCommandRunner = createProductionCommandRunner } = {}) {
   if (!config || typeof config !== "object" || !/^[a-f0-9]{64}$/.test(runtimeConfigSha256 || "")) throw new Error("Hash-authenticated production cutover adapter configuration is required.");
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || config.sourceSha !== sourceSha || typeof rotationId !== "string" || config.rotationId !== rotationId) throw new Error("Production cutover adapter identity does not match its runtime config.");
   if (releaseProfile !== "mscqr-production-release-deployer" || verifierProfile !== "mscqr-production-ecs-exec-verifier") throw new Error("Production cutover adapter profiles do not match the asymmetric identity contract.");
-  if (typeof resolveRebaselineAuthorization !== "function" || typeof createCommandRunner !== "function") throw new Error("Rebaseline authorization adapters are invalid.");
+  if (typeof createCommandRunner !== "function") throw new Error("Rebaseline authorization adapters are invalid.");
   const releaseRun = createCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: releaseProfile });
   const rebaseline = config.rebaselineRuntime
-    ? {
-      revalidate: async () => {
-        const bindings = config.rebaselineRuntime.bindings;
-        const resources = {
-          jwtPending: bindings.jwt.pendingSecretId,
-          qrPrivatePending: bindings.qr.privatePendingSecretId,
-          qrPublicPending: bindings.qr.publicPendingSecretId,
-          jwtPrevious: bindings.jwt.previousSecretId,
-          qrPublicPrevious: bindings.qr.publicPreviousSecretId,
-          qrCurrentVersion: bindings.qr.currentKeyVersionSecretId,
-          qrPreviousVersion: bindings.qr.previousKeyVersionSecretId,
-        };
-        const authorization = resolveRebaselineAuthorization({
-          ...config.rebaselineRuntime.authorizationCoordinates,
-          sourceSha: bindings.sourceSha,
-          rotationId: bindings.rotationId,
-          resources,
-          run: (command, args, options) => releaseRun([command, ...args], options),
-        }).authorization;
-        const verified = verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization });
-        if (verified.livePostWriteSha256 !== config.livePostWriteSha256) throw new Error("Live rebaseline post-write state changed after runtime preparation.");
-        return verified;
-      },
-    }
+    ? (() => {
+      const bindings = config.rebaselineRuntime.bindings;
+      const resources = {
+        jwtPending: bindings.jwt.pendingSecretId,
+        qrPrivatePending: bindings.qr.privatePendingSecretId,
+        qrPublicPending: bindings.qr.publicPendingSecretId,
+        jwtPrevious: bindings.jwt.previousSecretId,
+        qrPublicPrevious: bindings.qr.publicPreviousSecretId,
+        qrCurrentVersion: bindings.qr.currentKeyVersionSecretId,
+        qrPreviousVersion: bindings.qr.previousKeyVersionSecretId,
+      };
+      const authorization = config.rebaselineRuntime.authorization;
+      if (!authorization) throw new Error("Pre-mutation authenticated rebaseline authorization is required; late GitHub lookup is unavailable after AWS environment sanitization.");
+      assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources });
+      return {
+        revalidate: async () => {
+          const verified = verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization });
+          if (verified.livePostWriteSha256 !== config.livePostWriteSha256) throw new Error("Live rebaseline post-write state changed after runtime preparation.");
+          return verified;
+        },
+      };
+    })()
     : undefined;
   const releasePreflightAttestationVerifier = verifyReleasePreflightAttestationSignature || createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun });
   const releaseSts = createAwsStsRunner({ profile: releaseProfile });

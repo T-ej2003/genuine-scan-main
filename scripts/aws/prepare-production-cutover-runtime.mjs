@@ -2,6 +2,7 @@
 import os from "node:os";
 import path from "node:path";
 import { createProductionCutoverRuntimeComposition } from "./production-cutover-runtime-composition.mjs";
+import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime } from "./production-cutover-runtime-bootstrap.mjs";
 import { REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, resolveProductionDualSlotRebaselineAuthorizationArtifact, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
@@ -44,6 +45,7 @@ const rebaselineAuthorization = rebaselineAuthorizationCoordinates
     ...rebaselineAuthorizationCoordinates,
     sourceSha: rotationBindings.sourceSha, rotationId: rotationBindings.rotationId,
     resources: { jwtPending: rotationBindings.jwt.pendingSecretId, qrPrivatePending: rotationBindings.qr.privatePendingSecretId, qrPublicPending: rotationBindings.qr.publicPendingSecretId, jwtPrevious: rotationBindings.jwt.previousSecretId, qrPublicPrevious: rotationBindings.qr.publicPreviousSecretId, qrCurrentVersion: rotationBindings.qr.currentKeyVersionSecretId, qrPreviousVersion: rotationBindings.qr.previousKeyVersionSecretId },
+    run: createProductionGithubCommandRunner(),
   }).authorization
   : undefined;
 const onboardingPaths = args.has("onboarding-paths") ? read("onboarding-paths") : undefined;
