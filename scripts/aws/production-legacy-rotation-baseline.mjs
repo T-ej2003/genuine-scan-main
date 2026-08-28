@@ -30,6 +30,12 @@ export function deriveLegacyRotationBaseline(taskDefinition) {
 }
 
 export function assertBindingsMatchLegacyBaseline(bindings, baseline) {
-  if (!bindings || bindings.legacy?.jwtCurrent !== baseline.jwtCurrent || bindings.legacy?.qrPrivateCurrent !== baseline.qrPrivateCurrent || bindings.legacy?.qrPublicCurrent !== baseline.qrPublicCurrent || bindings.legacy?.qrCurrentVersion !== baseline.qrCurrentVersion || bindings.jwt?.currentSecretId !== baseline.jwtCurrent || bindings.qr?.privateCurrentSecretId !== baseline.qrPrivateCurrent || bindings.qr?.publicCurrentSecretId !== baseline.qrPublicCurrent || bindings.qr?.previousKeyVersion !== baseline.qrCurrentVersion) throw new Error("Rotation bindings do not match the authenticated live legacy task-definition bindings.");
+  const legacy = bindings?.legacy || {
+    jwtCurrent: bindings?.jwt?.currentSecretId,
+    qrPrivateCurrent: bindings?.qr?.privateCurrentSecretId,
+    qrPublicCurrent: bindings?.qr?.publicCurrentSecretId,
+    qrCurrentVersion: bindings?.qr?.previousKeyVersion,
+  };
+  if (!bindings || legacy.jwtCurrent !== baseline.jwtCurrent || legacy.qrPrivateCurrent !== baseline.qrPrivateCurrent || legacy.qrPublicCurrent !== baseline.qrPublicCurrent || legacy.qrCurrentVersion !== baseline.qrCurrentVersion || bindings.jwt?.currentSecretId !== baseline.jwtCurrent || bindings.qr?.privateCurrentSecretId !== baseline.qrPrivateCurrent || bindings.qr?.publicCurrentSecretId !== baseline.qrPublicCurrent || bindings.qr?.previousKeyVersion !== baseline.qrCurrentVersion) throw new Error("Rotation bindings do not match the authenticated live legacy task-definition bindings.");
   return true;
 }

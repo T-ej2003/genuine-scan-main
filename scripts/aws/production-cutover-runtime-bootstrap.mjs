@@ -159,10 +159,11 @@ export function buildProductionRotationConfig({ sourceSha, rotationId, approval,
 
 export function buildInitialMigrationSourceAdvance({ currentSourceSha, rotationBindings, supersessionEvidence, liveLegacyBaseline, proveDescendant } = {}) {
   const originalSourceSha = rotationBindings?.sourceSha;
-  if (!originalSourceSha || originalSourceSha === currentSourceSha) return undefined;
-  if (!SHA40.test(currentSourceSha || "") || !SHA40.test(originalSourceSha) || rotationBindings.rotationId !== supersessionEvidence?.rotationId || !liveLegacyBaseline) throw new Error("Initial-migration source-advance inputs are incomplete.");
+  if (!SHA40.test(currentSourceSha || "") || !SHA40.test(originalSourceSha || "") || !liveLegacyBaseline) throw new Error("Initial-migration source-advance inputs are incomplete.");
   assertBindings(rotationBindings);
   assertBindingsMatchLegacyBaseline(rotationBindings, liveLegacyBaseline);
+  if (originalSourceSha === currentSourceSha) return undefined;
+  if (rotationBindings.rotationId !== supersessionEvidence?.rotationId) throw new Error("Initial-migration source-advance inputs are incomplete.");
   const evidence = assertProductionSupersessionEvidence(supersessionEvidence);
   if (evidence.sourceSha !== originalSourceSha || proveDescendant?.({ ancestorSha: originalSourceSha, descendantSha: currentSourceSha }) !== true) throw new Error("Initial-migration source advancement is not an authenticated protected-main descendant transition.");
   const expectedArns = {

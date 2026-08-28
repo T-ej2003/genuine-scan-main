@@ -25,6 +25,12 @@ reuse only the exact authenticated deterministic version. At every resume point 
 slot must be either the immutable abandonment snapshot or that exact prepared version;
 any third state fails closed. Any mismatch fails closed.
 
+The baseline identity also authenticates the complete legacy/current runtime manifest.
+The three legacy signing-secret ARNs and active QR version are compared against the
+independently authorized baseline identity before rebaseline bindings are emitted or
+consumed. This check runs even when the binding source SHA is unchanged; source
+equality never substitutes for live baseline authentication.
+
 `BASELINE_COMPLETE` is emitted only after a fresh read authenticates all seven exact
 versions and `AWSCURRENT` stages. Completion and canonical rotation bindings are
 durable private outputs; a retry after a persistence interruption reuses the exact
@@ -35,7 +41,10 @@ The no-replace step uses POSIX hard-link publication followed by temporary-name
 cleanup; plain rename could replace a concurrently-created immutable final. A crash can
 leave an orphan temporary file or a complete final, and retries ignore orphan names,
 authenticate exact finals, and never overwrite them. The material journal uses the same
-primitive before any secret write is reachable.
+primitive before any secret write is reachable. If preparation stops after abandonment
+publication, the next run authenticates and reuses that exact immutable evidence rather
+than regenerating its timestamp or historical snapshot; a divergent existing artifact is
+rejected.
 Runtime preparation accepts only the declared rebaseline binding producer and requires
 an independently resolved protected-environment authorization artifact whose digest
 matches the completion. The operation performs no `DeleteSecret`, Terraform, ECS, database,

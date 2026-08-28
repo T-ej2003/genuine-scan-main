@@ -255,11 +255,9 @@ export function readRebaselineMaterialJournal({ filePath, repositoryRoot = proce
   return Object.freeze({ journal: value, material: value.generatedMaterial, sha256: captured.sha256, path: captured.path });
 }
 
-export function loadOrCreateRebaselineMaterialJournal({ filePath, repositoryRoot = process.cwd(), sourceSha, rotationId, baselineIdentitySha256, generatedMaterial } = {}) {
-  try { return readRebaselineMaterialJournal({ filePath, repositoryRoot, sourceSha, rotationId, baselineIdentitySha256 }); } catch (error) {
-    if (!/ENOENT|does not exist|not found/i.test(String(error?.code || error?.message || error))) throw error;
-  }
-  return writeRebaselineMaterialJournal({ filePath, repositoryRoot, sourceSha, rotationId, baselineIdentitySha256, generatedMaterial: generatedMaterial || generateRebaselineMaterial() });
+export function loadOrCreateRebaselineMaterialJournal({ filePath, repositoryRoot = process.cwd(), sourceSha, rotationId, baselineIdentitySha256, generatedMaterial, fsOps = fs } = {}) {
+  if (fsOps.lstatSync(filePath, { throwIfNoEntry: false })) return readRebaselineMaterialJournal({ filePath, repositoryRoot, sourceSha, rotationId, baselineIdentitySha256 });
+  return writeRebaselineMaterialJournal({ filePath, repositoryRoot, sourceSha, rotationId, baselineIdentitySha256, generatedMaterial: generatedMaterial || generateRebaselineMaterial(), fsOps });
 }
 
 export function prepareRebaselineWritePlan({ sourceSha, rotationId, resources, baselineIdentity, legacyBaseline, materialJournalFile, repositoryRoot = process.cwd(), generatedMaterial } = {}) {
@@ -311,6 +309,8 @@ export function buildRebaselineRotationBindings({ sourceSha, rotationId, legacyB
   assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha, rotationId, resources });
   assertBaselineCompletion(completion, { sourceSha, rotationId, resources, authorizationBinding: authorization.authorizationSha256, historicalRotationId: checkedAbandonment.historicalRotationId, abandonmentEvidenceSha256: checkedAbandonment.evidenceSha256 });
   const checkedLegacyBaseline = assertLegacyBaseline(legacyBaseline);
+  const expectedBaselineIdentity = buildRebaselineIdentity({ sourceSha, rotationId, resources, abandonmentEvidenceSha256: checkedAbandonment.evidenceSha256, legacyBaseline: checkedLegacyBaseline });
+  if (authorization.baselineIdentitySha256 !== expectedBaselineIdentity.identitySha256) fail("Rebaseline runtime legacy baseline is not bound to the authorization.");
   const bindings = {
     schemaVersion: 2, kind: REBASELINE_ROTATION_BINDINGS_KIND, producer: REBASELINE_ROTATION_BINDINGS_PRODUCER, operation: PRODUCTION_DUAL_SLOT_REBASELINE.kind, sourceSha, rotationId,
     legacy: checkedLegacyBaseline,
@@ -330,6 +330,10 @@ export function assertRebaselineRotationBindings(bindings, { authorization } = {
   if (bindings.historicalRotationId !== checkedAbandonment.historicalRotationId || bindings.abandonmentEvidenceSha256 !== checkedAbandonment.evidenceSha256 || !SHA256.test(bindings.authorizationSha256 || "")) fail("Rebaseline rotation binding provenance is invalid.");
   assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources: checkedResources });
   if (authorization.authorizationSha256 !== bindings.authorizationSha256 || authorization.abandonmentEvidenceSha256 !== bindings.abandonmentEvidenceSha256) fail("Rebaseline rotation binding authorization is not independently authenticated.");
+  const checkedLegacyBaseline = assertLegacyBaseline(bindings.legacy, "Rebaseline runtime legacy baseline");
+  if (bindings.jwt?.currentSecretId !== checkedLegacyBaseline.jwtCurrent || bindings.qr?.privateCurrentSecretId !== checkedLegacyBaseline.qrPrivateCurrent || bindings.qr?.publicCurrentSecretId !== checkedLegacyBaseline.qrPublicCurrent || bindings.qr?.previousKeyVersion !== checkedLegacyBaseline.qrCurrentVersion) fail("Rebaseline runtime legacy bindings are inconsistent.");
+  const expectedBaselineIdentity = buildRebaselineIdentity({ sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources: checkedResources, abandonmentEvidenceSha256: checkedAbandonment.evidenceSha256, legacyBaseline: checkedLegacyBaseline });
+  if (authorization.baselineIdentitySha256 !== expectedBaselineIdentity.identitySha256) fail("Rebaseline runtime legacy baseline is not bound to the authorization.");
   assertBaselineCompletion(bindings.baselineCompletion, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources: checkedResources, authorizationBinding: authorization.authorizationSha256, historicalRotationId: bindings.historicalRotationId, abandonmentEvidenceSha256: bindings.abandonmentEvidenceSha256 });
   if (bindings.baselineCompletionSha256 !== bindings.baselineCompletion.baselineBindingSha256) fail("Rebaseline completion hash is not bound to runtime bindings.");
   return bindings;

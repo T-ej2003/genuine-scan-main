@@ -223,6 +223,13 @@ test("source-advance bridge anchors legacy-current bindings to the live task def
   assert.throws(() => buildInitialMigrationSourceAdvance({ ...input, rotationBindings: changedSeven }), /resources do not match/);
 });
 
+test("same-source runtime binding still authenticates the live legacy baseline", () => {
+  const liveLegacyBaseline = { jwtCurrent: bindings.jwt.currentSecretId, qrPrivateCurrent: bindings.qr.privateCurrentSecretId, qrPublicCurrent: bindings.qr.publicCurrentSecretId, qrCurrentVersion: bindings.qr.previousKeyVersion };
+  assert.equal(buildInitialMigrationSourceAdvance({ currentSourceSha: sourceSha, rotationBindings: bindings, liveLegacyBaseline }), undefined);
+  const changed = { ...bindings, jwt: { ...bindings.jwt, currentSecretId: `${bindings.jwt.currentSecretId}-changed` } };
+  assert.throws(() => buildInitialMigrationSourceAdvance({ currentSourceSha: sourceSha, rotationBindings: changed, liveLegacyBaseline }), /authenticated live legacy/);
+});
+
 test("runtime config carries the authenticated source-advance bridge into coordinator approval bytes", () => {
   const directory = fsTemp();
   try {
@@ -593,7 +600,7 @@ test("LIVE_QR_VERSION_BINDING rejects an operator value that differs from live p
     input.rotationBindings = { ...bindings, qr: { ...bindings.qr, previousKeyVersion: "qr-v0" } };
     const result = prepareProductionCutoverRuntime(input);
     assert.equal(result.readyToConsumeMfa, false);
-    assert.match(result.blockers.join("\n"), /must equal the live QR_SIGN_ACTIVE_KEY_VERSION/);
+    assert.match(result.blockers.join("\n"), /must equal the live QR_SIGN_ACTIVE_KEY_VERSION|authenticated live legacy/);
   } finally {
     rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
     rmSync(directory, { recursive: true, force: true });

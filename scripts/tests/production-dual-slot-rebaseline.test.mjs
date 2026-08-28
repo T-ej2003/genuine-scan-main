@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -171,6 +171,38 @@ test("production execute CLI never regenerates missing resume material", async (
   assert.equal(topologyRead, false); rmSync(outputs.directory, { recursive: true, force: true });
 });
 
+test("production prepare CLI reuses authenticated abandonment evidence after a preparation crash", async () => {
+  const outputs = temporary(); const args = ["--prepare", "--source-sha", sourceSha, "--rotation-id", rotationId, "--output-directory", outputs.directory, "--database-dependencies", "0", "--external-consumers", "0"];
+  const auditWithLegacy = { ...audit, legacy: legacyBaseline, runningTasks: 2, pendingTasks: 0, activeTaskDefinition: "fixture-backend:1" };
+  const common = {
+    argv: args, repositoryRoot: process.cwd(), readCheckout: () => ({ toolingSha: sourceSha, porcelainStatus: "" }), createRun: () => () => "{}", createClient: () => ({ assertCredentialIdentity: async () => {} }), historicalTopologySha256,
+    gitRun: (gitArgs) => { if (gitArgs[0] === "fetch" || gitArgs[0] === "merge-base") return ""; if (gitArgs[0] === "status") return ""; if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--is-shallow-repository") return "false"; if (gitArgs[0] === "rev-parse" && (gitArgs[1] === "FETCH_HEAD" || gitArgs[1] === "HEAD")) return `${sourceSha}\n`; if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--git-path") return ".git/absent"; if (gitArgs[0] === "symbolic-ref") return "refs/remotes/origin/main"; throw new Error(`unexpected git ${gitArgs.join(" ")}`); },
+    readTopology: async () => ({ resources, currentVersionIds, observedSlotIdentities, observedSlotIdentitiesSha256: canonicalSha256(observedSlotIdentities) }), auditReferences: () => auditWithLegacy, output: () => {},
+  };
+  let crash = true;
+  await assert.rejects(() => runProductionDualSlotRebaselineCli({ ...common, afterAbandonmentPersist: async () => { if (crash) throw new Error("injected preparation crash"); } }), /injected preparation crash/);
+  const abandonmentPath = path.join(outputs.directory, "abandonment-evidence.json"); const firstEvidence = readFileSync(abandonmentPath);
+  assert.equal(existsSync(path.join(outputs.directory, "rebaseline-preparation.json")), false);
+  crash = false;
+  const resumed = await runProductionDualSlotRebaselineCli({ ...common });
+  assert.equal(resumed.writeCount, 7); assert.deepEqual(readFileSync(abandonmentPath), firstEvidence); assert.equal(existsSync(resumed.preparationFile), true);
+  rmSync(outputs.directory, { recursive: true, force: true });
+});
+
+test("production prepare CLI rejects a divergent existing abandonment artifact", async () => {
+  const outputs = temporary(); const args = ["--prepare", "--source-sha", sourceSha, "--rotation-id", rotationId, "--output-directory", outputs.directory, "--database-dependencies", "0", "--external-consumers", "0"];
+  const auditWithLegacy = { ...audit, legacy: legacyBaseline, runningTasks: 2, pendingTasks: 0, activeTaskDefinition: "fixture-backend:1" };
+  const common = {
+    argv: args, repositoryRoot: process.cwd(), readCheckout: () => ({ toolingSha: sourceSha, porcelainStatus: "" }), createRun: () => () => "{}", createClient: () => ({ assertCredentialIdentity: async () => {} }), historicalTopologySha256,
+    gitRun: (gitArgs) => { if (gitArgs[0] === "fetch" || gitArgs[0] === "merge-base") return ""; if (gitArgs[0] === "status") return ""; if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--is-shallow-repository") return "false"; if (gitArgs[0] === "rev-parse" && (gitArgs[1] === "FETCH_HEAD" || gitArgs[1] === "HEAD")) return `${sourceSha}\n`; if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--git-path") return ".git/absent"; if (gitArgs[0] === "symbolic-ref") return "refs/remotes/origin/main"; throw new Error(`unexpected git ${gitArgs.join(" ")}`); },
+    readTopology: async () => ({ resources, currentVersionIds, observedSlotIdentities, observedSlotIdentitiesSha256: canonicalSha256(observedSlotIdentities) }), auditReferences: () => auditWithLegacy, output: () => {},
+  };
+  await runProductionDualSlotRebaselineCli({ ...common });
+  const abandonmentPath = path.join(outputs.directory, "abandonment-evidence.json"); const divergent = JSON.parse(readFileSync(abandonmentPath, "utf8")); divergent.currentVersionIds = { ...divergent.currentVersionIds, jwtPending: "divergent-version" }; writeFileSync(abandonmentPath, `${JSON.stringify(divergent, null, 2)}\n`);
+  await assert.rejects(() => runProductionDualSlotRebaselineCli({ ...common }), /hash|identity|match|exact/i);
+  rmSync(outputs.directory, { recursive: true, force: true });
+});
+
 test("seven-slot execution resumes at every write boundary and persists exact completion plus bindings", async () => {
   for (let failAt = 1; failAt <= 7; failAt += 1) { const outputs = temporary(); const adapters = executionAdapters({ failAt }); await assert.rejects(() => execute(adapters, outputs), /interruption/); const resumed = await execute(adapters, outputs); assert.equal(resumed.baselineComplete, true); assert.equal(JSON.stringify(resumed.completion).includes(material.jwt), false); assert.equal(readFileSync(outputs.completionFile, "utf8").includes(material.jwt), false); rmSync(outputs.directory, { recursive: true, force: true }); }
 });
@@ -254,6 +286,17 @@ test("runtime admits only a declared rebaseline producer anchored to independent
   const fabricated = { ...result.completion, authorizationBinding: "f".repeat(64) }; fabricated.baselineBindingSha256 = canonicalSha256(Object.fromEntries(Object.entries(fabricated).filter(([key]) => key !== "baselineBindingSha256"))); const bad = { ...result.bindings, baselineCompletion: fabricated, baselineCompletionSha256: fabricated.baselineBindingSha256 }; assert.throws(() => assertBindings(bad, { rebaselineAuthorization: auth }), /authorization/i);
   assert.doesNotThrow(() => readBoundBaselineCompletion({ filePath: outputs.completionFile, expectedSha256: result.completionSha256, authorization: auth }));
   assert.throws(() => readBoundBaselineCompletion({ filePath: outputs.completionFile, expectedSha256: result.completionSha256, authorization: { ...auth, authorizationSha256: "f".repeat(64) } }), /hash|authorization/i);
+  rmSync(outputs.directory, { recursive: true, force: true });
+});
+
+test("runtime legacy/current secret identifiers are anchored to the authorized baseline identity", async () => {
+  const outputs = temporary(); const result = await execute(executionAdapters(), outputs); const auth = authorization();
+  for (const [group, field] of [["jwt", "currentSecretId"], ["qr", "privateCurrentSecretId"], ["qr", "publicCurrentSecretId"]]) {
+    const tampered = structuredClone(result.bindings); tampered[group][field] = `${tampered[group][field]}-substituted`;
+    assert.throws(() => assertRebaselineRotationBindings(tampered, { authorization: auth }), /legacy baseline|authorization|inconsistent/i);
+  }
+  const swapped = structuredClone(result.bindings); swapped.jwt.currentSecretId = result.bindings.qr.publicCurrentSecretId; swapped.legacy.jwtCurrent = swapped.jwt.currentSecretId;
+  assert.throws(() => assertRebaselineRotationBindings(swapped, { authorization: auth }), /legacy baseline|authorization|inconsistent/i);
   rmSync(outputs.directory, { recursive: true, force: true });
 });
 
