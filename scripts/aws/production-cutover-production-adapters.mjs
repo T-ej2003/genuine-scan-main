@@ -31,7 +31,7 @@ import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence, createReleasePreflightCheckerTrustSignatureVerifier } from "./production-release-preflight-checker-attestation.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { assertProductionDualSlotRebaselineAuthorization, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
+import { assertPartialRebaselineRecoveryAuthorization, assertProductionDualSlotRebaselineAuthorization, assertRebaselineRotationBindings, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
 
 export { PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
@@ -229,9 +229,13 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   if (releaseProfile !== "mscqr-production-release-deployer" || verifierProfile !== "mscqr-production-ecs-exec-verifier") throw new Error("Production cutover adapter profiles do not match the asymmetric identity contract.");
   if (typeof createCommandRunner !== "function") throw new Error("Rebaseline authorization adapters are invalid.");
   const releaseRun = createCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: releaseProfile });
+  const proveProtectedDescendant = ({ ancestorSha, descendantSha }) => {
+    try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; }
+  };
   const rebaseline = config.rebaselineRuntime
     ? (() => {
-      const bindings = config.rebaselineRuntime.bindings;
+      const runtime = config.rebaselineRuntime;
+      const bindings = runtime.bindings;
       const resources = {
         jwtPending: bindings.jwt.pendingSecretId,
         qrPrivatePending: bindings.qr.privatePendingSecretId,
@@ -241,12 +245,19 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
         qrCurrentVersion: bindings.qr.currentKeyVersionSecretId,
         qrPreviousVersion: bindings.qr.previousKeyVersionSecretId,
       };
-      const authorization = config.rebaselineRuntime.authorization;
+      const authorization = runtime.authorization;
       if (!authorization) throw new Error("Pre-mutation authenticated rebaseline authorization is required; late GitHub lookup is unavailable after AWS environment sanitization.");
-      assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources });
+      if (runtime.runtimeVariant === "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME") {
+        if (!runtime.recoveryEnvelope || !runtime.originalPreparation || !runtime.imageAuthorization) throw new Error("Complete successor-recovery runtime authority is required.");
+        assertPartialRebaselineRecoveryAuthorization(authorization, { sourceSha: bindings.sourceSha, recoveryEnvelope: runtime.recoveryEnvelope, imageAuthorization: runtime.imageAuthorization, proveDescendant: proveProtectedDescendant });
+        assertRebaselineRotationBindings(bindings, { authorization, recoveryEnvelope: runtime.recoveryEnvelope, originalPreparation: runtime.originalPreparation });
+      } else if (runtime.runtimeVariant === "ORDINARY_REBASELINE_RUNTIME") {
+        if (runtime.recoveryEnvelope !== undefined || runtime.originalPreparation !== undefined || runtime.imageAuthorization !== undefined) throw new Error("Ordinary rebaseline runtime contains successor-recovery authority.");
+        assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources });
+      } else throw new Error("Rebaseline runtime authority variant is missing or unsupported.");
       return {
         revalidate: async () => {
-          const verified = verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization });
+          const verified = verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization, ...(runtime.runtimeVariant === "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME" ? { recoveryEnvelope: runtime.recoveryEnvelope, originalPreparation: runtime.originalPreparation, imageAuthorization: runtime.imageAuthorization, proveDescendant: proveProtectedDescendant } : {}) });
           if (verified.livePostWriteSha256 !== config.livePostWriteSha256) throw new Error("Live rebaseline post-write state changed after runtime preparation.");
           return verified;
         },

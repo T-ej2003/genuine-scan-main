@@ -799,7 +799,7 @@ export function assertPartialRebaselineRecoveryRotationBindings(bindings, { auth
   return bindings;
 }
 
-export function verifyLiveProductionDualSlotRebaselineWithRunner({ run, bindings, authorization, recoveryEnvelope, originalPreparation, proveDescendant } = {}) {
+export function verifyLiveProductionDualSlotRebaselineWithRunner({ run, bindings, authorization, recoveryEnvelope, originalPreparation, imageAuthorization, proveDescendant } = {}) {
   if (typeof run !== "function") fail("Live post-write rebaseline command runner is required.");
   assertRebaselineRotationBindings(bindings, { authorization, recoveryEnvelope, originalPreparation });
   const resources = {
@@ -812,7 +812,7 @@ export function verifyLiveProductionDualSlotRebaselineWithRunner({ run, bindings
     qrPreviousVersion: bindings.qr.previousKeyVersionSecretId,
   };
   const recovery = recoveryEnvelope !== undefined || originalPreparation !== undefined;
-  if (recovery) assertPartialRebaselineRecoveryAuthorization(authorization, { sourceSha: bindings.sourceSha, recoveryEnvelope, proveDescendant });
+  if (recovery) assertPartialRebaselineRecoveryAuthorization(authorization, { sourceSha: bindings.sourceSha, recoveryEnvelope, imageAuthorization, proveDescendant });
   else assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources });
   const versionIds = {};
   const payloadIdentities = {};

@@ -66,7 +66,7 @@ const rebaselineAuthorization = rebaselineAuthorizationCoordinates
   : undefined;
 const onboardingPaths = args.has("onboarding-paths") ? read("onboarding-paths") : undefined;
 const verifyRebaselineLivePostWrite = rebaselineAuthorizationCoordinates
-  ? ({ bindings, authorization }) => verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization, recoveryEnvelope, originalPreparation, proveDescendant: proveRecoveryDescendant })
+  ? ({ bindings, authorization }) => verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization, recoveryEnvelope, originalPreparation, imageAuthorization, proveDescendant: proveRecoveryDescendant })
   : undefined;
 const verifyInitialBindingOrigin = ({ bindings }) => verifyLiveInitialDualSlotBindingWithRunner({ run: releaseRun, bindings });
 const loadCurrentTaskDefinition = () => {
