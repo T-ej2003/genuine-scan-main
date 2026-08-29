@@ -514,6 +514,19 @@ function assertReadSnapshot(snapshot, expected, label, historicalIdentity) {
   if (snapshot.unexpectedRebaselineIdentity === true) fail(`${label} contains an unexpected competing rebaseline.`); return "PENDING";
 }
 
+const REBASELINE_WRITE_CONVERGENCE_ATTEMPTS = 6;
+const rebaselineWriteConvergenceDelay = (attempt) => Math.min(1_000, 100 * (2 ** attempt));
+const sleepForRebaselineWriteConvergence = (milliseconds) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+
+async function awaitExactRebaselineWriteConvergence({ expected, historicalIdentity, readSlot, sleep = sleepForRebaselineWriteConvergence } = {}) {
+  for (let attempt = 0; attempt < REBASELINE_WRITE_CONVERGENCE_ATTEMPTS; attempt += 1) {
+    const snapshot = await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha: expected.payload.sourceSha, rotationId: expected.payload.rotationId, historicalIdentity });
+    if (assertReadSnapshot(snapshot, expected, `Post-write ${expected.slot}`, historicalIdentity) === "COMPLETED") return snapshot;
+    if (attempt < REBASELINE_WRITE_CONVERGENCE_ATTEMPTS - 1) sleep(rebaselineWriteConvergenceDelay(attempt));
+  }
+  fail(`Rebaseline write ${expected.slot} did not converge after ${REBASELINE_WRITE_CONVERGENCE_ATTEMPTS} read-only observations.`);
+}
+
 function assertStableLiveReferenceAudit(audit, expectedStableAuditSha256) {
   if (!audit || audit.status !== "PASS" || audit.dualSlotReferences !== 0 || audit.legacyRuntimeAuthoritative !== true || audit.liveLegacyBaselineCount !== 1 || audit.databaseDependencies !== 0 || audit.externalConsumers !== 0 || audit.stableAuditSha256 !== expectedStableAuditSha256) fail("Live reference audit no longer satisfies the authorization-bound security topology.");
   return audit;
@@ -634,8 +647,8 @@ function assertDurableOutputWritable(filePath) {
   }
 }
 
-export async function executeProductionDualSlotRebaseline({ preconditions, sourceSha, rotationId, baselineIdentity, writePlan, readReferenceAudit, readSlot, writeSlot, completionFile, bindingsFile, repositoryRoot = process.cwd(), authorization, afterCompletionPersist, afterBindingsPersist } = {}) {
-  const checked = assertRebaselinePreconditions(preconditions); if (checked.sourceSha !== sourceSha) fail("Execution source does not match preconditions."); if (typeof readReferenceAudit !== "function" || typeof readSlot !== "function" || typeof writeSlot !== "function") fail("Rebaseline execution adapters are incomplete.");
+export async function executeProductionDualSlotRebaseline({ preconditions, sourceSha, rotationId, baselineIdentity, writePlan, readReferenceAudit, readSlot, writeSlot, completionFile, bindingsFile, repositoryRoot = process.cwd(), authorization, sleep = sleepForRebaselineWriteConvergence, afterCompletionPersist, afterBindingsPersist } = {}) {
+  const checked = assertRebaselinePreconditions(preconditions); if (checked.sourceSha !== sourceSha) fail("Execution source does not match preconditions."); if (typeof readReferenceAudit !== "function" || typeof readSlot !== "function" || typeof writeSlot !== "function" || typeof sleep !== "function") fail("Rebaseline execution adapters are incomplete.");
   if (!completionFile || !bindingsFile) fail("Durable completion and rotation-binding outputs are required before rebaseline mutation.");
   if (path.resolve(completionFile) === path.resolve(bindingsFile)) fail("Completion and rotation-binding outputs must be distinct.");
   ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(completionFile)), repositoryRoot, create: true, normalize: true, label: "Dual-slot baseline completion directory" });
@@ -659,7 +672,7 @@ export async function executeProductionDualSlotRebaseline({ preconditions, sourc
   const historicalBySlot = checked.abandonmentEvidence.observedSlotIdentities;
   const initialSnapshots = await Promise.all(expectedPlan.map(async (expected) => ({ expected, snapshot: await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha, rotationId, historicalIdentity: historicalBySlot[expected.slot] }) })));
   if (outputExists.some(Boolean) && initialSnapshots.some(({ expected, snapshot }) => assertReadSnapshot(snapshot, expected, `Output preflight ${expected.slot}`, historicalBySlot[expected.slot]) !== "COMPLETED")) fail("Existing durable rebaseline outputs cannot accompany an incomplete secret baseline.");
-  for (const expected of expectedPlan) { assertStableLiveReferenceAudit(await readReferenceAudit(), checked.liveReferenceAuditSha256); const historicalIdentity = historicalBySlot[expected.slot]; const snapshot = await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha, rotationId, historicalIdentity }); if (assertReadSnapshot(snapshot, expected, `Pre-write ${expected.slot}`, historicalIdentity) === "COMPLETED") continue; const result = await writeSlot({ slot: expected.slot, secretArn: expected.secretArn, clientRequestToken: expected.clientRequestToken, payload: expected.payload, payloadSha256: expected.payloadSha256 }); writes += 1; if (result?.versionId !== expected.clientRequestToken || result?.arn !== expected.secretArn) fail(`Rebaseline write identity for ${expected.slot} is invalid.`); const verified = await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha, rotationId, historicalIdentity }); if (assertReadSnapshot(verified, expected, `Post-write ${expected.slot}`, historicalIdentity) !== "COMPLETED") fail(`Rebaseline write ${expected.slot} did not converge.`); }
+  for (const expected of expectedPlan) { assertStableLiveReferenceAudit(await readReferenceAudit(), checked.liveReferenceAuditSha256); const historicalIdentity = historicalBySlot[expected.slot]; const snapshot = await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha, rotationId, historicalIdentity }); if (assertReadSnapshot(snapshot, expected, `Pre-write ${expected.slot}`, historicalIdentity) === "COMPLETED") continue; const result = await writeSlot({ slot: expected.slot, secretArn: expected.secretArn, clientRequestToken: expected.clientRequestToken, payload: expected.payload, payloadSha256: expected.payloadSha256 }); writes += 1; if (result?.versionId !== expected.clientRequestToken || result?.arn !== expected.secretArn) fail(`Rebaseline write identity for ${expected.slot} is invalid.`); await awaitExactRebaselineWriteConvergence({ expected, historicalIdentity, readSlot, sleep }); }
   assertStableLiveReferenceAudit(await readReferenceAudit(), checked.liveReferenceAuditSha256);
   const finalSnapshots = []; for (const expected of expectedPlan) finalSnapshots.push({ slot: expected.slot, ...(await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha, rotationId, historicalIdentity: historicalBySlot[expected.slot] })) }); const completion = buildBaselineCompletion({ preconditions: checked, sourceSha, rotationId, baselineIdentity, writePlan, finalSnapshots, authorizationBinding: authorization.authorizationSha256, authorizedWritePayloadIdentities: authorization.writePayloadIdentities });
   const completionCapture = persistExactPrivateJson({ filePath: completionFile, value: completion, repositoryRoot, label: "Dual-slot baseline completion evidence" });
