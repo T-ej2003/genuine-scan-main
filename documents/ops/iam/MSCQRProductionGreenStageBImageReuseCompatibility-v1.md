@@ -11,7 +11,7 @@ schema version: 2
 identity model: tooling-input-tree-sha256
 image release: e4b0794dcf3b61ab2b43c38ff328736092a6e12c
 comparison base: e4b0794dcf3b61ab2b43c38ff328736092a6e12c
-tooling revision: 8fffdaa1f3124727d0e8b2a2deb5561b75861822
+tooling revision: a1b722512582d15ea8f11c981b0d3cc5ef5625eb
 comparison head identity: tooling-input-tree-sha256
 comparison head: 0490657cef2955fce9faff5ef652794fd56fb21bf39e2314b6a305c8b69c96ab
 tooling input tree: 0490657cef2955fce9faff5ef652794fd56fb21bf39e2314b6a305c8b69c96ab
@@ -43,4 +43,3 @@ The canonical changed-file classification is:
 | scripts/tests/production-cutover-runtime-bootstrap.test.mjs | testOnly | false |
 | scripts/tests/production-dual-slot-rebaseline-workflow.test.mjs | testOnly | false |
 | scripts/tests/production-dual-slot-rebaseline.test.mjs | testOnly | false |
-| scripts/aws/validate-stage-b-image-reuse.mjs | toolingOnly | false |
