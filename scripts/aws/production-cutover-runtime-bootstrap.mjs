@@ -22,7 +22,7 @@ import {
 } from "../security/production-initial-migration-source-advance.mjs";
 import { assertBindingsMatchLegacyBaseline, deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
-import { assertProductionDualSlotRebaselineAuthorization, assertRebaselineRotationBindings, BASELINE_COMPLETE, PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_ROTATION_BINDINGS_KIND, REBASELINE_ROTATION_BINDINGS_PRODUCER } from "./production-dual-slot-rebaseline-contract.mjs";
+import { assertPartialRebaselineRecoveryAuthorization, assertProductionDualSlotRebaselineAuthorization, assertRebaselineRotationBindings, BASELINE_COMPLETE, PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_ROTATION_BINDINGS_KIND, REBASELINE_ROTATION_BINDINGS_PRODUCER } from "./production-dual-slot-rebaseline-contract.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -77,7 +77,7 @@ function assertAuthenticatedOrigin(origin, bindings) {
   return origin;
 }
 
-function assertBindings(bindings = {}, { rebaselineAuthorization, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin } = {}) {
+function assertBindings(bindings = {}, { rebaselineAuthorization, recoveryEnvelope, originalPreparation, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin } = {}) {
   const missing = REQUIRED_SECRET_BINDINGS.filter((key) => {
     const [group, field] = key.split(".");
     return typeof bindings[group]?.[field] !== "string" || !bindings[group][field].trim();
@@ -97,12 +97,13 @@ function assertBindings(bindings = {}, { rebaselineAuthorization, verifyRebaseli
   try { initialOrigin = assertAuthenticatedOrigin(verifyInitialBindingOrigin({ bindings }), bindings); } catch { initialOrigin = undefined; }
   let rebaselineOrigin;
   let livePostWrite;
-  if (rebaselineAuthorization !== undefined || verifyRebaselineLivePostWrite !== undefined) {
+  if (rebaselineAuthorization !== undefined || verifyRebaselineLivePostWrite !== undefined || recoveryEnvelope !== undefined || originalPreparation !== undefined) {
     if (!rebaselineAuthorization || typeof verifyRebaselineLivePostWrite !== "function") throw new Error("Complete rebaseline authorization and live verification are required.");
+    if ((recoveryEnvelope === undefined) !== (originalPreparation === undefined)) throw new Error("Complete recovery evidence is required for successor recovery bindings.");
     try {
       if (bindings.operation !== PRODUCTION_DUAL_SLOT_REBASELINE.kind || bindings.baselineCompletion?.kind !== BASELINE_COMPLETE) throw new Error("Not a completed rebaseline binding.");
-      assertRebaselineRotationBindings(bindings, { authorization: rebaselineAuthorization });
-      livePostWrite = assertLiveRebaselinePostWrite(verifyRebaselineLivePostWrite({ bindings, authorization: rebaselineAuthorization }), { bindings, authorization: rebaselineAuthorization });
+      assertRebaselineRotationBindings(bindings, { authorization: rebaselineAuthorization, recoveryEnvelope, originalPreparation });
+      livePostWrite = assertLiveRebaselinePostWrite(verifyRebaselineLivePostWrite({ bindings, authorization: rebaselineAuthorization, recoveryEnvelope, originalPreparation }), { bindings, authorization: rebaselineAuthorization });
       rebaselineOrigin = assertAuthenticatedOrigin({ kind: REBASELINE_ROTATION_BINDINGS_KIND, producer: REBASELINE_ROTATION_BINDINGS_PRODUCER, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, bindingSha256: canonicalHash(bindings) }, bindings);
     } catch { rebaselineOrigin = undefined; }
   }
@@ -161,17 +162,19 @@ function assertFutureArtifactsAbsent(paths, repositoryRoot) {
   }
 }
 
-export function buildProductionRotationConfig({ sourceSha, rotationId, approval, bindings, rebaselineAuthorization, rebaselineAuthorizationCoordinates, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin, liveCurrentKeyVersion, overlapDeploymentSha = sourceSha } = {}) {
+export function buildProductionRotationConfig({ sourceSha, rotationId, approval, bindings, rebaselineAuthorization, rebaselineAuthorizationCoordinates, recoveryEnvelope, originalPreparation, proveRecoveryDescendant, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin, liveCurrentKeyVersion, overlapDeploymentSha = sourceSha } = {}) {
   if (!SHA40.test(sourceSha || "") || !ROTATION_ID.test(rotationId || "")) throw new Error("Production rotation identity is invalid.");
   const checkedApproval = assertApproval(approval);
-  const checkedBindings = assertBindings(bindings, { rebaselineAuthorization, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin });
+  const checkedBindings = assertBindings(bindings, { rebaselineAuthorization, recoveryEnvelope, originalPreparation, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin });
   if (liveCurrentKeyVersion !== undefined) {
     if (!/^[A-Za-z0-9._:-]{1,128}$/.test(liveCurrentKeyVersion) || checkedBindings.qr.previousKeyVersion !== liveCurrentKeyVersion) throw new Error("qr.previousKeyVersion must equal the live QR_SIGN_ACTIVE_KEY_VERSION.");
   }
   if (!SHA40.test(overlapDeploymentSha || "")) throw new Error("overlapDeploymentSha must be a full protected-main SHA.");
   const checkedRebaselineCoordinates = checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? assertRebaselineAuthorizationCoordinates(rebaselineAuthorizationCoordinates) : undefined;
   const checkedRebaselineAuthorization = checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND
-    ? assertProductionDualSlotRebaselineAuthorization(rebaselineAuthorization, { sourceSha, rotationId, resources: { jwtPending: checkedBindings.jwt.pendingSecretId, qrPrivatePending: checkedBindings.qr.privatePendingSecretId, qrPublicPending: checkedBindings.qr.publicPendingSecretId, jwtPrevious: checkedBindings.jwt.previousSecretId, qrPublicPrevious: checkedBindings.qr.publicPreviousSecretId, qrCurrentVersion: checkedBindings.qr.currentKeyVersionSecretId, qrPreviousVersion: checkedBindings.qr.previousKeyVersionSecretId } })
+    ? recoveryEnvelope
+      ? assertPartialRebaselineRecoveryAuthorization(rebaselineAuthorization, { sourceSha, recoveryEnvelope, proveDescendant: proveRecoveryDescendant })
+      : assertProductionDualSlotRebaselineAuthorization(rebaselineAuthorization, { sourceSha, rotationId, resources: { jwtPending: checkedBindings.jwt.pendingSecretId, qrPrivatePending: checkedBindings.qr.privatePendingSecretId, qrPublicPending: checkedBindings.qr.publicPendingSecretId, jwtPrevious: checkedBindings.jwt.previousSecretId, qrPublicPrevious: checkedBindings.qr.publicPreviousSecretId, qrCurrentVersion: checkedBindings.qr.currentKeyVersionSecretId, qrPreviousVersion: checkedBindings.qr.previousKeyVersionSecretId } })
     : undefined;
   return {
     region: REGION,
@@ -187,14 +190,14 @@ export function buildProductionRotationConfig({ sourceSha, rotationId, approval,
     verificationRef: checkedApproval.verificationRef,
     jwt: checkedBindings.jwt,
     qr: checkedBindings.qr,
-    ...(checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? { operation: checkedBindings.operation, baselineCompletionSha256: checkedBindings.baselineCompletionSha256, baselineCompletion: checkedBindings.baselineCompletion, rebaselineRuntime: { bindings: checkedBindings, authorization: checkedRebaselineAuthorization, authorizationCoordinates: checkedRebaselineCoordinates }, ...(checkedBindings.livePostWrite ? { livePostWriteSha256: checkedBindings.livePostWrite.livePostWriteSha256 } : {}) } : {}),
+    ...(checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? { operation: checkedBindings.operation, baselineCompletionSha256: checkedBindings.baselineCompletionSha256, baselineCompletion: checkedBindings.baselineCompletion, rebaselineRuntime: { bindings: checkedBindings, authorization: checkedRebaselineAuthorization, authorizationCoordinates: checkedRebaselineCoordinates, ...(recoveryEnvelope ? { recoveryEnvelopeSha256: recoveryEnvelope.recoverySha256 } : {}) }, ...(checkedBindings.livePostWrite ? { livePostWriteSha256: checkedBindings.livePostWrite.livePostWriteSha256 } : {}) } : {}),
   };
 }
 
-export function buildInitialMigrationSourceAdvance({ currentSourceSha, rotationBindings, rebaselineAuthorization, supersessionEvidence, liveLegacyBaseline, proveDescendant, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin } = {}) {
+export function buildInitialMigrationSourceAdvance({ currentSourceSha, rotationBindings, rebaselineAuthorization, recoveryEnvelope, originalPreparation, supersessionEvidence, liveLegacyBaseline, proveDescendant, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin } = {}) {
   const originalSourceSha = rotationBindings?.sourceSha;
   if (!SHA40.test(currentSourceSha || "") || !SHA40.test(originalSourceSha || "") || !liveLegacyBaseline) throw new Error("Initial-migration source-advance inputs are incomplete.");
-  assertBindings(rotationBindings, { rebaselineAuthorization, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin });
+  assertBindings(rotationBindings, { rebaselineAuthorization, recoveryEnvelope, originalPreparation, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin });
   assertBindingsMatchLegacyBaseline(rotationBindings, liveLegacyBaseline);
   if (originalSourceSha === currentSourceSha) return undefined;
   if (rotationBindings.rotationId !== supersessionEvidence?.rotationId) throw new Error("Initial-migration source-advance inputs are incomplete.");
@@ -225,6 +228,9 @@ export function prepareProductionCutoverRuntime({
   rotationBindings,
   rebaselineAuthorization,
   rebaselineAuthorizationCoordinates,
+  recoveryEnvelope,
+  originalPreparation,
+  proveRecoveryDescendant,
   verifyRebaselineLivePostWrite,
   verifyInitialBindingOrigin,
   rotationSupersessionEvidence,
@@ -356,6 +362,8 @@ export function prepareProductionCutoverRuntime({
       currentSourceSha: protectedSha,
       rotationBindings,
       rebaselineAuthorization,
+      recoveryEnvelope,
+      originalPreparation,
       supersessionEvidence: rotationSupersessionEvidence,
       liveLegacyBaseline,
       verifyRebaselineLivePostWrite,
@@ -364,7 +372,7 @@ export function prepareProductionCutoverRuntime({
         try { (git || execFileSync)("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; }
       }),
     });
-    const approvalConfig = { ...buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, rebaselineAuthorization, rebaselineAuthorizationCoordinates, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin, liveCurrentKeyVersion: currentKeyVersion }), ...(initialMigrationSourceAdvance ? { initialMigrationSourceAdvance } : {}) };
+    const approvalConfig = { ...buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, rebaselineAuthorization, rebaselineAuthorizationCoordinates, recoveryEnvelope, originalPreparation, proveRecoveryDescendant, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin, liveCurrentKeyVersion: currentKeyVersion }), ...(initialMigrationSourceAdvance ? { initialMigrationSourceAdvance } : {}) };
     const overlapTaskInput = buildOverlapTaskDefinition({
       backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${backendImageDigest}`,
       releaseSha: protectedSha,

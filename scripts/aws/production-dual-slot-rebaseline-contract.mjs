@@ -6,6 +6,7 @@ import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPr
 import path from "node:path";
 import { assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalIdentity, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
 import { assertProductionSupersessionEvidence } from "../security/production-initial-migration-source-advance.mjs";
+import { assertImageAuthorization } from "./production-cutover-control-plane.mjs";
 
 export const PRODUCTION_DUAL_SLOT_REBASELINE = Object.freeze({ schemaVersion: 1, kind: "PRODUCTION_DUAL_SLOT_REBASELINE", repository: "T-ej2003/genuine-scan-main", environment: "production", accountId: "368992683803", region: "eu-west-2", maxSecretValueWrites: 7 });
 export const REBASELINE_SLOTS = Object.freeze({ jwtPending: "mscqr/prod/rotation/jwt-pending", qrPrivatePending: "mscqr/prod/rotation/qr-private-pending", qrPublicPending: "mscqr/prod/rotation/qr-public-pending", jwtPrevious: "mscqr/prod/rotation/jwt-previous", qrPublicPrevious: "mscqr/prod/rotation/qr-public-previous", qrCurrentVersion: "mscqr/prod/rotation/qr-current-version", qrPreviousVersion: "mscqr/prod/rotation/qr-previous-version" });
@@ -14,10 +15,18 @@ export const ABANDONED_PRE_CUTOVER = "ABANDONED_PRE_CUTOVER";
 export const BASELINE_COMPLETE = "BASELINE_COMPLETE";
 export const REBASELINE_WRITE_IDENTITY_DOMAIN = "MSCQR_PRODUCTION_DUAL_SLOT_REBASELINE_WRITE_V1";
 export const REBASELINE_AUTHORIZATION_KIND = "PRODUCTION_DUAL_SLOT_REBASELINE_AUTHORIZATION";
+export const PARTIAL_REBASELINE_RECOVERY_AUTHORIZATION_KIND = "PRODUCTION_DUAL_SLOT_REBASELINE_SUCCESSOR_RECOVERY_AUTHORIZATION";
 export const REBASELINE_MATERIAL_JOURNAL_KIND = "PRODUCTION_DUAL_SLOT_REBASELINE_MATERIAL_JOURNAL";
 export const REBASELINE_PREPARATION_KIND = "PRODUCTION_DUAL_SLOT_REBASELINE_PREPARATION";
 export const REBASELINE_ROTATION_BINDINGS_KIND = "PRODUCTION_DUAL_SLOT_REBASELINE_ROTATION_BINDINGS";
 export const REBASELINE_ROTATION_BINDINGS_PRODUCER = "scripts/aws/production-dual-slot-rebaseline-contract.mjs:buildRebaselineRotationBindings";
+export const PARTIAL_REBASELINE_RECOVERY_KIND = "PRODUCTION_DUAL_SLOT_REBASELINE_SUCCESSOR_RECOVERY";
+export const PARTIAL_REBASELINE_RECOVERY_REASON = "POST_WRITE_READ_CONVERGENCE_SOURCE_FIX";
+export const PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA = "eb675a7f806b718e53196fa3dc1bf4845bcc872a";
+export const PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA = "e4b0794dcf3b61ab2b43c38ff328736092a6e12c";
+// Literal reviewed SHA-256 of the complete, non-secret 1/7 recovery envelope.
+// The supplied envelope proves integrity only; this protected-source value is its authority.
+export const EXPECTED_PARTIAL_REBASELINE_RECOVERY_SHA256 = "ee036cdbc70ecfc4ced65f78e53c0a610cf6d0e7b3e2e0d379f5aa37b1fc6bae";
 export const REBASELINE_HISTORICAL_SOURCE_SHAS = Object.freeze(["5506cbe3972a27a77c211f2891756c3b97de7197", "9f39d1c4f646467146c12c0587fd7ad585f3fe10"]);
 export const REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID = "rotation-20260826060632-b15b3f51";
 export const AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION = "AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION";
@@ -447,6 +456,122 @@ function assertRebaselineWritePayloadIdentities(value, label = "writePayloadIden
 
 export function safeWriteDescriptors(writePlan) { if (!Array.isArray(writePlan) || writePlan.length !== 7) fail("Rebaseline write plan is incomplete."); const payloadIdentities = rebaselineWritePayloadIdentities(writePlan); return Object.freeze(writePlan.map(({ slot, secretArn, clientRequestToken, payloadSha256, materialType }) => ({ slot, secretArn, clientRequestToken, payloadSha256, materialType, payloadIdentity: payloadIdentities[slot] }))); }
 
+function assertRecoveryWritePlan(value, resources) {
+  if (!Array.isArray(value) || value.length !== REBASELINE_SLOT_ORDER.length || new Set(value.map(({ slot }) => slot)).size !== REBASELINE_SLOT_ORDER.length) fail("Partial rebaseline recovery write plan is incomplete.");
+  const bySlot = Object.fromEntries(value.map((entry) => [entry.slot, entry]));
+  for (const slot of REBASELINE_SLOT_ORDER) {
+    const entry = bySlot[slot];
+    exactKeys(entry, ["slot", "secretArn", "clientRequestToken", "payloadSha256", "materialType", "payloadIdentity"], `Partial recovery writePlan.${slot}`);
+    if (entry.slot !== slot || entry.secretArn !== resources[slot]) fail(`Partial recovery writePlan resource is invalid: ${slot}`);
+    assertVersion(entry.clientRequestToken, `Partial recovery writePlan VersionId ${slot}`); assertSha256(entry.payloadSha256, `Partial recovery writePlan payload SHA ${slot}`);
+    exactKeys(entry.payloadIdentity, ["payloadSha256", "materialType", "keyVersion"], `Partial recovery writePlan payload identity ${slot}`);
+    if (entry.payloadIdentity.payloadSha256 !== entry.payloadSha256 || entry.payloadIdentity.materialType !== entry.materialType || (entry.payloadIdentity.keyVersion !== null && typeof entry.payloadIdentity.keyVersion !== "string")) fail(`Partial recovery writePlan payload identity is invalid: ${slot}`);
+  }
+  return Object.freeze(REBASELINE_SLOT_ORDER.map((slot) => Object.freeze({ ...bySlot[slot], payloadIdentity: Object.freeze({ ...bySlot[slot].payloadIdentity }) })));
+}
+
+// This is intentionally a one-transition bridge.  It does not derive replacement
+// material or VersionIds from a successor source; the literal anchor below permits
+// only the already-prepared eb675a7 transition to be resumed after its read-only
+// convergence repair reached protected main.
+export function assertAuthenticatedPartialRebaselineRecovery(value) {
+  const fields = ["schemaVersion", "kind", "reason", "originalSourceSha", "recoveryBaseSourceSha", "rotationId", "originalPreparationSha256", "originalMaterialJournalSha256", "originalAuthorization", "historicalAuthorityAnchorSha256", "resources", "historicalTopologySha256", "historicalSlotIdentities", "originalWritePlan", "completedSlots", "remainingSlots", "remainingSecretValueWrites", "expectedSecretDeletes", "recoveryBaseImagePublication", "recoverySha256"];
+  exactKeys(value, fields, "Partial rebaseline recovery envelope");
+  if (value.schemaVersion !== 1 || value.kind !== PARTIAL_REBASELINE_RECOVERY_KIND || value.reason !== PARTIAL_REBASELINE_RECOVERY_REASON || value.originalSourceSha !== PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA || value.recoveryBaseSourceSha !== PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA || value.remainingSecretValueWrites !== 6 || value.expectedSecretDeletes !== 0) fail("Partial rebaseline recovery envelope identity is invalid.");
+  assertRotation(value.rotationId, "Partial recovery rotationId");
+  for (const [name, item] of Object.entries({ originalPreparationSha256: value.originalPreparationSha256, originalMaterialJournalSha256: value.originalMaterialJournalSha256, historicalAuthorityAnchorSha256: value.historicalAuthorityAnchorSha256, recoverySha256: value.recoverySha256 })) assertSha256(item, `Partial recovery ${name}`);
+  if (value.historicalAuthorityAnchorSha256 !== EXPECTED_AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION_SHA256) fail("Partial recovery historical authority anchor is invalid.");
+  exactKeys(value.originalAuthorization, ["workflowRunId", "workflowRunAttempt", "authorizationSha256"], "Partial recovery original authorization");
+  if (!/^[1-9][0-9]*$/.test(String(value.originalAuthorization.workflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(value.originalAuthorization.workflowRunAttempt || ""))) fail("Partial recovery original authorization coordinates are invalid.");
+  assertSha256(value.originalAuthorization.authorizationSha256, "Partial recovery original authorization SHA");
+  const resources = assertSlotMap(value.resources, "Partial recovery resources");
+  assertSha256(value.historicalTopologySha256, "Partial recovery historical topology SHA");
+  exactKeys(value.historicalSlotIdentities, REBASELINE_SLOT_ORDER, "Partial recovery historical slot identities");
+  const historical = Object.freeze(Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => {
+    const identity = value.historicalSlotIdentities[slot];
+    if (!identity || identity.secretArn !== resources[slot] || !VERSION_ID.test(identity.versionId || "") || canonical(identity.stages) !== canonical(["AWSCURRENT"]) || !SHA256.test(identity.payloadSha256 || "") || !SHA256.test(identity.identitySha256 || "")) fail(`Partial recovery historical slot identity is invalid: ${slot}`);
+    return [slot, Object.freeze({ ...identity })];
+  })));
+  const plan = assertRecoveryWritePlan(value.originalWritePlan, resources);
+  if (canonical(value.completedSlots) !== canonical(["jwtPending"]) || canonical(value.remainingSlots) !== canonical(REBASELINE_SLOT_ORDER.filter((slot) => slot !== "jwtPending"))) fail("Partial recovery completed/remaining slot partition is invalid.");
+  exactKeys(value.recoveryBaseImagePublication, ["sourceSha", "workflowRunId", "artifactSha256", "images"], "Partial recovery base image publication");
+  if (value.recoveryBaseImagePublication.sourceSha !== PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA || !/^[1-9][0-9]*$/.test(String(value.recoveryBaseImagePublication.workflowRunId || "")) || !SHA256.test(value.recoveryBaseImagePublication.artifactSha256 || "")) fail("Partial recovery base image publication is invalid.");
+  exactKeys(value.recoveryBaseImagePublication.images, ["backend", "worker", "rlsExecutor", "rlsCanary"], "Partial recovery base images");
+  for (const digest of Object.values(value.recoveryBaseImagePublication.images)) if (!/^sha256:[a-f0-9]{64}$/.test(digest || "")) fail("Partial recovery base image digest is invalid.");
+  const { recoverySha256, ...body } = value;
+  if (canonicalSha256(body) !== recoverySha256 || recoverySha256 !== EXPECTED_PARTIAL_REBASELINE_RECOVERY_SHA256) fail("Partial rebaseline recovery envelope does not match the protected-source authority anchor.");
+  return Object.freeze({ ...value, resources, historicalSlotIdentities: historical, originalWritePlan: plan });
+}
+
+function assertRecoveryImageAuthorization(imageAuthorization, sourceSha, imageAuthorizationValidation) {
+  if (!imageAuthorization || imageAuthorization.sourceSha !== sourceSha || !SHA256.test(imageAuthorization.authorizationSha256 || "") || !SHA40.test(imageAuthorization.imageReleaseSha || "") || !/^[1-9][0-9]*$/.test(String(imageAuthorization.workflowRunId || "")) || !Array.isArray(imageAuthorization.images) || imageAuthorization.images.length !== 4) fail("Partial recovery current-image authority reference is invalid.");
+  if (imageAuthorizationValidation !== undefined) {
+    if (typeof imageAuthorizationValidation.verifyImageEvidence !== "function") fail("Partial recovery image verification adapter is invalid.");
+    assertImageAuthorization(imageAuthorization, sourceSha, imageAuthorizationValidation);
+  }
+  const expectedServices = ["backend", "rls-canary", "rls-executor", "worker"];
+  if (canonical(imageAuthorization.images.map(({ service }) => service).sort()) !== canonical(expectedServices)) fail("Partial recovery current-image authority has an incomplete image set.");
+  return Object.freeze({
+    sourceSha: imageAuthorization.sourceSha,
+    authorizationSha256: imageAuthorization.authorizationSha256,
+    workflowRunId: imageAuthorization.workflowRunId,
+    imageReleaseSha: imageAuthorization.imageReleaseSha,
+    images: Object.freeze(Object.fromEntries(imageAuthorization.images.map(({ service, digest }) => [service, digest]))),
+  });
+}
+
+function assertRecoveryLiveCas({ liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256, observedSlotIdentitiesSha256 } = {}) {
+  for (const [name, value] of Object.entries({ liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256, observedSlotIdentitiesSha256 })) assertSha256(value, `Partial recovery ${name}`);
+  return Object.freeze({ liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256, observedSlotIdentitiesSha256 });
+}
+
+export function createPartialRebaselineRecoveryAuthorization({ protectedEnvironmentApprovalEvidence, sourceSha, recoveryEnvelope, imageAuthorization, imageAuthorizationValidation, liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256, observedSlotIdentitiesSha256, reason, approverRole, verificationRef, proveDescendant } = {}) {
+  assertSha40(sourceSha, "Partial recovery successor sourceSha");
+  if (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA, descendantSha: sourceSha }) !== true) fail("Partial recovery successor source is not an authenticated protected-main descendant.");
+  const envelope = assertAuthenticatedPartialRebaselineRecovery(recoveryEnvelope);
+  const image = assertRecoveryImageAuthorization(imageAuthorization, sourceSha, imageAuthorizationValidation);
+  const liveCas = assertRecoveryLiveCas({ liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256, observedSlotIdentitiesSha256 });
+  const evidence = protectedEnvironmentApprovalEvidence;
+  assertProductionEnvironmentApprovalIdentity(evidence, { sourceSha, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository });
+  if (evidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineRecoveryWorkflowRef) fail("Partial recovery authorization requires the dedicated protected-environment workflow.");
+  const approvedBy = assertProductionEnvironmentActualReviewer(evidence, { sourceSha, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository, executionActor: evidence.executionActor });
+  for (const [name, item] of Object.entries({ reason, approverRole, verificationRef })) text(item, name);
+  const body = {
+    schemaVersion: 1, kind: PARTIAL_REBASELINE_RECOVERY_AUTHORIZATION_KIND, operation: PRODUCTION_DUAL_SLOT_REBASELINE.kind,
+    environment: "production", accountId: PRODUCTION_DUAL_SLOT_REBASELINE.accountId, region: PRODUCTION_DUAL_SLOT_REBASELINE.region,
+    sourceSha, transitionSourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, recoveryEnvelopeSha256: envelope.recoverySha256,
+    originalPreparationSha256: envelope.originalPreparationSha256, originalMaterialJournalSha256: envelope.originalMaterialJournalSha256,
+    resources: envelope.resources, writeIdentities: Object.freeze(Object.fromEntries(envelope.originalWritePlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken]))),
+    writePayloadIdentities: Object.freeze(Object.fromEntries(envelope.originalWritePlan.map(({ slot, payloadIdentity }) => [slot, payloadIdentity]))),
+    authorizationInitialCompletedSlots: envelope.completedSlots, authorizationInitialRemainingSlots: envelope.remainingSlots, maximumRemainingSecretValueWrites: envelope.remainingSecretValueWrites, expectedSecretDeletes: 0,
+    historicalAuthorityAnchorSha256: envelope.historicalAuthorityAnchorSha256, reason, approvedBy, approverRole, verificationRef,
+    currentImageAuthorization: image, currentImageAuthorizationSha256: image.authorizationSha256,
+    ...liveCas,
+    protectedEnvironmentApprovalEvidence: evidence, protectedEnvironmentApprovalEvidenceSha256: evidence.evidenceSha256,
+    exclusions: Object.freeze(["Terraform apply", "ECS RegisterTaskDefinition", "ECS UpdateService", "database mutation", "IAM mutation", "KMS policy mutation", "image publication", "network mutation", "DeleteSecret"]),
+  };
+  return Object.freeze({ ...body, authorizationSha256: canonicalSha256(body) });
+}
+
+export function assertPartialRebaselineRecoveryAuthorization(value, { sourceSha, recoveryEnvelope, imageAuthorization, imageAuthorizationValidation, liveCas, proveDescendant } = {}) {
+  const envelope = assertAuthenticatedPartialRebaselineRecovery(recoveryEnvelope);
+  assertSha40(sourceSha, "Partial recovery successor sourceSha");
+  if (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA, descendantSha: sourceSha }) !== true) fail("Partial recovery successor source is not an authenticated protected-main descendant.");
+  const fields = ["schemaVersion", "kind", "operation", "environment", "accountId", "region", "sourceSha", "transitionSourceSha", "rotationId", "recoveryEnvelopeSha256", "originalPreparationSha256", "originalMaterialJournalSha256", "resources", "writeIdentities", "writePayloadIdentities", "authorizationInitialCompletedSlots", "authorizationInitialRemainingSlots", "maximumRemainingSecretValueWrites", "expectedSecretDeletes", "historicalAuthorityAnchorSha256", "reason", "approvedBy", "approverRole", "verificationRef", "currentImageAuthorization", "currentImageAuthorizationSha256", "liveReferenceAuditSha256", "liveLegacyBaselineIdentitySha256", "observedSlotIdentitiesSha256", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "exclusions", "authorizationSha256"];
+  exactKeys(value, fields, "Partial recovery authorization");
+  if (value.schemaVersion !== 1 || value.kind !== PARTIAL_REBASELINE_RECOVERY_AUTHORIZATION_KIND || value.operation !== PRODUCTION_DUAL_SLOT_REBASELINE.kind || value.environment !== "production" || value.accountId !== PRODUCTION_DUAL_SLOT_REBASELINE.accountId || value.region !== PRODUCTION_DUAL_SLOT_REBASELINE.region || value.sourceSha !== sourceSha || value.transitionSourceSha !== envelope.originalSourceSha || value.rotationId !== envelope.rotationId || value.recoveryEnvelopeSha256 !== envelope.recoverySha256 || value.originalPreparationSha256 !== envelope.originalPreparationSha256 || value.originalMaterialJournalSha256 !== envelope.originalMaterialJournalSha256 || value.maximumRemainingSecretValueWrites !== envelope.remainingSecretValueWrites || value.expectedSecretDeletes !== 0 || value.historicalAuthorityAnchorSha256 !== envelope.historicalAuthorityAnchorSha256 || canonical(value.resources) !== canonical(envelope.resources) || canonical(value.writeIdentities) !== canonical(Object.fromEntries(envelope.originalWritePlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken]))) || canonical(value.writePayloadIdentities) !== canonical(Object.fromEntries(envelope.originalWritePlan.map(({ slot, payloadIdentity }) => [slot, payloadIdentity]))) || canonical(value.authorizationInitialCompletedSlots) !== canonical(envelope.completedSlots) || canonical(value.authorizationInitialRemainingSlots) !== canonical(envelope.remainingSlots)) fail("Partial recovery authorization is not bound to the exact original transition.");
+  const expectedImage = assertRecoveryImageAuthorization(imageAuthorization || value.currentImageAuthorization, sourceSha, imageAuthorizationValidation);
+  if (canonical(value.currentImageAuthorization) !== canonical(expectedImage) || value.currentImageAuthorizationSha256 !== expectedImage.authorizationSha256) fail("Partial recovery authorization current-image authority is invalid.");
+  const expectedCas = assertRecoveryLiveCas(liveCas || value);
+  for (const key of Object.keys(expectedCas)) if (value[key] !== expectedCas[key]) fail("Partial recovery authorization live CAS is invalid.");
+  for (const name of ["reason", "approvedBy", "approverRole", "verificationRef"]) text(value[name], name);
+  if (canonical(value.exclusions) !== canonical(["Terraform apply", "ECS RegisterTaskDefinition", "ECS UpdateService", "database mutation", "IAM mutation", "KMS policy mutation", "image publication", "network mutation", "DeleteSecret"])) fail("Partial recovery authorization exclusions are incomplete.");
+  assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository });
+  if (value.protectedEnvironmentApprovalEvidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineRecoveryWorkflowRef || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256 || value.protectedEnvironmentApprovalEvidence.schemaVersion !== 3 || value.approvedBy !== value.protectedEnvironmentApprovalEvidence.actualApproval.userLogin) fail("Partial recovery protected-environment approval identity is not authenticated from the actual approval event.");
+  const { authorizationSha256, ...body } = value; if (!SHA256.test(authorizationSha256 || "") || canonicalSha256(body) !== authorizationSha256) fail("Partial recovery authorization hash is invalid.");
+  return value;
+}
+
 export function buildRebaselinePreparation({ preconditions, sourceSha, rotationId, baselineIdentity, writePlan } = {}) {
   const checked = assertRebaselinePreconditions(preconditions); if (checked.sourceSha !== sourceSha || !baselineIdentity || baselineIdentity.identitySha256 !== buildRebaselineIdentity({ sourceSha, rotationId, resources: checked.resources, abandonmentEvidenceSha256: checked.abandonmentEvidence.evidenceSha256, legacyBaseline: baselineIdentity.legacyBaseline }).identitySha256) fail("Rebaseline preparation identity is invalid.");
   const safePlan = safeWriteDescriptors(writePlan); const body = { schemaVersion: 2, kind: REBASELINE_PREPARATION_KIND, operation: PRODUCTION_DUAL_SLOT_REBASELINE.kind, environment: checked.environment, accountId: checked.accountId, region: checked.region, sourceCas: checked.sourceCas, cleanWorktree: checked.cleanWorktree, existingSecretResources: checked.existingSecretResources, sourceSha, historicalRotationId: checked.historicalRotationId, rotationId, abandonmentEvidence: checked.abandonmentEvidence, abandonmentEvidenceSha256: checked.abandonmentEvidence.evidenceSha256, historicalTopologySha256: checked.abandonmentEvidence.historicalTopologySha256, resources: checked.resources, legacyBaseline: baselineIdentity.legacyBaseline, baselineIdentity, writePlan: safePlan, expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: checked.liveReferenceAudit, liveReferenceAuditSha256: checked.liveReferenceAuditSha256, databaseDependencies: checked.databaseDependencies, externalConsumers: checked.externalConsumers, dualSlotReferences: checked.dualSlotReferences, runningTasks: checked.runningTasks, pendingTasks: checked.pendingTasks, activeTaskDefinition: checked.activeTaskDefinition };
@@ -508,6 +633,8 @@ export function prepareRebaselineWritePlan({ sourceSha, rotationId, resources, b
 
 function assertReadSnapshot(snapshot, expected, label, historicalIdentity) {
   if (!snapshot || snapshot.arn !== expected.secretArn || !Array.isArray(snapshot.versions)) fail(`${label} topology is malformed.`);
+  const current = snapshot.versions.filter(({ stages }) => Array.isArray(stages) && stages.includes("AWSCURRENT"));
+  if (current.length !== 1 || current[0].versionId !== snapshot.currentVersionId || current[0].payloadSha256 !== snapshot.currentPayloadSha256 || canonical(current[0].stages) !== canonical(snapshot.currentStages)) fail(`${label} does not contain exactly one consistent AWSCURRENT version.`);
   const matches = snapshot.versions.filter(({ versionId }) => versionId === expected.clientRequestToken); if (matches.length > 1) fail(`${label} has duplicate deterministic versions.`);
   if (matches.length === 1) { if (matches[0].payloadSha256 !== expected.payloadSha256 || !Array.isArray(matches[0].stages) || matches[0].stages.length !== 1 || matches[0].stages[0] !== "AWSCURRENT") fail(`${label} deterministic version does not authenticate.`); return "COMPLETED"; }
   if (!historicalIdentity || snapshot.currentVersionId !== historicalIdentity.versionId || snapshot.currentPayloadSha256 !== historicalIdentity.payloadSha256 || canonical(snapshot.currentStages) !== canonical(["AWSCURRENT"])) fail(`${label} current version is neither the authenticated historical state nor the exact prepared write.`);
@@ -530,6 +657,18 @@ async function awaitExactRebaselineWriteConvergence({ expected, historicalIdenti
 function assertStableLiveReferenceAudit(audit, expectedStableAuditSha256) {
   if (!audit || audit.status !== "PASS" || audit.dualSlotReferences !== 0 || audit.legacyRuntimeAuthoritative !== true || audit.liveLegacyBaselineCount !== 1 || audit.databaseDependencies !== 0 || audit.externalConsumers !== 0 || audit.stableAuditSha256 !== expectedStableAuditSha256) fail("Live reference audit no longer satisfies the authorization-bound security topology.");
   return audit;
+}
+
+export function classifyAuthenticatedPartialRebaselineRecoveryProgress({ writePlan, historicalSlotIdentities, snapshots, authorizationInitialCompletedSlots, maximumRemainingSecretValueWrites } = {}) {
+  const plan = safeWriteDescriptors(writePlan);
+  if (!historicalSlotIdentities || !Array.isArray(snapshots) || snapshots.length !== REBASELINE_SLOT_ORDER.length || !Array.isArray(authorizationInitialCompletedSlots) || !Number.isInteger(maximumRemainingSecretValueWrites)) fail("Partial recovery progress inputs are incomplete.");
+  const bySlot = Object.fromEntries(snapshots.map((snapshot) => [snapshot?.slot, snapshot]));
+  if (Object.keys(bySlot).length !== REBASELINE_SLOT_ORDER.length) fail("Partial recovery progress snapshots are incomplete.");
+  const states = Object.fromEntries(plan.map((expected) => [expected.slot, assertReadSnapshot(bySlot[expected.slot], expected, `Partial recovery ${expected.slot}`, historicalSlotIdentities[expected.slot]) ]));
+  const completedSlots = REBASELINE_SLOT_ORDER.filter((slot) => states[slot] === "COMPLETED");
+  const remainingSlots = REBASELINE_SLOT_ORDER.filter((slot) => states[slot] === "PENDING");
+  if (!authorizationInitialCompletedSlots.every((slot) => completedSlots.includes(slot)) || completedSlots.length + remainingSlots.length !== REBASELINE_SLOT_ORDER.length || remainingSlots.length > maximumRemainingSecretValueWrites) fail("Partial recovery live topology exceeds the authenticated recovery transition.");
+  return Object.freeze({ states: Object.freeze(states), completedSlots: Object.freeze(completedSlots), remainingSlots: Object.freeze(remainingSlots) });
 }
 
 export function buildBaselineCompletion({ preconditions, sourceSha, rotationId, baselineIdentity, writePlan, finalSnapshots, authorizationBinding, authorizedWritePayloadIdentities } = {}) {
@@ -557,6 +696,40 @@ export function assertBaselineCompletion(value, { sourceSha, rotationId, resourc
   const { baselineBindingSha256, ...identity } = value; if (!SHA256.test(baselineBindingSha256 || "") || canonicalSha256(identity) !== baselineBindingSha256) fail("Baseline completion hash is invalid."); return value;
 }
 
+export function buildPartialRebaselineRecoveryCompletion({ originalPreparation, sourceSha, recoveryEnvelope, recoveryAuthorization, finalSnapshots, writePlan } = {}) {
+  const envelope = assertAuthenticatedPartialRebaselineRecovery(recoveryEnvelope);
+  assertRebaselinePreparation(originalPreparation, { sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId });
+  if (originalPreparation.preparationSha256 !== envelope.originalPreparationSha256 || canonical(originalPreparation.writePlan) !== canonical(envelope.originalWritePlan) || canonical(safeWriteDescriptors(writePlan)) !== canonical(envelope.originalWritePlan)) fail("Partial recovery completion does not preserve the original write plan.");
+  if (!Array.isArray(finalSnapshots) || finalSnapshots.length !== REBASELINE_SLOT_ORDER.length) fail("Partial recovery completion requires seven final live observations.");
+  const historical = originalPreparation.abandonmentEvidence.observedSlotIdentities;
+  for (const expected of writePlan) if (assertReadSnapshot(finalSnapshots.find(({ slot }) => slot === expected.slot), expected, `Partial recovery completion ${expected.slot}`, historical[expected.slot]) !== "COMPLETED") fail(`Partial recovery completion ${expected.slot} is incomplete.`);
+  const auth = recoveryAuthorization;
+  if (!auth || auth.kind !== PARTIAL_REBASELINE_RECOVERY_AUTHORIZATION_KIND || auth.sourceSha !== sourceSha || auth.recoveryEnvelopeSha256 !== envelope.recoverySha256) fail("Partial recovery completion requires the exact successor authorization.");
+  const body = {
+    schemaVersion: 3, kind: BASELINE_COMPLETE, operation: PRODUCTION_DUAL_SLOT_REBASELINE.kind, sourceSha, transitionSourceSha: envelope.originalSourceSha,
+    rotationId: envelope.rotationId, historicalRotationId: originalPreparation.historicalRotationId, abandonmentEvidenceSha256: originalPreparation.abandonmentEvidenceSha256,
+    resources: envelope.resources, versionIds: Object.fromEntries(envelope.originalWritePlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken])),
+    payloadIdentities: Object.fromEntries(envelope.originalWritePlan.map(({ slot, payloadIdentity }) => [slot, payloadIdentity])),
+    liveReferenceAudit: "PASS", liveReferenceAuditSha256: auth.liveReferenceAuditSha256, authorizationBinding: auth.authorizationSha256,
+    expectedSecretValueWrites: 7, expectedSecretDeletes: 0,
+    recovery: Object.freeze({ kind: PARTIAL_REBASELINE_RECOVERY_KIND, recoveryEnvelopeSha256: envelope.recoverySha256, originalPreparationSha256: envelope.originalPreparationSha256, originalMaterialJournalSha256: envelope.originalMaterialJournalSha256, transitionSourceSha: envelope.originalSourceSha, authorizationSha256: auth.authorizationSha256, currentImageAuthorizationSha256: auth.currentImageAuthorizationSha256 }),
+  };
+  return Object.freeze({ ...body, baselineBindingSha256: canonicalSha256(body) });
+}
+
+export function assertPartialRebaselineRecoveryCompletion(value, { sourceSha, recoveryEnvelope, recoveryAuthorization, originalPreparation } = {}) {
+  const envelope = assertAuthenticatedPartialRebaselineRecovery(recoveryEnvelope);
+  const authorization = recoveryAuthorization;
+  assertRebaselinePreparation(originalPreparation, { sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId });
+  const fields = ["schemaVersion", "kind", "operation", "sourceSha", "transitionSourceSha", "rotationId", "historicalRotationId", "abandonmentEvidenceSha256", "resources", "versionIds", "payloadIdentities", "liveReferenceAudit", "liveReferenceAuditSha256", "authorizationBinding", "expectedSecretValueWrites", "expectedSecretDeletes", "recovery", "baselineBindingSha256"];
+  exactKeys(value, fields, "Partial recovery baseline completion");
+  if (originalPreparation.preparationSha256 !== envelope.originalPreparationSha256 || value.schemaVersion !== 3 || value.kind !== BASELINE_COMPLETE || value.operation !== PRODUCTION_DUAL_SLOT_REBASELINE.kind || value.sourceSha !== sourceSha || value.transitionSourceSha !== envelope.originalSourceSha || value.rotationId !== envelope.rotationId || value.historicalRotationId !== originalPreparation.historicalRotationId || value.abandonmentEvidenceSha256 !== originalPreparation.abandonmentEvidenceSha256 || canonical(value.resources) !== canonical(envelope.resources) || canonical(value.versionIds) !== canonical(Object.fromEntries(envelope.originalWritePlan.map(({ slot, clientRequestToken }) => [slot, clientRequestToken]))) || canonical(value.payloadIdentities) !== canonical(Object.fromEntries(envelope.originalWritePlan.map(({ slot, payloadIdentity }) => [slot, payloadIdentity]))) || value.liveReferenceAudit !== "PASS" || value.liveReferenceAuditSha256 !== authorization?.liveReferenceAuditSha256 || value.authorizationBinding !== authorization?.authorizationSha256 || value.expectedSecretValueWrites !== 7 || value.expectedSecretDeletes !== 0) fail("Partial recovery completion is not bound to the authenticated transition.");
+  exactKeys(value.recovery, ["kind", "recoveryEnvelopeSha256", "originalPreparationSha256", "originalMaterialJournalSha256", "transitionSourceSha", "authorizationSha256", "currentImageAuthorizationSha256"], "Partial recovery completion binding");
+  if (value.recovery.kind !== PARTIAL_REBASELINE_RECOVERY_KIND || value.recovery.recoveryEnvelopeSha256 !== envelope.recoverySha256 || value.recovery.originalPreparationSha256 !== envelope.originalPreparationSha256 || value.recovery.originalMaterialJournalSha256 !== envelope.originalMaterialJournalSha256 || value.recovery.transitionSourceSha !== envelope.originalSourceSha || value.recovery.authorizationSha256 !== authorization?.authorizationSha256 || value.recovery.currentImageAuthorizationSha256 !== authorization?.currentImageAuthorizationSha256) fail("Partial recovery completion recovery binding is invalid.");
+  const { baselineBindingSha256, ...body } = value; if (!SHA256.test(baselineBindingSha256 || "") || canonicalSha256(body) !== baselineBindingSha256) fail("Partial recovery completion hash is invalid.");
+  return value;
+}
+
 export function buildRebaselineRotationBindings({ sourceSha, rotationId, legacyBaseline, resources, abandonmentEvidence, completion, authorization } = {}) {
   if (!completion || completion.kind !== BASELINE_COMPLETE) fail("Completed dual-slot baseline evidence is required for runtime binding.");
   const checkedAbandonment = assertAbandonmentEvidence(abandonmentEvidence, { sourceSha, resources, historicalTopologySha256: abandonmentEvidence?.historicalTopologySha256 });
@@ -575,7 +748,26 @@ export function buildRebaselineRotationBindings({ sourceSha, rotationId, legacyB
   return Object.freeze(bindings);
 }
 
-export function assertRebaselineRotationBindings(bindings, { authorization } = {}) {
+export function buildPartialRebaselineRecoveryRotationBindings({ sourceSha, originalPreparation, recoveryEnvelope, recoveryAuthorization, completion } = {}) {
+  const envelope = assertAuthenticatedPartialRebaselineRecovery(recoveryEnvelope);
+  assertRebaselinePreparation(originalPreparation, { sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId });
+  assertPartialRebaselineRecoveryCompletion(completion, { sourceSha, recoveryEnvelope: envelope, recoveryAuthorization, originalPreparation });
+  const legacy = assertLegacyBaseline(originalPreparation.legacyBaseline);
+  const resources = envelope.resources;
+  const bindings = {
+    schemaVersion: 3, kind: REBASELINE_ROTATION_BINDINGS_KIND, producer: REBASELINE_ROTATION_BINDINGS_PRODUCER, operation: PRODUCTION_DUAL_SLOT_REBASELINE.kind,
+    sourceSha, transitionSourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, legacy,
+    jwt: { currentSecretId: legacy.jwtCurrent, previousSecretId: resources.jwtPrevious, pendingSecretId: resources.jwtPending },
+    qr: { privateCurrentSecretId: legacy.qrPrivateCurrent, privatePendingSecretId: resources.qrPrivatePending, publicCurrentSecretId: legacy.qrPublicCurrent, publicPreviousSecretId: resources.qrPublicPrevious, publicPendingSecretId: resources.qrPublicPending, currentKeyVersionSecretId: resources.qrCurrentVersion, previousKeyVersionSecretId: resources.qrPreviousVersion, previousKeyVersion: legacy.qrCurrentVersion, pendingKeyVersion: completion.payloadIdentities.qrPublicPending.keyVersion || completion.payloadIdentities.qrPrivatePending.keyVersion || "" },
+    historicalRotationId: originalPreparation.historicalRotationId, abandonmentEvidenceSha256: originalPreparation.abandonmentEvidenceSha256, abandonmentEvidence: originalPreparation.abandonmentEvidence,
+    baselineCompletionSha256: completion.baselineBindingSha256, baselineCompletion: completion, authorizationSha256: recoveryAuthorization.authorizationSha256,
+    recovery: Object.freeze({ kind: PARTIAL_REBASELINE_RECOVERY_KIND, recoveryEnvelopeSha256: envelope.recoverySha256, originalPreparationSha256: envelope.originalPreparationSha256, authorizationSha256: recoveryAuthorization.authorizationSha256 }),
+  };
+  return Object.freeze(bindings);
+}
+
+export function assertRebaselineRotationBindings(bindings, { authorization, recoveryEnvelope, originalPreparation } = {}) {
+  if (bindings?.schemaVersion === 3) return assertPartialRebaselineRecoveryRotationBindings(bindings, { authorization, recoveryEnvelope, originalPreparation });
   exactKeys(bindings, ["schemaVersion", "kind", "producer", "operation", "sourceSha", "rotationId", "legacy", "jwt", "qr", "historicalRotationId", "abandonmentEvidenceSha256", "abandonmentEvidence", "baselineCompletionSha256", "baselineCompletion", "authorizationSha256"], "Rebaseline rotation bindings");
   if (bindings.schemaVersion !== 2 || bindings.kind !== REBASELINE_ROTATION_BINDINGS_KIND || bindings.producer !== REBASELINE_ROTATION_BINDINGS_PRODUCER || bindings.operation !== PRODUCTION_DUAL_SLOT_REBASELINE.kind) fail("Rebaseline rotation binding producer identity is invalid.");
   const resources = { jwtPending: bindings.jwt?.pendingSecretId, qrPrivatePending: bindings.qr?.privatePendingSecretId, qrPublicPending: bindings.qr?.publicPendingSecretId, jwtPrevious: bindings.jwt?.previousSecretId, qrPublicPrevious: bindings.qr?.publicPreviousSecretId, qrCurrentVersion: bindings.qr?.currentKeyVersionSecretId, qrPreviousVersion: bindings.qr?.previousKeyVersionSecretId };
@@ -593,9 +785,23 @@ export function assertRebaselineRotationBindings(bindings, { authorization } = {
   return bindings;
 }
 
-export function verifyLiveProductionDualSlotRebaselineWithRunner({ run, bindings, authorization } = {}) {
+export function assertPartialRebaselineRecoveryRotationBindings(bindings, { authorization, recoveryEnvelope, originalPreparation } = {}) {
+  const fields = ["schemaVersion", "kind", "producer", "operation", "sourceSha", "transitionSourceSha", "rotationId", "legacy", "jwt", "qr", "historicalRotationId", "abandonmentEvidenceSha256", "abandonmentEvidence", "baselineCompletionSha256", "baselineCompletion", "authorizationSha256", "recovery"];
+  exactKeys(bindings, fields, "Partial recovery rotation bindings");
+  if (bindings.schemaVersion !== 3 || bindings.kind !== REBASELINE_ROTATION_BINDINGS_KIND || bindings.producer !== REBASELINE_ROTATION_BINDINGS_PRODUCER || bindings.operation !== PRODUCTION_DUAL_SLOT_REBASELINE.kind) fail("Partial recovery rotation binding producer identity is invalid.");
+  const envelope = assertAuthenticatedPartialRebaselineRecovery(recoveryEnvelope);
+  const resources = { jwtPending: bindings.jwt?.pendingSecretId, qrPrivatePending: bindings.qr?.privatePendingSecretId, qrPublicPending: bindings.qr?.publicPendingSecretId, jwtPrevious: bindings.jwt?.previousSecretId, qrPublicPrevious: bindings.qr?.publicPreviousSecretId, qrCurrentVersion: bindings.qr?.currentKeyVersionSecretId, qrPreviousVersion: bindings.qr?.previousKeyVersionSecretId };
+  if (bindings.sourceSha !== authorization?.sourceSha || bindings.transitionSourceSha !== envelope.originalSourceSha || bindings.rotationId !== envelope.rotationId || canonical(resources) !== canonical(envelope.resources) || bindings.authorizationSha256 !== authorization?.authorizationSha256) fail("Partial recovery rotation binding is not bound to the successor authorization.");
+  exactKeys(bindings.recovery, ["kind", "recoveryEnvelopeSha256", "originalPreparationSha256", "authorizationSha256"], "Partial recovery rotation binding recovery");
+  if (bindings.recovery.kind !== PARTIAL_REBASELINE_RECOVERY_KIND || bindings.recovery.recoveryEnvelopeSha256 !== envelope.recoverySha256 || bindings.recovery.originalPreparationSha256 !== envelope.originalPreparationSha256 || bindings.recovery.authorizationSha256 !== authorization.authorizationSha256) fail("Partial recovery rotation binding recovery identity is invalid.");
+  assertPartialRebaselineRecoveryCompletion(bindings.baselineCompletion, { sourceSha: bindings.sourceSha, recoveryEnvelope: envelope, recoveryAuthorization: authorization, originalPreparation });
+  if (bindings.baselineCompletionSha256 !== bindings.baselineCompletion.baselineBindingSha256 || bindings.baselineCompletion.authorizationBinding !== bindings.authorizationSha256 || canonical(bindings.legacy) !== canonical(assertLegacyBaseline(bindings.legacy))) fail("Partial recovery rotation binding completion or legacy baseline is invalid.");
+  return bindings;
+}
+
+export function verifyLiveProductionDualSlotRebaselineWithRunner({ run, bindings, authorization, recoveryEnvelope, originalPreparation, proveDescendant } = {}) {
   if (typeof run !== "function") fail("Live post-write rebaseline command runner is required.");
-  assertRebaselineRotationBindings(bindings, { authorization });
+  assertRebaselineRotationBindings(bindings, { authorization, recoveryEnvelope, originalPreparation });
   const resources = {
     jwtPending: bindings.jwt.pendingSecretId,
     qrPrivatePending: bindings.qr.privatePendingSecretId,
@@ -605,7 +811,9 @@ export function verifyLiveProductionDualSlotRebaselineWithRunner({ run, bindings
     qrCurrentVersion: bindings.qr.currentKeyVersionSecretId,
     qrPreviousVersion: bindings.qr.previousKeyVersionSecretId,
   };
-  assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources });
+  const recovery = recoveryEnvelope !== undefined || originalPreparation !== undefined;
+  if (recovery) assertPartialRebaselineRecoveryAuthorization(authorization, { sourceSha: bindings.sourceSha, recoveryEnvelope, proveDescendant });
+  else assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources });
   const versionIds = {};
   const payloadIdentities = {};
   for (const [slot, secretArn] of Object.entries(resources)) {
@@ -621,7 +829,8 @@ export function verifyLiveProductionDualSlotRebaselineWithRunner({ run, bindings
     if (!payload || typeof payload !== "object" || Array.isArray(payload) || typeof payload.value !== "string") fail(`Live ${slot} secret payload is malformed.`);
     const expected = authorization.writePayloadIdentities[slot];
     const expectedShape = HISTORICAL_SLOT_SHAPES[slot];
-    if (canonicalSha256(payload) !== expected.payloadSha256 || payload.sourceSha !== bindings.sourceSha || payload.rotationId !== bindings.rotationId || payload.family !== expectedShape.family || payload.slot !== expectedShape.slot || (payload.materialType !== undefined ? payload.materialType : payload.baselineMarker) !== expected.materialType || (payload.keyVersion || null) !== expected.keyVersion) fail(`Live ${slot} secret payload does not match the protected rebaseline authorization.`);
+    const payloadSourceSha = recovery ? recoveryEnvelope.originalSourceSha : bindings.sourceSha;
+    if (canonicalSha256(payload) !== expected.payloadSha256 || payload.sourceSha !== payloadSourceSha || payload.rotationId !== bindings.rotationId || payload.family !== expectedShape.family || payload.slot !== expectedShape.slot || (payload.materialType !== undefined ? payload.materialType : payload.baselineMarker) !== expected.materialType || (payload.keyVersion || null) !== expected.keyVersion) fail(`Live ${slot} secret payload does not match the protected rebaseline authorization.`);
     versionIds[slot] = expectedVersionId;
     payloadIdentities[slot] = expected;
   }
@@ -683,6 +892,50 @@ export async function executeProductionDualSlotRebaseline({ preconditions, sourc
   assertBaselineCompletion(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(completionCapture.bytes)), { sourceSha, rotationId, resources: checked.resources, authorizationBinding: authorization.authorizationSha256, writeIdentities: authorization.writeIdentities, writePayloadIdentities: authorization.writePayloadIdentities, liveReferenceAuditSha256: authorization.liveReferenceAuditSha256 });
   assertRebaselineRotationBindings(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bindingsCapture.bytes)), { authorization });
   return Object.freeze({ baselineComplete: true, writes, completion, bindings, completionPath: completionCapture.path, completionSha256: completionCapture.sha256, bindingsPath: bindingsCapture.path, bindingsSha256: bindingsCapture.sha256, writePlan: safeWriteDescriptors(expectedPlan) });
+}
+
+// A recovery is deliberately not a source-rebound normal rebaseline.  It consumes
+// the literal one-transition envelope and a new approval, then treats live state as
+// the only progress counter.  This preserves the original VersionIds and payloads.
+export async function executeAuthenticatedPartialRebaselineRecovery({ recoveryEnvelope, recoveryAuthorization, sourceSha, imageAuthorization, imageAuthorizationValidation, liveCas, originalPreparation, originalWritePlan, materialJournalSha256, readReferenceAudit, readSlot, writeSlot, completionFile, bindingsFile, repositoryRoot = process.cwd(), proveDescendant, sleep = sleepForRebaselineWriteConvergence } = {}) {
+  const envelope = assertAuthenticatedPartialRebaselineRecovery(recoveryEnvelope);
+  const authorization = assertPartialRebaselineRecoveryAuthorization(recoveryAuthorization, { sourceSha, recoveryEnvelope: envelope, imageAuthorization, imageAuthorizationValidation, liveCas, proveDescendant });
+  assertRebaselinePreparation(originalPreparation, { sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId });
+  if (originalPreparation.preparationSha256 !== envelope.originalPreparationSha256 || materialJournalSha256 !== envelope.originalMaterialJournalSha256 || canonical(originalPreparation.resources) !== canonical(envelope.resources) || canonical(originalPreparation.writePlan) !== canonical(envelope.originalWritePlan)) fail("Partial recovery original preparation or material journal is not the anchored transition.");
+  if (!Array.isArray(originalWritePlan) || canonical(safeWriteDescriptors(originalWritePlan)) !== canonical(envelope.originalWritePlan)) fail("Partial recovery reconstructed material does not match the anchored original target identities.");
+  if (typeof readReferenceAudit !== "function" || typeof readSlot !== "function" || typeof writeSlot !== "function" || typeof sleep !== "function") fail("Partial recovery execution adapters are incomplete.");
+  if (!completionFile || !bindingsFile || path.resolve(completionFile) === path.resolve(bindingsFile)) fail("Partial recovery requires distinct durable completion and binding outputs.");
+  ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(completionFile)), repositoryRoot, create: true, normalize: true, label: "Partial recovery completion directory" });
+  ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(bindingsFile)), repositoryRoot, create: true, normalize: true, label: "Partial recovery binding directory" });
+  assertDurableOutputWritable(completionFile); assertDurableOutputWritable(bindingsFile);
+  const historicalBySlot = originalPreparation.abandonmentEvidence.observedSlotIdentities;
+  const plan = Object.freeze([...originalWritePlan].sort((left, right) => REBASELINE_SLOT_ORDER.indexOf(left.slot) - REBASELINE_SLOT_ORDER.indexOf(right.slot)));
+  const classify = async (expected) => assertReadSnapshot(await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, historicalIdentity: historicalBySlot[expected.slot] }), expected, `Recovery ${expected.slot}`, historicalBySlot[expected.slot]);
+  const initialSnapshots = await Promise.all(plan.map(async (expected) => ({ slot: expected.slot, ...(await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, historicalIdentity: historicalBySlot[expected.slot] })) })));
+  const progress = classifyAuthenticatedPartialRebaselineRecoveryProgress({ writePlan: plan, historicalSlotIdentities: historicalBySlot, snapshots: initialSnapshots, authorizationInitialCompletedSlots: authorization.authorizationInitialCompletedSlots, maximumRemainingSecretValueWrites: authorization.maximumRemainingSecretValueWrites });
+  const pending = progress.remainingSlots;
+  const outputExists = [completionFile, bindingsFile].some((filePath) => Boolean(fs.lstatSync(filePath, { throwIfNoEntry: false })));
+  if (outputExists && pending.length > 0) fail("Partial recovery durable outputs cannot accompany an incomplete live transition.");
+  let writes = 0;
+  for (const expected of plan) {
+    assertStableLiveReferenceAudit(await readReferenceAudit(), authorization.liveReferenceAuditSha256);
+    const state = await classify(expected);
+    if (state === "COMPLETED") continue;
+    const result = await writeSlot({ slot: expected.slot, secretArn: expected.secretArn, clientRequestToken: expected.clientRequestToken, payload: expected.payload, payloadSha256: expected.payloadSha256 });
+    writes += 1;
+    if (result?.versionId !== expected.clientRequestToken || result?.arn !== expected.secretArn) fail(`Partial recovery write identity for ${expected.slot} is invalid.`);
+    await awaitExactRebaselineWriteConvergence({ expected, historicalIdentity: historicalBySlot[expected.slot], readSlot, sleep });
+  }
+  assertStableLiveReferenceAudit(await readReferenceAudit(), authorization.liveReferenceAuditSha256);
+  const finalSnapshots = Object.freeze(await Promise.all(plan.map(async (expected) => ({ slot: expected.slot, ...(await readSlot(expected.slot, expected.secretArn, expected.clientRequestToken, { sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, historicalIdentity: historicalBySlot[expected.slot] })) }))));
+  for (const expected of plan) if (assertReadSnapshot(finalSnapshots.find(({ slot }) => slot === expected.slot), expected, `Partial recovery final ${expected.slot}`, historicalBySlot[expected.slot]) !== "COMPLETED") fail(`Partial recovery final ${expected.slot} is incomplete.`);
+  const completion = buildPartialRebaselineRecoveryCompletion({ originalPreparation, sourceSha, recoveryEnvelope: envelope, recoveryAuthorization: authorization, finalSnapshots, writePlan: plan });
+  const completionCapture = persistExactPrivateJson({ filePath: completionFile, value: completion, repositoryRoot, label: "Partial recovery baseline completion evidence" });
+  const bindings = buildPartialRebaselineRecoveryRotationBindings({ sourceSha, originalPreparation, recoveryEnvelope: envelope, recoveryAuthorization: authorization, completion });
+  const bindingsCapture = persistExactPrivateJson({ filePath: bindingsFile, value: bindings, repositoryRoot, label: "Partial recovery runtime bindings" });
+  assertPartialRebaselineRecoveryCompletion(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(completionCapture.bytes)), { sourceSha, recoveryEnvelope: envelope, recoveryAuthorization: authorization, originalPreparation });
+  assertPartialRebaselineRecoveryRotationBindings(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bindingsCapture.bytes)), { authorization, recoveryEnvelope: envelope, originalPreparation });
+  return Object.freeze({ baselineComplete: true, writes, completion, bindings, completionPath: completionCapture.path, completionSha256: completionCapture.sha256, bindingsPath: bindingsCapture.path, bindingsSha256: bindingsCapture.sha256, finalSnapshots, writePlan: safeWriteDescriptors(plan), completedSlots: REBASELINE_SLOT_ORDER, recoveryEnvelopeSha256: envelope.recoverySha256, authorizationSha256: authorization.authorizationSha256 });
 }
 
 export function readBoundBaselineCompletion({ filePath, expectedSha256, authorization, repositoryRoot = process.cwd() } = {}) { const captured = readStageBPrivateFileBytes({ filePath, repositoryRoot, label: "Dual-slot baseline completion evidence" }); if (captured.sha256 !== expectedSha256) fail("Dual-slot baseline completion evidence changed."); const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes)); assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: value.sourceSha, rotationId: value.rotationId, resources: value.resources }); assertBaselineCompletion(value, { sourceSha: value.sourceSha, rotationId: value.rotationId, resources: value.resources, authorizationBinding: authorization.authorizationSha256, writeIdentities: authorization.writeIdentities, writePayloadIdentities: authorization.writePayloadIdentities, liveReferenceAuditSha256: authorization.liveReferenceAuditSha256 }); return Object.freeze({ value, sha256: captured.sha256, path: captured.path }); }
@@ -750,6 +1003,29 @@ export function resolveProductionDualSlotRebaselineAuthorizationArtifact({ workf
     assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha, rotationId, resources });
     const evidence = authorization.protectedEnvironmentApprovalEvidence;
     if (evidence.workflowRunId !== String(workflow.id) || evidence.workflowRunAttempt !== String(workflow.run_attempt) || evidence.executionActor?.toLowerCase() !== String(workflow.actor?.login || "").toLowerCase()) fail("Rebaseline authorization artifact is not bound to the authenticated workflow execution.");
+    return Object.freeze({ workflow, artifact: matches[0], authorization, authorizationArtifactDigest: matches[0].digest });
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+}
+
+export function resolvePartialRebaselineRecoveryAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, recoveryEnvelope, imageAuthorization, imageAuthorizationValidation, liveCas, proveDescendant, run = (command, args, options = {}) => execFileSync(command, args, { encoding: options.encoding === null ? null : "utf8", maxBuffer: options.maxBuffer }) } = {}) {
+  if (!/^[1-9][0-9]*$/.test(String(workflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(workflowRunAttempt || "")) || !SHA40.test(sourceSha || "")) fail("Partial recovery authorization workflow coordinates are invalid.");
+  const workflow = JSON.parse(run("gh", ["api", `repos/${PRODUCTION_DUAL_SLOT_REBASELINE.repository}/actions/runs/${workflowRunId}`]));
+  if (String(workflow.id) !== String(workflowRunId) || workflow.repository?.full_name !== PRODUCTION_DUAL_SLOT_REBASELINE.repository || workflow.head_repository?.full_name !== PRODUCTION_DUAL_SLOT_REBASELINE.repository || workflow.path !== ".github/workflows/authorize-production-dual-slot-rebaseline-recovery.yml" || workflow.event !== "workflow_dispatch" || workflow.head_sha !== sourceSha || workflow.status !== "completed" || workflow.conclusion !== "success" || String(workflow.run_attempt) !== String(workflowRunAttempt)) fail("Partial recovery authorization workflow provenance is not authentic.");
+  const pages = JSON.parse(run("gh", ["api", `repos/${PRODUCTION_DUAL_SLOT_REBASELINE.repository}/actions/runs/${workflowRunId}/artifacts`, "--paginate", "--slurp"]));
+  const artifacts = Array.isArray(pages) ? pages.flatMap((page) => page?.artifacts || []) : [];
+  const matches = artifacts.filter((artifact) => artifact.name === "production-dual-slot-rebaseline-successor-recovery-authorization" && artifact.expired === false && String(artifact.workflow_run?.id) === String(workflowRunId) && artifact.workflow_run?.head_sha === sourceSha && artifact.workflow_run?.repository_id === workflow.repository.id && /^sha256:[a-f0-9]{64}$/.test(artifact.digest || ""));
+  if (matches.length !== 1 || !Number.isSafeInteger(matches[0]?.id) || matches[0].id < 1) fail("Partial recovery authorization artifact identity is not exact.");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-partial-recovery-authorization-")); const archive = path.join(directory, "authorization.zip");
+  try {
+    const bytes = run("gh", ["api", `repos/${PRODUCTION_DUAL_SLOT_REBASELINE.repository}/actions/artifacts/${matches[0].id}/zip`], { encoding: null, maxBuffer: 64 * 1024 * 1024 });
+    if (!Buffer.isBuffer(bytes) || bytes.length === 0 || `sha256:${sha256(bytes)}` !== matches[0].digest) fail("Partial recovery authorization archive bytes are not authenticated.");
+    fs.writeFileSync(archive, bytes, { mode: 0o600, flag: "wx" });
+    const entries = String(run("unzip", ["-Z1", archive])).trim().split("\n").filter(Boolean);
+    if (canonical(entries) !== canonical(["recovery-authorization.json"])) fail("Partial recovery authorization archive contents are not exact.");
+    const authorization = JSON.parse(Buffer.from(run("unzip", ["-p", archive, "recovery-authorization.json"])).toString("utf8"));
+    assertPartialRebaselineRecoveryAuthorization(authorization, { sourceSha, recoveryEnvelope, imageAuthorization, imageAuthorizationValidation, liveCas, proveDescendant });
+    const evidence = authorization.protectedEnvironmentApprovalEvidence;
+    if (evidence.workflowRunId !== String(workflow.id) || evidence.workflowRunAttempt !== String(workflow.run_attempt) || evidence.executionActor?.toLowerCase() !== String(workflow.actor?.login || "").toLowerCase()) fail("Partial recovery authorization artifact is not bound to the authenticated workflow execution.");
     return Object.freeze({ workflow, artifact: matches[0], authorization, authorizationArtifactDigest: matches[0].digest });
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }

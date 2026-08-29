@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { createProductionCutoverRuntimeComposition } from "./production-cutover-runtime-composition.mjs";
 import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { parseBootstrapArgs, prepareProductionCutoverRuntime } from "./production-cutover-runtime-bootstrap.mjs";
-import { REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, resolveProductionDualSlotRebaselineAuthorizationArtifact, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
+import { REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, resolvePartialRebaselineRecoveryAuthorizationArtifact, resolveProductionDualSlotRebaselineAuthorizationArtifact, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
 import { verifyLiveInitialDualSlotBindingWithRunner } from "./production-initial-dual-slot-bootstrap.mjs";
 
 const args = parseBootstrapArgs(process.argv.slice(2));
@@ -28,6 +29,9 @@ if (temporaryKmsCapabilityPath) readStageBPrivateFileBytes({ filePath: temporary
 for (const [name, label] of [["artifact-binding", "Artifact-signing runtime binding"], ["root-drop-evidence", "Root-drop evidence"], ["stage-a-plan", "Preserved Stage-A saved plan"], ["stage-a-recovery-evidence", "Stage-A recovery evidence"], ["stage-a-state", "Stage-A state"], ["stage-a-handoff", "Stage-A handoff"], ["stage-b-state", "Historical Stage-B state"], ["current-stage-b-state", "Current Stage-B state"], ["stage-b-tfvars", "Canonical Stage B tfvars"], ["stage-b-tfvars-binding-report", "Canonical Stage B tfvars binding report"]]) if (args.has(name)) capture(name, label);
 const rotationBindingCapture = args.has("rotation-bindings") ? capture("rotation-bindings", "Rotation secret binding manifest") : null;
 const rotationSupersessionCapture = args.has("rotation-supersession-evidence") ? capture("rotation-supersession-evidence", "Rotation supersession evidence") : null;
+const recoveryEnvelopeCapture = args.has("recovery-envelope") ? capture("recovery-envelope", "Partial rebaseline recovery envelope") : null;
+const originalPreparationCapture = args.has("original-rebaseline-preparation") ? capture("original-rebaseline-preparation", "Original dual-slot rebaseline preparation") : null;
+if (Boolean(recoveryEnvelopeCapture) !== Boolean(originalPreparationCapture)) throw new Error("Recovery runtime consumption requires both anchored recovery evidence files.");
 if (args.has("onboarding-paths")) capture("onboarding-paths", "Onboarding path manifest");
 ensureStageBPrivateDirectory({ directory: required("stage-b-terraform-data-dir"), repositoryRoot: process.cwd(), create: false, label: "Canonical Stage B Terraform data directory" });
 iamEvidence.filePath = path.resolve(required("iam-evidence"));
@@ -40,8 +44,20 @@ if (rotationBindings?.abandonmentEvidence?.historicalTopologySha256 === undefine
 const rebaselineAuthorizationCoordinates = args.has("rebaseline-authorization-run-id") || args.has("rebaseline-authorization-run-attempt")
   ? { workflowRunId: required("rebaseline-authorization-run-id"), workflowRunAttempt: required("rebaseline-authorization-run-attempt") }
   : undefined;
+const composition = createProductionCutoverRuntimeComposition();
+const { releaseRun } = composition;
+const recoveryEnvelope = recoveryEnvelopeCapture ? decode(recoveryEnvelopeCapture) : undefined;
+const originalPreparation = originalPreparationCapture ? decode(originalPreparationCapture) : undefined;
+const proveRecoveryDescendant = ({ ancestorSha, descendantSha }) => {
+  try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; }
+};
 const rebaselineAuthorization = rebaselineAuthorizationCoordinates
-  ? resolveProductionDualSlotRebaselineAuthorizationArtifact({
+  ? recoveryEnvelope
+    ? resolvePartialRebaselineRecoveryAuthorizationArtifact({
+      ...rebaselineAuthorizationCoordinates, sourceSha: rotationBindings.sourceSha, recoveryEnvelope, imageAuthorization,
+      imageAuthorizationValidation: composition.imageAuthorizationValidation, proveDescendant: proveRecoveryDescendant, run: createProductionGithubCommandRunner(),
+    }).authorization
+    : resolveProductionDualSlotRebaselineAuthorizationArtifact({
     ...rebaselineAuthorizationCoordinates,
     sourceSha: rotationBindings.sourceSha, rotationId: rotationBindings.rotationId,
     resources: { jwtPending: rotationBindings.jwt.pendingSecretId, qrPrivatePending: rotationBindings.qr.privatePendingSecretId, qrPublicPending: rotationBindings.qr.publicPendingSecretId, jwtPrevious: rotationBindings.jwt.previousSecretId, qrPublicPrevious: rotationBindings.qr.publicPreviousSecretId, qrCurrentVersion: rotationBindings.qr.currentKeyVersionSecretId, qrPreviousVersion: rotationBindings.qr.previousKeyVersionSecretId },
@@ -49,10 +65,8 @@ const rebaselineAuthorization = rebaselineAuthorizationCoordinates
   }).authorization
   : undefined;
 const onboardingPaths = args.has("onboarding-paths") ? read("onboarding-paths") : undefined;
-const composition = createProductionCutoverRuntimeComposition();
-const { releaseRun } = composition;
 const verifyRebaselineLivePostWrite = rebaselineAuthorizationCoordinates
-  ? ({ bindings, authorization }) => verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization })
+  ? ({ bindings, authorization }) => verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization, recoveryEnvelope, originalPreparation, proveDescendant: proveRecoveryDescendant })
   : undefined;
 const verifyInitialBindingOrigin = ({ bindings }) => verifyLiveInitialDualSlotBindingWithRunner({ run: releaseRun, bindings });
 const loadCurrentTaskDefinition = () => {
@@ -74,6 +88,9 @@ const result = prepareProductionCutoverRuntime({
   rotationBindings,
   rebaselineAuthorization,
   rebaselineAuthorizationCoordinates,
+  recoveryEnvelope,
+  originalPreparation,
+  proveRecoveryDescendant,
   verifyRebaselineLivePostWrite,
   verifyInitialBindingOrigin,
   rotationSupersessionEvidence,

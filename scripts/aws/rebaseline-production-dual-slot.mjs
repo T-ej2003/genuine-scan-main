@@ -8,12 +8,13 @@ import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from 
 import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 import { createInitialDualSlotSecretsManagerClient } from "./production-initial-dual-slot-bootstrap.mjs";
 import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
+import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
 import {
   PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_SLOTS, assertRebaselinePreconditions, buildAbandonmentEvidence,
   buildRebaselineIdentity, buildRebaselinePreparation, buildRebaselineWritePlan, buildRebaselinePayloads,
-  canonicalSha256, historicalSlotIdentity, loadOrCreateRebaselineMaterialJournal, readRebaselineMaterialJournal, executeProductionDualSlotRebaseline, resolveProductionDualSlotRebaselineAuthorizationArtifact, assertAbandonmentEvidence,
+  canonicalSha256, historicalSlotIdentity, loadOrCreateRebaselineMaterialJournal, readRebaselineMaterialJournal, executeProductionDualSlotRebaseline, executeAuthenticatedPartialRebaselineRecovery as executePartialRecoveryContract, resolveProductionDualSlotRebaselineAuthorizationArtifact, resolvePartialRebaselineRecoveryAuthorizationArtifact, assertAuthenticatedPartialRebaselineRecovery, assertAbandonmentEvidence,
   REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, assertProductionDualSlotRebaselineAuthorization, assertRebaselinePreparation, assertRebaselineRotationBindings, rebaselineWritePayloadIdentities, safeWriteDescriptors, coordinatorTransitionSlotIdentity, assertAuthenticatedPreCutoverCoordinatorTransition,
 } from "./production-dual-slot-rebaseline-contract.mjs";
 
@@ -27,7 +28,7 @@ const SERVICE = "mscqr-backend-servi-euw2";
 const HISTORICAL_ROTATION_ID = REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID;
 const HISTORICAL_SOURCES = ["5506cbe3972a27a77c211f2891756c3b97de7197", "9f39d1c4f646467146c12c0587fd7ad585f3fe10"];
 const required = (args, name) => { const value = args.get(name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
-const parseArgs = (argv) => { const values = new Map(); for (let i = 0; i < argv.length; i += 1) { const key = argv[i]?.replace(/^--/, ""); if (["prepare", "execute"].includes(key)) { if (values.has(key)) throw new Error(`Duplicate argument: ${argv[i]}`); values.set(key, true); continue; } if (!key || !argv[i + 1] || argv[i + 1].startsWith("--") || values.has(key)) throw new Error(`Invalid or duplicate argument: ${argv[i]}`); values.set(key, argv[++i]); } return values; };
+const parseArgs = (argv) => { const values = new Map(); for (let i = 0; i < argv.length; i += 1) { const key = argv[i]?.replace(/^--/, ""); if (["prepare", "execute", "recover-execute"].includes(key)) { if (values.has(key)) throw new Error(`Duplicate argument: ${argv[i]}`); values.set(key, true); continue; } if (!key || !argv[i + 1] || argv[i + 1].startsWith("--") || values.has(key)) throw new Error(`Invalid or duplicate argument: ${argv[i]}`); values.set(key, argv[++i]); } return values; };
 const json = (bytes) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 const parseSecret = (response, label, expectedVersionId) => { if (expectedVersionId !== undefined && response?.VersionId !== expectedVersionId) throw new Error(`${label} returned a substituted secret version.`); if (typeof response?.SecretString !== "string") throw new Error(`${label} is not a reviewed JSON secret.`); const value = JSON.parse(response.SecretString); if (!value || typeof value !== "object" || typeof value.value !== "string") throw new Error(`${label} has an invalid rotation payload.`); return { value, payloadSha256: canonicalSha256(value) }; };
 
@@ -295,9 +296,24 @@ export async function executePreparedProductionDualSlotRebaseline({ preparationF
   return executeProductionDualSlotRebaseline({ preconditions: current, sourceSha, rotationId: preparation.rotationId, baselineIdentity: preparation.baselineIdentity, writePlan, authorization, completionFile, bindingsFile, repositoryRoot, afterCompletionPersist, afterBindingsPersist, ...adapters });
 }
 
+export async function executeAuthenticatedPartialRebaselineRecovery({ recoveryEnvelopeFile, originalPreparationFile, materialJournalFile, authorization, imageAuthorization, imageAuthorizationValidation, sourceSha, currentPreconditions, completionFile, bindingsFile, repositoryRoot = REPOSITORY_ROOT, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), client, adapters, proveDescendant = (({ ancestorSha, descendantSha }) => { try { gitRun(["merge-base", "--is-ancestor", ancestorSha, descendantSha]); return true; } catch { return false; } }) } = {}) {
+  const envelope = assertAuthenticatedPartialRebaselineRecovery(json(readStageBPrivateFileBytes({ filePath: recoveryEnvelopeFile, repositoryRoot, label: "Partial rebaseline recovery envelope" }).bytes));
+  const preparation = json(readStageBPrivateFileBytes({ filePath: originalPreparationFile, repositoryRoot, label: "Original dual-slot rebaseline preparation" }).bytes);
+  assertRebaselinePreparation(preparation, { sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId });
+  const checkout = readAuthenticatedRebaselineCheckout({ sourceSha, gitRun, repositoryRoot });
+  const current = currentPreconditions;
+  if (!current || current.sourceSha !== checkout.toolingSha || current.sourceCas !== true || current.cleanWorktree !== true || current.liveReferenceAudit !== "PASS" || current.dualSlotReferences !== 0 || current.liveLegacyBaselineCount !== 1 || !/^[a-f0-9]{64}$/.test(current.liveReferenceAuditSha256 || "") || !/^[a-f0-9]{64}$/.test(current.liveLegacyBaselineIdentitySha256 || "") || canonicalSha256(current.resources) !== canonicalSha256(envelope.resources)) throw new Error("Partial rebaseline recovery preconditions changed.");
+  const journal = readRebaselineMaterialJournal({ filePath: materialJournalFile, repositoryRoot, sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, baselineIdentitySha256: preparation.baselineIdentity.identitySha256 });
+  const payloads = buildRebaselinePayloads({ sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, generatedMaterial: journal.material, legacyBaseline: preparation.legacyBaseline });
+  const writePlan = buildRebaselineWritePlan({ sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, resources: envelope.resources, baselineIdentitySha256: preparation.baselineIdentity.identitySha256, payloads });
+  const topology = await readPreparedDualSlotTopology({ client, preparation, writePlan });
+  const liveCas = { liveReferenceAuditSha256: current.liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256: current.liveLegacyBaselineIdentitySha256, observedSlotIdentitiesSha256: canonicalSha256(topology.snapshots) };
+  return executePartialRecoveryContract({ recoveryEnvelope: envelope, recoveryAuthorization: authorization, sourceSha: checkout.toolingSha, imageAuthorization, imageAuthorizationValidation, liveCas, originalPreparation: preparation, originalWritePlan: writePlan, materialJournalSha256: journal.journalSha256, readReferenceAudit: adapters?.readReferenceAudit, readSlot: adapters?.readSlot, writeSlot: adapters?.writeSlot, completionFile, bindingsFile, repositoryRoot, sleep: adapters?.sleep, proveDescendant });
+}
+
 export function createProductionRebaselineClient({ profile = "mscqr-production-release-deployer" } = {}) { return createInitialDualSlotSecretsManagerClient({ region: REGION, profile }); }
 
-export async function runProductionDualSlotRebaselineCli({ argv = process.argv.slice(2), repositoryRoot = REPOSITORY_ROOT, readCheckout = readAuthenticatedRebaselineCheckout, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), createRun = () => createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: REGION }), createClient = createProductionRebaselineClient, resolveAuthorization = resolveProductionDualSlotRebaselineAuthorizationArtifact, readTopology = readDualSlotTopology, readPreparedTopology = readPreparedDualSlotTopology, auditReferences = auditLiveProductionDualSlotReferences, executePrepared = executePreparedProductionDualSlotRebaseline, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, afterAbandonmentPersist, afterPreparationPersist, output = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`) } = {}) {
+export async function runProductionDualSlotRebaselineCli({ argv = process.argv.slice(2), repositoryRoot = REPOSITORY_ROOT, readCheckout = readAuthenticatedRebaselineCheckout, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), createRun = () => createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: REGION }), createClient = createProductionRebaselineClient, resolveAuthorization = resolveProductionDualSlotRebaselineAuthorizationArtifact, resolveRecoveryAuthorization = resolvePartialRebaselineRecoveryAuthorizationArtifact, readTopology = readDualSlotTopology, readPreparedTopology = readPreparedDualSlotTopology, auditReferences = auditLiveProductionDualSlotReferences, executePrepared = executePreparedProductionDualSlotRebaseline, executeRecovery = executeAuthenticatedPartialRebaselineRecovery, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, afterAbandonmentPersist, afterPreparationPersist, output = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`) } = {}) {
   const args = parseArgs(argv);
   const sourceSha = required(args, "source-sha");
   if (args.has("prepare")) {
@@ -330,7 +346,30 @@ export async function runProductionDualSlotRebaselineCli({ argv = process.argv.s
     const summary = { baselineComplete: result.baselineComplete, writes: result.writes, baselineBindingSha256: result.completion.baselineBindingSha256, completionPath: result.completionPath, completionSha256: result.completionSha256, rotationBindingsPath: result.bindingsPath, rotationBindingsSha256: result.bindingsSha256 };
     output(summary);
     return summary;
-  } else throw new Error("Use --prepare or --execute.");
+  } else if (args.has("recover-execute")) {
+    const checkout = readCheckout({ sourceSha, repositoryRoot });
+    const run = createRun();
+    const client = createClient(); await client.assertCredentialIdentity();
+    const envelope = assertAuthenticatedPartialRebaselineRecovery(json(readStageBPrivateFileBytes({ filePath: path.resolve(required(args, "recovery-envelope")), repositoryRoot, label: "Partial rebaseline recovery envelope" }).bytes));
+    const preparationFile = path.resolve(required(args, "original-preparation"));
+    const preparation = json(readStageBPrivateFileBytes({ filePath: preparationFile, repositoryRoot, label: "Original dual-slot rebaseline preparation" }).bytes);
+    assertRebaselinePreparation(preparation, { sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId });
+    const journalFile = path.resolve(required(args, "material-journal"));
+    const journal = readRebaselineMaterialJournal({ filePath: journalFile, repositoryRoot, sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, baselineIdentitySha256: preparation.baselineIdentity.identitySha256 });
+    const payloads = buildRebaselinePayloads({ sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, generatedMaterial: journal.material, legacyBaseline: preparation.legacyBaseline });
+    const writePlan = buildRebaselineWritePlan({ sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, resources: envelope.resources, baselineIdentitySha256: preparation.baselineIdentity.identitySha256, payloads });
+    const topology = await readPreparedTopology({ client, preparation, writePlan });
+    const audit = auditReferences({ run, resources: topology.resources, databaseDependencies: preparation.databaseDependencies, externalConsumers: preparation.externalConsumers });
+    const currentPreconditions = { sourceSha: checkout.toolingSha, sourceCas: true, cleanWorktree: checkout.porcelainStatus === "", resources: topology.resources, liveReferenceAudit: audit.status, liveReferenceAuditSha256: audit.stableAuditSha256, liveLegacyBaselineIdentitySha256: audit.liveLegacyBaselineIdentitySha256, liveLegacyBaselineCount: audit.liveLegacyBaselineCount, dualSlotReferences: audit.dualSlotReferences };
+    const imageAuthorization = json(readStageBPrivateFileBytes({ filePath: path.resolve(required(args, "image-authorization")), repositoryRoot, label: "Current image authorization" }).bytes);
+    const imageAuthorizationValidation = { verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run }) };
+    const liveCas = { liveReferenceAuditSha256: currentPreconditions.liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256: currentPreconditions.liveLegacyBaselineIdentitySha256, observedSlotIdentitiesSha256: canonicalSha256(topology.snapshots) };
+    const authorization = resolveRecoveryAuthorization({ workflowRunId: required(args, "workflow-run-id"), workflowRunAttempt: required(args, "workflow-run-attempt"), sourceSha: checkout.toolingSha, recoveryEnvelope: envelope, imageAuthorization, imageAuthorizationValidation, liveCas, proveDescendant: ({ ancestorSha, descendantSha }) => { try { gitRun(["merge-base", "--is-ancestor", ancestorSha, descendantSha]); return true; } catch { return false; } }, run: createProductionGithubCommandRunner() }).authorization;
+    const result = await executeRecovery({ recoveryEnvelopeFile: path.resolve(required(args, "recovery-envelope")), originalPreparationFile: preparationFile, materialJournalFile: journalFile, authorization, imageAuthorization, imageAuthorizationValidation, sourceSha: checkout.toolingSha, currentPreconditions, completionFile: path.resolve(required(args, "completion-output")), bindingsFile: path.resolve(required(args, "rotation-bindings-output")), repositoryRoot, gitRun, client, adapters: createProductionRebaselineAdapters({ client, run, resources: topology.resources, preparation }) });
+    const summary = { baselineComplete: result.baselineComplete, writes: result.writes, completedSlots: result.completedSlots, remainingWrites: 0, completionPath: result.completionPath, bindingsPath: result.bindingsPath };
+    output(summary);
+    return summary;
+  } else throw new Error("Use --prepare, --execute, or --recover-execute.");
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) await runProductionDualSlotRebaselineCli();

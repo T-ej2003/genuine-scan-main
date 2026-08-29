@@ -5,6 +5,7 @@ import test from "node:test";
 
 const root = path.resolve(new URL(".", import.meta.url).pathname, "../..");
 const workflow = readFileSync(path.join(root, ".github/workflows/authorize-production-dual-slot-rebaseline.yml"), "utf8");
+const recoveryWorkflow = readFileSync(path.join(root, ".github/workflows/authorize-production-dual-slot-rebaseline-recovery.yml"), "utf8");
 
 test("rebaseline authorization workflow keeps dispatch inputs out of executable shell text", () => {
   const runBodies = [...workflow.matchAll(/^[ ]{8}run: \|\n((?:^[ ]{10}.*\n?)*)/gm)].map((match) => match[1]);
@@ -63,4 +64,33 @@ test("malicious dispatch values remain environment data at the Node argument bou
   assert.match(shell, /--resources-json "\$RESOURCES_JSON"/);
   assert.match(shell, /--write-identities-json "\$WRITE_IDENTITIES_JSON"/);
   assert.match(shell, /--write-payload-identities-json "\$WRITE_PAYLOAD_IDENTITIES_JSON"/);
+});
+
+test("successor recovery authorization is a separate protected workflow with no mutation escape hatch", () => {
+  const shells = [...recoveryWorkflow.matchAll(/^[ ]{8}run: \|\n((?:^[ ]{10}.*\n?)*)/gm)].map((match) => match[1]);
+  assert.ok(shells.length >= 4);
+  assert.equal(shells.some((body) => body.includes("${{ inputs.")), false);
+  assert.match(recoveryWorkflow, /environment: production/);
+  assert.match(recoveryWorkflow, /--require-actual-approval/);
+  assert.match(recoveryWorkflow, /authorize-production-dual-slot-rebaseline-recovery\.mjs --authorize-recovery/);
+  assert.match(recoveryWorkflow, /production-dual-slot-rebaseline-successor-recovery-authorization/);
+  assert.match(recoveryWorkflow, /install -d -m 700 "\$workdir"/);
+  assert.match(recoveryWorkflow, /dual-slot-rebaseline-recovery\/recovery-authorization\.json/);
+  assert.equal(/terraform\s+(plan|apply)|PutSecretValue|UpdateSecretVersionStage|UpdateService|RegisterTaskDefinition|kms\s+sign/i.test(recoveryWorkflow), false);
+  for (const name of ["SOURCE_SHA", "RECOVERY_ENVELOPE_BASE64", "RECOVERY_ENVELOPE_FILE_SHA256", "IMAGE_AUTHORIZATION_BASE64", "IMAGE_AUTHORIZATION_FILE_SHA256", "LIVE_REFERENCE_AUDIT_SHA256", "LIVE_LEGACY_BASELINE_IDENTITY_SHA256", "OBSERVED_SLOT_IDENTITIES_SHA256", "REASON", "APPROVER_ROLE", "VERIFICATION_REF"]) assert.match(recoveryWorkflow, new RegExp("^          " + name + ": \\${\\{ inputs\\.", "m"));
+});
+
+test("production recovery authority has no descendant-bypass or normal-execute downgrade", () => {
+  const sources = [
+    "scripts/aws/production-dual-slot-rebaseline-contract.mjs",
+    "scripts/aws/rebaseline-production-dual-slot.mjs",
+    "scripts/aws/prepare-production-cutover-runtime.mjs",
+    "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+  ].map((file) => readFileSync(path.join(root, file), "utf8")).join("\n");
+  assert.doesNotMatch(sources, /prove(?:Recovery)?Descendant\s*:\s*\(\)\s*=>\s*true|proveDescendant\s*=\s*\(\)\s*=>\s*true/);
+  const executor = readFileSync(path.join(root, "scripts/aws/rebaseline-production-dual-slot.mjs"), "utf8");
+  assert.match(executor, /\["prepare", "execute", "recover-execute"\]/);
+  assert.match(executor, /else if \(args\.has\("recover-execute"\)\)/);
+  assert.match(executor, /assertRebaselinePreparation\(preparation, \{ sourceSha: checkout\.toolingSha/);
+  assert.match(executor, /assertAuthenticatedPartialRebaselineRecovery/);
 });

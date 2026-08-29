@@ -118,3 +118,11 @@ task-definition must expose the same canonical legacy JWT/QR baseline; zero or m
 live baselines fail closed. Incomplete
 task/deployment/task-definition reads also
 fail closed.
+
+## Authenticated successor recovery
+
+The narrowly scoped successor-recovery bridge is documented in
+[`MSCQR_PARTIAL_REBASELINE_SUCCESSOR_RECOVERY_THREAT_MODEL.md`](MSCQR_PARTIAL_REBASELINE_SUCCESSOR_RECOVERY_THREAT_MODEL.md).
+It applies only to the reviewed interrupted transition, preserves its original seven
+VersionIds and payload identities, requires fresh successor-source approval, and has
+terminal zero-write semantics after canonical completion.
