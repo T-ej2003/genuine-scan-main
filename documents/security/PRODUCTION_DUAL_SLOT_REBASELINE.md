@@ -51,6 +51,16 @@ success, rerunning preparation authenticates and reuses the same source, abandon
 baseline, and seven safe write descriptors. It never regenerates material or replaces
 the immutable preparation file; a divergent preparation fails closed.
 
+The abandoned production snapshot also has an authenticated
+`AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION` variant. It is accepted only when
+the retained supersession evidence, protected coordinator writer semantics, predecessor
+identities, deterministic post-transition VersionIds, both transitioned slot payload
+fingerprints, historical authorization/state evidence, and the zero-consumer/single
+legacy-baseline audit all agree. It is not a general source-less or `previous`-slot
+compatibility exception. Preparation supplies this retained private evidence with
+`--historical-transition-evidence`; missing, divergent, or locally altered evidence
+remains a fail-closed error.
+
 The protected authorization says that the seven deterministic writes may occur; it is
 not proof that they did. Runtime preparation therefore re-resolves the protected
 environment authorization artifact and performs fresh `DescribeSecret` plus

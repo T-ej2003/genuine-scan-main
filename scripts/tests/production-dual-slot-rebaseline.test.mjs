@@ -10,13 +10,14 @@ import {
   buildRebaselinePreparation, assertRebaselinePreconditions, assertRebaselinePreparation,
   createProductionDualSlotRebaselineAuthorization, deterministicWriteIdentity, executeProductionDualSlotRebaseline,
   generateRebaselineMaterial, assertBaselineCompletion, canonicalSha256, historicalSlotIdentity,
-  REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, writeRebaselineMaterialJournal, persistExactPrivateJson, rebaselineWritePayloadIdentities, verifyLiveProductionDualSlotRebaselineWithRunner, sha256,
+  REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, writeRebaselineMaterialJournal, persistExactPrivateJson, rebaselineWritePayloadIdentities, verifyLiveProductionDualSlotRebaselineWithRunner, sha256, coordinatorTransitionSlotIdentity, buildAuthenticatedPreCutoverCoordinatorTransition, assertAuthenticatedPreCutoverCoordinatorTransition, coordinatorTransitionVersionId,
 } from "../aws/production-dual-slot-rebaseline-contract.mjs";
-import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout, readPreparedDualSlotTopology, runProductionDualSlotRebaselineCli, verifyLiveProductionDualSlotRebaseline } from "../aws/rebaseline-production-dual-slot.mjs";
+import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout, readDualSlotTopology, readPreparedDualSlotTopology, runProductionDualSlotRebaselineCli, verifyLiveProductionDualSlotRebaseline } from "../aws/rebaseline-production-dual-slot.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { assertBindings, buildInitialMigrationSourceAdvance, buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
+import { productionSupersessionEvidenceIdentity } from "../security/production-initial-migration-source-advance.mjs";
 
 const sourceSha = "a".repeat(40);
 const historicalRotationId = "rotation-20260826060632-b15b3f51";
@@ -96,6 +97,77 @@ function cliTopologyRunner(completedSlots = [], overrides = {}) {
     throw new Error("unexpected command");
   };
 }
+
+function coordinatorPayload(slot) {
+  if (slot === "jwtPrevious") return { value: "coordinator-jwt-previous-fixture", family: "jwt_secrets", slot: "previous", rotationId: historicalRotationId, materialFingerprint: sha256("coordinator-jwt-previous-fixture").slice(0, 16) };
+  return { value: "coordinator-qr-version-fixture", family: "qr_key_versions", slot: "current", rotationId: historicalRotationId, sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[1], keyVersion: "coordinator-v1" };
+}
+
+function authenticatedCoordinatorTransitionFixture() {
+  const predecessorVersionIds = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, sha256(`${REBASELINE_HISTORICAL_SOURCE_SHAS[0]}:${historicalRotationId}:${slot}`)]));
+  const supersessionBody = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], staleSourceSha: "b".repeat(40), rotationId: historicalRotationId, staleRotationId: "rotation-stale-fixture", generatedAt: "2026-08-26T06:06:32.000Z", resources: Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, { arn: resources[slot], stages: ["AWSCURRENT"], versionId: predecessorVersionIds[slot] }])) };
+  const originalSupersessionEvidence = { ...supersessionBody, evidenceIdentitySha256: productionSupersessionEvidenceIdentity(supersessionBody) };
+  const predecessorSlotIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, historicalSlotIdentity({ slot, secretArn: resources[slot], versionId: predecessorVersionIds[slot], stages: ["AWSCURRENT"], payload: historicalPayload(slot, { source: REBASELINE_HISTORICAL_SOURCE_SHAS[0] }) })]));
+  const postVersionIds = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, ["jwtPrevious", "qrCurrentVersion"].includes(slot) ? coordinatorTransitionVersionId({ slot }) : predecessorVersionIds[slot]]));
+  const postSlotIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, ["jwtPrevious", "qrCurrentVersion"].includes(slot) ? coordinatorTransitionSlotIdentity({ slot, secretArn: resources[slot], versionId: postVersionIds[slot], stages: ["AWSCURRENT"], payload: coordinatorPayload(slot) }) : predecessorSlotIdentities[slot]]));
+  const authorizationBody = { reference: "GH-ISSUE-391", sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[1], rotationId: historicalRotationId, resourcesSha256: canonicalSha256(resources) };
+  const authorization = { ...authorizationBody, evidenceSha256: canonicalSha256(authorizationBody) };
+  const rotationStateBody = { stateVersion: 4, sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[1], rotationId: historicalRotationId, phase: "overlap-deploy-required", initialMigrationSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0] };
+  const rotationState = { ...rotationStateBody, stateSha256: canonicalSha256(rotationStateBody) };
+  return buildAuthenticatedPreCutoverCoordinatorTransition({ resources, originalSupersessionEvidence, predecessorSlotIdentities, postSlotIdentities, authorization, rotationState, liveReferenceAuditSha256: audit.stableAuditSha256, liveLegacyBaselineIdentitySha256: canonicalSha256(legacyBaseline) });
+}
+
+function coordinatorTopologyClient(transition, overrides = {}) {
+  return { send: async (command) => {
+    const input = command.input;
+    const slot = Object.entries(REBASELINE_SLOTS).find(([, name]) => name === input.SecretId)?.[0] || Object.entries(resources).find(([, arn]) => arn === input.SecretId)?.[0];
+    if (!slot) throw new Error("unexpected secret identity");
+    const currentVersionId = overrides[slot]?.versionId || transition.postVersionIds[slot];
+    const payload = overrides[slot]?.payload || (slot === "jwtPrevious" || slot === "qrCurrentVersion" ? coordinatorPayload(slot) : historicalPayload(slot, { source: REBASELINE_HISTORICAL_SOURCE_SHAS[0] }));
+    const name = command.constructor.name;
+    if (name === "DescribeSecretCommand") return { Name: input.SecretId, ARN: overrides[slot]?.arn || resources[slot], VersionIdsToStages: { [currentVersionId]: overrides[slot]?.stages || ["AWSCURRENT"] } };
+    if (name === "GetSecretValueCommand") return { SecretString: JSON.stringify(payload), VersionId: input.VersionId };
+    throw new Error(`unexpected command ${name}`);
+  } };
+}
+
+test("exact protected post-supersession coordinator topology is reproduced and rejected before the compatibility fix", async () => {
+  const transition = authenticatedCoordinatorTransitionFixture();
+  await assert.rejects(() => readDualSlotTopology({ client: coordinatorTopologyClient(transition) }), /kind|historical|authentic/i);
+});
+
+test("authenticated coordinator transition accepts the exact protected seven-slot topology", async () => {
+  const transition = authenticatedCoordinatorTransitionFixture();
+  const topology = await readDualSlotTopology({ client: coordinatorTopologyClient(transition), historicalTransitionEvidence: transition });
+  assert.deepEqual(topology.currentVersionIds, transition.postVersionIds);
+  assert.deepEqual(topology.observedSlotIdentities, transition.postSlotIdentities);
+  const evidence = buildAbandonmentEvidence({ sourceSha, historicalRotationId, historicalSourceShas: REBASELINE_HISTORICAL_SOURCE_SHAS, resources, currentVersionIds: transition.postVersionIds, historicalTopologySha256, observedSlotIdentities: transition.postSlotIdentities, historicalTransitionEvidence: transition, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, liveLegacyBaselineIdentitySha256: canonicalSha256(legacyBaseline), legacyRuntimeAuthoritative: true, observedAt: "2026-08-28T10:00:00.000Z" });
+  assert.equal(evidence.schemaVersion, 3);
+  assert.doesNotThrow(() => assertRebaselinePreconditions({ ...preconditions, resources, currentVersionIds: undefined, abandonmentEvidence: evidence, historicalTopologySha256 }));
+});
+
+test("coordinator transition rejects mutated resource, version, payload, source, rotation, fingerprint, predecessor, writer, authorization, or live evidence", () => {
+  const transition = authenticatedCoordinatorTransitionFixture();
+  const mutations = [
+    ["resource", () => ({ ...transition, predecessorSlotIdentities: { ...transition.predecessorSlotIdentities, jwtPrevious: { ...transition.predecessorSlotIdentities.jwtPrevious, secretArn: resources.qrPublicPending } } })],
+    ["post version", () => ({ ...transition, postVersionIds: { ...transition.postVersionIds, jwtPrevious: sha256("wrong-version") } })],
+    ["payload identity", () => ({ ...transition, postSlotIdentities: { ...transition.postSlotIdentities, qrCurrentVersion: { ...transition.postSlotIdentities.qrCurrentVersion, keyVersion: "wrong-v1" } } })],
+    ["source", () => ({ ...transition, coordinatorSourceSha: "c".repeat(40) })],
+    ["rotation", () => ({ ...transition, historicalRotationId: "rotation-other" })],
+    ["writer", () => ({ ...transition, writer: { ...transition.writer, operation: "other" } })],
+    ["authorization", () => ({ ...transition, authorization: { ...transition.authorization, reference: "GH-OTHER" } })],
+    ["supersession", () => ({ ...transition, originalSupersessionEvidenceSha256: sha256("wrong-evidence") })],
+    ["live reference", () => ({ ...transition, liveReferenceAuditSha256: sha256("changed-audit") })],
+    ["legacy baseline", () => ({ ...transition, liveLegacyBaselineIdentitySha256: sha256("changed-baseline") })],
+  ];
+  for (const [label, mutate] of mutations) assert.throws(() => assertAuthenticatedPreCutoverCoordinatorTransition(mutate()), /invalid|authentic|exact|hash|bound|duplicate|deterministic/i, label);
+});
+
+test("coordinator transition requires both changed slots to form one authenticated topology", async () => {
+  const transition = authenticatedCoordinatorTransitionFixture();
+  await assert.rejects(() => readDualSlotTopology({ client: coordinatorTopologyClient(transition, { jwtPrevious: { payload: { ...coordinatorPayload("jwtPrevious"), materialFingerprint: "wrong" } } }), historicalTransitionEvidence: transition }), /authentic|fingerprint|transition/i);
+  await assert.rejects(() => readDualSlotTopology({ client: coordinatorTopologyClient(transition, { qrCurrentVersion: { versionId: transition.predecessorVersionIds.qrCurrentVersion } }), historicalTransitionEvidence: transition }), /neither|deterministic|transition|authentic/i);
+});
 
 test("observed abandonment identities bind exact payloads without plaintext", () => {
   const preparation = buildRebaselinePreparation({ preconditions, sourceSha, rotationId, baselineIdentity: identity, writePlan });

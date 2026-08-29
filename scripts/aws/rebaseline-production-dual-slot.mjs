@@ -14,7 +14,7 @@ import {
   PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_SLOTS, assertRebaselinePreconditions, buildAbandonmentEvidence,
   buildRebaselineIdentity, buildRebaselinePreparation, buildRebaselineWritePlan, buildRebaselinePayloads,
   canonicalSha256, historicalSlotIdentity, loadOrCreateRebaselineMaterialJournal, readRebaselineMaterialJournal, executeProductionDualSlotRebaseline, resolveProductionDualSlotRebaselineAuthorizationArtifact, assertAbandonmentEvidence,
-  REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, assertProductionDualSlotRebaselineAuthorization, assertRebaselinePreparation, assertRebaselineRotationBindings, rebaselineWritePayloadIdentities, safeWriteDescriptors,
+  REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, assertProductionDualSlotRebaselineAuthorization, assertRebaselinePreparation, assertRebaselineRotationBindings, rebaselineWritePayloadIdentities, safeWriteDescriptors, coordinatorTransitionSlotIdentity, assertAuthenticatedPreCutoverCoordinatorTransition,
 } from "./production-dual-slot-rebaseline-contract.mjs";
 
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -62,9 +62,11 @@ export async function verifyLiveProductionDualSlotRebaseline({ client, bindings,
 }
 
 
-export async function readDualSlotTopology({ client, names = REBASELINE_SLOTS, historicalRotationId = HISTORICAL_ROTATION_ID, preparedState, preparedWritePlan } = {}) {
+export async function readDualSlotTopology({ client, names = REBASELINE_SLOTS, historicalRotationId = HISTORICAL_ROTATION_ID, preparedState, preparedWritePlan, historicalTransitionEvidence } = {}) {
   if ((preparedState && !preparedWritePlan) || (!preparedState && preparedWritePlan)) throw new Error("Prepared rebaseline topology requires both authenticated preparation and write plan.");
   if (preparedState) assertAbandonmentEvidence(preparedState.abandonmentEvidence, { sourceSha: preparedState.sourceSha, resources: preparedState.resources, historicalTopologySha256: preparedState.historicalTopologySha256 });
+  const transitionEvidence = historicalTransitionEvidence || preparedState?.abandonmentEvidence?.historicalTransitionEvidence;
+  if (transitionEvidence) assertAuthenticatedPreCutoverCoordinatorTransition(transitionEvidence);
   const preparedBySlot = preparedWritePlan ? Object.fromEntries(preparedWritePlan.map((entry) => [entry.slot, entry])) : null;
   const resources = {};
   const currentVersionIds = {};
@@ -80,7 +82,9 @@ export async function readDualSlotTopology({ client, names = REBASELINE_SLOTS, h
     currentVersionIds[slot] = current[0][0];
     snapshots[slot] = { slot, arn: described.ARN, versions: Object.entries(described.VersionIdsToStages).map(([versionId, stages]) => ({ versionId, stages, ...(versionId === current[0][0] ? { payloadSha256: parsed.payloadSha256 } : {}) })) };
     if (!preparedState) {
-      snapshots[slot].historicalIdentity = historicalSlotIdentity({ slot, secretArn: described.ARN, versionId: current[0][0], stages: current[0][1], payload: parsed.value });
+      snapshots[slot].historicalIdentity = transitionEvidence && ["jwtPrevious", "qrCurrentVersion"].includes(slot)
+        ? coordinatorTransitionSlotIdentity({ slot, secretArn: described.ARN, versionId: current[0][0], stages: current[0][1], payload: parsed.value })
+        : historicalSlotIdentity({ slot, secretArn: described.ARN, versionId: current[0][0], stages: current[0][1], payload: parsed.value });
       continue;
     }
     const historicalIdentity = preparedState.abandonmentEvidence.observedSlotIdentities[slot];
@@ -88,7 +92,9 @@ export async function readDualSlotTopology({ client, names = REBASELINE_SLOTS, h
     const expectedWrite = preparedBySlot[slot];
     if (!expectedWrite) throw new Error(`Prepared rebaseline write identity for ${slot} is missing.`);
     if (current[0][0] === historicalVersionId) {
-      const observed = historicalSlotIdentity({ slot, secretArn: described.ARN, versionId: current[0][0], stages: current[0][1], payload: parsed.value });
+      const observed = transitionEvidence && ["jwtPrevious", "qrCurrentVersion"].includes(slot)
+        ? coordinatorTransitionSlotIdentity({ slot, secretArn: described.ARN, versionId: current[0][0], stages: current[0][1], payload: parsed.value })
+        : historicalSlotIdentity({ slot, secretArn: described.ARN, versionId: current[0][0], stages: current[0][1], payload: parsed.value });
       if (canonicalSha256(observed) !== canonicalSha256(historicalIdentity)) throw new Error(`Historical ${slot} identity changed during rebaseline resume.`);
       snapshots[slot].classification = "HISTORICAL_NOT_YET_WRITTEN";
     } else if (current[0][0] === expectedWrite.clientRequestToken) {
@@ -99,7 +105,8 @@ export async function readDualSlotTopology({ client, names = REBASELINE_SLOTS, h
   const observedSlotIdentities = preparedState
     ? preparedState.abandonmentEvidence.observedSlotIdentities
     : Object.freeze(Object.fromEntries(Object.entries(snapshots).map(([slot, snapshot]) => [slot, snapshot.historicalIdentity])));
-  return Object.freeze({ resources, currentVersionIds, snapshots, observedSlotIdentities, observedSlotIdentitiesSha256: canonicalSha256(observedSlotIdentities), ...(preparedState ? { classifications: Object.freeze(Object.fromEntries(Object.entries(snapshots).map(([slot, snapshot]) => [slot, snapshot.classification]))) } : {}) });
+  if (transitionEvidence && !preparedState) assertAuthenticatedPreCutoverCoordinatorTransition(transitionEvidence, { resources, observedVersionIds: currentVersionIds, observedSlotIdentities });
+  return Object.freeze({ resources, currentVersionIds, snapshots, observedSlotIdentities, observedSlotIdentitiesSha256: canonicalSha256(observedSlotIdentities), ...(transitionEvidence ? { historicalTransitionEvidence: transitionEvidence } : {}), ...(preparedState ? { classifications: Object.freeze(Object.fromEntries(Object.entries(snapshots).map(([slot, snapshot]) => [slot, snapshot.classification]))) } : {}) });
 }
 
 export async function readPreparedDualSlotTopology({ client, preparation, writePlan } = {}) {
@@ -198,7 +205,7 @@ export function auditLiveProductionDualSlotReferences({ run, resources, database
   const stableEvidence = { cluster: CLUSTER, service: { arn: service.serviceArn, deploymentController, taskDefinition: service.taskDefinition }, serviceTaskDefinitionArns: [...serviceTaskDefinitionArns].sort(), serviceTaskDefinitionReferences: perTaskDefinition.filter(({ taskDefinitionArn }) => serviceTaskDefinitionArns.has(taskDefinitionArn)), liveServiceTaskDefinitionArns, deploymentTaskDefinitionCoverage, liveLegacyBaselines, liveLegacyBaselineCount, legacy, databaseDependencies, externalConsumers, externalDualSlotReferences: perTaskDefinition.filter(({ taskDefinitionArn }) => !serviceTaskDefinitionArns.has(taskDefinitionArn)).flatMap(({ dualSlotReferences }) => dualSlotReferences).sort() };
   const auditSha256 = canonicalSha256(evidence);
   const stableAuditSha256 = canonicalSha256(stableEvidence);
-  return Object.freeze({ status: legacyRuntimeAuthoritative ? "PASS" : "FAIL", dualSlotReferences, legacyRuntimeAuthoritative, liveLegacyBaselineCount, databaseDependencies, externalConsumers, runningTasks: service.runningCount, pendingTasks: service.pendingCount, activeTaskDefinition: service.taskDefinition, legacy, evidence, auditSha256, stableEvidence, stableAuditSha256 });
+  return Object.freeze({ status: legacyRuntimeAuthoritative ? "PASS" : "FAIL", dualSlotReferences, legacyRuntimeAuthoritative, liveLegacyBaselineCount, liveLegacyBaselineIdentitySha256: legacyRuntimeAuthoritative ? canonicalSha256(legacy) : undefined, databaseDependencies, externalConsumers, runningTasks: service.runningCount, pendingTasks: service.pendingCount, activeTaskDefinition: service.taskDefinition, legacy, evidence, auditSha256, stableEvidence, stableAuditSha256 });
 }
 
 export function createProductionRebaselineAdapters({ client, run, resources, preparation } = {}) {
@@ -217,7 +224,7 @@ export function auditLegacyTaskDefinition(taskDefinition, resources, { runningTa
   const perTaskDefinition = [{ taskDefinitionArn, dualSlotReferences: Object.values(resources).filter((arn) => serialized.includes(arn)).sort() }];
   const evidence = { service: { arn: "fixture", desiredCount: runningTasks, runningCount: runningTasks, pendingCount: pendingTasks, taskDefinition: taskDefinitionArn, deploymentController: "ECS" }, deployments: [], tasks: [], taskDefinitionArns: [taskDefinitionArn], serviceTaskDefinitionArns: [taskDefinitionArn], perTaskDefinition, databaseDependencies, externalConsumers };
   const stableEvidence = { cluster: "fixture", service: { arn: "fixture", deploymentController: "ECS", taskDefinition: taskDefinitionArn }, serviceTaskDefinitionArns: [taskDefinitionArn], serviceTaskDefinitionReferences: perTaskDefinition, legacy, databaseDependencies, externalConsumers, externalDualSlotReferences: [] };
-  return Object.freeze({ status: dualSlotReferences === 0 ? "PASS" : "FAIL", dualSlotReferences, legacyRuntimeAuthoritative: dualSlotReferences === 0, liveLegacyBaselineCount: 1, databaseDependencies, externalConsumers, runningTasks, pendingTasks, activeTaskDefinition: taskDefinitionArn, legacy, evidence, auditSha256: canonicalSha256(evidence), stableEvidence, stableAuditSha256: canonicalSha256(stableEvidence) });
+  return Object.freeze({ status: dualSlotReferences === 0 ? "PASS" : "FAIL", dualSlotReferences, legacyRuntimeAuthoritative: dualSlotReferences === 0, liveLegacyBaselineCount: 1, liveLegacyBaselineIdentitySha256: dualSlotReferences === 0 ? canonicalSha256(legacy) : undefined, databaseDependencies, externalConsumers, runningTasks, pendingTasks, activeTaskDefinition: taskDefinitionArn, legacy, evidence, auditSha256: canonicalSha256(evidence), stableEvidence, stableAuditSha256: canonicalSha256(stableEvidence) });
 }
 
 export function readAuthenticatedRebaselineCheckout({ sourceSha, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), repositoryRoot = REPOSITORY_ROOT } = {}) {
@@ -226,10 +233,10 @@ export function readAuthenticatedRebaselineCheckout({ sourceSha, gitRun = (args)
   return checkout;
 }
 
-export async function prepareProductionDualSlotRebaseline({ sourceSha, rotationId, outputDirectory, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), client, topology: suppliedTopology, taskDefinition, liveReferenceAudit = {}, repositoryRoot = REPOSITORY_ROOT, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, afterAbandonmentPersist, afterPreparationPersist } = {}) {
+export async function prepareProductionDualSlotRebaseline({ sourceSha, rotationId, outputDirectory, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), client, topology: suppliedTopology, historicalTransitionEvidence, taskDefinition, liveReferenceAudit = {}, repositoryRoot = REPOSITORY_ROOT, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, afterAbandonmentPersist, afterPreparationPersist } = {}) {
   const directory = ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot, create: true, normalize: true, label: "Dual-slot rebaseline preparation directory" });
   const checkout = readAuthenticatedRebaselineCheckout({ sourceSha, gitRun, repositoryRoot });
-  const topology = suppliedTopology || await readDualSlotTopology({ client });
+  const topology = suppliedTopology || await readDualSlotTopology({ client, historicalTransitionEvidence });
   const audit = liveReferenceAudit?.stableAuditSha256 ? liveReferenceAudit : auditLegacyTaskDefinition(taskDefinition, topology.resources, liveReferenceAudit);
   const abandonmentFile = path.join(directory, "abandonment-evidence.json");
   let abandonmentEvidence;
@@ -240,11 +247,11 @@ export async function prepareProductionDualSlotRebaseline({ sourceSha, rotationI
     abandonmentEvidence = assertAbandonmentEvidence(json(captured.bytes), { sourceSha: checkout.toolingSha, resources: topology.resources, historicalTopologySha256 });
     if (abandonmentEvidence.historicalRotationId !== HISTORICAL_ROTATION_ID || canonicalSha256(abandonmentEvidence.currentVersionIds) !== canonicalSha256(topology.currentVersionIds) || canonicalSha256(abandonmentEvidence.observedSlotIdentities) !== canonicalSha256(topology.observedSlotIdentities) || abandonmentEvidence.liveReferenceAuditSha256 !== audit.stableAuditSha256 || abandonmentEvidence.legacyRuntimeAuthoritative !== audit.legacyRuntimeAuthoritative) throw new Error("Existing dual-slot abandonment evidence does not match the authenticated preparation baseline.");
   } else {
-    abandonmentEvidence = buildAbandonmentEvidence({ sourceSha: checkout.toolingSha, historicalRotationId: HISTORICAL_ROTATION_ID, historicalSourceShas: HISTORICAL_SOURCES, resources: topology.resources, currentVersionIds: topology.currentVersionIds, historicalTopologySha256, observedSlotIdentities: topology.observedSlotIdentities, liveReferenceAudit: audit.status, liveReferenceAuditSha256: audit.stableAuditSha256, legacyRuntimeAuthoritative: audit.legacyRuntimeAuthoritative });
+    abandonmentEvidence = buildAbandonmentEvidence({ sourceSha: checkout.toolingSha, historicalRotationId: HISTORICAL_ROTATION_ID, historicalSourceShas: HISTORICAL_SOURCES, resources: topology.resources, currentVersionIds: topology.currentVersionIds, historicalTopologySha256, observedSlotIdentities: topology.observedSlotIdentities, historicalTransitionEvidence: topology.historicalTransitionEvidence || historicalTransitionEvidence, liveReferenceAudit: audit.status, liveReferenceAuditSha256: audit.stableAuditSha256, liveLegacyBaselineIdentitySha256: (topology.historicalTransitionEvidence || historicalTransitionEvidence) ? audit.liveLegacyBaselineIdentitySha256 : undefined, legacyRuntimeAuthoritative: audit.legacyRuntimeAuthoritative });
     writeStageBPrivateFileAtomicExclusive({ filePath: abandonmentFile, bytes: Buffer.from(`${JSON.stringify(abandonmentEvidence, null, 2)}\n`), repositoryRoot, label: "Dual-slot abandonment evidence" });
     if (typeof afterAbandonmentPersist === "function") await afterAbandonmentPersist();
   }
-  const preconditions = assertRebaselinePreconditions({ environment: "production", accountId: ACCOUNT, region: REGION, sourceSha: checkout.toolingSha, sourceCas: checkout.toolingSha === sourceSha, cleanWorktree: checkout.porcelainStatus === "", existingSecretResources: true, liveReferenceAudit: audit.status, liveReferenceAuditSha256: audit.stableAuditSha256, legacyRuntimeAuthoritative: audit.legacyRuntimeAuthoritative, liveLegacyBaselineCount: audit.liveLegacyBaselineCount, databaseDependencies: audit.databaseDependencies, externalConsumers: audit.externalConsumers, dualSlotReferences: audit.dualSlotReferences, runningTasks: audit.runningTasks, pendingTasks: audit.pendingTasks, activeTaskDefinition: audit.activeTaskDefinition, resources: topology.resources, historicalTopologySha256, abandonmentEvidence });
+  const preconditions = assertRebaselinePreconditions({ environment: "production", accountId: ACCOUNT, region: REGION, sourceSha: checkout.toolingSha, sourceCas: checkout.toolingSha === sourceSha, cleanWorktree: checkout.porcelainStatus === "", existingSecretResources: true, liveReferenceAudit: audit.status, liveReferenceAuditSha256: audit.stableAuditSha256, legacyRuntimeAuthoritative: audit.legacyRuntimeAuthoritative, liveLegacyBaselineCount: audit.liveLegacyBaselineCount, liveLegacyBaselineIdentitySha256: audit.liveLegacyBaselineIdentitySha256, legacyBaseline: audit.legacy, databaseDependencies: audit.databaseDependencies, externalConsumers: audit.externalConsumers, dualSlotReferences: audit.dualSlotReferences, runningTasks: audit.runningTasks, pendingTasks: audit.pendingTasks, activeTaskDefinition: audit.activeTaskDefinition, resources: topology.resources, historicalTopologySha256, abandonmentEvidence });
   const rotation = buildRebaselineIdentity({ sourceSha: checkout.toolingSha, rotationId, resources: topology.resources, abandonmentEvidenceSha256: abandonmentEvidence.evidenceSha256, legacyBaseline: audit.legacy });
   const material = loadOrCreateRebaselineMaterialJournal({ filePath: path.join(directory, "rebaseline-material.json"), repositoryRoot, sourceSha: checkout.toolingSha, rotationId, baselineIdentitySha256: rotation.identitySha256 });
   const payloads = buildRebaselinePayloads({ sourceSha: checkout.toolingSha, rotationId, generatedMaterial: material.material, legacyBaseline: audit.legacy });
@@ -299,9 +306,12 @@ export async function runProductionDualSlotRebaselineCli({ argv = process.argv.s
     const run = createRun();
     const client = createClient(); await client.assertCredentialIdentity();
     const outputDirectory = path.resolve(required(args, "output-directory")); mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
-    const topology = await readTopology({ client });
+    const historicalTransitionEvidence = args.has("historical-transition-evidence")
+      ? json(readStageBPrivateFileBytes({ filePath: path.resolve(required(args, "historical-transition-evidence")), repositoryRoot, label: "Historical coordinator transition evidence" }).bytes)
+      : undefined;
+    const topology = await readTopology({ client, historicalTransitionEvidence });
     const audit = auditReferences({ run, resources: topology.resources, databaseDependencies: Number(required(args, "database-dependencies")), externalConsumers: Number(required(args, "external-consumers")) });
-    const result = await prepareProductionDualSlotRebaseline({ sourceSha: checkout.toolingSha, rotationId: required(args, "rotation-id"), outputDirectory, client, topology, liveReferenceAudit: audit, repositoryRoot, gitRun, historicalTopologySha256, afterAbandonmentPersist, afterPreparationPersist });
+    const result = await prepareProductionDualSlotRebaseline({ sourceSha: checkout.toolingSha, rotationId: required(args, "rotation-id"), outputDirectory, client, topology, historicalTransitionEvidence, liveReferenceAudit: audit, repositoryRoot, gitRun, historicalTopologySha256, afterAbandonmentPersist, afterPreparationPersist });
     output(result);
     return result;
   } else if (args.has("execute")) {

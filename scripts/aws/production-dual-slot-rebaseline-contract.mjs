@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
 import path from "node:path";
 import { assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalIdentity, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
+import { assertProductionSupersessionEvidence } from "../security/production-initial-migration-source-advance.mjs";
 
 export const PRODUCTION_DUAL_SLOT_REBASELINE = Object.freeze({ schemaVersion: 1, kind: "PRODUCTION_DUAL_SLOT_REBASELINE", repository: "T-ej2003/genuine-scan-main", environment: "production", accountId: "368992683803", region: "eu-west-2", maxSecretValueWrites: 7 });
 export const REBASELINE_SLOTS = Object.freeze({ jwtPending: "mscqr/prod/rotation/jwt-pending", qrPrivatePending: "mscqr/prod/rotation/qr-private-pending", qrPublicPending: "mscqr/prod/rotation/qr-public-pending", jwtPrevious: "mscqr/prod/rotation/jwt-previous", qrPublicPrevious: "mscqr/prod/rotation/qr-public-previous", qrCurrentVersion: "mscqr/prod/rotation/qr-current-version", qrPreviousVersion: "mscqr/prod/rotation/qr-previous-version" });
@@ -19,6 +20,9 @@ export const REBASELINE_ROTATION_BINDINGS_KIND = "PRODUCTION_DUAL_SLOT_REBASELIN
 export const REBASELINE_ROTATION_BINDINGS_PRODUCER = "scripts/aws/production-dual-slot-rebaseline-contract.mjs:buildRebaselineRotationBindings";
 export const REBASELINE_HISTORICAL_SOURCE_SHAS = Object.freeze(["5506cbe3972a27a77c211f2891756c3b97de7197", "9f39d1c4f646467146c12c0587fd7ad585f3fe10"]);
 export const REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID = "rotation-20260826060632-b15b3f51";
+export const AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION = "AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION";
+export const REBASELINE_COORDINATOR_SOURCE_SHA = REBASELINE_HISTORICAL_SOURCE_SHAS[1];
+export const REBASELINE_COORDINATOR_WRITER = "backend/scripts/security/rotate-production-signing-material.mjs:putMaterial";
 // SHA-256 of private retained supersession evidence's exact {resources,versionIds}.
 // Production ARNs and version IDs remain private evidence, not committed source.
 export const REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256 = "80ec0c997561f13e4162e1aeaf9133dd58e4b5aa40f8eba5b13ee3474528e1ae";
@@ -126,6 +130,106 @@ function assertHistoricalSlotIdentities(identities, resources, currentVersionIds
   return Object.freeze({ ...identities });
 }
 
+const coordinatorTransitionToken = (rotationId, slot) => slot === "jwtPrevious"
+  ? sha256(`${rotationId}:jwt:previous`)
+  : slot === "qrCurrentVersion" ? sha256(`${rotationId}:qr:current-version`) : undefined;
+
+export function coordinatorTransitionVersionId({ historicalRotationId = REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, slot } = {}) {
+  if (historicalRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID || !REBASELINE_SLOT_ORDER.includes(slot) || !coordinatorTransitionToken(historicalRotationId, slot)) fail("Coordinator transition slot is invalid.");
+  assertRotation(historicalRotationId, "historicalRotationId");
+  return coordinatorTransitionToken(historicalRotationId, slot);
+}
+
+export function coordinatorTransitionSlotIdentity({ slot, secretArn, versionId, stages, payload } = {}) {
+  if (!['jwtPrevious', 'qrCurrentVersion'].includes(slot)) fail("Coordinator transition slot is invalid.");
+  assertArn(secretArn, "Coordinator transition secret ARN");
+  assertVersion(versionId, "Coordinator transition VersionId");
+  if (versionId !== coordinatorTransitionVersionId({ slot }) || !Array.isArray(stages) || canonical([...stages].sort()) !== canonical(["AWSCURRENT"])) fail("Coordinator transition VersionId or stages are not exact.");
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || typeof payload.value !== "string" || payload.rotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID) fail("Coordinator transition payload is malformed.");
+  const expected = slot === "jwtPrevious" ? { family: "jwt_secrets", slot: "previous" } : HISTORICAL_SLOT_SHAPES[slot];
+  if (payload.family !== expected.family || payload.slot !== expected.slot) fail(`Coordinator transition ${slot} payload kind is not authentic.`);
+  if (slot === "jwtPrevious") {
+    if (payload.sourceSha !== undefined || typeof payload.materialFingerprint !== "string" || payload.materialFingerprint !== fingerprint(payload.value)) fail("Coordinator jwtPrevious source-less writer shape is not authentic.");
+  } else if (payload.sourceSha !== REBASELINE_COORDINATOR_SOURCE_SHA || typeof payload.keyVersion !== "string" || !payload.keyVersion) fail("Coordinator qrCurrentVersion writer shape is not authentic.");
+  const body = {
+    schemaVersion: 1, kind: AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION, slot, secretArn, versionId, stages: ["AWSCURRENT"],
+    payloadSchema: "COORDINATOR_ROTATION_WRITER_V1", payloadKind: { family: payload.family, slot: payload.slot },
+    observedRotationId: payload.rotationId, ...(payload.sourceSha === undefined ? {} : { observedSourceSha: payload.sourceSha }),
+    payloadSha256: canonicalSha256(payload), ...(payload.materialFingerprint ? { materialFingerprint: payload.materialFingerprint } : {}), ...(payload.keyVersion ? { keyVersion: payload.keyVersion } : {}),
+  };
+  return Object.freeze({ ...body, identitySha256: canonicalSha256(body) });
+}
+
+function assertCoordinatorTransitionSlotIdentity(value, { slot, secretArn, versionId } = {}) {
+  const allowed = ["schemaVersion", "kind", "slot", "secretArn", "versionId", "stages", "payloadSchema", "payloadKind", "observedRotationId", "observedSourceSha", "payloadSha256", "materialFingerprint", "keyVersion", "identitySha256"];
+  if (!value || typeof value !== "object" || Object.keys(value).some((key) => !allowed.includes(key)) || value.schemaVersion !== 1 || value.kind !== AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION || value.slot !== slot || value.secretArn !== secretArn || value.versionId !== versionId || canonical(value.stages) !== canonical(["AWSCURRENT"]) || value.payloadSchema !== "COORDINATOR_ROTATION_WRITER_V1" || value.observedRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID || !SHA256.test(value.payloadSha256 || "") || !SHA256.test(value.identitySha256 || "")) fail("Coordinator transition slot identity is invalid.");
+  const expected = slot === "jwtPrevious" ? { family: "jwt_secrets", slot: "previous" } : { family: "qr_key_versions", slot: "current" };
+  if (value.payloadKind?.family !== expected.family || value.payloadKind?.slot !== expected.slot || (slot === "jwtPrevious" ? value.observedSourceSha !== undefined || typeof value.materialFingerprint !== "string" : value.observedSourceSha !== REBASELINE_COORDINATOR_SOURCE_SHA || typeof value.keyVersion !== "string" || !value.keyVersion)) fail("Coordinator transition slot provenance is invalid.");
+  const { identitySha256, ...body } = value;
+  if (canonicalSha256(body) !== identitySha256) fail("Coordinator transition slot identity hash is invalid.");
+  return value;
+}
+
+function assertCoordinatorTransitionIdentityMap(identities, resources, versionIds, label, coordinatorSlots = ["jwtPrevious", "qrCurrentVersion"]) {
+  exactKeys(identities, REBASELINE_SLOT_ORDER, label);
+  for (const slot of REBASELINE_SLOT_ORDER) {
+    if (coordinatorSlots.includes(slot)) assertCoordinatorTransitionSlotIdentity(identities[slot], { slot, secretArn: resources[slot], versionId: versionIds[slot] });
+    else assertHistoricalSlotIdentity(identities[slot], { slot, secretArn: resources[slot], versionId: versionIds[slot] });
+  }
+  return Object.freeze({ ...identities });
+}
+
+export function assertAuthenticatedPreCutoverCoordinatorTransition(value, { resources, observedVersionIds, observedSlotIdentities, liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256 } = {}) {
+  const keys = ["schemaVersion", "kind", "coordinatorSourceSha", "historicalRotationId", "writer", "originalSupersessionEvidence", "originalSupersessionEvidenceSha256", "predecessorVersionIds", "predecessorSlotIdentities", "postVersionIds", "postSlotIdentities", "authorization", "rotationState", "unexplainedSlotCount", "conflictSlotCount", "dualSlotReferences", "liveReferenceAuditSha256", "liveLegacyBaselineIdentitySha256", "transitionSha256"];
+  exactKeys(value, keys, "Coordinator transition evidence");
+  if (value.schemaVersion !== 1 || value.kind !== AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION || value.coordinatorSourceSha !== REBASELINE_COORDINATOR_SOURCE_SHA || value.historicalRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID || value.unexplainedSlotCount !== 0 || value.conflictSlotCount !== 0 || value.dualSlotReferences !== 0 || !SHA256.test(value.liveReferenceAuditSha256 || "") || !SHA256.test(value.liveLegacyBaselineIdentitySha256 || "")) fail("Coordinator transition evidence identity is invalid.");
+  exactKeys(value.writer, ["sourceSha", "module", "operation", "semanticsVersion"], "Coordinator transition writer");
+  if (value.writer.sourceSha !== REBASELINE_COORDINATOR_SOURCE_SHA || value.writer.module !== "backend/scripts/security/rotate-production-signing-material.mjs" || value.writer.operation !== "putMaterial" || value.writer.semanticsVersion !== 1) fail("Coordinator transition writer provenance is invalid.");
+  assertProductionSupersessionEvidence(value.originalSupersessionEvidence);
+  if (value.originalSupersessionEvidence.sourceSha !== REBASELINE_HISTORICAL_SOURCE_SHAS[0] || value.originalSupersessionEvidence.rotationId !== value.historicalRotationId || value.originalSupersessionEvidenceSha256 !== value.originalSupersessionEvidence.evidenceIdentitySha256) fail("Coordinator predecessor supersession evidence is invalid.");
+  const checkedResources = assertSlotMap(resources || Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, value.predecessorSlotIdentities[slot]?.secretArn])), "Coordinator transition resources");
+  if (canonical(value.originalSupersessionEvidence.resources) !== canonical(Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, { arn: checkedResources[slot], stages: ["AWSCURRENT"], versionId: value.predecessorVersionIds[slot] }]))) ) fail("Coordinator predecessor resources are not exact.");
+  exactKeys(value.predecessorVersionIds, REBASELINE_SLOT_ORDER, "Coordinator predecessorVersionIds");
+  exactKeys(value.postVersionIds, REBASELINE_SLOT_ORDER, "Coordinator postVersionIds");
+  for (const slot of REBASELINE_SLOT_ORDER) {
+    assertVersion(value.predecessorVersionIds[slot], `Coordinator predecessor VersionId ${slot}`);
+    assertVersion(value.postVersionIds[slot], `Coordinator post VersionId ${slot}`);
+    if (value.postVersionIds[slot] !== (coordinatorTransitionToken(value.historicalRotationId, slot) || value.predecessorVersionIds[slot])) fail(`Coordinator ${slot} transition VersionId is not deterministic.`);
+  }
+  if (canonicalSha256({ resources: checkedResources, versionIds: value.predecessorVersionIds }) !== canonicalSha256({ resources: checkedResources, versionIds: value.originalSupersessionEvidence.resources && Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, value.originalSupersessionEvidence.resources[slot].versionId])) })) fail("Coordinator predecessor topology is not bound to supersession evidence.");
+  assertHistoricalSlotIdentities(value.predecessorSlotIdentities, checkedResources, value.predecessorVersionIds, canonicalSha256({ resources: checkedResources, versionIds: value.predecessorVersionIds }));
+  assertCoordinatorTransitionIdentityMap(value.postSlotIdentities, checkedResources, value.postVersionIds);
+  exactKeys(value.authorization, ["reference", "sourceSha", "rotationId", "resourcesSha256", "evidenceSha256"], "Coordinator transition authorization");
+  if (value.authorization.reference !== "GH-ISSUE-391" || value.authorization.sourceSha !== REBASELINE_COORDINATOR_SOURCE_SHA || value.authorization.rotationId !== value.historicalRotationId || value.authorization.resourcesSha256 !== canonicalSha256(checkedResources)) fail("Coordinator transition authorization is invalid.");
+  const { evidenceSha256: authorizationEvidenceSha, ...authorizationBody } = value.authorization;
+  if (authorizationEvidenceSha !== canonicalSha256(authorizationBody)) fail("Coordinator transition authorization evidence hash is invalid.");
+  exactKeys(value.rotationState, ["stateVersion", "sourceSha", "rotationId", "phase", "initialMigrationSourceSha", "stateSha256"], "Coordinator transition rotation state");
+  if (value.rotationState.stateVersion !== 4 || value.rotationState.sourceSha !== REBASELINE_COORDINATOR_SOURCE_SHA || value.rotationState.rotationId !== value.historicalRotationId || value.rotationState.phase !== "overlap-deploy-required" || value.rotationState.initialMigrationSourceSha !== REBASELINE_HISTORICAL_SOURCE_SHAS[0]) fail("Coordinator transition rotation state is invalid.");
+  const { stateSha256, ...stateBody } = value.rotationState;
+  if (stateSha256 !== canonicalSha256(stateBody)) fail("Coordinator transition rotation state hash is invalid.");
+  if (observedVersionIds && canonical(observedVersionIds) !== canonical(value.postVersionIds)) fail("Observed coordinator transition versions are not exact.");
+  if (observedSlotIdentities) {
+    assertCoordinatorTransitionIdentityMap(observedSlotIdentities, checkedResources, value.postVersionIds);
+    if (canonical(observedSlotIdentities) !== canonical(value.postSlotIdentities)) fail("Observed coordinator transition identities are not exact.");
+  }
+  if (liveReferenceAuditSha256 !== undefined && value.liveReferenceAuditSha256 !== liveReferenceAuditSha256) fail("Coordinator transition live-reference evidence is not exact.");
+  if (liveLegacyBaselineIdentitySha256 !== undefined && value.liveLegacyBaselineIdentitySha256 !== liveLegacyBaselineIdentitySha256) fail("Coordinator transition legacy baseline evidence is not exact.");
+  const { transitionSha256, ...body } = value;
+  if (!SHA256.test(transitionSha256 || "") || canonicalSha256(body) !== transitionSha256) fail("Coordinator transition evidence hash is invalid.");
+  return Object.freeze({ ...value, resources: checkedResources });
+}
+
+export function buildAuthenticatedPreCutoverCoordinatorTransition({ coordinatorSourceSha = REBASELINE_COORDINATOR_SOURCE_SHA, historicalRotationId = REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, resources, originalSupersessionEvidence, predecessorSlotIdentities, postSlotIdentities, authorization, rotationState, liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256 } = {}) {
+  const checkedResources = assertSlotMap(resources, "Coordinator transition resources");
+  assertProductionSupersessionEvidence(originalSupersessionEvidence);
+  const predecessorVersionIds = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, originalSupersessionEvidence.resources[slot].versionId]));
+  const postVersionIds = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, coordinatorTransitionToken(historicalRotationId, slot) || predecessorVersionIds[slot]]));
+  const body = { schemaVersion: 1, kind: AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION, coordinatorSourceSha, historicalRotationId, writer: { sourceSha: coordinatorSourceSha, module: "backend/scripts/security/rotate-production-signing-material.mjs", operation: "putMaterial", semanticsVersion: 1 }, originalSupersessionEvidence, originalSupersessionEvidenceSha256: originalSupersessionEvidence.evidenceIdentitySha256, predecessorVersionIds, predecessorSlotIdentities, postVersionIds, postSlotIdentities, authorization, rotationState, unexplainedSlotCount: 0, conflictSlotCount: 0, dualSlotReferences: 0, liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256 };
+  const result = { ...body, transitionSha256: canonicalSha256(body) };
+  assertAuthenticatedPreCutoverCoordinatorTransition(result, { resources: checkedResources });
+  return Object.freeze(result);
+}
+
 export function generateRebaselineMaterial() {
   const pair = crypto.generateKeyPairSync("ed25519", { privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } });
   const qrPrivate = pair.privateKey;
@@ -141,25 +245,33 @@ export function assertGeneratedMaterial(material) {
   return material;
 }
 
-export function buildAbandonmentEvidence({ sourceSha, historicalRotationId, historicalSourceShas, resources, currentVersionIds, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, observedSlotIdentities, liveReferenceAudit, liveReferenceAuditSha256, legacyRuntimeAuthoritative, observedAt = new Date().toISOString() } = {}) {
+export function buildAbandonmentEvidence({ sourceSha, historicalRotationId, historicalSourceShas, resources, currentVersionIds, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, observedSlotIdentities, historicalTransitionEvidence, liveReferenceAudit, liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256, legacyRuntimeAuthoritative, observedAt = new Date().toISOString() } = {}) {
   assertSha40(sourceSha, "sourceSha"); assertRotation(historicalRotationId, "historicalRotationId"); if (historicalRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID) fail("Historical rotation identity is not the approved abandoned pre-cutover rotation.");
   const checkedResources = assertSlotMap(resources, "resources"); exactKeys(currentVersionIds, REBASELINE_SLOT_ORDER, "currentVersionIds");
   for (const slot of REBASELINE_SLOT_ORDER) assertVersion(currentVersionIds[slot], `currentVersionIds.${slot}`);
-  const checkedIdentities = assertHistoricalSlotIdentities(observedSlotIdentities, checkedResources, currentVersionIds, historicalTopologySha256);
-  if (liveReferenceAudit !== "PASS" || !SHA256.test(liveReferenceAuditSha256 || "") || legacyRuntimeAuthoritative !== true) fail("Historical rotation is not proven abandoned before cutover.");
+  const checkedIdentities = historicalTransitionEvidence
+    ? (assertAuthenticatedPreCutoverCoordinatorTransition(historicalTransitionEvidence, { resources: checkedResources, observedVersionIds: currentVersionIds, observedSlotIdentities, liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256 }).postSlotIdentities)
+    : assertHistoricalSlotIdentities(observedSlotIdentities, checkedResources, currentVersionIds, historicalTopologySha256);
+  if (liveReferenceAudit !== "PASS" || !SHA256.test(liveReferenceAuditSha256 || "") || legacyRuntimeAuthoritative !== true || (historicalTransitionEvidence && !SHA256.test(liveLegacyBaselineIdentitySha256 || ""))) fail("Historical rotation is not proven abandoned before cutover.");
   const timestamp = new Date(observedAt); if (!Number.isFinite(timestamp.getTime()) || timestamp.toISOString() !== observedAt) fail("observedAt is invalid.");
-  const body = { schemaVersion: 2, kind: ABANDONED_PRE_CUTOVER, environment: "production", accountId: PRODUCTION_DUAL_SLOT_REBASELINE.accountId, region: PRODUCTION_DUAL_SLOT_REBASELINE.region, sourceSha, historicalRotationId, historicalSourceShas: assertHistoricalSources(historicalSourceShas), resources: checkedResources, currentVersionIds: Object.freeze({ ...currentVersionIds }), historicalTopologySha256, observedSlotIdentities: checkedIdentities, observedSlotIdentitiesSha256: canonicalSha256(checkedIdentities), liveReferenceAudit, liveReferenceAuditSha256, legacyRuntimeAuthoritative, observedAt };
+  const body = { schemaVersion: historicalTransitionEvidence ? 3 : 2, kind: ABANDONED_PRE_CUTOVER, environment: "production", accountId: PRODUCTION_DUAL_SLOT_REBASELINE.accountId, region: PRODUCTION_DUAL_SLOT_REBASELINE.region, sourceSha, historicalRotationId, historicalSourceShas: assertHistoricalSources(historicalSourceShas), resources: checkedResources, currentVersionIds: Object.freeze({ ...currentVersionIds }), historicalTopologySha256, observedSlotIdentities: checkedIdentities, observedSlotIdentitiesSha256: canonicalSha256(checkedIdentities), liveReferenceAudit, liveReferenceAuditSha256, legacyRuntimeAuthoritative, observedAt, ...(historicalTransitionEvidence ? { historicalTransitionEvidence, observedTopologySha256: canonicalSha256({ resources: checkedResources, versionIds: currentVersionIds }), liveLegacyBaselineIdentitySha256 } : {}) };
   return Object.freeze({ ...body, evidenceSha256: canonicalSha256(body) });
 }
 
 export function assertAbandonmentEvidence(evidence, { sourceSha, resources, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256 } = {}) {
-  exactKeys(evidence, ["schemaVersion", "kind", "environment", "accountId", "region", "sourceSha", "historicalRotationId", "historicalSourceShas", "resources", "currentVersionIds", "historicalTopologySha256", "observedSlotIdentities", "observedSlotIdentitiesSha256", "liveReferenceAudit", "liveReferenceAuditSha256", "legacyRuntimeAuthoritative", "observedAt", "evidenceSha256"], "Abandonment evidence");
-  if (evidence.schemaVersion !== 2 || evidence.kind !== ABANDONED_PRE_CUTOVER || evidence.environment !== "production" || evidence.accountId !== PRODUCTION_DUAL_SLOT_REBASELINE.accountId || evidence.region !== PRODUCTION_DUAL_SLOT_REBASELINE.region || evidence.sourceSha !== sourceSha || evidence.liveReferenceAudit !== "PASS" || !SHA256.test(evidence.liveReferenceAuditSha256 || "") || evidence.legacyRuntimeAuthoritative !== true) fail("Abandonment evidence identity is invalid.");
+  const commonKeys = ["schemaVersion", "kind", "environment", "accountId", "region", "sourceSha", "historicalRotationId", "historicalSourceShas", "resources", "currentVersionIds", "historicalTopologySha256", "observedSlotIdentities", "observedSlotIdentitiesSha256", "liveReferenceAudit", "liveReferenceAuditSha256", "legacyRuntimeAuthoritative", "observedAt", "evidenceSha256"];
+  const transitionKeys = ["historicalTransitionEvidence", "observedTopologySha256", "liveLegacyBaselineIdentitySha256"];
+  exactKeys(evidence, evidence?.schemaVersion === 3 ? [...commonKeys, ...transitionKeys] : commonKeys, "Abandonment evidence");
+  if (![2, 3].includes(evidence.schemaVersion) || evidence.kind !== ABANDONED_PRE_CUTOVER || evidence.environment !== "production" || evidence.accountId !== PRODUCTION_DUAL_SLOT_REBASELINE.accountId || evidence.region !== PRODUCTION_DUAL_SLOT_REBASELINE.region || evidence.sourceSha !== sourceSha || evidence.liveReferenceAudit !== "PASS" || !SHA256.test(evidence.liveReferenceAuditSha256 || "") || evidence.legacyRuntimeAuthoritative !== true) fail("Abandonment evidence identity is invalid.");
   assertRotation(evidence.historicalRotationId, "historicalRotationId"); if (evidence.historicalRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID) fail("Abandonment evidence historical rotation is not exact."); assertHistoricalSources(evidence.historicalSourceShas);
   const expectedResources = assertSlotMap(resources || evidence.resources, "resources"); if (canonical(evidence.resources) !== canonical(expectedResources)) fail("Abandonment evidence resources are not exact.");
   exactKeys(evidence.currentVersionIds, REBASELINE_SLOT_ORDER, "currentVersionIds"); for (const slot of REBASELINE_SLOT_ORDER) assertVersion(evidence.currentVersionIds[slot], `currentVersionIds.${slot}`);
   if (evidence.historicalTopologySha256 !== historicalTopologySha256) fail("Abandonment evidence historical topology identity is not exact.");
-  assertHistoricalSlotIdentities(evidence.observedSlotIdentities, evidence.resources, evidence.currentVersionIds, historicalTopologySha256);
+  if (evidence.schemaVersion === 3) {
+    assertSha256(evidence.observedTopologySha256, "observedTopologySha256");
+    if (evidence.observedTopologySha256 !== canonicalSha256({ resources: evidence.resources, versionIds: evidence.currentVersionIds }) || !SHA256.test(evidence.liveLegacyBaselineIdentitySha256 || "")) fail("Abandonment evidence observed topology is invalid.");
+    assertAuthenticatedPreCutoverCoordinatorTransition(evidence.historicalTransitionEvidence, { resources: expectedResources, observedVersionIds: evidence.currentVersionIds, observedSlotIdentities: evidence.observedSlotIdentities, liveReferenceAuditSha256: evidence.liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256: evidence.liveLegacyBaselineIdentitySha256 });
+  } else assertHistoricalSlotIdentities(evidence.observedSlotIdentities, evidence.resources, evidence.currentVersionIds, historicalTopologySha256);
   if (evidence.observedSlotIdentitiesSha256 !== canonicalSha256(evidence.observedSlotIdentities)) fail("Abandonment evidence historical payload identities are not bound.");
   const observed = new Date(evidence.observedAt); if (!Number.isFinite(observed.getTime()) || observed.toISOString() !== evidence.observedAt) fail("Abandonment evidence timestamp is invalid.");
   const { evidenceSha256, ...body } = evidence; if (!SHA256.test(evidenceSha256 || "") || canonicalSha256(body) !== evidenceSha256) fail("Abandonment evidence hash is invalid.");
@@ -174,6 +286,7 @@ export function assertRebaselinePreconditions(preconditions = {}) {
   if (preconditions.historicalTopologySha256 !== undefined) assertSha256(preconditions.historicalTopologySha256, "historicalTopologySha256");
   const resources = assertSlotMap(preconditions.resources, "resources"); const abandonmentEvidence = assertAbandonmentEvidence(preconditions.abandonmentEvidence, { sourceSha: preconditions.sourceSha, resources, historicalTopologySha256: preconditions.historicalTopologySha256 });
   if (abandonmentEvidence.liveReferenceAuditSha256 !== preconditions.liveReferenceAuditSha256) fail("Rebaseline live reference audit is not bound to abandonment evidence.");
+  if (abandonmentEvidence.schemaVersion === 3 && preconditions.legacyBaseline && abandonmentEvidence.liveLegacyBaselineIdentitySha256 !== canonicalSha256(assertLegacyBaseline(preconditions.legacyBaseline))) fail("Rebaseline live legacy baseline is not bound to abandonment evidence.");
   return Object.freeze({ ...preconditions, resources, abandonmentEvidence, historicalRotationId: abandonmentEvidence.historicalRotationId });
 }
 
