@@ -78,17 +78,30 @@ const AUTHENTICATED_COORDINATOR_TRANSITION_ANCHOR = Object.freeze({
   }),
   authorization: Object.freeze({ reference: "GH-ISSUE-391", sourceSha: REBASELINE_COORDINATOR_SOURCE_SHA, rotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, resourcesSha256: "107e412e699b03ab324ddf6d3ebb0173a2b0d589db400dc921de22a91f56d1ab", evidenceSha256: "4da8122764c5d404d668320a222c2f590e78db34217a4e5d72dfc8b22b0354b8" }),
   rotationState: Object.freeze({ stateVersion: 4, sourceSha: REBASELINE_COORDINATOR_SOURCE_SHA, rotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, phase: "overlap-deploy-required", initialMigrationSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], stateSha256: "1769b305a1aea0619c1a58f478aa3fc4dd8f0c2505c6c39cc34326bfaf78744c" }),
-  transitionedSlots: Object.freeze({
-    jwtPrevious: Object.freeze({ payloadSchema: "COORDINATOR_ROTATION_WRITER_V1", family: "jwt_secrets", slot: "previous", sourceSha: null }),
-    qrCurrentVersion: Object.freeze({ payloadSchema: "COORDINATOR_ROTATION_WRITER_V1", family: "qr_key_versions", slot: "current", sourceSha: REBASELINE_COORDINATOR_SOURCE_SHA }),
+  predecessorPayloadIdentities: Object.freeze({
+    jwtPending: Object.freeze({ payloadSchema: "INITIAL_DUAL_SLOT_ROTATION_V1", payloadKind: Object.freeze({ family: "jwt_secrets", slot: "pending", initialMigration: false }), observedRotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "f5fd4550c84c9e6c4d3b814abe34baf262e23bdf69d389a9477eb342481fa3f5", materialFingerprint: "465ccccb1c54732a", keyVersion: null }),
+    qrPrivatePending: Object.freeze({ payloadSchema: "INITIAL_DUAL_SLOT_ROTATION_V1", payloadKind: Object.freeze({ family: "qr_signing_keys", slot: "pending-private", initialMigration: false }), observedRotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "4c452f500a4b3397e9563fc32c9673ff2236da2793b02f4355995b882af2e306", materialFingerprint: "52535062f8f92570", keyVersion: "c41ca96ab047dd25" }),
+    qrPublicPending: Object.freeze({ payloadSchema: "INITIAL_DUAL_SLOT_ROTATION_V1", payloadKind: Object.freeze({ family: "qr_signing_keys", slot: "pending-public", initialMigration: false }), observedRotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "230e8c09214455fc73fb14fe3232b8c4534e6f6a827a798dd8dcda59eaf1cb08", materialFingerprint: "c41ca96ab047dd25", keyVersion: "c41ca96ab047dd25" }),
+    jwtPrevious: Object.freeze({ payloadSchema: "INITIAL_DUAL_SLOT_SOURCE_ADVANCE_V1", payloadKind: Object.freeze({ family: "jwt_secrets", slot: "empty", initialMigration: true }), observedRotationId: null, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "6142323165b798617aa7c16d01bce85be1598f304a5d8f1615fcae4cd8ce0442", materialFingerprint: null, keyVersion: null }),
+    qrPublicPrevious: Object.freeze({ payloadSchema: "INITIAL_DUAL_SLOT_SOURCE_ADVANCE_V1", payloadKind: Object.freeze({ family: "qr_signing_keys", slot: "empty", initialMigration: true }), observedRotationId: null, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "2b9556af5ac261ebf168cdab1061e8d165b6d6b9e54563320a981449dea1167a", materialFingerprint: null, keyVersion: null }),
+    qrCurrentVersion: Object.freeze({ payloadSchema: "INITIAL_DUAL_SLOT_SOURCE_ADVANCE_V1", payloadKind: Object.freeze({ family: "qr_key_versions", slot: "current", initialMigration: true }), observedRotationId: null, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "46248c1e25e4825213ac2c9260a5c129296fb7acf531a0c6438690cfbc5d444e", materialFingerprint: null, keyVersion: null }),
+    qrPreviousVersion: Object.freeze({ payloadSchema: "INITIAL_DUAL_SLOT_SOURCE_ADVANCE_V1", payloadKind: Object.freeze({ family: "qr_key_versions", slot: "previous-empty", initialMigration: true }), observedRotationId: null, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "06ec3870a4dbceb768bd35a0480999b30e2bfb50a8a9cce7712601abaab4b715", materialFingerprint: null, keyVersion: null }),
   }),
-  unchangedSlots: Object.freeze(["jwtPending", "qrPrivatePending", "qrPublicPending", "qrPublicPrevious", "qrPreviousVersion"]),
+  postPayloadIdentities: Object.freeze({
+    jwtPending: Object.freeze({ payloadSchema: "INITIAL_DUAL_SLOT_ROTATION_V1", payloadKind: Object.freeze({ family: "jwt_secrets", slot: "pending", initialMigration: false }), observedRotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "f5fd4550c84c9e6c4d3b814abe34baf262e23bdf69d389a9477eb342481fa3f5", materialFingerprint: "465ccccb1c54732a", keyVersion: null }),
+    qrPrivatePending: Object.freeze({ payloadSchema: "INITIAL_DUAL_SLOT_ROTATION_V1", payloadKind: Object.freeze({ family: "qr_signing_keys", slot: "pending-private", initialMigration: false }), observedRotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "4c452f500a4b3397e9563fc32c9673ff2236da2793b02f4355995b882af2e306", materialFingerprint: "52535062f8f92570", keyVersion: "c41ca96ab047dd25" }),
+    qrPublicPending: Object.freeze({ payloadSchema: "INITIAL_DUAL_SLOT_ROTATION_V1", payloadKind: Object.freeze({ family: "qr_signing_keys", slot: "pending-public", initialMigration: false }), observedRotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "230e8c09214455fc73fb14fe3232b8c4534e6f6a827a798dd8dcda59eaf1cb08", materialFingerprint: "c41ca96ab047dd25", keyVersion: "c41ca96ab047dd25" }),
+    jwtPrevious: Object.freeze({ payloadSchema: "COORDINATOR_ROTATION_WRITER_V1", payloadKind: Object.freeze({ family: "jwt_secrets", slot: "previous" }), observedRotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, observedSourceSha: null, payloadSha256: "b1b4ab8a1b75414c9ac67c5805712d2d0d5c77abe759a50080a92b43295333dc", materialFingerprint: "f08038af478ff7cc", keyVersion: null }),
+    qrPublicPrevious: Object.freeze({ payloadSchema: "INITIAL_DUAL_SLOT_SOURCE_ADVANCE_V1", payloadKind: Object.freeze({ family: "qr_signing_keys", slot: "empty", initialMigration: true }), observedRotationId: null, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "2b9556af5ac261ebf168cdab1061e8d165b6d6b9e54563320a981449dea1167a", materialFingerprint: null, keyVersion: null }),
+    qrCurrentVersion: Object.freeze({ payloadSchema: "COORDINATOR_ROTATION_WRITER_V1", payloadKind: Object.freeze({ family: "qr_key_versions", slot: "current" }), observedRotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, observedSourceSha: REBASELINE_COORDINATOR_SOURCE_SHA, payloadSha256: "084036f486c0269ad9e56ba406d391cda77b3c51f301ea2772b336de38ad65a8", materialFingerprint: null, keyVersion: "c41ca96ab047dd25" }),
+    qrPreviousVersion: Object.freeze({ payloadSchema: "INITIAL_DUAL_SLOT_SOURCE_ADVANCE_V1", payloadKind: Object.freeze({ family: "qr_key_versions", slot: "previous-empty", initialMigration: true }), observedRotationId: null, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "06ec3870a4dbceb768bd35a0480999b30e2bfb50a8a9cce7712601abaab4b715", materialFingerprint: null, keyVersion: null }),
+  }),
   unexplainedSlotCount: 0,
   conflictSlotCount: 0,
   dualSlotReferences: 0,
 });
 
-export const EXPECTED_AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION_SHA256 = "9705170e179b31d56133d41d6c8946806c8781f76b95f4e194dba7784e79b564";
+export const EXPECTED_AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION_SHA256 = "82e33f535b53254c531ccbb6151fe9aee116d3401d7509d472da54626cb9b580";
 if (canonicalSha256(AUTHENTICATED_COORDINATOR_TRANSITION_ANCHOR) !== EXPECTED_AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION_SHA256) throw new Error("Protected coordinator transition anchor is internally inconsistent.");
 
 function assertSlotMap(map, label) {
@@ -172,6 +185,10 @@ function assertHistoricalSlotIdentities(identities, resources, currentVersionIds
   assertHistoricalTopology(resources, currentVersionIds, historicalTopologySha256);
   exactKeys(identities, REBASELINE_SLOT_ORDER, "observedSlotIdentities");
   for (const slot of REBASELINE_SLOT_ORDER) assertHistoricalSlotIdentity(identities[slot], { slot, secretArn: resources[slot], versionId: currentVersionIds[slot] });
+  if (historicalTopologySha256 === REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256) {
+    const observedPayloadIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, coordinatorTransitionPayloadIdentity(identities[slot])]));
+    if (canonicalSha256(resources) !== AUTHENTICATED_COORDINATOR_TRANSITION_ANCHOR.resourcesSha256 || canonical(currentVersionIds) !== canonical(AUTHENTICATED_COORDINATOR_TRANSITION_ANCHOR.predecessorVersionIds) || canonical(observedPayloadIdentities) !== canonical(AUTHENTICATED_COORDINATOR_TRANSITION_ANCHOR.predecessorPayloadIdentities)) fail("Historical slot payload identities do not match the protected historical authority anchor.");
+  }
   return Object.freeze({ ...identities });
 }
 
@@ -224,6 +241,18 @@ function assertCoordinatorTransitionIdentityMap(identities, resources, versionId
   return Object.freeze({ ...identities });
 }
 
+function coordinatorTransitionPayloadIdentity(value) {
+  return Object.freeze({
+    payloadSchema: value.payloadSchema,
+    payloadKind: value.payloadKind,
+    observedRotationId: value.observedRotationId ?? null,
+    observedSourceSha: value.observedSourceSha ?? null,
+    payloadSha256: value.payloadSha256,
+    materialFingerprint: value.materialFingerprint ?? null,
+    keyVersion: value.keyVersion ?? null,
+  });
+}
+
 function coordinatorTransitionAnchorProjection(value, resources) {
   return {
     schemaVersion: value.schemaVersion,
@@ -238,8 +267,8 @@ function coordinatorTransitionAnchorProjection(value, resources) {
     postVersionIds: value.postVersionIds,
     authorization: value.authorization,
     rotationState: value.rotationState,
-    transitionedSlots: AUTHENTICATED_COORDINATOR_TRANSITION_ANCHOR.transitionedSlots,
-    unchangedSlots: AUTHENTICATED_COORDINATOR_TRANSITION_ANCHOR.unchangedSlots,
+    predecessorPayloadIdentities: Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, coordinatorTransitionPayloadIdentity(value.predecessorSlotIdentities[slot])])),
+    postPayloadIdentities: Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, coordinatorTransitionPayloadIdentity(value.postSlotIdentities[slot])])),
     unexplainedSlotCount: value.unexplainedSlotCount,
     conflictSlotCount: value.conflictSlotCount,
     dualSlotReferences: value.dualSlotReferences,

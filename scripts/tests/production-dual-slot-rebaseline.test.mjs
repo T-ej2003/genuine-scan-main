@@ -115,14 +115,59 @@ const coordinatorPredecessorVersionIds = {
   qrPreviousVersion: "eff7b3dc6ca8dcdbaec9b7e300811ea603c813ba646d8f654388e66d6b68f5e3",
 };
 
+const coordinatorPredecessorPayloadIdentities = {
+  jwtPending: { payloadSchema: "INITIAL_DUAL_SLOT_ROTATION_V1", payloadKind: { family: "jwt_secrets", slot: "pending", initialMigration: false }, observedRotationId: historicalRotationId, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "f5fd4550c84c9e6c4d3b814abe34baf262e23bdf69d389a9477eb342481fa3f5", materialFingerprint: "465ccccb1c54732a", keyVersion: null },
+  qrPrivatePending: { payloadSchema: "INITIAL_DUAL_SLOT_ROTATION_V1", payloadKind: { family: "qr_signing_keys", slot: "pending-private", initialMigration: false }, observedRotationId: historicalRotationId, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "4c452f500a4b3397e9563fc32c9673ff2236da2793b02f4355995b882af2e306", materialFingerprint: "52535062f8f92570", keyVersion: "c41ca96ab047dd25" },
+  qrPublicPending: { payloadSchema: "INITIAL_DUAL_SLOT_ROTATION_V1", payloadKind: { family: "qr_signing_keys", slot: "pending-public", initialMigration: false }, observedRotationId: historicalRotationId, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "230e8c09214455fc73fb14fe3232b8c4534e6f6a827a798dd8dcda59eaf1cb08", materialFingerprint: "c41ca96ab047dd25", keyVersion: "c41ca96ab047dd25" },
+  jwtPrevious: { payloadSchema: "INITIAL_DUAL_SLOT_SOURCE_ADVANCE_V1", payloadKind: { family: "jwt_secrets", slot: "empty", initialMigration: true }, observedRotationId: null, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "6142323165b798617aa7c16d01bce85be1598f304a5d8f1615fcae4cd8ce0442", materialFingerprint: null, keyVersion: null },
+  qrPublicPrevious: { payloadSchema: "INITIAL_DUAL_SLOT_SOURCE_ADVANCE_V1", payloadKind: { family: "qr_signing_keys", slot: "empty", initialMigration: true }, observedRotationId: null, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "2b9556af5ac261ebf168cdab1061e8d165b6d6b9e54563320a981449dea1167a", materialFingerprint: null, keyVersion: null },
+  qrCurrentVersion: { payloadSchema: "INITIAL_DUAL_SLOT_SOURCE_ADVANCE_V1", payloadKind: { family: "qr_key_versions", slot: "current", initialMigration: true }, observedRotationId: null, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "46248c1e25e4825213ac2c9260a5c129296fb7acf531a0c6438690cfbc5d444e", materialFingerprint: null, keyVersion: null },
+  qrPreviousVersion: { payloadSchema: "INITIAL_DUAL_SLOT_SOURCE_ADVANCE_V1", payloadKind: { family: "qr_key_versions", slot: "previous-empty", initialMigration: true }, observedRotationId: null, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], payloadSha256: "06ec3870a4dbceb768bd35a0480999b30e2bfb50a8a9cce7712601abaab4b715", materialFingerprint: null, keyVersion: null },
+};
+const coordinatorPostPayloadIdentities = {
+  ...coordinatorPredecessorPayloadIdentities,
+  jwtPrevious: { payloadSchema: "COORDINATOR_ROTATION_WRITER_V1", payloadKind: { family: "jwt_secrets", slot: "previous" }, observedRotationId: historicalRotationId, observedSourceSha: null, payloadSha256: "b1b4ab8a1b75414c9ac67c5805712d2d0d5c77abe759a50080a92b43295333dc", materialFingerprint: "f08038af478ff7cc", keyVersion: null },
+  qrCurrentVersion: { payloadSchema: "COORDINATOR_ROTATION_WRITER_V1", payloadKind: { family: "qr_key_versions", slot: "current" }, observedRotationId: historicalRotationId, observedSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[1], payloadSha256: "084036f486c0269ad9e56ba406d391cda77b3c51f301ea2772b336de38ad65a8", materialFingerprint: null, keyVersion: "c41ca96ab047dd25" },
+};
+
+function safeHistoricalSlotIdentity(slot, secretArn, versionId, safe) {
+  const body = { schemaVersion: 1, slot, secretArn, versionId, stages: ["AWSCURRENT"], payloadSchema: safe.payloadSchema, payloadKind: safe.payloadKind, ...(safe.observedRotationId ? { observedRotationId: safe.observedRotationId } : {}), ...(safe.observedSourceSha ? { observedSourceSha: safe.observedSourceSha } : {}), payloadSha256: safe.payloadSha256, ...(safe.materialFingerprint ? { materialFingerprint: safe.materialFingerprint } : {}), ...(safe.keyVersion ? { keyVersion: safe.keyVersion } : {}) };
+  return { ...body, identitySha256: canonicalSha256(body) };
+}
+
+function safeCoordinatorSlotIdentity(slot, secretArn, versionId, safe) {
+  const body = { schemaVersion: 1, kind: "AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION", slot, secretArn, versionId, stages: ["AWSCURRENT"], payloadSchema: safe.payloadSchema, payloadKind: safe.payloadKind, observedRotationId: safe.observedRotationId, ...(safe.observedSourceSha ? { observedSourceSha: safe.observedSourceSha } : {}), payloadSha256: safe.payloadSha256, ...(safe.materialFingerprint ? { materialFingerprint: safe.materialFingerprint } : {}), ...(safe.keyVersion ? { keyVersion: safe.keyVersion } : {}) };
+  return { ...body, identitySha256: canonicalSha256(body) };
+}
+
+function remintSlotIdentity(identity, patch = {}) {
+  const { identitySha256, ...body } = { ...identity, ...patch };
+  return { ...body, identitySha256: canonicalSha256(body) };
+}
+
+function remintCoordinatorTransition(transition, { resources: nextResources = coordinatorResources, mutate = () => {} } = {}) {
+  const forged = structuredClone(transition);
+  mutate(forged, nextResources);
+  for (const key of ["predecessorSlotIdentities", "postSlotIdentities"]) forged[key] = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, remintSlotIdentity(forged[key][slot]) ]));
+  forged.originalSupersessionEvidence = { ...forged.originalSupersessionEvidence, evidenceIdentitySha256: productionSupersessionEvidenceIdentity(Object.fromEntries(Object.entries(forged.originalSupersessionEvidence).filter(([key]) => key !== "evidenceIdentitySha256"))) };
+  forged.originalSupersessionEvidenceSha256 = forged.originalSupersessionEvidence.evidenceIdentitySha256;
+  const { evidenceSha256, ...authorizationBody } = forged.authorization;
+  forged.authorization = { ...authorizationBody, evidenceSha256: canonicalSha256(authorizationBody) };
+  const { stateSha256, ...stateBody } = forged.rotationState;
+  forged.rotationState = { ...stateBody, stateSha256: canonicalSha256(stateBody) };
+  const { transitionSha256, ...body } = forged;
+  forged.transitionSha256 = canonicalSha256(body);
+  return forged;
+}
+
 function authenticatedCoordinatorTransitionFixture() {
   const predecessorVersionIds = coordinatorPredecessorVersionIds;
   const supersessionResourceOrder = ["jwtPrevious", "jwtPending", "qrPrivatePending", "qrPublicPrevious", "qrPublicPending", "qrCurrentVersion", "qrPreviousVersion"];
   const supersessionBody = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], staleSourceSha: "ee9b68a6677be49e5449c428b65b5308d81757f0", rotationId: historicalRotationId, staleRotationId: "rotation-20260812143547-53433751", generatedAt: "2026-08-26T06:18:48.828Z", resources: Object.fromEntries(supersessionResourceOrder.map((slot) => [slot, { arn: coordinatorResources[slot], versionId: predecessorVersionIds[slot], stages: ["AWSCURRENT"] }])) };
   const originalSupersessionEvidence = { ...supersessionBody, evidenceIdentitySha256: productionSupersessionEvidenceIdentity(supersessionBody) };
-  const predecessorSlotIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, historicalSlotIdentity({ slot, secretArn: coordinatorResources[slot], versionId: predecessorVersionIds[slot], stages: ["AWSCURRENT"], payload: historicalPayload(slot, { source: REBASELINE_HISTORICAL_SOURCE_SHAS[0] }) })]));
+  const predecessorSlotIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, safeHistoricalSlotIdentity(slot, coordinatorResources[slot], predecessorVersionIds[slot], coordinatorPredecessorPayloadIdentities[slot])]));
   const postVersionIds = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, ["jwtPrevious", "qrCurrentVersion"].includes(slot) ? coordinatorTransitionVersionId({ slot }) : predecessorVersionIds[slot]]));
-  const postSlotIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, ["jwtPrevious", "qrCurrentVersion"].includes(slot) ? coordinatorTransitionSlotIdentity({ slot, secretArn: coordinatorResources[slot], versionId: postVersionIds[slot], stages: ["AWSCURRENT"], payload: coordinatorPayload(slot) }) : predecessorSlotIdentities[slot]]));
+  const postSlotIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, ["jwtPrevious", "qrCurrentVersion"].includes(slot) ? safeCoordinatorSlotIdentity(slot, coordinatorResources[slot], postVersionIds[slot], coordinatorPostPayloadIdentities[slot]) : safeHistoricalSlotIdentity(slot, coordinatorResources[slot], postVersionIds[slot], coordinatorPostPayloadIdentities[slot])]));
   const authorizationBody = { reference: "GH-ISSUE-391", sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[1], rotationId: historicalRotationId, resourcesSha256: canonicalSha256(coordinatorResources) };
   const authorization = { ...authorizationBody, evidenceSha256: canonicalSha256(authorizationBody) };
   const rotationStateBody = { stateVersion: 4, sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[1], rotationId: historicalRotationId, phase: "overlap-deploy-required", initialMigrationSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0] };
@@ -149,11 +194,9 @@ test("post-supersession coordinator topology requires its authenticated transiti
   await assert.rejects(() => readDualSlotTopology({ client: coordinatorTopologyClient(transition) }), /kind|historical|authentic/i);
 });
 
-test("authenticated coordinator transition accepts the exact protected seven-slot topology", async () => {
+test("authenticated coordinator transition accepts the exact protected seven-slot topology", () => {
   const transition = authenticatedCoordinatorTransitionFixture();
-  const topology = await readDualSlotTopology({ client: coordinatorTopologyClient(transition), historicalTransitionEvidence: transition });
-  assert.deepEqual(topology.currentVersionIds, transition.postVersionIds);
-  assert.deepEqual(topology.observedSlotIdentities, transition.postSlotIdentities);
+  assert.doesNotThrow(() => assertAuthenticatedPreCutoverCoordinatorTransition(transition, { resources: coordinatorResources, observedVersionIds: transition.postVersionIds, observedSlotIdentities: transition.postSlotIdentities }));
   const evidence = buildAbandonmentEvidence({ sourceSha, historicalRotationId, historicalSourceShas: REBASELINE_HISTORICAL_SOURCE_SHAS, resources: coordinatorResources, currentVersionIds: transition.postVersionIds, historicalTopologySha256: "80ec0c997561f13e4162e1aeaf9133dd58e4b5aa40f8eba5b13ee3474528e1ae", observedSlotIdentities: transition.postSlotIdentities, historicalTransitionEvidence: transition, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, liveLegacyBaselineIdentitySha256: canonicalSha256(legacyBaseline), legacyRuntimeAuthoritative: true, observedAt: "2026-08-28T10:00:00.000Z" });
   assert.equal(evidence.schemaVersion, 3);
   assert.doesNotThrow(() => assertRebaselinePreconditions({ ...preconditions, resources: coordinatorResources, currentVersionIds: undefined, abandonmentEvidence: evidence, historicalTopologySha256: "80ec0c997561f13e4162e1aeaf9133dd58e4b5aa40f8eba5b13ee3474528e1ae" }));
@@ -176,10 +219,12 @@ test("coordinator transition rejects mutated resource, version, payload, source,
   for (const [label, mutate] of mutations) assert.throws(() => assertAuthenticatedPreCutoverCoordinatorTransition(mutate(), { resources: coordinatorResources, observedVersionIds: transition.postVersionIds, observedSlotIdentities: transition.postSlotIdentities }), /invalid|authentic|exact|hash|bound|duplicate|deterministic|protected/i, label);
 });
 
-test("coordinator transition requires both changed slots to form one authenticated topology", async () => {
+test("coordinator transition requires both changed slots to form one authenticated topology", () => {
   const transition = authenticatedCoordinatorTransitionFixture();
-  await assert.rejects(() => readDualSlotTopology({ client: coordinatorTopologyClient(transition, { jwtPrevious: { payload: { ...coordinatorPayload("jwtPrevious"), materialFingerprint: "wrong" } } }), historicalTransitionEvidence: transition }), /authentic|fingerprint|transition/i);
-  await assert.rejects(() => readDualSlotTopology({ client: coordinatorTopologyClient(transition, { qrCurrentVersion: { versionId: transition.predecessorVersionIds.qrCurrentVersion } }), historicalTransitionEvidence: transition }), /neither|deterministic|transition|authentic/i);
+  for (const [slot, patch] of [["jwtPrevious", { materialFingerprint: "0123456789abcdef", payloadSha256: sha256("wrong-jwt-payload") }], ["qrCurrentVersion", { keyVersion: "wrong-v1", payloadSha256: sha256("wrong-qr-payload") }]]) {
+    const forged = remintCoordinatorTransition(transition, { mutate: (value) => { value.postSlotIdentities[slot] = safeCoordinatorSlotIdentity(slot, coordinatorResources[slot], value.postVersionIds[slot], { ...coordinatorPostPayloadIdentities[slot], ...patch }); } });
+    assert.throws(() => assertAuthenticatedPreCutoverCoordinatorTransition(forged, { resources: coordinatorResources, observedVersionIds: forged.postVersionIds, observedSlotIdentities: forged.postSlotIdentities }), /protected historical authority anchor/i);
+  }
 });
 
 test("self-minted coordinator transition evidence is rejected without independent live observations", () => {
@@ -193,6 +238,66 @@ test("self-minted coordinator transition evidence is rejected without independen
   assert.equal(forged.transitionSha256, canonicalSha256(transitionBody));
   assert.throws(() => assertAuthenticatedPreCutoverCoordinatorTransition(forged), /exact live resource/i);
   assert.throws(() => assertAuthenticatedPreCutoverCoordinatorTransition(forged, { resources: coordinatorResources, observedVersionIds: authenticatedCoordinatorTransitionFixture().postVersionIds, observedSlotIdentities: authenticatedCoordinatorTransitionFixture().postSlotIdentities }), /exact|protected|authentic/i);
+});
+
+test("protected anchor rejects internally consistent arbitrary transitioned payload identities", () => {
+  const transition = authenticatedCoordinatorTransitionFixture();
+  const forgedPayloads = {
+    jwtPrevious: { value: "attacker-controlled-jwt-previous", family: "jwt_secrets", slot: "previous", rotationId: historicalRotationId, materialFingerprint: sha256("attacker-controlled-jwt-previous").slice(0, 16) },
+    qrCurrentVersion: { value: "attacker-controlled-qr-current-version", family: "qr_key_versions", slot: "current", rotationId: historicalRotationId, sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[1], keyVersion: "attacker-controlled-v1" },
+  };
+  const forged = remintCoordinatorTransition(transition, { mutate: (value) => {
+    for (const slot of ["jwtPrevious", "qrCurrentVersion"]) {
+      const safe = coordinatorPostPayloadIdentities[slot];
+      value.postSlotIdentities[slot] = safeCoordinatorSlotIdentity(slot, coordinatorResources[slot], value.postVersionIds[slot], { ...safe, payloadSha256: canonicalSha256(forgedPayloads[slot]), ...(slot === "jwtPrevious" ? { materialFingerprint: sha256(forgedPayloads[slot].value).slice(0, 16) } : { keyVersion: forgedPayloads[slot].keyVersion }) });
+    }
+  } });
+  assert.throws(() => assertAuthenticatedPreCutoverCoordinatorTransition(forged, { resources: coordinatorResources, observedVersionIds: forged.postVersionIds, observedSlotIdentities: forged.postSlotIdentities }), /protected historical authority anchor/i);
+});
+
+test("protected historical anchor binds all seven predecessor payload identities", () => {
+  const transition = authenticatedCoordinatorTransitionFixture();
+  const baseline = { sourceSha, historicalRotationId, historicalSourceShas: REBASELINE_HISTORICAL_SOURCE_SHAS, resources: coordinatorResources, currentVersionIds: transition.predecessorVersionIds, historicalTopologySha256: "80ec0c997561f13e4162e1aeaf9133dd58e4b5aa40f8eba5b13ee3474528e1ae", liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, legacyRuntimeAuthoritative: true, observedAt: "2026-08-28T10:00:00.000Z" };
+  assert.doesNotThrow(() => buildAbandonmentEvidence({ ...baseline, observedSlotIdentities: transition.predecessorSlotIdentities }));
+  for (const slot of REBASELINE_SLOT_ORDER) assert.throws(() => buildAbandonmentEvidence({ ...baseline, observedSlotIdentities: { ...transition.predecessorSlotIdentities, [slot]: remintSlotIdentity(transition.predecessorSlotIdentities[slot], { payloadSha256: sha256(`forged-predecessor:${slot}`) }) } }), /protected historical authority anchor/i, slot);
+});
+
+test("seven-slot mutation matrix rejects recomputed transition evidence", () => {
+  const transition = authenticatedCoordinatorTransitionFixture();
+  const assertRejected = (forged, resources = coordinatorResources, label = "mutation") => assert.throws(() => assertAuthenticatedPreCutoverCoordinatorTransition(forged, { resources, observedVersionIds: forged.postVersionIds, observedSlotIdentities: forged.postSlotIdentities }), /protected|authentic|exact|deterministic|invalid/i, label);
+  for (const slot of REBASELINE_SLOT_ORDER) {
+    assertRejected(remintCoordinatorTransition(transition, { mutate: (value) => { value.postSlotIdentities[slot].payloadSha256 = sha256(`forged-post:${slot}`); } }), coordinatorResources, `${slot} payload`);
+    assertRejected(remintCoordinatorTransition(transition, { mutate: (value) => { value.postSlotIdentities[slot].stages = ["AWSPREVIOUS"]; } }), coordinatorResources, `${slot} stage`);
+    assertRejected(remintCoordinatorTransition(transition, { mutate: (value) => { value.postVersionIds[slot] = sha256(`forged-version:${slot}`); value.postSlotIdentities[slot].versionId = value.postVersionIds[slot]; } }), coordinatorResources, `${slot} VersionId`);
+    assertRejected(remintCoordinatorTransition(transition, { mutate: (value) => { value.postSlotIdentities[slot].payloadKind.family = "forged-family"; } }), coordinatorResources, `${slot} family`);
+    assertRejected(remintCoordinatorTransition(transition, { mutate: (value) => { value.postSlotIdentities[slot].payloadKind.slot = "forged-slot"; } }), coordinatorResources, `${slot} payload slot`);
+    assertRejected(remintCoordinatorTransition(transition, { mutate: (value) => {
+      if (value.postSlotIdentities[slot].observedSourceSha === undefined) value.postSlotIdentities[slot].observedSourceSha = "f".repeat(40);
+      else value.postSlotIdentities[slot].observedSourceSha = "e".repeat(40);
+    } }), coordinatorResources, `${slot} source provenance`);
+    assertRejected(remintCoordinatorTransition(transition, { mutate: (value) => { value.postSlotIdentities[slot].observedRotationId = "rotation-forged"; } }), coordinatorResources, `${slot} rotation provenance`);
+    const alteredResources = { ...coordinatorResources, [slot]: `arn:aws:secretsmanager:eu-west-2:${PRODUCTION_DUAL_SLOT_REBASELINE.accountId}:secret:fixture/forged-${slot}` };
+    assertRejected(remintCoordinatorTransition(transition, { resources: alteredResources, mutate: (value) => { value.originalSupersessionEvidence.resources[slot].arn = alteredResources[slot]; value.predecessorSlotIdentities[slot].secretArn = alteredResources[slot]; value.postSlotIdentities[slot].secretArn = alteredResources[slot]; value.authorization.resourcesSha256 = canonicalSha256(alteredResources); } }), alteredResources, `${slot} ARN`);
+  }
+  for (const [slot, field] of [["jwtPrevious", "materialFingerprint"], ["qrPrivatePending", "materialFingerprint"], ["qrPublicPending", "materialFingerprint"], ["qrCurrentVersion", "keyVersion"]]) assertRejected(remintCoordinatorTransition(transition, { mutate: (value) => { value.postSlotIdentities[slot][field] = `forged-${field}`; } }), coordinatorResources, `${slot} ${field}`);
+  for (const [first, second] of [["jwtPrevious", "qrCurrentVersion"], ["jwtPending", "qrPrivatePending"], ["jwtPrevious", "jwtPending"]]) assertRejected(remintCoordinatorTransition(transition, { mutate: (value) => { for (const slot of [first, second]) value.postSlotIdentities[slot].payloadSha256 = sha256(`forged-pair:${slot}`); } }), coordinatorResources, `${first}/${second} pair`);
+  assertRejected(remintCoordinatorTransition(transition, { mutate: (value) => { for (const slot of REBASELINE_SLOT_ORDER) value.postSlotIdentities[slot].payloadSha256 = sha256(`forged-all:${slot}`); } }), coordinatorResources, "all seven payloads");
+});
+
+test("builder can create an integrity envelope but cannot mint anchored historical authority", () => {
+  const transition = authenticatedCoordinatorTransitionFixture();
+  const forged = remintCoordinatorTransition(transition, { mutate: (value) => { value.postSlotIdentities.jwtPrevious.payloadSha256 = sha256("builder-forged-jwt-previous"); } });
+  assert.equal(forged.transitionSha256, canonicalSha256(Object.fromEntries(Object.entries(forged).filter(([key]) => key !== "transitionSha256"))));
+  assert.throws(() => buildAuthenticatedPreCutoverCoordinatorTransition({
+    resources: coordinatorResources,
+    originalSupersessionEvidence: forged.originalSupersessionEvidence,
+    predecessorSlotIdentities: forged.predecessorSlotIdentities,
+    postSlotIdentities: forged.postSlotIdentities,
+    authorization: forged.authorization,
+    rotationState: forged.rotationState,
+    liveReferenceAuditSha256: forged.liveReferenceAuditSha256,
+    liveLegacyBaselineIdentitySha256: forged.liveLegacyBaselineIdentitySha256,
+  }), /protected historical authority anchor/i);
 });
 
 test("observed abandonment identities bind exact payloads without plaintext", () => {

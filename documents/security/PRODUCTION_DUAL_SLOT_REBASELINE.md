@@ -62,10 +62,23 @@ compatibility exception. Preparation supplies this retained private evidence wit
 remains a fail-closed error.
 
 The transition envelope is additionally compared with the reviewed protected-source
-anchor for this exact seven-resource historical transition. Its embedded SHA proves only
-internal integrity; the protected-source anchor establishes historical authority. The
-authoritative validator also requires fresh observed VersionIds and slot identities, so
-the anchor never substitutes for live Secrets Manager agreement.
+anchor for this exact seven-resource historical transition. The anchor binds each
+predecessor and post-transition VersionId plus its non-secret payload identity: canonical
+payload SHA, family/slot/schema, source-presence semantics, rotation identity, and every
+applicable fingerprint or key-version. This includes all five unchanged slots, not only
+the two coordinator writes. Its embedded SHA proves only internal integrity; the
+protected-source anchor establishes historical authority. The authoritative validator
+also requires fresh observed VersionIds and slot identities, so the anchor never
+substitutes for live Secrets Manager agreement.
+
+Security-critical transition fields have two independent checks: protected source fixes
+the accepted resources, predecessor/post VersionIds, payload identities, writer,
+supersession, authorization, and rotation-state provenance; fresh Secrets Manager reads
+must then match the protected post-transition identities. The transition file's hashes,
+including `transitionSha256`, are integrity checks only. ECS audit and coherent legacy
+baseline values are fresh safety predicates bound into abandonment/preparation and are
+not historical authority. No supplied field selects a weaker validator or supplies its
+own expected value.
 
 The protected authorization says that the seven deterministic writes may occur; it is
 not proof that they did. Runtime preparation therefore re-resolves the protected
