@@ -11,7 +11,7 @@ import {
   buildRebaselinePreparation, assertRebaselinePreconditions, assertRebaselinePreparation,
   createProductionDualSlotRebaselineAuthorization, deterministicWriteIdentity, executeProductionDualSlotRebaseline,
   generateRebaselineMaterial, assertBaselineCompletion, canonicalSha256, historicalSlotIdentity,
-  REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, writeRebaselineMaterialJournal, persistExactPrivateJson, rebaselineWritePayloadIdentities, verifyLiveProductionDualSlotRebaselineWithRunner, sha256, coordinatorTransitionSlotIdentity, buildAuthenticatedPreCutoverCoordinatorTransition, assertAuthenticatedPreCutoverCoordinatorTransition, coordinatorTransitionVersionId,
+  REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, readRebaselineMaterialJournal, writeRebaselineMaterialJournal, persistExactPrivateJson, rebaselineWritePayloadIdentities, verifyLiveProductionDualSlotRebaselineWithRunner, sha256, coordinatorTransitionSlotIdentity, buildAuthenticatedPreCutoverCoordinatorTransition, assertAuthenticatedPreCutoverCoordinatorTransition, coordinatorTransitionVersionId,
   assertAuthenticatedPartialRebaselineRecovery, createPartialRebaselineRecoveryAuthorization, assertPartialRebaselineRecoveryAuthorization, classifyAuthenticatedPartialRebaselineRecoveryProgress, resolvePartialRebaselineRecoveryAuthorizationArtifact, PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA,
 } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout, readDualSlotTopology, readPreparedDualSlotTopology, runProductionDualSlotRebaselineCli, verifyLiveProductionDualSlotRebaseline } from "../aws/rebaseline-production-dual-slot.mjs";
@@ -362,6 +362,21 @@ test("successor recovery progress permits only exact H-to-T states at every N-of
   const wrongStage = writePlan.map((expected) => ({ slot: expected.slot, arn: expected.secretArn, currentVersionId: expected.clientRequestToken, currentStages: ["AWSCURRENT"], currentPayloadSha256: expected.payloadSha256, versions: [{ versionId: expected.clientRequestToken, stages: ["AWSCURRENT"], payloadSha256: expected.payloadSha256 }] }));
   wrongStage[0] = { ...wrongStage[0], currentStages: ["AWSPREVIOUS"], versions: [{ ...wrongStage[0].versions[0], stages: ["AWSPREVIOUS"] }] };
   assert.throws(() => classifyAuthenticatedPartialRebaselineRecoveryProgress({ writePlan, historicalSlotIdentities: historical, snapshots: wrongStage, authorizationInitialCompletedSlots: ["jwtPending"], maximumRemainingSecretValueWrites: 6 }), /exactly one|AWSCURRENT/i);
+});
+
+test("recover-execute passes the reader's canonical journal identity, never its wrapper field", () => {
+  const directory = temporary();
+  try {
+    const journalFile = path.join(directory.directory, "material-journal.json");
+    const written = writeRebaselineMaterialJournal({ filePath: journalFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: material });
+    const readerResult = readRebaselineMaterialJournal({ filePath: journalFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256 });
+    assert.equal(readerResult.journalSha256, undefined);
+    assert.equal(readerResult.journal.journalSha256, written.sha256);
+    assert.notEqual(readerResult.sha256, written.sha256);
+    const caller = readFileSync(path.join(process.cwd(), "scripts/aws/rebaseline-production-dual-slot.mjs"), "utf8");
+    assert.match(caller, /materialJournalSha256: journal\.journal\.journalSha256/);
+    assert.doesNotMatch(caller, /materialJournalSha256: journal\.journalSha256/);
+  } finally { rmSync(directory.directory, { recursive: true, force: true }); }
 });
 
 test("observed abandonment identities bind exact payloads without plaintext", () => {
