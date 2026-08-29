@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import test from "node:test";
 import {
   PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_SLOT_ORDER, BASELINE_COMPLETE,
@@ -10,7 +11,8 @@ import {
   buildRebaselinePreparation, assertRebaselinePreconditions, assertRebaselinePreparation,
   createProductionDualSlotRebaselineAuthorization, deterministicWriteIdentity, executeProductionDualSlotRebaseline,
   generateRebaselineMaterial, assertBaselineCompletion, canonicalSha256, historicalSlotIdentity,
-  REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, writeRebaselineMaterialJournal, persistExactPrivateJson, rebaselineWritePayloadIdentities, verifyLiveProductionDualSlotRebaselineWithRunner, sha256, coordinatorTransitionSlotIdentity, buildAuthenticatedPreCutoverCoordinatorTransition, assertAuthenticatedPreCutoverCoordinatorTransition, coordinatorTransitionVersionId,
+  REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, readRebaselineMaterialJournal, writeRebaselineMaterialJournal, persistExactPrivateJson, rebaselineWritePayloadIdentities, verifyLiveProductionDualSlotRebaselineWithRunner, sha256, coordinatorTransitionSlotIdentity, buildAuthenticatedPreCutoverCoordinatorTransition, assertAuthenticatedPreCutoverCoordinatorTransition, coordinatorTransitionVersionId,
+  assertAuthenticatedPartialRebaselineRecovery, createPartialRebaselineRecoveryAuthorization, assertPartialRebaselineRecoveryAuthorization, classifyAuthenticatedPartialRebaselineRecoveryProgress, resolvePartialRebaselineRecoveryAuthorizationArtifact, PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA,
 } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout, readDualSlotTopology, readPreparedDualSlotTopology, runProductionDualSlotRebaselineCli, verifyLiveProductionDualSlotRebaseline } from "../aws/rebaseline-production-dual-slot.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
@@ -18,8 +20,13 @@ import { assertBindings, buildInitialMigrationSourceAdvance, buildProductionRota
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
 import { productionSupersessionEvidenceIdentity } from "../security/production-initial-migration-source-advance.mjs";
+import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 
 const sourceSha = "a".repeat(40);
+// Non-secret, production-safe recovery identity fixture.  The production validator
+// must still compare it to its literal protected-source anchor; recomputing this
+// envelope's own digest is deliberately insufficient.
+const recoveryEnvelopeFixture = () => JSON.parse(zlib.gunzipSync(Buffer.from("H4sIAAAAAAAAE91bW3NcuY1+n1+h0nNUIXEj6TdFVna1O2M5kuzJZmtLBQKg3WNZLbdadrxT89+3TutiWbfJTGSXN499DgmAOPgI8AP75+/W1tZP7XW81ZexOJ3Nj9efrOU/TE/fzI59/cna+vO93acvtg52dp8dPn2x+f3h/ve7B4d723/a3N/+fufZ9uH+i62t7f393b3Dve2t3Zfbe/+1vpq/CD1diVt/vrt/cPjj3s7B9uHe9ubTw63dZy+39/5t+9nW9uH+7ou9re3DP+/89XzWfDF7NTvWo/352cJi/7VOAqJLYS2jJukl12DMTYaiW+6DKnE3qwX0UrHN38fi45/0ND4XQz2VRm4Du2Tt0AkN6xgItaCkBiqRwS7EzJe6nM2Pd1ZeuPy1AQkkVWgpM+a8UYStapbPrX++iBNdrCbsv1ZgmUSgdsUavTXLRdGjFhINHaRFARX7kNLUsQm2hMFdR2JEF821pPS5ih90GYuZHv3H/Gwx+etKTdJaDCF30srWkSBnk+aqnakqcdEO0LxY7cIdR29Dx/CUQ8y8f65m82z5er6Y/e9qLetP1n7+bm1tbW39w3zxZhzNP+ydXfgHEaACS0VYCfh8zOZyGW9PltPAfPlar0v+ZD4VaxU859IHEGHL1MI11Q7R2Gp3qIQN+yhR+hAdlsNUEjjkCrr+3draL6slvJ6dLueLmV0tYvlx89hezxeflFUIxMHInRGYjDGb9S6Z84imETmLI6XshVNzKuDKJCDWW+eaLgPudBVmp5/889OH5fM49tnxq0mNLo6f6IfTJ6dhi1ievtVjfRWLJ3G28SFOlxvwBKW2BlKxJrwY9eTtqb1b/PFkMfc/XgbfH3/6sNw4OZe7kbeOf/zh5NKb7xbPF7P3uowvofbdYuPkXPqV9u//9tqYrmk/60cz+1LKV8KvdJ/9CZ/nv1zqnly9iPez+dnp4/v6QvCGLP6yePfTreV+Cb3X1nupffH93z7YXz9p3zpbLOJ4+WnHflTtdi594/25+I06nu2+3L4eaOdmfSH1V6u+1P/86Z/PjuAuXB/MT+ZH81cfrwE6hSVrrbDkkTEoC0SeNtmWEd25BnVWpTRqdOWeMQKpEEOdxq3f0LB/NF/ueBwvZ8vZvfg+f3ZfIj1/czRf7X7X5n16t3LH5uJxPXnvVrG2tn7h2fOdu2AZTr0pl9EiUuIxPCwgVYAUlaBWHNBGyiKeSi+CLp1ZiKKlem0hS321ctJ/XzxZW1vf/HF/68Xe3vazg/WLh/9zNf5EPx7N1fdXXptM2Xm2c7Cz+f31OmP3YHNVerzM6zfn/ed5gfLzJ2VD386OPl74+fDChVfzrn2GkxvfYG1tfXY8W8706IfZq8Vlrht6dBoXI3650j7vp7F4H773YH0gSZIgbPQ8pVi+Zv3l/M9KE+Yk1gNbAYWipRjkPKC2XFgMeyseJbdyywmfQn/wcGJOVslaiJFjr5m0B1LXAQIB2H1Ic6xNG5USU3VANQ/FwZ9Ev70oLf48O34Vi5PF7HjlNBI2M+vZmApeVFvnvjtHyDUcFrJoxGDZ1TtQ99Ei14FaIBzdIrSViNqLBObhrbTqhlgsg9V6Hiy/3J/cfgPmbs3+wsj7tWx5E4CaBqRB0II7ONSmUsQzBoZiNE+t1kKBVioySXCzqeppDAE9d/0mAfhucXg6e3U8O351+CY+PgTCS2f9S4GRjBgGp6TUEVuJxoLDEKxJwTEAUFyhNOwJBiFza9xrBR0QmORXwcjAyElg1NGAS/o04U18vJaZjbJpE+2JijvwQ6DFYSEtlwRcDDTaEHaCqRKmkoV9OA5Q9iEuDQdZDGPmbuBV2W+B9kZN+Nsw+9nkrwDZB2rMm4id1ms9oCbyBsO1YBMtuWYsxbWUUUsp7F7LqDmzQpbaSs85YhDH/3vErnz1LwVYwBTVUoNMxDys4OiZRiAg9GrESCFDtE7yW3Wvbq7cQke2fr0Kugew9wPx9wM2Q0lpeJIpWfReOxXrJTm2AdlATFsHBCDSPqpMuT8noFpMklXFzwH7+UHqHwDrJUO0+eLg37efHexsbR5sPz18vrd9uPXiYGKCDrd2d/ee7jzbPNjdOzzY23y2vzNF5votuF9X/TXq4juPdTdRnqyCu+NAH56KWeosSMSUsBeQKKIjae7eR+0tc6too0aloUz+mCi/7scrfK8Ytb3HrowvP8OjI/cW5PpEUfWquRemTNbUpBjXxCWDgydnK0V7FG7KKdWkbaLsoDEiuv0q5EaqCasOKnWMYvYQlAAUhjfmPH1zG4BJFay1RI2yireEzcrQUSyJoKMCiBdAikC/XbDeJAh+T/L7SpD4NcbhJjD6IASXFEgTNQnEo2NUVlGYUmBYaEEbDEVqDFDx8FahYsLK9GVPjBeE8ubTl5sTv/z4SXAiMj/+Su5bLs7uT32Pnrp6YxYdrAaSo48s1Vx7TpKjehbu4tJbMLEgQtJWM1Hz0JylPHyOS9gza8ZcKkX2VgOHZueiOh3UGnYQEfM8AKmMYo7Ohpyxi2O5CYtbzNVXTTO39H95YD1Ipt0ElgzJzFZapSi9dO7kPiKNWqfTRHfBFGy1OmLLnRKQQsIiBtK7pW8z47xbTFg6vFjpnZi68NLjJ507MdcGNs9GQ0hISiaZSIfEtQwv6lx54IicHsBcqpRQBlWxBNLUW7B0pSSOLdt0BuhonAemHAqlQEcUD6zqwlofo/or5NAVmo8mqeBAke4AWisNlMDedGTElEttrCBcWzJVAOiC0uI2x3KT1/2NJMvn078Gy3I3U3w3uGKM0tFNTKfavWtY6yUwpZpzqCS0mrGrkHgdwoS1hkw7p9TBgd921vo1hF356ptLX0nCsJak5N2iF6ndkTVRTa21jimgj85JqzazKCWDpKxdtVMv+UGIjEjeAjubJqVgkawltIsMMck5acFEdWACmooZj9qEs6YSSQrBBUSuWg+XXdEfF7NlPD/S46sg+PkmIL4Npt+OZnG83It3Z3G6PJi/iZVq6lmERh5SHQWcJXh4a8Hm0YZ7hTKoonbz2qxzCJTKYlaxQscHviZTc9aAZlUTJaTuNWl1txzOmUqhrIDeQyNZAmRHdaGKmLUJ3S7qDz6exOpbLuL09carOI6FLsNv2XDRpvn4OUi+nIG/wcSb2/zx2dHRJb6ub8K3gugbpK7vjiiBIEwEIynWIXUQdapu0Rh7y81K6Q6mEzeWCyVn6sWKomaHhvBARJWsKY3UE9dhWEC4B0/kS0o9IlMdQDHxMblPpGRBsZwbTeeRbIj9i0fUoxn4T0TUerJsEdCVREbDWP9H4+vbolnvji4bAVPDAxtW0gacKBE2cRGWUkUSNy+1eCOK2gM0IrSQtSQxQB7KPkNaJ1SM6Dimplgll+BCnVpJVhG4da1RO+Vwsshs1HoAUtZ8R9fskaPr0Qz8+tH1rbB69wRVjjqaCyWZbltJGwxNoNmoWnpNgrkV9IgiPU30URcgriqJw9jpgaByyQrDSmLnaQvUjC27GY2OUIlbLtlTI+tTcxQ6R8/afGJQclD1+4NqVb1tdD2No9lxbLzVxZtY/N7QejQzf7Oh/0xC/NaosXtKLBBRJK+ZcgbIKWVJ3QtF8TQStYwK0zF/ODbAzsjhIzuVLq3YQ9GVkREL9BZSQKR6HbWn0V1bYylEVFkwQAaZ56YZEkHi1qBoDLmjt/hFouvRzPya0fXN8UN3R1dNnKf9mKpCCWyUrbUGLtaAc5m6FBN8rcDUq4DB7M2UsWaIZskeiK6wTAKJ1frUAOtNgGqIxiBnZJ9Ih+Ho2tkiVdCeoFvppuhVFe+PLvX5yTJ8Y7r4OUWQTTln4yheqX3cUFvO3sfG5RHu9wbdo1n/WPb/U6X/N0eo3B2NjjWmK9UFkZR68pyaBLsMFa0dUppSRlUg64kzltYjkbTszVrut0ujaykKYbqT29ETM1kKrpW0pqgt5cbCwiVAO6UKpVRolcV75UxVSD19rUz6WGZ+gb3uuwsqat3mb0+OYhk+XWr8RF9dZyquxi7irc6mNsiNsfccSO85SNxRAd6Xwe/be+/AwR1GrqL6pR6dxYqZmQyW1ZD4+0nYtOTViKcxrX96m/5w858CO2/1VZybduOu++nv/g/BfRflW6OEcHVRXhfL2VBbXmuNKthIbE6RuYE4D0FRkAylGmirNpQQJ1IrTZddG1plrM443Z67pNvWZ28vmMqr7aWrvYnzfsrpSt0TGA2s54LaCEqnagW1Tr3vFGqVCbESTdcHepuuygbVxiVpb6yS9FqlMq01FtdFe6KAKAIyWDFjZDJU4hEOvUgDJa9tkEuLkihPDfTBqjnXEtI+iV4cnW7/PexsOb8uH8sILt0CU552mVaKWHLJg5g6hESlMgCtZSjZW57YiEJWchvgzT+Tv6XHuvh4TXriKr0UxsS1Tpc+UKLLdB9EJzcTQrEhA8NzhV56m0JgqEiQZOt8kzy8jLZr2SoSinm3ksKGkYULjzL9wcWSSk42xFOUjgGRHEubnIOl52HSNda/++W7/wMQe1tLwjMAAA==", "base64")).toString("utf8"));
 const historicalRotationId = "rotation-20260826060632-b15b3f51";
 const rotationId = "rotation-20260828000000-rebase";
 const resources = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot, index) => [slot, `arn:aws:secretsmanager:eu-west-2:${PRODUCTION_DUAL_SLOT_REBASELINE.accountId}:secret:fixture/${REBASELINE_SLOTS[slot]}-${index}`]));
@@ -306,6 +313,72 @@ test("builder can create an integrity envelope but cannot mint anchored historic
   }), /protected historical authority anchor/i);
 });
 
+test("one-transition successor recovery keeps literal historical authority separate from fresh execution authority", () => {
+  const envelope = recoveryEnvelopeFixture();
+  assert.doesNotThrow(() => assertAuthenticatedPartialRebaselineRecovery(envelope));
+  const forged = structuredClone(envelope);
+  forged.originalWritePlan[0].payloadSha256 = "f".repeat(64);
+  forged.originalWritePlan[0].payloadIdentity.payloadSha256 = forged.originalWritePlan[0].payloadSha256;
+  forged.recoverySha256 = canonicalSha256(Object.fromEntries(Object.entries(forged).filter(([key]) => key !== "recoverySha256")));
+  assert.throws(() => assertAuthenticatedPartialRebaselineRecovery(forged), /protected-source|anchor/i);
+
+  const successorSource = PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA;
+  const image = makeCanonicalImageAuthorization({ sourceSha: successorSource, imageReleaseSha: successorSource });
+  const approval = createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository, environment: "production", sourceSha: successorSource, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineRecoveryWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "987654", workflowRunAttempt: "1", executionActor: "operator", observedAt: image.now, actualApproval: { state: "approved", environmentId: 17, environmentName: "production", userId: 7, userLogin: "checker" } });
+  const liveCas = { liveReferenceAuditSha256: sha256("recovery-audit"), liveLegacyBaselineIdentitySha256: sha256("recovery-legacy"), observedSlotIdentitiesSha256: sha256("recovery-slots") };
+  const authorization = createPartialRebaselineRecoveryAuthorization({ protectedEnvironmentApprovalEvidence: approval, sourceSha: successorSource, recoveryEnvelope: envelope, imageAuthorization: image.authorization, imageAuthorizationValidation: { now: image.now, verifyImageEvidence: image.verifyImageEvidence }, ...liveCas, reason: "Resume the exact interrupted deterministic transition", approverRole: "production-independent-checker", verificationRef: "recovery-fixture", proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA && descendantSha === successorSource });
+  assert.doesNotThrow(() => assertPartialRebaselineRecoveryAuthorization(authorization, { sourceSha: successorSource, recoveryEnvelope: envelope, imageAuthorization: image.authorization, imageAuthorizationValidation: { now: image.now, verifyImageEvidence: image.verifyImageEvidence }, liveCas, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA && descendantSha === successorSource }));
+  const remintAuthorization = (mutate) => { const forgedAuthorization = structuredClone(authorization); mutate(forgedAuthorization); const { authorizationSha256: ignored, ...body } = forgedAuthorization; forgedAuthorization.authorizationSha256 = canonicalSha256(body); return forgedAuthorization; };
+  const verify = (candidate, options = {}) => assertPartialRebaselineRecoveryAuthorization(candidate, { sourceSha: successorSource, recoveryEnvelope: envelope, imageAuthorization: image.authorization, imageAuthorizationValidation: { now: image.now, verifyImageEvidence: image.verifyImageEvidence }, liveCas, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA && descendantSha === successorSource, ...options });
+  assert.throws(() => verify(remintAuthorization((value) => { value.sourceSha = "f".repeat(40); })), /source|transition/i);
+  assert.throws(() => verify(remintAuthorization((value) => { value.liveReferenceAuditSha256 = "f".repeat(64); })), /CAS|live/i);
+  assert.throws(() => verify(remintAuthorization((value) => { value.currentImageAuthorization.images.backend = "sha256:" + "f".repeat(64); })), /image/i);
+  assert.throws(() => verify(remintAuthorization((value) => { value.authorizationInitialRemainingSlots = []; })), /transition/i);
+  assert.throws(() => verify(authorization, { proveDescendant: () => false }), /descendant/i);
+  assert.throws(() => assertPartialRebaselineRecoveryAuthorization(authorization, { sourceSha: "e".repeat(40), recoveryEnvelope: envelope, imageAuthorization: image.authorization, imageAuthorizationValidation: { now: image.now, verifyImageEvidence: image.verifyImageEvidence }, liveCas, proveDescendant: () => true }), /source|transition/i);
+  assert.throws(() => createPartialRebaselineRecoveryAuthorization({ protectedEnvironmentApprovalEvidence: approval, sourceSha: successorSource, recoveryEnvelope: envelope, imageAuthorization: image.authorization, imageAuthorizationValidation: { now: image.now, verifyImageEvidence: image.verifyImageEvidence }, ...liveCas, reason: "fixture", approverRole: "checker", verificationRef: "fixture", proveDescendant: () => false }), /descendant/i);
+});
+
+test("successor recovery progress permits only exact H-to-T states at every N-of-7 boundary", () => {
+  const historical = abandoned.observedSlotIdentities;
+  for (let completed = 0; completed <= REBASELINE_SLOT_ORDER.length; completed += 1) {
+    const completedSlots = new Set(REBASELINE_SLOT_ORDER.slice(0, completed));
+    const snapshots = writePlan.map((expected) => completedSlots.has(expected.slot)
+      ? { slot: expected.slot, arn: expected.secretArn, currentVersionId: expected.clientRequestToken, currentStages: ["AWSCURRENT"], currentPayloadSha256: expected.payloadSha256, versions: [{ versionId: expected.clientRequestToken, stages: ["AWSCURRENT"], payloadSha256: expected.payloadSha256 }] }
+      : { slot: expected.slot, arn: expected.secretArn, currentVersionId: currentVersionIds[expected.slot], currentStages: ["AWSCURRENT"], currentPayloadSha256: historical[expected.slot].payloadSha256, versions: [{ versionId: currentVersionIds[expected.slot], stages: ["AWSCURRENT"], payloadSha256: historical[expected.slot].payloadSha256 }] });
+    if (completed === 0) assert.throws(() => classifyAuthenticatedPartialRebaselineRecoveryProgress({ writePlan, historicalSlotIdentities: historical, snapshots, authorizationInitialCompletedSlots: ["jwtPending"], maximumRemainingSecretValueWrites: 6 }), /topology/i);
+    else {
+      const progress = classifyAuthenticatedPartialRebaselineRecoveryProgress({ writePlan, historicalSlotIdentities: historical, snapshots, authorizationInitialCompletedSlots: ["jwtPending"], maximumRemainingSecretValueWrites: 6 });
+      assert.equal(progress.completedSlots.length, completed);
+      assert.equal(progress.remainingSlots.length, 7 - completed);
+    }
+  }
+  const snapshots = writePlan.map((expected) => ({ slot: expected.slot, arn: expected.secretArn, currentVersionId: expected.clientRequestToken, currentStages: ["AWSCURRENT"], currentPayloadSha256: expected.payloadSha256, versions: [{ versionId: expected.clientRequestToken, stages: ["AWSCURRENT"], payloadSha256: expected.payloadSha256 }] }));
+  snapshots[2] = { ...snapshots[2], currentPayloadSha256: "0".repeat(64), versions: [{ ...snapshots[2].versions[0], payloadSha256: "0".repeat(64) }] };
+  assert.throws(() => classifyAuthenticatedPartialRebaselineRecoveryProgress({ writePlan, historicalSlotIdentities: historical, snapshots, authorizationInitialCompletedSlots: ["jwtPending"], maximumRemainingSecretValueWrites: 6 }), /payload|version|topology/i);
+  const thirdCurrent = writePlan.map((expected) => ({ slot: expected.slot, arn: expected.secretArn, currentVersionId: expected.clientRequestToken, currentStages: ["AWSCURRENT"], currentPayloadSha256: expected.payloadSha256, versions: [{ versionId: expected.clientRequestToken, stages: ["AWSCURRENT"], payloadSha256: expected.payloadSha256 }] }));
+  thirdCurrent[0].versions.push({ versionId: sha256("competing-current-version"), stages: ["AWSCURRENT"], payloadSha256: sha256("competing-current-payload") });
+  assert.throws(() => classifyAuthenticatedPartialRebaselineRecoveryProgress({ writePlan, historicalSlotIdentities: historical, snapshots: thirdCurrent, authorizationInitialCompletedSlots: ["jwtPending"], maximumRemainingSecretValueWrites: 6 }), /exactly one|AWSCURRENT/i);
+  const wrongStage = writePlan.map((expected) => ({ slot: expected.slot, arn: expected.secretArn, currentVersionId: expected.clientRequestToken, currentStages: ["AWSCURRENT"], currentPayloadSha256: expected.payloadSha256, versions: [{ versionId: expected.clientRequestToken, stages: ["AWSCURRENT"], payloadSha256: expected.payloadSha256 }] }));
+  wrongStage[0] = { ...wrongStage[0], currentStages: ["AWSPREVIOUS"], versions: [{ ...wrongStage[0].versions[0], stages: ["AWSPREVIOUS"] }] };
+  assert.throws(() => classifyAuthenticatedPartialRebaselineRecoveryProgress({ writePlan, historicalSlotIdentities: historical, snapshots: wrongStage, authorizationInitialCompletedSlots: ["jwtPending"], maximumRemainingSecretValueWrites: 6 }), /exactly one|AWSCURRENT/i);
+});
+
+test("recover-execute passes the reader's canonical journal identity, never its wrapper field", () => {
+  const directory = temporary();
+  try {
+    const journalFile = path.join(directory.directory, "material-journal.json");
+    const written = writeRebaselineMaterialJournal({ filePath: journalFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: material });
+    const readerResult = readRebaselineMaterialJournal({ filePath: journalFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256 });
+    assert.equal(readerResult.journalSha256, undefined);
+    assert.equal(readerResult.journal.journalSha256, written.sha256);
+    assert.notEqual(readerResult.sha256, written.sha256);
+    const caller = readFileSync(path.join(process.cwd(), "scripts/aws/rebaseline-production-dual-slot.mjs"), "utf8");
+    assert.match(caller, /materialJournalSha256: journal\.journal\.journalSha256/);
+    assert.doesNotMatch(caller, /materialJournalSha256: journal\.journalSha256/);
+  } finally { rmSync(directory.directory, { recursive: true, force: true }); }
+});
+
 test("observed abandonment identities bind exact payloads without plaintext", () => {
   const preparation = buildRebaselinePreparation({ preconditions, sourceSha, rotationId, baselineIdentity: identity, writePlan });
   assert.equal(preparation.writePlan.length, 7); assertRebaselinePreparation(preparation, { sourceSha, rotationId }); assert.equal(JSON.stringify(abandoned).includes(material.jwt), false);
@@ -568,7 +641,7 @@ test("post-write convergence rejects every non-historical non-exact state withou
     const readSlot = adapters.readSlot; const writeSlot = adapters.writeSlot;
     adapters.writeSlot = async (...args) => { const result = await writeSlot(...args); wrote = true; return result; };
     adapters.readSlot = async (...args) => wrote ? snapshot() : readSlot(...args);
-    await assert.rejects(() => execute(adapters, outputs, { sleep: () => {} }), /deterministic|current version|prepared write/);
+    await assert.rejects(() => execute(adapters, outputs, { sleep: () => {} }), /deterministic|current version|prepared write|exactly one/);
     assert.equal([...adapters.store.values()].reduce((total, versions) => total + versions.length, 0), 8, name);
     rmSync(outputs.directory, { recursive: true, force: true });
   }
@@ -707,6 +780,28 @@ test("runtime authorization resolver derives the expected digest from GitHub pro
   const run = createProductionGithubCommandRunner({ env: { GH_TOKEN: "fixture-github-token" }, exec: execute });
   const resolved = resolveProductionDualSlotRebaselineAuthorizationArtifact({ workflowRunId: "123456", workflowRunAttempt: "1", sourceSha, rotationId, resources, run });
   assert.equal(resolved.authorization.authorizationSha256, auth.authorizationSha256); const zip = seen.find(({ args }) => args[1].endsWith("/zip")); assert.equal(zip.options.encoding, null); assert.equal(zip.args.includes("--output"), false);
+});
+
+test("successor recovery resolver accepts only its exact protected workflow artifact", () => {
+  const sourceSha = PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA;
+  const envelope = recoveryEnvelopeFixture();
+  const image = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: sourceSha });
+  const approval = createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository, environment: "production", sourceSha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineRecoveryWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "987655", workflowRunAttempt: "1", executionActor: "operator", observedAt: image.now, actualApproval: { state: "approved", environmentId: 17, environmentName: "production", userId: 7, userLogin: "checker" } });
+  const liveCas = { liveReferenceAuditSha256: sha256("resolver-recovery-audit"), liveLegacyBaselineIdentitySha256: sha256("resolver-recovery-legacy"), observedSlotIdentitiesSha256: sha256("resolver-recovery-slots") };
+  const authorization = createPartialRebaselineRecoveryAuthorization({ protectedEnvironmentApprovalEvidence: approval, sourceSha, recoveryEnvelope: envelope, imageAuthorization: image.authorization, imageAuthorizationValidation: { now: image.now, verifyImageEvidence: image.verifyImageEvidence }, ...liveCas, reason: "resume fixture", approverRole: "checker", verificationRef: "fixture", proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === sourceSha });
+  const archive = Buffer.from("recovery-zip-fixture");
+  const run = (command, args, options = {}) => {
+    if (command === "gh" && args[1].endsWith("/actions/runs/987655")) return JSON.stringify({ id: 987655, repository: { id: 9, full_name: PRODUCTION_DUAL_SLOT_REBASELINE.repository }, head_repository: { full_name: PRODUCTION_DUAL_SLOT_REBASELINE.repository }, path: ".github/workflows/authorize-production-dual-slot-rebaseline-recovery.yml", event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1, actor: { login: "operator" } });
+    if (command === "gh" && args[1].endsWith("/artifacts")) return JSON.stringify([{ artifacts: [{ id: 92, name: "production-dual-slot-rebaseline-successor-recovery-authorization", expired: false, workflow_run: { id: 987655, head_sha: sourceSha, repository_id: 9 }, digest: `sha256:${sha256(archive)}` }] }]);
+    if (command === "gh" && args[1].endsWith("/zip")) return archive;
+    if (command === "unzip" && args[0] === "-Z1") return "recovery-authorization.json\n";
+    if (command === "unzip" && args[0] === "-p") return JSON.stringify(authorization);
+    throw new Error(`unexpected ${command} ${args.join(" ")}`);
+  };
+  const options = { workflowRunId: "987655", workflowRunAttempt: "1", sourceSha, recoveryEnvelope: envelope, imageAuthorization: image.authorization, imageAuthorizationValidation: { now: image.now, verifyImageEvidence: image.verifyImageEvidence }, liveCas, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === sourceSha, run };
+  assert.equal(resolvePartialRebaselineRecoveryAuthorizationArtifact(options).authorization.authorizationSha256, authorization.authorizationSha256);
+  assert.throws(() => resolvePartialRebaselineRecoveryAuthorizationArtifact({ ...options, workflowRunAttempt: "2" }), /provenance/i);
+  assert.throws(() => resolvePartialRebaselineRecoveryAuthorizationArtifact({ ...options, sourceSha: "f".repeat(40) }), /provenance|source/i);
 });
 
 test("dispatcher reviewer text cannot replace the actual protected-environment approver", () => {

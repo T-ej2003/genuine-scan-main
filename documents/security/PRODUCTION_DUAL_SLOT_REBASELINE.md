@@ -118,3 +118,20 @@ task-definition must expose the same canonical legacy JWT/QR baseline; zero or m
 live baselines fail closed. Incomplete
 task/deployment/task-definition reads also
 fail closed.
+
+The cutover runtime has two explicit authority variants. Ordinary rebaseline runtime
+uses the ordinary rebaseline authorization and live contract. Successor-recovery runtime
+must carry the authenticated recovery envelope, original preparation, image authority,
+and successor-recovery authorization through the serialized runtime configuration;
+the adapter invokes only the recovery validator and passes that context to live
+revalidation. Recovery evidence is never retried through the ordinary validator, and
+the bootstrap CLI accepts only the exact `--recovery-envelope` and
+`--original-rebaseline-preparation` value options for this path.
+
+## Authenticated successor recovery
+
+The narrowly scoped successor-recovery bridge is documented in
+[`MSCQR_PARTIAL_REBASELINE_SUCCESSOR_RECOVERY_THREAT_MODEL.md`](MSCQR_PARTIAL_REBASELINE_SUCCESSOR_RECOVERY_THREAT_MODEL.md).
+It applies only to the reviewed interrupted transition, preserves its original seven
+VersionIds and payload identities, requires fresh successor-source approval, and has
+terminal zero-write semantics after canonical completion.

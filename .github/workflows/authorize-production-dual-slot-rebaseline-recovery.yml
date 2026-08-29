@@ -1,0 +1,109 @@
+name: Authorize production dual-slot rebaseline successor recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Protected execution source SHA, required: true, type: string }
+      recovery_envelope_base64: { description: Exact anchored non-secret recovery envelope, base64 encoded, required: true, type: string }
+      recovery_envelope_file_sha256: { description: SHA256 of decoded recovery envelope file, required: true, type: string }
+      image_authorization_base64: { description: Canonical current-source image authorization, base64 encoded, required: true, type: string }
+      image_authorization_file_sha256: { description: SHA256 of decoded image authorization file, required: true, type: string }
+      live_reference_audit_sha256: { description: Fresh canonical live-reference audit SHA256, required: true, type: string }
+      live_legacy_baseline_identity_sha256: { description: Fresh coherent live legacy baseline SHA256, required: true, type: string }
+      observed_slot_identities_sha256: { description: Fresh canonical seven-slot observation SHA256, required: true, type: string }
+      reason: { description: Exact successor-recovery reason, required: true, type: string }
+      approver_role: { description: Independent approver role, required: true, type: string }
+      verification_ref: { description: Recovery verification reference, required: true, type: string }
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  authorize-dual-slot-rebaseline-recovery:
+    name: Authorize exact successor recovery
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate protected source before dependencies
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_REPOSITORY: T-ej2003/genuine-scan-main
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          protected_main_sha="$(gh api "repos/$EXPECTED_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$SOURCE_SHA" = "$protected_main_sha"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked authorization dependencies
+        run: npm ci
+      - name: Re-authenticate protected source after dependency installation
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Authenticate protected environment approval
+        id: environment-approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/dual-slot-rebaseline-recovery"
+          install -d -m 700 "$workdir"
+          node scripts/aws/production-github-environment-approval.mjs \
+            --output "$workdir/environment-approval.json" \
+            --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
+            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+          echo "sha256=$(sha256sum "$workdir/environment-approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Produce exact successor recovery authorization artifact
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RECOVERY_ENVELOPE_BASE64: ${{ inputs.recovery_envelope_base64 }}
+          RECOVERY_ENVELOPE_FILE_SHA256: ${{ inputs.recovery_envelope_file_sha256 }}
+          IMAGE_AUTHORIZATION_BASE64: ${{ inputs.image_authorization_base64 }}
+          IMAGE_AUTHORIZATION_FILE_SHA256: ${{ inputs.image_authorization_file_sha256 }}
+          LIVE_REFERENCE_AUDIT_SHA256: ${{ inputs.live_reference_audit_sha256 }}
+          LIVE_LEGACY_BASELINE_IDENTITY_SHA256: ${{ inputs.live_legacy_baseline_identity_sha256 }}
+          OBSERVED_SLOT_IDENTITIES_SHA256: ${{ inputs.observed_slot_identities_sha256 }}
+          REASON: ${{ inputs.reason }}
+          APPROVER_ROLE: ${{ inputs.approver_role }}
+          VERIFICATION_REF: ${{ inputs.verification_ref }}
+          ENVIRONMENT_APPROVAL_SHA: ${{ steps.environment-approval.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          workdir="$RUNNER_TEMP/dual-slot-rebaseline-recovery"
+          install -d -m 700 "$workdir"
+          printf '%s' "$RECOVERY_ENVELOPE_BASE64" | base64 --decode > "$workdir/recovery-envelope.json"
+          printf '%s' "$IMAGE_AUTHORIZATION_BASE64" | base64 --decode > "$workdir/image-authorization.json"
+          node scripts/aws/authorize-production-dual-slot-rebaseline-recovery.mjs --authorize-recovery \
+            --output "$workdir/recovery-authorization.json" \
+            --environment-approval "$workdir/environment-approval.json" --environment-approval-sha256 "$ENVIRONMENT_APPROVAL_SHA" \
+            --recovery-envelope "$workdir/recovery-envelope.json" --recovery-envelope-file-sha256 "$RECOVERY_ENVELOPE_FILE_SHA256" \
+            --image-authorization "$workdir/image-authorization.json" --image-authorization-file-sha256 "$IMAGE_AUTHORIZATION_FILE_SHA256" \
+            --source-sha "$SOURCE_SHA" --live-reference-audit-sha256 "$LIVE_REFERENCE_AUDIT_SHA256" \
+            --live-legacy-baseline-identity-sha256 "$LIVE_LEGACY_BASELINE_IDENTITY_SHA256" --observed-slot-identities-sha256 "$OBSERVED_SLOT_IDENTITIES_SHA256" \
+            --reason "$REASON" --approver-role "$APPROVER_ROLE" --verification-ref "$VERIFICATION_REF"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-dual-slot-rebaseline-successor-recovery-authorization
+          path: ${{ runner.temp }}/dual-slot-rebaseline-recovery/recovery-authorization.json
+          if-no-files-found: error
+          retention-days: 90

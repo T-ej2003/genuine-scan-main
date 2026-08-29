@@ -32,6 +32,9 @@ import { buildReleasePreflightCheckerTrustAttestation } from "../aws/production-
 import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { assertInitialDualSlotBindings } from "../aws/production-initial-dual-slot-bootstrap.mjs";
+import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
+import { buildPartialRebaselineRecoveryCompletion, buildPartialRebaselineRecoveryRotationBindings, createPartialRebaselineRecoveryAuthorization, PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA, assertPartialRebaselineRecoveryAuthorization } from "../aws/production-dual-slot-rebaseline-contract.mjs";
+import { partialRecoveryEnvelopeFixture, partialRecoveryOriginalPreparationFixture } from "./fixtures/partial-rebaseline-runtime.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
@@ -102,9 +105,9 @@ function taskDefinition(taskBindings = bindings) {
   return { taskDefinition: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", containerDefinitions: [{ name: "backend", environment: [{ name: "PUBLIC_APP_URL", value: "https://www.mscqr.com" }, { name: "QR_SIGN_ACTIVE_KEY_VERSION", value: taskBindings.qr.previousKeyVersion }], secrets: [{ name: "JWT_SECRET", valueFrom: taskBindings.jwt.currentSecretId }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: taskBindings.qr.privateCurrentSecretId }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: taskBindings.qr.publicCurrentSecretId }] }] } };
 }
 
-function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha) {
+function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha, imageReleaseSha) {
   const file = (name, value) => { const target = path.join(directory, name); writeFileSync(target, JSON.stringify(value) + "\n", { mode: 0o600 }); chmodSync(target, 0o600); return target; };
-  const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha: expectedSha });
+  const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha: expectedSha, ...(imageReleaseSha ? { imageReleaseSha } : {}) });
   const imageAuthorization = file("image-authorization.json", imageAuthorizationFixture.authorization);
   const iamEvidence = file("iam-evidence.json", { status: "valid", iamEvaluationCensus: { total: 158, executed: 158, invalid: 0, failures: [] }, evidenceSha256: "d".repeat(64) });
   const temporaryKmsCapability = file("temporary-kms-capability.json", buildTemporaryCapabilityEvidence({ state: "ABSENCE_VERIFIED", sourceSha: expectedSha, transitionId: "rehearsal-transition", defaultVersionId: "v1", observedAt: "2026-08-18T12:00:00.000Z" }));
@@ -150,8 +153,8 @@ function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha) {
   return { imageAuthorization, imageAuthorizationFixture, iamEvidence, releasePreflightEvidence, releasePreflightAttestation, releasePreflightAttestationSignature, temporaryKmsCapability, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
 }
 
-function fullInput(directory, repositoryRoot, expectedSha = sourceSha) {
-  const evidence = evidenceFiles(directory, repositoryRoot, expectedSha);
+function fullInput(directory, repositoryRoot, expectedSha = sourceSha, imageReleaseSha) {
+  const evidence = evidenceFiles(directory, repositoryRoot, expectedSha, imageReleaseSha);
   return {
     outputDirectory: path.join(directory, "runtime"),
     repositoryRoot,
@@ -1056,6 +1059,72 @@ test("BOOTSTRAP_ARGUMENTS reject unknown, positional, and duplicate options", ()
   assert.throws(() => parseBootstrapArgs(["--unknown", "x"]), /unsupported/);
   assert.throws(() => parseBootstrapArgs(["positional"]), /Invalid/);
   assert.throws(() => parseBootstrapArgs(["--ticket", "A", "--ticket", "B"]), /Duplicate/);
+});
+
+test("BOOTSTRAP_ARGUMENTS accept the exact successor-recovery evidence options", () => {
+  const parsed = parseBootstrapArgs(["--recovery-envelope", "/private/tmp/recovery-envelope.json", "--original-rebaseline-preparation", "/private/tmp/original-preparation.json"]);
+  assert.equal(parsed.get("recovery-envelope"), "/private/tmp/recovery-envelope.json");
+  assert.equal(parsed.get("original-rebaseline-preparation"), "/private/tmp/original-preparation.json");
+  for (const argv of [["--recovery-envelope"], ["--original-rebaseline-preparation"], ["--recovery-envelope", "x", "--recovery-envelope", "y"], ["--recovery-envelope", "x", "--recovery-unknown", "y"]]) assert.throws(() => parseBootstrapArgs(argv), /Invalid|Duplicate|unsupported/);
+});
+
+test("REAL successor-recovery runtime path preserves recovery context through adapter construction", () => {
+  const directory = fsTemp();
+  const recoverySource = PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA;
+  const envelope = partialRecoveryEnvelopeFixture();
+  const originalPreparation = partialRecoveryOriginalPreparationFixture();
+  const imageFixture = makeCanonicalImageAuthorization({ sourceSha: recoverySource, imageReleaseSha: recoverySource });
+  const approvalEvidence = createProductionEnvironmentApprovalEvidence({
+    environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] },
+    repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha: recoverySource,
+    workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineRecoveryWorkflowRef, eventName: "workflow_dispatch",
+    workflowRunId: "987655", workflowRunAttempt: "1", executionActor: "operator", observedAt: imageFixture.now,
+    actualApproval: { state: "approved", environmentId: 17, environmentName: "production", userId: 7, userLogin: "checker" },
+  });
+  const liveCas = { liveReferenceAuditSha256: createHash("sha256").update("recovery-audit").digest("hex"), liveLegacyBaselineIdentitySha256: createHash("sha256").update("recovery-legacy").digest("hex"), observedSlotIdentitiesSha256: createHash("sha256").update("recovery-slots").digest("hex") };
+  const proveDescendant = ({ ancestorSha, descendantSha }) => ancestorSha === recoverySource && descendantSha === recoverySource;
+  const authorization = createPartialRebaselineRecoveryAuthorization({ protectedEnvironmentApprovalEvidence: approvalEvidence, sourceSha: recoverySource, recoveryEnvelope: envelope, imageAuthorization: imageFixture.authorization, imageAuthorizationValidation: { now: imageFixture.now, verifyImageEvidence: imageFixture.verifyImageEvidence }, ...liveCas, reason: "resume fixture", approverRole: "production-independent-checker", verificationRef: "recovery-runtime-fixture", proveDescendant });
+  const finalSnapshots = originalPreparation.writePlan.map(({ slot, secretArn, clientRequestToken, payloadSha256 }) => ({ slot, arn: secretArn, currentVersionId: clientRequestToken, currentStages: ["AWSCURRENT"], currentPayloadSha256: payloadSha256, versions: [{ versionId: clientRequestToken, stages: ["AWSCURRENT"], payloadSha256 }] }));
+  const originalWritePlan = originalPreparation.writePlan.map((entry) => ({ ...entry, payload: { keyVersion: entry.payloadIdentity.keyVersion } }));
+  const completion = buildPartialRebaselineRecoveryCompletion({ originalPreparation, sourceSha: recoverySource, recoveryEnvelope: envelope, recoveryAuthorization: authorization, finalSnapshots, writePlan: originalWritePlan });
+  const recoveryBindings = buildPartialRebaselineRecoveryRotationBindings({ sourceSha: recoverySource, originalPreparation, recoveryEnvelope: envelope, recoveryAuthorization: authorization, completion });
+  const livePostWriteBody = { kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha: recoverySource, rotationId: envelope.rotationId, authorizationSha256: authorization.authorizationSha256, resources: envelope.resources, versionIds: authorization.writeIdentities, payloadIdentities: authorization.writePayloadIdentities };
+  const input = {
+    ...fullInput(directory, process.cwd(), recoverySource, recoverySource),
+    rotationId: envelope.rotationId,
+    rotationBindings: recoveryBindings,
+    recoveryEnvelope: envelope,
+    originalPreparation,
+    rebaselineAuthorization: authorization,
+    rebaselineAuthorizationCoordinates: { workflowRunId: "987655", workflowRunAttempt: "1" },
+    imageAuthorizationValidation: { now: imageFixture.now, verifyImageEvidence: imageFixture.verifyImageEvidence },
+    verifyRebaselineLivePostWrite: () => ({ ...livePostWriteBody, livePostWriteSha256: canonicalSha256(livePostWriteBody) }),
+    proveRecoveryDescendant: proveDescendant,
+    currentTaskDefinition: taskDefinition({ jwt: { currentSecretId: recoveryBindings.legacy.jwtCurrent, previousSecretId: recoveryBindings.jwt.previousSecretId, pendingSecretId: recoveryBindings.jwt.pendingSecretId }, qr: { ...recoveryBindings.qr } }),
+  };
+  writeFileSync(input.imageAuthorization.filePath, `${JSON.stringify(imageFixture.authorization)}\n`, { mode: 0o600 });
+  input.imageAuthorization = { ...imageFixture.authorization, filePath: input.imageAuthorization.filePath };
+  try {
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, true, result.blockers?.join(" | "));
+    assert.equal(result.config.rebaselineRuntime.runtimeVariant, "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME");
+    assert.equal(result.config.rebaselineRuntime.recoveryEnvelope.recoverySha256, envelope.recoverySha256);
+    assert.equal(result.config.rebaselineRuntime.originalPreparation.preparationSha256, originalPreparation.preparationSha256);
+    assert.doesNotThrow(() => assertPartialRebaselineRecoveryAuthorization(result.config.rebaselineRuntime.authorization, { sourceSha: recoverySource, recoveryEnvelope: envelope, imageAuthorization: imageFixture.authorization, imageAuthorizationValidation: { now: imageFixture.now, verifyImageEvidence: imageFixture.verifyImageEvidence }, proveDescendant }));
+    assert.equal(JSON.parse(readFileSync(result.configPath, "utf8")).rebaselineRuntime.runtimeVariant, "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME");
+    const runtimeConfigSha = (config) => createHash("sha256").update(`${JSON.stringify(config, null, 2)}\n`).digest("hex");
+    const adapterArgs = (mutate) => {
+      const config = structuredClone(result.config);
+      mutate(config);
+      return { config, sourceSha: recoverySource, rotationId: config.rotationId, runtimeConfigSha256: runtimeConfigSha(config), verifyReleasePreflightAttestationSignature: () => true, createCommandRunner: () => () => "" };
+    };
+    assert.throws(() => createProductionCutoverAdapters(adapterArgs((config) => { config.rebaselineRuntime.runtimeVariant = "ORDINARY_REBASELINE_RUNTIME"; })), /contains successor-recovery authority/);
+    assert.throws(() => createProductionCutoverAdapters(adapterArgs((config) => { delete config.rebaselineRuntime.recoveryEnvelope; })), /Complete successor-recovery runtime authority/);
+    assert.throws(() => createProductionCutoverAdapters(adapterArgs((config) => { config.rebaselineRuntime.runtimeVariant = "UNKNOWN_REBASELINE_RUNTIME"; })), /missing or unsupported/);
+  } finally {
+    rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 function fsTemp() {
