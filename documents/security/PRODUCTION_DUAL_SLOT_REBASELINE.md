@@ -61,6 +61,12 @@ compatibility exception. Preparation supplies this retained private evidence wit
 `--historical-transition-evidence`; missing, divergent, or locally altered evidence
 remains a fail-closed error.
 
+The transition envelope is additionally compared with the reviewed protected-source
+anchor for this exact seven-resource historical transition. Its embedded SHA proves only
+internal integrity; the protected-source anchor establishes historical authority. The
+authoritative validator also requires fresh observed VersionIds and slot identities, so
+the anchor never substitutes for live Secrets Manager agreement.
+
 The protected authorization says that the seven deterministic writes may occur; it is
 not proof that they did. Runtime preparation therefore re-resolves the protected
 environment authorization artifact and performs fresh `DescribeSecret` plus

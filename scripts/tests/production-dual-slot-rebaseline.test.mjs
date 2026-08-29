@@ -103,35 +103,48 @@ function coordinatorPayload(slot) {
   return { value: "coordinator-qr-version-fixture", family: "qr_key_versions", slot: "current", rotationId: historicalRotationId, sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[1], keyVersion: "coordinator-v1" };
 }
 
+const coordinatorResourceSuffixes = { jwtPending: "1CnWMp", qrPrivatePending: "LZhc54", qrPublicPending: "uB3P1Q", jwtPrevious: "6rQrqj", qrPublicPrevious: "rLZwcX", qrCurrentVersion: "8fNOVE", qrPreviousVersion: "PDFul2" };
+const coordinatorResources = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, `arn:aws:secretsmanager:${PRODUCTION_DUAL_SLOT_REBASELINE.region}:${PRODUCTION_DUAL_SLOT_REBASELINE.accountId}:secret:${REBASELINE_SLOTS[slot]}-${coordinatorResourceSuffixes[slot]}`]));
+const coordinatorPredecessorVersionIds = {
+  jwtPending: "737fd4b9a57f9ee005ffdece208220e842883f29f0166d07b763d6b55644e908",
+  qrPrivatePending: "a0f20f429e5b2d289a676d13e3ea3e9d098874e3c783546e59c6afc952e2b1ba",
+  qrPublicPending: "c2d8cbe2804d92fda7396a7181377da77f87775dd87f8115a216897b11eef45e",
+  jwtPrevious: "61e8a3601210b8e7df43138088132fb1dedcdcd1b5c6e161d7af0285575355fc",
+  qrPublicPrevious: "bf432d60e346a18245fb3e85a6a28137ecea73cf52768ef2a6ded98283038548",
+  qrCurrentVersion: "11ce28ae6f806270413faabef2d055bd97db30fb75f53bd59b59cdb121ca30d4",
+  qrPreviousVersion: "eff7b3dc6ca8dcdbaec9b7e300811ea603c813ba646d8f654388e66d6b68f5e3",
+};
+
 function authenticatedCoordinatorTransitionFixture() {
-  const predecessorVersionIds = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, sha256(`${REBASELINE_HISTORICAL_SOURCE_SHAS[0]}:${historicalRotationId}:${slot}`)]));
-  const supersessionBody = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], staleSourceSha: "b".repeat(40), rotationId: historicalRotationId, staleRotationId: "rotation-stale-fixture", generatedAt: "2026-08-26T06:06:32.000Z", resources: Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, { arn: resources[slot], stages: ["AWSCURRENT"], versionId: predecessorVersionIds[slot] }])) };
+  const predecessorVersionIds = coordinatorPredecessorVersionIds;
+  const supersessionResourceOrder = ["jwtPrevious", "jwtPending", "qrPrivatePending", "qrPublicPrevious", "qrPublicPending", "qrCurrentVersion", "qrPreviousVersion"];
+  const supersessionBody = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], staleSourceSha: "ee9b68a6677be49e5449c428b65b5308d81757f0", rotationId: historicalRotationId, staleRotationId: "rotation-20260812143547-53433751", generatedAt: "2026-08-26T06:18:48.828Z", resources: Object.fromEntries(supersessionResourceOrder.map((slot) => [slot, { arn: coordinatorResources[slot], versionId: predecessorVersionIds[slot], stages: ["AWSCURRENT"] }])) };
   const originalSupersessionEvidence = { ...supersessionBody, evidenceIdentitySha256: productionSupersessionEvidenceIdentity(supersessionBody) };
-  const predecessorSlotIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, historicalSlotIdentity({ slot, secretArn: resources[slot], versionId: predecessorVersionIds[slot], stages: ["AWSCURRENT"], payload: historicalPayload(slot, { source: REBASELINE_HISTORICAL_SOURCE_SHAS[0] }) })]));
+  const predecessorSlotIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, historicalSlotIdentity({ slot, secretArn: coordinatorResources[slot], versionId: predecessorVersionIds[slot], stages: ["AWSCURRENT"], payload: historicalPayload(slot, { source: REBASELINE_HISTORICAL_SOURCE_SHAS[0] }) })]));
   const postVersionIds = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, ["jwtPrevious", "qrCurrentVersion"].includes(slot) ? coordinatorTransitionVersionId({ slot }) : predecessorVersionIds[slot]]));
-  const postSlotIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, ["jwtPrevious", "qrCurrentVersion"].includes(slot) ? coordinatorTransitionSlotIdentity({ slot, secretArn: resources[slot], versionId: postVersionIds[slot], stages: ["AWSCURRENT"], payload: coordinatorPayload(slot) }) : predecessorSlotIdentities[slot]]));
-  const authorizationBody = { reference: "GH-ISSUE-391", sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[1], rotationId: historicalRotationId, resourcesSha256: canonicalSha256(resources) };
+  const postSlotIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, ["jwtPrevious", "qrCurrentVersion"].includes(slot) ? coordinatorTransitionSlotIdentity({ slot, secretArn: coordinatorResources[slot], versionId: postVersionIds[slot], stages: ["AWSCURRENT"], payload: coordinatorPayload(slot) }) : predecessorSlotIdentities[slot]]));
+  const authorizationBody = { reference: "GH-ISSUE-391", sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[1], rotationId: historicalRotationId, resourcesSha256: canonicalSha256(coordinatorResources) };
   const authorization = { ...authorizationBody, evidenceSha256: canonicalSha256(authorizationBody) };
   const rotationStateBody = { stateVersion: 4, sourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[1], rotationId: historicalRotationId, phase: "overlap-deploy-required", initialMigrationSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0] };
   const rotationState = { ...rotationStateBody, stateSha256: canonicalSha256(rotationStateBody) };
-  return buildAuthenticatedPreCutoverCoordinatorTransition({ resources, originalSupersessionEvidence, predecessorSlotIdentities, postSlotIdentities, authorization, rotationState, liveReferenceAuditSha256: audit.stableAuditSha256, liveLegacyBaselineIdentitySha256: canonicalSha256(legacyBaseline) });
+  return buildAuthenticatedPreCutoverCoordinatorTransition({ resources: coordinatorResources, originalSupersessionEvidence, predecessorSlotIdentities, postSlotIdentities, authorization, rotationState, liveReferenceAuditSha256: audit.stableAuditSha256, liveLegacyBaselineIdentitySha256: canonicalSha256(legacyBaseline) });
 }
 
 function coordinatorTopologyClient(transition, overrides = {}) {
   return { send: async (command) => {
     const input = command.input;
-    const slot = Object.entries(REBASELINE_SLOTS).find(([, name]) => name === input.SecretId)?.[0] || Object.entries(resources).find(([, arn]) => arn === input.SecretId)?.[0];
+    const slot = Object.entries(REBASELINE_SLOTS).find(([, name]) => name === input.SecretId)?.[0] || Object.entries(coordinatorResources).find(([, arn]) => arn === input.SecretId)?.[0];
     if (!slot) throw new Error("unexpected secret identity");
     const currentVersionId = overrides[slot]?.versionId || transition.postVersionIds[slot];
     const payload = overrides[slot]?.payload || (slot === "jwtPrevious" || slot === "qrCurrentVersion" ? coordinatorPayload(slot) : historicalPayload(slot, { source: REBASELINE_HISTORICAL_SOURCE_SHAS[0] }));
     const name = command.constructor.name;
-    if (name === "DescribeSecretCommand") return { Name: input.SecretId, ARN: overrides[slot]?.arn || resources[slot], VersionIdsToStages: { [currentVersionId]: overrides[slot]?.stages || ["AWSCURRENT"] } };
+    if (name === "DescribeSecretCommand") return { Name: input.SecretId, ARN: overrides[slot]?.arn || coordinatorResources[slot], VersionIdsToStages: { [currentVersionId]: overrides[slot]?.stages || ["AWSCURRENT"] } };
     if (name === "GetSecretValueCommand") return { SecretString: JSON.stringify(payload), VersionId: input.VersionId };
     throw new Error(`unexpected command ${name}`);
   } };
 }
 
-test("exact protected post-supersession coordinator topology is reproduced and rejected before the compatibility fix", async () => {
+test("post-supersession coordinator topology requires its authenticated transition evidence", async () => {
   const transition = authenticatedCoordinatorTransitionFixture();
   await assert.rejects(() => readDualSlotTopology({ client: coordinatorTopologyClient(transition) }), /kind|historical|authentic/i);
 });
@@ -141,9 +154,9 @@ test("authenticated coordinator transition accepts the exact protected seven-slo
   const topology = await readDualSlotTopology({ client: coordinatorTopologyClient(transition), historicalTransitionEvidence: transition });
   assert.deepEqual(topology.currentVersionIds, transition.postVersionIds);
   assert.deepEqual(topology.observedSlotIdentities, transition.postSlotIdentities);
-  const evidence = buildAbandonmentEvidence({ sourceSha, historicalRotationId, historicalSourceShas: REBASELINE_HISTORICAL_SOURCE_SHAS, resources, currentVersionIds: transition.postVersionIds, historicalTopologySha256, observedSlotIdentities: transition.postSlotIdentities, historicalTransitionEvidence: transition, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, liveLegacyBaselineIdentitySha256: canonicalSha256(legacyBaseline), legacyRuntimeAuthoritative: true, observedAt: "2026-08-28T10:00:00.000Z" });
+  const evidence = buildAbandonmentEvidence({ sourceSha, historicalRotationId, historicalSourceShas: REBASELINE_HISTORICAL_SOURCE_SHAS, resources: coordinatorResources, currentVersionIds: transition.postVersionIds, historicalTopologySha256: "80ec0c997561f13e4162e1aeaf9133dd58e4b5aa40f8eba5b13ee3474528e1ae", observedSlotIdentities: transition.postSlotIdentities, historicalTransitionEvidence: transition, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, liveLegacyBaselineIdentitySha256: canonicalSha256(legacyBaseline), legacyRuntimeAuthoritative: true, observedAt: "2026-08-28T10:00:00.000Z" });
   assert.equal(evidence.schemaVersion, 3);
-  assert.doesNotThrow(() => assertRebaselinePreconditions({ ...preconditions, resources, currentVersionIds: undefined, abandonmentEvidence: evidence, historicalTopologySha256 }));
+  assert.doesNotThrow(() => assertRebaselinePreconditions({ ...preconditions, resources: coordinatorResources, currentVersionIds: undefined, abandonmentEvidence: evidence, historicalTopologySha256: "80ec0c997561f13e4162e1aeaf9133dd58e4b5aa40f8eba5b13ee3474528e1ae" }));
 });
 
 test("coordinator transition rejects mutated resource, version, payload, source, rotation, fingerprint, predecessor, writer, authorization, or live evidence", () => {
@@ -160,13 +173,26 @@ test("coordinator transition rejects mutated resource, version, payload, source,
     ["live reference", () => ({ ...transition, liveReferenceAuditSha256: sha256("changed-audit") })],
     ["legacy baseline", () => ({ ...transition, liveLegacyBaselineIdentitySha256: sha256("changed-baseline") })],
   ];
-  for (const [label, mutate] of mutations) assert.throws(() => assertAuthenticatedPreCutoverCoordinatorTransition(mutate()), /invalid|authentic|exact|hash|bound|duplicate|deterministic/i, label);
+  for (const [label, mutate] of mutations) assert.throws(() => assertAuthenticatedPreCutoverCoordinatorTransition(mutate(), { resources: coordinatorResources, observedVersionIds: transition.postVersionIds, observedSlotIdentities: transition.postSlotIdentities }), /invalid|authentic|exact|hash|bound|duplicate|deterministic|protected/i, label);
 });
 
 test("coordinator transition requires both changed slots to form one authenticated topology", async () => {
   const transition = authenticatedCoordinatorTransitionFixture();
   await assert.rejects(() => readDualSlotTopology({ client: coordinatorTopologyClient(transition, { jwtPrevious: { payload: { ...coordinatorPayload("jwtPrevious"), materialFingerprint: "wrong" } } }), historicalTransitionEvidence: transition }), /authentic|fingerprint|transition/i);
   await assert.rejects(() => readDualSlotTopology({ client: coordinatorTopologyClient(transition, { qrCurrentVersion: { versionId: transition.predecessorVersionIds.qrCurrentVersion } }), historicalTransitionEvidence: transition }), /neither|deterministic|transition|authentic/i);
+});
+
+test("self-minted coordinator transition evidence is rejected without independent live observations", () => {
+  const forged = structuredClone(authenticatedCoordinatorTransitionFixture());
+  forged.postSlotIdentities.jwtPrevious.materialFingerprint = "0123456789abcdef";
+  const { identitySha256, ...slotBody } = forged.postSlotIdentities.jwtPrevious;
+  forged.postSlotIdentities.jwtPrevious.identitySha256 = canonicalSha256(slotBody);
+  const { transitionSha256, ...transitionBody } = forged;
+  forged.transitionSha256 = canonicalSha256(transitionBody);
+  assert.equal(forged.postSlotIdentities.jwtPrevious.identitySha256, canonicalSha256(slotBody));
+  assert.equal(forged.transitionSha256, canonicalSha256(transitionBody));
+  assert.throws(() => assertAuthenticatedPreCutoverCoordinatorTransition(forged), /exact live resource/i);
+  assert.throws(() => assertAuthenticatedPreCutoverCoordinatorTransition(forged, { resources: coordinatorResources, observedVersionIds: authenticatedCoordinatorTransitionFixture().postVersionIds, observedSlotIdentities: authenticatedCoordinatorTransitionFixture().postSlotIdentities }), /exact|protected|authentic/i);
 });
 
 test("observed abandonment identities bind exact payloads without plaintext", () => {

@@ -66,7 +66,6 @@ export async function readDualSlotTopology({ client, names = REBASELINE_SLOTS, h
   if ((preparedState && !preparedWritePlan) || (!preparedState && preparedWritePlan)) throw new Error("Prepared rebaseline topology requires both authenticated preparation and write plan.");
   if (preparedState) assertAbandonmentEvidence(preparedState.abandonmentEvidence, { sourceSha: preparedState.sourceSha, resources: preparedState.resources, historicalTopologySha256: preparedState.historicalTopologySha256 });
   const transitionEvidence = historicalTransitionEvidence || preparedState?.abandonmentEvidence?.historicalTransitionEvidence;
-  if (transitionEvidence) assertAuthenticatedPreCutoverCoordinatorTransition(transitionEvidence);
   const preparedBySlot = preparedWritePlan ? Object.fromEntries(preparedWritePlan.map((entry) => [entry.slot, entry])) : null;
   const resources = {};
   const currentVersionIds = {};

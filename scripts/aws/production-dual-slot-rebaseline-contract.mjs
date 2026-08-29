@@ -46,6 +46,51 @@ export const sha256 = (value) => crypto.createHash("sha256").update(Buffer.isBuf
 export const canonicalSha256 = (value) => sha256(canonical(value));
 export const fingerprint = (value) => sha256(value).slice(0, 16);
 
+// This is a reviewed trust anchor for the one retained coordinator transition that
+// may be adopted.  The supplied evidence remains an integrity envelope; it is not
+// allowed to mint historical authority by recomputing its own digest.
+const AUTHENTICATED_COORDINATOR_TRANSITION_ANCHOR = Object.freeze({
+  schemaVersion: 1,
+  kind: AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION,
+  coordinatorSourceSha: REBASELINE_COORDINATOR_SOURCE_SHA,
+  historicalRotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID,
+  writer: Object.freeze({ sourceSha: REBASELINE_COORDINATOR_SOURCE_SHA, module: "backend/scripts/security/rotate-production-signing-material.mjs", operation: "putMaterial", semanticsVersion: 1 }),
+  originalSupersessionEvidenceSha256: "1e417d5f42d821f8022a56be1f07e257c48c4a81e44fc67822ff0d1c164f6df7",
+  historicalTopologySha256: REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256,
+  resourcesSha256: "107e412e699b03ab324ddf6d3ebb0173a2b0d589db400dc921de22a91f56d1ab",
+  predecessorVersionIds: Object.freeze({
+    jwtPending: "737fd4b9a57f9ee005ffdece208220e842883f29f0166d07b763d6b55644e908",
+    qrPrivatePending: "a0f20f429e5b2d289a676d13e3ea3e9d098874e3c783546e59c6afc952e2b1ba",
+    qrPublicPending: "c2d8cbe2804d92fda7396a7181377da77f87775dd87f8115a216897b11eef45e",
+    jwtPrevious: "61e8a3601210b8e7df43138088132fb1dedcdcd1b5c6e161d7af0285575355fc",
+    qrPublicPrevious: "bf432d60e346a18245fb3e85a6a28137ecea73cf52768ef2a6ded98283038548",
+    qrCurrentVersion: "11ce28ae6f806270413faabef2d055bd97db30fb75f53bd59b59cdb121ca30d4",
+    qrPreviousVersion: "eff7b3dc6ca8dcdbaec9b7e300811ea603c813ba646d8f654388e66d6b68f5e3",
+  }),
+  postVersionIds: Object.freeze({
+    jwtPending: "737fd4b9a57f9ee005ffdece208220e842883f29f0166d07b763d6b55644e908",
+    qrPrivatePending: "a0f20f429e5b2d289a676d13e3ea3e9d098874e3c783546e59c6afc952e2b1ba",
+    qrPublicPending: "c2d8cbe2804d92fda7396a7181377da77f87775dd87f8115a216897b11eef45e",
+    jwtPrevious: "0c82ddd3f3dfd07cc0b563445403b726e76af0a1bdbf8b915983cf8e84fa54de",
+    qrPublicPrevious: "bf432d60e346a18245fb3e85a6a28137ecea73cf52768ef2a6ded98283038548",
+    qrCurrentVersion: "6f6155c7984e7b7b5b4ddfe0f8852f5bd630e5c88d3391b4024a20376c26bbc0",
+    qrPreviousVersion: "eff7b3dc6ca8dcdbaec9b7e300811ea603c813ba646d8f654388e66d6b68f5e3",
+  }),
+  authorization: Object.freeze({ reference: "GH-ISSUE-391", sourceSha: REBASELINE_COORDINATOR_SOURCE_SHA, rotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, resourcesSha256: "107e412e699b03ab324ddf6d3ebb0173a2b0d589db400dc921de22a91f56d1ab", evidenceSha256: "4da8122764c5d404d668320a222c2f590e78db34217a4e5d72dfc8b22b0354b8" }),
+  rotationState: Object.freeze({ stateVersion: 4, sourceSha: REBASELINE_COORDINATOR_SOURCE_SHA, rotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, phase: "overlap-deploy-required", initialMigrationSourceSha: REBASELINE_HISTORICAL_SOURCE_SHAS[0], stateSha256: "1769b305a1aea0619c1a58f478aa3fc4dd8f0c2505c6c39cc34326bfaf78744c" }),
+  transitionedSlots: Object.freeze({
+    jwtPrevious: Object.freeze({ payloadSchema: "COORDINATOR_ROTATION_WRITER_V1", family: "jwt_secrets", slot: "previous", sourceSha: null }),
+    qrCurrentVersion: Object.freeze({ payloadSchema: "COORDINATOR_ROTATION_WRITER_V1", family: "qr_key_versions", slot: "current", sourceSha: REBASELINE_COORDINATOR_SOURCE_SHA }),
+  }),
+  unchangedSlots: Object.freeze(["jwtPending", "qrPrivatePending", "qrPublicPending", "qrPublicPrevious", "qrPreviousVersion"]),
+  unexplainedSlotCount: 0,
+  conflictSlotCount: 0,
+  dualSlotReferences: 0,
+});
+
+export const EXPECTED_AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION_SHA256 = "9705170e179b31d56133d41d6c8946806c8781f76b95f4e194dba7784e79b564";
+if (canonicalSha256(AUTHENTICATED_COORDINATOR_TRANSITION_ANCHOR) !== EXPECTED_AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION_SHA256) throw new Error("Protected coordinator transition anchor is internally inconsistent.");
+
 function assertSlotMap(map, label) {
   exactKeys(map, REBASELINE_SLOT_ORDER, label);
   for (const slot of REBASELINE_SLOT_ORDER) assertArn(map[slot], `${label}.${slot}`);
@@ -179,7 +224,29 @@ function assertCoordinatorTransitionIdentityMap(identities, resources, versionId
   return Object.freeze({ ...identities });
 }
 
-export function assertAuthenticatedPreCutoverCoordinatorTransition(value, { resources, observedVersionIds, observedSlotIdentities, liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256 } = {}) {
+function coordinatorTransitionAnchorProjection(value, resources) {
+  return {
+    schemaVersion: value.schemaVersion,
+    kind: value.kind,
+    coordinatorSourceSha: value.coordinatorSourceSha,
+    historicalRotationId: value.historicalRotationId,
+    writer: value.writer,
+    originalSupersessionEvidenceSha256: value.originalSupersessionEvidenceSha256,
+    historicalTopologySha256: canonicalSha256({ resources, versionIds: value.predecessorVersionIds }),
+    resourcesSha256: canonicalSha256(resources),
+    predecessorVersionIds: value.predecessorVersionIds,
+    postVersionIds: value.postVersionIds,
+    authorization: value.authorization,
+    rotationState: value.rotationState,
+    transitionedSlots: AUTHENTICATED_COORDINATOR_TRANSITION_ANCHOR.transitionedSlots,
+    unchangedSlots: AUTHENTICATED_COORDINATOR_TRANSITION_ANCHOR.unchangedSlots,
+    unexplainedSlotCount: value.unexplainedSlotCount,
+    conflictSlotCount: value.conflictSlotCount,
+    dualSlotReferences: value.dualSlotReferences,
+  };
+}
+
+function assertCoordinatorTransitionEnvelope(value, { resources, observedVersionIds, observedSlotIdentities, liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256 } = {}) {
   const keys = ["schemaVersion", "kind", "coordinatorSourceSha", "historicalRotationId", "writer", "originalSupersessionEvidence", "originalSupersessionEvidenceSha256", "predecessorVersionIds", "predecessorSlotIdentities", "postVersionIds", "postSlotIdentities", "authorization", "rotationState", "unexplainedSlotCount", "conflictSlotCount", "dualSlotReferences", "liveReferenceAuditSha256", "liveLegacyBaselineIdentitySha256", "transitionSha256"];
   exactKeys(value, keys, "Coordinator transition evidence");
   if (value.schemaVersion !== 1 || value.kind !== AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION || value.coordinatorSourceSha !== REBASELINE_COORDINATOR_SOURCE_SHA || value.historicalRotationId !== REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID || value.unexplainedSlotCount !== 0 || value.conflictSlotCount !== 0 || value.dualSlotReferences !== 0 || !SHA256.test(value.liveReferenceAuditSha256 || "") || !SHA256.test(value.liveLegacyBaselineIdentitySha256 || "")) fail("Coordinator transition evidence identity is invalid.");
@@ -216,7 +283,14 @@ export function assertAuthenticatedPreCutoverCoordinatorTransition(value, { reso
   if (liveLegacyBaselineIdentitySha256 !== undefined && value.liveLegacyBaselineIdentitySha256 !== liveLegacyBaselineIdentitySha256) fail("Coordinator transition legacy baseline evidence is not exact.");
   const { transitionSha256, ...body } = value;
   if (!SHA256.test(transitionSha256 || "") || canonicalSha256(body) !== transitionSha256) fail("Coordinator transition evidence hash is invalid.");
+  const anchor = coordinatorTransitionAnchorProjection(value, checkedResources);
+  if (canonicalSha256(anchor) !== EXPECTED_AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION_SHA256) fail("Coordinator transition evidence does not match the protected historical authority anchor.");
   return Object.freeze({ ...value, resources: checkedResources });
+}
+
+export function assertAuthenticatedPreCutoverCoordinatorTransition(value, options = {}) {
+  if (!options.resources || !options.observedVersionIds || !options.observedSlotIdentities) fail("Authenticated coordinator transition requires exact live resource and slot observations.");
+  return assertCoordinatorTransitionEnvelope(value, options);
 }
 
 export function buildAuthenticatedPreCutoverCoordinatorTransition({ coordinatorSourceSha = REBASELINE_COORDINATOR_SOURCE_SHA, historicalRotationId = REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, resources, originalSupersessionEvidence, predecessorSlotIdentities, postSlotIdentities, authorization, rotationState, liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256 } = {}) {
@@ -226,7 +300,7 @@ export function buildAuthenticatedPreCutoverCoordinatorTransition({ coordinatorS
   const postVersionIds = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, coordinatorTransitionToken(historicalRotationId, slot) || predecessorVersionIds[slot]]));
   const body = { schemaVersion: 1, kind: AUTHENTICATED_PRE_CUTOVER_COORDINATOR_TRANSITION, coordinatorSourceSha, historicalRotationId, writer: { sourceSha: coordinatorSourceSha, module: "backend/scripts/security/rotate-production-signing-material.mjs", operation: "putMaterial", semanticsVersion: 1 }, originalSupersessionEvidence, originalSupersessionEvidenceSha256: originalSupersessionEvidence.evidenceIdentitySha256, predecessorVersionIds, predecessorSlotIdentities, postVersionIds, postSlotIdentities, authorization, rotationState, unexplainedSlotCount: 0, conflictSlotCount: 0, dualSlotReferences: 0, liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256 };
   const result = { ...body, transitionSha256: canonicalSha256(body) };
-  assertAuthenticatedPreCutoverCoordinatorTransition(result, { resources: checkedResources });
+  assertCoordinatorTransitionEnvelope(result, { resources: checkedResources });
   return Object.freeze(result);
 }
 
