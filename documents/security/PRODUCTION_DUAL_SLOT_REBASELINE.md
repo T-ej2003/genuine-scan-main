@@ -25,6 +25,12 @@ reuse only the exact authenticated deterministic version. At every resume point 
 slot must be either the immutable abandonment snapshot or that exact prepared version;
 any third state fails closed. Any mismatch fails closed.
 
+After one acknowledged `PutSecretValue`, the executor performs a bounded six-observation
+read-only convergence loop before considering that slot complete. It retries only an
+unchanged authenticated historical snapshot, using capped exponential delays; it never
+issues a second write while waiting. A wrong deterministic VersionId, payload identity,
+stage topology, third state, read error, or exhausted bound fails closed.
+
 The baseline identity also authenticates the complete legacy/current runtime manifest.
 The three legacy signing-secret ARNs and active QR version are compared against the
 independently authorized baseline identity before rebaseline bindings are emitted or

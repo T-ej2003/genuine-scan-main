@@ -42,23 +42,29 @@ const temporary = () => { const directory = mkdtempSync(path.join(os.tmpdir(), "
 function environmentEvidence() { return createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository, environment: "production", sourceSha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "operator", observedAt: "2026-08-28T10:01:00.000Z", actualApproval: { state: "approved", environmentId: 17, environmentName: "production", userId: 7, userLogin: "checker" } }); }
 const verifyInitialBindingOrigin = () => { throw new Error("fixture is not an initial binding"); };
 function authorization({ baselineIdentitySha256 = identity.identitySha256, writePayloadIdentities = rebaselineWritePayloadIdentities(writePlan) } = {}) { return createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: environmentEvidence(), sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256, resources, writeIdentities: Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, deterministicWriteIdentity({ sourceSha, rotationId, slot, secretArn: resources[slot], baselineIdentitySha256 })])), writePayloadIdentities, expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "Abandon pre-cutover state and establish a clean baseline", approvedBy: "checker", approverRole: "production-independent-checker", verificationRef: "ticket-rebaseline-1" }); }
-function executionAdapters({ failAt = -1, liveReferenceAudit = audit } = {}) {
+function executionAdapters({ failAt = -1, liveReferenceAudit = audit, postWriteHistoricalReadLag = 0 } = {}) {
   const store = new Map(REBASELINE_SLOT_ORDER.map((slot) => [slot, [{
     versionId: currentVersionIds[slot], stages: ["AWSCURRENT"],
     payloadSha256: observedSlotIdentities[slot].payloadSha256,
   }]]));
-  let calls = 0;
+  const historical = new Map([...store].map(([slot, versions]) => [slot, structuredClone(versions)]));
+  let calls = 0; let staleReads = 0; const operations = [];
   return {
     store,
+    operations,
     readReferenceAudit: async () => typeof liveReferenceAudit === "function" ? liveReferenceAudit() : liveReferenceAudit,
     readSlot: async (slot, secretArn) => {
-      const versions = store.get(slot); const current = versions.find(({ stages }) => stages.includes("AWSCURRENT"));
+      operations.push({ operation: "read", slot });
+      const versions = staleReads > 0 ? historical.get(slot) : store.get(slot); if (staleReads > 0) staleReads -= 1;
+      const current = versions.find(({ stages }) => stages.includes("AWSCURRENT"));
       return { arn: secretArn, versions, currentVersionId: current?.versionId, currentStages: current?.stages, currentPayloadSha256: current?.payloadSha256 };
     },
     writeSlot: async ({ slot, secretArn, clientRequestToken, payload, payloadSha256 }) => {
+      operations.push({ operation: "write", slot });
       const entry = { versionId: clientRequestToken, stages: ["AWSCURRENT"], payloadSha256: payloadSha256 || canonicalSha256(payload) };
       store.set(slot, store.get(slot).map((version) => ({ ...version, stages: version.stages.includes("AWSCURRENT") ? ["AWSPREVIOUS"] : version.stages })).concat(entry));
       calls += 1;
+      staleReads = postWriteHistoricalReadLag;
       if (calls === failAt) throw new Error("injected interruption after remote write");
       return { arn: secretArn, versionId: clientRequestToken };
     },
@@ -538,6 +544,59 @@ test("production prepare CLI rejects a divergent existing abandonment artifact",
 
 test("seven-slot execution resumes at every write boundary and persists exact completion plus bindings", async () => {
   for (let failAt = 1; failAt <= 7; failAt += 1) { const outputs = temporary(); const adapters = executionAdapters({ failAt }); await assert.rejects(() => execute(adapters, outputs), /interruption/); const resumed = await execute(adapters, outputs); assert.equal(resumed.baselineComplete, true); assert.equal(JSON.stringify(resumed.completion).includes(material.jwt), false); assert.equal(readFileSync(outputs.completionFile, "utf8").includes(material.jwt), false); rmSync(outputs.directory, { recursive: true, force: true }); }
+});
+
+test("executor waits for a bounded read-only convergence after an acknowledged deterministic write", async () => {
+  const outputs = temporary(); const adapters = executionAdapters({ postWriteHistoricalReadLag: 1 });
+  const result = await execute(adapters, outputs, { sleep: () => {} });
+  assert.equal(result.baselineComplete, true);
+  assert.equal(adapters.store.get("jwtPending").filter(({ versionId }) => versionId === writePlan.find(({ slot }) => slot === "jwtPending").clientRequestToken).length, 1);
+  assert.equal(adapters.operations.filter(({ operation, slot }) => operation === "write" && slot === "jwtPending").length, 1);
+  assert.equal(adapters.operations.filter(({ operation, slot }) => operation === "read" && slot === "jwtPending").length >= 3, true);
+  rmSync(outputs.directory, { recursive: true, force: true });
+});
+
+test("post-write convergence rejects every non-historical non-exact state without another secret write", async () => {
+  const jwt = writePlan.find(({ slot }) => slot === "jwtPending");
+  const variants = [
+    { name: "wrong version", snapshot: () => ({ arn: jwt.secretArn, versions: [{ versionId: sha256("wrong-version"), stages: ["AWSCURRENT"], payloadSha256: jwt.payloadSha256 }], currentVersionId: sha256("wrong-version"), currentStages: ["AWSCURRENT"], currentPayloadSha256: jwt.payloadSha256 }) },
+    { name: "wrong payload", snapshot: () => ({ arn: jwt.secretArn, versions: [{ versionId: jwt.clientRequestToken, stages: ["AWSCURRENT"], payloadSha256: sha256("wrong-payload") }], currentVersionId: jwt.clientRequestToken, currentStages: ["AWSCURRENT"], currentPayloadSha256: sha256("wrong-payload") }) },
+    { name: "wrong stage", snapshot: () => ({ arn: jwt.secretArn, versions: [{ versionId: jwt.clientRequestToken, stages: ["AWSPREVIOUS"], payloadSha256: jwt.payloadSha256 }], currentVersionId: jwt.clientRequestToken, currentStages: ["AWSPREVIOUS"], currentPayloadSha256: jwt.payloadSha256 }) },
+  ];
+  for (const { name, snapshot } of variants) {
+    const outputs = temporary(); const adapters = executionAdapters(); let wrote = false;
+    const readSlot = adapters.readSlot; const writeSlot = adapters.writeSlot;
+    adapters.writeSlot = async (...args) => { const result = await writeSlot(...args); wrote = true; return result; };
+    adapters.readSlot = async (...args) => wrote ? snapshot() : readSlot(...args);
+    await assert.rejects(() => execute(adapters, outputs, { sleep: () => {} }), /deterministic|current version|prepared write/);
+    assert.equal([...adapters.store.values()].reduce((total, versions) => total + versions.length, 0), 8, name);
+    rmSync(outputs.directory, { recursive: true, force: true });
+  }
+});
+
+test("post-write historical snapshots time out and read errors fail closed without another secret write", async () => {
+  const timeoutOutputs = temporary(); const timeoutAdapters = executionAdapters({ postWriteHistoricalReadLag: 6 });
+  await assert.rejects(() => execute(timeoutAdapters, timeoutOutputs, { sleep: () => {} }), /did not converge/);
+  assert.equal([...timeoutAdapters.store.values()].reduce((total, versions) => total + versions.length, 0), 8);
+  rmSync(timeoutOutputs.directory, { recursive: true, force: true });
+
+  const errorOutputs = temporary(); const errorAdapters = executionAdapters(); let wrote = false;
+  const readSlot = errorAdapters.readSlot; const writeSlot = errorAdapters.writeSlot;
+  errorAdapters.writeSlot = async (...args) => { const result = await writeSlot(...args); wrote = true; return result; };
+  errorAdapters.readSlot = async (...args) => { if (wrote) throw new Error("injected post-write read failure"); return readSlot(...args); };
+  await assert.rejects(() => execute(errorAdapters, errorOutputs, { sleep: () => {} }), /injected post-write read failure/);
+  assert.equal([...errorAdapters.store.values()].reduce((total, versions) => total + versions.length, 0), 8);
+  rmSync(errorOutputs.directory, { recursive: true, force: true });
+});
+
+test("authenticated one-of-seven resume skips the converged slot and writes the remaining six", async () => {
+  const outputs = temporary(); const adapters = executionAdapters(); const jwt = writePlan.find(({ slot }) => slot === "jwtPending");
+  adapters.store.set("jwtPending", [{ versionId: currentVersionIds.jwtPending, stages: ["AWSPREVIOUS"], payloadSha256: observedSlotIdentities.jwtPending.payloadSha256 }, { versionId: jwt.clientRequestToken, stages: ["AWSCURRENT"], payloadSha256: jwt.payloadSha256 }]);
+  const result = await execute(adapters, outputs, { sleep: () => {} });
+  assert.equal(result.writes, 6);
+  assert.equal(adapters.operations.filter(({ operation, slot }) => operation === "write" && slot === "jwtPending").length, 0);
+  assert.equal([...adapters.store.values()].reduce((total, versions) => total + versions.length, 0), 14);
+  rmSync(outputs.directory, { recursive: true, force: true });
 });
 
 test("every partial write boundary resumes through harmless ECS task replacement but not a changed task-definition set", async () => {
