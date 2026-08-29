@@ -9,12 +9,12 @@ The canonical reviewed boundary is:
 ```text
 schema version: 2
 identity model: tooling-input-tree-sha256
-image release: a63da17024415c2764452b86f1dcbce0af4ae9b8
-comparison base: a63da17024415c2764452b86f1dcbce0af4ae9b8
-tooling revision: ea6b4fa0dd8e83be40636dae5a9d85b3d09b4765
+image release: e4b0794dcf3b61ab2b43c38ff328736092a6e12c
+comparison base: e4b0794dcf3b61ab2b43c38ff328736092a6e12c
+tooling revision: a1b722512582d15ea8f11c981b0d3cc5ef5625eb
 comparison head identity: tooling-input-tree-sha256
-comparison head: 3b8eb4991462c0ac6f18cc69286aecc77fc4da494576470eced769e2d440f0dd
-tooling input tree: 3b8eb4991462c0ac6f18cc69286aecc77fc4da494576470eced769e2d440f0dd
+comparison head: 0490657cef2955fce9faff5ef652794fd56fb21bf39e2314b6a305c8b69c96ab
+tooling input tree: 0490657cef2955fce9faff5ef652794fd56fb21bf39e2314b6a305c8b69c96ab
 rules version: stage-b-image-reuse-v4
 image reuse compatible: true
 image build inputs changed: false
@@ -27,40 +27,19 @@ The canonical changed-file classification is:
 
 | file | category | imageAffecting |
 | --- | --- | --- |
-| .github/workflows/authorize-production-stage-a-reconciliation.yml | ciOnly | false |
-| documents/ops/iam/MSCQR_PRODUCTION_STAGE_A_APPROVAL_KEY_RECONCILIATION_CAPABILITY-v1.md | documentationOnly | false |
-| documents/ops/iam/MSCQRProductionGreenStageBArtifactContracts-v1.json | documentationOnly | false |
-| documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json | documentationOnly | false |
-| documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.md | documentationOnly | false |
+| .github/workflows/authorize-production-dual-slot-rebaseline-recovery.yml | ciOnly | false |
 | documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json | documentationOnly | false |
 | documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.md | documentationOnly | false |
-| documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_TWO_SHA_IDENTITY.md | documentationOnly | false |
-| package.json | toolingOnly | false |
-| scripts/apply-production-green-stage-b.mjs | toolingOnly | false |
-| scripts/aws/dispatch-production-green-stage-b-images.mjs | toolingOnly | false |
-| scripts/aws/generate-production-green-stage-b-capability-graph.mjs | toolingOnly | false |
-| scripts/aws/generate-production-green-stage-b-tfvars.mjs | toolingOnly | false |
-| scripts/aws/production-cutover-control-plane.mjs | toolingOnly | false |
+| documents/security/MSCQR_PARTIAL_REBASELINE_SUCCESSOR_RECOVERY_THREAT_MODEL.md | documentationOnly | false |
+| documents/security/PRODUCTION_DUAL_SLOT_REBASELINE.md | documentationOnly | false |
+| scripts/aws/authorize-production-dual-slot-rebaseline-recovery.mjs | toolingOnly | false |
+| scripts/aws/prepare-production-cutover-runtime.mjs | toolingOnly | false |
 | scripts/aws/production-cutover-production-adapters.mjs | toolingOnly | false |
+| scripts/aws/production-cutover-runtime-bootstrap.mjs | toolingOnly | false |
+| scripts/aws/production-dual-slot-rebaseline-contract.mjs | toolingOnly | false |
 | scripts/aws/production-github-environment-approval.mjs | toolingOnly | false |
-| scripts/aws/production-green-stage-b-image-evidence.mjs | toolingOnly | false |
-| scripts/aws/production-image-authorization.mjs | toolingOnly | false |
-| scripts/aws/production-release-dispatch-contract.mjs | toolingOnly | false |
-| scripts/aws/production-stage-a-approval-key-reconciliation-authorization.mjs | toolingOnly | false |
-| scripts/aws/run-production-green-stage-b-preflight.mjs | toolingOnly | false |
-| scripts/aws/run-production-stage-a-approval-key-reconciliation.mjs | toolingOnly | false |
-| scripts/aws/stage-b-artifact-contract.mjs | toolingOnly | false |
-| scripts/aws/stage-b-image-publication-identity.mjs | toolingOnly | false |
-| scripts/aws/validate-stage-b-image-reuse.mjs | toolingOnly | false |
-| scripts/tests/fixtures/canonical-image-authorization.mjs | testOnly | false |
-| scripts/tests/production-green-stage-b-deployment-identity.test.mjs | testOnly | false |
-| scripts/tests/production-green-stage-b-identity-capabilities.test.mjs | testOnly | false |
-| scripts/tests/production-green-stage-b-image-dispatch.test.mjs | testOnly | false |
-| scripts/tests/production-green-stage-b-image-evidence.test.mjs | testOnly | false |
-| scripts/tests/production-green-stage-b-image-impact.test.mjs | testOnly | false |
-| scripts/tests/production-green-stage-b-permission-preflight.test.mjs | testOnly | false |
-| scripts/tests/production-green-stage-b-tfvars-generator.test.mjs | testOnly | false |
-| scripts/tests/production-image-authorization.test.mjs | testOnly | false |
-| scripts/tests/production-stage-a-approval-key-reconciliation-authorization.test.mjs | testOnly | false |
-| scripts/tests/production-stage-a-approval-key-reconciliation-capability.test.mjs | testOnly | false |
-| scripts/tests/stage-b-artifact-contract.test.mjs | testOnly | false |
+| scripts/aws/rebaseline-production-dual-slot.mjs | toolingOnly | false |
+| scripts/tests/fixtures/partial-rebaseline-runtime.mjs | testOnly | false |
+| scripts/tests/production-cutover-runtime-bootstrap.test.mjs | testOnly | false |
+| scripts/tests/production-dual-slot-rebaseline-workflow.test.mjs | testOnly | false |
+| scripts/tests/production-dual-slot-rebaseline.test.mjs | testOnly | false |
