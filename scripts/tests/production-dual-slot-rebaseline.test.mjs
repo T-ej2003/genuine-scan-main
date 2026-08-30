@@ -790,7 +790,7 @@ test("successor recovery resolver accepts only its exact protected workflow arti
   const liveCas = { liveReferenceAuditSha256: sha256("resolver-recovery-audit"), liveLegacyBaselineIdentitySha256: sha256("resolver-recovery-legacy"), observedSlotIdentitiesSha256: sha256("resolver-recovery-slots") };
   const authorization = createPartialRebaselineRecoveryAuthorization({ protectedEnvironmentApprovalEvidence: approval, sourceSha, recoveryEnvelope: envelope, imageAuthorization: image.authorization, imageAuthorizationValidation: { now: image.now, verifyImageEvidence: image.verifyImageEvidence }, ...liveCas, reason: "resume fixture", approverRole: "checker", verificationRef: "fixture", proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === sourceSha });
   const archive = Buffer.from("recovery-zip-fixture");
-  const run = (command, args, options = {}) => {
+  const execute = (command, args, options = {}) => {
     if (command === "gh" && args[1].endsWith("/actions/runs/987655")) return JSON.stringify({ id: 987655, repository: { id: 9, full_name: PRODUCTION_DUAL_SLOT_REBASELINE.repository }, head_repository: { full_name: PRODUCTION_DUAL_SLOT_REBASELINE.repository }, path: ".github/workflows/authorize-production-dual-slot-rebaseline-recovery.yml", event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1, actor: { login: "operator" } });
     if (command === "gh" && args[1].endsWith("/artifacts")) return JSON.stringify([{ artifacts: [{ id: 92, name: "production-dual-slot-rebaseline-successor-recovery-authorization", expired: false, workflow_run: { id: 987655, head_sha: sourceSha, repository_id: 9 }, digest: `sha256:${sha256(archive)}` }] }]);
     if (command === "gh" && args[1].endsWith("/zip")) return archive;
@@ -798,6 +798,7 @@ test("successor recovery resolver accepts only its exact protected workflow arti
     if (command === "unzip" && args[0] === "-p") return JSON.stringify(authorization);
     throw new Error(`unexpected ${command} ${args.join(" ")}`);
   };
+  const run = createProductionGithubCommandRunner({ env: { GH_TOKEN: "fixture-github-token" }, exec: execute });
   const options = { workflowRunId: "987655", workflowRunAttempt: "1", sourceSha, recoveryEnvelope: envelope, imageAuthorization: image.authorization, imageAuthorizationValidation: { now: image.now, verifyImageEvidence: image.verifyImageEvidence }, liveCas, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === sourceSha, run };
   assert.equal(resolvePartialRebaselineRecoveryAuthorizationArtifact(options).authorization.authorizationSha256, authorization.authorizationSha256);
   assert.throws(() => resolvePartialRebaselineRecoveryAuthorizationArtifact({ ...options, workflowRunAttempt: "2" }), /provenance/i);

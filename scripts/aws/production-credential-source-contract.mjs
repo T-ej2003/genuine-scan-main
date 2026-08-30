@@ -97,7 +97,7 @@ export function createProductionGithubCommandRunner({ env = process.env, exec = 
     if (command === "unzip") {
       const archive = args?.[0] === "-Z" ? args?.[2] : args?.[1];
       const archivePathValid = typeof archive === "string" && path.isAbsolute(archive) && path.basename(archive) === "authorization.zip";
-      const allowed = Array.isArray(args) && archivePathValid && ((args.length === 2 && args[0] === "-Z1") || (args.length === 3 && args[0] === "-Z" && args[1] === "-l") || (args.length === 3 && args[0] === "-p" && args[2] === "authorization.json"));
+      const allowed = Array.isArray(args) && archivePathValid && ((args.length === 2 && args[0] === "-Z1") || (args.length === 3 && args[0] === "-Z" && args[1] === "-l") || (args.length === 3 && args[0] === "-p" && new Set(["authorization.json", "recovery-authorization.json"]).has(args[2])));
       if (!allowed) throw new Error("Production GitHub runner permits only the reviewed local authorization archive reads.");
       return exec("unzip", args, { cwd: process.cwd(), env: localEnvironment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });
     }
