@@ -154,7 +154,9 @@ test("v3 reserved attempts have an explicit pre-spawn recovery candidate while a
   const genericObservation = { ...observation(), reservationIdentity: reserved.attemptId, sourceSha: reserved.sourceSha, planSha256: reserved.planSha256, savedPlanSha256: reserved.savedPlanSha256, stateLineage: reserved.stateLineage, stateSerial: reserved.stateSerial, stateSha256: reserved.stateSha256, workspace: reserved.workspace, backendIdentitySha256: reserved.backendIdentitySha256 };
   assert.doesNotThrow(() => createStageBApplyAttemptReconciliationArtifact({ historicalReservation: reserved, observation: genericObservation, successorSourceSha: "d".repeat(40) }));
   const successorSourceSha = "d".repeat(40);
-  const artifact = createStageBApplyAttemptReconciliationArtifact({ historicalReservation: reserved, historicalTransitions: [intent], observation: genericObservation, successorSourceSha });
+  const artifact = createStageBApplyAttemptReconciliationArtifact({ historicalReservation: reserved, historicalTransitions: [intent], observation: { ...genericObservation, localReservationMarkerCreated: true }, successorSourceSha });
+  assert.equal(artifact.bridgeType, "V3_APPLY_INTENT_PRE_TERRAFORM");
+  assert.throws(() => createStageBApplyAttemptReconciliationArtifact({ historicalReservation: historicalReservation(), observation: { ...observation(), localReservationMarkerCreated: true }, successorSourceSha }), /pre-Terraform/);
   const authorization = approval(artifact, { approvalSourceSha: successorSourceSha });
   assert.doesNotThrow(() => assertStageBApplyAttemptReconciliationEligibility({ reservation: reserved, transitions: [intent], reconciliationArtifact: artifact, reconciliationArtifactSha256: stageBApplyAttemptReconciliationSha256(artifact), authorization, authorizationSha256: authorization.authorizationSha256, successorSourceSha, now: NOW }));
   const unknown = createStageBApplyAttemptTransition(intent, { status: "UNKNOWN", operationResult: { classification: "UNKNOWN_RESULT", readback: "UNKNOWN" }, applyStarted: { status: "UNKNOWN", evidenceSha256: digest("2") }, applyResult: { status: "UNKNOWN", evidenceSha256: digest("3") } });

@@ -22,7 +22,9 @@ terminal for successor preparation.
 
 Because S3 persistence and child-process spawn are not atomic, a crash after
 `APPLY_INTENT_RECORDED` is classified as
-`INDETERMINATE_NO_AUTOMATIC_SUCCESSOR`. It cannot be downgraded from elapsed
+`INDETERMINATE_NO_AUTOMATIC_SUCCESSOR`. The historical v2 bridge requires the
+known-absent marker, while a v3 pre-spawn observation records either actual
+marker state and proves non-entry independently. It cannot be downgraded from elapsed
 time, unchanged state, or a missing local marker. Only a fresh reconciliation
 artifact plus independent protected-environment approval can establish a
 successor; any contradictory or post-spawn evidence remains fail-closed.
