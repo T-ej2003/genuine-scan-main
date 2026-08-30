@@ -14,6 +14,7 @@ import {
   STAGE_B_TERRAFORM_BACKEND_MANIFEST,
   STAGE_B_TERRAFORM_BACKEND_POLICY,
   stageBTerraformBackendIdentity,
+  stageBAttemptStepS3ObjectKey,
   ensureStageBTerraformBackendMetadataPrivate,
 } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { generateStageBTerraformBackendConfig } from "../aws/generate-production-green-stage-b-backend-config.mjs";
@@ -183,6 +184,18 @@ test("shared apply reservations are readable and conditionally creatable but nev
   assert.equal(decision([policy], "s3:PutObject", applyAttemptArn), "explicitDeny");
   assert.equal(decision([policy], "s3:DeleteObject", applyAttemptArn), "explicitDeny");
   assert.equal(decision([policy], "s3:DeleteObjectVersion", applyAttemptArn), "explicitDeny");
+});
+
+test("append-only apply-attempt transition keys stay inside the existing conditional reservation prefix", () => {
+  const attemptId = "a".repeat(64);
+  const transitionArn = `${bucketArn}/${stageBAttemptStepS3ObjectKey(attemptId, 1)}`;
+  assert.equal(decision([policy], "s3:GetObject", transitionArn), "allowed");
+  assert.equal(decision([policy], "s3:PutObject", transitionArn, { "s3:if-none-match": "*" }), "allowed");
+  assert.equal(decision([policy], "s3:PutObject", transitionArn), "explicitDeny");
+  assert.equal(decision([policy], "s3:DeleteObject", transitionArn), "explicitDeny");
+  assert.equal(stageBAttemptStepS3ObjectKey(attemptId, 3).endsWith("/0003.json"), true);
+  assert.throws(() => stageBAttemptStepS3ObjectKey(attemptId, 0), /identity/);
+  assert.throws(() => stageBAttemptStepS3ObjectKey(attemptId, 4), /identity/);
 });
 
 test("workspace listing and HeadBucket-style access are not required", () => {

@@ -63,6 +63,54 @@ therefore reports the reservation as not authoritatively readable and does not
 consume it. Only conditional `PutObject` at the final mutation boundary decides
 whether the mutation right is available.
 
+### Apply-attempt result and reconciliation contract
+
+New reservations use schema version 3 and are append-only. The initial
+`RESERVED` object records the exact source, approved plan and saved-plan
+identities, state lineage/serial/digest, workspace, backend identity, execution
+principal, and the structured conditional-create/readback result. The wrapper
+publishes a separately keyed, conditionally-created transition record before
+Terraform is spawned. Transition records are read-only evidence; they never
+replace the immutable reservation object and are never overwritten or deleted.
+
+The allowed state machine is:
+
+```text
+RESERVED -> APPLYING -> APPLIED
+                    \-> FAILED
+                    \-> UNKNOWN -> ABORTED_BEFORE_APPLY
+RESERVED -> ABORTED_BEFORE_APPLY
+```
+
+`UNKNOWN`, `APPLIED`, `FAILED`, and `ABORTED_BEFORE_APPLY` are terminal for
+automatic execution. A process or storage failure after the reachability marker
+is written remains `UNKNOWN` unless a separate, independently reviewed
+reconciliation artifact proves Terraform was not reached. A failed or uncertain
+apply is never retried from age, an unchanged state serial, a missing local
+marker, or an operator assertion.
+
+The one historical schema-v2 bridge is literal and non-reusable: it accepts only
+the authenticated incident reservation, source, plan, saved plan, state
+lineage/serial/digest, workspace, backend identity, and creation timestamp
+recorded in the incident review. A fresh reconciliation artifact must include
+independently authenticated evidence that the apply entrypoint and Terraform
+process were not reached, provider-side mutation is absent, infrastructure is
+unchanged, and the local marker was not created. The artifact is still not
+execution authority. A protected production-environment approval must bind the
+exact artifact, historical reservation, successor source, successor attempt
+identity, and a maximum of one successor Terraform apply. The original
+reservation is retained as historical evidence; the successor has a new
+identity and predecessor link.
+
+The reconciliation workflow publishes the canonical `authorization.json`
+member only after the production environment's independent required-reviewer
+approval. It grants no AWS or Terraform capability itself. A future successor
+execution must re-read the reservation, state, plan, and provider/reference
+safety evidence before any apply. Missing or contradictory evidence fails
+closed. No secret values, credentials, signed request contents, or private
+material are present in reservation, transition, reconciliation, or
+authorization evidence.
+
 The global mutation identity field audit is:
 
 | Field | Classification | Reservation-key effect |

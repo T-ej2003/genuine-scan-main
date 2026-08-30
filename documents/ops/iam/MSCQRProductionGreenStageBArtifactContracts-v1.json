@@ -1044,6 +1044,63 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "apply-attempt-transition",
+      "kind": "file",
+      "producer": "scripts/apply-production-green-stage-b.mjs:reserveStageBApplyAttemptTransition",
+      "consumers": [
+        "scripts/aws/stage-b-apply-attempt-reconciliation.mjs",
+        "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_MUTATION_CLOSURE_2026-08-16.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "apply-attempt-transition",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "apply-attempt-reconciliation",
+      "kind": "file",
+      "producer": "scripts/aws/stage-b-apply-attempt-reconciliation.mjs:create-reconciliation",
+      "consumers": [
+        "scripts/aws/stage-b-apply-attempt-reconciliation.mjs",
+        ".github/workflows/authorize-production-green-stage-b-apply-attempt-reconciliation.yml"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "apply-attempt-reconciliation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "apply-attempt-reconciliation-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-green-stage-b-apply-attempt-reconciliation.yml",
+      "consumers": [
+        "scripts/aws/stage-b-apply-attempt-reconciliation.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "apply-attempt-reconciliation-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "image-evidence",
       "kind": "file",
       "producer": "scripts/aws/production-green-stage-b-image-evidence.mjs:runCli",

@@ -199,6 +199,7 @@ export const STAGE_B_TERRAFORM_BACKEND_MANIFEST = Object.freeze({
   lockArn: `${bucketArn}/${lockKey}`,
   applyAttemptPrefixArn: `${bucketArn}/${applyAttemptPrefix}/*`,
   applyAttemptKeyTemplate: `${applyAttemptPrefix}/<artifact-set-identity>.json`,
+  applyAttemptTransitionKeyTemplate: `${applyAttemptPrefix}/<attempt-id>/<sequence>.json`,
   legacyWorkspaceKeyAccess: "read-write-delete-denied",
   headBucketRequired: false,
   requiredActions: Object.freeze([
@@ -216,6 +217,11 @@ export const STAGE_B_TERRAFORM_BACKEND_MANIFEST = Object.freeze({
 export function stageBApplyAttemptS3Key(artifactSetIdentity) {
   if (!/^[a-f0-9]{64}$/.test(artifactSetIdentity || "")) throw new Error("Stage B apply artifact-set identity is malformed.");
   return `${applyAttemptPrefix}/${artifactSetIdentity}.json`;
+}
+
+export function stageBAttemptStepS3ObjectKey(attemptId, sequence) {
+  if (!/^[a-f0-9]{64}$/.test(attemptId || "") || !Number.isSafeInteger(sequence) || sequence < 1 || sequence > 3) throw new Error("Stage B apply-attempt transition identity is malformed.");
+  return `${applyAttemptPrefix}/${attemptId}/${String(sequence).padStart(4, "0")}.json`;
 }
 
 export function assertStageBTerraformBackendPolicy(policy) {
