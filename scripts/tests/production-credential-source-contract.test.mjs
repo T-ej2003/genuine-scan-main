@@ -132,7 +132,14 @@ test("GitHub authorization runner rejects write-shaped gh api invocations", () =
   const run = createProductionGithubCommandRunner({ env: { GH_TOKEN: "fixture-token" }, exec: () => "{}" });
   for (const flag of ["--method", "-X", "--input", "--field", "-f", "--raw-field", "-F", "--method=POST", "-XPOST"]) assert.throws(() => run("gh", ["api", "repos/T-ej2003/genuine-scan-main/actions/runs/123", flag, "value"]), /reviewed read-only/);
   assert.throws(() => run("gh", ["api", "repos/example/repository"]), /reviewed read-only/);
-  assert.throws(() => run("unzip", ["-p", "/tmp/authorization.zip", "other.json"]), /reviewed local/);
+  for (const member of ["other.json", "../authorization.json", "arbitrary.json", "recovery/authorization.json"]) assert.throws(() => run("unzip", ["-p", "/tmp/authorization.zip", member]), /reviewed local/);
+});
+
+test("GitHub authorization runner permits only the two canonical authorization archive members", () => {
+  const seen = [];
+  const run = createProductionGithubCommandRunner({ env: { GH_TOKEN: "fixture-token" }, exec: (file, args) => { seen.push({ file, args }); return "{}"; } });
+  for (const member of ["authorization.json", "recovery-authorization.json"]) run("unzip", ["-p", "/tmp/authorization.zip", member]);
+  assert.deepEqual(seen.map(({ args }) => args[2]), ["authorization.json", "recovery-authorization.json"]);
 });
 
 test("runtime preparation's real composition root pins the release profile before KMS verification", () => {
