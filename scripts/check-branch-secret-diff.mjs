@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 const repoRoot = process.cwd();
@@ -117,7 +117,11 @@ for (const relativePath of changedFiles) {
   const fullPath = path.join(repoRoot, relativePath);
   if (!existsSync(fullPath)) continue;
 
-  const contents = readFileSync(fullPath, "utf8");
+  const contents = tryGitOutput(["diff", "--unified=0", "--no-ext-diff", "--diff-filter=ACMR", `${mergeBase}...HEAD`, "--", relativePath])
+    .split("\n")
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .map((line) => line.slice(1))
+    .join("\n");
   for (const rule of rules) {
     rule.regex.lastIndex = 0;
     let match = rule.regex.exec(contents);
