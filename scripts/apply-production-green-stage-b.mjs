@@ -25,7 +25,7 @@ import {
 } from "./aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./aws/stage-b-evidence-freshness.mjs";
 import { assertStageBBrokerConfigurationIdentity } from "./aws/production-green-stage-b-contract.mjs";
-import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendPolicy, stageBApplyAttemptS3Key, stageBApplyAttemptTransitionS3Key, stageBTerraformBackendIdentity, STAGE_B_TERRAFORM_BACKEND } from "./aws/stage-b-terraform-backend-contract.mjs";
+import { assertStageBTerraformBackendMetadataPrivate, assertStageBTerraformInitializedBackendMetadata, assertStageBTerraformBackendPolicy, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey, stageBTerraformBackendIdentity, STAGE_B_TERRAFORM_BACKEND } from "./aws/stage-b-terraform-backend-contract.mjs";
 import { assertStageBReleaseCallerArn } from "./plan-production-green-stage-b.mjs";
 import { assertStageBDeploymentIdentity, assertStageBProtectedCheckoutMatchesDeploymentIdentity, buildStageBProtectedMainCheckoutEvidence, readStageBProtectedMainCheckout } from "./aws/stage-b-deployment-identity.mjs";
 import { assertImageEvidence, assertStageBPlanImageEvidenceBinding, imageEvidenceSha256 as canonicalImageEvidenceSha256, verifyImageEvidenceSignature } from "./aws/production-green-stage-b-image-evidence.mjs";
@@ -181,7 +181,7 @@ export function reserveStageBSharedApplyAttempt({ artifactSetIdentity, bytes, pr
 export function reserveStageBApplyAttemptTransition({ attemptId, sequence, bytes, privateDirectory, run } = {}) {
   if (typeof run !== "function") throw new Error("Stage B apply-attempt transition requires an explicit credential-bound AWS command runner.");
   if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw new Error("Stage B apply-attempt transition bytes are missing.");
-  const key = stageBApplyAttemptTransitionS3Key(attemptId, sequence);
+  const key = stageBAttemptStepS3ObjectKey(attemptId, sequence);
   const temporaryDirectory = fs.mkdtempSync(path.join(privateDirectory, ".transition-")); fs.chmodSync(temporaryDirectory, 0o700);
   const requestPath = path.join(temporaryDirectory, "request.json"); const readbackPath = path.join(temporaryDirectory, "readback.json");
   try {
@@ -442,24 +442,24 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const reserveApplyAttempt = effectiveDeps.reserveApplyAttempt || ((filePath, bytes) => writeStageBPrivateFileExclusive({ filePath, bytes, repositoryRoot: root, label: "Stage B apply attempt" }));
   reserveApplyAttempt(applyAttemptPath, attemptBytes);
   const reserveAttemptTransition = effectiveDeps.reserveApplyAttemptTransition || reserveStageBApplyAttemptTransition;
-  const applying = createStageBApplyAttemptTransition(attempt, { status: "APPLYING", operationResult: { classification: "APPLY_ENTRYPOINT_REACHED", readback: "EXACT" }, applyStarted: { status: "REACHABLE", evidenceSha256: sha256(Buffer.from(`${callerArn}\n${finalBindings.protectedMainSha}\n${finalBindings.savedPlanSha256}`)) }, applyResult: { status: "PENDING", evidenceSha256: null } });
+  const applying = createStageBApplyAttemptTransition(attempt, { status: "APPLY_INTENT_RECORDED", operationResult: { classification: "APPLY_INTENT_RECORDED", readback: "EXACT" }, applyStarted: { status: "INTENT_RECORDED", evidenceSha256: sha256(Buffer.from(`${callerArn}\n${finalBindings.protectedMainSha}\n${finalBindings.savedPlanSha256}`)) }, applyResult: { status: "PENDING", evidenceSha256: null } });
   const applyingBytes = Buffer.from(`${JSON.stringify(applying, null, 2)}\n`);
   const applyingReserved = reserveAttemptTransition({ attemptId: applying.attemptId, sequence: applying.sequence, bytes: applyingBytes, privateDirectory: path.dirname(applyAttemptPath), run: (args) => releaseRun(args) });
-  if (applyingReserved?.status !== "reserved" || applyingReserved.key !== stageBApplyAttemptTransitionS3Key(applying.attemptId, applying.sequence)) throw new Error("Stage B apply-attempt reachability marker was not authenticated; Terraform apply is unreachable.");
+  if (applyingReserved?.status !== "reserved" || applyingReserved.key !== stageBAttemptStepS3ObjectKey(applying.attemptId, applying.sequence)) throw new Error("Stage B apply-attempt intent marker was not authenticated; Terraform apply is unreachable.");
   let result;
   try { result = effectiveDeps.apply(artifacts.planPath); }
   catch (error) {
     const unknown = createStageBApplyAttemptTransition(applying, { status: "UNKNOWN", operationResult: { classification: "UNKNOWN_RESULT", readback: "UNKNOWN" }, applyStarted: { status: "UNKNOWN", evidenceSha256: sha256(Buffer.from(`${callerArn}\n${finalBindings.protectedMainSha}\n${finalBindings.savedPlanSha256}\nunknown`)) }, applyResult: { status: "UNKNOWN", evidenceSha256: null } });
     const unknownBytes = Buffer.from(`${JSON.stringify(unknown, null, 2)}\n`);
     const unknownReserved = reserveAttemptTransition({ attemptId: unknown.attemptId, sequence: unknown.sequence, bytes: unknownBytes, privateDirectory: path.dirname(applyAttemptPath), run: (args) => releaseRun(args) });
-    if (unknownReserved?.status !== "reserved" || unknownReserved.key !== stageBApplyAttemptTransitionS3Key(unknown.attemptId, unknown.sequence)) throw new Error("Stage B apply-attempt uncertainty evidence was not durably authenticated; stop without retry.", { cause: error });
+    if (unknownReserved?.status !== "reserved" || unknownReserved.key !== stageBAttemptStepS3ObjectKey(unknown.attemptId, unknown.sequence)) throw new Error("Stage B apply-attempt uncertainty evidence was not durably authenticated; stop without retry.", { cause: error });
     throw error;
   }
   const succeeded = result?.status === undefined || result.status === 0;
   const completed = createStageBApplyAttemptTransition(applying, { status: succeeded ? "APPLIED" : "FAILED", operationResult: { classification: succeeded ? "APPLY_RESULT_COMMITTED" : "APPLY_RESULT_FAILED", readback: "EXACT" }, applyStarted: applying.applyStarted, applyResult: { status: succeeded ? "SUCCEEDED" : "FAILED", evidenceSha256: sha256(Buffer.from(JSON.stringify({ status: result?.status ?? 0 }))) } });
   const completedBytes = Buffer.from(`${JSON.stringify(completed, null, 2)}\n`);
   const completedReserved = reserveAttemptTransition({ attemptId: completed.attemptId, sequence: completed.sequence, bytes: completedBytes, privateDirectory: path.dirname(applyAttemptPath), run: (args) => releaseRun(args) });
-  if (completedReserved?.status !== "reserved" || completedReserved.key !== stageBApplyAttemptTransitionS3Key(completed.attemptId, completed.sequence)) throw new Error("Stage B apply result evidence was not durably authenticated; stop without retry.");
+  if (completedReserved?.status !== "reserved" || completedReserved.key !== stageBAttemptStepS3ObjectKey(completed.attemptId, completed.sequence)) throw new Error("Stage B apply result evidence was not durably authenticated; stop without retry.");
   if (!succeeded) throw new Error("Terraform apply failed; stop without retry.");
   return { status: "applied-saved-plan", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, mutationManifestSha256: verified.mutationManifestSha256, executableAuditSha256, applyAttemptPath, applyCalls: 1, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
 }

@@ -6,6 +6,8 @@ import test from "node:test";
 const workflow = readFileSync(path.resolve(".github/workflows/authorize-production-green-stage-b-apply-attempt-reconciliation.yml"), "utf8");
 
 test("reconciliation workflow has a protected, review-only authorization boundary", () => {
+  assert.match(workflow, /^permissions:\n  actions: read\n  contents: read$/m);
+  assert.doesNotMatch(workflow, /^  actions: (?:write|read-all)$/m);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /environment: production/);
   assert.match(workflow, /--require-actual-approval/);

@@ -11,6 +11,7 @@ on:
       verification_ref: { description: Reconciliation verification reference, required: true, type: string }
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
