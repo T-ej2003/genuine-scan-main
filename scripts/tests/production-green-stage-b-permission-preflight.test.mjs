@@ -2300,6 +2300,15 @@ test("local marker failure after shared reservation remains pre-Terraform and ca
   assert.deepEqual(input.applyCalls, []);
 });
 
+test("apply-intent persistence failure blocks Terraform before the spawn boundary", () => {
+  const fixture = createValidStageBApplyFixture(); const input = validRealApplyInput(fixture); const events = [];
+  input.deps.reserveApplyAttemptTransition = () => { events.push("intent-failure"); throw new Error("intent persistence failure"); };
+  input.deps.apply = () => { events.push("terraform"); return { status: 0 }; };
+  assert.throws(() => runApply(input), /intent persistence failure/);
+  assert.deepEqual(events, ["intent-failure"]);
+  assert.deepEqual(input.applyCalls, []);
+});
+
 test("apply failure records a terminal failed result while thrown spawn ambiguity remains non-retryable", () => {
   const failedFixture = createValidStageBApplyFixture(); const failed = validRealApplyInput(failedFixture);
   failed.deps.apply = () => ({ status: 1 });

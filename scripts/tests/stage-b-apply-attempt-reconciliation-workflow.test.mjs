@@ -22,7 +22,9 @@ test("reconciliation workflow has a protected, review-only authorization boundar
 test("workflow passes non-secret artifact files by digest and keeps inputs out of shell source", () => {
   assert.match(workflow, /reconciliation_artifact_base64:/);
   assert.match(workflow, /reconciliation_artifact_sha256:/);
-  assert.match(workflow, /test "\$\(sha256sum "\$workdir\/reconciliation\.json"/);
+  assert.match(workflow, /--mode reconciliation-sha256 --reconciliation-artifact "\$workdir\/reconciliation\.json"/);
+  assert.match(workflow, /test "\$canonical_reconciliation_sha256" = "\$RECONCILIATION_ARTIFACT_SHA256"/);
+  assert.doesNotMatch(workflow, /sha256sum "\$workdir\/reconciliation\.json"/);
   assert.match(workflow, /--reconciliation-artifact-sha256 "\$RECONCILIATION_ARTIFACT_SHA256"/);
   assert.equal([...workflow.matchAll(/^[ ]{8}run: \|\n((?:^[ ]{10}.*\n?)*)/gm)].some(([, body]) => body.includes("${{ inputs.")), false);
   assert.match(workflow, /--approved-by "\$APPROVED_BY"/);

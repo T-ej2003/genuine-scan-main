@@ -5,7 +5,7 @@ on:
     inputs:
       source_sha: { description: Protected successor source SHA, required: true, type: string }
       reconciliation_artifact_base64: { description: Exact non-secret reconciliation artifact, required: true, type: string }
-      reconciliation_artifact_sha256: { description: SHA256 of the reconciliation artifact, required: true, type: string }
+      reconciliation_artifact_sha256: { description: Canonical SHA256 identity of the reconciliation artifact, required: true, type: string }
       approved_by: { description: Independent production reviewer login, required: true, type: string }
       approver_role: { description: Independent reconciliation approver role, required: true, type: string }
       verification_ref: { description: Reconciliation verification reference, required: true, type: string }
@@ -82,7 +82,8 @@ jobs:
           workdir="$RUNNER_TEMP/stage-b-apply-attempt-reconciliation"
           install -d -m 700 "$workdir"
           printf '%s' "$RECONCILIATION_ARTIFACT_BASE64" | base64 --decode > "$workdir/reconciliation.json"
-          test "$(sha256sum "$workdir/reconciliation.json" | awk '{print $1}')" = "$RECONCILIATION_ARTIFACT_SHA256"
+          canonical_reconciliation_sha256="$(node scripts/aws/stage-b-apply-attempt-reconciliation.mjs --mode reconciliation-sha256 --reconciliation-artifact "$workdir/reconciliation.json" | node -pe 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).sha256')"
+          test "$canonical_reconciliation_sha256" = "$RECONCILIATION_ARTIFACT_SHA256"
           node scripts/aws/stage-b-apply-attempt-reconciliation.mjs --mode authorize \
             --source-sha "$SOURCE_SHA" \
             --reconciliation-artifact "$workdir/reconciliation.json" \

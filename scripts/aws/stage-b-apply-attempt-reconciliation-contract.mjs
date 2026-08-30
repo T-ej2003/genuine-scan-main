@@ -1,11 +1,11 @@
 import crypto from "node:crypto";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalIdentity } from "./production-github-environment-approval.mjs";
+import { assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalFreshness, assertProductionEnvironmentApprovalIdentity } from "./production-github-environment-approval.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 
 export const STAGE_B_APPLY_ATTEMPT_SCHEMA_VERSION = 3;
 export const STAGE_B_APPLY_ATTEMPT_KIND = "MSCQRProductionGreenStageBApplyAttempt";
-export const STAGE_B_APPLY_ATTEMPT_RECONCILIATION_SCHEMA_VERSION = 2;
+export const STAGE_B_APPLY_ATTEMPT_RECONCILIATION_SCHEMA_VERSION = 3;
 export const STAGE_B_APPLY_ATTEMPT_RECONCILIATION_KIND = "MSCQRProductionGreenStageBApplyAttemptReconciliation";
 export const STAGE_B_APPLY_ATTEMPT_RECONCILIATION_AUTHORIZATION_KIND = "MSCQRProductionGreenStageBApplyAttemptReconciliationAuthorization";
 export const STAGE_B_APPLY_ATTEMPT_RECONCILIATION_OPERATION = "STAGE_B_APPLY_ATTEMPT_RECONCILIATION";
@@ -148,14 +148,19 @@ export function classifyStageBApplyAttemptReconciliationState(reservation) {
   return Object.freeze({ status: "INDETERMINATE_NO_AUTOMATIC_SUCCESSOR", automaticSuccessorAllowed: false });
 }
 
-function assertReconciliationPredecessor(reservation) {
+function assertReconciliationPredecessor(reservation, transitions = []) {
+  if (!Array.isArray(transitions)) fail("Stage B reconciliation predecessor transitions are invalid.");
   if (reservation?.schemaVersion === 2) {
+    if (transitions.length !== 0) fail("Historical schema-v2 reconciliation cannot contain transitions.");
     assertHistoricalStageBV2Incident(reservation);
     return { bridgeType: "HISTORICAL_V2_INCIDENT", tuple: predecessorTuple(reservation, "HISTORICAL_V2_INCIDENT") };
   }
   assertStageBApplyAttemptReservation(reservation);
-  if (classifyStageBApplyAttemptReconciliationState(reservation).status !== "V3_RESERVED_BEFORE_APPLY_CANDIDATE") fail("Only an exact v3 RESERVED attempt can enter reconciliation; any apply intent is indeterminate and has no automatic successor.");
-  return { bridgeType: "V3_RESERVED_BEFORE_APPLY", tuple: predecessorTuple(reservation, "V3_RESERVED_BEFORE_APPLY") };
+  let current = reservation;
+  for (const transition of transitions) { assertStageBApplyAttemptTransition(current, transition); current = transition; }
+  if (transitions.length === 0 && classifyStageBApplyAttemptReconciliationState(reservation).status === "V3_RESERVED_BEFORE_APPLY_CANDIDATE") return { bridgeType: "V3_RESERVED_BEFORE_APPLY", tuple: predecessorTuple(reservation, "V3_RESERVED_BEFORE_APPLY") };
+  if (transitions.length === 1 && current.status === "APPLY_INTENT_RECORDED") return { bridgeType: "V3_APPLY_INTENT_PRE_TERRAFORM", tuple: predecessorTuple(reservation, "V3_APPLY_INTENT_PRE_TERRAFORM") };
+  fail("Only an authenticated v3 pre-spawn reservation or apply intent can enter governed reconciliation.");
 }
 
 function assertFreshObservation(observation, incident, { now = new Date() } = {}) {
@@ -173,15 +178,15 @@ function assertFreshObservation(observation, incident, { now = new Date() } = {}
   return observation;
 }
 
-export function createStageBApplyAttemptReconciliationArtifact({ historicalReservation, observation, successorSourceSha, generatedAt = new Date().toISOString(), reason = STAGE_B_APPLY_ATTEMPT_RECONCILIATION_REASON, now = new Date() } = {}) {
-  const predecessor = assertReconciliationPredecessor(historicalReservation); source(successorSourceSha, "successorSourceSha"); if (successorSourceSha === predecessor.tuple.sourceSha) fail("A reconciliation successor must be a distinct protected source."); const checkedObservation = assertFreshObservation(observation, predecessor.tuple, { now }); text(reason, "reason"); assertStageBDeploymentEvidenceFreshness(generatedAt, { now, evidenceType: "Stage B reconciliation artifact" });
-  return Object.freeze({ schemaVersion: STAGE_B_APPLY_ATTEMPT_RECONCILIATION_SCHEMA_VERSION, kind: STAGE_B_APPLY_ATTEMPT_RECONCILIATION_KIND, bridgeType: predecessor.bridgeType, generatedAt, reason, predecessor: predecessor.tuple, predecessorReservation: historicalReservation, successorSourceSha, observation: checkedObservation });
+export function createStageBApplyAttemptReconciliationArtifact({ historicalReservation, historicalTransitions = [], observation, successorSourceSha, generatedAt = new Date().toISOString(), reason = STAGE_B_APPLY_ATTEMPT_RECONCILIATION_REASON, now = new Date() } = {}) {
+  const predecessor = assertReconciliationPredecessor(historicalReservation, historicalTransitions); source(successorSourceSha, "successorSourceSha"); if (successorSourceSha === predecessor.tuple.sourceSha) fail("A reconciliation successor must be a distinct protected source."); const checkedObservation = assertFreshObservation(observation, predecessor.tuple, { now }); text(reason, "reason"); assertStageBDeploymentEvidenceFreshness(generatedAt, { now, evidenceType: "Stage B reconciliation artifact" });
+  return Object.freeze({ schemaVersion: STAGE_B_APPLY_ATTEMPT_RECONCILIATION_SCHEMA_VERSION, kind: STAGE_B_APPLY_ATTEMPT_RECONCILIATION_KIND, bridgeType: predecessor.bridgeType, generatedAt, reason, predecessor: predecessor.tuple, predecessorReservation: historicalReservation, predecessorTransitions: historicalTransitions, successorSourceSha, observation: checkedObservation });
 }
 
 export function assertStageBApplyAttemptReconciliationArtifact(value, { successorSourceSha, now = new Date() } = {}) {
-  exactKeys(value, ["schemaVersion", "kind", "bridgeType", "generatedAt", "reason", "predecessor", "predecessorReservation", "successorSourceSha", "observation"], "Stage B reconciliation artifact");
+  exactKeys(value, ["schemaVersion", "kind", "bridgeType", "generatedAt", "reason", "predecessor", "predecessorReservation", "predecessorTransitions", "successorSourceSha", "observation"], "Stage B reconciliation artifact");
   if (value.schemaVersion !== STAGE_B_APPLY_ATTEMPT_RECONCILIATION_SCHEMA_VERSION || value.kind !== STAGE_B_APPLY_ATTEMPT_RECONCILIATION_KIND || value.reason !== STAGE_B_APPLY_ATTEMPT_RECONCILIATION_REASON || value.successorSourceSha !== successorSourceSha) fail("Stage B reconciliation artifact identity is invalid.");
-  const predecessor = assertReconciliationPredecessor(value.predecessorReservation);
+  const predecessor = assertReconciliationPredecessor(value.predecessorReservation, value.predecessorTransitions);
   if (value.bridgeType !== predecessor.bridgeType || canonicalJson(value.predecessor) !== canonicalJson(predecessor.tuple)) fail("Stage B reconciliation predecessor is not authentically bound.");
   source(value.successorSourceSha, "successorSourceSha"); if (value.successorSourceSha === predecessor.tuple.sourceSha) fail("Stage B reconciliation successor source must be distinct from the predecessor source.");
   assertStageBDeploymentEvidenceFreshness(value.generatedAt, { now, evidenceType: "Stage B reconciliation artifact" });
@@ -192,16 +197,16 @@ export function stageBApplyAttemptReconciliationSha256(value, { now = new Date()
 
 export function createStageBApplyAttemptReconciliationAuthorization({ protectedEnvironmentApprovalEvidence, reconciliationArtifact, reconciliationArtifactSha256, successorSourceSha, approvedBy, approverRole, verificationRef, now = new Date() } = {}) {
   assertStageBApplyAttemptReconciliationArtifact(reconciliationArtifact, { successorSourceSha, now }); digest(reconciliationArtifactSha256, "reconciliationArtifactSha256"); source(successorSourceSha, "successorSourceSha");
-  assertProductionEnvironmentApprovalIdentity(protectedEnvironmentApprovalEvidence, { sourceSha: successorSourceSha, repository: "T-ej2003/genuine-scan-main" });
+  assertProductionEnvironmentApprovalIdentity(protectedEnvironmentApprovalEvidence, { sourceSha: successorSourceSha, repository: "T-ej2003/genuine-scan-main" }); assertProductionEnvironmentApprovalFreshness(protectedEnvironmentApprovalEvidence, { now });
   assertProductionEnvironmentActualReviewer(protectedEnvironmentApprovalEvidence, { sourceSha: successorSourceSha, repository: "T-ej2003/genuine-scan-main", executionActor: protectedEnvironmentApprovalEvidence.executionActor });
   if (protectedEnvironmentApprovalEvidence.workflowRef !== STAGE_B_APPLY_ATTEMPT_RECONCILIATION_WORKFLOW_REF || protectedEnvironmentApprovalEvidence.schemaVersion !== 3 || protectedEnvironmentApprovalEvidence.actualApproval?.userLogin !== approvedBy) fail("Stage B reconciliation authorization requires actual independent approval from the dedicated workflow.");
   const body = { schemaVersion: 1, kind: STAGE_B_APPLY_ATTEMPT_RECONCILIATION_AUTHORIZATION_KIND, operation: STAGE_B_APPLY_ATTEMPT_RECONCILIATION_OPERATION, environment: "production", accountId: "368992683803", region: "eu-west-2", successorSourceSha, predecessor: reconciliationArtifact.predecessor, reconciliationArtifactSha256, successorAttemptId: stageBApplyAttemptSuccessorIdentity({ predecessorAttemptId: reconciliationArtifact.predecessor.reservationIdentity, reconciliationArtifactSha256, sourceSha: successorSourceSha, planSha256: reconciliationArtifact.predecessor.planSha256, savedPlanSha256: reconciliationArtifact.predecessor.savedPlanSha256, stateLineage: reconciliationArtifact.predecessor.stateLineage, stateSerial: reconciliationArtifact.predecessor.stateSerial, stateSha256: reconciliationArtifact.predecessor.stateSha256, workspace: reconciliationArtifact.predecessor.workspace, backendIdentitySha256: reconciliationArtifact.predecessor.backendIdentitySha256 }), maximumTerraformApplies: 1, expectedTerraformApplies: 1, expectedSecretDeletes: 0, approvedBy, approverRole: text(approverRole, "approverRole"), verificationRef: text(verificationRef, "verificationRef"), protectedEnvironmentApprovalEvidence, protectedEnvironmentApprovalEvidenceSha256: protectedEnvironmentApprovalEvidence.evidenceSha256 };
   return Object.freeze({ ...body, authorizationSha256: canonicalSha256(body) });
 }
 
-export function createStageBApplyAttemptSuccessorReservation({ reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, executionPrincipal, createdAt = new Date().toISOString(), now = new Date() } = {}) {
+export function createStageBApplyAttemptSuccessorReservation({ reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, currentReservation, currentTransitions, executionPrincipal, createdAt = new Date().toISOString(), now = new Date() } = {}) {
   const sourceSha = reconciliationArtifact?.successorSourceSha;
-  assertStageBApplyAttemptReconciliationEligibility({ reservation: reconciliationArtifact?.predecessorReservation, reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, successorSourceSha: sourceSha, now });
+  assertStageBApplyAttemptReconciliationEligibility({ reservation: currentReservation, transitions: currentTransitions, reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, successorSourceSha: sourceSha, now });
   const predecessor = reconciliationArtifact.predecessor;
   return createStageBApplyAttemptReservation({ attemptId: authorization.successorAttemptId, predecessorAttemptId: predecessor.reservationIdentity, sourceSha, planSha256: predecessor.planSha256, savedPlanSha256: predecessor.savedPlanSha256, stateLineage: predecessor.stateLineage, stateSerial: predecessor.stateSerial, stateSha256: predecessor.stateSha256, workspace: predecessor.workspace, backendIdentitySha256: predecessor.backendIdentitySha256, executionPrincipal, createdAt });
 }
@@ -214,13 +219,13 @@ export function assertStageBApplyAttemptReconciliationAuthorization(value, { suc
   if (canonicalJson(value.predecessor) !== canonicalJson(reconciliationArtifact.predecessor)) fail("Stage B reconciliation authorization predecessor binding is invalid.");
   text(value.approvedBy, "approvedBy"); text(value.approverRole, "approverRole"); text(value.verificationRef, "verificationRef");
   if (canonicalSha256(reconciliationArtifact) !== reconciliationArtifactSha256 || value.successorAttemptId !== stageBApplyAttemptSuccessorIdentity({ predecessorAttemptId: value.predecessor.reservationIdentity, reconciliationArtifactSha256, sourceSha: successorSourceSha, planSha256: value.predecessor.planSha256, savedPlanSha256: value.predecessor.savedPlanSha256, stateLineage: value.predecessor.stateLineage, stateSerial: value.predecessor.stateSerial, stateSha256: value.predecessor.stateSha256, workspace: value.predecessor.workspace, backendIdentitySha256: value.predecessor.backendIdentitySha256 })) fail("Stage B reconciliation authorization is not bound to the exact successor attempt.");
-  assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha: successorSourceSha, repository: "T-ej2003/genuine-scan-main" });
+  assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha: successorSourceSha, repository: "T-ej2003/genuine-scan-main" }); assertProductionEnvironmentApprovalFreshness(value.protectedEnvironmentApprovalEvidence, { now });
   if (value.protectedEnvironmentApprovalEvidence.workflowRef !== STAGE_B_APPLY_ATTEMPT_RECONCILIATION_WORKFLOW_REF || value.protectedEnvironmentApprovalEvidence.schemaVersion !== 3 || value.protectedEnvironmentApprovalEvidence.actualApproval?.userLogin !== value.approvedBy || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256) fail("Stage B reconciliation approval evidence is not independently bound.");
   const { authorizationSha256, ...body } = value; if (canonicalSha256(body) !== authorizationSha256) fail("Stage B reconciliation authorization hash is invalid."); return value;
 }
 
-export function assertStageBApplyAttemptReconciliationEligibility({ reservation, reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, successorSourceSha, expectedState = {}, now = new Date() } = {}) {
-  const predecessor = assertReconciliationPredecessor(reservation); for (const [field, expectedValue] of Object.entries(expectedState)) if (expectedValue !== undefined && reservation[field] !== expectedValue) fail(`Stage B reconciliation reservation ${field} binding mismatch.`); assertStageBApplyAttemptReconciliationArtifact(reconciliationArtifact, { successorSourceSha, now }); if (canonicalJson(reservation) !== canonicalJson(reconciliationArtifact.predecessorReservation) || canonicalJson(predecessor.tuple) !== canonicalJson(reconciliationArtifact.predecessor)) fail("Stage B reconciliation predecessor changed after observation."); digest(reconciliationArtifactSha256, "reconciliationArtifactSha256"); if (canonicalSha256(reconciliationArtifact) !== reconciliationArtifactSha256) fail("Stage B reconciliation artifact hash is invalid.");
+export function assertStageBApplyAttemptReconciliationEligibility({ reservation, transitions = [], reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, successorSourceSha, expectedState = {}, now = new Date() } = {}) {
+  const predecessor = assertReconciliationPredecessor(reservation, transitions); for (const [field, expectedValue] of Object.entries(expectedState)) if (expectedValue !== undefined && reservation[field] !== expectedValue) fail(`Stage B reconciliation reservation ${field} binding mismatch.`); assertStageBApplyAttemptReconciliationArtifact(reconciliationArtifact, { successorSourceSha, now }); if (canonicalJson(reservation) !== canonicalJson(reconciliationArtifact.predecessorReservation) || canonicalJson(transitions) !== canonicalJson(reconciliationArtifact.predecessorTransitions) || canonicalJson(predecessor.tuple) !== canonicalJson(reconciliationArtifact.predecessor)) fail("Stage B reconciliation predecessor changed after observation."); digest(reconciliationArtifactSha256, "reconciliationArtifactSha256"); if (canonicalSha256(reconciliationArtifact) !== reconciliationArtifactSha256) fail("Stage B reconciliation artifact hash is invalid.");
   if (!authorization || authorization.authorizationSha256 !== authorizationSha256) fail("Stage B reconciliation authorization is not byte-bound.");
   assertStageBApplyAttemptReconciliationAuthorization(authorization, { successorSourceSha, reconciliationArtifact, reconciliationArtifactSha256, now }); return Object.freeze({ status: "RECOVERABLE", successorAttemptId: authorization.successorAttemptId, maximumTerraformApplies: authorization.maximumTerraformApplies });
 }

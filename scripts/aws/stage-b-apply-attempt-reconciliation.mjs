@@ -10,6 +10,7 @@ import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } fr
 import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 import { STAGE_B_TERRAFORM_BACKEND, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from "./stage-b-terraform-backend-contract.mjs";
 import { assertProductionEnvironmentApprovalIdentity } from "./production-github-environment-approval.mjs";
+import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { assertHistoricalStageBV2Incident, assertStageBApplyAttemptReconciliationArtifact, assertStageBApplyAttemptReconciliationAuthorization, assertStageBApplyAttemptReconciliationEligibility, assertStageBApplyAttemptReservation, assertStageBApplyAttemptTransition, classifyStageBApplyAttemptReconciliationState, createStageBApplyAttemptReconciliationArtifact, createStageBApplyAttemptReconciliationAuthorization, stageBApplyAttemptReconciliationSha256, STAGE_B_APPLY_ATTEMPT_RECONCILIATION_WORKFLOW_REF } from "./stage-b-apply-attempt-reconciliation-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -31,7 +32,7 @@ export function readStageBApplyAttemptReservation({ reservationIdentity, run } =
 
 export function readStageBApplyAttemptHistory({ reservationIdentity, run, maxTransitions = 3 } = {}) {
   const initial = readStageBApplyAttemptReservation({ reservationIdentity, run });
-  if (initial.reservation.schemaVersion === 2) return Object.freeze({ ...initial, transitions: [] });
+  if (initial.reservation.schemaVersion === 2) return Object.freeze({ ...initial, transitions: [], latestReservation: initial.reservation });
   assertStageBApplyAttemptReservation(initial.reservation);
   const transitions = [];
   for (let sequence = 1; sequence <= maxTransitions; sequence += 1) {
@@ -46,7 +47,7 @@ export function readStageBApplyAttemptHistory({ reservationIdentity, run, maxTra
       transitions.push(transition);
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   }
-  return Object.freeze({ ...initial, transitions });
+  return Object.freeze({ ...initial, transitions, latestReservation: transitions.at(-1) || initial.reservation });
 }
 
 export function resolveStageBApplyAttemptReconciliationAuthorization({ workflowRunId, workflowRunAttempt, sourceSha, reconciliationArtifact, reconciliationArtifactSha256, run = (command, args, options = {}) => execFileSync(command, args, { encoding: options.encoding === null ? null : "utf8", maxBuffer: options.maxBuffer }), githubRun = createProductionGithubCommandRunner() } = {}) {
@@ -71,43 +72,53 @@ export function resolveStageBApplyAttemptReconciliationAuthorization({ workflowR
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 
-export function produceStageBApplyAttemptReconciliationAuthorization({ reconciliationArtifactPath, reconciliationArtifactSha256, environmentApprovalPath, environmentApprovalSha256, sourceSha, outputPath, approvedBy, approverRole, verificationRef } = {}) {
+export function produceStageBApplyAttemptReconciliationAuthorization({ reconciliationArtifactPath, reconciliationArtifactSha256, environmentApprovalPath, environmentApprovalSha256, sourceSha, outputPath, approvedBy, approverRole, verificationRef, now = new Date() } = {}) {
   const reconciliation = readJsonFile(reconciliationArtifactPath, "Stage B reconciliation artifact");
-  if (stageBApplyAttemptReconciliationSha256(reconciliation.value) !== reconciliationArtifactSha256) throw new Error("Stage B reconciliation artifact changed after authentication.");
+  if (stageBApplyAttemptReconciliationSha256(reconciliation.value, { now }) !== reconciliationArtifactSha256) throw new Error("Stage B reconciliation artifact changed after authentication.");
   const approval = readJsonFile(environmentApprovalPath, "Stage B reconciliation environment approval");
   if (approval.sha256 !== environmentApprovalSha256) throw new Error("Stage B reconciliation environment approval changed after authentication.");
   assertProductionEnvironmentApprovalIdentity(approval.value, { sourceSha, repository: "T-ej2003/genuine-scan-main" });
-  const authorization = createStageBApplyAttemptReconciliationAuthorization({ protectedEnvironmentApprovalEvidence: approval.value, reconciliationArtifact: reconciliation.value, reconciliationArtifactSha256, successorSourceSha: sourceSha, approvedBy, approverRole, verificationRef });
+  const authorization = createStageBApplyAttemptReconciliationAuthorization({ protectedEnvironmentApprovalEvidence: approval.value, reconciliationArtifact: reconciliation.value, reconciliationArtifactSha256, successorSourceSha: sourceSha, approvedBy, approverRole, verificationRef, now });
   const output = assertStageBArtifactPath({ artifactPath: outputPath, repositoryRoot: root, label: "Stage B apply-attempt reconciliation authorization", allowExisting: false }); ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "Stage B apply-attempt reconciliation authorization directory" });
   writeStageBPrivateFileAtomic({ filePath: output, bytes: Buffer.from(`${JSON.stringify(authorization, null, 2)}\n`), repositoryRoot: root, label: "Stage B apply-attempt reconciliation authorization" });
   return { status: "published", outputPath: output, authorizationSha256: authorization.authorizationSha256 };
 }
 
-export function runStageBApplyAttemptReconciliationCli(argv = process.argv.slice(2), { now = new Date() } = {}) {
+export function runStageBApplyAttemptReconciliationCli(argv = process.argv.slice(2), { now = new Date(), awsRun: suppliedAwsRun } = {}) {
   const mode = required(argv, "--mode");
+  const awsRun = suppliedAwsRun || ((args) => {
+    const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+    try { return { status: 0, stdout: releaseRun(args) }; } catch (error) { return { status: error.status ?? 1, stdout: error.stdout?.toString?.() || "", stderr: error.stderr?.toString?.() || error.message || "" }; }
+  });
+  if (mode === "reconciliation-sha256") {
+    const reconciliation = readJsonFile(required(argv, "--reconciliation-artifact"), "Stage B reconciliation artifact");
+    return { sha256: stageBApplyAttemptReconciliationSha256(reconciliation.value, { now }) };
+  }
   if (mode === "verify") {
     const reservationIdentity = required(argv, "--reservation-identity"); const expected = { sourceSha: required(argv, "--source-sha"), planSha256: required(argv, "--plan-sha256"), savedPlanSha256: required(argv, "--saved-plan-sha256"), stateLineage: required(argv, "--state-lineage"), stateSerial: Number(required(argv, "--state-serial")), stateSha256: required(argv, "--state-sha256"), workspace: required(argv, "--workspace"), backendIdentitySha256: required(argv, "--backend-identity-sha256") };
-    const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" }); const awsRun = (args) => { try { return { status: 0, stdout: releaseRun(args) }; } catch (error) { return { status: error.status ?? 1, stdout: error.stdout?.toString?.() || "", stderr: error.stderr?.toString?.() || error.message || "" }; } }; const result = readStageBApplyAttemptHistory({ reservationIdentity, run: awsRun });
+    const result = readStageBApplyAttemptHistory({ reservationIdentity, run: awsRun });
     if (result.reservation.schemaVersion === 2) { assertHistoricalStageBV2Incident(result.reservation); if (reservationIdentity !== result.reservation.artifactSetIdentity) throw new Error("Historical Stage B reservation identity mismatch."); }
     else { const { sourceSha, ...v3Expected } = expected; assertStageBApplyAttemptReservation(result.reservation, { expected: { ...v3Expected, sourceSha } }); }
-    return { status: result.reservation.status || result.reservation.phase, reconciliationStatus: classifyStageBApplyAttemptReconciliationState(result.reservation).status, reservationIdentity, sha256: result.sha256 };
+    return { status: result.latestReservation.status || result.latestReservation.phase, reconciliationStatus: classifyStageBApplyAttemptReconciliationState(result.latestReservation).status, reservationIdentity, sha256: result.sha256 };
   }
   if (mode === "prepare-successor") {
     const reconciliation = readJsonFile(required(argv, "--reconciliation-artifact"), "Stage B reconciliation artifact"); const authorization = readJsonFile(required(argv, "--authorization"), "Stage B reconciliation authorization"); const sourceSha = required(argv, "--source-sha"); const reconciliationArtifactSha256 = required(argv, "--reconciliation-artifact-sha256");
     if (stageBApplyAttemptReconciliationSha256(reconciliation.value, { now }) !== reconciliationArtifactSha256 || authorization.value.authorizationSha256 !== required(argv, "--authorization-sha256")) throw new Error("Stage B successor inputs changed after authentication.");
-    const result = assertStageBApplyAttemptReconciliationEligibility({ reservation: reconciliation.value.predecessorReservation, reconciliationArtifact: reconciliation.value, reconciliationArtifactSha256, authorization: authorization.value, authorizationSha256: authorization.value.authorizationSha256, successorSourceSha: sourceSha, now });
+    const history = readStageBApplyAttemptHistory({ reservationIdentity: reconciliation.value.predecessor.reservationIdentity, run: awsRun });
+    const result = assertStageBApplyAttemptReconciliationEligibility({ reservation: history.reservation, transitions: history.transitions, reconciliationArtifact: reconciliation.value, reconciliationArtifactSha256, authorization: authorization.value, authorizationSha256: authorization.value.authorizationSha256, successorSourceSha: sourceSha, now });
     return { ...result, sourceSha, status: "SUCCESSOR_READY_BUT_NOT_EXECUTED" };
   }
   if (mode === "create-reconciliation") {
-    const historical = readJsonFile(required(argv, "--historical-reservation")); const observation = readJsonFile(required(argv, "--observation"));
-    const result = createStageBApplyAttemptReconciliationArtifact({ historicalReservation: historical.value, observation: observation.value, successorSourceSha: required(argv, "--successor-source-sha"), now });
+    const historical = readJsonFile(required(argv, "--historical-reservation")); const observation = readJsonFile(required(argv, "--observation")); const reservationIdentity = required(argv, "--reservation-identity"); const history = readStageBApplyAttemptHistory({ reservationIdentity, run: awsRun });
+    if (canonicalJson(historical.value) !== canonicalJson(history.reservation)) throw new Error("Stage B reconciliation historical reservation differs from canonical backend readback.");
+    const result = createStageBApplyAttemptReconciliationArtifact({ historicalReservation: history.reservation, historicalTransitions: history.transitions, observation: observation.value, successorSourceSha: required(argv, "--successor-source-sha"), generatedAt: now.toISOString(), now });
     const output = assertStageBArtifactPath({ artifactPath: required(argv, "--output"), repositoryRoot: root, label: "Stage B apply-attempt reconciliation artifact", allowExisting: false });
     ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "Stage B apply-attempt reconciliation directory" });
     writeStageBPrivateFileAtomic({ filePath: output, bytes: Buffer.from(`${JSON.stringify(result, null, 2)}\n`), repositoryRoot: root, label: "Stage B apply-attempt reconciliation artifact" });
-    return { status: "published", outputPath: output, sha256: stageBApplyAttemptReconciliationSha256(result) };
+    return { status: "published", outputPath: output, sha256: stageBApplyAttemptReconciliationSha256(result, { now }) };
   }
   if (mode === "authorize") {
-    return produceStageBApplyAttemptReconciliationAuthorization({ reconciliationArtifactPath: required(argv, "--reconciliation-artifact"), reconciliationArtifactSha256: required(argv, "--reconciliation-artifact-sha256"), environmentApprovalPath: required(argv, "--environment-approval"), environmentApprovalSha256: required(argv, "--environment-approval-sha256"), sourceSha: required(argv, "--source-sha"), outputPath: required(argv, "--output"), approvedBy: required(argv, "--approved-by"), approverRole: required(argv, "--approver-role"), verificationRef: required(argv, "--verification-ref") });
+    return produceStageBApplyAttemptReconciliationAuthorization({ reconciliationArtifactPath: required(argv, "--reconciliation-artifact"), reconciliationArtifactSha256: required(argv, "--reconciliation-artifact-sha256"), environmentApprovalPath: required(argv, "--environment-approval"), environmentApprovalSha256: required(argv, "--environment-approval-sha256"), sourceSha: required(argv, "--source-sha"), outputPath: required(argv, "--output"), approvedBy: required(argv, "--approved-by"), approverRole: required(argv, "--approver-role"), verificationRef: required(argv, "--verification-ref"), now });
   }
   throw new Error("Unknown Stage B apply-attempt reconciliation mode.");
 }

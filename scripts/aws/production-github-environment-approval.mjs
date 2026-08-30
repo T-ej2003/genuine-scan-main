@@ -106,7 +106,12 @@ export function assertProductionEnvironmentApprovalEvidence(evidence, { sourceSh
     || evidence.workflowRunAttempt !== String(workflowRunAttempt || "") || !RUN_ID.test(evidence.workflowRunAttempt)
     || actor.toLowerCase() !== requiredText(executionActor, "executionActor").toLowerCase()
     || !Number.isSafeInteger(evidence.requiredReviewerCount) || evidence.requiredReviewerCount !== reviewers.length) throw new Error("GitHub environment approval evidence is not bound to this protected recovery run.");
-  const observed = new Date(evidence.observedAt);
+  assertProductionEnvironmentApprovalFreshness(evidence, { now });
+  return evidence;
+}
+
+export function assertProductionEnvironmentApprovalFreshness(evidence, { now = new Date() } = {}) {
+  const observed = new Date(evidence?.observedAt);
   const age = now.getTime() - observed.getTime();
   if (!Number.isFinite(observed.getTime()) || observed.toISOString() !== evidence.observedAt || age < 0 || age > PRODUCTION_ENVIRONMENT_APPROVAL.maxAgeMs) throw new Error("GitHub environment approval evidence is stale or malformed.");
   return evidence;
