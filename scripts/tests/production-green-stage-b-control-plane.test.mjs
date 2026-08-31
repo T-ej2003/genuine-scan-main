@@ -20,7 +20,7 @@ const artifact = (overrides = {}) => {
 const verifySignature = async ({ message, signature }) => crypto.verify("sha256", message, { key: publicKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, signature);
 const taskDefinitions = Object.fromEntries(Object.entries(STAGE_B_BROKER_TASK_DEFINITION_FAMILIES).map(([mode, family]) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`]));
 const expected = { releaseSha, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, deploymentId: "phase2", approvalId: stageBApprovalIdForReleaseSha(releaseSha), ticketId: "CHG-STAGE-B-0001", images, taskDefinitionArns: taskDefinitions };
-const config = { clusterArn: STAGE_B.clusterArn, approvalSecretArn: STAGE_B.approvalSecretArn, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, privateSubnetIds: ["subnet-068d949017bd2ce45", "subnet-07e0a76e3a5241138"], replayTable: "replay", receiptBucket: STAGE_B.receiptBucket, taskDefinitionArns: taskDefinitions, templateHashes: stageBTemplateHashes(), approvalExpected: expected, images };
+const config = { clusterArn: STAGE_B.clusterArn, approvalSecretArn: STAGE_B.approvalSecretArn, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, privateSubnetIds: [...STAGE_B.privateSubnetIds], replayTable: "replay", receiptBucket: STAGE_B.receiptBucket, taskDefinitionArns: taskDefinitions, templateHashes: stageBTemplateHashes(), approvalExpected: expected, images };
 
 test("broker task-definition map enforces the exact mode, family, account, region, and revision contract", () => {
   assert.doesNotThrow(() => assertStageBBrokerTaskDefinitionMap(taskDefinitions));
@@ -38,7 +38,7 @@ test("broker task-definition map enforces the exact mode, family, account, regio
 });
 
 test("broker runtime bindings are exact before any handler work", () => {
-  for (const [field, value] of [["clusterArn", "arn:aws:ecs:eu-west-2:368992683803:cluster/other"], ["approvalSecretArn", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:other"], ["executorSecurityGroupId", "sg-other"], ["privateSubnetIds", ["subnet-068d949017bd2ce45"]], ["replayTable", "bad table"], ["receiptBucket", "other-bucket"]]) {
+  for (const [field, value] of [["clusterArn", "arn:aws:ecs:eu-west-2:368992683803:cluster/other"], ["approvalSecretArn", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:other"], ["executorSecurityGroupId", "sg-other"], ["privateSubnetIds", ["subnet-test-invalid"]], ["replayTable", "bad table"], ["receiptBucket", "other-bucket"]]) {
     assert.throws(() => createHandler({ config: { ...config, [field]: value } }), /runtime bindings|reviewed contract/);
   }
 });
@@ -114,7 +114,7 @@ test("Stage B templates require immutable images, private executor networking, a
     assert.match(fs.readFileSync(source, "utf8"), /uploads/);
   }
   assert.deepEqual(approvedNetworkConfiguration(config.privateSubnetIds).awsvpcConfiguration, { subnets: [...config.privateSubnetIds].sort(), securityGroups: [STAGE_B.executorSecurityGroupId], assignPublicIp: "DISABLED" });
-  assert.throws(() => approvedNetworkConfiguration([config.privateSubnetIds[0], "subnet-0123456789abcdef0"]), /approved private subnets/);
+  assert.throws(() => approvedNetworkConfiguration([config.privateSubnetIds[0], "subnet-test-invalid"]), /approved private subnets/);
   assert.throws(() => renderStageBTaskDefinition("executor", { ...common, executorImage: "mscqr-backend:latest", mode: "full-rls-verification" }), /immutable/);
   assert.throws(() => renderStageBTaskDefinition("backend", { ...common, backendImage: image("mscqr-web", "5") }), /reviewed ECR repository/);
   assert.throws(() => assertFixedTaskDefinition({ ...backend, cpu: "256", memory: "3072" }), /fixed reviewed/);

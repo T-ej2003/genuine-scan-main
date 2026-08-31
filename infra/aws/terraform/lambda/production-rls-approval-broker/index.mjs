@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { canonicalizeEcsTaskDefinition } from "./ecs-task-definition-readback.mjs";
+import { assertEcsTaskDefinitionReadback } from "./ecs-task-definition-readback.mjs";
 const { assertBrokerApprovalValidationRequest, assertBrokerRequest, assertStageBBrokerConfigurationBindings, assertStageBBrokerRuntimeBindings, assertStageBBrokerTaskDefinitionMap, canonicalJson, hasCompleteStageBTaskMaps, STAGE_B, validateStageBApproval } = await import(
   process.env.AWS_LAMBDA_FUNCTION_NAME ? "./stage-b-contract.mjs" : "../../../../../scripts/aws/production-green-stage-b-contract.mjs"
 );
@@ -175,7 +175,8 @@ function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, sou
       },
     }],
   };
-  if (!definition || definition.taskDefinitionArn !== taskDefinitionArn || definition.status !== "ACTIVE" || !container || canonicalizeEcsTaskDefinition(definition) !== canonicalizeEcsTaskDefinition(expected)) throw new Error("Pre-deployment inventory task definition is not the exact approved execution contract.");
+  if (!container) throw new Error("Pre-deployment inventory task definition is not the exact approved execution contract.");
+  assertEcsTaskDefinitionReadback({ definition, taskDefinitionArn, expected, label: "Pre-deployment inventory task definition" });
   return true;
 }
 

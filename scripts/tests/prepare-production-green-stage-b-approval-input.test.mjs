@@ -9,8 +9,8 @@ import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-che
 import { buildReleasePreflightCheckerTrustAttestation } from "../aws/production-release-preflight-checker-attestation.mjs";
 import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
-import { prepareProductionGreenStageBApprovalInput, writeProductionGreenStageBApprovalInput } from "../aws/prepare-production-green-stage-b-approval-input.mjs";
-import { stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
+import { assertStableBrokerAliasObservation, prepareProductionGreenStageBApprovalInput, writeProductionGreenStageBApprovalInput } from "../aws/prepare-production-green-stage-b-approval-input.mjs";
+import { renderStageBTaskDefinition, stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
 
 const releaseSha = "8d7ecc53a0c8d0ec07dfce1aeb03dc22d0f43f82";
 const checkerIdentity = "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/checker-session";
@@ -19,12 +19,33 @@ const digest = (character) => character.repeat(64);
 const taskDefinitionArns = Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${STAGE_B_BROKER_TASK_DEFINITION_FAMILIES[mode]}:4`]));
 const now = new Date("2026-08-31T10:01:00.000Z");
 const image = (repository, character) => ({ digest: `sha256:${character.repeat(64)}`, imageReference: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}@sha256:${character.repeat(64)}` });
-const report = { tfvarsSha256: digest("a"), images: { backend: image("mscqr-backend", "b"), worker: image("mscqr-worker", "a"), executor: image("mscqr-backend", "e"), canary: image("mscqr-backend", "c") } };
+const report = { tfvarsSha256: digest("a"), brokerPackageRawSha256: digest("e"), images: { backend: image("mscqr-backend", "b"), worker: image("mscqr-worker", "a"), executor: image("mscqr-backend", "e"), canary: image("mscqr-backend", "c") } };
 const authorization = { imageEvidenceSha256: digest("d"), authorizationSha256: digest("f"), imageReleaseSha: releaseSha, images: [{ service: "backend", digest: report.images.backend.digest }, { service: "worker", digest: report.images.worker.digest }, { service: "rls-executor", digest: report.images.executor.digest }, { service: "rls-canary", digest: report.images.canary.digest }] };
 const brokerApprovalExpected = { releaseSha, sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c"), deploymentId: "phase2", greenDatabaseName: "mscqr_production_rls_green_phase2", administratorIdentity: "mscqr_prod_admin", databaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, executorSecurityGroupId: STAGE_B.executorSecurityGroupId };
 const brokerImages = { backendImageDigest: report.images.backend.imageReference, workerImageDigest: report.images.worker.imageReference, executorImageDigest: report.images.executor.imageReference, canaryImageDigest: report.images.canary.imageReference };
+const taskDefinitionReadbacks = Object.fromEntries(STAGE_B_MODES.map((mode) => {
+  const kind = mode === "full-rls-application-canary" ? "canary" : "executor";
+  const definition = renderStageBTaskDefinition(kind, { imageReleaseSha: releaseSha, sourceContractSha256: brokerApprovalExpected.sourceContractSha256, migrationSetDigest: brokerApprovalExpected.migrationSetDigest, packageChecksumSha256: brokerApprovalExpected.packageChecksumSha256, receiptBucket: STAGE_B.receiptBucket, executorLogGroup: STAGE_B.executorLogGroupName, canaryLogGroup: STAGE_B.canaryLogGroupName, backendLogGroup: "/ecs/mscqr-production/rls-green-backend", workerLogGroup: "/ecs/mscqr-production/rls-green-worker", [`${kind}Image`]: kind === "canary" ? report.images.canary.imageReference : report.images.executor.imageReference, ...(kind === "executor" ? { mode } : {}) });
+  return [mode, { taskDefinition: { ...definition, taskDefinitionArn: taskDefinitionArns[mode], revision: 4, status: "ACTIVE" } }];
+}));
+const awsNormalizedTaskDefinitionReadbacks = Object.fromEntries(Object.entries(taskDefinitionReadbacks).map(([mode, value]) => {
+  const definition = structuredClone(value.taskDefinition);
+  delete definition.containerDefinitions[0].cpu;
+  definition.containerDefinitions[0].environmentFiles = [];
+  definition.containerDefinitions[0].mountPoints = definition.containerDefinitions[0].mountPoints || [];
+  definition.containerDefinitions[0].portMappings = definition.containerDefinitions[0].portMappings || [];
+  definition.containerDefinitions[0].systemControls = [];
+  definition.containerDefinitions[0].ulimits = [];
+  definition.containerDefinitions[0].volumesFrom = [];
+  definition.placementConstraints = [];
+  definition.volumes = definition.volumes || [];
+  return [mode, { taskDefinition: Object.fromEntries(Object.entries(definition).reverse()) }];
+}));
 const preflight = (overrides = {}) => ({ status: "ready-for-plan", sourceSha: releaseSha, caller: deployerIdentity, account: STAGE_B.account, region: STAGE_B.region, backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, failed: [], skipped: [], requiredReads: { "ecs:DescribeTasks": "allowed" }, total: 1, allowed: 1, checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }, administratorReportSha256: digest("b"), releaseReadFailures: 0, configurationFailures: 0, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, tfvarsSha256: digest("a"), ...overrides });
-const live = (overrides = {}) => ({ configuration: { FunctionArn: STAGE_B.brokerAliasArn, Version: "4", Environment: { Variables: { BROKER_CLUSTER_ARN: STAGE_B.clusterArn, BROKER_APPROVAL_SECRET_ARN: STAGE_B.approvalSecretArn, BROKER_EXECUTOR_SECURITY_GROUP_ID: STAGE_B.executorSecurityGroupId, BROKER_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds), BROKER_REPLAY_TABLE: "replay", BROKER_RECEIPT_BUCKET: STAGE_B.receiptBucket, BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskDefinitionArns), BROKER_TASK_TEMPLATE_HASHES_JSON: JSON.stringify(stageBTemplateHashes()), BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify(brokerApprovalExpected), BROKER_IMAGES_JSON: JSON.stringify(brokerImages) } } }, alias: { AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4" }, ...overrides });
+const live = (overrides = {}) => {
+  const base = { configuration: { FunctionArn: STAGE_B.brokerAliasArn, Version: "4", CodeSha256: Buffer.from(report.brokerPackageRawSha256, "hex").toString("base64"), Environment: { Variables: { BROKER_CLUSTER_ARN: STAGE_B.clusterArn, BROKER_APPROVAL_SECRET_ARN: STAGE_B.approvalSecretArn, BROKER_EXECUTOR_SECURITY_GROUP_ID: STAGE_B.executorSecurityGroupId, BROKER_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds), BROKER_REPLAY_TABLE: "replay", BROKER_RECEIPT_BUCKET: STAGE_B.receiptBucket, BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskDefinitionArns), BROKER_TASK_TEMPLATE_HASHES_JSON: JSON.stringify(stageBTemplateHashes()), BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify(brokerApprovalExpected), BROKER_IMAGES_JSON: JSON.stringify(brokerImages) } } }, alias: { AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4" }, taskDefinitions: taskDefinitionReadbacks };
+  return { ...base, ...overrides, configuration: overrides.configuration || base.configuration, alias: overrides.alias || base.alias, taskDefinitions: overrides.taskDefinitions || base.taskDefinitions };
+};
 
 function signedPreflightTrust(reportValue = preflight(), source = releaseSha) {
   const reportBytes = Buffer.from(`${JSON.stringify(reportValue)}\n`);
@@ -110,6 +131,49 @@ for (const [label, mutate] of [
   ["task map", () => ({ live: { configuration: { ...live().configuration, Environment: { Variables: { ...live().configuration.Environment.Variables, BROKER_TASK_DEFINITIONS_JSON: JSON.stringify({ ...taskDefinitionArns, rogue: taskDefinitionArns[STAGE_B_MODES[0]] }) } } } } })],
   ["broker binding", () => ({ live: { alias: { ...live().alias, FunctionVersion: "5" } } })],
 ]) test(`collector rejects current runtime ${label} drift`, () => assert.throws(() => evidence(mutate()), /match|broker|version|binding/i));
+
+test("collector binds the alias-resolved Lambda code bytes, not only its environment", () => {
+  assert.throws(() => evidence({ live: { configuration: { ...live().configuration, CodeSha256: Buffer.from(digest("f"), "hex").toString("base64") } } }), /broker Lambda code|package/);
+  assert.throws(() => evidence({ report: { brokerPackageRawSha256: "f".repeat(63) } }), /package raw SHA256|malformed/);
+  assert.throws(() => evidence({ live: { configuration: { ...live().configuration, CodeSha256: "not-base64" } } }), /CodeSha256|malformed/);
+});
+
+test("qualified broker observation rejects mixed or changed Lambda versions", () => {
+  const alias = { FunctionVersion: "4" };
+  assert.equal(assertStableBrokerAliasObservation({ initialAlias: alias, confirmedAlias: { FunctionVersion: "4" }, configuration: { Version: "4" } }), "4");
+  assert.throws(() => assertStableBrokerAliasObservation({ initialAlias: alias, confirmedAlias: { FunctionVersion: "5" }, configuration: { Version: "4" } }), /changed/);
+  assert.throws(() => assertStableBrokerAliasObservation({ initialAlias: alias, confirmedAlias: { FunctionVersion: "4" }, configuration: { Version: "5" } }), /changed/);
+});
+
+test("collector binds every exact broker task-definition revision to reviewed content", () => {
+  const changed = structuredClone(taskDefinitionReadbacks);
+  changed[STAGE_B_MODES[0]].taskDefinition.containerDefinitions[0].command = ["node", "unexpected.mjs"];
+  assert.throws(() => evidence({ live: { taskDefinitions: changed } }), /task definition|execution contract/i);
+  const wrongArn = structuredClone(taskDefinitionReadbacks);
+  wrongArn[STAGE_B_MODES[1]].taskDefinition.taskDefinitionArn = taskDefinitionArns[STAGE_B_MODES[0]];
+  assert.throws(() => evidence({ live: { taskDefinitions: wrongArn } }), /task definition|execution contract/i);
+  const missing = structuredClone(taskDefinitionReadbacks);
+  delete missing[STAGE_B_MODES[2]];
+  assert.throws(() => evidence({ live: { taskDefinitions: missing } }), /task definition|execution contract/i);
+});
+
+test("collector accepts AWS-normalized task readbacks with omitted defaults and reordered keys", () => {
+  assert.doesNotThrow(() => evidence({ live: { taskDefinitions: awsNormalizedTaskDefinitionReadbacks } }));
+});
+
+for (const [label, mutate] of [
+  ["image", (definition) => { definition.containerDefinitions[0].image = report.images.executor.imageReference.replace(/e{64}$/, "f".repeat(64)); }],
+  ["environment", (definition) => { definition.containerDefinitions[0].environment[0].value = "changed"; }],
+  ["secrets", (definition) => { definition.containerDefinitions[0].secrets[0].valueFrom = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:changed"; }],
+  ["task role", (definition) => { definition.taskRoleArn = "arn:aws:iam::368992683803:role/changed"; }],
+  ["network", (definition) => { definition.networkMode = "bridge"; }],
+  ["runtime platform", (definition) => { definition.runtimePlatform = { cpuArchitecture: "ARM64", operatingSystemFamily: "LINUX" }; }],
+  ["extra container", (definition) => { definition.containerDefinitions.push(structuredClone(definition.containerDefinitions[0])); }],
+]) test(`collector rejects broker task-definition ${label} drift`, () => {
+  const changed = structuredClone(taskDefinitionReadbacks);
+  mutate(changed[STAGE_B_MODES[0]].taskDefinition);
+  assert.throws(() => evidence({ live: { taskDefinitions: changed } }), /task definition|execution contract/i);
+});
 
 test("only ticket is operator-controlled; time and nonce are internally derived", async () => {
   const result = await prepareProductionGreenStageBApprovalInput({ evidence: evidence(), protectedSourceSha: releaseSha, operator: { ticketId: "CHG-STAGE-B-0001" }, now, randomUuid: () => "12345678-1234-1234-1234-123456789abc" });

@@ -9,6 +9,8 @@ export const STAGE_B = Object.freeze({
   executorSecurityGroupId: "sg-051a24aedff773761",
   privateSubnetIds: Object.freeze(["subnet-068d949017bd2ce45", "subnet-07e0a76e3a5241138"]),
   inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend",
+  executorLogGroupName: "/ecs/mscqr-production/full-rls-green",
+  canaryLogGroupName: "/ecs/mscqr-production/rls-green-canary",
   inventoryTaskDefinitionFamily: "mscqr-production-rls-green-predeployment-inventory",
   inventoryDatabaseSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
   inventoryRlsRole: "mscqr_prod_rls_read",

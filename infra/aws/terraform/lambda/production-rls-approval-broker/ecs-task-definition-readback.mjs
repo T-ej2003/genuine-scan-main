@@ -25,3 +25,13 @@ export function canonicalizeEcsTaskDefinition(definition) {
       : JSON.stringify(value);
   return canonical(normalizeEcsTaskDefinitionReadback(definition));
 }
+
+export function assertEcsTaskDefinitionReadback({ definition, taskDefinitionArn, expected, label = "ECS task definition" } = {}) {
+  const match = /^arn:aws:ecs:[^:]+:[^:]+:task-definition\/([^:]+):([1-9][0-9]*)$/.exec(String(taskDefinitionArn || ""));
+  if (!definition || !match || definition.taskDefinitionArn !== taskDefinitionArn
+      || definition.family !== match[1] || definition.revision !== undefined && String(definition.revision) !== match[2]
+      || definition.status !== "ACTIVE" || canonicalizeEcsTaskDefinition(definition) !== canonicalizeEcsTaskDefinition(expected)) {
+    throw new Error(`${label} is not the exact approved execution contract.`);
+  }
+  return true;
+}

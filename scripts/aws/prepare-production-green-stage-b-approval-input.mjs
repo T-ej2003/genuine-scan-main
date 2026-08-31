@@ -10,6 +10,7 @@ import {
   STAGE_B_APPROVAL_FIELDS,
   STAGE_B_APPROVAL_SCHEMA_VERSION,
   canonicalJson,
+  assertStageBBrokerTaskDefinitionMap,
   stageBApprovalIdForReleaseSha,
   validateStageBApprovalPayload,
 } from "./production-green-stage-b-contract.mjs";
@@ -20,6 +21,7 @@ import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from 
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 import { createReleasePreflightCheckerTrustSignatureVerifier } from "./production-release-preflight-checker-attestation.mjs";
+import { createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 
 export const STAGE_B_APPROVAL_INPUT_PRODUCER = "scripts/aws/prepare-production-green-stage-b-approval-input.mjs";
 export const STAGE_B_APPROVAL_INPUT_SCHEMA_VERSION = 1;
@@ -33,7 +35,7 @@ const DIGEST = /^[a-f0-9]{64}$/;
 const UUID = /^[a-f0-9-]{16,64}$/;
 const OPERATOR_FIELDS = Object.freeze(["ticketId"]);
 const EVIDENCE_FIELDS = Object.freeze([
-  "schemaVersion", "producer", "observedAt", "sourceCurrent", "runtimeBindingsCurrent", "releaseSha", "backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "taskDefinitionArns", "brokerVersion", "checkerIdentity", "deployerIdentity", "imageAuthorizationSha256", "tfvarsBindingSha256", "runtimeBindingSha256",
+  "schemaVersion", "producer", "observedAt", "sourceCurrent", "runtimeBindingsCurrent", "releaseSha", "backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "taskDefinitionArns", "taskDefinitionContentSha256", "brokerVersion", "brokerPackageRawSha256", "brokerCodeSha256", "checkerIdentity", "deployerIdentity", "imageAuthorizationSha256", "tfvarsBindingSha256", "runtimeBindingSha256",
 ]);
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -51,11 +53,13 @@ function assertEvidence(evidence) {
     if (!DIGEST.test(evidence[field] || "")) throw new Error(`Authenticated evidence ${field} is malformed.`);
   }
   if (!/^[1-9][0-9]*$/.test(String(evidence.brokerVersion || ""))) throw new Error("Authenticated evidence brokerVersion is malformed.");
+  if (!DIGEST.test(evidence.brokerPackageRawSha256 || "") || !/^[A-Za-z0-9+/]{43}=$/.test(evidence.brokerCodeSha256 || "") || Buffer.from(evidence.brokerCodeSha256, "base64").length !== 32 || evidence.brokerCodeSha256 !== Buffer.from(evidence.brokerPackageRawSha256, "hex").toString("base64")) throw new Error("Authenticated evidence broker package binding is malformed.");
   if (!exactKeys(evidence.taskDefinitionArns, [
     "full-rls-capability-preflight", "full-rls-admin-bootstrap", "full-rls-role-provision", "full-rls-role-verify",
     "full-rls-admin-ownership", "full-rls-runtime-policy", "full-rls-verification", "full-rls-application-canary", "full-rls-rollback",
   ])) throw new Error("Authenticated evidence task-definition map is not the exact broker map.");
   if (!Object.values(evidence.taskDefinitionArns).every((value) => /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[A-Za-z0-9_-]+:[1-9][0-9]*$/.test(value || ""))) throw new Error("Authenticated evidence task-definition ARN is malformed.");
+  if (!exactKeys(evidence.taskDefinitionContentSha256, Object.keys(evidence.taskDefinitionArns)) || !Object.values(evidence.taskDefinitionContentSha256).every((value) => DIGEST.test(value))) throw new Error("Authenticated evidence task-definition content bindings are incomplete.");
   const identityRoles = { checkerIdentity: "mscqr-production-rls-independent-checker", deployerIdentity: "mscqr-production-release-deployer" };
   for (const [field, role] of Object.entries(identityRoles)) {
     if (!new RegExp(`^arn:aws:sts::368992683803:assumed-role/${role}/[A-Za-z0-9+=,.@_-]{2,64}$`).test(evidence[field] || "")) throw new Error(`Authenticated evidence ${field} is not the exact required role session.`);
@@ -80,6 +84,16 @@ function deriveOperatorFields(operator = {}, now = new Date(), randomUuid = cryp
   const nonce = randomUuid();
   if (!UUID.test(nonce)) throw new Error("Approval nonce is malformed.");
   return { ticketId, issuedAt, expiresAt, nonce };
+}
+
+export function assertStableBrokerAliasObservation({ initialAlias, confirmedAlias, configuration } = {}) {
+  const expectedVersion = String(initialAlias?.FunctionVersion || "");
+  if (!/^[1-9][0-9]*$/.test(expectedVersion)
+      || String(confirmedAlias?.FunctionVersion || "") !== expectedVersion
+      || String(configuration?.Version || "") !== expectedVersion) {
+    throw new Error("Reviewed broker alias changed during the immutable version observation.");
+  }
+  return expectedVersion;
 }
 
 export async function prepareProductionGreenStageBApprovalInput({ evidence, protectedSourceSha, operator, now = new Date(), randomUuid = crypto.randomUUID } = {}) {
@@ -180,10 +194,18 @@ async function run(argv = process.argv.slice(2)) {
   for (let index = 0; index < argv.length; index += 1) { if (!allowed.has(argv[index])) throw new Error("Unknown approval-input option."); index += 1; }
   const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION });
   const checkerIdentity = JSON.parse(releaseRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn;
-  const live = {
-    configuration: JSON.parse(releaseRun(["lambda", "get-function-configuration", "--function-name", STAGE_B.brokerAliasArn, "--output", "json", "--no-cli-pager"])),
-    alias: JSON.parse(releaseRun(["lambda", "get-alias", "--function-name", STAGE_B.brokerFunctionArn, "--name", STAGE_B.brokerAliasQualifier, "--output", "json", "--no-cli-pager"])),
-  };
+  const alias = JSON.parse(releaseRun(["lambda", "get-alias", "--function-name", STAGE_B.brokerFunctionArn, "--name", STAGE_B.brokerAliasQualifier, "--output", "json", "--no-cli-pager"]));
+  const brokerVersion = String(alias.FunctionVersion || "");
+  if (!/^[1-9][0-9]*$/.test(brokerVersion)) throw new Error("Reviewed broker alias version is malformed.");
+  const configuration = JSON.parse(releaseRun(["lambda", "get-function-configuration", "--function-name", STAGE_B.brokerFunctionArn, "--qualifier", brokerVersion, "--output", "json", "--no-cli-pager"]));
+  let taskDefinitionArns;
+  try { taskDefinitionArns = JSON.parse(configuration.Environment?.Variables?.BROKER_TASK_DEFINITIONS_JSON); } catch { throw new Error("Live broker task-definition map is malformed."); }
+  assertStageBBrokerTaskDefinitionMap(taskDefinitionArns);
+  const confirmedAlias = JSON.parse(releaseRun(["lambda", "get-alias", "--function-name", STAGE_B.brokerFunctionArn, "--name", STAGE_B.brokerAliasQualifier, "--output", "json", "--no-cli-pager"]));
+  assertStableBrokerAliasObservation({ initialAlias: alias, confirmedAlias, configuration });
+  const ecsReader = createAwsReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn, run: releaseRun });
+  const taskDefinitions = Object.fromEntries(Object.entries(taskDefinitionArns || {}).map(([mode, arn]) => [mode, ecsReader.describeTaskDefinition(arn)]));
+  const live = { configuration, alias: confirmedAlias, taskDefinitions };
   const imageAuthorization = JSON.parse(fs.readFileSync(requiredOption(argv, "--image-authorization"), "utf8"));
   const { evidence } = collectProductionGreenStageBApprovalEvidence({ sourceSha: currentHead(), imageAuthorization, tfvarsPath: requiredOption(argv, "--tfvars"), bindingReportPath: requiredOption(argv, "--binding-report"), releasePreflightPath: requiredOption(argv, "--release-preflight"), releasePreflightAttestationPath: requiredOption(argv, "--release-preflight-attestation"), releasePreflightAttestationSignaturePath: requiredOption(argv, "--release-preflight-attestation-signature"), checkerIdentity, live, verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: releaseRun }), verifyReleasePreflightAttestationSignature: createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun }) });
   const result = await prepareProductionGreenStageBApprovalInput({

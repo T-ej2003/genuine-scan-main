@@ -6,8 +6,9 @@ import { assertStageBBrokerConfigurationBindings, assertStageBBrokerConfiguratio
 import { assertStageBTfvarsBinding, deriveContractDigests } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
-import { stageBTemplateHashes } from "./production-green-stage-b-task-definitions.mjs";
+import { renderStageBTaskDefinition, stageBTemplateHashes } from "./production-green-stage-b-task-definitions.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
+import { assertEcsTaskDefinitionReadback, canonicalizeEcsTaskDefinition } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA = /^[a-f0-9]{40}$/;
@@ -17,6 +18,34 @@ const digest = (value) => crypto.createHash("sha256").update(value).digest("hex"
 const exact = (left, right) => canonicalJson(left) === canonicalJson(right);
 const parse = (value, label) => { try { return JSON.parse(value); } catch { throw new Error(`${label} is malformed.`); } };
 const authenticatedEvidence = new WeakSet();
+
+function assertBrokerCodeBinding({ configuration, broker, brokerPackageRawSha256 }) {
+  if (!/^[a-f0-9]{64}$/.test(brokerPackageRawSha256 || "")) throw new Error("Canonical broker package raw SHA256 is malformed.");
+  const codeSha256 = configuration?.CodeSha256;
+  if (typeof codeSha256 !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(codeSha256)) throw new Error("Resolved broker Lambda CodeSha256 is malformed.");
+  const codeBytes = Buffer.from(codeSha256, "base64");
+  if (codeBytes.length !== 32 || codeBytes.toString("base64") !== codeSha256) throw new Error("Resolved broker Lambda CodeSha256 is not a canonical SHA256 encoding.");
+  if (codeSha256 !== Buffer.from(brokerPackageRawSha256, "hex").toString("base64")
+      || String(configuration.Version) !== broker.configurationVersion
+      || ![STAGE_B.brokerFunctionArn, STAGE_B.brokerAliasArn, `${STAGE_B.brokerFunctionArn}:${broker.configurationVersion}`].includes(configuration.FunctionArn)) {
+    throw new Error("Resolved broker Lambda code is not the reviewed package for the authenticated alias version.");
+  }
+  return codeSha256;
+}
+
+function authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions, sourceSha, contracts, images }) {
+  if (!liveTaskDefinitions || typeof liveTaskDefinitions !== "object" || Array.isArray(liveTaskDefinitions)) throw new Error("Exact live broker task-definition readbacks are required.");
+  const bindings = { imageReleaseSha: sourceSha, sourceContractSha256: contracts.sourceContractSha256, migrationSetDigest: contracts.migrationSetDigest, packageChecksumSha256: contracts.packageChecksumSha256, receiptBucket: STAGE_B.receiptBucket, executorLogGroup: STAGE_B.executorLogGroupName, canaryLogGroup: STAGE_B.canaryLogGroupName, backendLogGroup: "/ecs/mscqr-production/rls-green-backend", workerLogGroup: "/ecs/mscqr-production/rls-green-worker" };
+  const contentHashes = {};
+  for (const [mode, taskDefinitionArn] of Object.entries(taskDefinitionArns)) {
+    const kind = mode === "full-rls-application-canary" ? "canary" : "executor";
+    const expected = renderStageBTaskDefinition(kind, { ...bindings, [`${kind}Image`]: kind === "canary" ? images.canaryImageDigest : images.executorImageDigest, ...(kind === "executor" ? { mode } : {}) });
+    const readback = liveTaskDefinitions[mode]?.taskDefinition || liveTaskDefinitions[mode];
+    assertEcsTaskDefinitionReadback({ definition: readback, taskDefinitionArn, expected, label: `Live broker task definition ${mode}` });
+    contentHashes[mode] = digest(canonicalizeEcsTaskDefinition(readback));
+  }
+  return Object.freeze(contentHashes);
+}
 
 export const STAGE_B_APPROVAL_EVIDENCE_PRODUCER = "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs";
 export const STAGE_B_APPROVAL_EVIDENCE_SCHEMA_VERSION = 1;
@@ -92,6 +121,8 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
   assertStageBBrokerConfigurationBindings({ approvalExpected, images: liveImages, templateHashes });
   if (!exact(approvalExpected, expectedApproval)
       || !exact(liveImages, expectedImages) || !exact(templateHashes, stageBTemplateHashes())) throw new Error("Live broker bindings are stale or do not match the authenticated Stage B authorities.");
+  const brokerCodeSha256 = assertBrokerCodeBinding({ configuration: live.configuration, broker, brokerPackageRawSha256: report.brokerPackageRawSha256 });
+  const taskDefinitionContentSha256 = authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions: live.taskDefinitions, sourceSha, contracts, images: { executorImageDigest: report.images.executor.imageReference, canaryImageDigest: report.images.canary.imageReference } });
   const observedAt = now.toISOString();
   assertStageBDeploymentEvidenceFreshness(observedAt, { now, evidenceType: "Stage B approval live observation" });
   const evidence = Object.freeze({
@@ -109,12 +140,15 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
     migrationSetDigest: contracts.migrationSetDigest,
     packageChecksumSha256: contracts.packageChecksumSha256,
     taskDefinitionArns: Object.freeze({ ...taskDefinitionArns }),
+    taskDefinitionContentSha256,
     brokerVersion: broker.configurationVersion,
+    brokerPackageRawSha256: report.brokerPackageRawSha256,
+    brokerCodeSha256,
     checkerIdentity,
     deployerIdentity: preflight.caller,
     imageAuthorizationSha256: imageAuthorization.authorizationSha256,
     tfvarsBindingSha256: bindingReportBytes ? digest(bindingReportBytes) : digest(canonicalJson(report)),
-    runtimeBindingSha256: digest(canonicalJson({ broker, taskDefinitionArns, templateHashes, approvalExpected, images: liveImages })),
+    runtimeBindingSha256: digest(canonicalJson({ broker, brokerCodeSha256, taskDefinitionArns, taskDefinitionContentSha256, templateHashes, approvalExpected, images: liveImages })),
   });
   authenticatedEvidence.add(evidence);
   return Object.freeze({ evidence, evidenceSha256: digest(canonicalJson(evidence)) });
