@@ -189,7 +189,7 @@ const COMMANDS = Object.freeze({
   getAlias: ["lambda", "get-alias"],
 });
 
-export function observeStageBBrokerApprovalBindings({ reader } = {}) {
+export function observeStageBBrokerApprovalBindings({ reader, now = () => new Date() } = {}) {
   if (!reader || typeof reader.getAlias !== "function" || typeof reader.getFunctionConfiguration !== "function" || typeof reader.describeTaskDefinition !== "function") {
     throw new Error("Stage B broker approval observation requires the canonical ECS/Lambda reader.");
   }
@@ -204,7 +204,13 @@ export function observeStageBBrokerApprovalBindings({ reader } = {}) {
   try { taskDefinitionArns = JSON.parse(configuration.Environment?.Variables?.BROKER_TASK_DEFINITIONS_JSON); } catch { throw new Error("Live broker task-definition map is malformed."); }
   assertStageBBrokerTaskDefinitionMap(taskDefinitionArns);
   const taskDefinitions = Object.fromEntries(Object.entries(taskDefinitionArns).map(([mode, arn]) => [mode, reader.describeTaskDefinition(arn)]));
-  return Object.freeze({ configuration, alias, taskDefinitions });
+  const finalAlias = reader.getAlias();
+  if (String(finalAlias?.FunctionVersion || "") !== broker.configurationVersion) {
+    throw new Error("Reviewed broker alias changed during the exact task-definition observation.");
+  }
+  const capturedAt = now();
+  if (!(capturedAt instanceof Date) || !Number.isFinite(capturedAt.getTime())) throw new Error("Stage B broker approval observation clock is invalid.");
+  return Object.freeze({ observedAt: capturedAt.toISOString(), configuration, alias, taskDefinitions });
 }
 
 function parseJson(value, label) {

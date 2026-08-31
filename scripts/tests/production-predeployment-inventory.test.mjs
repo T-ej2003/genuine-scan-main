@@ -73,7 +73,7 @@ const brokerDefinition = () => ({ ...buildPreDeploymentInventoryTaskDefinition({
 
 test("broker runtime derives inventory configuration without duplicating it in Lambda environment", () => {
   const runtime = createBrokerRuntimeConfig({
-    BROKER_REPLAY_TABLE: "replay",
+    BROKER_REPLAY_TABLE: STAGE_B.replayTable,
     BROKER_RECEIPT_BUCKET: "receipts",
     BROKER_CLUSTER_ARN: STAGE_B.clusterArn,
     BROKER_APPROVAL_SECRET_ARN: STAGE_B.approvalSecretArn,

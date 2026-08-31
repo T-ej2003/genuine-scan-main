@@ -30,7 +30,8 @@ import {
   stageBMutationInstanceIdentity,
   resolveStageBRecoveryMode,
 } from "./stage-b-deployment-contract.mjs";
-import { assertStageBLambdaEnvironmentSize, STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { assertStageBLambdaEnvironmentSize, STAGE_B, STAGE_B_BROKER_ENVIRONMENT_VARIABLES } from "./production-green-stage-b-contract.mjs";
+export { STAGE_B_BROKER_ENVIRONMENT_VARIABLES } from "./production-green-stage-b-contract.mjs";
 
 export const STAGE_B_PLAN_SEMANTIC_CLASSES = Object.freeze([
   "STABLE_REQUIRED",
@@ -325,7 +326,7 @@ const STATIC_CONFIGURATION_CONSTANTS = Object.freeze({
     attribute: [{ name: { constant_value: "approvalMode" }, type: { constant_value: "S" } }],
     billing_mode: "PAY_PER_REQUEST",
     hash_key: "approvalMode",
-    name: "mscqr-production-rls-stage-b-replay",
+    name: STAGE_B.replayTable,
     ttl: [{ attribute_name: { constant_value: "expiresAt" }, enabled: { constant_value: true } }],
   },
   "aws_ecs_task_definition.candidate": { runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: true },
@@ -766,11 +767,6 @@ function assertBrokerPublishProviderMetadataRepresentation(change) {
   assertStageBBrokerPublishProviderMetadataRepresentation(change);
 }
 
-export const STAGE_B_BROKER_ENVIRONMENT_VARIABLES = Object.freeze([
-  "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
-  "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
-  "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
-]);
 const brokerTaskDefinitionModes = Object.freeze(Object.fromEntries([
   ["full-rls-application-canary", STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']],
   ...Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES)
@@ -787,7 +783,7 @@ function assertConcreteBrokerEnvironment(variables) {
   if (!variables || typeof variables !== "object" || Array.isArray(variables) || !exactObjectKeys(variables, STAGE_B_BROKER_ENVIRONMENT_VARIABLES)) {
     throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables");
   }
-  if (variables.BROKER_REPLAY_TABLE !== "mscqr-production-rls-stage-b-replay"
+  if (variables.BROKER_REPLAY_TABLE !== STAGE_B.replayTable
     || variables.BROKER_RECEIPT_BUCKET !== STAGE_B.receiptBucket
     || variables.BROKER_CLUSTER_ARN !== STAGE_B.clusterArn
     || variables.BROKER_APPROVAL_SECRET_ARN !== STAGE_B.approvalSecretArn

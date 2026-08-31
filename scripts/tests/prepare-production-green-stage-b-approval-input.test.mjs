@@ -9,7 +9,7 @@ import { collectProductionGreenStageBApprovalEvidence } from "../aws/collect-pro
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { buildReleasePreflightCheckerTrustAttestation } from "../aws/production-release-preflight-checker-attestation.mjs";
 import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
-import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
+import { assertStageBBrokerLambdaConfiguration, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import { assertStableBrokerAliasObservation, prepareProductionGreenStageBApprovalInput, writeProductionGreenStageBApprovalInput } from "../aws/prepare-production-green-stage-b-approval-input.mjs";
 import { renderStageBTaskDefinition, stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
 
@@ -48,7 +48,7 @@ const awsNormalizedTaskDefinitionReadbacks = Object.fromEntries(Object.entries(t
 }));
 const preflight = (overrides = {}) => ({ status: "ready-for-plan", sourceSha: releaseSha, caller: deployerIdentity, account: STAGE_B.account, region: STAGE_B.region, backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, failed: [], skipped: [], requiredReads: { "ecs:DescribeTasks": "allowed" }, total: 1, allowed: 1, checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }, administratorReportSha256: digest("b"), releaseReadFailures: 0, configurationFailures: 0, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, tfvarsSha256: report.tfvarsSha256, bindingReportSha256: sha256(bindingReportBytes), ...overrides });
 const live = (overrides = {}) => {
-  const base = { configuration: { FunctionArn: STAGE_B.brokerAliasArn, Version: "4", CodeSha256: Buffer.from(report.brokerPackageRawSha256, "hex").toString("base64"), Environment: { Variables: { BROKER_CLUSTER_ARN: STAGE_B.clusterArn, BROKER_APPROVAL_SECRET_ARN: STAGE_B.approvalSecretArn, BROKER_EXECUTOR_SECURITY_GROUP_ID: STAGE_B.executorSecurityGroupId, BROKER_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds), BROKER_REPLAY_TABLE: "replay", BROKER_RECEIPT_BUCKET: STAGE_B.receiptBucket, BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskDefinitionArns), BROKER_TASK_TEMPLATE_HASHES_JSON: JSON.stringify(stageBTemplateHashes()), BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify(brokerApprovalExpected), BROKER_IMAGES_JSON: JSON.stringify(brokerImages) } } }, alias: { AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4" }, taskDefinitions: taskDefinitionReadbacks };
+  const base = { observedAt: now.toISOString(), configuration: { FunctionName: STAGE_B.brokerLambdaConfiguration.functionName, FunctionArn: STAGE_B.brokerAliasArn, Version: "4", CodeSha256: Buffer.from(report.brokerPackageRawSha256, "hex").toString("base64"), Role: STAGE_B.brokerLambdaConfiguration.role, Handler: STAGE_B.brokerLambdaConfiguration.handler, Runtime: STAGE_B.brokerLambdaConfiguration.runtime, Architectures: [...STAGE_B.brokerLambdaConfiguration.architectures], Timeout: STAGE_B.brokerLambdaConfiguration.timeout, MemorySize: STAGE_B.brokerLambdaConfiguration.memorySize, PackageType: STAGE_B.brokerLambdaConfiguration.packageType, EphemeralStorage: { ...STAGE_B.brokerLambdaConfiguration.ephemeralStorage }, Layers: [], FileSystemConfigs: [], DeadLetterConfig: {}, VpcConfig: { VpcId: "", SubnetIds: [], SecurityGroupIds: [], Ipv6AllowedForDualStack: false }, SnapStart: { ApplyOn: "None" }, TracingConfig: { Mode: "PassThrough" }, Environment: { Variables: { BROKER_CLUSTER_ARN: STAGE_B.clusterArn, BROKER_APPROVAL_SECRET_ARN: STAGE_B.approvalSecretArn, BROKER_EXECUTOR_SECURITY_GROUP_ID: STAGE_B.executorSecurityGroupId, BROKER_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds), BROKER_REPLAY_TABLE: STAGE_B.replayTable, BROKER_RECEIPT_BUCKET: STAGE_B.receiptBucket, BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskDefinitionArns), BROKER_TASK_TEMPLATE_HASHES_JSON: JSON.stringify(stageBTemplateHashes()), BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify(brokerApprovalExpected), BROKER_IMAGES_JSON: JSON.stringify(brokerImages) } } }, alias: { AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4" }, taskDefinitions: taskDefinitionReadbacks };
   return { ...base, ...overrides, configuration: overrides.configuration || base.configuration, alias: overrides.alias || base.alias, taskDefinitions: overrides.taskDefinitions || base.taskDefinitions };
 };
 
@@ -108,6 +108,14 @@ test("same-source evidence expires instead of receiving a fresh approval lifetim
   await assert.rejects(() => prepareProductionGreenStageBApprovalInput({ evidence: collected, protectedSourceSha: releaseSha, operator: { ticketId: "CHG-STAGE-B-0001" }, now: new Date("2026-08-31T11:01:00.000Z") }), /stale/);
 });
 
+test("collector preserves the attested live-observation capture time", () => {
+  const stale = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+  assert.throws(() => evidence({ live: { observedAt: stale } }), /stale|expired/i);
+  const future = new Date(now.getTime() + 61_000).toISOString();
+  assert.throws(() => evidence({ live: { observedAt: future } }), /future/i);
+  assert.throws(() => evidence({ live: { observedAt: "not-a-timestamp" } }), /malformed/i);
+});
+
 for (const [label, overrides] of [
   ["blocked status", { preflight: { status: "blocked" } }],
   ["denied read", { preflight: { requiredReads: { "ecs:DescribeTasks": "denied" }, failed: [{ id: "read", action: "ecs:DescribeTasks" }] } }],
@@ -149,9 +157,60 @@ for (const [label, mutate] of [
 ]) test(`collector rejects current runtime ${label} drift`, () => assert.throws(() => evidence(mutate()), /match|broker|version|binding/i));
 
 test("collector binds the alias-resolved Lambda code bytes, not only its environment", () => {
-  assert.throws(() => evidence({ live: { configuration: { ...live().configuration, CodeSha256: Buffer.from(digest("f"), "hex").toString("base64") } } }), /broker Lambda code|package/);
-  assert.throws(() => evidence({ report: { brokerPackageRawSha256: "f".repeat(63) } }), /package raw SHA256|malformed/);
-  assert.throws(() => evidence({ live: { configuration: { ...live().configuration, CodeSha256: "not-base64" } } }), /CodeSha256|malformed/);
+  assert.throws(() => evidence({ live: { configuration: { ...live().configuration, CodeSha256: Buffer.from(digest("f"), "hex").toString("base64") } } }), /Lambda configuration|package/);
+  assert.throws(() => evidence({ report: { brokerPackageRawSha256: "f".repeat(63) } }), /Lambda configuration|package raw SHA256|malformed/);
+  assert.throws(() => evidence({ live: { configuration: { ...live().configuration, CodeSha256: "not-base64" } } }), /Lambda configuration|CodeSha256|malformed/);
+});
+
+test("production-shaped Lambda configuration fixture binds the reviewed executable contract", () => {
+  const configuration = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-stage-b-broker-get-function-configuration.json", "utf8"));
+  assert.doesNotThrow(() => assertStageBBrokerLambdaConfiguration({ configuration, alias: live().alias, brokerPackageRawSha256: report.brokerPackageRawSha256 }));
+});
+
+for (const [field, value] of [
+  ["Role", "arn:aws:iam::368992683803:role/unreviewed"], ["Handler", "unreviewed.handler"], ["Runtime", "nodejs22.x"],
+  ["Architectures", ["arm64"]], ["Timeout", 181], ["MemorySize", 256], ["PackageType", "Image"],
+  ["EphemeralStorage", { Size: 1024 }], ["Layers", ["arn:aws:lambda:eu-west-2:368992683803:layer:unreviewed:1"]],
+  ["FileSystemConfigs", [{ Arn: "arn:aws:elasticfilesystem:eu-west-2:368992683803:access-point/fsap-unreviewed", LocalMountPath: "/mnt" }]],
+  ["DeadLetterConfig", { TargetArn: "arn:aws:sqs:eu-west-2:368992683803:unreviewed" }],
+  ["VpcConfig", { VpcId: "vpc-unreviewed", SubnetIds: ["subnet-unreviewed"], SecurityGroupIds: ["sg-unreviewed"] }],
+  ["SnapStart", { ApplyOn: "PublishedVersions" }], ["TracingConfig", { Mode: "Active" }],
+]) test(`collector rejects broker Lambda ${field} drift`, () => {
+  assert.throws(() => evidence({ live: { configuration: { ...live().configuration, [field]: value } } }), /Lambda configuration|broker/i);
+});
+
+test("collector rejects an exact-shaped but wrong replay table", () => {
+  const variables = { ...live().configuration.Environment.Variables, BROKER_REPLAY_TABLE: "mscqr-production-rls-stage-b-replay-shadow" };
+  assert.throws(() => evidence({ live: { configuration: { ...live().configuration, Environment: { Variables: variables } } } }), /runtime bindings/i);
+});
+
+for (const [field, value] of [
+  ["BROKER_CLUSTER_ARN", "arn:aws:ecs:eu-west-2:368992683803:cluster/unreviewed"],
+  ["BROKER_APPROVAL_SECRET_ARN", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:unreviewed"],
+  ["BROKER_EXECUTOR_SECURITY_GROUP_ID", "sg-unreviewed"], ["BROKER_RECEIPT_BUCKET", "unreviewed-receipts"],
+  ["BROKER_REPLAY_TABLE", "mscqr-production-rls-stage-b-replay-shadow"],
+  ["BROKER_PRIVATE_SUBNETS_JSON", JSON.stringify([STAGE_B.privateSubnetIds[0], "subnet-unreviewed"])],
+  ["BROKER_PRIVATE_SUBNETS_JSON", JSON.stringify([...STAGE_B.privateSubnetIds, "subnet-unreviewed"])],
+]) test(`collector rejects exact runtime binding drift: ${field}`, () => {
+  const variables = { ...live().configuration.Environment.Variables, [field]: value };
+  assert.throws(() => evidence({ live: { configuration: { ...live().configuration, Environment: { Variables: variables } } } }), /runtime bindings/i);
+});
+
+test("collector rejects missing or unexpected broker runtime environment bindings", () => {
+  const variables = { ...live().configuration.Environment.Variables };
+  delete variables.BROKER_REPLAY_TABLE;
+  assert.throws(() => evidence({ live: { configuration: { ...live().configuration, Environment: { Variables: variables } } } }), /Lambda configuration/i);
+  assert.throws(() => evidence({ live: { configuration: { ...live().configuration, Environment: { Variables: { ...live().configuration.Environment.Variables, BROKER_UNREVIEWED_TARGET: "value" } } } } }), /Lambda configuration/i);
+});
+
+test("attested report bytes cannot be replayed with a modified observation timestamp", () => {
+  const selected = { ...preflight(), stageBApprovalLiveObservation: live() };
+  const trust = signedPreflightTrust(selected);
+  assert.throws(() => collectProductionGreenStageBApprovalEvidence({
+    sourceSha: releaseSha, imageAuthorization: authorization, checkerIdentity, now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => report,
+    readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }), readPreflight: () => ({ ...selected, stageBApprovalLiveObservation: { ...selected.stageBApprovalLiveObservation, observedAt: "2026-08-31T10:02:00.000Z" } }),
+    releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true, deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }),
+  }), /bound|attestation/i);
 });
 
 test("qualified broker observation rejects mixed or changed Lambda versions", () => {

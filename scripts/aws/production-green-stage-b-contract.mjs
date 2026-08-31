@@ -15,6 +15,7 @@ export const STAGE_B = Object.freeze({
   inventoryDatabaseSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
   inventoryRlsRole: "mscqr_prod_rls_read",
   receiptBucket: "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+  replayTable: "mscqr-production-rls-stage-b-replay",
   approvalSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho",
   approvalKmsKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478",
   rootDropKmsKeyArn: "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-drop",
@@ -27,6 +28,17 @@ export const STAGE_B = Object.freeze({
   brokerAliasArn: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
   brokerAliasQualifier: "reviewed",
   taskRuntimePlatform: Object.freeze({ operatingSystemFamily: "LINUX", cpuArchitecture: "X86_64" }),
+  brokerLambdaConfiguration: Object.freeze({
+    functionName: "mscqr-production-rls-approval-broker",
+    role: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+    handler: "index.handler",
+    runtime: "nodejs24.x",
+    architectures: Object.freeze(["x86_64"]),
+    timeout: 180,
+    memorySize: 128,
+    packageType: "Zip",
+    ephemeralStorage: Object.freeze({ Size: 512 }),
+  }),
   frontendTaskDefinition: "mscqr-frontend:20",
 });
 
@@ -156,6 +168,11 @@ export const canonicalJson = (value) => {
 export const canonicalSha256 = (value) => sha256(canonicalJson(value));
 export const STAGE_B_LAMBDA_ENVIRONMENT_HARD_LIMIT_BYTES = 4096;
 export const STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES = 3500;
+export const STAGE_B_BROKER_ENVIRONMENT_VARIABLES = Object.freeze([
+  "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
+  "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
+  "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
+]);
 export const stageBLambdaEnvironmentUtf8Bytes = (variables) => Buffer.byteLength(JSON.stringify(variables), "utf8");
 export function assertStageBLambdaEnvironmentSize(variables, maxBytes = STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES) {
   if (!variables || typeof variables !== "object" || Array.isArray(variables) || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error("Stage B Lambda environment payload is malformed.");
@@ -206,10 +223,52 @@ export function assertStageBBrokerTaskDefinitionMap(value) {
 export function assertStageBBrokerRuntimeBindings({ clusterArn, approvalSecretArn, executorSecurityGroupId, privateSubnetIds, replayTable, receiptBucket } = {}) {
   if (clusterArn !== STAGE_B.clusterArn || approvalSecretArn !== STAGE_B.approvalSecretArn || executorSecurityGroupId !== STAGE_B.executorSecurityGroupId
       || !Array.isArray(privateSubnetIds) || [...privateSubnetIds].sort().join(",") !== [...STAGE_B.privateSubnetIds].sort().join(",")
-      || !/^[A-Za-z0-9._-]{3,255}$/.test(replayTable || "") || receiptBucket !== STAGE_B.receiptBucket) {
+      || replayTable !== STAGE_B.replayTable || receiptBucket !== STAGE_B.receiptBucket) {
     throw new Error("Stage B broker runtime bindings are outside the reviewed contract.");
   }
   return { clusterArn, approvalSecretArn, executorSecurityGroupId, privateSubnetIds, replayTable, receiptBucket };
+}
+
+const exactKeys = (value, expected) => value && typeof value === "object" && !Array.isArray(value)
+  && Object.keys(value).sort().join(",") === [...expected].sort().join(",");
+const emptyArray = (value) => value === undefined || Array.isArray(value) && value.length === 0;
+const emptyObject = (value) => value === undefined || value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
+const noVpcConfiguration = (value) => value === undefined || value === null || value && typeof value === "object" && !Array.isArray(value)
+  && !value.VpcId && emptyArray(value.SubnetIds) && emptyArray(value.SecurityGroupIds) && !value.Ipv6AllowedForDualStack;
+
+export function assertStageBBrokerLambdaConfiguration({ configuration, alias, brokerPackageRawSha256 } = {}) {
+  const broker = assertStageBBrokerConfigurationIdentity({ configuration, alias });
+  const expected = STAGE_B.brokerLambdaConfiguration;
+  const codeSha256 = configuration?.CodeSha256;
+  if (!/^[a-f0-9]{64}$/.test(brokerPackageRawSha256 || "") || typeof codeSha256 !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(codeSha256)
+      || Buffer.from(codeSha256, "base64").length !== 32 || Buffer.from(codeSha256, "base64").toString("base64") !== codeSha256
+      || codeSha256 !== Buffer.from(brokerPackageRawSha256, "hex").toString("base64")
+      || configuration.FunctionName !== expected.functionName || configuration.Role !== expected.role || configuration.Handler !== expected.handler
+      || configuration.Runtime !== expected.runtime || canonicalJson(configuration.Architectures) !== canonicalJson(expected.architectures)
+      || configuration.Timeout !== expected.timeout || configuration.MemorySize !== expected.memorySize || configuration.PackageType !== expected.packageType
+      || canonicalJson(configuration.EphemeralStorage) !== canonicalJson(expected.ephemeralStorage)
+      || !exactKeys(configuration.Environment?.Variables, STAGE_B_BROKER_ENVIRONMENT_VARIABLES)
+      || !emptyArray(configuration.Layers) || !emptyArray(configuration.FileSystemConfigs) || !emptyObject(configuration.DeadLetterConfig)
+      || !noVpcConfiguration(configuration.VpcConfig) || !emptyObject(configuration.ImageConfigResponse)
+      || configuration.SnapStart !== undefined && configuration.SnapStart?.ApplyOn !== "None"
+      || configuration.TracingConfig !== undefined && configuration.TracingConfig?.Mode !== "PassThrough") {
+    throw new Error("Resolved broker Lambda configuration is outside the reviewed executable contract.");
+  }
+  return Object.freeze({
+    broker,
+    codeSha256,
+    configuration: Object.freeze({
+      FunctionName: configuration.FunctionName, FunctionArn: configuration.FunctionArn, Version: configuration.Version,
+      CodeSha256: codeSha256, Role: configuration.Role, Handler: configuration.Handler, Runtime: configuration.Runtime,
+      Architectures: [...configuration.Architectures], Timeout: configuration.Timeout, MemorySize: configuration.MemorySize,
+      PackageType: configuration.PackageType, EphemeralStorage: { ...configuration.EphemeralStorage },
+      Environment: { Variables: { ...configuration.Environment.Variables } },
+      Layers: [...(configuration.Layers || [])], FileSystemConfigs: [...(configuration.FileSystemConfigs || [])],
+      DeadLetterConfig: { ...(configuration.DeadLetterConfig || {}) }, VpcConfig: configuration.VpcConfig || null,
+      ImageConfigResponse: configuration.ImageConfigResponse || {}, SnapStart: configuration.SnapStart || null,
+      TracingConfig: configuration.TracingConfig || null,
+    }),
+  });
 }
 
 export function assertStageBBrokerApprovalExpected(value) {

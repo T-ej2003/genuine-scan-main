@@ -37,15 +37,34 @@ function brokerReader(overrides = {}) {
 }
 
 test("release-deployer broker observation captures one alias-resolved version and every exact task definition", () => {
-  const observed = observeStageBBrokerApprovalBindings({ reader: brokerReader() });
+  const observed = observeStageBBrokerApprovalBindings({ reader: brokerReader(), now: () => new Date("2026-08-31T10:00:00.000Z") });
   assert.equal(observed.configuration.Version, "4");
   assert.equal(observed.alias.FunctionVersion, "4");
+  assert.equal(observed.observedAt, "2026-08-31T10:00:00.000Z");
   assert.deepEqual(Object.keys(observed.taskDefinitions).sort(), [...STAGE_B_MODES].sort());
+});
+
+test("release-deployer captures approval-observation time after every live read", () => {
+  const calls = [];
+  const observed = observeStageBBrokerApprovalBindings({
+    reader: brokerReader({
+      getAlias: () => { calls.push("alias"); return { AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4" }; },
+      getFunctionConfiguration: (functionArn, qualifier) => { calls.push("configuration"); return { FunctionArn: `${functionArn}:${qualifier}`, Version: qualifier, Environment: { Variables: { BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(brokerTaskDefinitions) } } }; },
+      describeTaskDefinition: (arn) => { calls.push(`task:${arn}`); return { taskDefinition: { taskDefinitionArn: arn, family: arn.match(/task-definition\/([^:]+)/)[1], revision: 4, status: "ACTIVE" } }; },
+    }),
+    now: () => {
+      assert.equal(calls.length, STAGE_B_MODES.length + 4);
+      return new Date("2026-08-31T10:00:00.000Z");
+    },
+  });
+  assert.equal(observed.observedAt, "2026-08-31T10:00:00.000Z");
 });
 
 test("release-deployer broker observation rejects alias movement and an incomplete task map", () => {
   let aliases = 0;
   assert.throws(() => observeStageBBrokerApprovalBindings({ reader: brokerReader({ getAlias: () => ({ AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: String(++aliases === 1 ? 4 : 5) }) }) }), /changed|version/i);
+  aliases = 0;
+  assert.throws(() => observeStageBBrokerApprovalBindings({ reader: brokerReader({ getAlias: () => ({ AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: String(++aliases < 3 ? 4 : 5) }) }) }), /changed|version/i);
   assert.throws(() => observeStageBBrokerApprovalBindings({ reader: brokerReader({ getFunctionConfiguration: () => ({ FunctionArn: STAGE_B.brokerFunctionArn, Version: "4", Environment: { Variables: { BROKER_TASK_DEFINITIONS_JSON: "{}" } } }) }) }), /task-definition map/i);
 });
 

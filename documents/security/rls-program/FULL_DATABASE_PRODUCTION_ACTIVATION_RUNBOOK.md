@@ -167,6 +167,16 @@ authority by themselves. The collector authenticates the broker expectation,
 four-image map, task-definition ARN map, and task-definition
 template-hash map. Matching Git SHA or package checksum alone is not authority:
 runtime bindings must be current and complete.
+The release-deployer stamps `stageBApprovalLiveObservation.observedAt` only
+after it has completed the alias-resolved Lambda and exact ECS revision reads;
+that timestamp is inside the KMS-attested report and is never refreshed by the
+collector or checker. The live Lambda must match the reviewed immutable code,
+version, role, handler, runtime, architecture, timeout, memory, package type,
+ephemeral storage, environment, and absent executable extensions (layers,
+VPC, filesystem mount, dead-letter and image configuration). The broker runtime
+targets are exact identities: cluster, approval secret, executor security
+group, complete private-subnet set, replay table, receipt bucket, every
+mode-specific task revision, and their semantically normalized ECS contents.
 The operator supplies only `ticketId`; the producer creates `issuedAt`, a
 maximum-two-hour `expiresAt`, and a cryptographically random nonce. It writes
 the input and mandatory checker review as one immutable 0600 private pair; it

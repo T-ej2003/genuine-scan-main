@@ -20,7 +20,7 @@ const artifact = (overrides = {}) => {
 const verifySignature = async ({ message, signature }) => crypto.verify("sha256", message, { key: publicKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, signature);
 const taskDefinitions = Object.fromEntries(Object.entries(STAGE_B_BROKER_TASK_DEFINITION_FAMILIES).map(([mode, family]) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`]));
 const expected = { releaseSha, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, deploymentId: "phase2", approvalId: stageBApprovalIdForReleaseSha(releaseSha), ticketId: "CHG-STAGE-B-0001", brokerVersion: "1", images, taskDefinitionArns: taskDefinitions };
-const config = { clusterArn: STAGE_B.clusterArn, approvalSecretArn: STAGE_B.approvalSecretArn, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, privateSubnetIds: [...STAGE_B.privateSubnetIds], replayTable: "replay", receiptBucket: STAGE_B.receiptBucket, taskDefinitionArns: taskDefinitions, templateHashes: stageBTemplateHashes(), approvalExpected: expected, images };
+const config = { clusterArn: STAGE_B.clusterArn, approvalSecretArn: STAGE_B.approvalSecretArn, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, privateSubnetIds: [...STAGE_B.privateSubnetIds], replayTable: STAGE_B.replayTable, receiptBucket: STAGE_B.receiptBucket, taskDefinitionArns: taskDefinitions, templateHashes: stageBTemplateHashes(), approvalExpected: expected, images };
 
 test("broker task-definition map enforces the exact mode, family, account, region, and revision contract", () => {
   assert.doesNotThrow(() => assertStageBBrokerTaskDefinitionMap(taskDefinitions));
