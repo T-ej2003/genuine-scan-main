@@ -21,8 +21,18 @@ const applying = createStageBApplyAttemptTransition(reservation, {
   status: "APPLY_INTENT_RECORDED", operationResult: { classification: "APPLY_INTENT_RECORDED", readback: "EXACT" },
   applyMayHaveOccurred: false, applyStarted: { status: "NOT_STARTED", evidenceSha256: null }, applyResult: { status: "PENDING", evidenceSha256: null },
 });
+const spawnUncertain = (value) => createStageBApplyAttemptTransition(value, {
+  status: "APPLY_SPAWN_UNCERTAIN", operationResult: { classification: "APPLY_SPAWN_UNCERTAIN", readback: "EXACT" },
+  applyMayHaveOccurred: true, applyStarted: { status: "REACHABLE", evidenceSha256: digest("e") }, applyResult: { status: "PENDING", evidenceSha256: null },
+});
 const historyRunner = (objects) => (args) => {
-  const bytes = objects.get(args[args.indexOf("--key") + 1]);
+  const key = args[args.indexOf("--key") + 1];
+  if (args[0] === "s3api" && args[1] === "put-object") {
+    if (objects.has(key)) return { status: 1, stderr: "PreconditionFailed (412)" };
+    objects.set(key, fs.readFileSync(args[args.indexOf("--body") + 1]));
+    return { status: 0 };
+  }
+  const bytes = objects.get(key);
   if (!bytes) return { status: 1, stderr: "NoSuchKey" };
   fs.writeFileSync(args.at(-1), bytes, { mode: 0o600 });
   return { status: 0 };
@@ -57,7 +67,17 @@ test("real prepare-successor CLI authenticates a canonical v3 pre-spawn predeces
     const predecessor = createStageBApplyAttemptReservation({ sourceSha: "b".repeat(40), planSha256: digest("a"), savedPlanSha256: digest("b"), stateLineage: "lineage", stateSerial: 102, stateSha256: digest("c"), workspace: "default", backendIdentitySha256: digest("d"), executionPrincipal: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", createdAt: "2026-08-30T04:00:00.000Z" });
     const beforeSpawn = createStageBApplyAttemptTransition(predecessor, { status: "APPLY_INTENT_RECORDED", operationResult: { classification: "APPLY_INTENT_RECORDED", readback: "EXACT" }, applyMayHaveOccurred: false, applyStarted: { status: "NOT_STARTED", evidenceSha256: null }, applyResult: { status: "PENDING", evidenceSha256: null } });
     const approval = createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 42, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 7, login: "reviewer" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha, workflowRef: STAGE_B_APPLY_ATTEMPT_RECONCILIATION_WORKFLOW_REF, eventName: "workflow_dispatch", workflowRunId: "99", workflowRunAttempt: "1", executionActor: "operator", actualApproval: { state: "approved", environmentId: 42, environmentName: "production", userId: 7, userLogin: "reviewer" }, observedAt: NOW.toISOString() });
-    const run = historyRunner(new Map([[stageBApplyAttemptS3Key(predecessor.attemptId), Buffer.from(`${JSON.stringify(predecessor)}\n`)], [stageBAttemptStepS3ObjectKey(predecessor.attemptId, 1), Buffer.from(`${JSON.stringify(beforeSpawn)}\n`)]]));
+    const objects = new Map([[stageBApplyAttemptS3Key(predecessor.attemptId), Buffer.from(`${JSON.stringify(predecessor)}\n`)], [stageBAttemptStepS3ObjectKey(predecessor.attemptId, 1), Buffer.from(`${JSON.stringify(beforeSpawn)}\n`)]]);
+    const canonicalRun = historyRunner(objects); let ambiguousClaimWrite = true;
+    const run = (args) => {
+      if (args[0] === "s3api" && args[1] === "put-object" && ambiguousClaimWrite) {
+        ambiguousClaimWrite = false;
+        const key = args[args.indexOf("--key") + 1];
+        objects.set(key, fs.readFileSync(args[args.indexOf("--body") + 1]));
+        return { status: 1, stderr: "network timeout" };
+      }
+      return canonicalRun(args);
+    };
     const historicalPath = path.join(directory, "historical.json"); const artifactPath = path.join(directory, "reconciliation.json"); const approvalPath = path.join(directory, "approval.json"); const authorizationPath = path.join(directory, "authorization.json");
     fs.writeFileSync(historicalPath, `${JSON.stringify(predecessor, null, 2)}\n`, { mode: 0o600 }); fs.writeFileSync(approvalPath, `${JSON.stringify(approval, null, 2)}\n`, { mode: 0o600 });
     const published = runStageBApplyAttemptReconciliationCli(["--mode", "create-reconciliation", "--historical-reservation", historicalPath, "--reservation-identity", predecessor.attemptId, "--successor-source-sha", sourceSha, "--output", artifactPath], { now: NOW, awsRun: run });
@@ -68,8 +88,28 @@ test("real prepare-successor CLI authenticates a canonical v3 pre-spawn predeces
     assert.equal(authorized.authorizationSha256, authorization.authorizationSha256);
     const result = runStageBApplyAttemptReconciliationCli(["--mode", "prepare-successor", "--reconciliation-artifact", artifactPath, "--reconciliation-artifact-sha256", artifactSha256, "--authorization", authorizationPath, "--authorization-sha256", authorization.authorizationSha256, "--source-sha", sourceSha], { now: NOW, awsRun: run });
     assert.equal(result.status, "SUCCESSOR_READY_BUT_NOT_EXECUTED");
+    assert.equal(JSON.parse(objects.get(stageBAttemptStepS3ObjectKey(predecessor.attemptId, 2))).status, "ABORTED_BEFORE_APPLY");
+    assert.equal(ambiguousClaimWrite, false);
+    assert.equal(runStageBApplyAttemptReconciliationCli(["--mode", "prepare-successor", "--reconciliation-artifact", artifactPath, "--reconciliation-artifact-sha256", artifactSha256, "--authorization", authorizationPath, "--authorization-sha256", authorization.authorizationSha256, "--source-sha", sourceSha], { now: NOW, awsRun: run }).status, "SUCCESSOR_READY_BUT_NOT_EXECUTED");
     const tampered = structuredClone(artifact); tampered.predecessorReservation.planSha256 = digest("f"); fs.writeFileSync(artifactPath, `${JSON.stringify(tampered, null, 2)}\n`, { mode: 0o600 });
     assert.throws(() => runStageBApplyAttemptReconciliationCli(["--mode", "prepare-successor", "--reconciliation-artifact", artifactPath, "--reconciliation-artifact-sha256", stageBApplyAttemptReconciliationSha256(tampered, { now: NOW }), "--authorization", authorizationPath, "--authorization-sha256", authorization.authorizationSha256, "--source-sha", sourceSha], { now: NOW, awsRun: run }), /monotonic|predecessor/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("original continuation winning the same next slot prevents successor readiness", () => {
+  const sourceSha = "c".repeat(40); const predecessor = createStageBApplyAttemptReservation({ sourceSha: "b".repeat(40), planSha256: digest("a"), savedPlanSha256: digest("b"), stateLineage: "lineage", stateSerial: 102, stateSha256: digest("c"), workspace: "default", backendIdentitySha256: digest("d"), executionPrincipal: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", createdAt: "2026-08-30T04:00:00.000Z" }); const beforeSpawn = createStageBApplyAttemptTransition(predecessor, { status: "APPLY_INTENT_RECORDED", operationResult: { classification: "APPLY_INTENT_RECORDED", readback: "EXACT" }, applyMayHaveOccurred: false, applyStarted: { status: "NOT_STARTED", evidenceSha256: null }, applyResult: { status: "PENDING", evidenceSha256: null } });
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-reconciliation-race-")); fs.chmodSync(directory, 0o700);
+  try {
+    const objects = new Map([[stageBApplyAttemptS3Key(predecessor.attemptId), Buffer.from(`${JSON.stringify(predecessor)}\n`)], [stageBAttemptStepS3ObjectKey(predecessor.attemptId, 1), Buffer.from(`${JSON.stringify(beforeSpawn)}\n`)]]);
+    const approval = createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 42, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 7, login: "reviewer" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha, workflowRef: STAGE_B_APPLY_ATTEMPT_RECONCILIATION_WORKFLOW_REF, eventName: "workflow_dispatch", workflowRunId: "99", workflowRunAttempt: "1", executionActor: "operator", actualApproval: { state: "approved", environmentId: 42, environmentName: "production", userId: 7, userLogin: "reviewer" }, observedAt: NOW.toISOString() });
+    const historicalPath = path.join(directory, "historical.json"); const artifactPath = path.join(directory, "reconciliation.json"); const approvalPath = path.join(directory, "approval.json"); const authorizationPath = path.join(directory, "authorization.json"); fs.writeFileSync(historicalPath, `${JSON.stringify(predecessor)}\n`, { mode: 0o600 }); fs.writeFileSync(approvalPath, `${JSON.stringify(approval)}\n`, { mode: 0o600 });
+    const publish = runStageBApplyAttemptReconciliationCli(["--mode", "create-reconciliation", "--historical-reservation", historicalPath, "--reservation-identity", predecessor.attemptId, "--successor-source-sha", sourceSha, "--output", artifactPath], { now: NOW, awsRun: historyRunner(objects) }); const approvalSha = crypto.createHash("sha256").update(fs.readFileSync(approvalPath)).digest("hex"); runStageBApplyAttemptReconciliationCli(["--mode", "authorize", "--reconciliation-artifact", artifactPath, "--reconciliation-artifact-sha256", publish.sha256, "--environment-approval", approvalPath, "--environment-approval-sha256", approvalSha, "--source-sha", sourceSha, "--output", authorizationPath, "--approved-by", "reviewer", "--approver-role", "independent-production-reviewer", "--verification-ref", "race-review"], { now: NOW });
+    let originalWon = false; const run = (args) => {
+      if (args[0] === "s3api" && args[1] === "put-object" && !originalWon) { originalWon = true; objects.set(stageBAttemptStepS3ObjectKey(predecessor.attemptId, 2), Buffer.from(`${JSON.stringify(spawnUncertain(beforeSpawn))}\n`)); return { status: 1, stderr: "PreconditionFailed (412)" }; }
+      return historyRunner(objects)(args);
+    };
+    assert.throws(() => runStageBApplyAttemptReconciliationCli(["--mode", "prepare-successor", "--reconciliation-artifact", artifactPath, "--reconciliation-artifact-sha256", publish.sha256, "--authorization", authorizationPath, "--authorization-sha256", JSON.parse(fs.readFileSync(authorizationPath)).authorizationSha256, "--source-sha", sourceSha], { now: NOW, awsRun: run }), /claim was not acquired/);
+    assert.equal(JSON.parse(objects.get(stageBAttemptStepS3ObjectKey(predecessor.attemptId, 2))).status, "APPLY_SPAWN_UNCERTAIN");
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 

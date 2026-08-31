@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const repoRoot = process.cwd();
 
@@ -88,16 +89,43 @@ const rules = [
   },
 ];
 
+export const addedLinesFromUnifiedDiff = (diff) => {
+  let inHunk = false;
+  const added = [];
+  for (const line of String(diff).split("\n")) {
+    if (line.startsWith("diff --git ")) { inHunk = false; continue; }
+    if (line.startsWith("@@ ")) { inHunk = true; continue; }
+    if (inHunk && line.startsWith("+")) added.push(line.slice(1));
+  }
+  return added;
+};
+
+export const scanAddedDiff = (diff, relativePath) => {
+  const contents = addedLinesFromUnifiedDiff(diff).join("\n");
+  const findings = [];
+  for (const rule of rules) {
+    rule.regex.lastIndex = 0;
+    let match = rule.regex.exec(contents);
+    while (match) {
+      findings.push({ file: relativePath, line: contents.slice(0, match.index).split("\n").length, rule: rule.name, message: rule.message });
+      match = rule.regex.exec(contents);
+    }
+  }
+  return findings;
+};
+
+export const runBranchSecretDiff = () => {
+
 const baseRef = resolveBaseRef();
 if (!baseRef) {
   console.log("Branch secret-diff guard skipped: no suitable base ref found.");
-  process.exit(0);
+  return 0;
 }
 
 const mergeBase = tryGitOutput(["merge-base", baseRef, "HEAD"]);
 if (!mergeBase) {
   console.log("Branch secret-diff guard skipped: could not determine a safe merge-base.");
-  process.exit(0);
+  return 0;
 }
 
 const changedFiles = tryGitOutput(["diff", "--name-only", "--diff-filter=ACMR", `${mergeBase}...HEAD`])
@@ -108,7 +136,7 @@ const changedFiles = tryGitOutput(["diff", "--name-only", "--diff-filter=ACMR", 
 
 if (changedFiles.length === 0) {
   console.log("Branch secret-diff guard passed. No tracked infra/config/docs files changed.");
-  process.exit(0);
+  return 0;
 }
 
 const findings = [];
@@ -117,25 +145,7 @@ for (const relativePath of changedFiles) {
   const fullPath = path.join(repoRoot, relativePath);
   if (!existsSync(fullPath)) continue;
 
-  const contents = tryGitOutput(["diff", "--unified=0", "--no-ext-diff", "--diff-filter=ACMR", `${mergeBase}...HEAD`, "--", relativePath])
-    .split("\n")
-    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
-    .map((line) => line.slice(1))
-    .join("\n");
-  for (const rule of rules) {
-    rule.regex.lastIndex = 0;
-    let match = rule.regex.exec(contents);
-    while (match) {
-      const line = contents.slice(0, match.index).split("\n").length;
-      findings.push({
-        file: relativePath,
-        line,
-        rule: rule.name,
-        message: rule.message,
-      });
-      match = rule.regex.exec(contents);
-    }
-  }
+  findings.push(...scanAddedDiff(tryGitOutput(["diff", "--unified=0", "--no-ext-diff", "--diff-filter=ACMR", `${mergeBase}...HEAD`, "--", relativePath]), relativePath));
 }
 
 if (findings.length > 0) {
@@ -143,7 +153,11 @@ if (findings.length > 0) {
   for (const finding of findings) {
     console.error(`- ${finding.file}:${finding.line} [${finding.rule}] ${finding.message}`);
   }
-  process.exit(1);
+  return 1;
 }
 
 console.log(`Branch secret-diff guard passed for ${changedFiles.length} changed file(s).`);
+return 0;
+};
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) process.exitCode = runBranchSecretDiff();

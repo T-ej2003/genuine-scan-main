@@ -26,7 +26,7 @@ export const HISTORICAL_STAGE_B_V2_INCIDENT = Object.freeze({
 });
 
 export const STAGE_B_APPLY_ATTEMPT_STATES = Object.freeze(["RESERVED", "APPLY_INTENT_RECORDED", "APPLY_SPAWN_UNCERTAIN", "APPLIED", "FAILED", "UNKNOWN", "ABORTED_BEFORE_APPLY"]);
-export const STAGE_B_APPLY_ATTEMPT_RESULT_CLASSES = Object.freeze(["CONDITIONAL_CREATE_COMMITTED", "APPLY_INTENT_RECORDED", "APPLY_SPAWN_UNCERTAIN", "APPLY_RESULT_COMMITTED", "APPLY_RESULT_FAILED", "OCCUPIED", "CONCURRENT_CONFLICT", "AUTHORIZATION_FAILURE", "TRANSPORT_FAILURE", "SERVICE_FAILURE", "READBACK_MISMATCH", "UNKNOWN_RESULT"]);
+export const STAGE_B_APPLY_ATTEMPT_RESULT_CLASSES = Object.freeze(["CONDITIONAL_CREATE_COMMITTED", "APPLY_INTENT_RECORDED", "APPLY_SPAWN_UNCERTAIN", "RECONCILIATION_CLAIM_COMMITTED", "APPLY_RESULT_COMMITTED", "APPLY_RESULT_FAILED", "OCCUPIED", "CONCURRENT_CONFLICT", "AUTHORIZATION_FAILURE", "TRANSPORT_FAILURE", "SERVICE_FAILURE", "READBACK_MISMATCH", "UNKNOWN_RESULT"]);
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -106,7 +106,7 @@ export function assertStageBApplyAttemptReservation(value, { expected = {}, allo
   if (value.status === "APPLIED" && (value.applyStarted.status !== "REACHABLE" || value.applyResult.status !== "SUCCEEDED")) fail("APPLIED reservation must contain successful apply evidence.");
   if (value.status === "FAILED" && (value.applyStarted.status !== "REACHABLE" || value.applyResult.status !== "FAILED")) fail("FAILED reservation must contain failed apply evidence.");
   if (value.status === "UNKNOWN" && (value.applyStarted.status !== "UNKNOWN" || value.applyResult.status !== "UNKNOWN")) fail("UNKNOWN reservation must preserve uncertain apply evidence.");
-  if (value.status === "ABORTED_BEFORE_APPLY" && (value.applyStarted.status !== "NOT_STARTED" || value.applyResult.status !== "PENDING" || value.applyMayHaveOccurred !== false || value.reconciliationBinding === null)) fail("ABORTED_BEFORE_APPLY reservation must prove no apply was reachable and bind reconciliation evidence.");
+  if (value.status === "ABORTED_BEFORE_APPLY" && (value.operationResult.classification !== "RECONCILIATION_CLAIM_COMMITTED" || value.operationResult.readback !== "EXACT" || value.applyStarted.status !== "NOT_STARTED" || value.applyResult.status !== "PENDING" || value.applyMayHaveOccurred !== false || value.reconciliationBinding === null)) fail("ABORTED_BEFORE_APPLY reservation must prove no apply was reachable and bind reconciliation evidence.");
   for (const [field, expectedValue] of Object.entries(expected)) if (expectedValue !== undefined && value[field] !== expectedValue) fail(`Stage B apply reservation ${field} binding mismatch.`);
   return value;
 }
@@ -124,7 +124,7 @@ export function assertStageBApplyAttemptTransition(previous, next) {
   assertStageBApplyAttemptReservation(previous); assertStageBApplyAttemptReservation(next);
   const immutableFields = ["attemptId", "predecessorAttemptId", "sourceSha", "planSha256", "savedPlanSha256", "stateLineage", "stateSerial", "stateSha256", "workspace", "backendIdentitySha256", "executionPrincipal", "createdAt"];
   if (immutableFields.some((field) => next[field] !== previous[field]) || next.sequence !== previous.sequence + 1 || previous.status === "APPLIED" || previous.status === "FAILED" || previous.status === "ABORTED_BEFORE_APPLY" || previous.status === "UNKNOWN") fail("Stage B apply reservation transition is not monotonic.");
-  const allowed = { RESERVED: ["APPLY_INTENT_RECORDED", "ABORTED_BEFORE_APPLY"], APPLY_INTENT_RECORDED: ["APPLY_SPAWN_UNCERTAIN"], APPLY_SPAWN_UNCERTAIN: ["APPLIED", "FAILED", "UNKNOWN"] };
+  const allowed = { RESERVED: ["APPLY_INTENT_RECORDED", "ABORTED_BEFORE_APPLY"], APPLY_INTENT_RECORDED: ["APPLY_SPAWN_UNCERTAIN", "ABORTED_BEFORE_APPLY"], APPLY_SPAWN_UNCERTAIN: ["APPLIED", "FAILED", "UNKNOWN"] };
   if (!allowed[previous.status]?.includes(next.status)) fail("Stage B apply reservation transition is not authorized.");
   return true;
 }
@@ -193,6 +193,19 @@ export function createStageBApplyAttemptReconciliationAuthorization({ protectedE
   return Object.freeze({ ...body, authorizationSha256: canonicalSha256(body) });
 }
 
+export function assertStageBApplyAttemptReconciliationClaimEligibility({ reservation, transitions = [], reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, successorSourceSha, expectedState = {}, now = new Date() } = {}) {
+  const predecessor = assertReconciliationPredecessor(reservation, transitions); for (const [field, expectedValue] of Object.entries(expectedState)) if (expectedValue !== undefined && reservation[field] !== expectedValue) fail(`Stage B reconciliation reservation ${field} binding mismatch.`); assertStageBApplyAttemptReconciliationArtifact(reconciliationArtifact, { successorSourceSha, now }); if (canonicalJson(reservation) !== canonicalJson(reconciliationArtifact.predecessorReservation) || canonicalJson(transitions) !== canonicalJson(reconciliationArtifact.predecessorTransitions) || canonicalJson(predecessor.tuple) !== canonicalJson(reconciliationArtifact.predecessor)) fail("Stage B reconciliation predecessor changed after observation."); digest(reconciliationArtifactSha256, "reconciliationArtifactSha256"); if (canonicalSha256(reconciliationArtifact) !== reconciliationArtifactSha256) fail("Stage B reconciliation artifact hash is invalid.");
+  if (!authorization || authorization.authorizationSha256 !== authorizationSha256) fail("Stage B reconciliation authorization is not byte-bound.");
+  assertStageBApplyAttemptReconciliationAuthorization(authorization, { successorSourceSha, reconciliationArtifact, reconciliationArtifactSha256, now });
+  return Object.freeze({ status: "CLAIM_REQUIRED", predecessor, successorAttemptId: authorization.successorAttemptId });
+}
+
+export function createStageBApplyAttemptReconciliationClaim({ reservation, transitions = [], reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, successorSourceSha, now = new Date() } = {}) {
+  const eligibility = assertStageBApplyAttemptReconciliationClaimEligibility({ reservation, transitions, reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, successorSourceSha, now });
+  const current = transitions.at(-1) || reservation;
+  return createStageBApplyAttemptTransition(current, { status: "ABORTED_BEFORE_APPLY", operationResult: { classification: "RECONCILIATION_CLAIM_COMMITTED", readback: "EXACT" }, applyMayHaveOccurred: false, applyStarted: { status: "NOT_STARTED", evidenceSha256: null }, applyResult: { status: "PENDING", evidenceSha256: null }, reconciliationBinding: { artifactSha256: reconciliationArtifactSha256, authorizationSha256, successorAttemptId: eligibility.successorAttemptId } });
+}
+
 export function createStageBApplyAttemptSuccessorReservation({ reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, currentReservation, currentTransitions, executionPrincipal, createdAt = new Date().toISOString(), now = new Date() } = {}) {
   const sourceSha = reconciliationArtifact?.successorSourceSha;
   assertStageBApplyAttemptReconciliationEligibility({ reservation: currentReservation, transitions: currentTransitions, reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, successorSourceSha: sourceSha, now });
@@ -215,7 +228,14 @@ export function assertStageBApplyAttemptReconciliationAuthorization(value, { suc
 }
 
 export function assertStageBApplyAttemptReconciliationEligibility({ reservation, transitions = [], reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, successorSourceSha, expectedState = {}, now = new Date() } = {}) {
-  const predecessor = assertReconciliationPredecessor(reservation, transitions); for (const [field, expectedValue] of Object.entries(expectedState)) if (expectedValue !== undefined && reservation[field] !== expectedValue) fail(`Stage B reconciliation reservation ${field} binding mismatch.`); assertStageBApplyAttemptReconciliationArtifact(reconciliationArtifact, { successorSourceSha, now }); if (canonicalJson(reservation) !== canonicalJson(reconciliationArtifact.predecessorReservation) || canonicalJson(transitions) !== canonicalJson(reconciliationArtifact.predecessorTransitions) || canonicalJson(predecessor.tuple) !== canonicalJson(reconciliationArtifact.predecessor)) fail("Stage B reconciliation predecessor changed after observation."); digest(reconciliationArtifactSha256, "reconciliationArtifactSha256"); if (canonicalSha256(reconciliationArtifact) !== reconciliationArtifactSha256) fail("Stage B reconciliation artifact hash is invalid.");
-  if (!authorization || authorization.authorizationSha256 !== authorizationSha256) fail("Stage B reconciliation authorization is not byte-bound.");
-  assertStageBApplyAttemptReconciliationAuthorization(authorization, { successorSourceSha, reconciliationArtifact, reconciliationArtifactSha256, now }); return Object.freeze({ status: "RECOVERABLE", successorAttemptId: authorization.successorAttemptId, maximumTerraformApplies: authorization.maximumTerraformApplies });
+  if (reservation?.schemaVersion === 2) {
+    assertHistoricalStageBV2Incident(reservation);
+    fail("Historical schema-v2 incident is permanently non-retryable: durable independent apply-start evidence is unavailable.");
+  }
+  if (!Array.isArray(transitions) || transitions.length === 0) fail("Stage B reconciliation predecessor has not been durably claimed.");
+  const claim = transitions.at(-1); const predecessorTransitions = transitions.slice(0, -1);
+  const expectedClaim = createStageBApplyAttemptReconciliationClaim({ reservation, transitions: predecessorTransitions, reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, successorSourceSha, now });
+  if (canonicalJson(claim) !== canonicalJson(expectedClaim)) fail("Stage B reconciliation claim is not the exact authenticated next predecessor transition.");
+  const eligibility = assertStageBApplyAttemptReconciliationClaimEligibility({ reservation, transitions: predecessorTransitions, reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256, successorSourceSha, expectedState, now });
+  return Object.freeze({ status: "RECOVERABLE", successorAttemptId: eligibility.successorAttemptId, maximumTerraformApplies: authorization.maximumTerraformApplies, claimedPredecessorSequence: claim.sequence });
 }

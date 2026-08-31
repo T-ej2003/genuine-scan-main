@@ -2322,6 +2322,20 @@ test("spawn-uncertainty persistence failure blocks Terraform after durable pre-s
   assert.deepEqual(input.applyCalls, []);
 });
 
+test("a reconciliation claim occupying the canonical spawn slot blocks the original apply seam", () => {
+  const fixture = createValidStageBApplyFixture(); const input = validRealApplyInput(fixture); const transitions = [];
+  input.deps.reserveApplyAttemptTransition = ({ sequence, attemptId }) => {
+    transitions.push(sequence);
+    return sequence === 2
+      ? { status: "occupied", key: stageBAttemptStepS3ObjectKey(attemptId, sequence) }
+      : { status: "reserved", key: stageBAttemptStepS3ObjectKey(attemptId, sequence) };
+  };
+  input.deps.apply = () => { throw new Error("Terraform must remain unreachable"); };
+  assert.throws(() => runApply(input), /apply-spawn uncertainty marker was not authenticated/);
+  assert.deepEqual(transitions, [1, 2]);
+  assert.deepEqual(input.applyCalls, []);
+});
+
 test("apply failure records a terminal failed result while thrown spawn ambiguity remains non-retryable", () => {
   const failedFixture = createValidStageBApplyFixture(); const failed = validRealApplyInput(failedFixture);
   failed.deps.apply = () => ({ status: 1 });

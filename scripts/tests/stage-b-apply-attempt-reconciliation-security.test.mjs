@@ -12,6 +12,7 @@ import {
   classifyStageBReservationAwsResult,
   createStageBApplyAttemptReconciliationArtifact,
   createStageBApplyAttemptReconciliationAuthorization,
+  createStageBApplyAttemptReconciliationClaim,
   createStageBApplyAttemptReservation,
   createStageBApplyAttemptSuccessorReservation,
   createStageBApplyAttemptTransition,
@@ -33,6 +34,10 @@ const authorized = (value) => {
   const reconciliationArtifact = value || artifact(); const reconciliationArtifactSha256 = stageBApplyAttemptReconciliationSha256(reconciliationArtifact, { now });
   const authorization = createStageBApplyAttemptReconciliationAuthorization({ protectedEnvironmentApprovalEvidence: approval(), reconciliationArtifact, reconciliationArtifactSha256, successorSourceSha: successorSource, approvedBy: "reviewer", approverRole: "independent-production-reviewer", verificationRef: "review-1", now });
   return { reconciliationArtifact, reconciliationArtifactSha256, authorization };
+};
+const claimedTransitions = ({ reconciliationArtifact, reconciliationArtifactSha256, authorization }) => {
+  const transitions = reconciliationArtifact.predecessorTransitions;
+  return [...transitions, createStageBApplyAttemptReconciliationClaim({ reservation: reconciliationArtifact.predecessorReservation, transitions, reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256: authorization.authorizationSha256, successorSourceSha: successorSource, now })];
 };
 
 test("the exact historical v2 incident is parseable but permanently non-retryable", () => {
@@ -70,25 +75,25 @@ test("reconciliation freshness and protected approval are rechecked at successor
   const initial = reservation(); const beforeSpawn = intent(initial);
   assert.doesNotThrow(() => artifact(initial, [beforeSpawn], "2026-08-30T03:03:00.001Z"));
   for (const generatedAt of ["2026-not-a-date", "2026-08-30T03:03:00.000Z", "2026-08-30T04:04:00.001Z"]) assert.throws(() => artifact(initial, [beforeSpawn], generatedAt), /malformed|stale\/expired|future/);
-  const { reconciliationArtifact, reconciliationArtifactSha256, authorization } = authorized(artifact(initial, [beforeSpawn]));
-  assert.throws(() => assertStageBApplyAttemptReconciliationEligibility({ reservation: initial, transitions: [beforeSpawn], reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256: authorization.authorizationSha256, successorSourceSha: successorSource, now: new Date("2026-08-30T04:33:00.001Z") }), /stale or malformed/);
+  const binding = authorized(artifact(initial, [beforeSpawn]));
+  assert.throws(() => assertStageBApplyAttemptReconciliationEligibility({ reservation: initial, transitions: claimedTransitions(binding), reconciliationArtifact: binding.reconciliationArtifact, reconciliationArtifactSha256: binding.reconciliationArtifactSha256, authorization: binding.authorization, authorizationSha256: binding.authorization.authorizationSha256, successorSourceSha: successorSource, now: new Date("2026-08-30T04:33:00.001Z") }), /stale or malformed/);
 });
 
 test("actual review is independent, source-bound, and cannot be fabricated", () => {
   const current = artifact(); const currentSha = stageBApplyAttemptReconciliationSha256(current, { now });
   for (const invalidApproval of [approval({ actor: "operator", reviewer: "operator", preventSelfReview: true }), approval({ preventSelfReview: false })]) assert.throws(() => createStageBApplyAttemptReconciliationAuthorization({ protectedEnvironmentApprovalEvidence: invalidApproval, reconciliationArtifact: current, reconciliationArtifactSha256: currentSha, successorSourceSha: successorSource, approvedBy: invalidApproval.actualApproval.userLogin, approverRole: "independent-production-reviewer", verificationRef: "review-1", now }), /self-approved|self-review prevention|distinct actual/);
-  const { authorization, ...binding } = authorized(current);
-  assert.doesNotThrow(() => assertStageBApplyAttemptReconciliationEligibility({ reservation: binding.reconciliationArtifact.predecessorReservation, transitions: binding.reconciliationArtifact.predecessorTransitions, reconciliationArtifact: binding.reconciliationArtifact, reconciliationArtifactSha256: binding.reconciliationArtifactSha256, authorization, authorizationSha256: authorization.authorizationSha256, successorSourceSha: successorSource, now }));
-  assert.throws(() => assertStageBApplyAttemptReconciliationEligibility({ reservation: binding.reconciliationArtifact.predecessorReservation, transitions: binding.reconciliationArtifact.predecessorTransitions, reconciliationArtifact: binding.reconciliationArtifact, reconciliationArtifactSha256: binding.reconciliationArtifactSha256, authorization, authorizationSha256: authorization.authorizationSha256, successorSourceSha: "d".repeat(40), now }), /identity|source/);
+  const binding = authorized(current); const transitions = claimedTransitions(binding);
+  assert.doesNotThrow(() => assertStageBApplyAttemptReconciliationEligibility({ reservation: binding.reconciliationArtifact.predecessorReservation, transitions, reconciliationArtifact: binding.reconciliationArtifact, reconciliationArtifactSha256: binding.reconciliationArtifactSha256, authorization: binding.authorization, authorizationSha256: binding.authorization.authorizationSha256, successorSourceSha: successorSource, now }));
+  assert.throws(() => assertStageBApplyAttemptReconciliationEligibility({ reservation: binding.reconciliationArtifact.predecessorReservation, transitions, reconciliationArtifact: binding.reconciliationArtifact, reconciliationArtifactSha256: binding.reconciliationArtifactSha256, authorization: binding.authorization, authorizationSha256: binding.authorization.authorizationSha256, successorSourceSha: "d".repeat(40), now }), /identity|source/);
 });
 
 test("successor preparation is append-only and cannot execute the deployment", () => {
-  const { reconciliationArtifact, reconciliationArtifactSha256, authorization } = authorized();
-  const successor = createStageBApplyAttemptSuccessorReservation({ currentReservation: reconciliationArtifact.predecessorReservation, currentTransitions: reconciliationArtifact.predecessorTransitions, reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256: authorization.authorizationSha256, executionPrincipal: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", createdAt: "2026-08-30T04:04:00.000Z", now });
+  const binding = authorized(); const { reconciliationArtifact, reconciliationArtifactSha256, authorization } = binding; const transitions = claimedTransitions(binding);
+  const successor = createStageBApplyAttemptSuccessorReservation({ currentReservation: reconciliationArtifact.predecessorReservation, currentTransitions: transitions, reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256: authorization.authorizationSha256, executionPrincipal: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", createdAt: "2026-08-30T04:04:00.000Z", now });
   assert.equal(successor.predecessorAttemptId, reconciliationArtifact.predecessor.reservationIdentity);
   assert.notEqual(successor.attemptId, successor.predecessorAttemptId);
   assert.equal(successor.sourceSha, successorSource);
-  assert.throws(() => createStageBApplyAttemptSuccessorReservation({ currentReservation: { ...reconciliationArtifact.predecessorReservation, stateSerial: 103 }, currentTransitions: reconciliationArtifact.predecessorTransitions, reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256: authorization.authorizationSha256, executionPrincipal: "principal", now }), /monotonic|predecessor changed/);
+  assert.throws(() => createStageBApplyAttemptSuccessorReservation({ currentReservation: { ...reconciliationArtifact.predecessorReservation, stateSerial: 103 }, currentTransitions: transitions, reconciliationArtifact, reconciliationArtifactSha256, authorization, authorizationSha256: authorization.authorizationSha256, executionPrincipal: "principal", now }), /monotonic|predecessor changed/);
 });
 
 test("reservation result classifications and malformed state remain fail-closed", () => {

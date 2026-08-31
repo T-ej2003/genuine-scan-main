@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { HISTORICAL_STAGE_B_V2_INCIDENT, STAGE_B_APPLY_ATTEMPT_RECONCILIATION_WORKFLOW_REF, assertStageBApplyAttemptReconciliationEligibility, assertStageBApplyAttemptReservation, assertStageBApplyAttemptTransition, classifyStageBApplyAttemptReconciliationState, createStageBApplyAttemptReconciliationArtifact, createStageBApplyAttemptReconciliationAuthorization, createStageBApplyAttemptReservation, createStageBApplyAttemptTransition, stageBApplyAttemptReconciliationSha256 } from "../aws/stage-b-apply-attempt-reconciliation-contract.mjs";
+import { HISTORICAL_STAGE_B_V2_INCIDENT, STAGE_B_APPLY_ATTEMPT_RECONCILIATION_WORKFLOW_REF, assertStageBApplyAttemptReconciliationEligibility, assertStageBApplyAttemptReservation, assertStageBApplyAttemptTransition, classifyStageBApplyAttemptReconciliationState, createStageBApplyAttemptReconciliationArtifact, createStageBApplyAttemptReconciliationAuthorization, createStageBApplyAttemptReconciliationClaim, createStageBApplyAttemptReservation, createStageBApplyAttemptTransition, stageBApplyAttemptReconciliationSha256 } from "../aws/stage-b-apply-attempt-reconciliation-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 
 const sha = (value) => value.repeat(64);
@@ -31,9 +31,24 @@ test("successor eligibility requires exact v3 history and an actual distinct rev
   const initial = reservation(); const beforeSpawn = intent(initial); const successor = "e".repeat(40);
   const artifact = createStageBApplyAttemptReconciliationArtifact({ historicalReservation: initial, historicalTransitions: [beforeSpawn], successorSourceSha: successor, generatedAt: now.toISOString(), now }); const artifactSha = stageBApplyAttemptReconciliationSha256(artifact, { now });
   const authorization = createStageBApplyAttemptReconciliationAuthorization({ protectedEnvironmentApprovalEvidence: approval({ source: successor }), reconciliationArtifact: artifact, reconciliationArtifactSha256: artifactSha, successorSourceSha: successor, approvedBy: "reviewer", approverRole: "independent-production-reviewer", verificationRef: "review-1", now });
-  assert.equal(assertStageBApplyAttemptReconciliationEligibility({ reservation: initial, transitions: [beforeSpawn], reconciliationArtifact: artifact, reconciliationArtifactSha256: artifactSha, authorization, authorizationSha256: authorization.authorizationSha256, successorSourceSha: successor, now }).status, "RECOVERABLE");
+  const claim = createStageBApplyAttemptReconciliationClaim({ reservation: initial, transitions: [beforeSpawn], reconciliationArtifact: artifact, reconciliationArtifactSha256: artifactSha, authorization, authorizationSha256: authorization.authorizationSha256, successorSourceSha: successor, now });
+  assert.equal(assertStageBApplyAttemptReconciliationEligibility({ reservation: initial, transitions: [beforeSpawn, claim], reconciliationArtifact: artifact, reconciliationArtifactSha256: artifactSha, authorization, authorizationSha256: authorization.authorizationSha256, successorSourceSha: successor, now }).status, "RECOVERABLE");
   assert.throws(() => createStageBApplyAttemptReconciliationAuthorization({ protectedEnvironmentApprovalEvidence: approval({ source: successor, selfReview: true }), reconciliationArtifact: artifact, reconciliationArtifactSha256: artifactSha, successorSourceSha: successor, approvedBy: "operator", approverRole: "independent-production-reviewer", verificationRef: "review-1", now }), /self-review|distinct actual/);
-  assert.throws(() => assertStageBApplyAttemptReconciliationEligibility({ reservation: initial, transitions: [], reconciliationArtifact: artifact, reconciliationArtifactSha256: artifactSha, authorization, authorizationSha256: authorization.authorizationSha256, successorSourceSha: successor, now }), /predecessor changed/);
+  assert.throws(() => assertStageBApplyAttemptReconciliationEligibility({ reservation: initial, transitions: [], reconciliationArtifact: artifact, reconciliationArtifactSha256: artifactSha, authorization, authorizationSha256: authorization.authorizationSha256, successorSourceSha: successor, now }), /durably claimed/);
+});
+
+test("reconciliation claims the original process's exact next append-only slot", () => {
+  const successor = "e".repeat(40);
+  for (const withIntent of [false, true]) {
+    const predecessor = reservation();
+    const history = withIntent ? [intent(predecessor)] : [];
+    const artifact = createStageBApplyAttemptReconciliationArtifact({ historicalReservation: predecessor, historicalTransitions: history, successorSourceSha: successor, generatedAt: now.toISOString(), now });
+    const artifactSha = stageBApplyAttemptReconciliationSha256(artifact, { now });
+    const authorization = createStageBApplyAttemptReconciliationAuthorization({ protectedEnvironmentApprovalEvidence: approval({ source: successor }), reconciliationArtifact: artifact, reconciliationArtifactSha256: artifactSha, successorSourceSha: successor, approvedBy: "reviewer", approverRole: "independent-production-reviewer", verificationRef: "review-slot", now });
+    const claim = createStageBApplyAttemptReconciliationClaim({ reservation: predecessor, transitions: history, reconciliationArtifact: artifact, reconciliationArtifactSha256: artifactSha, authorization, authorizationSha256: authorization.authorizationSha256, successorSourceSha: successor, now });
+    assert.equal(claim.sequence, history.length + 1);
+    assert.equal(claim.status, "ABORTED_BEFORE_APPLY");
+  }
 });
 
 test("malformed pre-spawn and post-spawn transitions fail closed", () => {

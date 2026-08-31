@@ -24,6 +24,16 @@ can invoke Terraform, it durably records `APPLY_SPAWN_UNCERTAIN` with
 `applyMayHaveOccurred=true`. `APPLY_SPAWN_UNCERTAIN`, `APPLIED`, `FAILED`,
 and `UNKNOWN` are terminal for successor preparation.
 
+For either pre-spawn state, preparation first conditionally writes the exact
+next append-only predecessor transition, `ABORTED_BEFORE_APPLY`. The original
+apply wrapper's next transition and this reconciliation claim use the same
+attempt/sequence S3 key. The claim is valid only after exact readback and
+canonical history verification. If the original transition occupies the key,
+successor preparation fails; if the claim occupies it, the original wrapper
+cannot persist `APPLY_SPAWN_UNCERTAIN` and Terraform remains unreachable. A
+timeout is resolved only by re-reading that exact key and history; an unknown
+outcome remains fail-closed.
+
 Because S3 persistence and child-process spawn are not atomic, a crash after
 `APPLY_SPAWN_UNCERTAIN` is `INDETERMINATE_NO_AUTOMATIC_SUCCESSOR` and cannot
 be downgraded by elapsed time, unchanged state, or a missing local marker.
@@ -48,8 +58,9 @@ The reconciliation artifact contains the complete initial reservation and its
 authenticated append-only transition history. The create and prepare commands
 re-read that history from the canonical backend and require exact equality
 with the artifact. A v3 `APPLY_INTENT_RECORDED` record is never an automatic
-retry: it needs protected approval before it can prepare a successor. Any
-other transition is indeterminate and cannot prepare a successor. The
+retry: it needs protected approval and the durable same-slot claim before it
+can prepare a successor. Any other transition is indeterminate and cannot
+prepare a successor. The
 workflow receives the artifact's canonical JSON SHA-256 identity, not the
 hash of its transport formatting.
 
