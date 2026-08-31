@@ -72,6 +72,7 @@
     "rls:named-function-recovery": "node scripts/rls/named-sql-function-recovery.mjs",
     "rls:full-verify": "node scripts/rls/verify-full-rls-package.mjs && node --test scripts/tests/full-database-rls-enforcement.test.mjs",
     "stage-b:generate-tfvars": "node scripts/aws/generate-production-green-stage-b-tfvars.mjs",
+    "stage-b:prepare-approval-input": "node scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
     "stage-b:readiness:check": "node scripts/aws/check-stage-b-production-readiness.mjs",
     "stage-b:refresh-only": "node scripts/refresh-production-green-stage-b.mjs",
     "stage-b:generate-backend-config": "node scripts/aws/generate-production-green-stage-b-backend-config.mjs",

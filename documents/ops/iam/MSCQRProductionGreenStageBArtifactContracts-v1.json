@@ -722,6 +722,24 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "stage-b-approval-input",
+      "kind": "file",
+      "producer": "scripts/aws/prepare-production-green-stage-b-approval-input.mjs:run",
+      "consumers": [
+        "scripts/aws/create-production-green-stage-b-approval.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "stage-b-approval-input",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "reference-audit",
       "kind": "file",
       "producer": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs:runCli",
