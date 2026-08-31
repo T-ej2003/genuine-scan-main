@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import { createHandler } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
-import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalStageBApproval, stageBApprovalIdForReleaseSha, validateStageBApproval } from "../aws/production-green-stage-b-contract.mjs";
+import { assertStageBBrokerTaskDefinitionMap, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, canonicalStageBApproval, stageBApprovalIdForReleaseSha, validateStageBApproval } from "../aws/production-green-stage-b-contract.mjs";
 import { approvedNetworkConfiguration, assertFixedTaskDefinition, renderStageBTaskDefinition, stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
 import { validateProductionRlsApproval } from "../../backend/scripts/production-rls-approval.mjs";
 
@@ -18,9 +18,30 @@ const artifact = (overrides = {}) => {
   return { ...value, signatureBase64: sign(value) };
 };
 const verifySignature = async ({ message, signature }) => crypto.verify("sha256", message, { key: publicKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, signature);
-const taskDefinitions = Object.fromEntries(["full-rls-capability-preflight", "full-rls-admin-bootstrap", "full-rls-role-provision", "full-rls-role-verify", "full-rls-admin-ownership", "full-rls-runtime-policy", "full-rls-verification", "full-rls-application-canary", "full-rls-rollback"].map((mode) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-${mode.replace("full-rls-", "")}:1`]));
+const taskDefinitions = Object.fromEntries(Object.entries(STAGE_B_BROKER_TASK_DEFINITION_FAMILIES).map(([mode, family]) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`]));
 const expected = { releaseSha, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, deploymentId: "phase2", approvalId: stageBApprovalIdForReleaseSha(releaseSha), ticketId: "CHG-STAGE-B-0001", images, taskDefinitionArns: taskDefinitions };
-const config = { clusterArn: STAGE_B.clusterArn, approvalSecretArn: STAGE_B.approvalSecretArn, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, privateSubnetIds: ["subnet-068d949017bd2ce45", "subnet-07e0a76e3a5241138"], taskDefinitionArns: taskDefinitions, templateHashes: stageBTemplateHashes(), approvalExpected: expected, images };
+const config = { clusterArn: STAGE_B.clusterArn, approvalSecretArn: STAGE_B.approvalSecretArn, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, privateSubnetIds: ["subnet-068d949017bd2ce45", "subnet-07e0a76e3a5241138"], replayTable: "replay", receiptBucket: STAGE_B.receiptBucket, taskDefinitionArns: taskDefinitions, templateHashes: stageBTemplateHashes(), approvalExpected: expected, images };
+
+test("broker task-definition map enforces the exact mode, family, account, region, and revision contract", () => {
+  assert.doesNotThrow(() => assertStageBBrokerTaskDefinitionMap(taskDefinitions));
+  const cases = [
+    ["arbitrary family", { ...taskDefinitions, "full-rls-verification": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-other:1" }],
+    ["wrong mode family", { ...taskDefinitions, "full-rls-verification": taskDefinitions["full-rls-application-canary"] }],
+    ["wrong account", { ...taskDefinitions, "full-rls-verification": taskDefinitions["full-rls-verification"].replace("368992683803", "000000000000") }],
+    ["wrong region", { ...taskDefinitions, "full-rls-verification": taskDefinitions["full-rls-verification"].replace("eu-west-2", "us-east-1") }],
+    ["revision zero", { ...taskDefinitions, "full-rls-verification": taskDefinitions["full-rls-verification"].replace(":1", ":0") }],
+    ["missing revision", { ...taskDefinitions, "full-rls-verification": taskDefinitions["full-rls-verification"].replace(":1", "") }],
+    ["missing mode", Object.fromEntries(Object.entries(taskDefinitions).filter(([mode]) => mode !== "full-rls-verification"))],
+    ["unexpected mode", { ...taskDefinitions, unexpected: taskDefinitions["full-rls-verification"] }],
+  ];
+  for (const [label, value] of cases) assert.throws(() => assertStageBBrokerTaskDefinitionMap(value), /task-definition map/, label);
+});
+
+test("broker runtime bindings are exact before any handler work", () => {
+  for (const [field, value] of [["clusterArn", "arn:aws:ecs:eu-west-2:368992683803:cluster/other"], ["approvalSecretArn", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:other"], ["executorSecurityGroupId", "sg-other"], ["privateSubnetIds", ["subnet-068d949017bd2ce45"]], ["replayTable", "bad table"], ["receiptBucket", "other-bucket"]]) {
+    assert.throws(() => createHandler({ config: { ...config, [field]: value } }), /runtime bindings|reviewed contract/);
+  }
+});
 
 test("Stage B approval rejects wrong signer, bindings, expiry, and mutable image input", async () => {
   await assert.rejects(() => validateStageBApproval(artifact(), expected, { now, verifySignature: async () => false }), /signature/);
@@ -112,8 +133,7 @@ test("broker rejects replay, task substitution, image substitution, and every ca
     await assert.rejects(() => handler({ ...event, [key]: "substitution" }), /outside the reviewed contract/);
   }
   const substituted = { ...config, taskDefinitionArns: { ...taskDefinitions, "full-rls-verification": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-other:1" } };
-  const substitutedHandler = createHandler({ config: substituted, readApproval: async () => JSON.stringify(artifact()), verifySignature, claimApproval: async () => assert.fail("substituted task must not claim approval"), runTask: async () => assert.fail("substituted task must not start"), now: () => now });
-  await assert.rejects(() => substitutedHandler(event), /signed approval/);
+  assert.throws(() => createHandler({ config: substituted, readApproval: async () => JSON.stringify(artifact()), verifySignature, claimApproval: async () => assert.fail("substituted task must not claim approval"), runTask: async () => assert.fail("substituted task must not start"), now: () => now }), /task-definition map|reviewed contract/);
 });
 
 test("broker releases only an explicit ECS rejection and blocks uncertain launches for review", async () => {

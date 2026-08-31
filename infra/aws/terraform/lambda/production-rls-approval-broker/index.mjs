@@ -1,11 +1,10 @@
 import crypto from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { canonicalizeEcsTaskDefinition } from "./ecs-task-definition-readback.mjs";
-const { assertBrokerApprovalValidationRequest, assertBrokerRequest, assertStageBBrokerConfigurationBindings, canonicalJson, hasCompleteStageBTaskMaps, STAGE_B, STAGE_B_MODES, validateStageBApproval } = await import(
+const { assertBrokerApprovalValidationRequest, assertBrokerRequest, assertStageBBrokerConfigurationBindings, assertStageBBrokerRuntimeBindings, assertStageBBrokerTaskDefinitionMap, canonicalJson, hasCompleteStageBTaskMaps, STAGE_B, validateStageBApproval } = await import(
   process.env.AWS_LAMBDA_FUNCTION_NAME ? "./stage-b-contract.mjs" : "../../../../../scripts/aws/production-green-stage-b-contract.mjs"
 );
 
-const taskArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-(?:full-rls-green|rls-green)-(?:[a-z0-9-]+):[1-9][0-9]*$/;
 export const PREDEPLOYMENT_INVENTORY_OPERATION = "production-predeployment-rotation-inventory";
 export const PREDEPLOYMENT_INVENTORY_POLL_ATTEMPTS = 30;
 export const PREDEPLOYMENT_INVENTORY_POLL_INTERVAL_MS = 2_000;
@@ -44,10 +43,11 @@ export function validateBrokerConfiguration(config) {
   if (!config || config.clusterArn !== STAGE_B.clusterArn || config.approvalSecretArn !== STAGE_B.approvalSecretArn
       || config.executorSecurityGroupId !== STAGE_B.executorSecurityGroupId || !Array.isArray(config.privateSubnetIds)
       || [...config.privateSubnetIds].sort().join(",") !== [...STAGE_B.privateSubnetIds].sort().join(",")
-      || !hasCompleteStageBTaskMaps(config.taskDefinitionArns, config.templateHashes)
-      || STAGE_B_MODES.some((mode) => !taskArnPattern.test(config.taskDefinitionArns[mode] || ""))) {
+      || !hasCompleteStageBTaskMaps(config.taskDefinitionArns, config.templateHashes)) {
     throw new Error("Stage B broker configuration is outside the reviewed contract.");
   }
+  assertStageBBrokerTaskDefinitionMap(config.taskDefinitionArns);
+  assertStageBBrokerRuntimeBindings(config);
   return config;
 }
 
@@ -338,7 +338,6 @@ export function createBrokerRuntimeConfig(env = process.env) {
 export async function handler(event, context) {
   const config = createBrokerRuntimeConfig();
   assertStageBBrokerConfigurationBindings({ approvalExpected: config.approvalExpected, images: config.images, templateHashes: config.templateHashes });
-  if (!/^[A-Za-z0-9._-]{3,255}$/.test(config.replayTable || "") || config.receiptBucket !== STAGE_B.receiptBucket) throw new Error("Stage B broker storage is outside the reviewed contract.");
   const [{ ECSClient, RunTaskCommand, DescribeTaskDefinitionCommand, DescribeTasksCommand, StopTaskCommand }, { SecretsManagerClient, GetSecretValueCommand }, { KMSClient, VerifyCommand }, { DynamoDBClient, PutItemCommand, DeleteItemCommand, UpdateItemCommand }, { S3Client, PutObjectCommand }, { CloudWatchLogsClient, DescribeLogStreamsCommand, GetLogEventsCommand }] = await Promise.all([
     import("@aws-sdk/client-ecs"), import("@aws-sdk/client-secrets-manager"), import("@aws-sdk/client-kms"), import("@aws-sdk/client-dynamodb"), import("@aws-sdk/client-s3"), import("@aws-sdk/client-cloudwatch-logs"),
   ]);

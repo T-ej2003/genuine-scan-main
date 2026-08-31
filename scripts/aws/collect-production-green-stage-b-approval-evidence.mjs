@@ -2,11 +2,12 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertImageAuthorization } from "./production-cutover-control-plane.mjs";
-import { assertStageBBrokerConfigurationBindings, assertStageBBrokerConfigurationIdentity, canonicalJson, canonicalStageBBrokerApprovalExpected, hasCompleteStageBTaskMaps, STAGE_B, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
+import { assertStageBBrokerConfigurationBindings, assertStageBBrokerConfigurationIdentity, assertStageBBrokerRuntimeBindings, assertStageBBrokerTaskDefinitionMap, canonicalJson, canonicalStageBBrokerApprovalExpected, hasCompleteStageBTaskMaps, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertStageBTfvarsBinding, deriveContractDigests } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { stageBTemplateHashes } from "./production-green-stage-b-task-definitions.mjs";
+import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA = /^[a-f0-9]{40}$/;
@@ -20,12 +21,36 @@ const authenticatedEvidence = new WeakSet();
 export const STAGE_B_APPROVAL_EVIDENCE_PRODUCER = "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs";
 export const STAGE_B_APPROVAL_EVIDENCE_SCHEMA_VERSION = 1;
 
-export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageAuthorization, tfvarsPath, bindingReportPath, releasePreflightPath, checkerIdentity, live, now = new Date(), verifyImageEvidence, validateImageAuthorization = assertImageAuthorization, validateTfvarsBinding = assertStageBTfvarsBinding, deriveContracts = deriveContractDigests, readPreflight } = {}) {
+export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageAuthorization, tfvarsPath, bindingReportPath, releasePreflightPath, releasePreflightAttestationPath, releasePreflightAttestationSignaturePath, releasePreflightTrustEvidence, checkerIdentity, live, now = new Date(), verifyImageEvidence, verifyReleasePreflightAttestationSignature, validateImageAuthorization = assertImageAuthorization, validateTfvarsBinding = assertStageBTfvarsBinding, deriveContracts = deriveContractDigests, readPreflight } = {}) {
   if (!SHA.test(sourceSha || "") || !CHECKER.test(checkerIdentity || "")) throw new Error("Approval evidence source or checker identity is invalid.");
   validateImageAuthorization(imageAuthorization, sourceSha, { now, verifyImageEvidence });
   const imageEvidenceSha256 = imageAuthorization.imageEvidenceSha256;
   const report = validateTfvarsBinding({ tfvarsPath, bindingReportPath, expectedToolingSha: sourceSha, expectedImageReleaseSha: imageAuthorization.imageReleaseSha, expectedImageEvidenceSha256: imageEvidenceSha256 });
-  const preflight = readPreflight ? readPreflight(releasePreflightPath) : JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(readStageBPrivateFileBytes({ filePath: releasePreflightPath, repositoryRoot: root, label: "Release-deployer preflight evidence" }).bytes));
+  const reportBytes = readPreflight
+    ? Buffer.from(`${JSON.stringify(readPreflight(releasePreflightPath))}\n`)
+    : readStageBPrivateFileBytes({ filePath: releasePreflightPath, repositoryRoot: root, label: "Release-deployer preflight evidence" }).bytes;
+  const preflight = readPreflight ? JSON.parse(reportBytes) : JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(reportBytes));
+  const trust = releasePreflightTrustEvidence || (() => {
+    if (!releasePreflightAttestationPath || !releasePreflightAttestationSignaturePath) throw new Error("Canonical release-preflight checker-trust attestation and signature are required.");
+    const attestationBytes = readStageBPrivateFileBytes({ filePath: releasePreflightAttestationPath, repositoryRoot: root, label: "Release-preflight checker-trust attestation" }).bytes;
+    const signatureBytes = readStageBPrivateFileBytes({ filePath: releasePreflightAttestationSignaturePath, repositoryRoot: root, label: "Release-preflight checker-trust attestation signature" }).bytes;
+    return { reportBytes, attestation: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(attestationBytes)), attestationBytes, signatureArtifact: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(signatureBytes)), signatureBytes };
+  })();
+  if (!trust || !Buffer.isBuffer(trust.reportBytes) || canonicalJson(JSON.parse(trust.reportBytes)) !== canonicalJson(preflight)) throw new Error("Release-preflight checker-trust evidence is not bound to the exact consumed report bytes.");
+  authenticateReleasePreflightCheckerTrustEvidence({
+    report: preflight,
+    reportBytes,
+    attestation: trust.attestation,
+    attestationBytes: trust.attestationBytes,
+    signatureArtifact: trust.signatureArtifact,
+    signatureBytes: trust.signatureBytes,
+    sourceSha,
+    administratorReportSha256: preflight.administratorReportSha256,
+    expectedAttestationFileSha256: digest(trust.attestationBytes),
+    expectedSignatureFileSha256: digest(trust.signatureBytes),
+    now,
+    verifySignature: verifyReleasePreflightAttestationSignature,
+  });
   if (preflight?.status !== "ready-for-plan" || preflight?.sourceSha !== sourceSha || !RELEASE.test(preflight?.caller || "")
       || preflight.account !== STAGE_B.account || preflight.region !== STAGE_B.region
       || preflight.backendReady !== true || preflight.stateReady !== true || preflight.handoffReady !== true || preflight.tfvarsReady !== true
@@ -54,7 +79,10 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
   const approvalExpected = parse(variables?.BROKER_APPROVAL_EXPECTED_JSON, "Live broker approval bindings");
   const templateHashes = parse(variables?.BROKER_TASK_TEMPLATE_HASHES_JSON, "Live broker task-definition template hashes");
   const liveImages = parse(variables?.BROKER_IMAGES_JSON, "Live broker image bindings");
-  if (!hasCompleteStageBTaskMaps(taskDefinitionArns, templateHashes) || !exact(Object.keys(taskDefinitionArns || {}).sort(), [...STAGE_B_MODES].sort()) || Object.values(taskDefinitionArns).some((arn) => !/^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[A-Za-z0-9_-]+:[1-9][0-9]*$/.test(arn || ""))) throw new Error("Live broker task-definition map is incomplete.");
+  const privateSubnetIds = parse(variables?.BROKER_PRIVATE_SUBNETS_JSON, "Live broker private subnets");
+  assertStageBBrokerRuntimeBindings({ clusterArn: variables?.BROKER_CLUSTER_ARN, approvalSecretArn: variables?.BROKER_APPROVAL_SECRET_ARN, executorSecurityGroupId: variables?.BROKER_EXECUTOR_SECURITY_GROUP_ID, privateSubnetIds, replayTable: variables?.BROKER_REPLAY_TABLE, receiptBucket: variables?.BROKER_RECEIPT_BUCKET });
+  if (!hasCompleteStageBTaskMaps(taskDefinitionArns, templateHashes)) throw new Error("Live broker task-definition map is incomplete.");
+  assertStageBBrokerTaskDefinitionMap(taskDefinitionArns);
   const images = Object.fromEntries(imageAuthorization.images.map(({ service, digest: value }) => [service, value]));
   const reportImages = { backend: report.images.backend.digest, worker: report.images.worker.digest, "rls-executor": report.images.executor.digest, "rls-canary": report.images.canary.digest };
   if (!exact(images, reportImages)) throw new Error("Signed image authorization does not match the canonical Stage B tfvars bindings.");

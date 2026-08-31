@@ -19,6 +19,7 @@ import { collectProductionGreenStageBApprovalEvidence, isAuthenticatedProduction
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
+import { createReleasePreflightCheckerTrustSignatureVerifier } from "./production-release-preflight-checker-attestation.mjs";
 
 export const STAGE_B_APPROVAL_INPUT_PRODUCER = "scripts/aws/prepare-production-green-stage-b-approval-input.mjs";
 export const STAGE_B_APPROVAL_INPUT_SCHEMA_VERSION = 1;
@@ -175,7 +176,7 @@ function assertCleanSource() { if (execFileSync("git", ["status", "--porcelain"]
 
 async function run(argv = process.argv.slice(2)) {
   assertCleanSource();
-  const allowed = new Set(["--ticket-id", "--image-authorization", "--tfvars", "--binding-report", "--release-preflight", "--output", "--review-output"]);
+  const allowed = new Set(["--ticket-id", "--image-authorization", "--tfvars", "--binding-report", "--release-preflight", "--release-preflight-attestation", "--release-preflight-attestation-signature", "--output", "--review-output"]);
   for (let index = 0; index < argv.length; index += 1) { if (!allowed.has(argv[index])) throw new Error("Unknown approval-input option."); index += 1; }
   const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION });
   const checkerIdentity = JSON.parse(releaseRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn;
@@ -184,7 +185,7 @@ async function run(argv = process.argv.slice(2)) {
     alias: JSON.parse(releaseRun(["lambda", "get-alias", "--function-name", STAGE_B.brokerFunctionArn, "--name", STAGE_B.brokerAliasQualifier, "--output", "json", "--no-cli-pager"])),
   };
   const imageAuthorization = JSON.parse(fs.readFileSync(requiredOption(argv, "--image-authorization"), "utf8"));
-  const { evidence } = collectProductionGreenStageBApprovalEvidence({ sourceSha: currentHead(), imageAuthorization, tfvarsPath: requiredOption(argv, "--tfvars"), bindingReportPath: requiredOption(argv, "--binding-report"), releasePreflightPath: requiredOption(argv, "--release-preflight"), checkerIdentity, live, verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: releaseRun }) });
+  const { evidence } = collectProductionGreenStageBApprovalEvidence({ sourceSha: currentHead(), imageAuthorization, tfvarsPath: requiredOption(argv, "--tfvars"), bindingReportPath: requiredOption(argv, "--binding-report"), releasePreflightPath: requiredOption(argv, "--release-preflight"), releasePreflightAttestationPath: requiredOption(argv, "--release-preflight-attestation"), releasePreflightAttestationSignaturePath: requiredOption(argv, "--release-preflight-attestation-signature"), checkerIdentity, live, verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: releaseRun }), verifyReleasePreflightAttestationSignature: createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun }) });
   const result = await prepareProductionGreenStageBApprovalInput({
     evidence,
     protectedSourceSha: currentHead(),

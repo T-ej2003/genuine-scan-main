@@ -114,6 +114,11 @@ export const STAGE_B_MODES = Object.freeze([
   "full-rls-role-verify", "full-rls-admin-ownership", "full-rls-runtime-policy",
   "full-rls-verification", "full-rls-application-canary", "full-rls-rollback",
 ]);
+export const STAGE_B_BROKER_TASK_DEFINITION_FAMILIES = Object.freeze(Object.fromEntries(
+  STAGE_B_MODES.map((mode) => [mode, mode === "full-rls-application-canary"
+    ? "mscqr-production-full-rls-green-application-canary"
+    : `mscqr-production-full-rls-green-${mode}`]),
+));
 export const STAGE_B_TASK_TEMPLATE_KEYS = Object.freeze(["executor", "canary", "backend", "worker"]);
 export const STAGE_B_APPROVAL_ALGORITHM = "RSASSA_PSS_SHA_256";
 export const STAGE_B_APPROVAL_SCHEMA_VERSION = 2;
@@ -177,6 +182,24 @@ const assumedRole = (role) => new RegExp(`^arn:aws:sts::${STAGE_B.account}:assum
 const isDigest = (value) => /^[a-f0-9]{64}$/.test(value || "");
 const strictKeys = (value, expected) => Object.keys(value || {}).sort().join(",") === [...expected].sort().join(",");
 const taskDefinitionArn = (value) => /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[A-Za-z0-9_-]+:[1-9][0-9]*$/.test(value || "");
+const taskDefinitionArnForFamily = (value, family) => new RegExp(`^arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${family}:[1-9][0-9]*$`).test(value || "");
+
+export function assertStageBBrokerTaskDefinitionMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !strictKeys(value, STAGE_B_MODES)
+      || Object.entries(value).some(([mode, arn]) => !taskDefinitionArnForFamily(arn, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES[mode]))) {
+    throw new Error("Stage B broker task-definition map is incomplete or outside the reviewed mode/family contract.");
+  }
+  return value;
+}
+
+export function assertStageBBrokerRuntimeBindings({ clusterArn, approvalSecretArn, executorSecurityGroupId, privateSubnetIds, replayTable, receiptBucket } = {}) {
+  if (clusterArn !== STAGE_B.clusterArn || approvalSecretArn !== STAGE_B.approvalSecretArn || executorSecurityGroupId !== STAGE_B.executorSecurityGroupId
+      || !Array.isArray(privateSubnetIds) || [...privateSubnetIds].sort().join(",") !== [...STAGE_B.privateSubnetIds].sort().join(",")
+      || !/^[A-Za-z0-9._-]{3,255}$/.test(replayTable || "") || receiptBucket !== STAGE_B.receiptBucket) {
+    throw new Error("Stage B broker runtime bindings are outside the reviewed contract.");
+  }
+  return { clusterArn, approvalSecretArn, executorSecurityGroupId, privateSubnetIds, replayTable, receiptBucket };
+}
 
 export function assertStageBBrokerApprovalExpected(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || !strictKeys(value, STAGE_B_BROKER_APPROVAL_EXPECTED_FIELDS)

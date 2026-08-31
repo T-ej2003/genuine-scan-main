@@ -149,6 +149,10 @@ collector. It requires the release-deployer preflight to be the positive
 true, zero failure counters, and exact tfvars/binding-report hashes. It also
 verifies the signed current-source image authorization and fresh read-only
 broker alias/configuration observation, including the complete live approval
+binding. The preflight report is trusted only after the existing KMS-signed
+checker-trust attestation and signature are authenticated against the exact
+report bytes; report fields, permissions, and caller-supplied hashes are never
+authority by themselves.
 expectation, four-image map, task-definition ARN map, and task-definition
 template-hash map. Matching Git SHA or package checksum alone is not authority:
 runtime bindings must be current and complete.
@@ -163,6 +167,8 @@ node scripts/aws/prepare-production-green-stage-b-approval-input.mjs \
   --tfvars /secure/operator/production-green-stage-b.tfvars \
   --binding-report /secure/operator/production-green-stage-b-tfvars-binding.json \
   --release-preflight /secure/operator/production-green-stage-b-release-preflight.json \
+  --release-preflight-attestation /secure/operator/production-green-stage-b-release-preflight.attestation.json \
+  --release-preflight-attestation-signature /secure/operator/production-green-stage-b-release-preflight.attestation.signature.json \
   --ticket-id <change-ticket-id> \
   --output /secure/operator/production-rls-stage-b-approval-input.json \
   --review-output /secure/operator/production-rls-stage-b-approval-review.txt

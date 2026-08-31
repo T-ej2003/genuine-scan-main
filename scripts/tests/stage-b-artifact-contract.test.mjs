@@ -119,16 +119,22 @@ test("release-preflight checker artifacts declare every direct reader and publis
       "scripts/aws/production-cutover-runtime-bootstrap.mjs",
       "scripts/aws/production-cutover-production-adapters.mjs",
       "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+      "scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
+      "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs",
     ],
     "release-preflight-checker-trust-attestation": [
       "scripts/aws/prepare-production-cutover-runtime.mjs",
       "scripts/aws/production-cutover-runtime-bootstrap.mjs",
       "scripts/aws/production-cutover-production-adapters.mjs",
+      "scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
+      "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs",
     ],
     "release-preflight-checker-trust-attestation-signature": [
       "scripts/aws/prepare-production-cutover-runtime.mjs",
       "scripts/aws/production-cutover-runtime-bootstrap.mjs",
       "scripts/aws/production-cutover-production-adapters.mjs",
+      "scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
+      "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs",
     ],
   };
   const artifacts = Object.fromEntries(STAGE_B_ARTIFACT_CONTRACTS.filter(({ id }) => Object.hasOwn(expected, id)).map((artifact) => [artifact.id, artifact]));

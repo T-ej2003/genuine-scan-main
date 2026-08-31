@@ -74,7 +74,9 @@
         "scripts/aws/prepare-production-cutover-runtime.mjs",
         "scripts/aws/production-cutover-runtime-bootstrap.mjs",
         "scripts/aws/production-cutover-production-adapters.mjs",
-        "scripts/aws/forward-recover-stage-b-existing-revision.mjs"
+        "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+        "scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
+        "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -94,7 +96,9 @@
       "consumers": [
         "scripts/aws/prepare-production-cutover-runtime.mjs",
         "scripts/aws/production-cutover-runtime-bootstrap.mjs",
-        "scripts/aws/production-cutover-production-adapters.mjs"
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
+        "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -114,7 +118,9 @@
       "consumers": [
         "scripts/aws/prepare-production-cutover-runtime.mjs",
         "scripts/aws/production-cutover-runtime-bootstrap.mjs",
-        "scripts/aws/production-cutover-production-adapters.mjs"
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
+        "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
