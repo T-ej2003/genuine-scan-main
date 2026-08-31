@@ -112,9 +112,9 @@ export function runStageBApplyAttemptReconciliationCli(argv = process.argv.slice
     const history = readStageBApplyAttemptHistory({ reservationIdentity: reconciliation.value.predecessor.reservationIdentity, run: awsRun });
     const existingClaim = history.transitions.at(-1)?.status === "ABORTED_BEFORE_APPLY" ? history.transitions.at(-1) : null;
     const predecessorTransitions = existingClaim ? history.transitions.slice(0, -1) : history.transitions;
-    const claim = createStageBApplyAttemptReconciliationClaim({ reservation: history.reservation, transitions: predecessorTransitions, reconciliationArtifact: reconciliation.value, reconciliationArtifactSha256, authorization: canonicalAuthorization, authorizationSha256: canonicalAuthorization.authorizationSha256, successorSourceSha: sourceSha, now });
+    const claim = existingClaim || createStageBApplyAttemptReconciliationClaim({ reservation: history.reservation, transitions: predecessorTransitions, reconciliationArtifact: reconciliation.value, reconciliationArtifactSha256, authorization: canonicalAuthorization, authorizationSha256: canonicalAuthorization.authorizationSha256, successorSourceSha: sourceSha, now });
     let claimError;
-    if (!existingClaim || canonicalJson(existingClaim) !== canonicalJson(claim)) {
+    if (!existingClaim) {
       const claimBytes = Buffer.from(`${JSON.stringify(claim, null, 2)}\n`);
       try { reserveTransition({ attemptId: claim.attemptId, sequence: claim.sequence, bytes: claimBytes, privateDirectory: os.tmpdir(), run: awsRun }); } catch (error) { claimError = error; }
     }
