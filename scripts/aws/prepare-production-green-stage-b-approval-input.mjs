@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -13,37 +14,26 @@ import {
   validateStageBApprovalPayload,
 } from "./production-green-stage-b-contract.mjs";
 import { stageBTemplateHashes } from "./production-green-stage-b-task-definitions.mjs";
-import { readBoundStageBPrivateJson, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { collectProductionGreenStageBApprovalEvidence, isAuthenticatedProductionGreenStageBApprovalEvidence } from "./collect-production-green-stage-b-approval-evidence.mjs";
+import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
+import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
+import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 
 export const STAGE_B_APPROVAL_INPUT_PRODUCER = "scripts/aws/prepare-production-green-stage-b-approval-input.mjs";
 export const STAGE_B_APPROVAL_INPUT_SCHEMA_VERSION = 1;
 export const STAGE_B_APPROVAL_INPUT_MAX_VALIDITY_MS = 7_200_000;
 export const STAGE_B_APPROVAL_INPUT_DEFAULT_PATH = "/secure/operator/production-rls-stage-b-approval-input.json";
+export const STAGE_B_APPROVAL_REVIEW_DEFAULT_PATH = "/secure/operator/production-rls-stage-b-approval-review.txt";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA = /^[a-f0-9]{40}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
 const UUID = /^[a-f0-9-]{16,64}$/;
-const OPERATOR_FIELDS = Object.freeze(["ticketId", "issuedAt", "expiresAt", "nonce"]);
+const OPERATOR_FIELDS = Object.freeze(["ticketId"]);
 const EVIDENCE_FIELDS = Object.freeze([
-  "releaseSha", "backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest",
-  "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "taskDefinitionArns",
-  "brokerVersion", "checkerIdentity", "deployerIdentity", "provenance",
+  "schemaVersion", "producer", "observedAt", "sourceCurrent", "runtimeBindingsCurrent", "releaseSha", "backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "taskDefinitionArns", "brokerVersion", "checkerIdentity", "deployerIdentity", "imageAuthorizationSha256", "tfvarsBindingSha256", "runtimeBindingSha256",
 ]);
-const EVIDENCE_PROVENANCE = Object.freeze({
-  releaseSha: "protected-main-checkout",
-  backendImageDigest: "production-green-stage-b-image-evidence",
-  workerImageDigest: "production-green-stage-b-image-evidence",
-  executorImageDigest: "production-green-stage-b-image-evidence",
-  canaryImageDigest: "production-green-stage-b-image-evidence",
-  sourceContractSha256: "generate-production-green-stage-b-tfvars",
-  migrationSetDigest: "generate-production-green-stage-b-tfvars",
-  packageChecksumSha256: "generate-production-green-stage-b-tfvars",
-  taskDefinitionArns: "stage-b-refresh-state",
-  brokerVersion: "stage-b-refresh-state",
-  checkerIdentity: "inherited-checker-session",
-  deployerIdentity: "authenticated-release-preflight",
-});
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const exactKeys = (value, expected) => Object.keys(value || {}).sort().join(",") === [...expected].sort().join(",");
@@ -54,10 +44,7 @@ function assertEvidence(evidence) {
   if (!evidence || typeof evidence !== "object" || Array.isArray(evidence) || !exactKeys(evidence, EVIDENCE_FIELDS)) {
     throw new Error("Authenticated Stage B approval evidence fields are incomplete or unexpected.");
   }
-  if (!evidence.provenance || !exactKeys(evidence.provenance, Object.keys(EVIDENCE_PROVENANCE))
-    || Object.entries(EVIDENCE_PROVENANCE).some(([field, producer]) => evidence.provenance[field] !== producer)) {
-    throw new Error("Authenticated evidence provenance is incomplete or not canonical.");
-  }
+  if (evidence.schemaVersion !== 1 || evidence.producer !== "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs" || evidence.sourceCurrent !== true || evidence.runtimeBindingsCurrent !== true || !/^\d{4}-\d\d-\d\dT/.test(evidence.observedAt || "")) throw new Error("Authenticated evidence provenance or currentness is incomplete.");
   if (!SHA.test(evidence.releaseSha || "")) throw new Error("Authenticated evidence releaseSha is not exact.");
   for (const field of ["sourceContractSha256", "migrationSetDigest", "packageChecksumSha256"]) {
     if (!DIGEST.test(evidence[field] || "")) throw new Error(`Authenticated evidence ${field} is malformed.`);
@@ -83,19 +70,21 @@ function deriveOperatorFields(operator = {}, now = new Date(), randomUuid = cryp
   if (!operator || typeof operator !== "object" || Array.isArray(operator) || Object.keys(operator).some((key) => !OPERATOR_FIELDS.includes(key))) throw new Error("Approval operator inputs contain an unexpected field.");
   const ticketId = String(operator.ticketId || "").trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(ticketId)) throw new Error("Approval ticketId is missing or malformed.");
-  const issuedAt = operator.issuedAt || now.toISOString();
+  const issuedAt = now.toISOString();
   const issuedMs = Date.parse(issuedAt);
   if (!Number.isFinite(issuedMs)) throw new Error("Approval issuedAt is malformed.");
-  const expiresAt = operator.expiresAt || new Date(issuedMs + STAGE_B_APPROVAL_INPUT_MAX_VALIDITY_MS).toISOString();
+  const expiresAt = new Date(issuedMs + STAGE_B_APPROVAL_INPUT_MAX_VALIDITY_MS).toISOString();
   const expiresMs = Date.parse(expiresAt);
   if (!Number.isFinite(expiresMs) || expiresMs <= issuedMs || expiresMs - issuedMs > STAGE_B_APPROVAL_INPUT_MAX_VALIDITY_MS) throw new Error("Approval expiry exceeds the two-hour contract.");
-  const nonce = operator.nonce || randomUuid();
+  const nonce = randomUuid();
   if (!UUID.test(nonce)) throw new Error("Approval nonce is malformed.");
   return { ticketId, issuedAt, expiresAt, nonce };
 }
 
 export async function prepareProductionGreenStageBApprovalInput({ evidence, protectedSourceSha, operator, now = new Date(), randomUuid = crypto.randomUUID } = {}) {
+  if (!isAuthenticatedProductionGreenStageBApprovalEvidence(evidence)) throw new Error("Approval input requires canonical authenticated evidence collection.");
   assertEvidence(evidence);
+  assertStageBDeploymentEvidenceFreshness(evidence.observedAt, { now, evidenceType: "Stage B approval evidence" });
   if (!SHA.test(protectedSourceSha || "") || evidence.releaseSha !== protectedSourceSha) throw new Error("Approval evidence is not bound to the protected source.");
   const operatorFields = deriveOperatorFields(operator, now, randomUuid);
   const input = {
@@ -172,10 +161,12 @@ export function formatProductionGreenStageBApprovalReview(input, inputSha256) {
   ].join("\n");
 }
 
-export function writeProductionGreenStageBApprovalInput({ result, outputPath, reviewOutputPath, repositoryRoot = root } = {}) {
+export function writeProductionGreenStageBApprovalInput({ result, outputPath, reviewOutputPath, repositoryRoot = root, fsOps } = {}) {
   if (!result?.bytes || !result?.inputSha256) throw new Error("Prepared Stage B approval input is missing.");
-  const written = writeStageBPrivateFileAtomic({ filePath: path.resolve(outputPath || process.env.MSCQR_STAGE_B_APPROVAL_INPUT_PATH || STAGE_B_APPROVAL_INPUT_DEFAULT_PATH), bytes: result.bytes, repositoryRoot, label: "Stage B approval input" });
-  const review = reviewOutputPath ? writeStageBPrivateFileAtomic({ filePath: path.resolve(reviewOutputPath), bytes: Buffer.from(`${result.review}\n`), repositoryRoot, label: "Stage B approval review" }) : null;
+  const [written, review] = writeStageBPrivateFilesAtomic({ repositoryRoot, ...(fsOps ? { fsOps } : {}), files: [
+    { filePath: path.resolve(outputPath || process.env.MSCQR_STAGE_B_APPROVAL_INPUT_PATH || STAGE_B_APPROVAL_INPUT_DEFAULT_PATH), bytes: result.bytes, label: "Stage B approval input" },
+    { filePath: path.resolve(reviewOutputPath || process.env.MSCQR_STAGE_B_APPROVAL_REVIEW_PATH || STAGE_B_APPROVAL_REVIEW_DEFAULT_PATH), bytes: Buffer.from(`${result.review}\n`), label: "Stage B approval review" },
+  ] });
   return { written, review };
 }
 
@@ -184,19 +175,20 @@ function assertCleanSource() { if (execFileSync("git", ["status", "--porcelain"]
 
 async function run(argv = process.argv.slice(2)) {
   assertCleanSource();
-  const evidencePath = requiredOption(argv, "--evidence");
-  const evidenceSha256 = requiredOption(argv, "--evidence-sha256");
-  const evidence = readBoundStageBPrivateJson({ filePath: evidencePath, expectedSha256: evidenceSha256, repositoryRoot: root, label: "Authenticated Stage B approval evidence" });
-  if (evidence.releaseSha !== currentHead()) throw new Error("Approval evidence is not bound to the current source HEAD.");
+  const allowed = new Set(["--ticket-id", "--image-authorization", "--tfvars", "--binding-report", "--release-preflight", "--output", "--review-output"]);
+  for (let index = 0; index < argv.length; index += 1) { if (!allowed.has(argv[index])) throw new Error("Unknown approval-input option."); index += 1; }
+  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION });
+  const checkerIdentity = JSON.parse(releaseRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn;
+  const live = {
+    configuration: JSON.parse(releaseRun(["lambda", "get-function-configuration", "--function-name", STAGE_B.brokerAliasArn, "--output", "json", "--no-cli-pager"])),
+    alias: JSON.parse(releaseRun(["lambda", "get-alias", "--function-name", STAGE_B.brokerFunctionArn, "--name", STAGE_B.brokerAliasQualifier, "--output", "json", "--no-cli-pager"])),
+  };
+  const imageAuthorization = JSON.parse(fs.readFileSync(requiredOption(argv, "--image-authorization"), "utf8"));
+  const { evidence } = collectProductionGreenStageBApprovalEvidence({ sourceSha: currentHead(), imageAuthorization, tfvarsPath: requiredOption(argv, "--tfvars"), bindingReportPath: requiredOption(argv, "--binding-report"), releasePreflightPath: requiredOption(argv, "--release-preflight"), checkerIdentity, live, verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: releaseRun }) });
   const result = await prepareProductionGreenStageBApprovalInput({
     evidence,
     protectedSourceSha: currentHead(),
-    operator: {
-      ticketId: requiredOption(argv, "--ticket-id"),
-      ...(option(argv, "--issued-at") ? { issuedAt: option(argv, "--issued-at") } : {}),
-      ...(option(argv, "--expires-at") ? { expiresAt: option(argv, "--expires-at") } : {}),
-      ...(option(argv, "--nonce") ? { nonce: option(argv, "--nonce") } : {}),
-    },
+    operator: { ticketId: requiredOption(argv, "--ticket-id") },
   });
   const output = writeProductionGreenStageBApprovalInput({ result, outputPath: option(argv, "--output"), reviewOutputPath: option(argv, "--review-output"), repositoryRoot: root });
   process.stdout.write(`${JSON.stringify({ status: "prepared", schemaVersion: STAGE_B_APPROVAL_INPUT_SCHEMA_VERSION, approvalId: result.input.approvalId, sourceSha: result.input.releaseSha, approvalInputPath: output.written.path, approvalInputSha256: output.written.sha256, checkerDecisionPresent: false, approvalSigned: false, approvalPublished: false })}\n`);

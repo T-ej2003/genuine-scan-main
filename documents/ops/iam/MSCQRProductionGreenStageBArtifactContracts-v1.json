@@ -733,9 +733,27 @@
       "symlink": "reject",
       "outsideRepository": true,
       "atomic": true,
+      "atomicGroup": "stage-b-approval-input-review-pair",
       "overwrite": false,
       "hashBound": true,
-      "atomicGroup": "stage-b-approval-input",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stage-b-approval-review",
+      "kind": "file",
+      "producer": "scripts/aws/prepare-production-green-stage-b-approval-input.mjs:run",
+      "consumers": [
+        "documents/security/rls-program/FULL_DATABASE_PRODUCTION_ACTIVATION_RUNBOOK.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "atomicGroup": "stage-b-approval-input-review-pair",
+      "overwrite": false,
+      "hashBound": true,
       "allOrNone": true,
       "rollback": "remove-committed-or-restore-backups"
     },
