@@ -1,6 +1,6 @@
 const READBACK_METADATA_FIELDS = Object.freeze(["taskDefinitionArn", "revision", "status", "registeredAt", "registeredBy", "tags", "requiresAttributes", "compatibilities"]);
 const ROOT_EMPTY_DEFAULT_FIELDS = Object.freeze(["placementConstraints", "volumes"]);
-const CONTAINER_EMPTY_DEFAULT_FIELDS = Object.freeze(["mountPoints", "portMappings", "systemControls", "volumesFrom"]);
+const CONTAINER_EMPTY_DEFAULT_FIELDS = Object.freeze(["environmentFiles", "mountPoints", "portMappings", "systemControls", "ulimits", "volumesFrom"]);
 
 export function normalizeEcsTaskDefinitionReadback(definition) {
   const normalized = structuredClone(definition);
