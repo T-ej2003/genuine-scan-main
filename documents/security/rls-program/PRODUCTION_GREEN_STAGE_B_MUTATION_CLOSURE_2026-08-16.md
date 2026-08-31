@@ -63,6 +63,65 @@ therefore reports the reservation as not authoritatively readable and does not
 consume it. Only conditional `PutObject` at the final mutation boundary decides
 whether the mutation right is available.
 
+### Apply-attempt result and reconciliation contract
+
+New reservations use schema version 3 and are append-only. The initial
+`RESERVED` object records the exact source, approved plan and saved-plan
+identities, state lineage/serial/digest, workspace, backend identity, execution
+principal, and the structured conditional-create/readback result. The wrapper
+publishes a separately keyed, conditionally-created transition record before
+Terraform is spawned. Transition records are read-only evidence; they never
+replace the immutable reservation object and are never overwritten or deleted.
+
+The allowed state machine is:
+
+```text
+RESERVED -> APPLY_INTENT_RECORDED -> APPLY_SPAWN_UNCERTAIN -> APPLIED
+      \-> ABORTED_BEFORE_APPLY                         \-> FAILED
+                                                        \-> UNKNOWN
+APPLY_INTENT_RECORDED -> ABORTED_BEFORE_APPLY
+```
+
+`RESERVED` and `APPLY_INTENT_RECORDED` are pre-spawn states. A governed
+reconciliation claim may use either state only by conditionally creating
+`ABORTED_BEFORE_APPLY` at the same next append-only sequence key required by
+the original continuation. The claim is valid only after exact readback and
+canonical history verification. If the original continuation wins that key,
+successor preparation fails; if the claim wins, the original cannot persist
+`APPLY_SPAWN_UNCERTAIN` and Terraform remains unreachable. A conditional-write
+timeout is resolved only by authenticating that exact history; ambiguity fails
+closed. Successor readiness exists only after the authenticated claim proves
+the predecessor terminal and non-executable.
+
+`APPLY_SPAWN_UNCERTAIN`, `APPLIED`, `FAILED`, `UNKNOWN`, and
+`ABORTED_BEFORE_APPLY` are terminal for automatic execution. The spawn-uncertain
+state conservatively means Terraform may have crossed the process/provider
+boundary. No current reconciliation can downgrade it, and a failed or uncertain
+apply is never retried from age, unchanged state, a missing local marker, or an
+operator assertion.
+
+The historical schema-v2 reservation
+`1aefb5f358412d102e68be79c324e221c6a7af4114f12ce18a9ddbd465d85021`
+is immutable incident evidence only:
+
+```text
+HISTORICAL_V2_RECONCILIATION=UNSAFE
+HISTORICAL_V2_RETRYABLE=false
+```
+
+No current observation, unchanged state, absence of observed provider mutation,
+operator assertion, elapsed time, or new human approval can make it retryable.
+The v3 `ABORTED_BEFORE_APPLY` claim does not apply to this historical incident.
+
+The reconciliation workflow publishes the canonical `authorization.json`
+member only after the production environment's independent required-reviewer
+approval. It grants no AWS or Terraform capability itself. A future successor
+execution must re-read the reservation, state, plan, and provider/reference
+safety evidence before any apply. Missing or contradictory evidence fails
+closed. No secret values, credentials, signed request contents, or private
+material are present in reservation, transition, reconciliation, or
+authorization evidence.
+
 The global mutation identity field audit is:
 
 | Field | Classification | Reservation-key effect |

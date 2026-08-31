@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, reserveStageBSharedApplyAttempt, runApply, showSavedPlan, stageBApplyArtifactSetIdentity, stageBApplyAttemptPath, stageBEffectiveOperatorHome } from "../apply-production-green-stage-b.mjs";
-import { stageBApplyAttemptS3Key } from "../aws/stage-b-terraform-backend-contract.mjs";
+import { stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { buildRootAttestationKeyPolicy, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import {
@@ -1945,6 +1945,10 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
         fixture.sharedReservations.set(artifactSetIdentity, Buffer.from(bytes));
         return { status: "reserved", key: stageBApplyAttemptS3Key(artifactSetIdentity) };
       },
+      reserveApplyAttemptTransition: ({ attemptId, sequence, bytes }) => {
+        fixture.sharedReservations.set(`${attemptId}/${sequence}`, Buffer.from(bytes));
+        return { status: "reserved", key: stageBAttemptStepS3ObjectKey(attemptId, sequence) };
+      },
       apply: (planPath) => {
         applyCalls.push(planPath);
         return { status: 0 };
@@ -2095,6 +2099,16 @@ test("S3 reservation uses conditional create as the first authoritative gate and
   assert.equal(calls[0][calls[0].indexOf("--server-side-encryption") + 1], "AES256");
   assert.equal(calls[0][calls[0].indexOf("--key") + 1], stageBApplyAttemptS3Key(identity));
   assert.equal(calls[1][1], "get-object");
+});
+
+test("production command-runner string results are normalized before reservation decisions", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-shared-reservation-string-result-"));
+  const identity = "c".repeat(64); const bytes = Buffer.from("{\"attempt\":1}\n");
+  const result = reserveStageBSharedApplyAttempt({ artifactSetIdentity: identity, bytes, privateDirectory: directory, run: (args) => {
+    if (args[1] === "get-object") fs.writeFileSync(args.at(-1), bytes);
+    return "{}\n";
+  } });
+  assert.deepEqual(result, { status: "reserved", key: stageBApplyAttemptS3Key(identity) });
 });
 
 test("shared reservation 412, 409, outage, and readback mismatch fail closed", () => {
@@ -2277,6 +2291,70 @@ test("reservation failure occurs before Terraform spawn", () => {
   assert.deepEqual(events, ["shared-reserve"]);
 });
 
+test("local marker failure after shared reservation remains pre-Terraform and cannot be replayed implicitly", () => {
+  const fixture = createValidStageBApplyFixture(); const input = validRealApplyInput(fixture); const events = [];
+  input.deps.reserveApplyAttempt = () => { events.push("local-marker-failure"); throw new Error("local marker failure"); };
+  input.deps.apply = () => { events.push("terraform"); return { status: 0 }; };
+  assert.throws(() => runApply(input), /local marker failure/);
+  assert.deepEqual(events, ["local-marker-failure"]);
+  assert.deepEqual(input.applyCalls, []);
+});
+
+test("apply-intent persistence failure blocks Terraform before the spawn boundary", () => {
+  const fixture = createValidStageBApplyFixture(); const input = validRealApplyInput(fixture); const events = [];
+  input.deps.reserveApplyAttemptTransition = () => { events.push("intent-failure"); throw new Error("intent persistence failure"); };
+  input.deps.apply = () => { events.push("terraform"); return { status: 0 }; };
+  assert.throws(() => runApply(input), /intent persistence failure/);
+  assert.deepEqual(events, ["intent-failure"]);
+  assert.deepEqual(input.applyCalls, []);
+});
+
+test("spawn-uncertainty persistence failure blocks Terraform after durable pre-spawn intent", () => {
+  const fixture = createValidStageBApplyFixture(); const input = validRealApplyInput(fixture); const events = [];
+  input.deps.reserveApplyAttemptTransition = ({ sequence, attemptId }) => {
+    events.push(`transition-${sequence}`);
+    if (sequence === 2) throw new Error("spawn-uncertainty persistence failure");
+    return { status: "reserved", key: stageBAttemptStepS3ObjectKey(attemptId, sequence) };
+  };
+  input.deps.apply = () => { events.push("terraform"); return { status: 0 }; };
+  assert.throws(() => runApply(input), /spawn-uncertainty persistence failure/);
+  assert.deepEqual(events, ["transition-1", "transition-2"]);
+  assert.deepEqual(input.applyCalls, []);
+});
+
+test("a reconciliation claim occupying the canonical spawn slot blocks the original apply seam", () => {
+  const fixture = createValidStageBApplyFixture(); const input = validRealApplyInput(fixture); const transitions = [];
+  input.deps.reserveApplyAttemptTransition = ({ sequence, attemptId }) => {
+    transitions.push(sequence);
+    return sequence === 2
+      ? { status: "occupied", key: stageBAttemptStepS3ObjectKey(attemptId, sequence) }
+      : { status: "reserved", key: stageBAttemptStepS3ObjectKey(attemptId, sequence) };
+  };
+  input.deps.apply = () => { throw new Error("Terraform must remain unreachable"); };
+  assert.throws(() => runApply(input), /apply-spawn uncertainty marker was not authenticated/);
+  assert.deepEqual(transitions, [1, 2]);
+  assert.deepEqual(input.applyCalls, []);
+});
+
+test("apply failure records a terminal failed result while thrown spawn ambiguity remains non-retryable", () => {
+  const failedFixture = createValidStageBApplyFixture(); const failed = validRealApplyInput(failedFixture);
+  failed.deps.apply = () => ({ status: 1 });
+  assert.throws(() => runApply(failed), /Terraform apply failed/);
+  const failedTransitions = [...failedFixture.sharedReservations.entries()].filter(([key]) => key.includes("/"));
+  assert.equal(failedTransitions.length, 3);
+  assert.equal(JSON.parse(failedTransitions[1][1]).status, "APPLY_SPAWN_UNCERTAIN");
+  assert.equal(JSON.parse(failedTransitions[2][1]).status, "FAILED");
+
+  const uncertainFixture = createValidStageBApplyFixture(); const uncertain = validRealApplyInput(uncertainFixture);
+  uncertain.deps.apply = () => { throw new Error("spawn outcome unknown"); };
+  assert.throws(() => runApply(uncertain), /spawn outcome unknown/);
+  const uncertainTransitions = [...uncertainFixture.sharedReservations.entries()].filter(([key]) => key.includes("/"));
+  assert.equal(uncertainTransitions.length, 3);
+  assert.equal(JSON.parse(uncertainTransitions[1][1]).status, "APPLY_SPAWN_UNCERTAIN");
+  assert.equal(JSON.parse(uncertainTransitions[2][1]).status, "UNKNOWN");
+  assert.deepEqual(uncertain.applyCalls, []);
+});
+
 test("pre-existing local evidence blocks before consuming a shared reservation", () => {
   const fixture = createValidStageBApplyFixture(); runApply(validRealApplyInput(fixture)); fixture.sharedReservations.clear();
   const input = validRealApplyInput(fixture); let sharedCalls = 0;
@@ -2290,9 +2368,10 @@ test("shared reservation and readback precede local reservation and Terraform sp
   const fixture = createValidStageBApplyFixture(); const input = validRealApplyInput(fixture); const events = [];
   input.deps.reserveSharedApplyAttempt = ({ artifactSetIdentity }) => { events.push("shared-reserved-and-verified"); return { status: "reserved", key: stageBApplyAttemptS3Key(artifactSetIdentity) }; };
   input.deps.reserveApplyAttempt = () => { events.push("local-evidence"); };
+  input.deps.reserveApplyAttemptTransition = ({ sequence, attemptId }) => { events.push(`transition-${sequence}`); return { status: "reserved", key: stageBAttemptStepS3ObjectKey(attemptId, sequence) }; };
   input.deps.apply = () => { events.push("terraform"); return { status: 0 }; };
   runApply(input);
-  assert.deepEqual(events, ["shared-reserved-and-verified", "local-evidence", "terraform"]);
+  assert.deepEqual(events, ["shared-reserved-and-verified", "local-evidence", "transition-1", "transition-2", "terraform", "transition-3"]);
 });
 
 test("apply rejects ambient Terraform CLI argument injection before artifacts or mutation", () => {

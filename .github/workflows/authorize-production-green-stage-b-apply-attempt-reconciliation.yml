@@ -1,0 +1,102 @@
+name: Authorize production Stage B apply-attempt reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Protected successor source SHA, required: true, type: string }
+      reconciliation_artifact_base64: { description: Exact non-secret reconciliation artifact, required: true, type: string }
+      reconciliation_artifact_sha256: { description: Canonical SHA256 identity of the reconciliation artifact, required: true, type: string }
+      approved_by: { description: Independent production reviewer login, required: true, type: string }
+      approver_role: { description: Independent reconciliation approver role, required: true, type: string }
+      verification_ref: { description: Reconciliation verification reference, required: true, type: string }
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  authorize-stage-b-apply-attempt-reconciliation:
+    name: Authorize exact Stage B apply-attempt reconciliation
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate protected source before dependencies
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_REPOSITORY: T-ej2003/genuine-scan-main
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          protected_main_sha="$(gh api "repos/$EXPECTED_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$SOURCE_SHA" = "$protected_main_sha"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked authorization dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Re-authenticate protected source after dependency installation
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Authenticate protected environment approval
+        id: environment-approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/stage-b-apply-attempt-reconciliation"
+          install -d -m 700 "$workdir"
+          node scripts/aws/production-github-environment-approval.mjs \
+            --output "$workdir/environment-approval.json" \
+            --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
+            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+          echo "sha256=$(sha256sum "$workdir/environment-approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Produce exact reconciliation authorization artifact
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RECONCILIATION_ARTIFACT_BASE64: ${{ inputs.reconciliation_artifact_base64 }}
+          RECONCILIATION_ARTIFACT_SHA256: ${{ inputs.reconciliation_artifact_sha256 }}
+          APPROVED_BY: ${{ inputs.approved_by }}
+          APPROVER_ROLE: ${{ inputs.approver_role }}
+          VERIFICATION_REF: ${{ inputs.verification_ref }}
+        run: |
+          set -euo pipefail
+          umask 077
+          workdir="$RUNNER_TEMP/stage-b-apply-attempt-reconciliation"
+          install -d -m 700 "$workdir"
+          printf '%s' "$RECONCILIATION_ARTIFACT_BASE64" | base64 --decode > "$workdir/reconciliation.json"
+          canonical_reconciliation_sha256="$(node scripts/aws/stage-b-apply-attempt-reconciliation.mjs --mode reconciliation-sha256 --reconciliation-artifact "$workdir/reconciliation.json" | node -pe 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).sha256')"
+          test "$canonical_reconciliation_sha256" = "$RECONCILIATION_ARTIFACT_SHA256"
+          node scripts/aws/stage-b-apply-attempt-reconciliation.mjs --mode authorize \
+            --source-sha "$SOURCE_SHA" \
+            --reconciliation-artifact "$workdir/reconciliation.json" \
+            --reconciliation-artifact-sha256 "$RECONCILIATION_ARTIFACT_SHA256" \
+            --environment-approval "$workdir/environment-approval.json" \
+            --environment-approval-sha256 "${{ steps.environment-approval.outputs.sha256 }}" \
+            --output "$workdir/authorization.json" \
+            --approved-by "$APPROVED_BY" \
+            --approver-role "$APPROVER_ROLE" \
+            --verification-ref "$VERIFICATION_REF"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-b-apply-attempt-reconciliation-authorization
+          path: ${{ runner.temp }}/stage-b-apply-attempt-reconciliation/authorization.json
+          if-no-files-found: error
+          retention-days: 90

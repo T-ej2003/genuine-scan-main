@@ -13,6 +13,7 @@ export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
   stageAReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-stage-a-reconciliation.yml@refs/heads/main",
   dualSlotRebaselineWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-dual-slot-rebaseline.yml@refs/heads/main",
   dualSlotRebaselineRecoveryWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-dual-slot-rebaseline-recovery.yml@refs/heads/main",
+  stageBApplyAttemptReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-green-stage-b-apply-attempt-reconciliation.yml@refs/heads/main",
   eventName: "workflow_dispatch",
   maxAgeMs: 30 * 60 * 1000,
 });
@@ -22,6 +23,7 @@ const approvedWorkflowRefs = new Set([
   PRODUCTION_ENVIRONMENT_APPROVAL.stageAReconciliationWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineRecoveryWorkflowRef,
+  PRODUCTION_ENVIRONMENT_APPROVAL.stageBApplyAttemptReconciliationWorkflowRef,
 ]);
 
 const SHA = /^[a-f0-9]{40}$/;
@@ -104,7 +106,12 @@ export function assertProductionEnvironmentApprovalEvidence(evidence, { sourceSh
     || evidence.workflowRunAttempt !== String(workflowRunAttempt || "") || !RUN_ID.test(evidence.workflowRunAttempt)
     || actor.toLowerCase() !== requiredText(executionActor, "executionActor").toLowerCase()
     || !Number.isSafeInteger(evidence.requiredReviewerCount) || evidence.requiredReviewerCount !== reviewers.length) throw new Error("GitHub environment approval evidence is not bound to this protected recovery run.");
-  const observed = new Date(evidence.observedAt);
+  assertProductionEnvironmentApprovalFreshness(evidence, { now });
+  return evidence;
+}
+
+export function assertProductionEnvironmentApprovalFreshness(evidence, { now = new Date() } = {}) {
+  const observed = new Date(evidence?.observedAt);
   const age = now.getTime() - observed.getTime();
   if (!Number.isFinite(observed.getTime()) || observed.toISOString() !== evidence.observedAt || age < 0 || age > PRODUCTION_ENVIRONMENT_APPROVAL.maxAgeMs) throw new Error("GitHub environment approval evidence is stale or malformed.");
   return evidence;
