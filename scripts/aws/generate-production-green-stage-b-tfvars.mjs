@@ -492,12 +492,13 @@ function assertStageAPrerequisiteBinding(report) {
   assertStageAInputMatchesStateBackup(input, stateBytes, stageAState, report);
 }
 
-export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindingReportSha256, expectedToolingSha, expectedToolingTreeSha256, expectedImageReleaseSha, expectedImageEvidenceSha256 } = {}) {
+export function assertStageBTfvarsBindingBytes({ tfvarsPath, bindingReportPath, tfvarsBytes, bindingReportBytes, bindingReportSha256, expectedToolingSha, expectedToolingTreeSha256, expectedImageReleaseSha, expectedImageEvidenceSha256 } = {}) {
   assertAbsoluteFile(tfvarsPath, "Tfvars"); assertAbsoluteFile(bindingReportPath, "Binding report");
   assertStageBPrivateFile({ filePath: bindingReportPath, repositoryRoot: root, label: "Stage B tfvars binding report" });
-  const tfvarsBytes = fs.readFileSync(tfvarsPath); const reportBytes = fs.readFileSync(bindingReportPath); const report = JSON.parse(reportBytes);
+  if (!Buffer.isBuffer(tfvarsBytes) || !Buffer.isBuffer(bindingReportBytes)) throw new Error("Stage B tfvars binding requires captured immutable bytes.");
+  const report = JSON.parse(bindingReportBytes);
   assertStageBCanonicalTfvarsFile({ tfvarsPath, bindingReport: report, tfvarsBytes });
-  if (bindingReportSha256 && sha256(reportBytes) !== bindingReportSha256) throw new Error("Stage B tfvars binding-report SHA256 does not match the approved digest.");
+  if (bindingReportSha256 && sha256(bindingReportBytes) !== bindingReportSha256) throw new Error("Stage B tfvars binding-report SHA256 does not match the approved digest.");
   if (report?.schemaVersion !== STAGE_B_TFVARS_BINDING_REPORT_SCHEMA_VERSION || report.tfvarsSchemaVersion !== STAGE_B_TFVARS_SCHEMA_VERSION || report.generator !== STAGE_B_TFVARS_GENERATOR) throw new Error("Stage B tfvars binding report is not produced by the canonical generator.");
   if (report.tfvarsSha256 !== sha256(tfvarsBytes)) throw new Error("Stage B tfvars was modified after canonical generation.");
   if (report.recoveryOnly !== undefined && typeof report.recoveryOnly !== "boolean") throw new Error("Stage B tfvars binding recovery-only flag is malformed.");
@@ -531,6 +532,18 @@ export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, bindi
     if (report.recoveryMode !== "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" || report.imageReleaseSha !== report.toolingSha || report.imagePublicationSourceSha !== report.toolingSha || report.imagePublicationWorkflowDefinitionSha !== report.toolingSha || !digestPattern.test(report.imagePublicationIdentitySha256 || "") || !/^\d+$/.test(String(report.imageEvidenceWorkflowRunId || ""))) throw new Error("Fresh-image partial-apply recovery tfvars binding is not source-bound to fresh publication evidence.");
   }
   return report;
+}
+
+export function assertStageBTfvarsBinding({ tfvarsPath, bindingReportPath, ...options } = {}) {
+  assertAbsoluteFile(tfvarsPath, "Tfvars"); assertAbsoluteFile(bindingReportPath, "Binding report");
+  assertStageBPrivateFile({ filePath: bindingReportPath, repositoryRoot: root, label: "Stage B tfvars binding report" });
+  return assertStageBTfvarsBindingBytes({
+    tfvarsPath,
+    bindingReportPath,
+    tfvarsBytes: fs.readFileSync(tfvarsPath),
+    bindingReportBytes: fs.readFileSync(bindingReportPath),
+    ...options,
+  });
 }
 
 function imageReferencePattern(value) { return imageUriPattern.test(String(value || "")); }

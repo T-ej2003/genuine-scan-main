@@ -147,9 +147,11 @@ Generate the source-contract and ordered migration digests locally.
 collector. It requires the release-deployer preflight to be the positive
 `ready-for-plan` result with every required read allowed, every readiness gate
 true, zero failure counters, and exact tfvars/binding-report hashes. It also
-verifies the signed current-source image authorization and fresh read-only
-broker alias/configuration observation, including the complete live approval
-binding. The preflight report is trusted only after the existing KMS-signed
+verifies the signed current-source image authorization and the fresh
+release-deployer-owned broker alias/version/configuration and exact
+task-definition observations captured with
+`--capture-stage-b-approval-live-observation`. The checker does not inspect
+Lambda or ECS directly. The preflight report is trusted only after the existing KMS-signed
 checker-trust attestation and signature are authenticated against the exact
 report bytes; report fields, permissions, and caller-supplied hashes are never
 authority by themselves.

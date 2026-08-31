@@ -4,9 +4,10 @@ import test from "node:test";
 import {
   STAGE_B_ECS_READ_ACTIONS,
   createAwsReader,
+  observeStageBBrokerApprovalBindings,
   observeStageBEcs,
 } from "../aws/production-green-stage-b-ecs-observations.mjs";
-import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
+import { STAGE_B, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILY_NAMES } from "../aws/stage-b-reference-audit-contract.mjs";
 
 const family = STAGE_B_TASK_DEFINITION_FAMILY_NAMES[0];
@@ -24,6 +25,29 @@ function reader(overrides = {}) {
   };
   return { ...base, ...overrides };
 }
+
+const brokerTaskDefinitions = Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${STAGE_B_BROKER_TASK_DEFINITION_FAMILIES[mode]}:4`]));
+function brokerReader(overrides = {}) {
+  return reader({
+    getAlias: () => ({ AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4" }),
+    getFunctionConfiguration: (functionArn, qualifier) => ({ FunctionArn: `${functionArn}:${qualifier}`, Version: qualifier, Environment: { Variables: { BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(brokerTaskDefinitions) } } }),
+    describeTaskDefinition: (arn) => ({ taskDefinition: { taskDefinitionArn: arn, family: arn.match(/task-definition\/([^:]+)/)[1], revision: 4, status: "ACTIVE" } }),
+    ...overrides,
+  });
+}
+
+test("release-deployer broker observation captures one alias-resolved version and every exact task definition", () => {
+  const observed = observeStageBBrokerApprovalBindings({ reader: brokerReader() });
+  assert.equal(observed.configuration.Version, "4");
+  assert.equal(observed.alias.FunctionVersion, "4");
+  assert.deepEqual(Object.keys(observed.taskDefinitions).sort(), [...STAGE_B_MODES].sort());
+});
+
+test("release-deployer broker observation rejects alias movement and an incomplete task map", () => {
+  let aliases = 0;
+  assert.throws(() => observeStageBBrokerApprovalBindings({ reader: brokerReader({ getAlias: () => ({ AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: String(++aliases === 1 ? 4 : 5) }) }) }), /changed|version/i);
+  assert.throws(() => observeStageBBrokerApprovalBindings({ reader: brokerReader({ getFunctionConfiguration: () => ({ FunctionArn: STAGE_B.brokerFunctionArn, Version: "4", Environment: { Variables: { BROKER_TASK_DEFINITIONS_JSON: "{}" } } }) }) }), /task-definition map/i);
+});
 
 test("the source-controlled companion policy contains audit reads plus the Stage A cluster read and no mutation", () => {
   const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json", "utf8"));

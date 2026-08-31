@@ -38,7 +38,8 @@ const assertNoTokens = (value) => {
   if (/{{[A-Z0-9_]+}}/.test(text)) throw new Error("Stage B task template has an unresolved binding.");
 };
 
-export const stageBTemplateHashes = () => Object.fromEntries(Object.entries(files).map(([kind]) => [kind, canonicalSha256(readTemplate(kind))]));
+const reviewedTemplate = (kind) => ({ ...readTemplate(kind), runtimePlatform: { ...STAGE_B.taskRuntimePlatform } });
+export const stageBTemplateHashes = () => Object.fromEntries(Object.entries(files).map(([kind]) => [kind, canonicalSha256(reviewedTemplate(kind))]));
 export const approvedNetworkConfiguration = (privateSubnetIds) => {
   if (!Array.isArray(privateSubnetIds) || privateSubnetIds.length !== STAGE_B.privateSubnetIds.length
       || [...privateSubnetIds].sort().join(",") !== [...STAGE_B.privateSubnetIds].sort().join(",")) {
@@ -56,6 +57,7 @@ export function assertFixedTaskDefinition(definition) {
   const scratchMount = container?.mountPoints?.find((mount) => /^(executor|canary)-tmp$/.test(mount.sourceVolume));
   const fargateSizes = new Set(["256/512", "256/1024", "512/1024", "512/2048", "1024/2048", "1024/3072", "1024/4096", "2048/4096", "2048/5120", "2048/6144", "2048/7168", "2048/8192", "4096/8192", "4096/16384", "4096/30720"]);
   if (!container || definition.networkMode !== "awsvpc" || !definition.requiresCompatibilities?.includes("FARGATE")
+      || !definition.runtimePlatform || canonicalSha256(definition.runtimePlatform) !== canonicalSha256(STAGE_B.taskRuntimePlatform)
       || container.privileged || container.interactive || container.pseudoTerminal || !Array.isArray(container.entryPoint)
       || (Object.hasOwn(container, "command") && (!Array.isArray(container.command) || container.command.length)) || !container.logConfiguration
       || !["awslogs"].includes(container.logConfiguration.logDriver) || !container.image?.includes("@sha256:")
@@ -90,7 +92,7 @@ export function renderStageBTaskDefinition(kind, bindings) {
     values.MODE = bindings.mode;
     values.CONFIRMATION = confirmations[bindings.mode] || "";
   }
-  const definition = replace(readTemplate(kind), values);
+  const definition = replace(reviewedTemplate(kind), values);
   assertNoTokens(definition);
   return assertFixedTaskDefinition(definition);
 }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,10 +17,13 @@ const releaseSha = "8d7ecc53a0c8d0ec07dfce1aeb03dc22d0f43f82";
 const checkerIdentity = "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/checker-session";
 const deployerIdentity = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/deployer-session";
 const digest = (character) => character.repeat(64);
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const taskDefinitionArns = Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${STAGE_B_BROKER_TASK_DEFINITION_FAMILIES[mode]}:4`]));
 const now = new Date("2026-08-31T10:01:00.000Z");
 const image = (repository, character) => ({ digest: `sha256:${character.repeat(64)}`, imageReference: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}@sha256:${character.repeat(64)}` });
-const report = { tfvarsSha256: digest("a"), brokerPackageRawSha256: digest("e"), images: { backend: image("mscqr-backend", "b"), worker: image("mscqr-worker", "a"), executor: image("mscqr-backend", "e"), canary: image("mscqr-backend", "c") } };
+const tfvarsBytes = Buffer.from("canonical-tfvars\n");
+const report = { tfvarsSha256: sha256(tfvarsBytes), brokerPackageRawSha256: digest("e"), images: { backend: image("mscqr-backend", "b"), worker: image("mscqr-worker", "a"), executor: image("mscqr-backend", "e"), canary: image("mscqr-backend", "c") } };
+const bindingReportBytes = Buffer.from(`${JSON.stringify(report)}\n`);
 const authorization = { imageEvidenceSha256: digest("d"), authorizationSha256: digest("f"), imageReleaseSha: releaseSha, images: [{ service: "backend", digest: report.images.backend.digest }, { service: "worker", digest: report.images.worker.digest }, { service: "rls-executor", digest: report.images.executor.digest }, { service: "rls-canary", digest: report.images.canary.digest }] };
 const brokerApprovalExpected = { releaseSha, sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c"), deploymentId: "phase2", greenDatabaseName: "mscqr_production_rls_green_phase2", administratorIdentity: "mscqr_prod_admin", databaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, executorSecurityGroupId: STAGE_B.executorSecurityGroupId };
 const brokerImages = { backendImageDigest: report.images.backend.imageReference, workerImageDigest: report.images.worker.imageReference, executorImageDigest: report.images.executor.imageReference, canaryImageDigest: report.images.canary.imageReference };
@@ -41,7 +45,7 @@ const awsNormalizedTaskDefinitionReadbacks = Object.fromEntries(Object.entries(t
   definition.volumes = definition.volumes || [];
   return [mode, { taskDefinition: Object.fromEntries(Object.entries(definition).reverse()) }];
 }));
-const preflight = (overrides = {}) => ({ status: "ready-for-plan", sourceSha: releaseSha, caller: deployerIdentity, account: STAGE_B.account, region: STAGE_B.region, backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, failed: [], skipped: [], requiredReads: { "ecs:DescribeTasks": "allowed" }, total: 1, allowed: 1, checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }, administratorReportSha256: digest("b"), releaseReadFailures: 0, configurationFailures: 0, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, tfvarsSha256: digest("a"), ...overrides });
+const preflight = (overrides = {}) => ({ status: "ready-for-plan", sourceSha: releaseSha, caller: deployerIdentity, account: STAGE_B.account, region: STAGE_B.region, backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, failed: [], skipped: [], requiredReads: { "ecs:DescribeTasks": "allowed" }, total: 1, allowed: 1, checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }, administratorReportSha256: digest("b"), releaseReadFailures: 0, configurationFailures: 0, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, tfvarsSha256: report.tfvarsSha256, bindingReportSha256: sha256(bindingReportBytes), ...overrides });
 const live = (overrides = {}) => {
   const base = { configuration: { FunctionArn: STAGE_B.brokerAliasArn, Version: "4", CodeSha256: Buffer.from(report.brokerPackageRawSha256, "hex").toString("base64"), Environment: { Variables: { BROKER_CLUSTER_ARN: STAGE_B.clusterArn, BROKER_APPROVAL_SECRET_ARN: STAGE_B.approvalSecretArn, BROKER_EXECUTOR_SECURITY_GROUP_ID: STAGE_B.executorSecurityGroupId, BROKER_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds), BROKER_REPLAY_TABLE: "replay", BROKER_RECEIPT_BUCKET: STAGE_B.receiptBucket, BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskDefinitionArns), BROKER_TASK_TEMPLATE_HASHES_JSON: JSON.stringify(stageBTemplateHashes()), BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify(brokerApprovalExpected), BROKER_IMAGES_JSON: JSON.stringify(brokerImages) } } }, alias: { AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4" }, taskDefinitions: taskDefinitionReadbacks };
   return { ...base, ...overrides, configuration: overrides.configuration || base.configuration, alias: overrides.alias || base.alias, taskDefinitions: overrides.taskDefinitions || base.taskDefinitions };
@@ -57,9 +61,9 @@ function signedPreflightTrust(reportValue = preflight(), source = releaseSha) {
 }
 
 function evidence(overrides = {}) {
-  const selectedPreflight = preflight(overrides.preflight);
+  const selectedPreflight = { ...preflight(overrides.preflight), stageBApprovalLiveObservation: live(overrides.live) };
   const trust = overrides.trust || signedPreflightTrust(overrides.trustReport || selectedPreflight, overrides.trustSource || releaseSha);
-  return collectProductionGreenStageBApprovalEvidence({ sourceSha: releaseSha, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, live: live(overrides.live), now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => ({ ...report, ...(overrides.report || {}) }), deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }), readPreflight: () => selectedPreflight, releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true }).evidence;
+  return collectProductionGreenStageBApprovalEvidence({ sourceSha: releaseSha, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => ({ ...report, ...(overrides.report || {}) }), deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }), readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }), readPreflight: () => selectedPreflight, releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true }).evidence;
 }
 
 test("canonical collector produces evidence accepted by the existing creator", async () => {
@@ -75,7 +79,7 @@ test("fabricated evidence and self-declared provenance cannot enter the producer
 });
 
 test("unsigned ready-for-plan, forged permissions, or a modified attested report is rejected", () => {
-  assert.throws(() => collectProductionGreenStageBApprovalEvidence({ sourceSha: releaseSha, imageAuthorization: authorization, checkerIdentity, live: live(), now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => report, readPreflight: () => preflight() }), /attestation|trust/i);
+  assert.throws(() => collectProductionGreenStageBApprovalEvidence({ sourceSha: releaseSha, imageAuthorization: authorization, checkerIdentity, now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => report, readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }), readPreflight: () => ({ ...preflight(), stageBApprovalLiveObservation: live() }) }), /attestation|trust/i);
   assert.throws(() => evidence({ preflight: { caller: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/forged" }, trustReport: preflight() }), /attestation|bound/i);
 });
 
@@ -83,7 +87,7 @@ test("preflight trust attestation binds source, signature authority, and exact r
   assert.throws(() => evidence({ trustSource: "f".repeat(40) }), /source|attestation/i);
   const trust = signedPreflightTrust();
   const wrongSigner = { ...trust, signatureArtifact: { ...trust.signatureArtifact, keyArn: "arn:aws:kms:eu-west-2:368992683803:key/wrong" } };
-  assert.throws(() => evidence({ trust: wrongSigner }), /signature|identity|key/i);
+  assert.throws(() => evidence({ trust: wrongSigner }), /signature|identity|key|bound/i);
   assert.throws(() => evidence({ preflight: { status: "blocked" }, trustReport: preflight() }), /bound|attestation/i);
 });
 
@@ -161,12 +165,37 @@ test("collector accepts AWS-normalized task readbacks with omitted defaults and 
   assert.doesNotThrow(() => evidence({ live: { taskDefinitions: awsNormalizedTaskDefinitionReadbacks } }));
 });
 
+test("collector binds one captured binding-report byte sequence for semantics and digest", () => {
+  let reads = 0;
+  let validatedBytes;
+  const selected = { ...preflight(), stageBApprovalLiveObservation: live() };
+  const trust = signedPreflightTrust(selected);
+  assert.doesNotThrow(() => collectProductionGreenStageBApprovalEvidence({
+    sourceSha: releaseSha, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, now,
+    validateImageAuthorization: () => {},
+    readTfvarsBinding: () => { reads += 1; return { tfvarsBytes, bindingReportBytes }; },
+    validateTfvarsBinding: ({ bindingReportBytes: bytes }) => { validatedBytes = bytes; return report; },
+    readPreflight: () => selected, releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true,
+    deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }),
+  }));
+  assert.equal(reads, 1);
+  assert.equal(validatedBytes, bindingReportBytes);
+  const spliced = { ...selected, bindingReportSha256: digest("f") };
+  assert.throws(() => collectProductionGreenStageBApprovalEvidence({
+    sourceSha: releaseSha, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, now,
+    validateImageAuthorization: () => {}, readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }), validateTfvarsBinding: () => report,
+    readPreflight: () => spliced, releasePreflightTrustEvidence: signedPreflightTrust(spliced), verifyReleasePreflightAttestationSignature: () => true,
+    deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }),
+  }), /binding report/);
+});
+
 for (const [label, mutate] of [
   ["image", (definition) => { definition.containerDefinitions[0].image = report.images.executor.imageReference.replace(/e{64}$/, "f".repeat(64)); }],
   ["environment", (definition) => { definition.containerDefinitions[0].environment[0].value = "changed"; }],
   ["secrets", (definition) => { definition.containerDefinitions[0].secrets[0].valueFrom = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:changed"; }],
   ["task role", (definition) => { definition.taskRoleArn = "arn:aws:iam::368992683803:role/changed"; }],
   ["network", (definition) => { definition.networkMode = "bridge"; }],
+  ["missing runtime platform", (definition) => { delete definition.runtimePlatform; }],
   ["runtime platform", (definition) => { definition.runtimePlatform = { cpuArchitecture: "ARM64", operatingSystemFamily: "LINUX" }; }],
   ["extra container", (definition) => { definition.containerDefinitions.push(structuredClone(definition.containerDefinitions[0])); }],
 ]) test(`collector rejects broker task-definition ${label} drift`, () => {
@@ -185,6 +214,8 @@ test("source exposes no caller-controlled evidence hash or time/nonce CLI switch
   const source = fs.readFileSync(path.resolve("scripts/aws/prepare-production-green-stage-b-approval-input.mjs"), "utf8");
   for (const option of ["--evidence", "--evidence-sha256", "--issued-at", "--expires-at", "--nonce"]) assert.doesNotMatch(source, new RegExp(option));
   assert.match(source, /writeStageBPrivateFilesAtomic/);
+  assert.doesNotMatch(source, /checkerRun\(\["(?:lambda|ecs)/);
+  assert.match(fs.readFileSync(path.resolve("scripts/aws/run-production-green-stage-b-preflight.mjs"), "utf8"), /capture-stage-b-approval-live-observation/);
 });
 
 test("input and mandatory review are an immutable transactional pair", async () => {

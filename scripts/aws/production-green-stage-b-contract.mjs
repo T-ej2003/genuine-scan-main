@@ -26,6 +26,7 @@ export const STAGE_B = Object.freeze({
   brokerFunctionArnWildcard: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*",
   brokerAliasArn: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
   brokerAliasQualifier: "reviewed",
+  taskRuntimePlatform: Object.freeze({ operatingSystemFamily: "LINUX", cpuArchitecture: "X86_64" }),
   frontendTaskDefinition: "mscqr-frontend:20",
 });
 

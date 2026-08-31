@@ -101,6 +101,7 @@ test("Stage B templates require immutable images, private executor networking, a
   for (const definition of [...Object.values(executors), canary, backend, worker]) {
     assertFixedTaskDefinition(definition);
     assert.equal(definition.containerDefinitions.length, 1);
+    assert.deepEqual(definition.runtimePlatform, STAGE_B.taskRuntimePlatform);
   }
   assert.match(JSON.stringify(executor), /rds!db-/);
   assert.doesNotMatch(`${JSON.stringify(canary)}${JSON.stringify(backend)}${JSON.stringify(worker)}`, /rds!db-/);
@@ -118,6 +119,9 @@ test("Stage B templates require immutable images, private executor networking, a
   assert.throws(() => renderStageBTaskDefinition("executor", { ...common, executorImage: "mscqr-backend:latest", mode: "full-rls-verification" }), /immutable/);
   assert.throws(() => renderStageBTaskDefinition("backend", { ...common, backendImage: image("mscqr-web", "5") }), /reviewed ECR repository/);
   assert.throws(() => assertFixedTaskDefinition({ ...backend, cpu: "256", memory: "3072" }), /fixed reviewed/);
+  assert.throws(() => assertFixedTaskDefinition({ ...backend, runtimePlatform: { operatingSystemFamily: "LINUX", cpuArchitecture: "ARM64" } }), /fixed reviewed/);
+  const { runtimePlatform, ...withoutRuntimePlatform } = backend;
+  assert.throws(() => assertFixedTaskDefinition(withoutRuntimePlatform), /fixed reviewed/);
 });
 
 test("broker rejects replay, task substitution, image substitution, and every caller override", async () => {

@@ -1,4 +1,4 @@
-import { STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { STAGE_B, assertStageBBrokerConfigurationIdentity, assertStageBBrokerTaskDefinitionMap } from "./production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILY_NAMES } from "./stage-b-reference-audit-contract.mjs";
 
 export const STAGE_B_ECS_READ_ACTIONS = Object.freeze([
@@ -189,6 +189,24 @@ const COMMANDS = Object.freeze({
   getAlias: ["lambda", "get-alias"],
 });
 
+export function observeStageBBrokerApprovalBindings({ reader } = {}) {
+  if (!reader || typeof reader.getAlias !== "function" || typeof reader.getFunctionConfiguration !== "function" || typeof reader.describeTaskDefinition !== "function") {
+    throw new Error("Stage B broker approval observation requires the canonical ECS/Lambda reader.");
+  }
+  const initialAlias = reader.getAlias();
+  const version = String(initialAlias?.FunctionVersion || "");
+  if (!/^[1-9][0-9]*$/.test(version)) throw new Error("Reviewed broker alias version is malformed.");
+  const configuration = reader.getFunctionConfiguration(STAGE_B.brokerFunctionArn, version);
+  const alias = reader.getAlias();
+  const broker = assertStageBBrokerConfigurationIdentity({ configuration, alias });
+  if (String(initialAlias.FunctionVersion) !== broker.configurationVersion) throw new Error("Reviewed broker alias changed during the immutable version observation.");
+  let taskDefinitionArns;
+  try { taskDefinitionArns = JSON.parse(configuration.Environment?.Variables?.BROKER_TASK_DEFINITIONS_JSON); } catch { throw new Error("Live broker task-definition map is malformed."); }
+  assertStageBBrokerTaskDefinitionMap(taskDefinitionArns);
+  const taskDefinitions = Object.fromEntries(Object.entries(taskDefinitionArns).map(([mode, arn]) => [mode, reader.describeTaskDefinition(arn)]));
+  return Object.freeze({ configuration, alias, taskDefinitions });
+}
+
 function parseJson(value, label) {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${label} is missing.`);
   try { return JSON.parse(value); } catch { throw new Error(`${label} is malformed JSON.`); }
@@ -230,7 +248,7 @@ function createAwsReader({ region, clusterArn, run }) {
     },
     describeTasks: (taskArns) => call("describeTasks", ["--cluster", clusterArn, "--tasks", ...taskArns]),
     describeTaskDefinition: (taskDefinition) => call("describeTaskDefinition", ["--task-definition", taskDefinition]),
-    getFunctionConfiguration: (functionArn) => call("getFunctionConfiguration", ["--function-name", functionArn]),
+    getFunctionConfiguration: (functionArn, qualifier) => call("getFunctionConfiguration", ["--function-name", functionArn, ...(qualifier ? ["--qualifier", qualifier] : [])]),
     getAlias: (functionArn = STAGE_B.brokerFunctionArn, aliasName = STAGE_B.brokerAliasQualifier) => call("getAlias", ["--function-name", functionArn, "--name", aliasName]),
   };
 }

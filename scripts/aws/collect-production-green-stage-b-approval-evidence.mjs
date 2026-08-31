@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertImageAuthorization } from "./production-cutover-control-plane.mjs";
 import { assertStageBBrokerConfigurationBindings, assertStageBBrokerConfigurationIdentity, assertStageBBrokerRuntimeBindings, assertStageBBrokerTaskDefinitionMap, canonicalJson, canonicalStageBBrokerApprovalExpected, hasCompleteStageBTaskMaps, STAGE_B } from "./production-green-stage-b-contract.mjs";
-import { assertStageBTfvarsBinding, deriveContractDigests } from "./generate-production-green-stage-b-tfvars.mjs";
+import { assertStageBTfvarsBindingBytes, deriveContractDigests } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { renderStageBTaskDefinition, stageBTemplateHashes } from "./production-green-stage-b-task-definitions.mjs";
@@ -50,11 +50,18 @@ function authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinit
 export const STAGE_B_APPROVAL_EVIDENCE_PRODUCER = "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs";
 export const STAGE_B_APPROVAL_EVIDENCE_SCHEMA_VERSION = 1;
 
-export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageAuthorization, tfvarsPath, bindingReportPath, releasePreflightPath, releasePreflightAttestationPath, releasePreflightAttestationSignaturePath, releasePreflightTrustEvidence, checkerIdentity, live, now = new Date(), verifyImageEvidence, verifyReleasePreflightAttestationSignature, validateImageAuthorization = assertImageAuthorization, validateTfvarsBinding = assertStageBTfvarsBinding, deriveContracts = deriveContractDigests, readPreflight } = {}) {
+export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageAuthorization, tfvarsPath, bindingReportPath, releasePreflightPath, releasePreflightAttestationPath, releasePreflightAttestationSignaturePath, releasePreflightTrustEvidence, checkerIdentity, now = new Date(), verifyImageEvidence, verifyReleasePreflightAttestationSignature, validateImageAuthorization = assertImageAuthorization, validateTfvarsBinding = assertStageBTfvarsBindingBytes, deriveContracts = deriveContractDigests, readPreflight, readTfvarsBinding } = {}) {
   if (!SHA.test(sourceSha || "") || !CHECKER.test(checkerIdentity || "")) throw new Error("Approval evidence source or checker identity is invalid.");
   validateImageAuthorization(imageAuthorization, sourceSha, { now, verifyImageEvidence });
   const imageEvidenceSha256 = imageAuthorization.imageEvidenceSha256;
-  const report = validateTfvarsBinding({ tfvarsPath, bindingReportPath, expectedToolingSha: sourceSha, expectedImageReleaseSha: imageAuthorization.imageReleaseSha, expectedImageEvidenceSha256: imageEvidenceSha256 });
+  const capturedTfvars = readTfvarsBinding
+    ? readTfvarsBinding({ tfvarsPath, bindingReportPath })
+    : {
+      tfvarsBytes: readStageBPrivateFileBytes({ filePath: tfvarsPath, repositoryRoot: root, label: "Stage B tfvars" }).bytes,
+      bindingReportBytes: readStageBPrivateFileBytes({ filePath: bindingReportPath, repositoryRoot: root, label: "Stage B tfvars binding report" }).bytes,
+    };
+  if (!Buffer.isBuffer(capturedTfvars?.tfvarsBytes) || !Buffer.isBuffer(capturedTfvars?.bindingReportBytes)) throw new Error("Stage B tfvars binding must be captured as immutable bytes.");
+  const report = validateTfvarsBinding({ tfvarsPath, bindingReportPath, tfvarsBytes: capturedTfvars.tfvarsBytes, bindingReportBytes: capturedTfvars.bindingReportBytes, expectedToolingSha: sourceSha, expectedImageReleaseSha: imageAuthorization.imageReleaseSha, expectedImageEvidenceSha256: imageEvidenceSha256 });
   const reportBytes = readPreflight
     ? Buffer.from(`${JSON.stringify(readPreflight(releasePreflightPath))}\n`)
     : readStageBPrivateFileBytes({ filePath: releasePreflightPath, repositoryRoot: root, label: "Release-deployer preflight evidence" }).bytes;
@@ -93,15 +100,14 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
       || preflight.sourceLivePolicyMismatches !== 0 || preflight.administratorSimulationFailures !== 0) {
     throw new Error("Release-deployer preflight is not an authenticated ready-for-plan report.");
   }
-  const tfvarsBytes = readPreflight ? null : readStageBPrivateFileBytes({ filePath: tfvarsPath, repositoryRoot: root, label: "Stage B tfvars" }).bytes;
-  const bindingReportBytes = readPreflight ? null : readStageBPrivateFileBytes({ filePath: bindingReportPath, repositoryRoot: root, label: "Stage B tfvars binding report" }).bytes;
-  const tfvarsSha256 = tfvarsBytes ? digest(tfvarsBytes) : preflight.tfvarsSha256;
-  const bindingReportSha256 = bindingReportBytes ? digest(bindingReportBytes) : undefined;
+  const tfvarsSha256 = digest(capturedTfvars.tfvarsBytes);
+  const bindingReportSha256 = digest(capturedTfvars.bindingReportBytes);
   if (!/^[a-f0-9]{64}$/.test(tfvarsSha256 || "") || report.tfvarsSha256 !== tfvarsSha256 || preflight.tfvarsSha256 !== tfvarsSha256
       || preflight.bindingReportSha256 !== undefined && preflight.bindingReportSha256 !== bindingReportSha256) {
     throw new Error("Release-deployer preflight is not bound to the selected canonical tfvars and binding report.");
   }
-  if (!live || typeof live !== "object") throw new Error("Live Stage B approval evidence reader is required.");
+  const live = preflight.stageBApprovalLiveObservation;
+  if (!live || typeof live !== "object" || Array.isArray(live)) throw new Error("Authenticated release-preflight live Stage B approval observation is required.");
   const broker = assertStageBBrokerConfigurationIdentity({ configuration: live.configuration, alias: live.alias });
   const variables = live.configuration?.Environment?.Variables;
   const taskDefinitionArns = parse(variables?.BROKER_TASK_DEFINITIONS_JSON, "Live broker task-definition map");
@@ -147,7 +153,7 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
     checkerIdentity,
     deployerIdentity: preflight.caller,
     imageAuthorizationSha256: imageAuthorization.authorizationSha256,
-    tfvarsBindingSha256: bindingReportBytes ? digest(bindingReportBytes) : digest(canonicalJson(report)),
+    tfvarsBindingSha256: bindingReportSha256,
     runtimeBindingSha256: digest(canonicalJson({ broker, brokerCodeSha256, taskDefinitionArns, taskDefinitionContentSha256, templateHashes, approvalExpected, images: liveImages })),
   });
   authenticatedEvidence.add(evidence);

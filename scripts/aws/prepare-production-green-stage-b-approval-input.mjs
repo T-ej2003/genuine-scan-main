@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -10,7 +9,6 @@ import {
   STAGE_B_APPROVAL_FIELDS,
   STAGE_B_APPROVAL_SCHEMA_VERSION,
   canonicalJson,
-  assertStageBBrokerTaskDefinitionMap,
   stageBApprovalIdForReleaseSha,
   validateStageBApprovalPayload,
 } from "./production-green-stage-b-contract.mjs";
@@ -21,7 +19,7 @@ import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from 
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 import { createReleasePreflightCheckerTrustSignatureVerifier } from "./production-release-preflight-checker-attestation.mjs";
-import { createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
+import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 
 export const STAGE_B_APPROVAL_INPUT_PRODUCER = "scripts/aws/prepare-production-green-stage-b-approval-input.mjs";
 export const STAGE_B_APPROVAL_INPUT_SCHEMA_VERSION = 1;
@@ -188,26 +186,22 @@ export function writeProductionGreenStageBApprovalInput({ result, outputPath, re
 function currentHead() { return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(); }
 function assertCleanSource() { if (execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim()) throw new Error("Approval-input producer requires a clean source checkout."); }
 
+function restrictCheckerRunner(run) {
+  return (args) => {
+    if (!Array.isArray(args) || !["sts", "kms"].includes(args[0])) throw new Error("Independent checker session may only authenticate itself or verify existing evidence.");
+    return run(args);
+  };
+}
+
 async function run(argv = process.argv.slice(2)) {
   assertCleanSource();
   const allowed = new Set(["--ticket-id", "--image-authorization", "--tfvars", "--binding-report", "--release-preflight", "--release-preflight-attestation", "--release-preflight-attestation-signature", "--output", "--review-output"]);
   for (let index = 0; index < argv.length; index += 1) { if (!allowed.has(argv[index])) throw new Error("Unknown approval-input option."); index += 1; }
-  const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION });
-  const checkerIdentity = JSON.parse(releaseRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn;
-  const alias = JSON.parse(releaseRun(["lambda", "get-alias", "--function-name", STAGE_B.brokerFunctionArn, "--name", STAGE_B.brokerAliasQualifier, "--output", "json", "--no-cli-pager"]));
-  const brokerVersion = String(alias.FunctionVersion || "");
-  if (!/^[1-9][0-9]*$/.test(brokerVersion)) throw new Error("Reviewed broker alias version is malformed.");
-  const configuration = JSON.parse(releaseRun(["lambda", "get-function-configuration", "--function-name", STAGE_B.brokerFunctionArn, "--qualifier", brokerVersion, "--output", "json", "--no-cli-pager"]));
-  let taskDefinitionArns;
-  try { taskDefinitionArns = JSON.parse(configuration.Environment?.Variables?.BROKER_TASK_DEFINITIONS_JSON); } catch { throw new Error("Live broker task-definition map is malformed."); }
-  assertStageBBrokerTaskDefinitionMap(taskDefinitionArns);
-  const confirmedAlias = JSON.parse(releaseRun(["lambda", "get-alias", "--function-name", STAGE_B.brokerFunctionArn, "--name", STAGE_B.brokerAliasQualifier, "--output", "json", "--no-cli-pager"]));
-  assertStableBrokerAliasObservation({ initialAlias: alias, confirmedAlias, configuration });
-  const ecsReader = createAwsReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn, run: releaseRun });
-  const taskDefinitions = Object.fromEntries(Object.entries(taskDefinitionArns || {}).map(([mode, arn]) => [mode, ecsReader.describeTaskDefinition(arn)]));
-  const live = { configuration, alias: confirmedAlias, taskDefinitions };
-  const imageAuthorization = JSON.parse(fs.readFileSync(requiredOption(argv, "--image-authorization"), "utf8"));
-  const { evidence } = collectProductionGreenStageBApprovalEvidence({ sourceSha: currentHead(), imageAuthorization, tfvarsPath: requiredOption(argv, "--tfvars"), bindingReportPath: requiredOption(argv, "--binding-report"), releasePreflightPath: requiredOption(argv, "--release-preflight"), releasePreflightAttestationPath: requiredOption(argv, "--release-preflight-attestation"), releasePreflightAttestationSignaturePath: requiredOption(argv, "--release-preflight-attestation-signature"), checkerIdentity, live, verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: releaseRun }), verifyReleasePreflightAttestationSignature: createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun }) });
+  const checkerRun = restrictCheckerRunner(createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION }));
+  const checkerIdentity = JSON.parse(checkerRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn;
+  const imageAuthorizationBytes = readStageBPrivateFileBytes({ filePath: requiredOption(argv, "--image-authorization"), repositoryRoot: root, label: "Stage B image authorization" }).bytes;
+  const imageAuthorization = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(imageAuthorizationBytes));
+  const { evidence } = collectProductionGreenStageBApprovalEvidence({ sourceSha: currentHead(), imageAuthorization, tfvarsPath: requiredOption(argv, "--tfvars"), bindingReportPath: requiredOption(argv, "--binding-report"), releasePreflightPath: requiredOption(argv, "--release-preflight"), releasePreflightAttestationPath: requiredOption(argv, "--release-preflight-attestation"), releasePreflightAttestationSignaturePath: requiredOption(argv, "--release-preflight-attestation-signature"), checkerIdentity, verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: checkerRun }), verifyReleasePreflightAttestationSignature: createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun: checkerRun }) });
   const result = await prepareProductionGreenStageBApprovalInput({
     evidence,
     protectedSourceSha: currentHead(),
