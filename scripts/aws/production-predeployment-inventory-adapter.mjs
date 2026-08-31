@@ -40,6 +40,7 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
     if (!registrationPromise) {
       registrationPromise = registerPreDeploymentInventoryTaskDefinition({
         input: { ...taskInput },
+        existingTaskDefinitionArn: config.inventoryTaskDefinitionArn,
         register: async (registration) => {
           const response = run(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify({ ...registration.taskDefinition, tags: registration.tags })]);
           return typeof response === "string" ? JSON.parse(response) : response;
@@ -75,7 +76,7 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
         if (invocation.FunctionError) throw new Error("Pre-deployment inventory broker returned a function error.");
         const response = JSON.parse(readFileSync(outputPath, "utf8"));
         if (response.status !== "completed" || response.sourceSha !== sourceSha || response.rotationId !== rotationId || response.taskDefinitionArn !== taskDefinitionArn) throw new Error("Pre-deployment inventory broker evidence is not bound to this task.");
-        return { inventory: response.inventory, taskArn: response.taskArn, taskDefinitionArn, sourceSha, rotationId, valid: true, evidenceRef: `predeployment-inventory:${response.taskArn}`, evidenceSha256: response.receiptSha256 || response.evidenceSha256, mutationCount: 1, mutationPayload: { operation: "RegisterTaskDefinition", taskDefinitionArn } };
+        return { inventory: response.inventory, taskArn: response.taskArn, taskDefinitionArn, sourceSha, rotationId, valid: true, evidenceRef: `predeployment-inventory:${response.taskArn}`, evidenceSha256: response.receiptSha256 || response.evidenceSha256, mutationCount: registered.mutationCount, ...(registered.mutationCount ? { mutationPayload: { operation: "RegisterTaskDefinition", taskDefinitionArn } } : {}) };
       } finally {
         rmSync(directory, { recursive: true, force: true });
       }

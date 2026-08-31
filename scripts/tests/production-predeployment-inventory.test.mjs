@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { createProductionPreDeploymentInventoryAdapter, PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS, PREDEPLOYMENT_BROKER_CALLER_TIMEOUT_HEADROOM_SECONDS } from "../aws/production-predeployment-inventory-adapter.mjs";
 import { assertPreDeploymentInventoryResult, createBrokerRuntimeConfig, createPreDeploymentInventoryHandler, createPreDeploymentOperationIdentity, preDeploymentOperationKey, validatePreDeploymentInventoryConfiguration, PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS, PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
-import { buildPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAG } from "../aws/production-predeployment-inventory-task.mjs";
+import { assertPreDeploymentInventoryTaskDefinition, buildPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAG } from "../aws/production-predeployment-inventory-task.mjs";
 import { assertBoundedRotationInventory, ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 
@@ -35,6 +35,12 @@ const config = {
 const brokerTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:19";
 const brokerTaskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/inventory-19";
 const brokerTags = [{ key: "Component", value: "full-rls-green-stage-b" }, { key: "Environment", value: "production" }, { key: "ManagedBy", value: "Terraform" }, { key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }];
+const ecsDefaultedReadback = (definition) => ({
+  ...structuredClone(definition),
+  containerDefinitions: definition.containerDefinitions.map((container) => ({ ...structuredClone(container), cpu: 0, mountPoints: [], portMappings: [], systemControls: [], volumesFrom: [] })),
+  placementConstraints: [],
+  volumes: [],
+});
 const brokerConfig = {
   ...config,
   clusterArn: STAGE_B.clusterArn,
@@ -110,6 +116,31 @@ test("predeployment task is fixed, terminating, and not a governed ECS Exec targ
   assert.equal(tags.some((tag) => tag.key === "MSCQRExecTarget"), false);
 });
 
+test("inventory readback accepts only the observed ECS default normalization", () => {
+  const input = { backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName, inventoryTaskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task", inventoryExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution" };
+  const expected = buildPreDeploymentInventoryTaskDefinition(input).taskDefinition;
+  assert.doesNotThrow(() => assertPreDeploymentInventoryTaskDefinition(ecsDefaultedReadback(expected), input));
+  const rejected = [
+    ["container CPU", (definition) => { definition.containerDefinitions[0].cpu = 128; }],
+    ["task CPU", (definition) => { definition.cpu = "512"; }],
+    ["memory", (definition) => { definition.memory = "1024"; }],
+    ["image", (definition) => { definition.containerDefinitions[0].image = image.replace(/b/g, "c"); }],
+    ["command", (definition) => { definition.containerDefinitions[0].command = ["/app/scripts/unreviewed.mjs"]; }],
+    ["environment", (definition) => { definition.containerDefinitions[0].environment[0].value = "f".repeat(40); }],
+    ["task role", (definition) => { definition.taskRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution"; }],
+    ["execution role", (definition) => { definition.executionRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"; }],
+    ["network mode", (definition) => { definition.networkMode = "bridge"; }],
+    ["runtime platform", (definition) => { definition.runtimePlatform = { operatingSystemFamily: "LINUX", cpuArchitecture: "X86_64" }; }],
+    ["family", (definition) => { definition.family = "unreviewed-family"; }],
+    ["extra container", (definition) => { definition.containerDefinitions.push({ name: "sidecar" }); }],
+  ];
+  for (const [label, mutate] of rejected) {
+    const readback = ecsDefaultedReadback(expected);
+    mutate(readback);
+    assert.throws(() => assertPreDeploymentInventoryTaskDefinition(readback, input), /task definition differs from the reviewed payload/, label);
+  }
+});
+
 test("production predeployment adapter registers then invokes only the reviewed broker operation", async () => {
   const calls = [];
   const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:19";
@@ -125,7 +156,7 @@ test("production predeployment adapter registers then invokes only the reviewed 
       registeredTags = tags;
       return JSON.stringify({ taskDefinition: { ...registeredDefinition, taskDefinitionArn }, tags });
     }
-    if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: { ...registeredDefinition, taskDefinitionArn, status: "ACTIVE" }, tags: registeredTags });
+    if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: { ...ecsDefaultedReadback(registeredDefinition), taskDefinitionArn, status: "ACTIVE" }, tags: registeredTags });
     if (args[0] === "lambda" && args[1] === "invoke") {
       writeFileSync(args.at(-4), JSON.stringify({ status: "completed", sourceSha, rotationId: "rotation-1", taskDefinitionArn, taskArn, inventory }));
       return JSON.stringify({ StatusCode: 200 });
@@ -141,6 +172,29 @@ test("production predeployment adapter registers then invokes only the reviewed 
   assert.deepEqual(invoke.slice(invoke.indexOf("--cli-read-timeout"), invoke.indexOf("--payload")), ["--cli-read-timeout", String(PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS)]);
   assert.equal(PREDEPLOYMENT_BROKER_CALLER_TIMEOUT_HEADROOM_SECONDS, 20);
   assert.doesNotMatch(invoke.join(" "), /ExecuteCommand|--overrides|MSCQRExecTarget/);
+  assert.equal(result.mutationCount, 1);
+});
+
+test("production predeployment adapter reuses an exact existing revision after authenticated readback", async () => {
+  const calls = [];
+  const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:1";
+  const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/inventory-1";
+  const input = { ...config, inventoryTaskDefinitionArn: taskDefinitionArn };
+  const definition = buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition;
+  const adapter = createProductionPreDeploymentInventoryAdapter({ run: (args) => {
+    calls.push(args);
+    if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: { ...ecsDefaultedReadback(definition), taskDefinitionArn, status: "ACTIVE" } });
+    if (args[0] === "lambda" && args[1] === "invoke") {
+      writeFileSync(args.at(-4), JSON.stringify({ status: "completed", sourceSha, rotationId: "rotation-1", taskDefinitionArn, taskArn, inventory }));
+      return JSON.stringify({ StatusCode: 200 });
+    }
+    throw new Error(`unexpected command: ${args.join(" ")}`);
+  }, sourceSha, imageDigest: image, config: input });
+  const result = await adapter.run({ rotationId: "rotation-1" });
+  assert.equal(result.taskDefinitionArn, taskDefinitionArn);
+  assert.equal(result.mutationCount, 0);
+  assert.equal(calls.filter(([service, operation]) => service === "ecs" && operation === "register-task-definition").length, 0);
+  assert.equal(calls.filter(([service, operation]) => service === "ecs" && operation === "describe-task-definition").length, 1);
 });
 
 test("cutover predeployment adapter uses the authorized full image and rejects the bare digest", async () => {

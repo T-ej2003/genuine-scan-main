@@ -1068,6 +1068,11 @@ test("BOOTSTRAP_ARGUMENTS accept the exact successor-recovery evidence options",
   for (const argv of [["--recovery-envelope"], ["--original-rebaseline-preparation"], ["--recovery-envelope", "x", "--recovery-envelope", "y"], ["--recovery-envelope", "x", "--recovery-unknown", "y"]]) assert.throws(() => parseBootstrapArgs(argv), /Invalid|Duplicate|unsupported/);
 });
 
+test("BOOTSTRAP_ARGUMENTS accept an exact predeployment inventory revision for readback reuse", () => {
+  const parsed = parseBootstrapArgs(["--inventory-task-definition-arn", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:1"]);
+  assert.equal(parsed.get("inventory-task-definition-arn"), "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:1");
+});
+
 test("REAL successor-recovery runtime path preserves recovery context through adapter construction", () => {
   const directory = fsTemp();
   const recoverySource = PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA;
