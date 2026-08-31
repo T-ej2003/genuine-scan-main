@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
+import { canonicalizeEcsTaskDefinition, normalizeEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 
 const TEMPLATE_PATH = path.resolve("infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-rotation-inventory.json");
 const FAMILY = "mscqr-production-rls-green-predeployment-inventory";
@@ -21,10 +22,6 @@ export const PREDEPLOYMENT_INVENTORY_TAGS = Object.freeze([
 ]);
 export const PREDEPLOYMENT_INVENTORY_COMMAND = Object.freeze(["/app/scripts/production-rotation-state-inventory.mjs"]);
 
-const READBACK_METADATA_FIELDS = Object.freeze(["taskDefinitionArn", "revision", "status", "registeredAt", "registeredBy", "tags", "requiresAttributes", "compatibilities"]);
-const ROOT_EMPTY_DEFAULT_FIELDS = Object.freeze(["placementConstraints", "volumes"]);
-const CONTAINER_EMPTY_DEFAULT_FIELDS = Object.freeze(["mountPoints", "portMappings", "systemControls", "volumesFrom"]);
-
 const replace = (value, bindings) => Array.isArray(value) ? value.map((item) => replace(item, bindings)) : value && typeof value === "object"
   ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replace(item, bindings)]))
   : typeof value === "string" ? value.replace(/{{([A-Z0-9_]+)}}/g, (_, key) => bindings[key] ?? (() => { throw new Error(`Missing inventory task binding: ${key}.`); })()) : value;
@@ -38,24 +35,11 @@ export function buildPreDeploymentInventoryTaskDefinition({ backendImage, releas
   return { taskDefinition: definition, tags: PREDEPLOYMENT_INVENTORY_TAGS };
 }
 
-export function normalizePreDeploymentInventoryTaskDefinitionReadback(definition) {
-  const normalized = structuredClone(definition);
-  for (const field of READBACK_METADATA_FIELDS) delete normalized[field];
-  for (const field of ROOT_EMPTY_DEFAULT_FIELDS) if (Array.isArray(normalized[field]) && normalized[field].length === 0) delete normalized[field];
-  if (Array.isArray(normalized.containerDefinitions)) {
-    normalized.containerDefinitions = normalized.containerDefinitions.map((container) => {
-      const normalizedContainer = structuredClone(container);
-      if (!Object.hasOwn(normalizedContainer, "cpu")) normalizedContainer.cpu = 0;
-      for (const field of CONTAINER_EMPTY_DEFAULT_FIELDS) if (Array.isArray(normalizedContainer[field]) && normalizedContainer[field].length === 0) delete normalizedContainer[field];
-      return normalizedContainer;
-    });
-  }
-  return normalized;
-}
+export const normalizePreDeploymentInventoryTaskDefinitionReadback = normalizeEcsTaskDefinitionReadback;
 
 export function assertPreDeploymentInventoryTaskDefinition(definition, expected = {}) {
   const payload = buildPreDeploymentInventoryTaskDefinition({ backendImage: expected.backendImage || definition?.containerDefinitions?.[0]?.image, releaseSha: expected.releaseSha || definition?.containerDefinitions?.[0]?.environment?.find(({ name }) => name === "RELEASE_GIT_SHA")?.value, databaseUrl: expected.databaseUrl || definition?.containerDefinitions?.[0]?.secrets?.find(({ name }) => name === "DATABASE_URL")?.valueFrom, rotationInventoryRlsRole: expected.rotationInventoryRlsRole || definition?.containerDefinitions?.[0]?.environment?.find(({ name }) => name === "ROTATION_INVENTORY_RLS_ROLE")?.value, inventoryLogGroup: expected.inventoryLogGroup || definition?.containerDefinitions?.[0]?.logConfiguration?.options?.["awslogs-group"], inventoryTaskRoleArn: expected.inventoryTaskRoleArn || definition?.taskRoleArn, inventoryExecutionRoleArn: expected.inventoryExecutionRoleArn || definition?.executionRoleArn });
-  if (JSON.stringify(normalizePreDeploymentInventoryTaskDefinitionReadback(payload.taskDefinition)) !== JSON.stringify(normalizePreDeploymentInventoryTaskDefinitionReadback(definition))) throw new Error("Pre-deployment inventory task definition differs from the reviewed payload.");
+  if (canonicalizeEcsTaskDefinition(payload.taskDefinition) !== canonicalizeEcsTaskDefinition(definition)) throw new Error("Pre-deployment inventory task definition differs from the reviewed payload.");
   return true;
 }
 
@@ -78,4 +62,9 @@ export async function registerPreDeploymentInventoryTaskDefinition({ input, regi
     assertPreDeploymentInventoryTaskDefinition(registered, input);
   }
   return { ...payload, valid: true, reused: false, mutationCount: 1, evidenceRef: arn, evidenceSha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), taskDefinitionArn: arn };
+}
+
+export function assertPreDeploymentInventoryTaskDefinitionArn(value) {
+  if (!ARN.test(value || "")) throw new Error("Pre-deployment inventory task-definition ARN is outside the reviewed contract.");
+  return value;
 }

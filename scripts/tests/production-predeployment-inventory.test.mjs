@@ -41,6 +41,7 @@ const ecsDefaultedReadback = (definition) => ({
   placementConstraints: [],
   volumes: [],
 });
+const reorderObjectKeys = (value) => Array.isArray(value) ? value.map(reorderObjectKeys) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, child]) => [key, reorderObjectKeys(child)])) : value;
 const brokerConfig = {
   ...config,
   clusterArn: STAGE_B.clusterArn,
@@ -139,6 +140,15 @@ test("inventory readback accepts only the observed ECS default normalization", (
     mutate(readback);
     assert.throws(() => assertPreDeploymentInventoryTaskDefinition(readback, input), /task definition differs from the reviewed payload/, label);
   }
+});
+
+test("inventory semantic readback ignores object order but preserves ordered arrays", () => {
+  const input = { backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName };
+  const expected = buildPreDeploymentInventoryTaskDefinition(input).taskDefinition;
+  assert.doesNotThrow(() => assertPreDeploymentInventoryTaskDefinition(reorderObjectKeys(ecsDefaultedReadback(expected)), input));
+  const reorderedArray = reorderObjectKeys(ecsDefaultedReadback(expected));
+  reorderedArray.containerDefinitions[0].environment = [...reorderedArray.containerDefinitions[0].environment].reverse();
+  assert.throws(() => assertPreDeploymentInventoryTaskDefinition(reorderedArray, input), /task definition differs from the reviewed payload/);
 });
 
 test("production predeployment adapter registers then invokes only the reviewed broker operation", async () => {
@@ -271,7 +281,7 @@ test("real broker handler runs one bounded task and reads only its exact log str
     readApproval: async () => approval,
     verifySignature: async () => true,
     runTask: async (request) => { handlerCalls.push(["runTask", request]); return { failures: [], tasks: [{ taskArn }] }; },
-    describeTaskDefinition: async (arn) => ({ taskDefinition: { ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn: arn, status: "ACTIVE" }, tags: [{ key: "Component", value: "full-rls-green-stage-b" }, { key: "Environment", value: "production" }, { key: "ManagedBy", value: "Terraform" }, { key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }] }),
+    describeTaskDefinition: async (arn) => ({ taskDefinition: reorderObjectKeys({ ...ecsDefaultedReadback(buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition), taskDefinitionArn: arn, status: "ACTIVE" }), tags: [{ key: "Component", value: "full-rls-green-stage-b" }, { key: "Environment", value: "production" }, { key: "ManagedBy", value: "Terraform" }, { key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }] }),
     describeTasks: async (request) => { handlerCalls.push(["describeTasks", request]); describeCount += 1; return { tasks: [{ taskArn, taskDefinitionArn, lastStatus: describeCount === 1 ? "RUNNING" : "STOPPED", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: "rotation-1" }], containers: [{ name: "inventory", exitCode: describeCount === 1 ? undefined : 0 }] }] }; },
     describeLogStreams: async (request) => { handlerCalls.push(["describeLogStreams", request]); return { logStreams: [{ logStreamName: "predeployment-inventory/inventory/inventory-19" }] }; },
     getLogEvents: async (request) => { handlerCalls.push(["getLogEvents", request]); return { events: [{ message: JSON.stringify(inventory) }] }; },
