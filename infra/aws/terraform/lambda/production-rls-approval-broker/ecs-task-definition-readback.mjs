@@ -11,6 +11,9 @@ export function normalizeEcsTaskDefinitionReadback(definition) {
       const normalizedContainer = structuredClone(container);
       if (!Object.hasOwn(normalizedContainer, "cpu")) normalizedContainer.cpu = 0;
       for (const field of CONTAINER_EMPTY_DEFAULT_FIELDS) if (Array.isArray(normalizedContainer[field]) && normalizedContainer[field].length === 0) delete normalizedContainer[field];
+      // ECS materializes an omitted awslogs secretOptions list as []; an actual
+      // non-empty list remains part of the reviewed executable configuration.
+      if (Array.isArray(normalizedContainer.logConfiguration?.secretOptions) && normalizedContainer.logConfiguration.secretOptions.length === 0) delete normalizedContainer.logConfiguration.secretOptions;
       return normalizedContainer;
     });
   }

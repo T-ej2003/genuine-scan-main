@@ -37,7 +37,7 @@ const brokerTaskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-m
 const brokerTags = [{ key: "Component", value: "full-rls-green-stage-b" }, { key: "Environment", value: "production" }, { key: "ManagedBy", value: "Terraform" }, { key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }];
 const ecsDefaultedReadback = (definition) => ({
   ...structuredClone(definition),
-  containerDefinitions: definition.containerDefinitions.map((container) => ({ ...structuredClone(container), cpu: 0, environmentFiles: [], mountPoints: [], portMappings: [], systemControls: [], ulimits: [], volumesFrom: [] })),
+  containerDefinitions: definition.containerDefinitions.map((container) => ({ ...structuredClone(container), cpu: 0, environmentFiles: [], mountPoints: [], portMappings: [], systemControls: [], ulimits: [], volumesFrom: [], logConfiguration: { ...container.logConfiguration, secretOptions: [] } })),
   placementConstraints: [],
   volumes: [],
 });

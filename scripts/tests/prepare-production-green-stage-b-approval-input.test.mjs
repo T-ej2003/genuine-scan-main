@@ -41,6 +41,7 @@ const awsNormalizedTaskDefinitionReadbacks = Object.fromEntries(Object.entries(t
   definition.containerDefinitions[0].systemControls = [];
   definition.containerDefinitions[0].ulimits = [];
   definition.containerDefinitions[0].volumesFrom = [];
+  definition.containerDefinitions[0].logConfiguration = { ...definition.containerDefinitions[0].logConfiguration, secretOptions: [] };
   definition.placementConstraints = [];
   definition.volumes = definition.volumes || [];
   return [mode, { taskDefinition: Object.fromEntries(Object.entries(definition).reverse()) }];
