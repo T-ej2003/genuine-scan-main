@@ -51,7 +51,7 @@ export function readStageBApplyAttemptHistory({ reservationIdentity, run, maxTra
   return Object.freeze({ ...initial, transitions, latestReservation: transitions.at(-1) || initial.reservation });
 }
 
-export function resolveStageBApplyAttemptReconciliationAuthorization({ workflowRunId, workflowRunAttempt, sourceSha, reconciliationArtifact, reconciliationArtifactSha256, run = (command, args, options = {}) => execFileSync(command, args, { encoding: options.encoding === null ? null : "utf8", maxBuffer: options.maxBuffer }), githubRun = createProductionGithubCommandRunner() } = {}) {
+export function resolveStageBApplyAttemptReconciliationAuthorization({ workflowRunId, workflowRunAttempt, sourceSha, reconciliationArtifact, reconciliationArtifactSha256, now = new Date(), run = (command, args, options = {}) => execFileSync(command, args, { encoding: options.encoding === null ? null : "utf8", maxBuffer: options.maxBuffer }), githubRun = createProductionGithubCommandRunner() } = {}) {
   if (!/^[1-9][0-9]*$/.test(String(workflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(workflowRunAttempt || "")) || !/^[a-f0-9]{40}$/.test(sourceSha || "")) throw new Error("Stage B reconciliation authorization workflow coordinates are invalid.");
   const workflow = JSON.parse(githubRun("gh", ["api", `repos/T-ej2003/genuine-scan-main/actions/runs/${workflowRunId}`]));
   if (String(workflow.id) !== String(workflowRunId) || workflow.repository?.full_name !== "T-ej2003/genuine-scan-main" || workflow.head_repository?.full_name !== "T-ej2003/genuine-scan-main" || workflow.path !== ".github/workflows/authorize-production-green-stage-b-apply-attempt-reconciliation.yml" || workflow.event !== "workflow_dispatch" || workflow.head_sha !== sourceSha || workflow.status !== "completed" || workflow.conclusion !== "success" || String(workflow.run_attempt) !== String(workflowRunAttempt)) throw new Error("Stage B reconciliation authorization workflow provenance is not authentic.");
@@ -66,7 +66,7 @@ export function resolveStageBApplyAttemptReconciliationAuthorization({ workflowR
     const entries = String(githubRun("unzip", ["-Z1", archive])).trim().split("\n").filter(Boolean);
     if (JSON.stringify(entries) !== JSON.stringify(["authorization.json"])) throw new Error("Stage B reconciliation authorization archive contents are not exact.");
     const authorization = JSON.parse(Buffer.from(githubRun("unzip", ["-p", archive, "authorization.json"])).toString("utf8"));
-    assertStageBApplyAttemptReconciliationAuthorization(authorization, { successorSourceSha: sourceSha, reconciliationArtifact, reconciliationArtifactSha256 });
+    assertStageBApplyAttemptReconciliationAuthorization(authorization, { successorSourceSha: sourceSha, reconciliationArtifact, reconciliationArtifactSha256, now });
     const evidence = authorization.protectedEnvironmentApprovalEvidence;
     if (evidence.workflowRunId !== String(workflow.id) || evidence.workflowRunAttempt !== String(workflow.run_attempt) || evidence.executionActor?.toLowerCase() !== String(workflow.actor?.login || "").toLowerCase()) throw new Error("Stage B reconciliation authorization is not bound to the authenticated workflow execution.");
     return Object.freeze({ workflow, artifact: matches[0], authorization, authorizationArtifactDigest: matches[0].digest });
@@ -85,7 +85,7 @@ export function produceStageBApplyAttemptReconciliationAuthorization({ reconcili
   return { status: "published", outputPath: output, authorizationSha256: authorization.authorizationSha256 };
 }
 
-export function runStageBApplyAttemptReconciliationCli(argv = process.argv.slice(2), { now = new Date(), awsRun: suppliedAwsRun, reserveTransition = reserveStageBApplyAttemptTransition } = {}) {
+export function runStageBApplyAttemptReconciliationCli(argv = process.argv.slice(2), { now = new Date(), awsRun: suppliedAwsRun, githubRun: suppliedGithubRun, reserveTransition = reserveStageBApplyAttemptTransition } = {}) {
   const mode = required(argv, "--mode");
   const awsRun = suppliedAwsRun || ((args) => {
     const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
@@ -104,11 +104,15 @@ export function runStageBApplyAttemptReconciliationCli(argv = process.argv.slice
   }
   if (mode === "prepare-successor") {
     const reconciliation = readJsonFile(required(argv, "--reconciliation-artifact"), "Stage B reconciliation artifact"); const authorization = readJsonFile(required(argv, "--authorization"), "Stage B reconciliation authorization"); const sourceSha = required(argv, "--source-sha"); const reconciliationArtifactSha256 = required(argv, "--reconciliation-artifact-sha256");
-    if (stageBApplyAttemptReconciliationSha256(reconciliation.value, { now }) !== reconciliationArtifactSha256 || authorization.value.authorizationSha256 !== required(argv, "--authorization-sha256")) throw new Error("Stage B successor inputs changed after authentication.");
+    const authorizationSha256 = required(argv, "--authorization-sha256");
+    if (stageBApplyAttemptReconciliationSha256(reconciliation.value, { now }) !== reconciliationArtifactSha256 || authorization.value.authorizationSha256 !== authorizationSha256) throw new Error("Stage B successor inputs changed after authentication.");
+    const authenticated = resolveStageBApplyAttemptReconciliationAuthorization({ workflowRunId: required(argv, "--authorization-workflow-run-id"), workflowRunAttempt: required(argv, "--authorization-workflow-run-attempt"), sourceSha, reconciliationArtifact: reconciliation.value, reconciliationArtifactSha256, now, githubRun: suppliedGithubRun });
+    if (canonicalJson(authenticated.authorization) !== canonicalJson(authorization.value) || authenticated.authorization.authorizationSha256 !== authorizationSha256) throw new Error("Stage B successor authorization does not match the authenticated workflow artifact.");
+    const canonicalAuthorization = authenticated.authorization;
     const history = readStageBApplyAttemptHistory({ reservationIdentity: reconciliation.value.predecessor.reservationIdentity, run: awsRun });
     const existingClaim = history.transitions.at(-1)?.status === "ABORTED_BEFORE_APPLY" ? history.transitions.at(-1) : null;
     const predecessorTransitions = existingClaim ? history.transitions.slice(0, -1) : history.transitions;
-    const claim = createStageBApplyAttemptReconciliationClaim({ reservation: history.reservation, transitions: predecessorTransitions, reconciliationArtifact: reconciliation.value, reconciliationArtifactSha256, authorization: authorization.value, authorizationSha256: authorization.value.authorizationSha256, successorSourceSha: sourceSha, now });
+    const claim = createStageBApplyAttemptReconciliationClaim({ reservation: history.reservation, transitions: predecessorTransitions, reconciliationArtifact: reconciliation.value, reconciliationArtifactSha256, authorization: canonicalAuthorization, authorizationSha256: canonicalAuthorization.authorizationSha256, successorSourceSha: sourceSha, now });
     let claimError;
     if (!existingClaim || canonicalJson(existingClaim) !== canonicalJson(claim)) {
       const claimBytes = Buffer.from(`${JSON.stringify(claim, null, 2)}\n`);
@@ -116,7 +120,7 @@ export function runStageBApplyAttemptReconciliationCli(argv = process.argv.slice
     }
     const claimedHistory = readStageBApplyAttemptHistory({ reservationIdentity: claim.attemptId, run: awsRun });
     let result;
-    try { result = assertStageBApplyAttemptReconciliationEligibility({ reservation: claimedHistory.reservation, transitions: claimedHistory.transitions, reconciliationArtifact: reconciliation.value, reconciliationArtifactSha256, authorization: authorization.value, authorizationSha256: authorization.value.authorizationSha256, successorSourceSha: sourceSha, now }); }
+    try { result = assertStageBApplyAttemptReconciliationEligibility({ reservation: claimedHistory.reservation, transitions: claimedHistory.transitions, reconciliationArtifact: reconciliation.value, reconciliationArtifactSha256, authorization: canonicalAuthorization, authorizationSha256: canonicalAuthorization.authorizationSha256, successorSourceSha: sourceSha, now }); }
     catch (error) { throw new Error("Stage B reconciliation claim was not acquired; successor is unreachable.", { cause: claimError || error }); }
     return { ...result, sourceSha, status: "SUCCESSOR_READY_BUT_NOT_EXECUTED" };
   }
