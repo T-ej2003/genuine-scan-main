@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { performance } from "node:perf_hooks";
+import { canonicalizeEcsTaskDefinition } from "./ecs-task-definition-readback.mjs";
 const { assertBrokerApprovalValidationRequest, assertBrokerRequest, hasCompleteStageBTaskMaps, STAGE_B, STAGE_B_MODES, validateStageBApproval } = await import(
   process.env.AWS_LAMBDA_FUNCTION_NAME ? "./stage-b-contract.mjs" : "../../../../../scripts/aws/production-green-stage-b-contract.mjs"
 );
@@ -22,8 +23,6 @@ const inventoryRlsRole = "mscqr_prod_rls_read";
 const inventoryTaskRoleArn = `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-task`;
 const inventoryExecutionRoleArn = `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-execution`;
 const exact = (left, right) => JSON.stringify(left) === JSON.stringify(right);
-const canonicalize = (value) => Array.isArray(value) ? value.map(canonicalize) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, child]) => [key, canonicalize(child)])) : value;
-const exactJson = (left, right) => JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
 const brokerReceipt = (value) => ({ ...value, receiptSha256: crypto.createHash("sha256").update(`${JSON.stringify(value)}\n`).digest("hex") });
 
 export function createPreDeploymentOperationIdentity({ approvalId, releaseSha, rotationId, operation = PREDEPLOYMENT_INVENTORY_OPERATION, taskDefinitionArn, imageDigest } = {}) {
@@ -176,9 +175,7 @@ function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, sou
       },
     }],
   };
-  const normalized = { ...definition };
-  for (const key of ["taskDefinitionArn", "revision", "status", "registeredAt", "registeredBy", "tags", "requiresAttributes", "compatibilities"]) delete normalized[key];
-  if (!definition || definition.taskDefinitionArn !== taskDefinitionArn || definition.status !== "ACTIVE" || !container || !exactJson(normalized, expected)) throw new Error("Pre-deployment inventory task definition is not the exact approved execution contract.");
+  if (!definition || definition.taskDefinitionArn !== taskDefinitionArn || definition.status !== "ACTIVE" || !container || canonicalizeEcsTaskDefinition(definition) !== canonicalizeEcsTaskDefinition(expected)) throw new Error("Pre-deployment inventory task definition is not the exact approved execution contract.");
   return true;
 }
 

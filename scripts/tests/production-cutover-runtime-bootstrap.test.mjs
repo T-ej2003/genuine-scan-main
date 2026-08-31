@@ -1068,6 +1068,35 @@ test("BOOTSTRAP_ARGUMENTS accept the exact successor-recovery evidence options",
   for (const argv of [["--recovery-envelope"], ["--original-rebaseline-preparation"], ["--recovery-envelope", "x", "--recovery-envelope", "y"], ["--recovery-envelope", "x", "--recovery-unknown", "y"]]) assert.throws(() => parseBootstrapArgs(argv), /Invalid|Duplicate|unsupported/);
 });
 
+test("BOOTSTRAP_ARGUMENTS accept an exact predeployment inventory revision for readback reuse", () => {
+  const parsed = parseBootstrapArgs(["--inventory-task-definition-arn", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:1"]);
+  assert.equal(parsed.get("inventory-task-definition-arn"), "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:1");
+});
+
+test("bootstrap rejects every non-exact inventory task-definition ARN before runtime construction", () => {
+  const invalidArns = [
+    "not-an-arn",
+    "arn:aws:ecs:eu-west-2:000000000000:task-definition/mscqr-production-rls-green-predeployment-inventory:1",
+    "arn:aws:ecs:us-east-1:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:1",
+    "arn:aws:ecs:eu-west-2:368992683803:task-definition/other-family:1",
+    "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory",
+  ];
+  for (const inventoryTaskDefinitionArn of invalidArns) {
+    const directory = fsTemp();
+    let adaptersConstructed = false;
+    try {
+      assert.throws(() => prepareProductionCutoverRuntime({
+        ...fullInput(directory, process.cwd()),
+        inventoryTaskDefinitionArn,
+        constructAdapters: () => { adaptersConstructed = true; },
+      }), /task-definition ARN is outside the reviewed contract/);
+      assert.equal(adaptersConstructed, false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
 test("REAL successor-recovery runtime path preserves recovery context through adapter construction", () => {
   const directory = fsTemp();
   const recoverySource = PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA;

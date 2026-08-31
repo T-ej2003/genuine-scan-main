@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
+import { canonicalizeEcsTaskDefinition, normalizeEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 
 const TEMPLATE_PATH = path.resolve("infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-rotation-inventory.json");
 const FAMILY = "mscqr-production-rls-green-predeployment-inventory";
@@ -34,16 +35,23 @@ export function buildPreDeploymentInventoryTaskDefinition({ backendImage, releas
   return { taskDefinition: definition, tags: PREDEPLOYMENT_INVENTORY_TAGS };
 }
 
+export const normalizePreDeploymentInventoryTaskDefinitionReadback = normalizeEcsTaskDefinitionReadback;
+
 export function assertPreDeploymentInventoryTaskDefinition(definition, expected = {}) {
   const payload = buildPreDeploymentInventoryTaskDefinition({ backendImage: expected.backendImage || definition?.containerDefinitions?.[0]?.image, releaseSha: expected.releaseSha || definition?.containerDefinitions?.[0]?.environment?.find(({ name }) => name === "RELEASE_GIT_SHA")?.value, databaseUrl: expected.databaseUrl || definition?.containerDefinitions?.[0]?.secrets?.find(({ name }) => name === "DATABASE_URL")?.valueFrom, rotationInventoryRlsRole: expected.rotationInventoryRlsRole || definition?.containerDefinitions?.[0]?.environment?.find(({ name }) => name === "ROTATION_INVENTORY_RLS_ROLE")?.value, inventoryLogGroup: expected.inventoryLogGroup || definition?.containerDefinitions?.[0]?.logConfiguration?.options?.["awslogs-group"], inventoryTaskRoleArn: expected.inventoryTaskRoleArn || definition?.taskRoleArn, inventoryExecutionRoleArn: expected.inventoryExecutionRoleArn || definition?.executionRoleArn });
-  const readback = { ...definition };
-  for (const key of ["taskDefinitionArn", "revision", "status", "registeredAt", "registeredBy", "tags", "requiresAttributes", "compatibilities"]) delete readback[key];
-  if (JSON.stringify(payload.taskDefinition) !== JSON.stringify(readback)) throw new Error("Pre-deployment inventory task definition differs from the reviewed payload.");
+  if (canonicalizeEcsTaskDefinition(payload.taskDefinition) !== canonicalizeEcsTaskDefinition(definition)) throw new Error("Pre-deployment inventory task definition differs from the reviewed payload.");
   return true;
 }
 
-export async function registerPreDeploymentInventoryTaskDefinition({ input, register, describe = null } = {}) {
+export async function registerPreDeploymentInventoryTaskDefinition({ input, register, describe = null, existingTaskDefinitionArn = null } = {}) {
   const payload = buildPreDeploymentInventoryTaskDefinition(input);
+  if (existingTaskDefinitionArn !== null) {
+    if (!ARN.test(existingTaskDefinitionArn) || typeof describe !== "function") throw new Error("Pre-deployment inventory existing task-definition readback adapter is required.");
+    const existing = await describe(existingTaskDefinitionArn);
+    if (existing?.taskDefinitionArn !== existingTaskDefinitionArn || existing?.family !== FAMILY || existing?.status !== "ACTIVE") throw new Error("Pre-deployment inventory existing task readback is invalid.");
+    assertPreDeploymentInventoryTaskDefinition(existing, input);
+    return { ...payload, valid: true, reused: true, mutationCount: 0, evidenceRef: existingTaskDefinitionArn, evidenceSha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), taskDefinitionArn: existingTaskDefinitionArn };
+  }
   if (typeof register !== "function") throw new Error("Pre-deployment inventory registration adapter is required.");
   const response = await register(payload);
   const arn = response?.taskDefinition?.taskDefinitionArn || response?.taskDefinitionArn;
@@ -53,5 +61,10 @@ export async function registerPreDeploymentInventoryTaskDefinition({ input, regi
     if (registered?.taskDefinitionArn !== arn || registered?.family !== FAMILY || registered?.status !== "ACTIVE") throw new Error("Pre-deployment inventory task readback is invalid.");
     assertPreDeploymentInventoryTaskDefinition(registered, input);
   }
-  return { ...payload, valid: true, evidenceRef: arn, evidenceSha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), taskDefinitionArn: arn };
+  return { ...payload, valid: true, reused: false, mutationCount: 1, evidenceRef: arn, evidenceSha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), taskDefinitionArn: arn };
+}
+
+export function assertPreDeploymentInventoryTaskDefinitionArn(value) {
+  if (!ARN.test(value || "")) throw new Error("Pre-deployment inventory task-definition ARN is outside the reviewed contract.");
+  return value;
 }

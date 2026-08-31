@@ -21,6 +21,7 @@ import {
   PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE_KIND,
 } from "../security/production-initial-migration-source-advance.mjs";
 import { assertBindingsMatchLegacyBaseline, deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
+import { assertPreDeploymentInventoryTaskDefinitionArn } from "./production-predeployment-inventory-task.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
 import { assertPartialRebaselineRecoveryAuthorization, assertProductionDualSlotRebaselineAuthorization, assertRebaselineRotationBindings, BASELINE_COMPLETE, PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_ROTATION_BINDINGS_KIND, REBASELINE_ROTATION_BINDINGS_PRODUCER } from "./production-dual-slot-rebaseline-contract.mjs";
 
@@ -253,6 +254,7 @@ export function prepareProductionCutoverRuntime({
   currentTaskDefinition,
   loadCurrentTaskDefinition,
   inventoryApprovalId,
+  inventoryTaskDefinitionArn,
   onboardingPaths,
   stageBTfvarsPath,
   stageBTfvarsBindingReportPath,
@@ -265,6 +267,7 @@ export function prepareProductionCutoverRuntime({
   verifyReleasePreflightAttestationSignature,
   proveSourceAdvance,
 } = {}) {
+  if (inventoryTaskDefinitionArn !== undefined) assertPreDeploymentInventoryTaskDefinitionArn(inventoryTaskDefinitionArn);
   const directory = ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot, create: true, normalize: true, label: "Production cutover runtime directory" });
   const paths = phasePaths(directory);
   assertFutureArtifactsAbsent(paths, repositoryRoot);
@@ -425,6 +428,7 @@ export function prepareProductionCutoverRuntime({
       backendImageDigest,
       expectedCurrentTaskDefinitionArn: taskDefinition?.taskDefinitionArn,
       inventoryApprovalId,
+      ...(inventoryTaskDefinitionArn === undefined ? {} : { inventoryTaskDefinitionArn }),
       inventoryDatabaseSecretArn: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.secrets?.find(({ name }) => name === "DATABASE_URL")?.valueFrom,
       inventoryTaskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
       inventoryExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
@@ -523,7 +527,7 @@ export function parseBootstrapArgs(argv) {
   const supported = new Set([
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
     "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "rebaseline-authorization-run-id", "rebaseline-authorization-run-attempt", "recovery-envelope", "original-rebaseline-preparation", "image-authorization", "iam-evidence", "release-preflight-evidence", "release-preflight-attestation", "release-preflight-attestation-signature",
-    "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "onboarding-paths",
+    "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "inventory-task-definition-arn", "onboarding-paths",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir",
   ]);
   const values = new Map();

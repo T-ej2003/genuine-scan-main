@@ -111,6 +111,7 @@ const result = prepareProductionCutoverRuntime({
   currentStageBStatePath: args.get("current-stage-b-state"),
   loadCurrentTaskDefinition,
   inventoryApprovalId: args.get("inventory-approval-id"),
+  inventoryTaskDefinitionArn: args.get("inventory-task-definition-arn"),
   onboardingPaths,
   stageBTfvarsPath: required("stage-b-tfvars"),
   stageBTfvarsBindingReportPath: required("stage-b-tfvars-binding-report"),
