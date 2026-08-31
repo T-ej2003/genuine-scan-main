@@ -84,6 +84,17 @@ test("unsigned ready-for-plan, forged permissions, or a modified attested report
   assert.throws(() => evidence({ preflight: { caller: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/forged" }, trustReport: preflight() }), /attestation|bound/i);
 });
 
+test("runtime approval preparation stops before creation because PLAN_APPROVED, not a guessed live version, is the bootstrap authority", () => {
+  const selected = preflight();
+  const trust = signedPreflightTrust(selected);
+  assert.throws(() => collectProductionGreenStageBApprovalEvidence({
+    sourceSha: releaseSha, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, now,
+    validateImageAuthorization: () => {}, validateTfvarsBinding: () => report, readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }),
+    readPreflight: () => selected, releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true,
+    deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }),
+  }), /PLAN_APPROVED.*resource creation|post-creation/i);
+});
+
 test("preflight trust attestation binds source, signature authority, and exact report bytes", () => {
   assert.throws(() => evidence({ trustSource: "f".repeat(40) }), /source|attestation/i);
   const trust = signedPreflightTrust();

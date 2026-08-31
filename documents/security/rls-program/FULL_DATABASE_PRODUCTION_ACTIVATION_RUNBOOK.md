@@ -143,19 +143,28 @@ This creates the isolated RDS instance, KMS keys, checker/executor roles, securi
 ```
 
 Generate the source-contract and ordered migration digests locally.
-5. Prepare the unsigned input through the canonical authenticated evidence
-collector. It requires the release-deployer preflight to be the positive
+5. Generate, externally approve, and apply the canonical `PLAN_APPROVED`
+saved-plan artifact for the Stage-B infrastructure mutation. This is the sole
+pre-creation authority for a broker/task initial create or release-changing
+replacement. Terraform assigns the Lambda published version and ECS
+task-definition revisions during that governed apply; do not create a
+broker-runtime approval from guessed future identifiers. The post-apply
+readback is mandatory before a broker can be invoked.
+6. After that successful creation/replacement (or directly for an unchanged
+deployment), prepare the unsigned runtime approval through the canonical
+authenticated evidence collector. It requires the release-deployer preflight to be the positive
 `ready-for-plan` result with every required read allowed, every readiness gate
 true, zero failure counters, and exact tfvars/binding-report hashes. It also
 verifies the signed current-source image authorization and the fresh
 release-deployer-owned broker alias/version/configuration and exact
 task-definition observations captured with
-`--capture-stage-b-approval-live-observation`. The checker does not inspect
+`--capture-stage-b-approval-live-observation`. For an unchanged deployment the
+same live-resource authority applies directly. The checker does not inspect
 Lambda or ECS directly. The preflight report is trusted only after the existing KMS-signed
 checker-trust attestation and signature are authenticated against the exact
 report bytes; report fields, permissions, and caller-supplied hashes are never
-authority by themselves.
-expectation, four-image map, task-definition ARN map, and task-definition
+authority by themselves. The collector authenticates the broker expectation,
+four-image map, task-definition ARN map, and task-definition
 template-hash map. Matching Git SHA or package checksum alone is not authority:
 runtime bindings must be current and complete.
 The operator supplies only `ticketId`; the producer creates `issuedAt`, a
@@ -181,7 +190,7 @@ digest as proof of provenance. The review text is deterministic for the complete
 credentials, secret values, or signature material. The checker must review that
 exact input digest and make an explicit independent decision.
 
-6. The checker uses the MFA-backed source-role session from the authentication
+7. The checker uses the MFA-backed source-role session from the authentication
 boundary above, then assumes `mscqr-production-rls-independent-checker` through
 the exact role chain. It first performs an unsigned local validation, then
 explicitly signs the exact v2 input; the input contains every v2 field except
@@ -197,7 +206,7 @@ node scripts/aws/create-production-green-stage-b-approval.mjs --sign \
   --output /secure/operator/production-rls-approval.json
 ```
 
-7. The checker reviews the producer output and its deterministic report, then
+8. The checker reviews the producer output and its deterministic report, then
 runs the repository-owned
 `scripts/aws/publish-production-green-stage-b-approval.mjs` command. The
 publisher uses only the exact Stage B approval secret and exact checker
@@ -205,12 +214,15 @@ session, validates before writing, uses the contract-defined deterministic
 `ClientRequestToken`, and lets Secrets Manager move `AWSCURRENT` while
 retaining the prior version as `AWSPREVIOUS`. Run
 `scripts/aws/check-production-green-stage-b-approval-publication.mjs` through
-the reviewed broker alias before treating the approval as published. Record
+the reviewed broker alias before treating the approval as published. That
+broker-visible proof rejects an approval whose signed `brokerVersion` differs
+from the immutable Lambda version executing the check; every later broker
+request repeats that same runtime-version check. Record
 only its approval ID, contract SHA256, payload SHA256, and version ID in the
 ticket. Do not expose the signature. The complete publication, idempotency,
 rollback, and redaction contract is
 `PRODUCTION_GREEN_STAGE_B_APPROVAL_PUBLICATION_CONTRACT-v1.md`.
-8. Generate the production package using the KMS-backed artifact:
+9. Generate the production package using the KMS-backed artifact:
 
 ```sh
 node scripts/rls/generate-clean-room-rls-sql.mjs \
@@ -222,8 +234,13 @@ node scripts/rls/generate-clean-room-rls-sql.mjs \
 npm run rls:full-verify
 ```
 
-9. Stage B is the protected release-activation contract in `infra/aws/terraform/production-green-stage-b/`. It starts only after Stage A outputs, the external protected release role, distinct checker, signed approval, and immutable backend/worker/executor image digests exist. It creates fixed executor/canary tasks and the reviewed broker, then runs mandatory green canaries; it is not part of the Stage A plan.
-10. Invoke the protected release workflow with production approval, the exact approval secret ARN/ID, exact broker alias ARN, and `preserve_current_frontend=true`. It invokes only the broker. The broker revalidates the signed approval before every fixed phase.
+10. Stage B infrastructure is the protected plan/apply contract in
+`infra/aws/terraform/production-green-stage-b/`; it creates or replaces the
+reviewed broker and fixed executor/canary task definitions before runtime
+approval. The later protected release workflow invokes only the broker with
+the published approval, exact approval secret ARN/ID, exact broker alias ARN,
+and `preserve_current_frontend=true`. The broker revalidates the signed
+approval, including its immutable executing version, before every fixed phase.
 11. The executor performs capability preflight, creates the exact database, creates restricted roles and generated credentials, writes only the declared secret handles, runs all Prisma migrations from zero, transfers ownership, installs grants/functions/policies, verifies the catalog, and writes redacted receipts.
 12. The broker runs the application canary task against green. Required checks are ordinary login, admin login with recent MFA, admin MFA challenge completion, `/auth/me`, refresh-token rotation, dashboard stats, QR stats, catalog verification, and tenant-isolation certification. Any failure triggers pre-traffic green cleanup and leaves backend traffic on blue.
 12. Only after independent receipt review, activate the exact Terraform-managed Stage-B backend candidate revision with the exact all-or-nothing secret map. Production currently has no worker ECS service, so preserve the worker image/candidate contract without issuing a worker service update. Do not deploy the frontend. Wait for backend ECS steady state and rerun external canaries.

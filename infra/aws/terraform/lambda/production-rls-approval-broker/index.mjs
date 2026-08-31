@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { assertEcsTaskDefinitionReadback } from "./ecs-task-definition-readback.mjs";
-const { assertBrokerApprovalValidationRequest, assertBrokerRequest, assertStageBBrokerConfigurationBindings, assertStageBBrokerRuntimeBindings, assertStageBBrokerTaskDefinitionMap, canonicalJson, hasCompleteStageBTaskMaps, STAGE_B, validateStageBApproval } = await import(
+const { assertBrokerApprovalValidationRequest, assertBrokerRequest, assertStageBBrokerConfigurationBindings, assertStageBBrokerRuntimeBindings, assertStageBBrokerRuntimeVersion, assertStageBBrokerTaskDefinitionMap, canonicalJson, hasCompleteStageBTaskMaps, STAGE_B, validateStageBApproval } = await import(
   process.env.AWS_LAMBDA_FUNCTION_NAME ? "./stage-b-contract.mjs" : "../../../../../scripts/aws/production-green-stage-b-contract.mjs"
 );
 
@@ -51,13 +51,15 @@ export function validateBrokerConfiguration(config) {
   return config;
 }
 
-export function createHandler({ config, readApproval, verifySignature, claimApproval, releaseApproval = async () => {}, markLaunchUncertain = async () => {}, recordTaskStarted = async () => {}, runTask, writeReceipt = async () => {}, now = () => new Date() }) {
+export function createHandler({ config, executingBrokerVersion, readApproval, verifySignature, claimApproval, releaseApproval = async () => {}, markLaunchUncertain = async () => {}, recordTaskStarted = async () => {}, runTask, writeReceipt = async () => {}, now = () => new Date() }) {
   validateBrokerConfiguration(config);
+  const brokerVersion = assertStageBBrokerRuntimeVersion(executingBrokerVersion);
+  const approvalExpected = { ...config.approvalExpected, images: config.images, brokerVersion };
   return async (event, context = {}) => {
     if (event?.operation === "validate-approval") {
       const request = assertBrokerApprovalValidationRequest(event);
       const rawApproval = await readApproval(STAGE_B.approvalSecretArn);
-      const approval = await validateStageBApproval(rawApproval, { ...config.approvalExpected, images: config.images }, { now: now(), verifySignature });
+      const approval = await validateStageBApproval(rawApproval, approvalExpected, { now: now(), verifySignature });
       const approvalSha256 = crypto.createHash("sha256").update(Buffer.from(rawApproval, "utf8")).digest("hex");
       if (approval.approval.approvalId !== request.approvalId || approval.approval.releaseSha !== request.sourceSha || approvalSha256 !== request.approvalSha256) {
         throw new Error("Stage B approval publication proof is not bound to the current broker approval.");
@@ -65,10 +67,7 @@ export function createHandler({ config, readApproval, verifySignature, claimAppr
       return { status: "validated", approvalId: approval.approval.approvalId, sourceSha: approval.approval.releaseSha, approvalContractSha256: approval.approvalContractSha256, approvalSha256 };
     }
     const request = assertBrokerRequest(event);
-    const approval = await validateStageBApproval(await readApproval(STAGE_B.approvalSecretArn), {
-      ...config.approvalExpected,
-      images: config.images,
-    }, { now: now(), verifySignature, allowExpiredRollback: request.mode === "full-rls-rollback", requestedMode: request.mode });
+    const approval = await validateStageBApproval(await readApproval(STAGE_B.approvalSecretArn), approvalExpected, { now: now(), verifySignature, allowExpiredRollback: request.mode === "full-rls-rollback", requestedMode: request.mode });
     if (approval.approval.approvalId !== request.approvalId || !exact(approval.approval.taskDefinitionTemplateHashes, config.templateHashes)
         || !exact(approval.approval.taskDefinitionArns, config.taskDefinitionArns)) {
       throw new Error("Stage B broker request is not bound to the signed approval.");
@@ -180,8 +179,9 @@ function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, sou
   return true;
 }
 
-export function createPreDeploymentInventoryHandler({ config, readApproval, verifySignature, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, runTask, describeTaskDefinition, describeTasks, describeLogStreams, getLogEvents, stopTask, now = () => new Date(), monotonicNow = () => performance.now(), sleep = async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)) }) {
+export function createPreDeploymentInventoryHandler({ config, executingBrokerVersion, readApproval, verifySignature, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, runTask, describeTaskDefinition, describeTasks, describeLogStreams, getLogEvents, stopTask, now = () => new Date(), monotonicNow = () => performance.now(), sleep = async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)) }) {
   validatePreDeploymentInventoryConfiguration(config);
+  const brokerVersion = assertStageBBrokerRuntimeVersion(executingBrokerVersion);
   return async (event, context = {}) => {
     const requestStartMs = monotonicNow();
     const lambdaDeadlineMs = typeof context.getRemainingTimeInMillis === "function"
@@ -209,7 +209,7 @@ export function createPreDeploymentInventoryHandler({ config, readApproval, veri
       }
     };
     if (!event || typeof event !== "object" || Object.keys(event).sort().join(",") !== "approvalId,operation,rotationId,sourceSha,taskDefinitionArn" || event.operation !== PREDEPLOYMENT_INVENTORY_OPERATION || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(event.rotationId || "") || !/^[a-f0-9]{40}$/.test(event.sourceSha || "") || !inventoryTaskArnPattern.test(event.taskDefinitionArn || "")) throw new Error("Pre-deployment inventory broker request is outside the reviewed contract.");
-    const approval = await runWithinDeadline("approval authorization", async () => validateStageBApproval(await readApproval(config.approvalSecretArn), { ...config.approvalExpected, approvalId: event.approvalId }, { now: now(), verifySignature }), operationDeadlineMs);
+    const approval = await runWithinDeadline("approval authorization", async () => validateStageBApproval(await readApproval(config.approvalSecretArn), { ...config.approvalExpected, approvalId: event.approvalId, brokerVersion }, { now: now(), verifySignature }), operationDeadlineMs);
     if (approval.approval.releaseSha !== event.sourceSha || approval.approval.backendImageDigest !== config.inventoryImageDigest) throw new Error("Pre-deployment inventory request is not bound to the signed release/image.");
     const definitionResponse = await runWithinDeadline("task-definition authorization", () => describeTaskDefinition(event.taskDefinitionArn), operationDeadlineMs);
     const definition = definitionResponse?.taskDefinition;
@@ -338,6 +338,7 @@ export function createBrokerRuntimeConfig(env = process.env) {
 
 export async function handler(event, context) {
   const config = createBrokerRuntimeConfig();
+  const executingBrokerVersion = assertStageBBrokerRuntimeVersion(process.env.AWS_LAMBDA_FUNCTION_VERSION);
   assertStageBBrokerConfigurationBindings({ approvalExpected: config.approvalExpected, images: config.images, templateHashes: config.templateHashes });
   const [{ ECSClient, RunTaskCommand, DescribeTaskDefinitionCommand, DescribeTasksCommand, StopTaskCommand }, { SecretsManagerClient, GetSecretValueCommand }, { KMSClient, VerifyCommand }, { DynamoDBClient, PutItemCommand, DeleteItemCommand, UpdateItemCommand }, { S3Client, PutObjectCommand }, { CloudWatchLogsClient, DescribeLogStreamsCommand, GetLogEventsCommand }] = await Promise.all([
     import("@aws-sdk/client-ecs"), import("@aws-sdk/client-secrets-manager"), import("@aws-sdk/client-kms"), import("@aws-sdk/client-dynamodb"), import("@aws-sdk/client-s3"), import("@aws-sdk/client-cloudwatch-logs"),
@@ -396,7 +397,7 @@ export async function handler(event, context) {
   };
   if (event?.operation === PREDEPLOYMENT_INVENTORY_OPERATION) {
     const logs = new CloudWatchLogsClient({ region: STAGE_B.region });
-    return createPreDeploymentInventoryHandler({ ...clients, runTask: (request) => ecs.send(new RunTaskCommand(request)), describeTaskDefinition: (taskDefinition) => ecs.send(new DescribeTaskDefinitionCommand({ taskDefinition, include: ["TAGS"] })), describeTasks: (request) => ecs.send(new DescribeTasksCommand(request)), describeLogStreams: (request) => logs.send(new DescribeLogStreamsCommand(request)), getLogEvents: (request) => logs.send(new GetLogEventsCommand(request)), stopTask: (request) => ecs.send(new StopTaskCommand(request)) })(event, context);
+    return createPreDeploymentInventoryHandler({ ...clients, executingBrokerVersion, runTask: (request) => ecs.send(new RunTaskCommand(request)), describeTaskDefinition: (taskDefinition) => ecs.send(new DescribeTaskDefinitionCommand({ taskDefinition, include: ["TAGS"] })), describeTasks: (request) => ecs.send(new DescribeTasksCommand(request)), describeLogStreams: (request) => logs.send(new DescribeLogStreamsCommand(request)), getLogEvents: (request) => logs.send(new GetLogEventsCommand(request)), stopTask: (request) => ecs.send(new StopTaskCommand(request)) })(event, context);
   }
-  return createHandler({ ...clients })(event, context);
+  return createHandler({ ...clients, executingBrokerVersion })(event, context);
 }

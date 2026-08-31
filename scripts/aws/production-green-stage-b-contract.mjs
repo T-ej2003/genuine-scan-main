@@ -176,6 +176,14 @@ export const STAGE_B_APPROVAL_FIELDS = Object.freeze([
   "schemaVersion", "signatureAlgorithm", "sourceContractSha256", "taskDefinitionArns", "taskDefinitionTemplateHashes", "ticketId", "workerImageDigest",
 ]);
 
+export const STAGE_B_RUNTIME_APPROVAL_AUTHORITY = "EXISTING_LIVE_RESOURCE_AUTHORITY";
+
+export function assertStageBBrokerRuntimeVersion(value) {
+  const version = String(value || "");
+  if (!/^[1-9][0-9]*$/.test(version)) throw new Error("Stage B broker must execute from an immutable published Lambda version.");
+  return version;
+}
+
 export const canonicalStageBApproval = (approval) => canonicalJson(Object.fromEntries(
   STAGE_B_APPROVAL_FIELDS.map((key) => [key, approval[key]])
 ));
@@ -287,7 +295,7 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
   if (artifact.approvalId !== stageBApprovalIdForReleaseSha(artifact.releaseSha)) {
     throw new Error("Stage B approval approvalId does not match releaseSha.");
   }
-  for (const field of ["releaseSha", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "deploymentId", "approvalId", "ticketId", "greenDatabaseName", "administratorIdentity"]) {
+  for (const field of ["releaseSha", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "deploymentId", "approvalId", "ticketId", "greenDatabaseName", "administratorIdentity", "brokerVersion"]) {
     if (expected?.[field] && artifact[field] !== expected[field]) throw new Error(`Stage B approval ${field} does not match the release contract.`);
   }
   for (const [field, value] of Object.entries(expected?.images || {})) {

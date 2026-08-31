@@ -96,7 +96,7 @@ function makeBrokerHandler({ definition = brokerDefinition(), tags = brokerTags,
   const calls = [];
   const cleanup = stopTask || (async (request) => { calls.push(["stopTask", request]); });
   const handler = createPreDeploymentInventoryHandler({
-    config: brokerConfig, readApproval, verifySignature,
+    config: brokerConfig, executingBrokerVersion: "1", readApproval, verifySignature,
     claimPreDeploymentOperation, releasePreDeploymentOperation, markPreDeploymentLaunchUncertain, recordPreDeploymentTaskStarted, recordPreDeploymentCompleted,
     describeTaskDefinition,
     runTask: async (request) => { calls.push(["runTask", request]); return runTask(request); },
@@ -277,7 +277,7 @@ test("real broker handler runs one bounded task and reads only its exact log str
     approvalExpected: { releaseSha: sourceSha, sourceContractSha256: approval.sourceContractSha256, migrationSetDigest: approval.migrationSetDigest, packageChecksumSha256: approval.packageChecksumSha256, deploymentId: "phase2", approvalId },
   };
   const handler = createPreDeploymentInventoryHandler({
-    config: handlerConfig,
+    config: handlerConfig, executingBrokerVersion: "1",
     readApproval: async () => approval,
     verifySignature: async () => true,
     runTask: async (request) => { handlerCalls.push(["runTask", request]); return { failures: [], tasks: [{ taskArn }] }; },
@@ -299,7 +299,7 @@ test("real broker handler runs one bounded task and reads only its exact log str
   assert.equal("overrides" in handlerCalls[0][1], false);
   assert.equal(handlerCalls.find(([name]) => name === "getLogEvents")[1].logStreamName, "predeployment-inventory/inventory/inventory-19");
   const nestedOnlyHandler = createPreDeploymentInventoryHandler({
-    config: handlerConfig,
+    config: handlerConfig, executingBrokerVersion: "1",
     readApproval: async () => approval,
     verifySignature: async () => true,
     describeTaskDefinition: async () => ({ taskDefinition: { ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn, status: "ACTIVE", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }] } }),

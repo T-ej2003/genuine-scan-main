@@ -19,7 +19,7 @@ const artifact = (overrides = {}) => {
 };
 const verifySignature = async ({ message, signature }) => crypto.verify("sha256", message, { key: publicKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, signature);
 const taskDefinitions = Object.fromEntries(Object.entries(STAGE_B_BROKER_TASK_DEFINITION_FAMILIES).map(([mode, family]) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`]));
-const expected = { releaseSha, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, deploymentId: "phase2", approvalId: stageBApprovalIdForReleaseSha(releaseSha), ticketId: "CHG-STAGE-B-0001", images, taskDefinitionArns: taskDefinitions };
+const expected = { releaseSha, sourceContractSha256: source, migrationSetDigest: migration, packageChecksumSha256: checksum, deploymentId: "phase2", approvalId: stageBApprovalIdForReleaseSha(releaseSha), ticketId: "CHG-STAGE-B-0001", brokerVersion: "1", images, taskDefinitionArns: taskDefinitions };
 const config = { clusterArn: STAGE_B.clusterArn, approvalSecretArn: STAGE_B.approvalSecretArn, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, privateSubnetIds: [...STAGE_B.privateSubnetIds], replayTable: "replay", receiptBucket: STAGE_B.receiptBucket, taskDefinitionArns: taskDefinitions, templateHashes: stageBTemplateHashes(), approvalExpected: expected, images };
 
 test("broker task-definition map enforces the exact mode, family, account, region, and revision contract", () => {
@@ -39,16 +39,24 @@ test("broker task-definition map enforces the exact mode, family, account, regio
 
 test("broker runtime bindings are exact before any handler work", () => {
   for (const [field, value] of [["clusterArn", "arn:aws:ecs:eu-west-2:368992683803:cluster/other"], ["approvalSecretArn", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:other"], ["executorSecurityGroupId", "sg-other"], ["privateSubnetIds", ["subnet-test-invalid"]], ["replayTable", "bad table"], ["receiptBucket", "other-bucket"]]) {
-    assert.throws(() => createHandler({ config: { ...config, [field]: value } }), /runtime bindings|reviewed contract/);
+    assert.throws(() => createHandler({ config: { ...config, [field]: value }, executingBrokerVersion: "1" }), /runtime bindings|reviewed contract/);
   }
 });
 
 test("Stage B approval rejects wrong signer, bindings, expiry, and mutable image input", async () => {
   await assert.rejects(() => validateStageBApproval(artifact(), expected, { now, verifySignature: async () => false }), /signature/);
-  for (const [field, value, message] of [["releaseSha", "e".repeat(40), /releaseSha/], ["sourceContractSha256", "e".repeat(64), /sourceContractSha256/], ["migrationSetDigest", "e".repeat(64), /migrationSetDigest/], ["expiresAt", "2026-07-29T11:59:00.000Z", /expired/], ["backendImageDigest", "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend:latest", /invalid/]]) {
+  for (const [field, value, message] of [["releaseSha", "e".repeat(40), /releaseSha/], ["sourceContractSha256", "e".repeat(64), /sourceContractSha256/], ["migrationSetDigest", "e".repeat(64), /migrationSetDigest/], ["brokerVersion", "2", /brokerVersion/], ["expiresAt", "2026-07-29T11:59:00.000Z", /expired/], ["backendImageDigest", "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend:latest", /invalid/]]) {
     await assert.rejects(() => validateStageBApproval(artifact({ [field]: value }), expected, { now, verifySignature }), message);
   }
   await assert.rejects(() => validateStageBApproval(artifact({ backendImageDigest: image("mscqr-backend", "9") }), expected, { now, verifySignature }), /immutable image contract/);
+});
+
+test("every broker request binds its signed approval to the immutable executing Lambda version", async () => {
+  const handler = createHandler({ config, executingBrokerVersion: "2", readApproval: async () => JSON.stringify(artifact()), verifySignature,
+    claimApproval: async () => assert.fail("moved alias version must not claim approval"), runTask: async () => assert.fail("moved alias version must not start a task"), now: () => now,
+  });
+  await assert.rejects(() => handler({ approvalId: stageBApprovalIdForReleaseSha(releaseSha), mode: "full-rls-verification" }), /brokerVersion/);
+  assert.throws(() => createHandler({ config, executingBrokerVersion: "$LATEST" }), /immutable published Lambda version/);
 });
 
 test("executor accepts the same signed Stage B approval and binds its package checksum", async () => {
@@ -126,7 +134,7 @@ test("Stage B templates require immutable images, private executor networking, a
 
 test("broker rejects replay, task substitution, image substitution, and every caller override", async () => {
   const claimed = new Set(); let request;
-  const handler = createHandler({ config, readApproval: async () => JSON.stringify(artifact()), verifySignature, now: () => now,
+  const handler = createHandler({ config, executingBrokerVersion: "1", readApproval: async () => JSON.stringify(artifact()), verifySignature, now: () => now,
     claimApproval: async ({ approvalId, mode }) => { const key = `${approvalId}:${mode}`; if (claimed.has(key)) throw new Error("approval replay"); claimed.add(key); },
     runTask: async (value) => { request = value; return { failures: [], tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/fixed" }] }; },
   });
@@ -137,12 +145,12 @@ test("broker rejects replay, task substitution, image substitution, and every ca
     await assert.rejects(() => handler({ ...event, [key]: "substitution" }), /outside the reviewed contract/);
   }
   const substituted = { ...config, taskDefinitionArns: { ...taskDefinitions, "full-rls-verification": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-other:1" } };
-  assert.throws(() => createHandler({ config: substituted, readApproval: async () => JSON.stringify(artifact()), verifySignature, claimApproval: async () => assert.fail("substituted task must not claim approval"), runTask: async () => assert.fail("substituted task must not start"), now: () => now }), /task-definition map|reviewed contract/);
+  assert.throws(() => createHandler({ config: substituted, executingBrokerVersion: "1", readApproval: async () => JSON.stringify(artifact()), verifySignature, claimApproval: async () => assert.fail("substituted task must not claim approval"), runTask: async () => assert.fail("substituted task must not start"), now: () => now }), /task-definition map|reviewed contract/);
 });
 
 test("broker releases only an explicit ECS rejection and blocks uncertain launches for review", async () => {
   const events = [];
-  const handler = createHandler({ config, readApproval: async () => JSON.stringify(artifact()), verifySignature, now: () => now,
+  const handler = createHandler({ config, executingBrokerVersion: "1", readApproval: async () => JSON.stringify(artifact()), verifySignature, now: () => now,
     claimApproval: async () => events.push("claim"),
     releaseApproval: async () => events.push("release"),
     markLaunchUncertain: async () => events.push("uncertain"),
@@ -150,7 +158,7 @@ test("broker releases only an explicit ECS rejection and blocks uncertain launch
   });
   await assert.rejects(() => handler({ approvalId: stageBApprovalIdForReleaseSha(releaseSha), mode: "full-rls-verification" }), /claim was released/);
   assert.deepEqual(events, ["claim", "release"]);
-  const uncertain = createHandler({ config, readApproval: async () => JSON.stringify(artifact()), verifySignature, now: () => now,
+  const uncertain = createHandler({ config, executingBrokerVersion: "1", readApproval: async () => JSON.stringify(artifact()), verifySignature, now: () => now,
     claimApproval: async () => events.push("claim-uncertain"), markLaunchUncertain: async () => events.push("uncertain"), runTask: async () => { throw new Error("timeout"); },
   });
   await assert.rejects(() => uncertain({ approvalId: stageBApprovalIdForReleaseSha(releaseSha), mode: "full-rls-verification" }), /outcome is uncertain/);

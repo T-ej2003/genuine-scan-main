@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
-import { assertStageBNormalPlanCompleteness, assertStageBPlanApprovedBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes, STAGE_B_BROKER_OPERATIONS, STAGE_B_PLAN_PROFILES, STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS } from "../aws/stage-b-plan-approval-contract.mjs";
+import { assertStageBNormalPlanCompleteness, assertStageBPlanApprovedBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBApprovalAuthorityMode, stageBPlanHashes, STAGE_B_BROKER_OPERATIONS, STAGE_B_LIVE_AUTHORITY, STAGE_B_PLAN_AUTHORITY, STAGE_B_PLAN_PROFILES, STAGE_B_RETAINED_TASK_DEFINITION_DESCRIPTORS } from "../aws/stage-b-plan-approval-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { STAGE_B_BACKEND_ECS_EXEC_INLINE_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 import { approveCapturedStageBPlan, finalizeCapturedStageBPlanApproval, readStageBApprovalPlanArtifacts } from "../plan-production-green-stage-b.mjs";
@@ -343,6 +343,13 @@ test("plan profile and broker operation registries match the emitted Stage B uni
   assert.deepEqual(STAGE_B_BROKER_OPERATIONS, ["none", "initial-create", "update", "recovery-alias-only", "partial-apply-recovery", "fresh-image-partial-apply-recovery"]);
   assert.throws(() => createStageBPlanCaptureReport({ ...capture, planProfile: "UNREVIEWED" }), /unsupported/);
   assert.throws(() => createStageBPlanApprovalReport({ ...approval, planProfile: "UNREVIEWED" }), /unsupported/);
+});
+
+test("Stage B derives creation versus runtime authority from authenticated plan operation, never operator input", () => {
+  assert.equal(stageBApprovalAuthorityMode(approval), STAGE_B_PLAN_AUTHORITY);
+  assert.equal(stageBApprovalAuthorityMode({ brokerOperation: "initial-create" }), STAGE_B_PLAN_AUTHORITY);
+  assert.equal(stageBApprovalAuthorityMode({ brokerOperation: "none" }), STAGE_B_LIVE_AUTHORITY);
+  assert.throws(() => stageBApprovalAuthorityMode({ brokerOperation: "operator-selected" }), /canonical broker operation/);
 });
 
 test("normal approval uses canonical address completeness instead of a fixed no-op count", () => {

@@ -8,6 +8,7 @@ import {
   STAGE_B_APPROVAL_ALGORITHM,
   STAGE_B_APPROVAL_FIELDS,
   STAGE_B_APPROVAL_SCHEMA_VERSION,
+  STAGE_B_RUNTIME_APPROVAL_AUTHORITY,
   canonicalJson,
   stageBApprovalIdForReleaseSha,
   validateStageBApprovalPayload,
@@ -33,7 +34,7 @@ const DIGEST = /^[a-f0-9]{64}$/;
 const UUID = /^[a-f0-9-]{16,64}$/;
 const OPERATOR_FIELDS = Object.freeze(["ticketId"]);
 const EVIDENCE_FIELDS = Object.freeze([
-  "schemaVersion", "producer", "observedAt", "sourceCurrent", "runtimeBindingsCurrent", "releaseSha", "backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "taskDefinitionArns", "taskDefinitionContentSha256", "brokerVersion", "brokerPackageRawSha256", "brokerCodeSha256", "checkerIdentity", "deployerIdentity", "imageAuthorizationSha256", "tfvarsBindingSha256", "runtimeBindingSha256",
+  "schemaVersion", "producer", "observedAt", "authorityMode", "sourceCurrent", "runtimeBindingsCurrent", "releaseSha", "backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "taskDefinitionArns", "taskDefinitionContentSha256", "brokerVersion", "brokerPackageRawSha256", "brokerCodeSha256", "checkerIdentity", "deployerIdentity", "imageAuthorizationSha256", "tfvarsBindingSha256", "runtimeBindingSha256",
 ]);
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -45,7 +46,7 @@ function assertEvidence(evidence) {
   if (!evidence || typeof evidence !== "object" || Array.isArray(evidence) || !exactKeys(evidence, EVIDENCE_FIELDS)) {
     throw new Error("Authenticated Stage B approval evidence fields are incomplete or unexpected.");
   }
-  if (evidence.schemaVersion !== 1 || evidence.producer !== "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs" || evidence.sourceCurrent !== true || evidence.runtimeBindingsCurrent !== true || !/^\d{4}-\d\d-\d\dT/.test(evidence.observedAt || "")) throw new Error("Authenticated evidence provenance or currentness is incomplete.");
+  if (evidence.schemaVersion !== 1 || evidence.producer !== "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs" || evidence.authorityMode !== STAGE_B_RUNTIME_APPROVAL_AUTHORITY || evidence.sourceCurrent !== true || evidence.runtimeBindingsCurrent !== true || !/^\d{4}-\d\d-\d\dT/.test(evidence.observedAt || "")) throw new Error("Authenticated evidence provenance or currentness is incomplete.");
   if (!SHA.test(evidence.releaseSha || "")) throw new Error("Authenticated evidence releaseSha is not exact.");
   for (const field of ["sourceContractSha256", "migrationSetDigest", "packageChecksumSha256"]) {
     if (!DIGEST.test(evidence[field] || "")) throw new Error(`Authenticated evidence ${field} is malformed.`);

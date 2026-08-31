@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertImageAuthorization } from "./production-cutover-control-plane.mjs";
-import { assertStageBBrokerConfigurationBindings, assertStageBBrokerConfigurationIdentity, assertStageBBrokerRuntimeBindings, assertStageBBrokerTaskDefinitionMap, canonicalJson, canonicalStageBBrokerApprovalExpected, hasCompleteStageBTaskMaps, STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { assertStageBBrokerConfigurationBindings, assertStageBBrokerConfigurationIdentity, assertStageBBrokerRuntimeBindings, assertStageBBrokerTaskDefinitionMap, canonicalJson, canonicalStageBBrokerApprovalExpected, hasCompleteStageBTaskMaps, STAGE_B, STAGE_B_RUNTIME_APPROVAL_AUTHORITY } from "./production-green-stage-b-contract.mjs";
 import { assertStageBTfvarsBindingBytes, deriveContractDigests } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
@@ -107,7 +107,7 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
     throw new Error("Release-deployer preflight is not bound to the selected canonical tfvars and binding report.");
   }
   const live = preflight.stageBApprovalLiveObservation;
-  if (!live || typeof live !== "object" || Array.isArray(live)) throw new Error("Authenticated release-preflight live Stage B approval observation is required.");
+  if (!live || typeof live !== "object" || Array.isArray(live)) throw new Error("Runtime broker approval requires post-creation authenticated live Stage B observations; PLAN_APPROVED is the separate authority for resource creation or replacement.");
   const broker = assertStageBBrokerConfigurationIdentity({ configuration: live.configuration, alias: live.alias });
   const variables = live.configuration?.Environment?.Variables;
   const taskDefinitionArns = parse(variables?.BROKER_TASK_DEFINITIONS_JSON, "Live broker task-definition map");
@@ -135,6 +135,7 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
     schemaVersion: STAGE_B_APPROVAL_EVIDENCE_SCHEMA_VERSION,
     producer: STAGE_B_APPROVAL_EVIDENCE_PRODUCER,
     observedAt,
+    authorityMode: STAGE_B_RUNTIME_APPROVAL_AUTHORITY,
     sourceCurrent: true,
     runtimeBindingsCurrent: true,
     releaseSha: sourceSha,
