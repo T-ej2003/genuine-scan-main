@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { canonicalizeEcsTaskDefinition } from "./ecs-task-definition-readback.mjs";
-const { assertBrokerApprovalValidationRequest, assertBrokerRequest, hasCompleteStageBTaskMaps, STAGE_B, STAGE_B_MODES, validateStageBApproval } = await import(
+const { assertBrokerApprovalValidationRequest, assertBrokerRequest, assertStageBBrokerConfigurationBindings, canonicalJson, hasCompleteStageBTaskMaps, STAGE_B, STAGE_B_MODES, validateStageBApproval } = await import(
   process.env.AWS_LAMBDA_FUNCTION_NAME ? "./stage-b-contract.mjs" : "../../../../../scripts/aws/production-green-stage-b-contract.mjs"
 );
 
@@ -22,7 +22,7 @@ const inventoryDatabaseUrlArn = "arn:aws:secretsmanager:eu-west-2:368992683803:s
 const inventoryRlsRole = "mscqr_prod_rls_read";
 const inventoryTaskRoleArn = `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-task`;
 const inventoryExecutionRoleArn = `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-execution`;
-const exact = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const exact = (left, right) => canonicalJson(left) === canonicalJson(right);
 const brokerReceipt = (value) => ({ ...value, receiptSha256: crypto.createHash("sha256").update(`${JSON.stringify(value)}\n`).digest("hex") });
 
 export function createPreDeploymentOperationIdentity({ approvalId, releaseSha, rotationId, operation = PREDEPLOYMENT_INVENTORY_OPERATION, taskDefinitionArn, imageDigest } = {}) {
@@ -337,6 +337,7 @@ export function createBrokerRuntimeConfig(env = process.env) {
 
 export async function handler(event, context) {
   const config = createBrokerRuntimeConfig();
+  assertStageBBrokerConfigurationBindings({ approvalExpected: config.approvalExpected, images: config.images, templateHashes: config.templateHashes });
   if (!/^[A-Za-z0-9._-]{3,255}$/.test(config.replayTable || "") || config.receiptBucket !== STAGE_B.receiptBucket) throw new Error("Stage B broker storage is outside the reviewed contract.");
   const [{ ECSClient, RunTaskCommand, DescribeTaskDefinitionCommand, DescribeTasksCommand, StopTaskCommand }, { SecretsManagerClient, GetSecretValueCommand }, { KMSClient, VerifyCommand }, { DynamoDBClient, PutItemCommand, DeleteItemCommand, UpdateItemCommand }, { S3Client, PutObjectCommand }, { CloudWatchLogsClient, DescribeLogStreamsCommand, GetLogEventsCommand }] = await Promise.all([
     import("@aws-sdk/client-ecs"), import("@aws-sdk/client-secrets-manager"), import("@aws-sdk/client-kms"), import("@aws-sdk/client-dynamodb"), import("@aws-sdk/client-s3"), import("@aws-sdk/client-cloudwatch-logs"),

@@ -92,7 +92,7 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   assertStageBTerraformInitializedBackendMetadata(metadata);
   const observedWorkspace = String(run("terraform", [`-chdir=${terraformRoot}`, "workspace", "show"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
   assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE, observedWorkspace });
-  return { backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, tfvarsSha256: generated.tfvarsSha256, ...backendMetadata };
+  return { backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, tfvarsSha256: generated.tfvarsSha256, bindingReportSha256: sha256(fs.readFileSync(generated.bindingReportPath)), ...backendMetadata };
 }
 
 export function runProductionPreflightCli(argv = process.argv.slice(2), dependencies = {}) {

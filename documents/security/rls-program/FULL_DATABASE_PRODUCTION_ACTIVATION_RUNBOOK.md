@@ -144,10 +144,14 @@ This creates the isolated RDS instance, KMS keys, checker/executor roles, securi
 
 Generate the source-contract and ordered migration digests locally.
 5. Prepare the unsigned input through the canonical authenticated evidence
-collector. It verifies the signed current-source image authorization, canonical
-tfvars binding, release-deployer preflight, and fresh read-only broker alias and
-configuration observation before it emits the input. Matching Git SHA alone is
-not authority: live image, task-definition, and broker bindings must be current.
+collector. It requires the release-deployer preflight to be the positive
+`ready-for-plan` result with every required read allowed, every readiness gate
+true, zero failure counters, and exact tfvars/binding-report hashes. It also
+verifies the signed current-source image authorization and fresh read-only
+broker alias/configuration observation, including the complete live approval
+expectation, four-image map, task-definition ARN map, and task-definition
+template-hash map. Matching Git SHA or package checksum alone is not authority:
+runtime bindings must be current and complete.
 The operator supplies only `ticketId`; the producer creates `issuedAt`, a
 maximum-two-hour `expiresAt`, and a cryptographically random nonce. It writes
 the input and mandatory checker review as one immutable 0600 private pair; it

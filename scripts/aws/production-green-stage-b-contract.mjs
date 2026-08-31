@@ -119,6 +119,11 @@ export const STAGE_B_APPROVAL_ALGORITHM = "RSASSA_PSS_SHA_256";
 export const STAGE_B_APPROVAL_SCHEMA_VERSION = 2;
 export const STAGE_B_APPROVAL_ID_PREFIX = "APR-STAGE-B-";
 export const STAGE_B_APPROVAL_PUBLICATION_VALIDATION_OPERATION = "validate-approval";
+export const STAGE_B_BROKER_APPROVAL_EXPECTED_FIELDS = Object.freeze([
+  "releaseSha", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256",
+  "deploymentId", "greenDatabaseName", "administratorIdentity", "databaseSecurityGroupId", "executorSecurityGroupId",
+]);
+export const STAGE_B_BROKER_IMAGE_FIELDS = Object.freeze(["backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest"]);
 const imagePattern = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-(?:backend|worker|web)@sha256:[a-f0-9]{64}$/;
 const imagePatterns = Object.freeze({
   backendImageDigest: /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/,
@@ -172,6 +177,47 @@ const assumedRole = (role) => new RegExp(`^arn:aws:sts::${STAGE_B.account}:assum
 const isDigest = (value) => /^[a-f0-9]{64}$/.test(value || "");
 const strictKeys = (value, expected) => Object.keys(value || {}).sort().join(",") === [...expected].sort().join(",");
 const taskDefinitionArn = (value) => /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[A-Za-z0-9_-]+:[1-9][0-9]*$/.test(value || "");
+
+export function assertStageBBrokerApprovalExpected(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !strictKeys(value, STAGE_B_BROKER_APPROVAL_EXPECTED_FIELDS)
+      || !/^[a-f0-9]{40}$/.test(value.releaseSha || "")
+      || [value.sourceContractSha256, value.migrationSetDigest, value.packageChecksumSha256].some((item) => !isDigest(item))
+      || value.deploymentId !== "phase2" || value.greenDatabaseName !== "mscqr_production_rls_green_phase2"
+      || value.administratorIdentity !== "mscqr_prod_admin" || value.databaseSecurityGroupId !== STAGE_B.databaseSecurityGroupId
+      || value.executorSecurityGroupId !== STAGE_B.executorSecurityGroupId) {
+    throw new Error("Stage B broker approval expectation is incomplete or outside the reviewed contract.");
+  }
+  return value;
+}
+
+export function assertStageBBrokerImageBindings(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !strictKeys(value, STAGE_B_BROKER_IMAGE_FIELDS)
+      || Object.entries(value).some(([field, item]) => !imagePatterns[field]?.test(item || ""))) {
+    throw new Error("Stage B broker image bindings are incomplete or outside the reviewed contract.");
+  }
+  return value;
+}
+
+export function assertStageBBrokerTemplateHashBindings(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !strictKeys(value, STAGE_B_TASK_TEMPLATE_KEYS)
+      || Object.values(value).some((item) => !isDigest(item))) {
+    throw new Error("Stage B broker task-definition template hashes are incomplete or malformed.");
+  }
+  return value;
+}
+
+export function assertStageBBrokerConfigurationBindings({ approvalExpected, images, templateHashes } = {}) {
+  assertStageBBrokerApprovalExpected(approvalExpected);
+  assertStageBBrokerImageBindings(images);
+  assertStageBBrokerTemplateHashBindings(templateHashes);
+  return { approvalExpected, images, templateHashes };
+}
+
+export const canonicalStageBBrokerApprovalExpected = ({ releaseSha, sourceContractSha256, migrationSetDigest, packageChecksumSha256 } = {}) => ({
+  releaseSha, sourceContractSha256, migrationSetDigest, packageChecksumSha256,
+  deploymentId: "phase2", greenDatabaseName: "mscqr_production_rls_green_phase2", administratorIdentity: "mscqr_prod_admin",
+  databaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, executorSecurityGroupId: STAGE_B.executorSecurityGroupId,
+});
 
 export const hasCompleteStageBTaskMaps = (taskDefinitionArns, taskDefinitionTemplateHashes) =>
   Boolean(taskDefinitionArns && typeof taskDefinitionArns === "object" && !Array.isArray(taskDefinitionArns)
