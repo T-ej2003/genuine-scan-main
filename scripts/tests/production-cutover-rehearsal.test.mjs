@@ -122,6 +122,7 @@ const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/ms
 
 export function fixtureInput(overrides = {}) {
   const mutations = [];
+  let registeredOverlapDefinition;
   const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha });
   const strictProbes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
   const stageA = {
@@ -152,7 +153,15 @@ export function fixtureInput(overrides = {}) {
     verifyRootDropSignature: () => true,
     stageA,
     artifactSigning: artifactFixture(),
-    overlapTask: { input: { backendImage: imageDigest, releaseSha: sourceSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } }, register: async () => { mutations.push("M4_REGISTER_TASK_DEFINITION"); return { taskDefinition: { taskDefinitionArn } }; }, describe: async (arn) => ({ taskDefinitionArn: arn, family: "mscqr-production-rls-green-backend-candidate", status: "ACTIVE", tags: [{ key: "MSCQRExecTarget", value: "production-backend" }] }) },
+    overlapTask: {
+      input: { backendImage: imageDigest, releaseSha: sourceSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
+      register: async ({ taskDefinition, tags }) => {
+        mutations.push("M4_REGISTER_TASK_DEFINITION");
+        registeredOverlapDefinition = structuredClone(taskDefinition);
+        return { taskDefinition: { taskDefinitionArn }, tags };
+      },
+      describe: async (arn) => ({ ...structuredClone(registeredOverlapDefinition), taskDefinitionArn: arn, revision: 1, status: "ACTIVE", tags: [{ key: "MSCQRExecTarget", value: "production-backend" }] }),
+    },
     inventory: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", execute: async () => ({ inventory, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", taskArn }) },
     rotationPrepare: { run: async () => { mutations.push("M5_ROTATION_STATE_PERSISTENCE"); return { valid: true, prepared: true, rotationId, rotationStateSha256, rotationFixtureSha256, evidenceRef: "rotation:rehearsal", evidenceSha256, mutationCount: 1 }; } },
     rotationInfrastructure: { run: async ({ sourceSha: currentSourceSha, rotationId: currentRotationId, secretBindings }) => { mutations.push("M5_ROTATION_INFRA_CONVERGENCE"); const overlapSecretSet = Object.values(secretBindings).filter((value) => typeof value === "string" && value.startsWith("arn:aws:secretsmanager:")).map((value) => value.replace(/:value::$/, "")); return { valid: true, converged: true, rotationEnabled: true, sourceSha: currentSourceSha, rotationId: currentRotationId, applyCount: 1, overlapSecretSet, authorizedOverlapSecretSet: overlapSecretSet, unrelatedSecretAccess: false, evidenceRef: "terraform:rotation-infrastructure", evidenceSha256, mutationCount: 1 }; } },
@@ -615,9 +624,10 @@ test("post-prepare overlap registration uses JSON-key references for promoted cu
     ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"].includes(name) ? `${value}:value::` : value]));
   input.rotationPrepare.run = async () => ({ valid: true, prepared: true, rotationId, rotationStateSha256, rotationFixtureSha256, evidenceRef: "rotation:rehearsal", evidenceSha256, mutationCount: 1, overlapSecretBindings });
   let registeredPayload;
+  const originalRegister = input.overlapTask.register;
   input.overlapTask.register = async (payload) => {
     registeredPayload = payload;
-    return { taskDefinition: { taskDefinitionArn } };
+    return originalRegister(payload);
   };
   await runProductionCutoverControlPlane(input);
   const secrets = registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").secrets;
@@ -635,7 +645,8 @@ test("rebaseline live post-write state is reauthenticated immediately before ECS
   let rotationRevalidations = 0;
   input.rebaseline = { revalidate: async () => { revalidations += 1; return { livePostWriteSha256: "a".repeat(64) }; } };
   input.rotationPrepare.revalidate = async ({ rotationId: observedRotationId, rotationStateSha256: observedStateSha256 }) => { rotationRevalidations += 1; assert.equal(observedRotationId, rotationId); assert.equal(observedStateSha256, rotationStateSha256); return { valid: true, phase: "overlap-deploy-required" }; };
-  input.overlapTask.register = async (payload) => { registered = true; return { taskDefinition: { taskDefinitionArn }, input: payload }; };
+  const originalRegister = input.overlapTask.register;
+  input.overlapTask.register = async (payload) => { registered = true; return originalRegister(payload); };
   await runProductionCutoverControlPlane(input);
   assert.equal(revalidations, 1);
   assert.equal(rotationRevalidations, 1);

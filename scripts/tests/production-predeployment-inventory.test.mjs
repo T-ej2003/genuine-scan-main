@@ -37,6 +37,7 @@ const brokerTaskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-m
 const brokerTags = [{ key: "Component", value: "full-rls-green-stage-b" }, { key: "Environment", value: "production" }, { key: "ManagedBy", value: "Terraform" }, { key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }];
 const ecsDefaultedReadback = (definition) => ({
   ...structuredClone(definition),
+  enableFaultInjection: false,
   containerDefinitions: definition.containerDefinitions.map((container) => ({ ...structuredClone(container), cpu: 0, environmentFiles: [], mountPoints: [], portMappings: [], systemControls: [], ulimits: [], volumesFrom: [], logConfiguration: { ...container.logConfiguration, secretOptions: [] } })),
   placementConstraints: [],
   volumes: [],
@@ -69,7 +70,7 @@ const brokerApproval = {
   taskDefinitionArns: Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${mode}:1`])),
   taskDefinitionTemplateHashes: Object.fromEntries(STAGE_B_TASK_TEMPLATE_KEYS.map((key) => [key, "f".repeat(64)])),
 };
-const brokerDefinition = () => ({ ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn: brokerTaskDefinitionArn, status: "ACTIVE" });
+const brokerDefinition = () => ({ ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn: brokerTaskDefinitionArn, status: "ACTIVE", enableFaultInjection: false });
 
 test("broker runtime derives inventory configuration without duplicating it in Lambda environment", () => {
   const runtime = createBrokerRuntimeConfig({

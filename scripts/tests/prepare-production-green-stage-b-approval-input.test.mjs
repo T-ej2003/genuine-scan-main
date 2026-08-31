@@ -44,6 +44,7 @@ const awsNormalizedTaskDefinitionReadbacks = Object.fromEntries(Object.entries(t
   definition.containerDefinitions[0].logConfiguration = { ...definition.containerDefinitions[0].logConfiguration, secretOptions: [] };
   definition.placementConstraints = [];
   definition.volumes = definition.volumes || [];
+  definition.enableFaultInjection = false;
   return [mode, { taskDefinition: Object.fromEntries(Object.entries(definition).reverse()) }];
 }));
 const preflight = (overrides = {}) => ({ status: "ready-for-plan", sourceSha: releaseSha, caller: deployerIdentity, account: STAGE_B.account, region: STAGE_B.region, backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, failed: [], skipped: [], requiredReads: { "ecs:DescribeTasks": "allowed" }, total: 1, allowed: 1, checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }, administratorReportSha256: digest("b"), releaseReadFailures: 0, configurationFailures: 0, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, tfvarsSha256: report.tfvarsSha256, bindingReportSha256: sha256(bindingReportBytes), ...overrides });

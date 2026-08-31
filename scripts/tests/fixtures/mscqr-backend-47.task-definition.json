@@ -89,6 +89,7 @@
     "requiresAttributes": [],
     "placementConstraints": [],
     "compatibilities": ["EC2", "FARGATE"],
+    "enableFaultInjection": false,
     "runtimePlatform": { "cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX" },
     "requiresCompatibilities": ["FARGATE"],
     "cpu": "2048",

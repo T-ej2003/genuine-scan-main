@@ -1,10 +1,13 @@
-const READBACK_METADATA_FIELDS = Object.freeze(["taskDefinitionArn", "revision", "status", "registeredAt", "registeredBy", "tags", "requiresAttributes", "compatibilities"]);
+const READBACK_METADATA_FIELDS = Object.freeze(["taskDefinitionArn", "revision", "status", "registeredAt", "registeredBy", "deregisteredAt", "deleteRequestedAt", "tags", "requiresAttributes", "compatibilities"]);
 const ROOT_EMPTY_DEFAULT_FIELDS = Object.freeze(["placementConstraints", "volumes"]);
-const CONTAINER_EMPTY_DEFAULT_FIELDS = Object.freeze(["environmentFiles", "mountPoints", "portMappings", "systemControls", "ulimits", "volumesFrom"]);
+const CONTAINER_EMPTY_DEFAULT_FIELDS = Object.freeze(["environment", "environmentFiles", "mountPoints", "portMappings", "systemControls", "ulimits", "volumesFrom"]);
 
 export function normalizeEcsTaskDefinitionReadback(definition) {
   const normalized = structuredClone(definition);
   for (const field of READBACK_METADATA_FIELDS) delete normalized[field];
+  // ECS documents this optional field as defaulting to false. Preserve true:
+  // it enables task fault-injection endpoints and is executable configuration.
+  if (normalized.enableFaultInjection === false) delete normalized.enableFaultInjection;
   for (const field of ROOT_EMPTY_DEFAULT_FIELDS) if (Array.isArray(normalized[field]) && normalized[field].length === 0) delete normalized[field];
   if (Array.isArray(normalized.containerDefinitions)) {
     normalized.containerDefinitions = normalized.containerDefinitions.map((container) => {

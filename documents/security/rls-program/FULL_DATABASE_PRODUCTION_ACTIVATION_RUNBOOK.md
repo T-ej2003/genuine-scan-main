@@ -177,6 +177,10 @@ VPC, filesystem mount, dead-letter and image configuration). The broker runtime
 targets are exact identities: cluster, approval secret, executor security
 group, complete private-subnet set, replay table, receipt bucket, every
 mode-specific task revision, and their semantically normalized ECS contents.
+The field-by-field AWS default/metadata contract is
+`ECS_TASK_DEFINITION_READBACK_NORMALIZATION.md`. It normalizes only documented,
+captured omission-equivalent values (including `enableFaultInjection: false`),
+while preserving every non-default executable and security-relevant value.
 The operator supplies only `ticketId`; the producer creates `issuedAt`, a
 maximum-two-hour `expiresAt`, and a cryptographically random nonce. It writes
 the input and mandatory checker review as one immutable 0600 private pair; it
