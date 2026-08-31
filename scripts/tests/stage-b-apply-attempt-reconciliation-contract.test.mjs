@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import { HISTORICAL_STAGE_B_V2_INCIDENT, STAGE_B_APPLY_ATTEMPT_RECONCILIATION_WORKFLOW_REF, assertStageBApplyAttemptReconciliationEligibility, assertStageBApplyAttemptReservation, assertStageBApplyAttemptTransition, classifyStageBApplyAttemptReconciliationState, createStageBApplyAttemptReconciliationArtifact, createStageBApplyAttemptReconciliationAuthorization, createStageBApplyAttemptReconciliationClaim, createStageBApplyAttemptReservation, createStageBApplyAttemptTransition, stageBApplyAttemptReconciliationSha256 } from "../aws/stage-b-apply-attempt-reconciliation-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
@@ -55,4 +56,11 @@ test("malformed pre-spawn and post-spawn transitions fail closed", () => {
   const initial = reservation(); const beforeSpawn = intent(initial);
   assert.throws(() => assertStageBApplyAttemptReservation({ ...beforeSpawn, applyMayHaveOccurred: true }), /prove Terraform remains unreachable/);
   assert.throws(() => createStageBApplyAttemptTransition(beforeSpawn, { status: "APPLIED", operationResult: { classification: "APPLY_RESULT_COMMITTED", readback: "EXACT" }, applyStarted: { status: "REACHABLE", evidenceSha256: sha("2") }, applyResult: { status: "SUCCEEDED", evidenceSha256: sha("3") } }), /authorized/);
+});
+
+test("production mutation closure documents only executable reconciliation states", () => {
+  const closure = fs.readFileSync("documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_MUTATION_CLOSURE_2026-08-16.md", "utf8");
+  for (const state of ["RESERVED", "APPLY_INTENT_RECORDED", "APPLY_SPAWN_UNCERTAIN", "ABORTED_BEFORE_APPLY", "APPLIED", "FAILED", "UNKNOWN"]) assert.match(closure, new RegExp(`\\b${state}\\b`));
+  assert.doesNotMatch(closure, /RESERVED\s*->\s*APPLYING|UNKNOWN\s*->\s*ABORTED_BEFORE_APPLY/);
+  assert.match(closure, /HISTORICAL_V2_RECONCILIATION=UNSAFE[\s\S]*HISTORICAL_V2_RETRYABLE=false/);
 });

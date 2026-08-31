@@ -114,6 +114,8 @@ export const scanAddedDiff = (diff, relativePath) => {
   return findings;
 };
 
+export const addedContentDiffArgs = (mergeBase, relativePath) => ["diff", "--text", "--unified=0", "--no-ext-diff", "--diff-filter=ACMR", `${mergeBase}...HEAD`, "--", relativePath];
+
 export const runBranchSecretDiff = () => {
 
 const baseRef = resolveBaseRef();
@@ -145,7 +147,7 @@ for (const relativePath of changedFiles) {
   const fullPath = path.join(repoRoot, relativePath);
   if (!existsSync(fullPath)) continue;
 
-  findings.push(...scanAddedDiff(tryGitOutput(["diff", "--unified=0", "--no-ext-diff", "--diff-filter=ACMR", `${mergeBase}...HEAD`, "--", relativePath]), relativePath));
+  findings.push(...scanAddedDiff(tryGitOutput(addedContentDiffArgs(mergeBase, relativePath)), relativePath));
 }
 
 if (findings.length > 0) {
