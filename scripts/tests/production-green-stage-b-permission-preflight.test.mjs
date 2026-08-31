@@ -2309,20 +2309,35 @@ test("apply-intent persistence failure blocks Terraform before the spawn boundar
   assert.deepEqual(input.applyCalls, []);
 });
 
+test("spawn-uncertainty persistence failure blocks Terraform after durable pre-spawn intent", () => {
+  const fixture = createValidStageBApplyFixture(); const input = validRealApplyInput(fixture); const events = [];
+  input.deps.reserveApplyAttemptTransition = ({ sequence, attemptId }) => {
+    events.push(`transition-${sequence}`);
+    if (sequence === 2) throw new Error("spawn-uncertainty persistence failure");
+    return { status: "reserved", key: stageBAttemptStepS3ObjectKey(attemptId, sequence) };
+  };
+  input.deps.apply = () => { events.push("terraform"); return { status: 0 }; };
+  assert.throws(() => runApply(input), /spawn-uncertainty persistence failure/);
+  assert.deepEqual(events, ["transition-1", "transition-2"]);
+  assert.deepEqual(input.applyCalls, []);
+});
+
 test("apply failure records a terminal failed result while thrown spawn ambiguity remains non-retryable", () => {
   const failedFixture = createValidStageBApplyFixture(); const failed = validRealApplyInput(failedFixture);
   failed.deps.apply = () => ({ status: 1 });
   assert.throws(() => runApply(failed), /Terraform apply failed/);
   const failedTransitions = [...failedFixture.sharedReservations.entries()].filter(([key]) => key.includes("/"));
-  assert.equal(failedTransitions.length, 2);
-  assert.equal(JSON.parse(failedTransitions[1][1]).status, "FAILED");
+  assert.equal(failedTransitions.length, 3);
+  assert.equal(JSON.parse(failedTransitions[1][1]).status, "APPLY_SPAWN_UNCERTAIN");
+  assert.equal(JSON.parse(failedTransitions[2][1]).status, "FAILED");
 
   const uncertainFixture = createValidStageBApplyFixture(); const uncertain = validRealApplyInput(uncertainFixture);
   uncertain.deps.apply = () => { throw new Error("spawn outcome unknown"); };
   assert.throws(() => runApply(uncertain), /spawn outcome unknown/);
   const uncertainTransitions = [...uncertainFixture.sharedReservations.entries()].filter(([key]) => key.includes("/"));
-  assert.equal(uncertainTransitions.length, 2);
-  assert.equal(JSON.parse(uncertainTransitions[1][1]).status, "UNKNOWN");
+  assert.equal(uncertainTransitions.length, 3);
+  assert.equal(JSON.parse(uncertainTransitions[1][1]).status, "APPLY_SPAWN_UNCERTAIN");
+  assert.equal(JSON.parse(uncertainTransitions[2][1]).status, "UNKNOWN");
   assert.deepEqual(uncertain.applyCalls, []);
 });
 
@@ -2342,7 +2357,7 @@ test("shared reservation and readback precede local reservation and Terraform sp
   input.deps.reserveApplyAttemptTransition = ({ sequence, attemptId }) => { events.push(`transition-${sequence}`); return { status: "reserved", key: stageBAttemptStepS3ObjectKey(attemptId, sequence) }; };
   input.deps.apply = () => { events.push("terraform"); return { status: 0 }; };
   runApply(input);
-  assert.deepEqual(events, ["shared-reserved-and-verified", "local-evidence", "transition-1", "terraform", "transition-2"]);
+  assert.deepEqual(events, ["shared-reserved-and-verified", "local-evidence", "transition-1", "transition-2", "terraform", "transition-3"]);
 });
 
 test("apply rejects ambient Terraform CLI argument injection before artifacts or mutation", () => {

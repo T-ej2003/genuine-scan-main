@@ -109,9 +109,9 @@ export function runStageBApplyAttemptReconciliationCli(argv = process.argv.slice
     return { ...result, sourceSha, status: "SUCCESSOR_READY_BUT_NOT_EXECUTED" };
   }
   if (mode === "create-reconciliation") {
-    const historical = readJsonFile(required(argv, "--historical-reservation")); const observation = readJsonFile(required(argv, "--observation")); const reservationIdentity = required(argv, "--reservation-identity"); const history = readStageBApplyAttemptHistory({ reservationIdentity, run: awsRun });
+    const historical = readJsonFile(required(argv, "--historical-reservation")); const reservationIdentity = required(argv, "--reservation-identity"); const history = readStageBApplyAttemptHistory({ reservationIdentity, run: awsRun });
     if (canonicalJson(historical.value) !== canonicalJson(history.reservation)) throw new Error("Stage B reconciliation historical reservation differs from canonical backend readback.");
-    const result = createStageBApplyAttemptReconciliationArtifact({ historicalReservation: history.reservation, historicalTransitions: history.transitions, observation: observation.value, successorSourceSha: required(argv, "--successor-source-sha"), generatedAt: now.toISOString(), now });
+    const result = createStageBApplyAttemptReconciliationArtifact({ historicalReservation: history.reservation, historicalTransitions: history.transitions, successorSourceSha: required(argv, "--successor-source-sha"), generatedAt: now.toISOString(), now });
     const output = assertStageBArtifactPath({ artifactPath: required(argv, "--output"), repositoryRoot: root, label: "Stage B apply-attempt reconciliation artifact", allowExisting: false });
     ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "Stage B apply-attempt reconciliation directory" });
     writeStageBPrivateFileAtomic({ filePath: output, bytes: Buffer.from(`${JSON.stringify(result, null, 2)}\n`), repositoryRoot: root, label: "Stage B apply-attempt reconciliation artifact" });

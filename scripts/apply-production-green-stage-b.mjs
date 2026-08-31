@@ -442,21 +442,25 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const reserveApplyAttempt = effectiveDeps.reserveApplyAttempt || ((filePath, bytes) => writeStageBPrivateFileExclusive({ filePath, bytes, repositoryRoot: root, label: "Stage B apply attempt" }));
   reserveApplyAttempt(applyAttemptPath, attemptBytes);
   const reserveAttemptTransition = effectiveDeps.reserveApplyAttemptTransition || reserveStageBApplyAttemptTransition;
-  const applying = createStageBApplyAttemptTransition(attempt, { status: "APPLY_INTENT_RECORDED", operationResult: { classification: "APPLY_INTENT_RECORDED", readback: "EXACT" }, applyStarted: { status: "INTENT_RECORDED", evidenceSha256: sha256(Buffer.from(`${callerArn}\n${finalBindings.protectedMainSha}\n${finalBindings.savedPlanSha256}`)) }, applyResult: { status: "PENDING", evidenceSha256: null } });
+  const applying = createStageBApplyAttemptTransition(attempt, { status: "APPLY_INTENT_RECORDED", operationResult: { classification: "APPLY_INTENT_RECORDED", readback: "EXACT" }, applyMayHaveOccurred: false, applyStarted: { status: "NOT_STARTED", evidenceSha256: null }, applyResult: { status: "PENDING", evidenceSha256: null } });
   const applyingBytes = Buffer.from(`${JSON.stringify(applying, null, 2)}\n`);
   const applyingReserved = reserveAttemptTransition({ attemptId: applying.attemptId, sequence: applying.sequence, bytes: applyingBytes, privateDirectory: path.dirname(applyAttemptPath), run: (args) => releaseRun(args) });
   if (applyingReserved?.status !== "reserved" || applyingReserved.key !== stageBAttemptStepS3ObjectKey(applying.attemptId, applying.sequence)) throw new Error("Stage B apply-attempt intent marker was not authenticated; Terraform apply is unreachable.");
+  const spawnUncertain = createStageBApplyAttemptTransition(applying, { status: "APPLY_SPAWN_UNCERTAIN", operationResult: { classification: "APPLY_SPAWN_UNCERTAIN", readback: "EXACT" }, applyStarted: { status: "REACHABLE", evidenceSha256: sha256(Buffer.from(`${callerArn}\n${finalBindings.protectedMainSha}\n${finalBindings.savedPlanSha256}\nspawn-uncertain`)) }, applyResult: { status: "PENDING", evidenceSha256: null } });
+  const spawnUncertainBytes = Buffer.from(`${JSON.stringify(spawnUncertain, null, 2)}\n`);
+  const spawnUncertainReserved = reserveAttemptTransition({ attemptId: spawnUncertain.attemptId, sequence: spawnUncertain.sequence, bytes: spawnUncertainBytes, privateDirectory: path.dirname(applyAttemptPath), run: (args) => releaseRun(args) });
+  if (spawnUncertainReserved?.status !== "reserved" || spawnUncertainReserved.key !== stageBAttemptStepS3ObjectKey(spawnUncertain.attemptId, spawnUncertain.sequence)) throw new Error("Stage B apply-spawn uncertainty marker was not authenticated; Terraform apply is unreachable.");
   let result;
   try { result = effectiveDeps.apply(artifacts.planPath); }
   catch (error) {
-    const unknown = createStageBApplyAttemptTransition(applying, { status: "UNKNOWN", operationResult: { classification: "UNKNOWN_RESULT", readback: "UNKNOWN" }, applyStarted: { status: "UNKNOWN", evidenceSha256: sha256(Buffer.from(`${callerArn}\n${finalBindings.protectedMainSha}\n${finalBindings.savedPlanSha256}\nunknown`)) }, applyResult: { status: "UNKNOWN", evidenceSha256: null } });
+    const unknown = createStageBApplyAttemptTransition(spawnUncertain, { status: "UNKNOWN", operationResult: { classification: "UNKNOWN_RESULT", readback: "UNKNOWN" }, applyStarted: { status: "UNKNOWN", evidenceSha256: sha256(Buffer.from(`${callerArn}\n${finalBindings.protectedMainSha}\n${finalBindings.savedPlanSha256}\nunknown`)) }, applyResult: { status: "UNKNOWN", evidenceSha256: null } });
     const unknownBytes = Buffer.from(`${JSON.stringify(unknown, null, 2)}\n`);
     const unknownReserved = reserveAttemptTransition({ attemptId: unknown.attemptId, sequence: unknown.sequence, bytes: unknownBytes, privateDirectory: path.dirname(applyAttemptPath), run: (args) => releaseRun(args) });
     if (unknownReserved?.status !== "reserved" || unknownReserved.key !== stageBAttemptStepS3ObjectKey(unknown.attemptId, unknown.sequence)) throw new Error("Stage B apply-attempt uncertainty evidence was not durably authenticated; stop without retry.", { cause: error });
     throw error;
   }
   const succeeded = result?.status === undefined || result.status === 0;
-  const completed = createStageBApplyAttemptTransition(applying, { status: succeeded ? "APPLIED" : "FAILED", operationResult: { classification: succeeded ? "APPLY_RESULT_COMMITTED" : "APPLY_RESULT_FAILED", readback: "EXACT" }, applyStarted: applying.applyStarted, applyResult: { status: succeeded ? "SUCCEEDED" : "FAILED", evidenceSha256: sha256(Buffer.from(JSON.stringify({ status: result?.status ?? 0 }))) } });
+  const completed = createStageBApplyAttemptTransition(spawnUncertain, { status: succeeded ? "APPLIED" : "FAILED", operationResult: { classification: succeeded ? "APPLY_RESULT_COMMITTED" : "APPLY_RESULT_FAILED", readback: "EXACT" }, applyStarted: spawnUncertain.applyStarted, applyResult: { status: succeeded ? "SUCCEEDED" : "FAILED", evidenceSha256: sha256(Buffer.from(JSON.stringify({ status: result?.status ?? 0 }))) } });
   const completedBytes = Buffer.from(`${JSON.stringify(completed, null, 2)}\n`);
   const completedReserved = reserveAttemptTransition({ attemptId: completed.attemptId, sequence: completed.sequence, bytes: completedBytes, privateDirectory: path.dirname(applyAttemptPath), run: (args) => releaseRun(args) });
   if (completedReserved?.status !== "reserved" || completedReserved.key !== stageBAttemptStepS3ObjectKey(completed.attemptId, completed.sequence)) throw new Error("Stage B apply result evidence was not durably authenticated; stop without retry.");
