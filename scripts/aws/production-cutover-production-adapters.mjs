@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { lstatSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createAwsArtifactSigningAdapter } from "./production-artifact-signing-secrets-adapter.mjs";
@@ -12,7 +12,7 @@ import { createProductionRotationPrepareAdapter } from "./production-rotation-pr
 import { createProductionInteractiveEcsExecRunner, extractMarkedJson } from "./production-ecs-exec-command.mjs";
 import { establishReleaseDeployerIdentity, establishVerifierIdentity, createAwsStsRunner } from "./production-identity-adapters.mjs";
 import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
-import { assertSelectedTargetTask, selectTargetTask } from "./ecs-exec-target-selection.mjs";
+import { assertSelectedTargetTask, assertTaskBelongsToExactPrimaryDeployment, selectTargetTask } from "./ecs-exec-target-selection.mjs";
 import { createStrictHttpOnboardingAdapter } from "../security/production-strict-onboarding-http.mjs";
 import { assertOnboardingPaths } from "../security/production-onboarding-contract.mjs";
 import { promptProductionMfaCode } from "../security/production-interactive-mfa-provider.mjs";
@@ -409,6 +409,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       configSha256: runtimeConfigSha256,
       stateFile: config.rotationStateFile,
       fixtureFile: config.rotationFixtureFile,
+      runtimeProofFile: config.overlapRuntimeProofFile,
     }),
     rotationInfrastructure,
     readiness: config.readinessEvidenceFile ? {
@@ -432,14 +433,26 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       const result = await verifierEcs.describeTasks({ taskArns: [taskArn], includeTags: true });
       const task = result.tasks?.[0];
       assertSelectedTargetTask({ task, expectedClusterArn: CLUSTER_ARN, expectedTaskDefinitionArn: taskDefinitionArn, expectedImageDigest: imageDigest, serviceName: SERVICE, containerName: CONTAINER, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });
+      const service = await verifierEcs.describeService();
+      const primary = assertTaskBelongsToExactPrimaryDeployment({ service, task, expectedTaskDefinitionArn: taskDefinitionArn });
       const fixtureBefore = readStageBPrivateFileBytes({ filePath: config.runtimeProofFixtureFile, repositoryRoot: process.cwd(), label: "Rotation runtime fixture" });
       if (fixtureBefore.sha256 !== rotationFixtureSha256) throw new Error("Rotation runtime fixture changed after preparation.");
+      if (lstatSync(config.overlapRuntimeProofFile, { throwIfNoEntry: false })) {
+        const captured = readStageBPrivateFileBytes({ filePath: config.overlapRuntimeProofFile, repositoryRoot: process.cwd(), label: "Overlap runtime proof" });
+        const proof = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes));
+        const expected = { rotationId, phase: "overlap", deploymentSha: config.rotationDeploymentSha || sourceSha, healthReleaseGitSha: sourceSha, targetTaskArn: task.taskArn, selectedTaskArn: task.taskArn, matchingTaskCount: 1, targetTaskDefinitionArn: task.taskDefinitionArn, targetImageDigest: imageDigest, expectedReleaseSha: sourceSha, targetService: SERVICE, targetCluster: CLUSTER, targetDeploymentId: primary.id };
+        for (const [field, value] of Object.entries(expected)) if (proof[field] !== value) throw new Error(`Persisted overlap runtime proof ${field} binding is wrong.`);
+        if (proof.artifactCurrentRuntimeVerify !== true || proof.artifactHistoricalRuntimeVerify !== true) throw new Error("Persisted overlap runtime proof is incomplete.");
+        latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(proof))), proof, resumed: true };
+        return latestEcsExecProof;
+      }
       const transcript = await verifierEcs.executeCommand({ taskArn, container: CONTAINER, inputFile: config.runtimeProofFixtureFile, command: runtimeProofCommand({ sourceSha, rotationId, deploymentSha: config.rotationDeploymentSha, healthUrl: config.rotationHealthUrl || `${config.onboardingBaseUrl}/api/health`, invocationRef: config.runtimeInvocationRef }) });
       const fixtureAfter = readStageBPrivateFileBytes({ filePath: config.runtimeProofFixtureFile, repositoryRoot: process.cwd(), label: "Rotation runtime fixture" });
       if (fixtureAfter.sha256 !== rotationFixtureSha256) throw new Error("Rotation runtime fixture changed during verification.");
       const proof = extractMarkedJson(transcript, "MSCQR_PROOF_BEGIN", "MSCQR_PROOF_END");
       if (proof.rotationId !== rotationId || proof.phase !== "overlap" || proof.deploymentSha !== (config.rotationDeploymentSha || sourceSha) || proof.healthReleaseGitSha !== sourceSha || proof.artifactCurrentRuntimeVerify !== true || proof.artifactHistoricalRuntimeVerify !== true) throw new Error("ECS Exec runtime proof is not bound to the exact deployment.");
-      latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(proof))), proof };
+      const boundProof = { ...proof, targetTaskArn: task.taskArn, selectedTaskArn: task.taskArn, matchingTaskCount: 1, targetTaskDefinitionArn: task.taskDefinitionArn, targetImageDigest: imageDigest, expectedReleaseSha: sourceSha, targetService: SERVICE, targetCluster: CLUSTER, targetDeploymentId: primary.id };
+      latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(boundProof))), proof: boundProof };
       return latestEcsExecProof;
     } },
     onboarding: { run: createStrictHttpOnboardingAdapter({

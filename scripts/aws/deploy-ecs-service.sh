@@ -739,10 +739,12 @@ for (const task of tasksResponse.tasks) {
 NODE
 
   if [[ -n "${METADATA_FILE:-}" ]]; then
-    node --input-type=module - "$METADATA_FILE" "$CLUSTER_NAME" "$SERVICE_NAME" "$CONTAINER_NAME" "$PREVIOUS_TASK_DEFINITION_ARN" "$EXISTING_TASK_DEFINITION_ARN" "$EXPECTED_IMAGE_DIGEST" <<'NODE'
+    node --input-type=module - "$METADATA_FILE" "$CLUSTER_NAME" "$SERVICE_NAME" "$CONTAINER_NAME" "$PREVIOUS_TASK_DEFINITION_ARN" "$EXISTING_TASK_DEFINITION_ARN" "$EXPECTED_IMAGE_DIGEST" "$EXISTING_POST_SERVICE_FILE" "$EXISTING_TASKS_FILE" <<'NODE'
 import fs from "node:fs";
-const [outPath, clusterName, serviceName, containerName, previousTaskDefinitionArn, targetTaskDefinitionArn, expectedImageDigest] = process.argv.slice(2);
-fs.writeFileSync(outPath, JSON.stringify({ mode: "existing-task-definition", clusterName, serviceName, containerName, previousTaskDefinitionArn, targetTaskDefinitionArn, expectedImageDigest }, null, 2));
+const [outPath, clusterName, serviceName, containerName, previousTaskDefinitionArn, targetTaskDefinitionArn, expectedImageDigest, servicePath, tasksPath] = process.argv.slice(2);
+const service = JSON.parse(fs.readFileSync(servicePath, "utf8")).services[0];
+const tasks = JSON.parse(fs.readFileSync(tasksPath, "utf8")).tasks;
+fs.writeFileSync(outPath, JSON.stringify({ mode: "existing-task-definition", clusterName, serviceName, containerName, previousTaskDefinitionArn, newTaskDefinitionArn: targetTaskDefinitionArn, expectedImageDigest, observedTaskDefinitionArn: targetTaskDefinitionArn, observedImageDigest: expectedImageDigest, observedTaskArns: tasks.map(({ taskArn }) => taskArn).sort(), serviceStable: service.status === "ACTIVE" && service.runningCount === service.desiredCount && service.pendingCount === 0, desiredCount: service.desiredCount, runningCount: service.runningCount, pendingCount: service.pendingCount }, null, 2));
 NODE
   fi
 

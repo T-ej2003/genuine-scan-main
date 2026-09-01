@@ -995,6 +995,34 @@ test("rotation prepare authenticates persisted state before authorizing the next
   }
 });
 
+test("overlap verification resumes an exact persisted runtime proof without redeployment", async () => {
+  const directory = fsTemp();
+  try {
+    const rotationId = "rotation-20260829015311-765c8a16";
+    const configFile = path.join(directory, "config.json");
+    const stateFile = path.join(directory, "state.json");
+    const fixtureFile = path.join(directory, "fixture.json");
+    const runtimeProofFile = path.join(directory, "runtime-proof.json");
+    const proof = { rotationId, phase: "overlap", artifactCurrentRuntimeVerify: true, artifactHistoricalRuntimeVerify: true };
+    for (const [file, value] of [[configFile, { rotationId }], [stateFile, { rotationId, phase: "overlap-deploy-required" }], [fixtureFile, { rotationId }]]) writeFileSync(file, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+    const hash = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
+    const stateSha256 = hash(stateFile);
+    const fixtureSha256 = hash(fixtureFile);
+    let coordinatorCalls = 0;
+    const adapter = createProductionRotationPrepareAdapter({ coordinator: "coordinator.mjs", configFile, configSha256: hash(configFile), stateFile, fixtureFile, runtimeProofFile, repositoryRoot: process.cwd(), run: async () => {
+      coordinatorCalls += 1;
+      if (coordinatorCalls === 1) throw new Error("interrupted after proof persistence");
+      writeFileSync(stateFile, `${JSON.stringify({ rotationId, phase: "verified", overlapRuntime: proof, overlapReadyAt: "2026-09-01T10:00:00.000Z", cleanupEligibleAt: "2026-09-02T10:00:00.000Z" })}\n`, { mode: 0o600 });
+      return JSON.stringify({ phase: "verified" });
+    } });
+    const input = { execProof: { valid: true, proof }, rotationId, rotationStateSha256: stateSha256, rotationFixtureSha256: fixtureSha256 };
+    await assert.rejects(() => adapter.verifyOverlap.run(input), /interrupted/);
+    assert.equal(existsSync(runtimeProofFile), true);
+    assert.equal((await adapter.verifyOverlap.run(input)).terminalState, "VERIFIED_OVERLAP");
+    assert.equal(coordinatorCalls, 2);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("rebaseline registration requires a fresh read-only prepared-rotation status", async () => {
   const directory = fsTemp();
   try {

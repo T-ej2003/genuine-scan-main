@@ -73,7 +73,13 @@ gh workflow run release-gate.yml --ref main \
   -f rotation_task_definition_arn=<exact-overlap-task-definition-arn> \
   -f rotation_expected_current_task_definition_arn=<current-service-task-definition-arn> \
   -f rotation_image_digest=sha256:<64-hex> \
-  -f rotation_deployment_sha=<exact-overlap-deployment-sha>
+  -f rotation_deployment_sha=<exact-overlap-deployment-sha> \
+  -f rotation_fixture_sha256=<exact-private-fixture-sha256>
+
+# A successful Release Gate overlap job means DEPLOYED_PENDING_VERIFICATION,
+# not VERIFIED_OVERLAP or READY_FOR_ONBOARDING. It uploads the authenticated
+# production-overlap-deployment-receipt and must not be dispatched again merely
+# because independent runtime verification is pending or failed.
 
 # Before using the verifier role, the administrator preflight must prove the
 # exact MFA-backed trust policy, the exact operator policy attachment, and
@@ -90,18 +96,18 @@ gh workflow run release-gate.yml --ref main \
 # task, verifies its task definition/image/release identity, then uses ECS Exec
 # to run the image-local verifier in /app. The fixture is transferred via PTY
 # stdin and never appears in a command, environment value, or log.
-ROTATION_RUNTIME_PHASE=overlap \
-ROTATION_ID=<rotation-id> \
-ROTATION_DEPLOYMENT_SHA=<full-overlap-deployment-sha> \
-ROTATION_RUNTIME_INVOCATION_REF=<machine-verifiable-runtime-ref> \
-scripts/aws/verify-production-rotation-via-ecs-exec.sh \
-  --credential-source inherited-ecs-exec-verifier-session \
-  --cluster <exact-cluster-arn> --service <exact-service-name> \
-  --task-definition <exact-task-definition-arn> --image-digest sha256:<64-hex> \
-  --expected-release-sha <full-source-sha> --phase overlap \
-  --fixture-file /secure/operator/previous-qr-fixture.json \
-  --health-url https://www.mscqr.com/api/health \
-  --proof-output /secure/operator/overlap-runtime.json
+npm run stage-b:verify-overlap -- \
+  --config <private-runtime-config> \
+  --config-sha256 <runtime-config-sha256> \
+  --source-sha <full-source-sha> \
+  --rotation-id <rotation-id> \
+  --workflow-run-id <authorized-overlap-run-id> \
+  --workflow-run-attempt <authorized-overlap-run-attempt>
+
+# The continuation authenticates the protected workflow, independent production
+# approval, receipt artifact, readiness/state/fixture cross-bindings, and the
+# MFA-backed verifier before ECS Exec. It then runs the canonical coordinator
+# --verify and persists VERIFIED_OVERLAP. It never calls UpdateService.
 
 # The exact short cluster name is also accepted for operator compatibility;
 # both forms are validated as the one production cluster and the proof always

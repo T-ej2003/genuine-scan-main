@@ -147,13 +147,14 @@ function phasePaths(directory) {
     rotationStateFile: path.join(directory, "rotation-state.json"),
     rotationFixtureFile: path.join(directory, "rotation-fixture.json"),
     runtimeProofFixtureFile: path.join(directory, "rotation-fixture.json"),
+    overlapRuntimeProofFile: path.join(directory, "overlap-runtime-proof.json"),
     readinessEvidenceFile: path.join(directory, "readiness-evidence.json"),
   };
 }
 
 function assertFutureArtifactsAbsent(paths, repositoryRoot) {
   for (const [name, filePath] of Object.entries(paths)) {
-    if (!["rotationConfigFile", "rotationTerraformInputFile", "rotationTerraformPlanFile", "rotationStateFile", "rotationFixtureFile", "runtimeProofFixtureFile", "readinessEvidenceFile"].includes(name)) continue;
+    if (!["rotationConfigFile", "rotationTerraformInputFile", "rotationTerraformPlanFile", "rotationStateFile", "rotationFixtureFile", "runtimeProofFixtureFile", "overlapRuntimeProofFile", "readinessEvidenceFile"].includes(name)) continue;
     ensureStageBPrivateDirectory({ directory: path.dirname(filePath), repositoryRoot, create: false });
     const stat = lstatSync(filePath, { throwIfNoEntry: false });
     if (!stat) continue;
@@ -462,7 +463,7 @@ export function prepareProductionCutoverRuntime({
     protectedMainSha: protectedSha || null,
     staticBindingSha256: staticBindings ? canonicalHash(staticBindings) : null,
     runtimeConfigSha256,
-    phaseArtifacts: { rotationState: paths.rotationStateFile, rotationFixture: paths.rotationFixtureFile, readinessEvidence: paths.readinessEvidenceFile, rotationTerraformInput: paths.rotationTerraformInputFile },
+    phaseArtifacts: { rotationState: paths.rotationStateFile, rotationFixture: paths.rotationFixtureFile, overlapRuntimeProof: paths.overlapRuntimeProofFile, readinessEvidence: paths.readinessEvidenceFile, rotationTerraformInput: paths.rotationTerraformInputFile },
     blockers: [...new Set(blockers)],
     readyToConsumeMfa: blockers.length === 0,
   };

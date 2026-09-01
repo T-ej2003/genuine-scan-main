@@ -7,12 +7,19 @@ test("rotation-overlap has one governed production entrypoint", () => {
   const deploy = readFileSync("scripts/aws/deploy-ecs-service.sh", "utf8");
   const orchestrator = readFileSync("scripts/aws/production-cutover-control-plane.mjs", "utf8");
   assert.match(workflow, /run-production-cutover\.mjs[\s\S]*--mode rotation-overlap/);
+  assert.match(workflow, /run-production-cutover\.mjs[\s\S]*--mode rotation-overlap[\s\S]*--transition-mode "\$\{\{ inputs\.release_mode \}\}"/);
   const overlapBlock = workflow.slice(workflow.indexOf("Deploy rotation transition backend ECS service"), workflow.indexOf("Verify backend health"));
   assert.doesNotMatch(overlapBlock, /deploy-ecs-service\.sh/);
   assert.match(deploy, /must be invoked by run-production-cutover\.mjs/);
   for (const required of ["runStageAControlPlane", "verifyArtifactSigningDomain", "registerOverlapTaskDefinition", "produceRuntimeRotationInventory", "buildOverlapReadinessEvidence", "runGovernedOverlapDeployment", "runProductionCutoverOverlapControlPlane", "produceOnboardingEvidence"]) assert.match(orchestrator, new RegExp(required));
   assert.match(readFileSync("scripts/aws/run-production-cutover.mjs", "utf8"), /runProductionCutoverOverlapControlPlane/);
   assert.doesNotMatch(readFileSync("scripts/aws/run-production-cutover.mjs", "utf8"), /runGovernedOverlapDeployment/);
+  assert.match(workflow, /rotation_fixture_sha256/);
+  assert.match(workflow, /Upload overlap deployment receipt/);
+  assert.match(workflow, /production-overlap-deployment-receipt/);
+  const verifier = readFileSync("scripts/aws/verify-production-cutover-overlap.mjs", "utf8");
+  assert.match(verifier, /runPostOverlapVerification/);
+  assert.doesNotMatch(verifier, /runGovernedOverlapDeployment|update-service|register-task-definition/);
 });
 
 test("prepare-overlap uses the shared control plane and cannot fall through to overlap deployment", () => {

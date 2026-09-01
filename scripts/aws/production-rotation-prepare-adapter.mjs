@@ -3,7 +3,7 @@ import { lstatSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { rotationBindingsToPostPrepareTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
-import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -27,10 +27,33 @@ const lastJsonLine = (output) => {
  * secret/state transaction; this boundary supplies only aggregate inventory
  * evidence and returns redacted persisted-state metadata.
  */
-export function createProductionRotationPrepareAdapter({ run, coordinator, configFile, configSha256, stateFile, fixtureFile, repositoryRoot = process.cwd() } = {}) {
+export function createProductionRotationPrepareAdapter({ run, coordinator, configFile, configSha256, stateFile, fixtureFile, runtimeProofFile, repositoryRoot = process.cwd() } = {}) {
   if (typeof run !== "function" || typeof coordinator !== "string" || !configFile || !stateFile || !fixtureFile) {
     throw new Error("Production rotation prepare adapter is incomplete.");
   }
+  const verifyOverlap = {
+    async run({ execProof, rotationId, rotationStateSha256, rotationFixtureSha256 } = {}) {
+      if (!runtimeProofFile || execProof?.valid !== true || !execProof.proof || !SHA256.test(rotationStateSha256 || "") || !SHA256.test(rotationFixtureSha256 || "")) throw new Error("Overlap coordinator verification inputs are incomplete.");
+      const config = readBoundStageBPrivateJson({ filePath: configFile, expectedSha256: configSha256, repositoryRoot, label: "Production cutover runtime config" });
+      if (config.rotationId !== rotationId) throw new Error("Overlap coordinator verification rotation changed.");
+      const stateBefore = readStageBPrivateFileBytes({ filePath: stateFile, repositoryRoot, label: "Persisted rotation state" });
+      const fixture = readStageBPrivateFileBytes({ filePath: fixtureFile, repositoryRoot, label: "Persisted rotation fixture" });
+      if (stateBefore.sha256 !== rotationStateSha256 || fixture.sha256 !== rotationFixtureSha256) throw new Error("Overlap coordinator continuation artifacts changed.");
+      const existing = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stateBefore.bytes));
+      if (existing.phase === "verified") return { terminalState: "VERIFIED_OVERLAP", rotationId, rotationStateSha256: stateBefore.sha256, overlapReadyAt: existing.overlapReadyAt, cleanupEligibleAt: existing.cleanupEligibleAt, resumed: true };
+      const existingProof = lstatSync(runtimeProofFile, { throwIfNoEntry: false });
+      if (existingProof) {
+        const captured = readStageBPrivateFileBytes({ filePath: runtimeProofFile, repositoryRoot, label: "Overlap runtime proof" });
+        const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes));
+        if (JSON.stringify(value) !== JSON.stringify(execProof.proof)) throw new Error("Persisted overlap runtime proof conflicts with this verifier attempt.");
+      } else writeStageBPrivateFileAtomic({ filePath: runtimeProofFile, bytes: Buffer.from(`${JSON.stringify(execProof.proof, null, 2)}\n`), repositoryRoot, label: "Overlap runtime proof" });
+      const response = lastJsonLine(await run(["node", coordinator, "--verify", "--config", configFile, "--config-sha256", configSha256, "--state-file", stateFile, "--runtime-verification-file", runtimeProofFile]));
+      const stateAfter = readStageBPrivateFileBytes({ filePath: stateFile, repositoryRoot, label: "Verified rotation state" });
+      const state = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stateAfter.bytes));
+      if (response.phase !== "verified" || state.phase !== "verified" || state.rotationId !== rotationId || !state.overlapRuntime || !state.overlapReadyAt || !state.cleanupEligibleAt) throw new Error("Rotation coordinator did not persist VERIFIED_OVERLAP.");
+      return { terminalState: "VERIFIED_OVERLAP", rotationId, rotationStateSha256: stateAfter.sha256, overlapReadyAt: state.overlapReadyAt, cleanupEligibleAt: state.cleanupEligibleAt, resumed: false };
+    },
+  };
   return {
     async run({ inventory, rotationId } = {}) {
       if (!inventory || typeof inventory !== "object" || !SHA256.test(inventory.evidenceSha256 || "")) throw new Error("Rotation prepare requires hash-bound bounded inventory evidence.");
@@ -84,5 +107,6 @@ export function createProductionRotationPrepareAdapter({ run, coordinator, confi
       if (response.mode !== "status" || response.phase !== "overlap-deploy-required" || !response.records || typeof response.records !== "object") throw new Error("Live rotation state no longer authenticates the prepared overlap.");
       return { valid: true, rotationId, rotationStateSha256, phase: response.phase };
     },
+    verifyOverlap,
   };
 }
