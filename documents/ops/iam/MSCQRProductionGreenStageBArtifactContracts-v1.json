@@ -500,7 +500,13 @@
         "scripts/refresh-production-green-stage-b.mjs",
         "scripts/plan-production-green-stage-b.mjs",
         "scripts/aws/validate-stage-b-deployment-closure.mjs",
-        "scripts/apply-production-green-stage-b.mjs"
+        "scripts/apply-production-green-stage-b.mjs",
+        "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs",
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/prepare-production-cutover-runtime.mjs",
+        "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+        "scripts/aws/recover-stage-b-backend-task-definition.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -521,7 +527,13 @@
         "scripts/refresh-production-green-stage-b.mjs",
         "scripts/plan-production-green-stage-b.mjs",
         "scripts/aws/validate-stage-b-deployment-closure.mjs",
-        "scripts/apply-production-green-stage-b.mjs"
+        "scripts/apply-production-green-stage-b.mjs",
+        "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs",
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/prepare-production-cutover-runtime.mjs",
+        "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+        "scripts/aws/recover-stage-b-backend-task-definition.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
