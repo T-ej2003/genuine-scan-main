@@ -6,7 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import { assertStageAPlan, buildStageAProductionArtifactsBucketPolicy, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
-import { assertTransitionMatrix, buildTransitionMatrix, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
+import { assertTransitionMatrix, buildTransitionMatrix, PRODUCTION_CUTOVER_MODE, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
+import { persistOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
+import { readAndAssertReadyForOverlapDeployment } from "../aws/production-overlap-readiness-contract.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { buildOnboardingEvidenceFingerprint, runStrictOnboardingProbes, STRICT_ONBOARDING_CHECKS } from "../security/production-strict-onboarding.mjs";
 import { ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
@@ -468,6 +470,46 @@ test("the real cutover orchestrator reaches synthetic onboarding with ordered mu
   assert.equal(result.results.rotationInfrastructure.unrelatedSecretAccess, false);
   assert.equal(result.mutationSequence.find(({ name }) => name === "M5_ROTATION_INFRA_CONVERGENCE").count, 1);
   assert.equal(result.transitionMatrix.every((edge) => edge.result === "PASS"), true);
+});
+
+test("prepare-overlap persists and authenticates readiness without reaching deployment", async (t) => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "prepare-overlap-"));
+  const readinessFile = path.join(directory, "readiness.json");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const input = fixtureInput({ mode: PRODUCTION_CUTOVER_MODE.PREPARE_OVERLAP });
+  input.readiness = {
+    persist: async (evidence) => persistOverlapReadinessEvidence({ outputPath: readinessFile, evidence }),
+    authenticate: async ({ sourceSha: expectedSourceSha, rotationId: expectedRotationId, rotationStateSha256: expectedStateSha256, evidenceSha256: expectedEvidenceSha256 }) => readAndAssertReadyForOverlapDeployment({ filePath: readinessFile, evidenceSha256: expectedEvidenceSha256, sourceSha: expectedSourceSha, rotationId: expectedRotationId, rotationStateSha256: expectedStateSha256 }),
+  };
+  input.deployOverlap.run = async () => { throw new Error("prepare-overlap reached UpdateService"); };
+  input.postDeploy.run = async () => { throw new Error("prepare-overlap reached post-deployment"); };
+  input.ecsExec.run = async () => { throw new Error("prepare-overlap reached ECS Exec"); };
+  input.onboarding.run = async () => { throw new Error("prepare-overlap reached onboarding"); };
+
+  const result = await runProductionCutoverControlPlane(input);
+  assert.equal(result.readyForOverlapDeployment, true);
+  assert.equal(result.readinessFile, readinessFile);
+  assert.match(result.readinessSha256, /^[a-f0-9]{64}$/);
+  assert.equal(result.taskDefinitionArn, taskDefinitionArn);
+  assert.equal(result.readiness.ecsUpdateServiceCount, 0);
+  assert.deepEqual(result.mutationSequence.map(({ name }) => name), ["M2_STAGE_A_APPLY", "M3_ARTIFACT_SECRET_PROVISION", "M5_ROTATION_STATE_PERSISTENCE", "M5_ROTATION_INFRA_CONVERGENCE", "M4_REGISTER_TASK_DEFINITION"]);
+  assert.equal(input._mutations.includes("M6_ECS_UPDATE_SERVICE"), false);
+  assert.equal(result.results.deployment, undefined);
+
+  let overlapCalls = 0;
+  const resumed = await runGovernedOverlapDeployment({ readiness: result.readiness, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256: result.readinessSha256, deployOverlap: { run: async () => { overlapCalls += 1; return { updateServiceCount: 1, propagateTags: "TASK_DEFINITION", taskDefinitionArn }; } } });
+  assert.equal(resumed.updateServiceCount, 1);
+  assert.equal(overlapCalls, 1);
+});
+
+test("prepare-overlap requires authenticated persistence and is not deployment authorization", async () => {
+  const missingPersistence = fixtureInput({ mode: PRODUCTION_CUTOVER_MODE.PREPARE_OVERLAP });
+  await assert.rejects(() => runProductionCutoverControlPlane(missingPersistence), /persisted readiness authentication/);
+  assert.equal(missingPersistence._mutations.includes("M6_ECS_UPDATE_SERVICE"), false);
+
+  const invalidMode = fixtureInput({ mode: "rotation-overlap" });
+  await assert.rejects(() => runProductionCutoverControlPlane(invalidMode), /mode is invalid/);
+  assert.deepEqual(invalidMode._mutations, []);
 });
 
 test("invalid IAM evidence is rejected before reconciliation", async () => {

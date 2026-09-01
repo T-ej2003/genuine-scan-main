@@ -18,6 +18,7 @@ import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
+export const PRODUCTION_CUTOVER_MODE = Object.freeze({ FULL: "FULL", PREPARE_OVERLAP: "PREPARE_OVERLAP" });
 const OVERLAP_SECRET_KEYS = Object.freeze([
   "JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT",
   "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION",
@@ -255,7 +256,8 @@ function assertCheckerTrustEvidence(evidence, sourceSha) {
  * Every adapter is required to return sanitized, hash-bound evidence.
  */
 export async function runProductionCutoverControlPlane(input = {}) {
-  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, checkerTrustEvidence, identities: suppliedIdentities, verifyRootDropSignature, checkerChain, stageA, artifactSigning, rebaseline, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  const { mode = PRODUCTION_CUTOVER_MODE.FULL, sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, checkerTrustEvidence, identities: suppliedIdentities, verifyRootDropSignature, checkerChain, stageA, artifactSigning, rebaseline, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  if (!Object.values(PRODUCTION_CUTOVER_MODE).includes(mode)) throw new Error("Production cutover mode is invalid.");
   if (!SHA40.test(sourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
   const mutations = [];
   const results = { protectedMain: { valid: true, sourceSha, evidenceSha256: imageAuthorization?.evidenceSha256 } , imageAuthorization };
@@ -379,6 +381,13 @@ export async function runProductionCutoverControlPlane(input = {}) {
   const persistedReadiness = typeof readiness?.persist === "function" ? await readiness.persist(readinessEvidence) : null;
   if (persistedReadiness && !SHA256.test(persistedReadiness.evidenceSha256 || "")) throw new Error("Persisted readiness evidence hash is invalid.");
   results.readiness = readinessEvidence;
+
+  if (mode === PRODUCTION_CUTOVER_MODE.PREPARE_OVERLAP) {
+    if (!persistedReadiness?.outputPath || typeof readiness?.authenticate !== "function") throw new Error("Prepare-overlap requires persisted readiness authentication.");
+    const authenticatedReadiness = await readiness.authenticate({ sourceSha, rotationId, rotationStateSha256, evidenceSha256: persistedReadiness.evidenceSha256 });
+    if (authenticatedReadiness?.readyForOverlapDeployment !== true || authenticatedReadiness.evidenceSha256 !== persistedReadiness.evidenceSha256 || canonicalSha256(authenticatedReadiness.evidence) !== canonicalSha256(readinessEvidence)) throw new Error("Persisted readiness authentication failed.");
+    return { readyForOverlapDeployment: true, sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn: task.taskDefinitionArn, readiness: readinessEvidence, readinessFile: persistedReadiness.outputPath, readinessSha256: persistedReadiness.evidenceSha256, mutationSequence: mutations, results };
+  }
 
   const deployment = await runGovernedOverlapDeployment({ readiness: readinessEvidence, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn: task.taskDefinitionArn, readinessSha256: persistedReadiness?.evidenceSha256, deployOverlap });
   recordMutation(mutations, "M6_ECS_UPDATE_SERVICE", deployment);

@@ -18,6 +18,7 @@ import { assertOnboardingPaths } from "../security/production-onboarding-contrac
 import { promptProductionMfaCode } from "../security/production-interactive-mfa-provider.mjs";
 import { resolveSmokeAdminMfaCode } from "../lib/staging-smoke-totp.mjs";
 import { persistOverlapReadinessEvidence } from "./produce-production-overlap-readiness-evidence.mjs";
+import { readAndAssertReadyForOverlapDeployment } from "./production-overlap-readiness-contract.mjs";
 import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH } from "./production-artifact-signing-bootstrap.mjs";
 import { assertStageBCanonicalTfvarsFile } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
@@ -412,6 +413,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     rotationInfrastructure,
     readiness: config.readinessEvidenceFile ? {
       persist: async (evidence) => persistOverlapReadinessEvidence({ outputPath: config.readinessEvidenceFile, evidence }),
+      authenticate: async ({ sourceSha: readinessSourceSha, rotationId: readinessRotationId, rotationStateSha256, evidenceSha256 }) => readAndAssertReadyForOverlapDeployment({ filePath: config.readinessEvidenceFile, evidenceSha256, sourceSha: readinessSourceSha, rotationId: readinessRotationId, rotationStateSha256 }),
     } : undefined,
     deployOverlap: createProductionOverlapDeploymentAdapter({ run: releaseRun, profile: releaseProfile, credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, readinessFile: config.readinessEvidenceFile, sourceSha, rotationId, imageDigest: config.backendImageDigest, expectedCurrentTaskDefinitionArn: config.expectedCurrentTaskDefinitionArn, versionUrl: config.rotationHealthUrl, expectedGitSha: sourceSha }),
     postDeploy: { run: async ({ taskDefinitionArn, verifierSession: suppliedVerifierSession }) => {

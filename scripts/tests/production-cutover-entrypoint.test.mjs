@@ -15,6 +15,18 @@ test("rotation-overlap has one governed production entrypoint", () => {
   assert.doesNotMatch(readFileSync("scripts/aws/run-production-cutover.mjs", "utf8"), /runGovernedOverlapDeployment/);
 });
 
+test("prepare-overlap uses the shared control plane and cannot fall through to overlap deployment", () => {
+  const cli = readFileSync("scripts/aws/run-production-cutover.mjs", "utf8");
+  const controlPlane = readFileSync("scripts/aws/production-cutover-control-plane.mjs", "utf8");
+  assert.match(cli, /"prepare-overlap"/);
+  assert.match(cli, /PRODUCTION_CUTOVER_MODE\.PREPARE_OVERLAP/);
+  assert.match(controlPlane, /mode === PRODUCTION_CUTOVER_MODE\.PREPARE_OVERLAP/);
+  assert.ok(controlPlane.indexOf("mode === PRODUCTION_CUTOVER_MODE.PREPARE_OVERLAP") < controlPlane.indexOf("runGovernedOverlapDeployment({ readiness: readinessEvidence"));
+  assert.match(cli, /preparedForOverlapAuthorization: true/);
+  assert.match(cli, /ecsUpdateServiceCount: 0/);
+  assert.doesNotMatch(cli.slice(cli.indexOf('mode === "prepare-overlap"'), cli.indexOf(': { readyForOnboarding')), /runProductionCutoverOverlapControlPlane/);
+});
+
 test("runtime inventory and ECS Exec are bounded by shared production target logic", () => {
   const inventory = readFileSync("scripts/aws/production-runtime-inventory-adapter.mjs", "utf8");
   const verifier = readFileSync("scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "utf8");
