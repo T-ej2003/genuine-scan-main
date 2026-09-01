@@ -12,6 +12,6 @@ export function createProductionCutoverRuntimeComposition({ releaseRun, env, exe
     releaseRun,
     verifyReleasePreflightAttestationSignature,
     imageAuthorizationValidation: Object.freeze({ verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: releaseRun }) }),
-    constructAdapters: ({ config, sourceSha, rotationId, runtimeConfigSha256 }) => createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, verifyReleasePreflightAttestationSignature }),
+  constructAdapters: ({ config, sourceSha, rotationId, runtimeConfigSha256, identityMode = "FULL" }) => createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, identityMode, verifyReleasePreflightAttestationSignature }),
   });
 }

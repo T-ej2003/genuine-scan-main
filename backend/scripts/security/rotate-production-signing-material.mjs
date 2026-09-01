@@ -536,6 +536,7 @@ const verify = async (context) => {
   const { config, values } = context;
   const file = required(values.get("runtime-verification-file"), "--runtime-verification-file");
   const stateFile = statePath(values);
+  const preparedStateSha256 = sha256(readFileSync(stateFile));
   const state = readCurrentState(context);
   if (!["overlap-deploy-required", "overlap-ready"].includes(state.phase)) throw new Error("rotation must require an overlap deployment before verification");
   const proof = validateRuntimeProof({ file, config, phase: "overlap", expectedDeploymentSha: config.overlapDeploymentSha, clock: clockOf(context), historicalContinuity: qrHistoricalContinuity(state) });
@@ -551,6 +552,7 @@ const verify = async (context) => {
   state.phase = "verified";
   state.verifiedAt = nowIso(clockOf(context));
   state.verification = {
+    preparedStateSha256,
     runtimeInvocationRef: proof.runtimeInvocationRef,
     jwtCurrentRuntimeVerify: true,
     jwtPreviousRuntimeVerify: true,

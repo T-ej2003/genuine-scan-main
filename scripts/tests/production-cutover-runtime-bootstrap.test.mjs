@@ -1012,7 +1012,7 @@ test("overlap verification resumes an exact persisted runtime proof without rede
     const adapter = createProductionRotationPrepareAdapter({ coordinator: "coordinator.mjs", configFile, configSha256: hash(configFile), stateFile, fixtureFile, runtimeProofFile, repositoryRoot: process.cwd(), run: async () => {
       coordinatorCalls += 1;
       if (coordinatorCalls === 1) throw new Error("interrupted after proof persistence");
-      writeFileSync(stateFile, `${JSON.stringify({ rotationId, phase: "verified", overlapRuntime: proof, overlapReadyAt: "2026-09-01T10:00:00.000Z", cleanupEligibleAt: "2026-09-02T10:00:00.000Z" })}\n`, { mode: 0o600 });
+      writeFileSync(stateFile, `${JSON.stringify({ rotationId, phase: "verified", overlapRuntime: proof, overlapReadyAt: "2026-09-01T10:00:00.000Z", cleanupEligibleAt: "2026-09-02T10:00:00.000Z", verification: { preparedStateSha256: stateSha256 } })}\n`, { mode: 0o600 });
       return JSON.stringify({ phase: "verified" });
     } });
     const input = { execProof: { valid: true, proof }, rotationId, rotationStateSha256: stateSha256, rotationFixtureSha256: fixtureSha256 };
@@ -1020,6 +1020,12 @@ test("overlap verification resumes an exact persisted runtime proof without rede
     assert.equal(existsSync(runtimeProofFile), true);
     assert.equal((await adapter.verifyOverlap.run(input)).terminalState, "VERIFIED_OVERLAP");
     assert.equal(coordinatorCalls, 2);
+    assert.equal((await adapter.verifyOverlap.run(input)).resumed, true);
+    assert.equal(coordinatorCalls, 2);
+    const tampered = JSON.parse(readFileSync(stateFile, "utf8"));
+    tampered.verification.preparedStateSha256 = "f".repeat(64);
+    writeFileSync(stateFile, `${JSON.stringify(tampered)}\n`, { mode: 0o600 });
+    await assert.rejects(() => adapter.verifyOverlap.run(input), /prepared predecessor/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

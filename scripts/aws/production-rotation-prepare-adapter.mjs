@@ -38,9 +38,13 @@ export function createProductionRotationPrepareAdapter({ run, coordinator, confi
       if (config.rotationId !== rotationId) throw new Error("Overlap coordinator verification rotation changed.");
       const stateBefore = readStageBPrivateFileBytes({ filePath: stateFile, repositoryRoot, label: "Persisted rotation state" });
       const fixture = readStageBPrivateFileBytes({ filePath: fixtureFile, repositoryRoot, label: "Persisted rotation fixture" });
-      if (stateBefore.sha256 !== rotationStateSha256 || fixture.sha256 !== rotationFixtureSha256) throw new Error("Overlap coordinator continuation artifacts changed.");
+      if (fixture.sha256 !== rotationFixtureSha256) throw new Error("Overlap coordinator continuation artifacts changed.");
       const existing = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stateBefore.bytes));
-      if (existing.phase === "verified") return { terminalState: "VERIFIED_OVERLAP", rotationId, rotationStateSha256: stateBefore.sha256, overlapReadyAt: existing.overlapReadyAt, cleanupEligibleAt: existing.cleanupEligibleAt, resumed: true };
+      if (existing.phase === "verified") {
+        if (existing.verification?.preparedStateSha256 !== rotationStateSha256 || !existing.overlapRuntime || !existing.overlapReadyAt || !existing.cleanupEligibleAt) throw new Error("Verified rotation state is not bound to the prepared predecessor.");
+        return { terminalState: "VERIFIED_OVERLAP", rotationId, rotationStateSha256: stateBefore.sha256, overlapReadyAt: existing.overlapReadyAt, cleanupEligibleAt: existing.cleanupEligibleAt, resumed: true };
+      }
+      if (stateBefore.sha256 !== rotationStateSha256) throw new Error("Overlap coordinator continuation artifacts changed.");
       const existingProof = lstatSync(runtimeProofFile, { throwIfNoEntry: false });
       if (existingProof) {
         const captured = readStageBPrivateFileBytes({ filePath: runtimeProofFile, repositoryRoot, label: "Overlap runtime proof" });

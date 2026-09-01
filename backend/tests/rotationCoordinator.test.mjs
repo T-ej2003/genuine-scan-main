@@ -992,11 +992,13 @@ test("verified state persists the reviewed grace and rejects config or proof att
     const clock = () => Date.parse("2026-08-10T00:01:00.000Z");
     const context = contextFor(directory, baseConfig, sm, clock);
     await prepare(context);
+    const stateFile = path.join(directory, "state.json");
+    const preparedStateSha256 = createHash("sha256").update(readFileSync(stateFile)).digest("hex");
     const firstProof = writeProof(directory, "overlap.json", runtimeProof(baseConfig, "overlap", "2026-08-10T00:00:00.000Z", baseConfig.overlapDeploymentSha));
     await verify({ ...context, values: valuesWith(context, [["runtime-verification-file", firstProof]]) });
-    const stateFile = path.join(directory, "state.json");
     const persisted = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(persisted.minimumGraceSeconds, baseConfig.minimumGraceSeconds);
+    assert.equal(persisted.verification.preparedStateSha256, preparedStateSha256);
     assert.equal(persisted.cleanupEligibleAt, "2026-09-09T00:00:00.000Z");
 
     const retryState = { ...persisted, phase: "overlap-ready" };

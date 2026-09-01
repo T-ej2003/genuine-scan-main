@@ -183,9 +183,10 @@ export async function runProductionCutoverOverlapControlPlane(input = {}) {
 
 export async function runPostOverlapVerification({ deployment, sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn, expectedImageDigest, verifierSession, postDeploy, ecsExec, rotationVerify } = {}) {
   if (!deployment || !postDeploy?.run || !ecsExec?.run || !rotationVerify?.run) throw new Error("Post-overlap verification adapters are incomplete.");
-  const deployed = await postDeploy.run({ deployment, taskDefinitionArn, verifierSession });
+  const resumed = deployment.resumeVerified === true;
+  const deployed = resumed ? deployment.persistedDeployed : await postDeploy.run({ deployment, taskDefinitionArn, verifierSession });
   if (deployed?.valid !== true || deployed.taskDefinitionArn !== taskDefinitionArn || deployed.imageDigest !== expectedImageDigest || deployed.taskTag !== "MSCQRExecTarget=production-backend" || typeof deployed.taskArn !== "string") throw new Error("Replacement task did not converge to the reviewed task-definition, digest, and execution marker.");
-  const execProof = await ecsExec.run({ taskArn: deployed.taskArn, taskDefinitionArn, imageDigest: deployed.imageDigest, sourceSha, rotationId, rotationFixtureSha256, verifierSession });
+  const execProof = resumed ? deployment.persistedExecProof : await ecsExec.run({ taskArn: deployed.taskArn, taskDefinitionArn, imageDigest: deployed.imageDigest, sourceSha, rotationId, rotationFixtureSha256, verifierSession });
   if (execProof?.valid !== true) throw new Error("ECS Exec runtime proof is invalid.");
   const verified = await rotationVerify.run({ execProof, sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn, imageDigest: deployed.imageDigest, taskArn: deployed.taskArn });
   if (verified?.terminalState !== "VERIFIED_OVERLAP" || verified.rotationId !== rotationId || !SHA256.test(verified.rotationStateSha256 || "") || !verified.overlapReadyAt || !verified.cleanupEligibleAt) throw new Error("Coordinator overlap verification did not reach VERIFIED_OVERLAP.");

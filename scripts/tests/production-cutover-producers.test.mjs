@@ -158,8 +158,8 @@ test("production AWS command runner executes service operations through aws", ()
 
 test("production cutover adapters use the shared release-bound attestation verifier", () => {
   const source = fs.readFileSync("scripts/aws/production-cutover-production-adapters.mjs", "utf8");
-  assert.match(source, /createReleasePreflightCheckerTrustSignatureVerifier\(\{ releaseRun \}\)/);
-  assert.match(source, /verifyImageEvidenceSignature\(\{ \.\.\.options, run: \(args\) => releaseRun\(args\) \}\)/);
+  assert.match(source, /createReleasePreflightCheckerTrustSignatureVerifier\(\{ releaseRun: commandRun \}\)/);
+  assert.match(source, /verifyImageEvidenceSignature\(\{ \.\.\.options, run: \(args\) => commandRun\(args\) \}\)/);
   assert.match(source, /imageAuthorizationValidation: \{ verifyImageEvidence:/);
   for (const entrypoint of ["scripts/aws/prepare-production-cutover-runtime.mjs", "scripts/aws/run-production-cutover.mjs"]) {
     assert.match(fs.readFileSync(entrypoint, "utf8"), /createProductionCutoverRuntimeComposition/);

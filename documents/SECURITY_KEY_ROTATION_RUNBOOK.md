@@ -90,8 +90,11 @@ gh workflow run release-gate.yml --ref main \
 # helper independently checks the caller ARN and rejects release-deployer
 # credentials before any ECS discovery.
 # The verifier session is established by the reviewed MFA-backed verifier
-# boundary. Do not select an AWS profile here: the helper accepts only that
-# inherited STS session and rejects profile/default credential selection.
+# boundary before this continuation starts. Do not select an AWS profile here:
+# the helper accepts only that inherited STS session, authenticates its caller
+# with GetCallerIdentity, and rejects profile/default credential selection or a
+# release-deployer session. A retry after an atomic coordinator verification
+# write reuses the persisted proof and never redeploys the service.
 # The helper selects the exact running backend
 # task, verifies its task definition/image/release identity, then uses ECS Exec
 # to run the image-local verifier in /app. The fixture is transferred via PTY

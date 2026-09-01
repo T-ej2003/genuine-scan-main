@@ -76,6 +76,24 @@ test("independent continuation shares runtime proof and coordinator verification
   assert.equal(result.readyForOnboarding, undefined);
 });
 
+test("verified continuation reuses persisted runtime proof without post-deploy or ECS Exec replay", async () => {
+  let postDeployCalls = 0;
+  let ecsExecCalls = 0;
+  let coordinatorCalls = 0;
+  const persistedDeployed = { valid: true, taskArn: "task", taskDefinitionArn, imageDigest, taskTag: "MSCQRExecTarget=production-backend" };
+  const persistedExecProof = { valid: true, rotationId, phase: "overlap", deploymentSha: sourceSha, runtimeInvocationRef: "persisted-proof" };
+  const result = await runPostOverlapVerification({
+    deployment: { resumeVerified: true, persistedDeployed, persistedExecProof }, sourceSha, rotationId, rotationStateSha256: sha("c"), rotationFixtureSha256: sha("e"), taskDefinitionArn, expectedImageDigest: imageDigest, verifierSession: {},
+    postDeploy: { run: async () => { postDeployCalls += 1; throw new Error("must not read deployment again"); } },
+    ecsExec: { run: async () => { ecsExecCalls += 1; throw new Error("must not replay ECS Exec"); } },
+    rotationVerify: { run: async () => { coordinatorCalls += 1; return { terminalState: "VERIFIED_OVERLAP", rotationId, rotationStateSha256: sha("f"), overlapReadyAt: "2026-09-01T10:02:00.000Z", cleanupEligibleAt: "2026-09-02T10:02:00.000Z" }; } },
+  });
+  assert.equal(result.terminalState, "VERIFIED_OVERLAP");
+  assert.equal(postDeployCalls, 0);
+  assert.equal(ecsExecCalls, 0);
+  assert.equal(coordinatorCalls, 1);
+});
+
 test("verification failure cannot produce VERIFIED_OVERLAP or redeploy", async () => {
   await assert.rejects(() => runPostOverlapVerification({ deployment: {}, sourceSha, rotationId, rotationStateSha256: sha("c"), rotationFixtureSha256: sha("e"), taskDefinitionArn, expectedImageDigest: imageDigest, verifierSession: {}, postDeploy: { run: async () => ({ valid: true, taskArn: "task", taskDefinitionArn, imageDigest, taskTag: "MSCQRExecTarget=production-backend" }) }, ecsExec: { run: async () => ({ valid: false }) }, rotationVerify: { run: async () => assert.fail("coordinator must not run") } }), /runtime proof/);
   await assert.rejects(() => runPostOverlapVerification({ deployment: {}, sourceSha, rotationId, rotationStateSha256: sha("c"), rotationFixtureSha256: sha("e"), taskDefinitionArn, expectedImageDigest: imageDigest, verifierSession: {}, postDeploy: { run: async () => ({ valid: true, taskArn: "task", taskDefinitionArn, imageDigest, taskTag: "MSCQRExecTarget=production-backend" }) }, ecsExec: { run: async () => ({ valid: true, proof: {} }) }, rotationVerify: { run: async () => ({ terminalState: "DEPLOYED_PENDING_VERIFICATION" }) } }), /VERIFIED_OVERLAP/);

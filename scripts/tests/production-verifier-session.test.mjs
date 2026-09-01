@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createAwsStsRunner, establishVerifierIdentity, VERIFIER_SESSION_MIN_REMAINING_MS } from "../aws/production-identity-adapters.mjs";
+import { createAwsStsRunner, establishInheritedVerifierIdentity, establishVerifierIdentity, VERIFIER_SESSION_MIN_REMAINING_MS } from "../aws/production-identity-adapters.mjs";
 import { ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { establishEcsExecVerifierSession } from "../aws/establish-production-ecs-exec-verifier-session.mjs";
 
@@ -94,4 +94,34 @@ test("verifier MFA serial is an IAM device ARN, not a one-time code", async () =
     getMfaCode: async () => "654321",
   }), /MFA device ARN/);
   assert.equal(callerChecks, 0);
+});
+
+test("inherited verifier identity authenticates the current session without MFA or AssumeRole", async () => {
+  const calls = [];
+  const runner = createAwsStsRunner({
+    credentialSource: "inherited-ecs-exec-verifier-session",
+    env: { AWS_ACCESS_KEY_ID: "inherited-access", AWS_SECRET_ACCESS_KEY: "inherited-secret", AWS_SESSION_TOKEN: "inherited-token", AWS_PROFILE: "must-not-leak" },
+    run: (_file, args, options) => { calls.push({ args, env: options.env }); return JSON.stringify({ Arn: verifierArn }); },
+  });
+  const result = await establishInheritedVerifierIdentity({ adapter: runner });
+  assert.equal(result.valid, true);
+  assert.equal(result.callerArn, verifierArn);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].args[1], "get-caller-identity");
+  assert.equal(calls[0].env.AWS_PROFILE, undefined);
+  assert.equal(result.session.callerArn, verifierArn);
+});
+
+test("inherited verifier identity rejects release-deployer and unrelated sessions", async () => {
+  for (const callerArn of [
+    "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/run",
+    "arn:aws:sts::368992683803:assumed-role/other-role/run",
+  ]) {
+    const runner = createAwsStsRunner({
+      credentialSource: "inherited-ecs-exec-verifier-session",
+      env: { AWS_ACCESS_KEY_ID: "access", AWS_SECRET_ACCESS_KEY: "secret", AWS_SESSION_TOKEN: "token" },
+      run: () => JSON.stringify({ Arn: callerArn }),
+    });
+    await assert.rejects(() => establishInheritedVerifierIdentity({ adapter: runner }), /reviewed assumed role/);
+  }
 });
