@@ -37,7 +37,8 @@ const brokerTaskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-m
 const brokerTags = [{ key: "Component", value: "full-rls-green-stage-b" }, { key: "Environment", value: "production" }, { key: "ManagedBy", value: "Terraform" }, { key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }];
 const ecsDefaultedReadback = (definition) => ({
   ...structuredClone(definition),
-  containerDefinitions: definition.containerDefinitions.map((container) => ({ ...structuredClone(container), cpu: 0, environmentFiles: [], mountPoints: [], portMappings: [], systemControls: [], ulimits: [], volumesFrom: [] })),
+  enableFaultInjection: false,
+  containerDefinitions: definition.containerDefinitions.map((container) => ({ ...structuredClone(container), cpu: 0, environmentFiles: [], mountPoints: [], portMappings: [], systemControls: [], ulimits: [], volumesFrom: [], logConfiguration: { ...container.logConfiguration, secretOptions: [] } })),
   placementConstraints: [],
   volumes: [],
 });
@@ -69,11 +70,11 @@ const brokerApproval = {
   taskDefinitionArns: Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${mode}:1`])),
   taskDefinitionTemplateHashes: Object.fromEntries(STAGE_B_TASK_TEMPLATE_KEYS.map((key) => [key, "f".repeat(64)])),
 };
-const brokerDefinition = () => ({ ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn: brokerTaskDefinitionArn, status: "ACTIVE" });
+const brokerDefinition = () => ({ ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn: brokerTaskDefinitionArn, status: "ACTIVE", enableFaultInjection: false });
 
 test("broker runtime derives inventory configuration without duplicating it in Lambda environment", () => {
   const runtime = createBrokerRuntimeConfig({
-    BROKER_REPLAY_TABLE: "replay",
+    BROKER_REPLAY_TABLE: STAGE_B.replayTable,
     BROKER_RECEIPT_BUCKET: "receipts",
     BROKER_CLUSTER_ARN: STAGE_B.clusterArn,
     BROKER_APPROVAL_SECRET_ARN: STAGE_B.approvalSecretArn,
@@ -96,7 +97,7 @@ function makeBrokerHandler({ definition = brokerDefinition(), tags = brokerTags,
   const calls = [];
   const cleanup = stopTask || (async (request) => { calls.push(["stopTask", request]); });
   const handler = createPreDeploymentInventoryHandler({
-    config: brokerConfig, readApproval, verifySignature,
+    config: brokerConfig, executingBrokerVersion: "1", readApproval, verifySignature,
     claimPreDeploymentOperation, releasePreDeploymentOperation, markPreDeploymentLaunchUncertain, recordPreDeploymentTaskStarted, recordPreDeploymentCompleted,
     describeTaskDefinition,
     runTask: async (request) => { calls.push(["runTask", request]); return runTask(request); },
@@ -277,7 +278,7 @@ test("real broker handler runs one bounded task and reads only its exact log str
     approvalExpected: { releaseSha: sourceSha, sourceContractSha256: approval.sourceContractSha256, migrationSetDigest: approval.migrationSetDigest, packageChecksumSha256: approval.packageChecksumSha256, deploymentId: "phase2", approvalId },
   };
   const handler = createPreDeploymentInventoryHandler({
-    config: handlerConfig,
+    config: handlerConfig, executingBrokerVersion: "1",
     readApproval: async () => approval,
     verifySignature: async () => true,
     runTask: async (request) => { handlerCalls.push(["runTask", request]); return { failures: [], tasks: [{ taskArn }] }; },
@@ -299,7 +300,7 @@ test("real broker handler runs one bounded task and reads only its exact log str
   assert.equal("overrides" in handlerCalls[0][1], false);
   assert.equal(handlerCalls.find(([name]) => name === "getLogEvents")[1].logStreamName, "predeployment-inventory/inventory/inventory-19");
   const nestedOnlyHandler = createPreDeploymentInventoryHandler({
-    config: handlerConfig,
+    config: handlerConfig, executingBrokerVersion: "1",
     readApproval: async () => approval,
     verifySignature: async () => true,
     describeTaskDefinition: async () => ({ taskDefinition: { ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn, status: "ACTIVE", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }] } }),

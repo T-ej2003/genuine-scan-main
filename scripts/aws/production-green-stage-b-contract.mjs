@@ -9,10 +9,13 @@ export const STAGE_B = Object.freeze({
   executorSecurityGroupId: "sg-051a24aedff773761",
   privateSubnetIds: Object.freeze(["subnet-068d949017bd2ce45", "subnet-07e0a76e3a5241138"]),
   inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend",
+  executorLogGroupName: "/ecs/mscqr-production/full-rls-green",
+  canaryLogGroupName: "/ecs/mscqr-production/rls-green-canary",
   inventoryTaskDefinitionFamily: "mscqr-production-rls-green-predeployment-inventory",
   inventoryDatabaseSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
   inventoryRlsRole: "mscqr_prod_rls_read",
   receiptBucket: "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+  replayTable: "mscqr-production-rls-stage-b-replay",
   approvalSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho",
   approvalKmsKeyArn: "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478",
   rootDropKmsKeyArn: "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-drop",
@@ -24,6 +27,25 @@ export const STAGE_B = Object.freeze({
   brokerFunctionArnWildcard: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*",
   brokerAliasArn: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
   brokerAliasQualifier: "reviewed",
+  taskRuntimePlatform: Object.freeze({ operatingSystemFamily: "LINUX", cpuArchitecture: "X86_64" }),
+  brokerLambdaConfiguration: Object.freeze({
+    functionName: "mscqr-production-rls-approval-broker",
+    role: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+    handler: "index.handler",
+    runtime: "nodejs24.x",
+    architectures: Object.freeze(["x86_64"]),
+    timeout: 180,
+    memorySize: 128,
+    packageType: "Zip",
+    ephemeralStorage: Object.freeze({ Size: 512 }),
+    loggingConfig: Object.freeze({
+      logFormat: "Text",
+      logGroup: "/aws/lambda/mscqr-production-rls-approval-broker",
+      systemLogLevel: "INFO",
+    }),
+    kmsKeyArn: null,
+    codeSigningConfigArn: null,
+  }),
   frontendTaskDefinition: "mscqr-frontend:20",
 });
 
@@ -97,6 +119,17 @@ export function assertStageBBrokerConfigurationIdentity({ configuration, alias }
   if (!/^[1-9][0-9]*$/.test(aliasFunctionVersion) || aliasFunctionVersion !== configurationVersion) {
     throw new Error(`Broker Lambda reviewed alias version does not match configuration Version. Alias version: ${aliasFunctionVersion || "<empty>"}; Configuration Version: ${configurationVersion}`);
   }
+  if (alias.RoutingConfig !== undefined) {
+    const routing = alias.RoutingConfig;
+    if (!routing || typeof routing !== "object" || Array.isArray(routing)
+        || Object.keys(routing).some((key) => key !== "AdditionalVersionWeights")) {
+      throw new Error("Broker Lambda reviewed alias routing configuration is malformed or outside the reviewed contract.");
+    }
+    const weights = routing.AdditionalVersionWeights;
+    if (weights !== undefined && (!weights || typeof weights !== "object" || Array.isArray(weights) || Object.keys(weights).length !== 0)) {
+      throw new Error("Broker Lambda reviewed alias routes traffic to an unreviewed version.");
+    }
+  }
 
   return {
     functionArn: STAGE_B.brokerFunctionArn,
@@ -114,11 +147,21 @@ export const STAGE_B_MODES = Object.freeze([
   "full-rls-role-verify", "full-rls-admin-ownership", "full-rls-runtime-policy",
   "full-rls-verification", "full-rls-application-canary", "full-rls-rollback",
 ]);
+export const STAGE_B_BROKER_TASK_DEFINITION_FAMILIES = Object.freeze(Object.fromEntries(
+  STAGE_B_MODES.map((mode) => [mode, mode === "full-rls-application-canary"
+    ? "mscqr-production-full-rls-green-application-canary"
+    : `mscqr-production-full-rls-green-${mode}`]),
+));
 export const STAGE_B_TASK_TEMPLATE_KEYS = Object.freeze(["executor", "canary", "backend", "worker"]);
 export const STAGE_B_APPROVAL_ALGORITHM = "RSASSA_PSS_SHA_256";
 export const STAGE_B_APPROVAL_SCHEMA_VERSION = 2;
 export const STAGE_B_APPROVAL_ID_PREFIX = "APR-STAGE-B-";
 export const STAGE_B_APPROVAL_PUBLICATION_VALIDATION_OPERATION = "validate-approval";
+export const STAGE_B_BROKER_APPROVAL_EXPECTED_FIELDS = Object.freeze([
+  "releaseSha", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256",
+  "deploymentId", "greenDatabaseName", "administratorIdentity", "databaseSecurityGroupId", "executorSecurityGroupId",
+]);
+export const STAGE_B_BROKER_IMAGE_FIELDS = Object.freeze(["backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest"]);
 const imagePattern = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-(?:backend|worker|web)@sha256:[a-f0-9]{64}$/;
 const imagePatterns = Object.freeze({
   backendImageDigest: /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/,
@@ -143,6 +186,11 @@ export const canonicalJson = (value) => {
 export const canonicalSha256 = (value) => sha256(canonicalJson(value));
 export const STAGE_B_LAMBDA_ENVIRONMENT_HARD_LIMIT_BYTES = 4096;
 export const STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES = 3500;
+export const STAGE_B_BROKER_ENVIRONMENT_VARIABLES = Object.freeze([
+  "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
+  "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
+  "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
+]);
 export const stageBLambdaEnvironmentUtf8Bytes = (variables) => Buffer.byteLength(JSON.stringify(variables), "utf8");
 export function assertStageBLambdaEnvironmentSize(variables, maxBytes = STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES) {
   if (!variables || typeof variables !== "object" || Array.isArray(variables) || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error("Stage B Lambda environment payload is malformed.");
@@ -163,6 +211,14 @@ export const STAGE_B_APPROVAL_FIELDS = Object.freeze([
   "schemaVersion", "signatureAlgorithm", "sourceContractSha256", "taskDefinitionArns", "taskDefinitionTemplateHashes", "ticketId", "workerImageDigest",
 ]);
 
+export const STAGE_B_RUNTIME_APPROVAL_AUTHORITY = "EXISTING_LIVE_RESOURCE_AUTHORITY";
+
+export function assertStageBBrokerRuntimeVersion(value) {
+  const version = String(value || "");
+  if (!/^[1-9][0-9]*$/.test(version)) throw new Error("Stage B broker must execute from an immutable published Lambda version.");
+  return version;
+}
+
 export const canonicalStageBApproval = (approval) => canonicalJson(Object.fromEntries(
   STAGE_B_APPROVAL_FIELDS.map((key) => [key, approval[key]])
 ));
@@ -172,6 +228,182 @@ const assumedRole = (role) => new RegExp(`^arn:aws:sts::${STAGE_B.account}:assum
 const isDigest = (value) => /^[a-f0-9]{64}$/.test(value || "");
 const strictKeys = (value, expected) => Object.keys(value || {}).sort().join(",") === [...expected].sort().join(",");
 const taskDefinitionArn = (value) => /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[A-Za-z0-9_-]+:[1-9][0-9]*$/.test(value || "");
+const taskDefinitionArnForFamily = (value, family) => new RegExp(`^arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${family}:[1-9][0-9]*$`).test(value || "");
+
+export function assertStageBBrokerTaskDefinitionMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !strictKeys(value, STAGE_B_MODES)
+      || Object.entries(value).some(([mode, arn]) => !taskDefinitionArnForFamily(arn, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES[mode]))) {
+    throw new Error("Stage B broker task-definition map is incomplete or outside the reviewed mode/family contract.");
+  }
+  return value;
+}
+
+export function assertStageBBrokerRuntimeBindings({ clusterArn, approvalSecretArn, executorSecurityGroupId, privateSubnetIds, replayTable, receiptBucket } = {}) {
+  if (clusterArn !== STAGE_B.clusterArn || approvalSecretArn !== STAGE_B.approvalSecretArn || executorSecurityGroupId !== STAGE_B.executorSecurityGroupId
+      || !Array.isArray(privateSubnetIds) || [...privateSubnetIds].sort().join(",") !== [...STAGE_B.privateSubnetIds].sort().join(",")
+      || replayTable !== STAGE_B.replayTable || receiptBucket !== STAGE_B.receiptBucket) {
+    throw new Error("Stage B broker runtime bindings are outside the reviewed contract.");
+  }
+  return { clusterArn, approvalSecretArn, executorSecurityGroupId, privateSubnetIds, replayTable, receiptBucket };
+}
+
+const exactKeys = (value, expected) => value && typeof value === "object" && !Array.isArray(value)
+  && Object.keys(value).sort().join(",") === [...expected].sort().join(",");
+const emptyArray = (value) => value === undefined || Array.isArray(value) && value.length === 0;
+const emptyObject = (value) => value === undefined || value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
+const emptyString = (value) => value === undefined || value === null || value === "";
+const noVpcConfiguration = (value) => value === undefined || value === null || value && typeof value === "object" && !Array.isArray(value)
+  && !value.VpcId && emptyArray(value.SubnetIds) && emptyArray(value.SecurityGroupIds) && !value.Ipv6AllowedForDualStack;
+const RUNTIME_VERSION_CONFIG_FIELDS = Object.freeze(["Error", "RuntimeVersionArn"]);
+const RUNTIME_VERSION_ERROR_FIELDS = Object.freeze(["ErrorCode", "Message"]);
+const isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+export function normalizeStageBBrokerRuntimeVersionConfig(value) {
+  if (value === undefined) return null;
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !RUNTIME_VERSION_CONFIG_FIELDS.includes(key))) {
+    throw new Error("Resolved broker Lambda RuntimeVersionConfig is malformed or contains an unknown field.");
+  }
+  const runtimeVersionArn = value.RuntimeVersionArn;
+  if (runtimeVersionArn !== undefined
+      && (typeof runtimeVersionArn !== "string" || runtimeVersionArn.length < 26 || runtimeVersionArn.length > 2048
+        || !new RegExp(`^arn:aws:lambda:${STAGE_B.region}::runtime:.+$`).test(runtimeVersionArn))) {
+    throw new Error("Resolved broker Lambda RuntimeVersionArn is malformed or outside the AWS-managed runtime contract.");
+  }
+  if (value.Error !== undefined) {
+    const error = value.Error;
+    if (!isPlainObject(error) || Object.keys(error).some((key) => !RUNTIME_VERSION_ERROR_FIELDS.includes(key))
+        || error.ErrorCode !== undefined && typeof error.ErrorCode !== "string"
+        || error.Message !== undefined && typeof error.Message !== "string") {
+      throw new Error("Resolved broker Lambda RuntimeVersionConfig error is malformed or contains an unknown field.");
+    }
+    throw new Error("Resolved broker Lambda runtime version retrieval returned an error.");
+  }
+  return Object.freeze(runtimeVersionArn === undefined ? {} : { RuntimeVersionArn: runtimeVersionArn });
+}
+
+const LAMBDA_CONFIGURATION_RESPONSE_FIELDS = Object.freeze([
+  "Architectures", "CapacityProviderConfig", "CodeSha256", "CodeSize", "ConfigSha256", "DeadLetterConfig", "Description",
+  "DurableConfig", "Environment", "EphemeralStorage", "FileSystemConfigs", "FunctionArn", "FunctionName", "Handler",
+  "ImageConfigResponse", "KMSKeyArn", "LastModified", "LastUpdateStatus", "LastUpdateStatusReason", "LastUpdateStatusReasonCode",
+  "Layers", "LoggingConfig", "MasterArn", "MemorySize", "PackageType", "RevisionId", "Role", "Runtime", "RuntimeVersionConfig",
+  "SigningJobArn", "SigningProfileVersionArn", "SnapStart", "State", "StateReason", "StateReasonCode", "TenancyConfig", "Timeout",
+  "TracingConfig", "Version", "VpcConfig",
+]);
+
+function assertStageBBrokerLambdaResponseShape(configuration) {
+  if (!configuration || typeof configuration !== "object" || Array.isArray(configuration)
+      || Object.keys(configuration).some((key) => !LAMBDA_CONFIGURATION_RESPONSE_FIELDS.includes(key))) {
+    throw new Error("Resolved broker Lambda configuration contains an unknown or malformed GetFunctionConfiguration field.");
+  }
+}
+
+function assertStageBBrokerLoggingConfig(value, expected) {
+  if (value === undefined || value === null) return;
+  if (typeof value !== "object" || Array.isArray(value)
+      || Object.keys(value).some((key) => !["ApplicationLogLevel", "LogFormat", "LogGroup", "SystemLogLevel"].includes(key))
+      || value.ApplicationLogLevel !== undefined
+      || value.LogFormat !== undefined && value.LogFormat !== expected.logFormat
+      || value.LogGroup !== undefined && value.LogGroup !== expected.logGroup
+      || value.SystemLogLevel !== undefined && value.SystemLogLevel !== expected.systemLogLevel) {
+    throw new Error("Resolved broker Lambda LoggingConfig is outside the reviewed default logging contract.");
+  }
+}
+
+function assertStageBBrokerLambdaDefaults(configuration, expected) {
+  if (!emptyString(configuration.KMSKeyArn) || !emptyString(configuration.CodeSigningConfigArn)
+      || !emptyObject(configuration.CapacityProviderConfig) || !emptyObject(configuration.DurableConfig)
+      || !emptyString(configuration.Description) || !emptyString(configuration.MasterArn)
+      || !emptyString(configuration.SigningJobArn) || !emptyString(configuration.SigningProfileVersionArn)
+      || configuration.State !== undefined && configuration.State !== "Active"
+      || configuration.LastUpdateStatus !== undefined && configuration.LastUpdateStatus !== "Successful"
+      || !emptyString(configuration.StateReason) || !emptyString(configuration.StateReasonCode)
+      || !emptyObject(configuration.TenancyConfig)) {
+    throw new Error("Resolved broker Lambda configuration contains an unexpected AWS default or runtime state.");
+  }
+  assertStageBBrokerLoggingConfig(configuration.LoggingConfig, expected.loggingConfig);
+  return normalizeStageBBrokerRuntimeVersionConfig(configuration.RuntimeVersionConfig);
+}
+
+export function assertStageBBrokerLambdaConfiguration({ configuration, alias, brokerPackageRawSha256 } = {}) {
+  assertStageBBrokerLambdaResponseShape(configuration);
+  const broker = assertStageBBrokerConfigurationIdentity({ configuration, alias });
+  const expected = STAGE_B.brokerLambdaConfiguration;
+  const codeSha256 = configuration?.CodeSha256;
+  if (!/^[a-f0-9]{64}$/.test(brokerPackageRawSha256 || "") || typeof codeSha256 !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(codeSha256)
+      || Buffer.from(codeSha256, "base64").length !== 32 || Buffer.from(codeSha256, "base64").toString("base64") !== codeSha256
+      || codeSha256 !== Buffer.from(brokerPackageRawSha256, "hex").toString("base64")
+      || configuration.FunctionName !== expected.functionName || configuration.Role !== expected.role || configuration.Handler !== expected.handler
+      || configuration.Runtime !== expected.runtime || canonicalJson(configuration.Architectures) !== canonicalJson(expected.architectures)
+      || configuration.Timeout !== expected.timeout || configuration.MemorySize !== expected.memorySize || configuration.PackageType !== expected.packageType
+      || canonicalJson(configuration.EphemeralStorage) !== canonicalJson(expected.ephemeralStorage)
+      || !exactKeys(configuration.Environment?.Variables, STAGE_B_BROKER_ENVIRONMENT_VARIABLES)
+      || !emptyArray(configuration.Layers) || !emptyArray(configuration.FileSystemConfigs) || !emptyObject(configuration.DeadLetterConfig)
+      || !noVpcConfiguration(configuration.VpcConfig) || !emptyObject(configuration.ImageConfigResponse)
+      || configuration.SnapStart !== undefined && configuration.SnapStart?.ApplyOn !== "None"
+      || configuration.TracingConfig !== undefined && configuration.TracingConfig?.Mode !== "PassThrough") {
+    throw new Error("Resolved broker Lambda configuration is outside the reviewed executable contract.");
+  }
+  const runtimeVersionConfig = assertStageBBrokerLambdaDefaults(configuration, expected);
+  return Object.freeze({
+    broker,
+    codeSha256,
+    configuration: Object.freeze({
+      FunctionName: configuration.FunctionName, FunctionArn: configuration.FunctionArn, Version: configuration.Version,
+      CodeSha256: codeSha256, Role: configuration.Role, Handler: configuration.Handler, Runtime: configuration.Runtime,
+      Architectures: [...configuration.Architectures], Timeout: configuration.Timeout, MemorySize: configuration.MemorySize,
+      PackageType: configuration.PackageType, EphemeralStorage: { ...configuration.EphemeralStorage },
+      Environment: { Variables: { ...configuration.Environment.Variables } },
+      Layers: [...(configuration.Layers || [])], FileSystemConfigs: [...(configuration.FileSystemConfigs || [])],
+      DeadLetterConfig: { ...(configuration.DeadLetterConfig || {}) }, VpcConfig: configuration.VpcConfig || null,
+      ImageConfigResponse: configuration.ImageConfigResponse || {}, SnapStart: configuration.SnapStart || null,
+      TracingConfig: configuration.TracingConfig || null,
+      LoggingConfig: configuration.LoggingConfig || null, KMSKeyArn: configuration.KMSKeyArn || null,
+      CodeSigningConfigArn: configuration.CodeSigningConfigArn || null,
+      RuntimeVersionConfig: runtimeVersionConfig,
+    }),
+  });
+}
+
+export function assertStageBBrokerApprovalExpected(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !strictKeys(value, STAGE_B_BROKER_APPROVAL_EXPECTED_FIELDS)
+      || !/^[a-f0-9]{40}$/.test(value.releaseSha || "")
+      || [value.sourceContractSha256, value.migrationSetDigest, value.packageChecksumSha256].some((item) => !isDigest(item))
+      || value.deploymentId !== "phase2" || value.greenDatabaseName !== "mscqr_production_rls_green_phase2"
+      || value.administratorIdentity !== "mscqr_prod_admin" || value.databaseSecurityGroupId !== STAGE_B.databaseSecurityGroupId
+      || value.executorSecurityGroupId !== STAGE_B.executorSecurityGroupId) {
+    throw new Error("Stage B broker approval expectation is incomplete or outside the reviewed contract.");
+  }
+  return value;
+}
+
+export function assertStageBBrokerImageBindings(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !strictKeys(value, STAGE_B_BROKER_IMAGE_FIELDS)
+      || Object.entries(value).some(([field, item]) => !imagePatterns[field]?.test(item || ""))) {
+    throw new Error("Stage B broker image bindings are incomplete or outside the reviewed contract.");
+  }
+  return value;
+}
+
+export function assertStageBBrokerTemplateHashBindings(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !strictKeys(value, STAGE_B_TASK_TEMPLATE_KEYS)
+      || Object.values(value).some((item) => !isDigest(item))) {
+    throw new Error("Stage B broker task-definition template hashes are incomplete or malformed.");
+  }
+  return value;
+}
+
+export function assertStageBBrokerConfigurationBindings({ approvalExpected, images, templateHashes } = {}) {
+  assertStageBBrokerApprovalExpected(approvalExpected);
+  assertStageBBrokerImageBindings(images);
+  assertStageBBrokerTemplateHashBindings(templateHashes);
+  return { approvalExpected, images, templateHashes };
+}
+
+export const canonicalStageBBrokerApprovalExpected = ({ releaseSha, sourceContractSha256, migrationSetDigest, packageChecksumSha256 } = {}) => ({
+  releaseSha, sourceContractSha256, migrationSetDigest, packageChecksumSha256,
+  deploymentId: "phase2", greenDatabaseName: "mscqr_production_rls_green_phase2", administratorIdentity: "mscqr_prod_admin",
+  databaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, executorSecurityGroupId: STAGE_B.executorSecurityGroupId,
+});
 
 export const hasCompleteStageBTaskMaps = (taskDefinitionArns, taskDefinitionTemplateHashes) =>
   Boolean(taskDefinitionArns && typeof taskDefinitionArns === "object" && !Array.isArray(taskDefinitionArns)
@@ -215,7 +447,7 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
   if (artifact.approvalId !== stageBApprovalIdForReleaseSha(artifact.releaseSha)) {
     throw new Error("Stage B approval approvalId does not match releaseSha.");
   }
-  for (const field of ["releaseSha", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "deploymentId", "approvalId", "ticketId", "greenDatabaseName", "administratorIdentity"]) {
+  for (const field of ["releaseSha", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "deploymentId", "approvalId", "ticketId", "greenDatabaseName", "administratorIdentity", "brokerVersion"]) {
     if (expected?.[field] && artifact[field] !== expected[field]) throw new Error(`Stage B approval ${field} does not match the release contract.`);
   }
   for (const [field, value] of Object.entries(expected?.images || {})) {

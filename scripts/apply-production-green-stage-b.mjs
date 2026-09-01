@@ -34,7 +34,7 @@ import { assertStageBTerraformWorkspace } from "./aws/stage-b-terraform-workspac
 import { assertStageBDeploymentCapabilityGraph } from "./aws/generate-production-green-stage-b-capability-graph.mjs";
 import { assertStageBRecoveryProvenance, assertStageBRefreshEvidence } from "./aws/stage-b-refresh-contract.mjs";
 import { assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileExclusive } from "./aws/stage-b-artifact-contract.mjs";
-import { assertStageBPlanApprovedBinding } from "./aws/stage-b-plan-approval-contract.mjs";
+import { assertStageBPlanApprovedBinding, stageBApprovalAuthorityMode } from "./aws/stage-b-plan-approval-contract.mjs";
 import { assertRecoveryOnlyPlan, assertVerifiedStageBRecovery, createStageBRecoveryKmsVerifier } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
 import { captureStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs";
 import { findTerraformCliArgEnvKeys } from "./plan-staging-terraform.mjs";
@@ -276,6 +276,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
   const parsedAudit = JSON.parse(auditBytes);
   const terraformConfiguration = fs.readFileSync(path.join(root, terraformRoot, "main.tf"), "utf8");
   assertStageBPlanApprovedBinding(approvalReport, { approvalReportBytes, approvalReportSha256: planApprovalReportSha256, savedPlanBytes, planJsonBytes: planBytes, canonicalPlanJsonBytes, referenceAudit: parsedAudit, referenceAuditBytes: auditBytes, expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256, expectedRefreshReportSha256: refreshReportSha256, expectedRefreshBindingReportSha256: recoveryPlan || partialApplyRecovery || freshImagePartialApplyRecovery ? refreshBindingReportSha256 : undefined, expectedRecoveryAttestationSha256: trustedRecovery?.attestationSha256, expectedStageBLineage: bindingReport.stateLineage, expectedStageBSerial: bindingReport.stateSerial, terraformConfiguration, now: new Date(now) });
+  const authorityMode = stageBApprovalAuthorityMode(approvalReport);
   if (!/^[a-f0-9]{64}$/.test(canonicalPlanJsonSha256)) throw new Error("Canonical plan JSON SHA256 is missing or malformed.");
   if (sha256(planBytes) !== planSha256) throw new Error("Plan JSON SHA256 does not match the approved digest.");
   if (sha256(auditBytes) !== auditSha256) throw new Error("Reference audit SHA256 does not match the approved digest.");
@@ -359,7 +360,7 @@ export function assertApplyArtifacts({ planPath, planJsonPath, canonicalPlanJson
     .map(({ mutation_instance_identity }) => mutation_instance_identity);
   const actualDeleteInstances = deleteChanges.map((change) => stageBMutationInstanceIdentity(change));
   assertStageBMutationInstanceMultisetEqual(approvedDeleteIdentities, actualDeleteInstances, "Stage B delete mutation instances");
-  return { plan, audit, permissionReport, imageEvidence, deploymentIdentity, imageBindings, resourceClassification, trustedRecovery, mutationManifest, mutationManifestSha256: mutationManifest.mutationManifestSha256, savedPlanSha256, canonicalPlanJsonSha256, derivedPlanJsonSha256: sha256(derivedPlanBytes) };
+  return { plan, audit, permissionReport, imageEvidence, deploymentIdentity, authorityMode, imageBindings, resourceClassification, trustedRecovery, mutationManifest, mutationManifestSha256: mutationManifest.mutationManifestSha256, savedPlanSha256, canonicalPlanJsonSha256, derivedPlanJsonSha256: sha256(derivedPlanBytes) };
 }
 
 export function showSavedPlan(planPath, { env = process.env, execFile = execFileSync } = {}) {
@@ -465,7 +466,7 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const completedReserved = reserveAttemptTransition({ attemptId: completed.attemptId, sequence: completed.sequence, bytes: completedBytes, privateDirectory: path.dirname(applyAttemptPath), run: (args) => releaseRun(args) });
   if (completedReserved?.status !== "reserved" || completedReserved.key !== stageBAttemptStepS3ObjectKey(completed.attemptId, completed.sequence)) throw new Error("Stage B apply result evidence was not durably authenticated; stop without retry.");
   if (!succeeded) throw new Error("Terraform apply failed; stop without retry.");
-  return { status: "applied-saved-plan", callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, mutationManifestSha256: verified.mutationManifestSha256, executableAuditSha256, applyAttemptPath, applyCalls: 1, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
+  return { status: "applied-saved-plan", authorityMode: verified.authorityMode, callerArn, planSha256: artifacts.planSha256, auditSha256: artifacts.auditSha256, mutationManifestSha256: verified.mutationManifestSha256, executableAuditSha256, applyAttemptPath, applyCalls: 1, imageBindings: verified.imageBindings, classifiedResources: verified.resourceClassification?.classifiedResources || [], unclassifiedResources: verified.resourceClassification?.unclassifiedResources || [], actionCounts: verified.resourceClassification?.actionCounts || {} };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertFixedTaskDefinition } from "./production-green-stage-b-task-definitions.mjs";
 import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
+import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 
 const ROOT = path.resolve("infra/aws/terraform/production-green-stage-b/task-definitions");
 const TEMPLATE_PATH = path.join(ROOT, "green-backend-rotation-candidate.json");
@@ -53,12 +55,12 @@ export function buildOverlapTaskDefinition({ backendImage, releaseSha, backendLo
     else if (!SECRET_REF.test(secretBindings[name] || "")) throw new Error(`Overlap task secret binding is not an exact production reference: ${name}.`);
     else if (ROTATION_BINDING_SHAPES[name] && !((postPrepare && ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"].includes(name) ? ECS_VALUE_REF : ROTATION_BINDING_SHAPES[name]).test(secretBindings[name]))) throw new Error(`Overlap task secret binding has the wrong SDK/ECS reference shape: ${name}.`);
   }
-  const definition = replace(JSON.parse(fs.readFileSync(TEMPLATE_PATH, "utf8")), {
+  const definition = { ...replace(JSON.parse(fs.readFileSync(TEMPLATE_PATH, "utf8")), {
     BACKEND_IMAGE: backendImage,
     RELEASE_SHA: releaseSha,
     BACKEND_LOG_GROUP: backendLogGroup,
     ...secretBindings,
-  });
+  }), runtimePlatform: { ...STAGE_B.taskRuntimePlatform } };
   assertUniqueSecretBindingNames(definition);
   deriveEcsRuntimeDependencies(definition);
   if (/{{[A-Z0-9_]+}}/.test(JSON.stringify(definition)) || definition.family !== FAMILY) throw new Error("Overlap task definition is unresolved or has the wrong family.");
@@ -83,6 +85,7 @@ export async function registerOverlapTaskDefinition({ input, register, describe 
   if (describe) {
     const registered = await describe(arn);
     if (registered?.taskDefinitionArn !== arn || registered?.family !== FAMILY || registered?.status !== "ACTIVE") throw new Error("Registered overlap task definition did not converge to the reviewed payload.");
+    assertEcsTaskDefinitionReadback({ definition: registered, taskDefinitionArn: arn, expected: payload.taskDefinition, label: "Registered overlap task definition" });
     if (!Array.isArray(registered.tags) || !registered.tags.some(({ key, value }) => key === OVERLAP_TASK_MARKER.key && value === OVERLAP_TASK_MARKER.value)) throw new Error("Registered overlap task definition is missing the creation-time execution marker.");
     const registeredBackend = registered.containerDefinitions?.find(({ name }) => name === "backend");
     if (registeredBackend && registeredBackend.image !== payload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend")?.image) throw new Error("Registered overlap image differs from the authorized immutable digest.");

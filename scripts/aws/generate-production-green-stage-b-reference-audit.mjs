@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
+import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
 import {
   assertStageBReferenceAuditFreshness,
   STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
@@ -38,9 +38,7 @@ const familyFromArn = (value, label) => {
   return { arn: value, family: match[1], revision: Number(match[2]) };
 };
 
-const expectedBrokerFamily = (mode) => mode === "full-rls-application-canary"
-  ? STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["canary"]']
-  : `mscqr-production-full-rls-green-${mode}`;
+const expectedBrokerFamily = (mode) => STAGE_B_BROKER_TASK_DEFINITION_FAMILIES[mode];
 const brokerTaskDefinitionAddress = (mode) => mode === "full-rls-application-canary"
   ? 'aws_ecs_task_definition.candidate["canary"]'
   : `aws_ecs_task_definition.executor["${mode}"]`;

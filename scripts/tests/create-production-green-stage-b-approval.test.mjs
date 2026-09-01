@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
 import { createHandler } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
-import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalStageBApproval, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
+import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, canonicalStageBApproval, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 import { stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
 import { prepareStageBApproval, signStageBApproval } from "../aws/create-production-green-stage-b-approval.mjs";
 
 const now = new Date("2026-07-30T12:00:00.000Z");
 const digest = (value) => value.repeat(64);
 const image = (repository, value) => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}@sha256:${digest(value)}`;
-const taskDefinitionArns = Object.fromEntries(["full-rls-capability-preflight", "full-rls-admin-bootstrap", "full-rls-role-provision", "full-rls-role-verify", "full-rls-admin-ownership", "full-rls-runtime-policy", "full-rls-verification", "full-rls-application-canary", "full-rls-rollback"].map((mode) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-${mode.replace("full-rls-", "")}:1`]));
+const taskDefinitionArns = Object.fromEntries(Object.entries(STAGE_B_BROKER_TASK_DEFINITION_FAMILIES).map(([mode, family]) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:1`]));
 const checkerIdentity = "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/checker";
 const deployerIdentity = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/deployer";
 const input = (overrides = {}) => ({
@@ -56,8 +56,8 @@ test("v2 creator requires complete exact task-definition and template-hash maps"
 
 test("explicit signing validates the v2 artifact through the broker validator without KMS in tests", async () => {
   const { artifact } = await signStageBApproval(input(), { now, caller: async () => ({ Arn: checkerIdentity }), sign, verifySignature });
-  const config = { clusterArn: STAGE_B.clusterArn, approvalSecretArn: STAGE_B.approvalSecretArn, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, privateSubnetIds: STAGE_B.privateSubnetIds, taskDefinitionArns, templateHashes: stageBTemplateHashes(), approvalExpected: { releaseSha: artifact.releaseSha, sourceContractSha256: artifact.sourceContractSha256, migrationSetDigest: artifact.migrationSetDigest, packageChecksumSha256: artifact.packageChecksumSha256, deploymentId: artifact.deploymentId, approvalId: artifact.approvalId, ticketId: artifact.ticketId, images: { backendImageDigest: artifact.backendImageDigest, workerImageDigest: artifact.workerImageDigest, executorImageDigest: artifact.executorImageDigest, canaryImageDigest: artifact.canaryImageDigest }, taskDefinitionArns }, images: { backendImageDigest: artifact.backendImageDigest, workerImageDigest: artifact.workerImageDigest, executorImageDigest: artifact.executorImageDigest, canaryImageDigest: artifact.canaryImageDigest } };
-  const handler = createHandler({ config, readApproval: async () => JSON.stringify(artifact), verifySignature, claimApproval: async () => {}, runTask: async () => ({ failures: [], tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/fixed" }] }), now: () => now });
+  const config = { clusterArn: STAGE_B.clusterArn, approvalSecretArn: STAGE_B.approvalSecretArn, executorSecurityGroupId: STAGE_B.executorSecurityGroupId, privateSubnetIds: STAGE_B.privateSubnetIds, replayTable: STAGE_B.replayTable, receiptBucket: STAGE_B.receiptBucket, taskDefinitionArns, templateHashes: stageBTemplateHashes(), approvalExpected: { releaseSha: artifact.releaseSha, sourceContractSha256: artifact.sourceContractSha256, migrationSetDigest: artifact.migrationSetDigest, packageChecksumSha256: artifact.packageChecksumSha256, deploymentId: artifact.deploymentId, approvalId: artifact.approvalId, ticketId: artifact.ticketId, images: { backendImageDigest: artifact.backendImageDigest, workerImageDigest: artifact.workerImageDigest, executorImageDigest: artifact.executorImageDigest, canaryImageDigest: artifact.canaryImageDigest }, taskDefinitionArns }, images: { backendImageDigest: artifact.backendImageDigest, workerImageDigest: artifact.workerImageDigest, executorImageDigest: artifact.executorImageDigest, canaryImageDigest: artifact.canaryImageDigest } };
+  const handler = createHandler({ config, executingBrokerVersion: "1", readApproval: async () => JSON.stringify(artifact), verifySignature, claimApproval: async () => {}, runTask: async () => ({ failures: [], tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/fixed" }] }), now: () => now });
   await assert.doesNotReject(() => handler({ approvalId: artifact.approvalId, mode: "full-rls-verification" }));
   await assert.rejects(() => signStageBApproval(input(), { now, caller: async () => ({ Arn: deployerIdentity }), sign, verifySignature }), /exact independent checker/);
 });

@@ -39,6 +39,8 @@ import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.m
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment } from "./production-credential-source-contract.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
+import { createAwsReader, observeStageBBrokerApprovalBindings } from "./production-green-stage-b-ecs-observations.mjs";
+import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -92,7 +94,7 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   assertStageBTerraformInitializedBackendMetadata(metadata);
   const observedWorkspace = String(run("terraform", [`-chdir=${terraformRoot}`, "workspace", "show"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
   assertStageBTerraformWorkspace({ envWorkspace: env.TF_WORKSPACE, observedWorkspace });
-  return { backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, tfvarsSha256: generated.tfvarsSha256, ...backendMetadata };
+  return { backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, tfvarsSha256: generated.tfvarsSha256, bindingReportSha256: sha256(fs.readFileSync(generated.bindingReportPath)), ...backendMetadata };
 }
 
 export function runProductionPreflightCli(argv = process.argv.slice(2), dependencies = {}) {
@@ -183,7 +185,11 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
       const reportFile = write(output, blockedReport);
       return { identity, status: report.status, releaseReadCapabilities: { failed: report.failed.length, skipped: report.skipped.length }, report: reportFile, backendReady: false, stateReady: false, handoffReady: false, tfvarsReady: false, capabilityGraph };
     }
-    const readiness = continueReadiness(argv); const finalReport = { ...report, ...readiness, capabilityGraph, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, releaseReadFailures: 0, configurationFailures: 0, status: "ready-for-plan" }; const reportFile = write(output, finalReport);
+    const readiness = continueReadiness(argv);
+    const stageBApprovalLiveObservation = argv.includes("--capture-stage-b-approval-live-observation")
+      ? observeStageBBrokerApprovalBindings({ reader: createAwsReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn, run: releaseRun }) })
+      : undefined;
+    const finalReport = { ...report, ...readiness, ...(stageBApprovalLiveObservation ? { stageBApprovalLiveObservation } : {}), capabilityGraph, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, releaseReadFailures: 0, configurationFailures: 0, status: "ready-for-plan" }; const reportFile = write(output, finalReport);
     return { identity, status: "ready-for-plan", releaseReadCapabilities: { failed: 0, skipped: 0 }, report: reportFile, ...readiness, capabilityGraph };
   }
   throw new Error("--identity must be administrator or release-deployer.");

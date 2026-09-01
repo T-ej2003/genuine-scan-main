@@ -197,7 +197,7 @@ const brokerPolicyResources = Object.freeze({
   ReadAndStopOnlyPreDeploymentInventory: (resource) => Array.isArray(resource) && resource.length === 1 && resource[0] === `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/*`,
   TagOnlyPreDeploymentInventoryTasks: (resource) => resource === `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/*`,
   PassOnlyApprovedTaskRoles: (resource) => Array.isArray(resource) && JSON.stringify([...resource].sort()) === JSON.stringify([...brokerPassRoleArns].sort()),
-  ClaimOnlyStageBReplayRows: (resource) => resource === `arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/mscqr-production-rls-stage-b-replay`,
+  ClaimOnlyStageBReplayRows: (resource) => resource === `arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/${STAGE_B.replayTable}`,
   ReadOnlyStageAApproval: (resource) => resource === STAGE_B.approvalSecretArn,
   VerifyOnlyStageAApprovalKey: (resource) => resource === STAGE_B.approvalKmsKeyArn,
   WriteOnlyBrokerReceipts: (resource) => resource === `arn:aws:s3:::${STAGE_B.receiptBucket}/rls-broker-receipts/*`,
@@ -471,8 +471,8 @@ function assertStageBResourceIdentity(change, kind, key, strict) {
   if (kind === "backend-ecs-exec-policy") assertPolicyRoleIdentity(change, taskRoleNames.backend, "stage-b-backend-ecs-exec-ssm-channels", strict);
   if (kind === "executor-runtime-policy") assertPolicyRoleIdentity(change, "mscqr-production-full-rls-green-executor-task", "stage-b-executor-runtime", strict);
   if (kind === "replay") {
-    assertKnown(after.name, "mscqr-production-rls-stage-b-replay", "Stage B replay table name", strict);
-    if (after.arn !== undefined) assertIamArn(after.arn, `arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/mscqr-production-rls-stage-b-replay`, "Stage B replay table ARN", strict);
+    assertKnown(after.name, STAGE_B.replayTable, "Stage B replay table name", strict);
+    if (after.arn !== undefined) assertIamArn(after.arn, `arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/${STAGE_B.replayTable}`, "Stage B replay table ARN", strict);
   }
   if (kind === "broker-function") assertKnown(after.function_name, "mscqr-production-rls-approval-broker", "Stage B broker function name", strict);
   if (kind === "broker-alias") {

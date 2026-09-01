@@ -184,7 +184,12 @@ full-RLS release checksum is `var.package_checksum_sha256`, which must flow thro
 `local.broker_approval_expected.packageChecksumSha256` into the broker environment.
 The independently built ZIP is `var.broker_package_path`; its raw SHA-256 and
 base64 `source_code_hash` are proved separately. These two artifact digests are
-different contract values and must not be equal. If the live release checksum is
+different contract values and must not be equal. Approval-evidence collection
+also resolves the `reviewed` alias to one immutable numeric Lambda version and
+compares that version's `Configuration.CodeSha256` to the raw ZIP digest after
+strict hex/base64 conversion. It describes every exact ARN in the broker task
+map and compares the returned immutable task-definition contents with the
+source-rendered templates using the shared ECS readback normalizer. If the live release checksum is
 older, the audit records `plannedAtomicPackageChecksumTransition` only when the same
 exact plan updates it from the broker plan `before` value to the release checksum,
 replaces the ZIP, and binds all evidence to the exact plan SHA. Missing, stale,
@@ -213,7 +218,9 @@ stable alias ARN, and resolved numeric version ARN separately. It accepts the
 unqualified base ARN, a matching numeric version ARN, or the exact reviewed alias
 ARN only when an independent `GetAlias` read proves `AliasArn`, alias name, and
 `FunctionVersion` match the configuration version. Other qualifiers remain
-invalid.
+invalid. The alias is exact executable authority: its `RoutingConfig` must be
+absent or contain an empty `AdditionalVersionWeights` map. Any weighted
+secondary version is unreviewed executable traffic and fails closed.
 
 Bind the saved-plan SHA, plan JSON SHA, canonical-plan file SHA, and logical canonical
 JSON SHA in the capture and approval reports. Bind all four again when invoking

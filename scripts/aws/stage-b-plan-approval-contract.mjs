@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { canonicalJson } from "./production-green-stage-b-contract.mjs";
+import { canonicalJson, STAGE_B_RUNTIME_APPROVAL_AUTHORITY } from "./production-green-stage-b-contract.mjs";
 import { assertStageBCurrentRolloverReferenceBinding, assertStageBReferenceAuditFreshness, normalizeStageBFreshImageRuntimeModel, STAGE_B_TASK_DEFINITION_FAMILIES, STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS, STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS } from "./stage-b-reference-audit-contract.mjs";
 import { assertStageBFreshImageDeposedCleanupSet, assertStageBFreshImageRecoveryCensus, assertStageBMutationInstanceMultisetEqual, assertStageBPartialApplyRecoveryPlan, assertStageBFreshImagePartialApplyRecoveryPlan, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_FRESH_IMAGE_RECOVERY_CENSUSES, STAGE_B_NORMAL_STATIC_RESOURCE_ADDRESSES } from "./stage-b-deployment-contract.mjs";
 import { assertStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
@@ -9,6 +9,8 @@ import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-re
 export const STAGE_B_PLAN_EVIDENCE_SCHEMA_VERSION = 1;
 export const STAGE_B_PLAN_CAPTURED = "PLAN_CAPTURED";
 export const STAGE_B_PLAN_APPROVED = "PLAN_APPROVED";
+export const STAGE_B_PLAN_AUTHORITY = "PRE_CREATION_PLAN_AUTHORITY";
+export const STAGE_B_LIVE_AUTHORITY = STAGE_B_RUNTIME_APPROVAL_AUTHORITY;
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const STAGE_B_CAPTURE_BROKER_ADDRESSES = ["aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"];
@@ -94,6 +96,11 @@ function assertPartialApplyRecoveryEvidence(report) {
   if (["PARTIAL_APPLY_RECOVERY", "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY"].includes(report?.planProfile) && (report.recoveryAttestationSha256 !== undefined || report.recoveryPlan === true)) throw new Error(`${report.planProfile} cannot carry RECOVERY_ALIAS_ONLY attestation evidence.`);
 }
 export const STAGE_B_BROKER_OPERATIONS = Object.freeze(["none", "initial-create", "update", "recovery-alias-only", "partial-apply-recovery", "fresh-image-partial-apply-recovery"]);
+
+export function stageBApprovalAuthorityMode(report) {
+  if (!STAGE_B_BROKER_OPERATIONS.includes(report?.brokerOperation)) throw new Error("Stage B approval authority requires a canonical broker operation.");
+  return report.brokerOperation === "none" ? STAGE_B_LIVE_AUTHORITY : STAGE_B_PLAN_AUTHORITY;
+}
 export const STAGE_B_PLAN_PROFILE_CENSUS = Object.freeze({
   BASELINE: Object.freeze({ create: 12, replacement: 0, update: 3, destroy: 0, unclassified: 0 }),
   IMPORTED_BACKEND_METADATA_NORMALIZATION: Object.freeze({ create: 1, replacement: 11, update: 4, destroy: 0, unclassified: 0 }),

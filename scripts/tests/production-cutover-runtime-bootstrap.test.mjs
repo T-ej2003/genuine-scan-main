@@ -741,7 +741,8 @@ test("overlap task rejects legacy/ECS reference confusion and double JSON-key su
     backendLogGroup: "/ecs/mscqr-production/rls-green-backend",
     secretBindings,
   };
-  assert.doesNotThrow(() => buildOverlapTaskDefinition(input));
+  const rendered = buildOverlapTaskDefinition(input);
+  assert.deepEqual(rendered.taskDefinition.runtimePlatform, { operatingSystemFamily: "LINUX", cpuArchitecture: "X86_64" });
   for (const name of ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"]) {
     assert.throws(() => buildOverlapTaskDefinition({ ...input, secretBindings: { ...secretBindings, [name]: `${secretBindings[name]}:value::` } }), /wrong SDK\/ECS reference shape/);
   }

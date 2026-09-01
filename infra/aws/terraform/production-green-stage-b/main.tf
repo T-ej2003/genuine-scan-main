@@ -272,11 +272,19 @@ locals {
       }
     ]
   }
+  task_runtime_platform = {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+  task_runtime_platform_template = {
+    operatingSystemFamily = local.task_runtime_platform.operating_system_family
+    cpuArchitecture       = local.task_runtime_platform.cpu_architecture
+  }
   broker_template_hashes = {
-    backend  = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-backend-candidate.json"))))
-    worker   = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-worker-candidate.json"))))
-    executor = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-activation-executor.json"))))
-    canary   = sha256(jsonencode(jsondecode(file("${path.module}/task-definitions/green-application-canary.json"))))
+    backend  = sha256(jsonencode(merge(jsondecode(file("${path.module}/task-definitions/green-backend-candidate.json")), { runtimePlatform = local.task_runtime_platform_template })))
+    worker   = sha256(jsonencode(merge(jsondecode(file("${path.module}/task-definitions/green-worker-candidate.json")), { runtimePlatform = local.task_runtime_platform_template })))
+    executor = sha256(jsonencode(merge(jsondecode(file("${path.module}/task-definitions/green-activation-executor.json")), { runtimePlatform = local.task_runtime_platform_template })))
+    canary   = sha256(jsonencode(merge(jsondecode(file("${path.module}/task-definitions/green-application-canary.json")), { runtimePlatform = local.task_runtime_platform_template })))
   }
   broker_images = {
     backendImageDigest  = var.backend_image
@@ -443,8 +451,8 @@ resource "aws_ecs_task_definition" "candidate_retained" {
   }
 
   runtime_platform {
-    operating_system_family = "LINUX"
-    cpu_architecture        = "X86_64"
+    operating_system_family = local.task_runtime_platform.operating_system_family
+    cpu_architecture        = local.task_runtime_platform.cpu_architecture
   }
   tags = local.tags
 }
@@ -472,8 +480,8 @@ resource "aws_ecs_task_definition" "executor_retained" {
   }
 
   runtime_platform {
-    operating_system_family = "LINUX"
-    cpu_architecture        = "X86_64"
+    operating_system_family = local.task_runtime_platform.operating_system_family
+    cpu_architecture        = local.task_runtime_platform.cpu_architecture
   }
   tags = local.tags
 }
@@ -498,8 +506,8 @@ resource "aws_ecs_task_definition" "candidate" {
   }
 
   runtime_platform {
-    operating_system_family = "LINUX"
-    cpu_architecture        = "X86_64"
+    operating_system_family = local.task_runtime_platform.operating_system_family
+    cpu_architecture        = local.task_runtime_platform.cpu_architecture
   }
   tags = each.key == "backend" ? local.backend_exec_tags : local.tags
 }
@@ -524,8 +532,8 @@ resource "aws_ecs_task_definition" "executor" {
   }
 
   runtime_platform {
-    operating_system_family = "LINUX"
-    cpu_architecture        = "X86_64"
+    operating_system_family = local.task_runtime_platform.operating_system_family
+    cpu_architecture        = local.task_runtime_platform.cpu_architecture
   }
   tags = local.tags
 }

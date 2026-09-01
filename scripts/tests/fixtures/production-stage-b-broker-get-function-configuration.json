@@ -1,0 +1,44 @@
+{
+  "FunctionName": "mscqr-production-rls-approval-broker",
+  "FunctionArn": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:4",
+  "Runtime": "nodejs24.x",
+  "Role": "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+  "Handler": "index.handler",
+  "CodeSize": 1234,
+  "Description": "",
+  "Timeout": 180,
+  "MemorySize": 128,
+  "LastModified": "2026-08-31T10:00:00.000+0000",
+  "CodeSha256": "7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u4=",
+  "Version": "4",
+  "VpcConfig": {
+    "SubnetIds": [],
+    "SecurityGroupIds": [],
+    "Ipv6AllowedForDualStack": false
+  },
+  "DeadLetterConfig": {},
+  "Environment": {
+    "Variables": {
+      "BROKER_APPROVAL_EXPECTED_JSON": "{}",
+      "BROKER_APPROVAL_SECRET_ARN": "value",
+      "BROKER_CLUSTER_ARN": "value",
+      "BROKER_EXECUTOR_SECURITY_GROUP_ID": "value",
+      "BROKER_IMAGES_JSON": "{}",
+      "BROKER_PRIVATE_SUBNETS_JSON": "[]",
+      "BROKER_RECEIPT_BUCKET": "value",
+      "BROKER_REPLAY_TABLE": "value",
+      "BROKER_TASK_DEFINITIONS_JSON": "{}",
+      "BROKER_TASK_TEMPLATE_HASHES_JSON": "{}"
+    }
+  },
+  "TracingConfig": { "Mode": "PassThrough" },
+  "RevisionId": "revision-id",
+  "Layers": [],
+  "State": "Active",
+  "LastUpdateStatus": "Successful",
+  "PackageType": "Zip",
+  "Architectures": ["x86_64"],
+  "EphemeralStorage": { "Size": 512 },
+  "SnapStart": { "ApplyOn": "None", "OptimizationStatus": "Off" },
+  "RuntimeVersionConfig": { "RuntimeVersionArn": "arn:aws:lambda:eu-west-2::runtime:8eeff65f6809a3ce81507fe733fe09b835899b99481ba22fd75b5a7338290ec1" }
+}

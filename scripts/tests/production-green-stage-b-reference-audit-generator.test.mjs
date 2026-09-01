@@ -1453,6 +1453,23 @@ test("broker configuration identity rejects missing or inconsistent alias eviden
   ]) assert.throws(() => assertStageBBrokerConfigurationIdentity({ configuration: { FunctionArn, Version: "2" }, alias: validAlias }), /outside/);
 });
 
+test("broker configuration identity permits only unweighted reviewed-alias routing", () => {
+  const configuration = { FunctionArn: STAGE_B.brokerAliasArn, Version: "2" };
+  const alias = { AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "2" };
+  for (const RoutingConfig of [undefined, {}, { AdditionalVersionWeights: {} }]) {
+    assert.doesNotThrow(() => assertStageBBrokerConfigurationIdentity({ configuration, alias: RoutingConfig === undefined ? alias : { ...alias, RoutingConfig } }));
+  }
+  for (const RoutingConfig of [
+    { AdditionalVersionWeights: { "3": 0.01 } },
+    { AdditionalVersionWeights: { "3": 0.01, "4": 0.02 } },
+    null,
+    [],
+    { AdditionalVersionWeights: null },
+    { AdditionalVersionWeights: [] },
+    { unreviewed: true },
+  ]) assert.throws(() => assertStageBBrokerConfigurationIdentity({ configuration, alias: { ...alias, RoutingConfig } }), /routing|unreviewed/i);
+});
+
 test("reference audit records base, alias, configuration, and resolved broker identities separately", () => {
   const fixture = makeFixture({ mutateReader: (reader) => {
     const original = reader.getFunctionConfiguration;

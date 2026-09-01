@@ -74,7 +74,9 @@
         "scripts/aws/prepare-production-cutover-runtime.mjs",
         "scripts/aws/production-cutover-runtime-bootstrap.mjs",
         "scripts/aws/production-cutover-production-adapters.mjs",
-        "scripts/aws/forward-recover-stage-b-existing-revision.mjs"
+        "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+        "scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
+        "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -94,7 +96,9 @@
       "consumers": [
         "scripts/aws/prepare-production-cutover-runtime.mjs",
         "scripts/aws/production-cutover-runtime-bootstrap.mjs",
-        "scripts/aws/production-cutover-production-adapters.mjs"
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
+        "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -114,7 +118,9 @@
       "consumers": [
         "scripts/aws/prepare-production-cutover-runtime.mjs",
         "scripts/aws/production-cutover-runtime-bootstrap.mjs",
-        "scripts/aws/production-cutover-production-adapters.mjs"
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
+        "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -494,7 +500,13 @@
         "scripts/refresh-production-green-stage-b.mjs",
         "scripts/plan-production-green-stage-b.mjs",
         "scripts/aws/validate-stage-b-deployment-closure.mjs",
-        "scripts/apply-production-green-stage-b.mjs"
+        "scripts/apply-production-green-stage-b.mjs",
+        "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs",
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/prepare-production-cutover-runtime.mjs",
+        "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+        "scripts/aws/recover-stage-b-backend-task-definition.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -515,7 +527,13 @@
         "scripts/refresh-production-green-stage-b.mjs",
         "scripts/plan-production-green-stage-b.mjs",
         "scripts/aws/validate-stage-b-deployment-closure.mjs",
-        "scripts/apply-production-green-stage-b.mjs"
+        "scripts/apply-production-green-stage-b.mjs",
+        "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs",
+        "scripts/aws/production-cutover-production-adapters.mjs",
+        "scripts/aws/production-cutover-runtime-bootstrap.mjs",
+        "scripts/aws/prepare-production-cutover-runtime.mjs",
+        "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
+        "scripts/aws/recover-stage-b-backend-task-definition.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -718,6 +736,42 @@
       "overwrite": false,
       "hashBound": true,
       "atomicGroup": "plan-approval-report",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stage-b-approval-input",
+      "kind": "file",
+      "producer": "scripts/aws/prepare-production-green-stage-b-approval-input.mjs:run",
+      "consumers": [
+        "scripts/aws/create-production-green-stage-b-approval.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "atomicGroup": "stage-b-approval-input-review-pair",
+      "overwrite": false,
+      "hashBound": true,
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stage-b-approval-review",
+      "kind": "file",
+      "producer": "scripts/aws/prepare-production-green-stage-b-approval-input.mjs:run",
+      "consumers": [
+        "documents/security/rls-program/FULL_DATABASE_PRODUCTION_ACTIVATION_RUNBOOK.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "atomicGroup": "stage-b-approval-input-review-pair",
+      "overwrite": false,
+      "hashBound": true,
       "allOrNone": true,
       "rollback": "remove-committed-or-restore-backups"
     },
