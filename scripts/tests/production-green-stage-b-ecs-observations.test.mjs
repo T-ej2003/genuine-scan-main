@@ -68,6 +68,12 @@ test("release-deployer broker observation rejects alias movement and an incomple
   assert.throws(() => observeStageBBrokerApprovalBindings({ reader: brokerReader({ getFunctionConfiguration: () => ({ FunctionArn: STAGE_B.brokerFunctionArn, Version: "4", Environment: { Variables: { BROKER_TASK_DEFINITIONS_JSON: "{}" } } }) }) }), /task-definition map/i);
 });
 
+test("release-deployer broker observation rejects weighted reviewed-alias routing", () => {
+  assert.throws(() => observeStageBBrokerApprovalBindings({ reader: brokerReader({
+    getAlias: () => ({ AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4", RoutingConfig: { AdditionalVersionWeights: { "5": 0.01 } } }),
+  }) }), /routing|unreviewed/i);
+});
+
 test("the source-controlled companion policy contains audit reads plus the Stage A cluster read and no mutation", () => {
   const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json", "utf8"));
   const actions = policy.Statement.flatMap((statement) => Array.isArray(statement.Action) ? statement.Action : [statement.Action]).filter((action) => action.startsWith("ecs:"));

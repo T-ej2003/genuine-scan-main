@@ -218,7 +218,9 @@ stable alias ARN, and resolved numeric version ARN separately. It accepts the
 unqualified base ARN, a matching numeric version ARN, or the exact reviewed alias
 ARN only when an independent `GetAlias` read proves `AliasArn`, alias name, and
 `FunctionVersion` match the configuration version. Other qualifiers remain
-invalid.
+invalid. The alias is exact executable authority: its `RoutingConfig` must be
+absent or contain an empty `AdditionalVersionWeights` map. Any weighted
+secondary version is unreviewed executable traffic and fails closed.
 
 Bind the saved-plan SHA, plan JSON SHA, canonical-plan file SHA, and logical canonical
 JSON SHA in the capture and approval reports. Bind all four again when invoking

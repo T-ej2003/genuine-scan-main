@@ -112,6 +112,17 @@ export function assertStageBBrokerConfigurationIdentity({ configuration, alias }
   if (!/^[1-9][0-9]*$/.test(aliasFunctionVersion) || aliasFunctionVersion !== configurationVersion) {
     throw new Error(`Broker Lambda reviewed alias version does not match configuration Version. Alias version: ${aliasFunctionVersion || "<empty>"}; Configuration Version: ${configurationVersion}`);
   }
+  if (alias.RoutingConfig !== undefined) {
+    const routing = alias.RoutingConfig;
+    if (!routing || typeof routing !== "object" || Array.isArray(routing)
+        || Object.keys(routing).some((key) => key !== "AdditionalVersionWeights")) {
+      throw new Error("Broker Lambda reviewed alias routing configuration is malformed or outside the reviewed contract.");
+    }
+    const weights = routing.AdditionalVersionWeights;
+    if (weights !== undefined && (!weights || typeof weights !== "object" || Array.isArray(weights) || Object.keys(weights).length !== 0)) {
+      throw new Error("Broker Lambda reviewed alias routes traffic to an unreviewed version.");
+    }
+  }
 
   return {
     functionArn: STAGE_B.brokerFunctionArn,

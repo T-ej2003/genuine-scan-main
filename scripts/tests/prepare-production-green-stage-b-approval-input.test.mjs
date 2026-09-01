@@ -168,6 +168,12 @@ test("production-shaped Lambda configuration fixture binds the reviewed executab
   assert.doesNotThrow(() => assertStageBBrokerLambdaConfiguration({ configuration, alias: live().alias, brokerPackageRawSha256: report.brokerPackageRawSha256 }));
 });
 
+test("collector and Lambda configuration reject weighted reviewed-alias routing", () => {
+  const alias = { ...live().alias, RoutingConfig: { AdditionalVersionWeights: { "5": 0.01 } } };
+  assert.throws(() => assertStageBBrokerLambdaConfiguration({ configuration: live().configuration, alias, brokerPackageRawSha256: report.brokerPackageRawSha256 }), /routing|unreviewed/i);
+  assert.throws(() => evidence({ live: { alias } }), /routing|unreviewed/i);
+});
+
 for (const [field, value] of [
   ["Role", "arn:aws:iam::368992683803:role/unreviewed"], ["Handler", "unreviewed.handler"], ["Runtime", "nodejs22.x"],
   ["Architectures", ["arm64"]], ["Timeout", 181], ["MemorySize", 256], ["PackageType", "Image"],
