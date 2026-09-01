@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { canonicalSha256, assertImmutableImage, STAGE_B, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS } from "./production-green-stage-b-contract.mjs";
+import { assertStageBRuntimePlatform, canonicalSha256, assertImmutableImage, STAGE_B, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS } from "./production-green-stage-b-contract.mjs";
 import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b/task-definitions";
@@ -49,6 +49,8 @@ export const approvedNetworkConfiguration = (privateSubnetIds) => {
 };
 
 export function assertFixedTaskDefinition(definition) {
+  try { assertStageBRuntimePlatform(definition?.runtimePlatform, { format: "aws", label: "Stage B task definition runtimePlatform" }); }
+  catch { throw new Error("Stage B task definition is outside the fixed reviewed contract."); }
   const container = definition?.containerDefinitions?.[0];
   const environmentNames = container?.environment?.map(({ name }) => name) || [];
   const secretNames = container?.secrets?.map(({ name }) => name) || [];
@@ -57,7 +59,6 @@ export function assertFixedTaskDefinition(definition) {
   const scratchMount = container?.mountPoints?.find((mount) => /^(executor|canary)-tmp$/.test(mount.sourceVolume));
   const fargateSizes = new Set(["256/512", "256/1024", "512/1024", "512/2048", "1024/2048", "1024/3072", "1024/4096", "2048/4096", "2048/5120", "2048/6144", "2048/7168", "2048/8192", "4096/8192", "4096/16384", "4096/30720"]);
   if (!container || definition.networkMode !== "awsvpc" || !definition.requiresCompatibilities?.includes("FARGATE")
-      || !definition.runtimePlatform || canonicalSha256(definition.runtimePlatform) !== canonicalSha256(STAGE_B.taskRuntimePlatform)
       || container.privileged || container.interactive || container.pseudoTerminal || !Array.isArray(container.entryPoint)
       || (Object.hasOwn(container, "command") && (!Array.isArray(container.command) || container.command.length)) || !container.logConfiguration
       || !["awslogs"].includes(container.logConfiguration.logDriver) || !container.image?.includes("@sha256:")

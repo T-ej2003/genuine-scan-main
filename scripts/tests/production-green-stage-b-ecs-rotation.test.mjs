@@ -456,6 +456,21 @@ test("rotation contract rejects delete-only and unknown task-definition actions"
   }
 });
 
+test("rollover runtime platforms remain inside the canonical domain", () => {
+  for (const platform of [
+    { operating_system_family: "LINUX", cpu_architecture: "ARM64" },
+    { operating_system_family: "WINDOWS_SERVER_2022_CORE", cpu_architecture: "X86_64" },
+  ]) {
+    const plan = rotationPlan();
+    for (const change of plan.resource_changes) {
+      change.change.before.runtime_platform = structuredClone(platform);
+      change.change.after.runtime_platform = structuredClone(platform);
+    }
+    assert.throws(() => classifyStageBPlan(plan, { strict: true }), /outside the exact Stage B domain/);
+  }
+  assert.doesNotThrow(() => classifyStageBPlan(rotationPlan(), { strict: true }));
+});
+
 test("recovery does not authorize an extra ECS address", () => {
   const plan = rotationPlan();
   plan.resource_changes.push({ address: 'aws_ecs_task_definition.executor["unexpected"]', type: "aws_ecs_task_definition", change: { actions: ["create", "delete"] } });

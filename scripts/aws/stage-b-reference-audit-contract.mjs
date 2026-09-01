@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
+import { assertStageBRuntimePlatform, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
 import { assertStageBDeploymentEvidenceFreshness, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
 import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 import { STAGE_B_BACKEND_PORT_MAPPING } from "./production-green-stage-b-task-definitions.mjs";
@@ -279,6 +279,7 @@ export function canonicalizeEcsTaskDefinitionVolumes(value) {
 const canonicalTaskDefinitionStableField = (field, value) => {
   if (field === "volume") return canonicalizeEcsTaskDefinitionVolumes(value);
   if (field === "ipc_mode" || field === "pid_mode") return canonicalizeEcsTaskDefinitionNullableMode(value, field);
+  if (field === "runtime_platform") return assertStageBRuntimePlatform(value, { format: "terraform", label: "Stage B task-definition runtime platform" });
   return stableTaskDefinitionValue(parsedTaskDefinitionValue(value));
 };
 export const exactReviewedTaskDefinitionTags = (address, before, after) => {
