@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
-import { buildProductionOverlapDeploymentReceipt, assertProductionOverlapDeploymentReceipt, resolveProductionOverlapDeploymentReceipt } from "../aws/production-overlap-deployment-receipt.mjs";
+import { buildProductionOverlapDeploymentReceipt, assertProductionOverlapDeploymentReceipt, assertReceiptBoundarySteps, resolveProductionOverlapDeploymentReceipt } from "../aws/production-overlap-deployment-receipt.mjs";
 import { runPostOverlapVerification, runProductionCutoverOverlapControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { buildOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
 import { READY_FOR_OVERLAP_DEPLOYMENT_STAGES } from "../aws/production-overlap-readiness-contract.mjs";
@@ -19,6 +19,11 @@ const approval = createProductionEnvironmentApprovalEvidence({ environmentConfig
 const readiness = buildOverlapReadinessEvidence({ sourceSha, rotationId, rotationStateSha256: sha("c"), generatedAt: "2026-09-01T10:00:00.000Z", stages: Object.fromEntries(READY_FOR_OVERLAP_DEPLOYMENT_STAGES.map((name) => [name, { valid: true, evidenceRef: name, evidenceSha256: sha("1"), identityBindings: { sourceSha, rotationId, ...(name === "overlapTaskDefinition" ? { taskDefinitionArn } : {}) } }])) });
 
 const receipt = () => buildProductionOverlapDeploymentReceipt({ sourceSha, rotationId, rotationStateSha256: sha("c"), readinessSha256: sha("d"), rotationFixtureSha256: sha("e"), environmentApproval: approval, deployedAt: "2026-09-01T10:01:00.000Z", expectedCurrentTaskDefinitionArn: previousTaskDefinitionArn, taskDefinitionArn, imageDigest, deploymentSha: sourceSha, deployment: { updateServiceCount: 1, metadata: { clusterName: "mscqr-prod-euw2-main", serviceName: "mscqr-backend-servi-euw2", observedTaskDefinitionArn: taskDefinitionArn, observedImageDigest: imageDigest, serviceStable: true } } });
+const boundarySteps = () => [
+  { name: "Authenticate production environment approval boundary", status: "completed", conclusion: "success" },
+  { name: "Deploy rotation transition backend ECS service", status: "completed", conclusion: "success" },
+  { name: "Upload overlap deployment receipt", status: "completed", conclusion: "success", started_at: "2026-09-01T10:01:00.000Z", completed_at: "2026-09-01T10:01:10.000Z" },
+];
 
 test("deployment receipt binds the exact authorized stable overlap deployment", () => {
   const value = receipt();
@@ -27,6 +32,25 @@ test("deployment receipt binds the exact authorized stable overlap deployment", 
     const changed = { ...value, [field]: field.includes("Sha256") ? sha("f") : field === "workflowRunId" ? "11" : field === "workflowRunAttempt" ? "2" : `${value[field]}-tampered` };
     assert.throws(() => assertProductionOverlapDeploymentReceipt(changed), /receipt|binding|identity|deployment/i);
   }
+});
+
+test("receipt boundary steps are unique, successful, and strictly ordered without adjacency", () => {
+  assert.deepEqual(assertReceiptBoundarySteps(boundarySteps()).map(({ index }) => index), [0, 1, 2]);
+  const withLegitimateSteps = [boundarySteps()[0], { name: "Upload normal backend activation evidence", status: "completed", conclusion: "skipped" }, boundarySteps()[1], { name: "Prepare governed legacy backend health recovery", status: "completed", conclusion: "skipped" }, boundarySteps()[2]];
+  assert.deepEqual(assertReceiptBoundarySteps(withLegitimateSteps).map(({ index }) => index), [0, 2, 4]);
+  for (const steps of [
+    [boundarySteps()[1], boundarySteps()[0], boundarySteps()[2]],
+    [boundarySteps()[0], boundarySteps()[2], boundarySteps()[1]],
+    boundarySteps().slice(1),
+    [boundarySteps()[0], boundarySteps()[2]],
+    boundarySteps().slice(0, 2),
+    [{ ...boundarySteps()[0], conclusion: "failure" }, boundarySteps()[1], boundarySteps()[2]],
+    [boundarySteps()[0], { ...boundarySteps()[1], conclusion: "failure" }, boundarySteps()[2]],
+    [boundarySteps()[0], boundarySteps()[1], { ...boundarySteps()[2], conclusion: "failure" }],
+    [boundarySteps()[0], boundarySteps()[0], boundarySteps()[1], boundarySteps()[2]],
+    [boundarySteps()[0], boundarySteps()[1], boundarySteps()[1], boundarySteps()[2]],
+    [boundarySteps()[0], boundarySteps()[1], boundarySteps()[2], boundarySteps()[2]],
+  ]) assert.throws(() => assertReceiptBoundarySteps(steps), /boundary|ordered/);
 });
 
 test("receipt resolver authenticates the exact independently approved workflow deployment", () => {
@@ -58,7 +82,9 @@ test("receipt remains usable when an auditable post-receipt health tail fails", 
   const value = receipt();
   const job = { id: 20, run_id: 10, run_attempt: 1, name: "Deploy production ECS", head_sha: sourceSha, status: "completed", conclusion: "failure", steps: [
     { name: "Authenticate production environment approval boundary", status: "completed", conclusion: "success" },
+    { name: "Upload normal backend activation evidence", status: "completed", conclusion: "skipped" },
     { name: "Deploy rotation transition backend ECS service", status: "completed", conclusion: "success" },
+    { name: "Prepare governed legacy backend health recovery", status: "completed", conclusion: "skipped" },
     { name: "Upload overlap deployment receipt", status: "completed", conclusion: "success", started_at: "2026-09-01T10:01:00.000Z", completed_at: "2026-09-01T10:01:10.000Z" },
     { name: "Verify backend health", status: "completed", conclusion: "failure" },
   ] };
