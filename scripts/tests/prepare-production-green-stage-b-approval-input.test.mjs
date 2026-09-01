@@ -10,7 +10,7 @@ import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-che
 import { buildReleasePreflightCheckerTrustAttestation } from "../aws/production-release-preflight-checker-attestation.mjs";
 import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerLambdaConfiguration, normalizeStageBBrokerRuntimeVersionConfig, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
-import { assertStableBrokerAliasObservation, prepareProductionGreenStageBApprovalInput, writeProductionGreenStageBApprovalInput } from "../aws/prepare-production-green-stage-b-approval-input.mjs";
+import { assertStableBrokerAliasObservation, authenticateApprovalInputCheckerIdentity, createApprovalInputEvidenceRunners, prepareProductionGreenStageBApprovalInput, writeProductionGreenStageBApprovalInput } from "../aws/prepare-production-green-stage-b-approval-input.mjs";
 import { renderStageBTaskDefinition, stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
 
 const releaseSha = "8d7ecc53a0c8d0ec07dfce1aeb03dc22d0f43f82";
@@ -67,6 +67,52 @@ function evidence(overrides = {}) {
   const trust = overrides.trust || signedPreflightTrust(overrides.trustReport || selectedPreflight, overrides.trustSource || releaseSha);
   return collectProductionGreenStageBApprovalEvidence({ sourceSha: releaseSha, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => ({ ...report, ...(overrides.report || {}) }), deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }), readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }), readPreflight: () => selectedPreflight, releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true }).evidence;
 }
+
+test("approval-input keeps checker identity and root-attestation verification on their exact principals", () => {
+  const checkerCalls = [];
+  const releaseCalls = [];
+  const rootAttestationActions = ["describe-key", "get-key-policy", "list-resource-tags", "verify"];
+  const createRunner = ({ credentialSource, profile }) => {
+    if (credentialSource === "inherited-checker-session") return (args) => {
+      checkerCalls.push(args);
+      if (args[0] === "kms") throw new Error("checker must not verify root attestations");
+      return JSON.stringify({ Arn: checkerIdentity });
+    };
+    assert.equal(credentialSource, "named-profile");
+    assert.equal(profile, "mscqr-production-release-deployer");
+    return (args) => { releaseCalls.push(args); return "true"; };
+  };
+  const routes = createApprovalInputEvidenceRunners({
+    createRunner,
+    verifyImageEvidence: ({ run }) => rootAttestationActions.forEach((action) => run(["kms", action])),
+    createReleasePreflightTrustVerifier: ({ releaseRun }) => () => rootAttestationActions.forEach((action) => releaseRun(["kms", action])),
+  });
+  assert.equal(authenticateApprovalInputCheckerIdentity(routes.checkerRun), checkerIdentity);
+  assert.doesNotThrow(() => routes.verifyImageEvidence({}));
+  assert.doesNotThrow(() => routes.verifyReleasePreflightAttestationSignature({}));
+  assert.deepEqual(checkerCalls.map(([service, action]) => [service, action]), [["sts", "get-caller-identity"]]);
+  assert.deepEqual(releaseCalls.map(([service, action]) => [service, action]), [...rootAttestationActions, ...rootAttestationActions].map((action) => ["kms", action]));
+});
+
+test("approval-input fails closed when either mandatory principal fails", () => {
+  const releaseFailure = createApprovalInputEvidenceRunners({
+    createRunner: ({ credentialSource }) => credentialSource === "inherited-checker-session"
+      ? () => JSON.stringify({ Arn: checkerIdentity })
+      : () => { throw new Error("release root-attestation verification denied"); },
+    verifyImageEvidence: ({ run }) => run(["kms", "describe-key"]),
+    createReleasePreflightTrustVerifier: ({ releaseRun }) => () => releaseRun(["kms", "verify"]),
+  });
+  assert.throws(() => releaseFailure.verifyImageEvidence({}), /release root-attestation verification denied/);
+  assert.throws(() => releaseFailure.verifyReleasePreflightAttestationSignature({}), /release root-attestation verification denied/);
+  const checkerFailure = createApprovalInputEvidenceRunners({
+    createRunner: ({ credentialSource }) => credentialSource === "inherited-checker-session"
+      ? () => { throw new Error("checker identity denied"); }
+      : () => "true",
+    verifyImageEvidence: () => true,
+    createReleasePreflightTrustVerifier: () => () => true,
+  });
+  assert.throws(() => authenticateApprovalInputCheckerIdentity(checkerFailure.checkerRun), /checker identity denied/);
+});
 
 test("canonical collector produces evidence accepted by the existing creator", async () => {
   const result = await prepareProductionGreenStageBApprovalInput({ evidence: evidence(), protectedSourceSha: releaseSha, operator: { ticketId: "CHG-STAGE-B-0001" }, now, randomUuid: () => "12345678-1234-1234-1234-123456789abc" });
