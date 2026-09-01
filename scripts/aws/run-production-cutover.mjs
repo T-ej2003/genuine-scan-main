@@ -26,6 +26,8 @@ if (mode === "rotation-overlap") {
   const environmentApprovalSha256 = optionalValue("--environment-approval-sha256");
   const receiptOutput = optionalValue("--deployment-receipt-output");
   const readiness = readAndAssertReadyForOverlapDeployment({ filePath: readinessFile, evidenceSha256: readinessSha256, sourceSha, rotationId, rotationStateSha256 });
+  const authorizedTaskDefinitionArn = readiness.evidence?.overlapTaskDefinition?.identityBindings?.taskDefinitionArn;
+  if (typeof authorizedTaskDefinitionArn !== "string" || taskDefinitionArn !== authorizedTaskDefinitionArn) throw new Error("Rotation overlap task definition is not the exact authenticated readiness candidate.");
   const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER });
   const receiptEnabled = [rotationFixtureSha256, environmentApprovalFile, environmentApprovalSha256, receiptOutput].every(Boolean);
   if ([rotationFixtureSha256, environmentApprovalFile, environmentApprovalSha256, receiptOutput].some(Boolean) && !receiptEnabled) throw new Error("Overlap deployment receipt inputs must be supplied together.");

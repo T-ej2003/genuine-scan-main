@@ -79,7 +79,11 @@ gh workflow run release-gate.yml --ref main \
 # A successful Release Gate overlap job means DEPLOYED_PENDING_VERIFICATION,
 # not VERIFIED_OVERLAP or READY_FOR_ONBOARDING. It uploads the authenticated
 # production-overlap-deployment-receipt and must not be dispatched again merely
-# because independent runtime verification is pending or failed.
+# because independent runtime verification is pending or failed. If a later
+# unconditional health-tail step fails after receipt upload, retain that failed
+# workflow as audit evidence and run only this verifier continuation; the
+# receipt boundary is still DEPLOYED_PENDING_VERIFICATION, never permission to
+# replay UpdateService.
 
 # Before using the verifier role, the administrator preflight must prove the
 # exact MFA-backed trust policy, the exact operator policy attachment, and

@@ -64,3 +64,9 @@ test("release gate and deploy wrapper enforce the same checkpoint immediately be
   assert.match(deploy, /require_existing_activation_authorization/);
   assert.ok(deploy.indexOf("require_existing_activation_authorization") < deploy.indexOf("aws ecs update-service"));
 });
+
+test("the release-gate cutover wrapper deploys only the exact readiness task definition", () => {
+  const source = readFileSync("scripts/aws/run-production-cutover.mjs", "utf8");
+  assert.match(source, /overlapTaskDefinition\?\.identityBindings\?\.taskDefinitionArn/);
+  assert.match(source, /taskDefinitionArn !== authorizedTaskDefinitionArn/);
+});
