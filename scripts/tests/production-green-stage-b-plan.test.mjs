@@ -237,6 +237,13 @@ test("current no-op retry rejects stale image, package, and retained ARN", () =>
   assert.throws(() => assertStageBPlan(retainedArn, { terraformConfiguration }), /retained ARN|duplicate/);
 });
 
+test("current no-op runtime platforms remain inside the canonical domain", () => {
+  const noOp = currentRetryPlan(1);
+  noOp.resource_changes[0].change.before.runtime_platform.cpu_architecture = "ARM64";
+  noOp.resource_changes[0].change.after.runtime_platform.cpu_architecture = "ARM64";
+  assert.throws(() => assertStageBPlan(noOp, { terraformConfiguration }), /outside the exact Stage B domain/);
+});
+
 test("first and second revision-keyed rollovers retain history as no-op", () => {
   const first = { resource_changes: [...currentCreates(), ...firstRolloverAddresses.map((taskAddress) => retainedForAddress(taskAddress))] };
   assert.doesNotThrow(() => assertStageBPlan(first, { terraformConfiguration }));

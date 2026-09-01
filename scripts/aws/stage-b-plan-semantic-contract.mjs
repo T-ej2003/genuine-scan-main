@@ -30,7 +30,7 @@ import {
   stageBMutationInstanceIdentity,
   resolveStageBRecoveryMode,
 } from "./stage-b-deployment-contract.mjs";
-import { assertStageBLambdaEnvironmentSize, STAGE_B, STAGE_B_BROKER_ENVIRONMENT_VARIABLES } from "./production-green-stage-b-contract.mjs";
+import { assertStageBLambdaEnvironmentSize, assertStageBRuntimePlatform, assertStageBTerraformRuntimePlatformSource, STAGE_B, STAGE_B_BROKER_ENVIRONMENT_VARIABLES } from "./production-green-stage-b-contract.mjs";
 export { STAGE_B_BROKER_ENVIRONMENT_VARIABLES } from "./production-green-stage-b-contract.mjs";
 
 export const STAGE_B_PLAN_SEMANTIC_CLASSES = Object.freeze([
@@ -69,6 +69,7 @@ export const STAGE_B_SUPPORTED_PLAN_PROFILES = Object.freeze([
 ]);
 
 const ECS_ADDRESSES = new Set(Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES));
+const ECS_BASE_ADDRESSES = new Set([...ECS_ADDRESSES].map((address) => address.replace(/\["[^\"]+"\]$/, "")));
 const ECS_INITIAL_CREATE_ACTIONS = ["create"];
 const ECS_INITIAL_CREATE_PATHS = new Set([
   "container_definitions", "cpu", "enable_fault_injection", "ephemeral_storage",
@@ -353,18 +354,6 @@ const STATIC_CONFIGURATION_CONSTANTS = Object.freeze({
   "aws_lambda_permission.release_deployer": { action: "lambda:InvokeFunction", principal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", statement_id: "OnlyProtectedReleaseRoleMayInvokeReviewedAlias" },
 });
 
-const STAGE_B_RUNTIME_PLATFORM_EXPRESSION = Object.freeze([Object.freeze({
-  cpu_architecture: Object.freeze({ references: Object.freeze(["local.task_runtime_platform.cpu_architecture", "local.task_runtime_platform"]) }),
-  operating_system_family: Object.freeze({ references: Object.freeze(["local.task_runtime_platform.operating_system_family", "local.task_runtime_platform"]) }),
-})]);
-
-const STATIC_CONFIGURATION_EXPRESSIONS = Object.freeze(Object.fromEntries([
-  "aws_ecs_task_definition.candidate",
-  "aws_ecs_task_definition.executor",
-  "aws_ecs_task_definition.candidate_retained",
-  "aws_ecs_task_definition.executor_retained",
-].map((address) => [address, Object.freeze({ runtime_platform: STAGE_B_RUNTIME_PLATFORM_EXPRESSION })])));
-
 export function getStageBConfigurationReferenceRules() {
   return Object.fromEntries(Object.entries(CONFIGURATION_REFERENCE_RULES).map(([address, fields]) => [
     address,
@@ -550,6 +539,27 @@ function canonicalReferenceSet(references) {
   return [...unique].sort();
 }
 
+export function assertStageBRuntimePlatformExpression(expression, plan, address) {
+  if (!Array.isArray(expression) || expression.length !== 1 || !isObject(expression[0]) || Array.isArray(expression[0])) {
+    throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_EXPRESSION: ${address}.runtime_platform`);
+  }
+  const platform = expression[0];
+  if (!exactJson(Object.keys(platform).sort(), ["cpu_architecture", "operating_system_family"])) {
+    throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_EXPRESSION: ${address}.runtime_platform`);
+  }
+  for (const field of ["cpu_architecture", "operating_system_family"]) {
+    const leaf = platform[field];
+    const references = CONFIGURATION_REFERENCE_RULES[address]?.[`runtime_platform[0].${field}`];
+    if (!isObject(leaf) || Array.isArray(leaf) || !exactJson(Object.keys(leaf).sort(), ["references"])
+      || !Array.isArray(leaf.references) || new Set(leaf.references).size !== leaf.references.length
+      || !Array.isArray(references)
+      || !exactJson(canonicalReferenceSet(leaf.references), canonicalReferenceSet(references))) {
+      throw new Error(`UNCLASSIFIED_CONFIGURATION_REFERENCES: ${address}.runtime_platform[0].${field}`);
+    }
+  }
+  return true;
+}
+
 function staticConfigurationClass(address, field) {
   if (["policy", "container_definitions", "environment", "source_code_hash"].includes(field)) return "SENSITIVE_HASH_BOUND";
   if (["runtime_platform", "skip_destroy", "billing_mode", "hash_key", "ttl"].includes(field)) return "EXACT_IMMUTABLE";
@@ -561,8 +571,6 @@ function rootConfigurationResources(plan) {
 }
 
 function expectedStaticExpression(plan, address, field) {
-  const expression = STATIC_CONFIGURATION_EXPRESSIONS[address]?.[field];
-  if (expression !== undefined) return expression;
   const constants = STATIC_CONFIGURATION_CONSTANTS[address]?.[field];
   if (constants !== undefined) return isObject(constants) || Array.isArray(constants) ? constants : { constant_value: constants };
   const references = allowedConfigurationReferences(plan, address, field === "environment" ? "environment[0].variables" : field);
@@ -588,6 +596,10 @@ export function assertStageBStaticConfigurationCoverage(plan, { terraformConfigu
     if (!exactJson(fields, [...profile.fields].sort())) throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_FIELDS: ${resource.address}`);
     for (const field of profile.fields) {
       const actual = resource.expressions?.[field];
+      if (ECS_BASE_ADDRESSES.has(resource.address) && field === "runtime_platform") {
+        assertStageBRuntimePlatformExpression(actual, plan, resource.address);
+        continue;
+      }
       const expected = expectedStaticExpression(plan, resource.address, field);
       if ((expressionHasNonReferenceContent(actual) || expressionHasNonReferenceContent(expected))
         && !exactJson(canonicalExpression(actual), canonicalExpression(expected))) {
@@ -612,7 +624,10 @@ export function assertStageBStaticConfigurationCoverage(plan, { terraformConfigu
   if (missing.length || unexpected.length || configured.size !== expectedAddresses.size || configuredTypes.size !== expectedAddresses.size) {
     throw new Error(`UNCLASSIFIED_STATIC_CONFIGURATION_RESOURCE_SET: missing=${missing.join(",") || "<none>"};unexpected=${unexpected.join(",") || "<none>"}`);
   }
-  if (typeof terraformConfiguration === "string") assertStageBTerraformBrokerPolicySource(terraformConfiguration, true);
+  if (typeof terraformConfiguration === "string") {
+    assertStageBTerraformRuntimePlatformSource(terraformConfiguration);
+    assertStageBTerraformBrokerPolicySource(terraformConfiguration, true);
+  }
   const brokerChange = plan?.resource_changes?.find((change) => change.address === "aws_iam_policy.broker");
   const brokerPolicy = brokerChange?.change?.after?.policy;
   if (typeof brokerPolicy === "string") {
@@ -874,15 +889,15 @@ function assertInitialProviderComputedShape(change) {
 
 function assertInitialEcsSemanticDomain(change) {
   const after = change.change?.after || {};
-  const runtimePlatform = after.runtime_platform;
+  try {
+    assertStageBRuntimePlatform(after.runtime_platform, { format: "terraform", label: `${change.address}.runtime_platform` });
+  } catch {
+    throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES: ${change.address}.runtime_platform`);
+  }
   const runtimePlatformBlock = STAGE_B_PROVIDER_SEMANTIC_SNAPSHOT.resources.aws_ecs_task_definition.blocks
     .find((entry) => entry.blockPath === "runtime_platform");
   if (runtimePlatformBlock?.nestingMode !== "list" || runtimePlatformBlock.maxItems !== 1
-    || !Array.isArray(runtimePlatform) || runtimePlatform.length !== 1
-    || !runtimePlatform[0] || Array.isArray(runtimePlatform[0])
-    || !exactJson(Object.keys(runtimePlatform[0]).sort(), ["cpu_architecture", "operating_system_family"])
-    || runtimePlatform[0].operating_system_family !== "LINUX"
-    || runtimePlatform[0].cpu_architecture !== "X86_64") {
+    || !Array.isArray(after.runtime_platform) || after.runtime_platform.length !== 1) {
     throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES: ${change.address}.runtime_platform`);
   }
   try {
@@ -948,6 +963,12 @@ function assertEcsSemanticDomain(change) {
   if (isEcsInitialCreate(change)) {
     assertInitialEcsSemanticDomain(change);
     return;
+  }
+  try {
+    assertStageBRuntimePlatform(change.change.before.runtime_platform, { format: "terraform", label: `${change.address}.before.runtime_platform` });
+    assertStageBRuntimePlatform(change.change.after.runtime_platform, { format: "terraform", label: `${change.address}.after.runtime_platform` });
+  } catch {
+    throw new Error(`UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES: ${change.address}.runtime_platform`);
   }
   try {
     canonicalizeEcsTaskDefinitionVolumes(change.change.before.volume);

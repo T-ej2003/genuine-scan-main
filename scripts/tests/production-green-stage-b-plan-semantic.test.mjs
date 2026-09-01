@@ -26,7 +26,7 @@ import {
   STAGE_B_EXECUTOR_FOR_EACH_REFERENCES,
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "../aws/stage-b-reference-audit-contract.mjs";
-import { assertStageBLambdaEnvironmentSize, STAGE_B, stageBLambdaEnvironmentUtf8Bytes } from "../aws/production-green-stage-b-contract.mjs";
+import { assertStageBRuntimePlatform, assertStageBTerraformRuntimePlatformSource, assertStageBLambdaEnvironmentSize, STAGE_B, stageBLambdaEnvironmentUtf8Bytes } from "../aws/production-green-stage-b-contract.mjs";
 
 const addresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
 const BROKER_INITIAL_ADDRESSES = new Set(["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"]);
@@ -827,7 +827,7 @@ test("fresh-image recovery census admits only the two reviewed cleanup topologie
 });
 
 test("baseline initial-create semantics fail closed on action, identity, path, and reference drift", () => {
-  const mutateBaseline = (mutator, expected = /UNCLASSIFIED/) => {
+  const mutateBaseline = (mutator, expected = /UNCLASSIFIED_|UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES/) => {
     const value = baselinePlan();
     mutator(value);
     assert.throws(() => assertStageBPlanSemanticCompleteness(value), expected);
@@ -837,7 +837,7 @@ test("baseline initial-create semantics fail closed on action, identity, path, a
   mutateBaseline((value) => { baselineEcsChange(value).mode = "data"; }, /UNCLASSIFIED_RESOURCE_ACTION/);
   mutateBaseline((value) => { baselineEcsChange(value).type = "aws_lambda_function"; }, /UNCLASSIFIED_RESOURCE_ACTION/);
   mutateBaseline((value) => { baselineEcsChange(value).change.actions = ["delete"]; }, /UNCLASSIFIED_RESOURCE_ACTION/);
-  mutateBaseline((value) => { baselineEcsChange(value).change.actions = ["create", "delete"]; }, /UNCLASSIFIED_/);
+  mutateBaseline((value) => { baselineEcsChange(value).change.actions = ["create", "delete"]; }, /UNCLASSIFIED_|UNFAITHFUL_SUPPORTED_PROFILE_FIXTURES/);
   mutateBaseline((value) => { value.resource_changes.push(structuredClone(baselineEcsChange(value))); }, /UNCLASSIFIED_RESOURCE_ACTION/);
   mutateBaseline((value) => { baselineEcsChange(value).change.after.unreviewed = true; }, /UNCLASSIFIED_CHANGED_PATH/);
   mutateBaseline((value) => { baselineEcsChange(value).change.after_unknown = { unreviewed: true }; }, /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS|UNCLASSIFIED_AFTER_UNKNOWN/);
@@ -886,6 +886,20 @@ test("static configuration profiles reject unknown fields and references without
   assert.throws(() => assertStageBStaticConfigurationCoverage(missingField), /UNCLASSIFIED_STATIC_CONFIGURATION_FIELDS/);
 });
 
+test("runtime-platform source binding authenticates the canonical Terraform literal domain", () => {
+  const source = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  assert.doesNotThrow(() => assertStageBTerraformRuntimePlatformSource(source));
+  assert.doesNotThrow(() => assertStageBStaticConfigurationCoverage({ configuration: configuration(), resource_changes: [] }, { terraformConfiguration: source }));
+  assert.doesNotThrow(() => assertStageBRuntimePlatform({ operating_system_family: "LINUX", cpu_architecture: "X86_64" }, { format: "terraform" }));
+  assert.throws(() => assertStageBTerraformRuntimePlatformSource(source.replace('cpu_architecture        = "X86_64"', 'cpu_architecture        = "ARM64"')), /outside the exact Stage B domain/);
+  assert.throws(() => assertStageBTerraformRuntimePlatformSource(source.replace('operating_system_family = "LINUX"', 'operating_system_family = "WINDOWS_SERVER_2022_CORE"')), /outside the exact Stage B domain/);
+  for (const malformed of [
+    source.replace(/  task_runtime_platform = \{[\s\S]*?\n  \}/, "  task_runtime_platform = {}"),
+    source.replace('    cpu_architecture        = "X86_64"', "    cpu_architecture        = local.unreviewed"),
+    source.replace('    cpu_architecture        = "X86_64"', '    cpu_architecture        = "X86_64"\n    unreviewed              = "value"'),
+  ]) assert.throws(() => assertStageBTerraformRuntimePlatformSource(malformed), /runtime.?platform|outside the exact Stage B/);
+});
+
 test("baseline ECS runtime platform uses the provider list shape and indexed semantic paths", () => {
   const value = baselinePlan();
   const ecs = value.resource_changes.filter((change) => addresses.includes(change.address));
@@ -915,6 +929,28 @@ test("baseline runtime platform rejects object, unindexed, extra, and multi-elem
   mutateBaseline((change) => { delete change.change.after.runtime_platform; });
   mutateBaseline((change) => { change.change.after.runtime_platform[0].operating_system_family = "WINDOWS_SERVER_2022_CORE"; });
   mutateBaseline((change) => { change.change.after.runtime_platform[0].cpu_architecture = "ARM64"; });
+});
+
+test("runtime-platform expressions are closed-world and reference-exact", () => {
+  const mutate = (mutation) => {
+    const value = { configuration: configuration(), resource_changes: [] };
+    const expression = value.configuration.root_module.resources.find((resource) => resource.address === "aws_ecs_task_definition.candidate").expressions.runtime_platform;
+    mutation(expression);
+    assert.throws(() => assertStageBStaticConfigurationCoverage(value), /UNCLASSIFIED_STATIC_CONFIGURATION_EXPRESSION|UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+  };
+  for (const mutation of [
+    (expression) => { expression[0].unexpected = {}; },
+    (expression) => { expression[0].unexpected = []; },
+    (expression) => { expression[0].unexpected = "value"; },
+    (expression) => { expression.push({}); },
+    (expression) => { expression.push([]); },
+    (expression) => { expression[0].cpu_architecture.references.push("local.task_runtime_platform"); },
+    (expression) => { expression[0].cpu_architecture.references.push("local.unreviewed"); },
+    (expression) => { delete expression[0].cpu_architecture; },
+    (expression) => { delete expression[0].operating_system_family; },
+    (expression) => { expression[0].cpu_architecture = { constant_value: "ARM64" }; },
+    (expression) => { expression[0].cpu_architecture.references[0] = "local.other.cpu_architecture"; },
+  ]) mutate(mutation);
 });
 
 test("baseline broker creates are atomic and broker mutations cannot consume recovery authorization", () => {

@@ -58,6 +58,47 @@ export const PRODUCTION_ACTIVATION_LIFECYCLE = Object.freeze({
   releaseRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
 });
 
+export function assertStageBRuntimePlatform(value, { format = "either", label = "Stage B runtime platform" } = {}) {
+  const isPlainObject = (candidate) => candidate !== null && typeof candidate === "object" && !Array.isArray(candidate);
+  const isTerraform = format === "terraform";
+  const isAws = format === "aws";
+  if (!(["either", "terraform", "aws"].includes(format))) throw new Error(`${label} format is unsupported.`);
+  const platform = isTerraform
+    ? (Array.isArray(value) ? (value.length === 1 ? value[0] : undefined) : value)
+    : value;
+  if (!isPlainObject(platform)) throw new Error(`${label} is malformed.`);
+  const keys = Object.keys(platform).sort();
+  const terraformKeys = ["cpu_architecture", "operating_system_family"];
+  const awsKeys = ["cpuArchitecture", "operatingSystemFamily"];
+  const expectedKeys = isTerraform ? terraformKeys : isAws ? awsKeys : keys.includes("cpu_architecture") || keys.includes("operating_system_family") ? terraformKeys : awsKeys;
+  if (JSON.stringify(keys) !== JSON.stringify([...expectedKeys].sort())) throw new Error(`${label} has an unsupported shape.`);
+  const normalized = isTerraform || expectedKeys === terraformKeys
+    ? { cpuArchitecture: platform.cpu_architecture, operatingSystemFamily: platform.operating_system_family }
+    : { cpuArchitecture: platform.cpuArchitecture, operatingSystemFamily: platform.operatingSystemFamily };
+  if (normalized.operatingSystemFamily !== STAGE_B.taskRuntimePlatform.operatingSystemFamily
+    || normalized.cpuArchitecture !== STAGE_B.taskRuntimePlatform.cpuArchitecture) throw new Error(`${label} is outside the exact Stage B domain.`);
+  return normalized;
+}
+
+export function assertStageBTerraformRuntimePlatformSource(terraformConfiguration) {
+  if (typeof terraformConfiguration !== "string" || terraformConfiguration.length === 0) throw new Error("Stage B Terraform runtime-platform source is missing.");
+  const lines = terraformConfiguration.split("\n");
+  const starts = lines.flatMap((line, index) => line.trim() === "task_runtime_platform = {" ? [index] : []);
+  if (starts.length !== 1) throw new Error("Stage B Terraform runtime-platform local must be declared exactly once.");
+  const assignments = [];
+  let end = -1;
+  for (let index = starts[0] + 1; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (line === "}") { end = index; break; }
+    const match = /^(cpu_architecture|operating_system_family)\s*=\s*"([^"\\]+)"$/.exec(line);
+    if (!match) throw new Error("Stage B Terraform runtime-platform local contains an unsupported expression.");
+    assignments.push(match);
+  }
+  if (end < 0 || assignments.length !== 2 || new Set(assignments.map(([key]) => key)).size !== 2) throw new Error("Stage B Terraform runtime-platform local is incomplete.");
+  assertStageBRuntimePlatform([Object.fromEntries(assignments.map(([, key, value]) => [key, value]))], { format: "terraform", label: "Stage B Terraform runtime platform" });
+  return true;
+}
+
 export const PRODUCTION_ECS_CLUSTER_NAME = STAGE_B.clusterArn.slice(STAGE_B.clusterArn.lastIndexOf("/") + 1);
 
 export function canonicalProductionEcsClusterArn(value) {
