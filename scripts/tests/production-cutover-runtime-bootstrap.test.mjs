@@ -461,7 +461,7 @@ test("generated cutover command binds runtime config and image authorization byt
   try {
     const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
     assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId }), /Hash-authenticated/);
-    assert.match(result.nextCommand, /^npm run stage-b:run-cutover-operator -- --config /);
+    assert.match(result.nextCommand, /^npm run stage-b:run-cutover-operator -- --mode prepare-overlap --config /);
     assert.match(result.nextCommand, new RegExp(`--config-sha256 ${result.runtimeConfigSha256}`));
     assert.equal(result.nextCommand.includes("MSCQR_VERIFIER_MFA_CODE"), false);
     assert.equal(JSON.stringify(result.config).includes("MSCQR_VERIFIER_MFA_CODE"), false);

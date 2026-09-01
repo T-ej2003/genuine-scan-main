@@ -63,7 +63,7 @@ and the administrator/KMS report; checker trust is never treated as administrato
 identifier-only rotation config, redacted manifest, canonical onboarding paths, and rotation Terraform
 input in a 0700 runtime directory; all four are 0600 outputs.
 It never creates rotation state or the rotation fixture. Those remain outputs of the coordinator's
-`--prepare` phase. The command emits one exact `stage-b:run-cutover-operator` command only after all
+`--prepare` phase. The command emits one exact `stage-b:run-cutover-operator -- --mode prepare-overlap` command only after all
 pre-MFA inputs are valid. The launcher obtains the verifier MFA device ARN and strict-onboarding inputs
 from the controlling terminal with echo disabled, then invokes the governed entrypoint without
 putting them in command arguments, files, or evidence. The pre-MFA bootstrap does not collect onboarding MFA. The onboarding

@@ -7,7 +7,7 @@ import { ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "../aws/production-ec
 
 const sourceSha = "a".repeat(40);
 const configSha = "b".repeat(64);
-const argv = ["--config", "/private/runtime/rotation-config.json", "--config-sha256", configSha, "--source-sha", sourceSha, "--rotation-id", "rotation-20260826060632-b15b3f51"];
+const argv = ["--mode", "prepare-overlap", "--config", "/private/runtime/rotation-config.json", "--config-sha256", configSha, "--source-sha", sourceSha, "--rotation-id", "rotation-20260826060632-b15b3f51"];
 const values = Object.freeze({ MSCQR_VERIFIER_MFA_SERIAL: ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN, MSCQR_ONBOARDING_EMAIL: "administration@example.invalid", MSCQR_ONBOARDING_PASSWORD: "fixture-admin-value", MSCQR_CANARY_ORDINARY_EMAIL: "canary@example.invalid", MSCQR_CANARY_ORDINARY_PASSWORD: "fixture-canary-value" });
 
 const inputFor = (prompt) => values[prompt.includes("verifier MFA serial") ? "MSCQR_VERIFIER_MFA_SERIAL" : prompt.includes("administrator email") ? "MSCQR_ONBOARDING_EMAIL" : prompt.includes("administrator password") ? "MSCQR_ONBOARDING_PASSWORD" : prompt.includes("tenant-canary email") ? "MSCQR_CANARY_ORDINARY_EMAIL" : "MSCQR_CANARY_ORDINARY_PASSWORD"];
@@ -44,6 +44,7 @@ test("operator handoff collects exactly five hidden pre-launch inputs and leaves
   assert.deepEqual(prompts.map(({ prompt }) => prompt), ["Production verifier MFA serial: ", "Production strict-onboarding administrator email: ", "Production strict-onboarding administrator password: ", "Production strict-onboarding tenant-canary email: ", "Production strict-onboarding tenant-canary password: "]);
   assert.equal(prompts.some(({ prompt }) => /MFA code|MFA_BOOTSTRAP|onboarding MFA|tenant-canary MFA/.test(prompt)), false);
   assert.deepEqual(spawned.options.stdio, "inherit");
+  assert.deepEqual(spawned.args.slice(0, 3), ["scripts/aws/run-production-cutover.mjs", "--mode", "prepare-overlap"]);
   assert.equal(spawned.environment.UNRELATED_SECRET, undefined);
   for (const name of ["AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_SDK_LOAD_CONFIG", "AWS_CA_BUNDLE"]) assert.equal(spawned.environment[name], undefined);
   assert.equal(spawned.environment.MSCQR_VERIFIER_MFA_CODE, undefined);
@@ -86,6 +87,9 @@ test("hidden controlling-terminal input disables echo and does not report the en
 
 test("operator handoff accepts only the exact non-secret runtime argument contract", () => {
   assert.equal(parseProductionCutoverOperatorArgs(argv)["--source-sha"], sourceSha);
-  assert.throws(() => parseProductionCutoverOperatorArgs([...argv, "--extra", "value"]), /exactly four/);
+  assert.throws(() => parseProductionCutoverOperatorArgs(argv.slice(2)), /exactly five/);
+  assert.throws(() => parseProductionCutoverOperatorArgs(["--mode", "production", ...argv.slice(2)]), /runtime identity/);
+  assert.throws(() => parseProductionCutoverOperatorArgs(["--mode", "unknown", ...argv.slice(2)]), /runtime identity/);
+  assert.throws(() => parseProductionCutoverOperatorArgs([...argv, "--extra", "value"]), /exactly five/);
   assert.throws(() => buildProductionCutoverChildEnvironment({ inputs: { ...values, MSCQR_ONBOARDING_PASSWORD: "" } }), /incomplete/);
 });
