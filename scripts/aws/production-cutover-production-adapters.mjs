@@ -10,7 +10,8 @@ import { createProductionRuntimeInventoryAdapter } from "./production-runtime-in
 import { createProductionPreDeploymentInventoryAdapter } from "./production-predeployment-inventory-adapter.mjs";
 import { createProductionRotationPrepareAdapter } from "./production-rotation-prepare-adapter.mjs";
 import { createProductionInteractiveEcsExecRunner, extractMarkedJson } from "./production-ecs-exec-command.mjs";
-import { establishInheritedVerifierIdentity, establishReleaseDeployerIdentity, establishVerifierIdentity, createAwsStsRunner } from "./production-identity-adapters.mjs";
+import { createLazyProductionVerifierEcsAdapter, productionOverlapRuntimeProofCommand } from "./production-cutover-verifier-primitives.mjs";
+import { establishReleaseDeployerIdentity, establishVerifierIdentity, createAwsStsRunner } from "./production-identity-adapters.mjs";
 import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 import { assertSelectedTargetTask, assertTaskBelongsToExactPrimaryDeployment, selectTargetTask } from "./ecs-exec-target-selection.mjs";
 import { createStrictHttpOnboardingAdapter } from "../security/production-strict-onboarding-http.mjs";
@@ -157,34 +158,6 @@ export function createProductionOverlapDeploymentAdapter({ run, runScript = exec
   };
 }
 
-function createEcsAdapter(run, interactive) {
-  return {
-    describeService: async () => parseJson(run, ["ecs", "describe-services", "--cluster", CLUSTER, "--services", SERVICE]).services?.[0],
-    listTasks: async () => parseJson(run, ["ecs", "list-tasks", "--cluster", CLUSTER, "--service-name", SERVICE, "--desired-status", "RUNNING"]),
-    describeTasks: async ({ taskArns, includeTags }) => parseJson(run, ["ecs", "describe-tasks", "--cluster", CLUSTER, "--tasks", ...taskArns, ...(includeTags ? ["--include", "TAGS"] : [])]),
-    executeCommand: async ({ taskArn, container, command, inputFile }) => interactive
-      ? interactive({ cluster: CLUSTER, taskArn, container, command, inputFile })
-      : parseJson(run, ["ecs", "execute-command", "--cluster", CLUSTER, "--task", taskArn, "--container", container, "--interactive", "--command", command]),
-  };
-}
-
-function createLazyEcsAdapter(getRun, getInteractive) {
-  return new Proxy({}, { get: (_target, property) => (...args) => createEcsAdapter(getRun(), getInteractive?.())[property](...args) });
-}
-
-const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
-const runtimeProofCommand = ({ sourceSha, rotationId, deploymentSha, healthUrl, invocationRef }) => {
-  if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "") || !/^https:\/\//.test(healthUrl || "")) throw new Error("Runtime proof identity is invalid.");
-  const proofPath = `/app/uploads/.mscqr-rotation-proof-${rotationId}.json`;
-  return [
-    "stty -echo",
-    `trap 'rm -f ${quote(proofPath)}; stty echo' EXIT HUP INT TERM`,
-    `ROTATION_RUNTIME_PHASE=overlap ROTATION_ID=${quote(rotationId)} ROTATION_DEPLOYMENT_SHA=${quote(deploymentSha || sourceSha)} ROTATION_RUNTIME_INVOCATION_REF=${quote(invocationRef || `cutover-${rotationId}`)} node /app/scripts/security/verify-production-rotation-runtime.mjs --fixture-stdin --output ${quote(proofPath)} --health-url ${quote(healthUrl)} --expected-release-sha ${quote(sourceSha)}`,
-    "status=$?",
-    `if [ \"$status\" -eq 0 ]; then printf '\\nMSCQR_PROOF_BEGIN\\n'; cat ${quote(proofPath)}; printf '\\nMSCQR_PROOF_END\\n'; fi`,
-    "exit $status",
-  ].join("; ");
-};
 
 export function createProductionRotationInfrastructureAdapter({ run = execFileSync, releaseProfile, credentialSource = PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, root = path.resolve("infra/aws/terraform/production-green-stage-b"), config } = {}) {
   if (!config?.stageBTfvarsPath || !config.stageBTfvarsBindingReportPath || !config.stageBTfvarsBindingReportSha256 || !config.rotationTerraformInputFile || !config.rotationTerraformPlanFile || !config.stageBTerraformDataDir) throw new Error("Canonical rotation Terraform inputs are required.");
@@ -224,16 +197,13 @@ export function createProductionRotationInfrastructureAdapter({ run = execFileSy
   };
 }
 
-export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, identityMode = "FULL", releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier", interactiveMfaCodeProvider, verifierMfaCodeProvider = promptProductionMfaCode, verifyReleasePreflightAttestationSignature, createCommandRunner = createProductionCommandRunner } = {}) {
+export function createProductionCutoverAdapters({ config, sourceSha, rotationId, runtimeConfigSha256, releaseProfile = "mscqr-production-release-deployer", verifierProfile = "mscqr-production-ecs-exec-verifier", interactiveMfaCodeProvider, verifierMfaCodeProvider = promptProductionMfaCode, verifyReleasePreflightAttestationSignature, createCommandRunner = createProductionCommandRunner } = {}) {
   if (!config || typeof config !== "object" || !/^[a-f0-9]{64}$/.test(runtimeConfigSha256 || "")) throw new Error("Hash-authenticated production cutover adapter configuration is required.");
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || config.sourceSha !== sourceSha || typeof rotationId !== "string" || config.rotationId !== rotationId) throw new Error("Production cutover adapter identity does not match its runtime config.");
   if (releaseProfile !== "mscqr-production-release-deployer" || verifierProfile !== "mscqr-production-ecs-exec-verifier") throw new Error("Production cutover adapter profiles do not match the asymmetric identity contract.");
   if (typeof createCommandRunner !== "function") throw new Error("Rebaseline authorization adapters are invalid.");
-  if (!["FULL", "INHERITED_VERIFIER"].includes(identityMode)) throw new Error("Production cutover identity mode is unsupported.");
-  const continuation = identityMode === "INHERITED_VERIFIER";
-  const releaseRun = continuation ? null : createCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: releaseProfile });
-  const verifierRun = continuation ? createCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION }) : null;
-  const commandRun = releaseRun || verifierRun;
+  const releaseRun = createCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: releaseProfile });
+  const commandRun = releaseRun;
   const proveProtectedDescendant = ({ ancestorSha, descendantSha }) => {
     try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; }
   };
@@ -270,15 +240,15 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     })()
     : undefined;
   const releasePreflightAttestationVerifier = verifyReleasePreflightAttestationSignature || createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun: commandRun });
-  const releaseSts = continuation ? null : createAwsStsRunner({ profile: releaseProfile });
-  const verifierSts = continuation ? createAwsStsRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION }) : createAwsStsRunner({ profile: config.bootstrapProfile || verifierProfile });
+  const releaseSts = createAwsStsRunner({ profile: releaseProfile });
+  const verifierSts = createAwsStsRunner({ profile: config.bootstrapProfile || verifierProfile });
   let verifierSession = null;
   const requireVerifierSession = () => {
     if (!verifierSession) throw new Error("Verifier session must be established before verifier-owned operations.");
     return verifierSession;
   };
   const verifierInteractive = () => createProductionInteractiveEcsExecRunner({ spawn: requireVerifierSession().spawn });
-  const verifierEcs = createLazyEcsAdapter(() => requireVerifierSession().run, verifierInteractive);
+  const verifierEcs = createLazyProductionVerifierEcsAdapter(() => requireVerifierSession().run, verifierInteractive);
   let latestEcsExecProof = null;
   const runtimeReadback = async ({ imageDigest, taskDefinitionArn, taskArn }) => {
     const service = await verifierEcs.describeService();
@@ -372,14 +342,12 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     checkerChain,
     identities: {
       establish: async () => {
-        const releaseDeployer = continuation ? undefined : await establishReleaseDeployerIdentity({ adapter: releaseSts });
-        const verifier = continuation
-          ? await establishInheritedVerifierIdentity({ adapter: verifierSts })
-          : await establishVerifierIdentity({ adapter: verifierSts, mfaSerial: process.env.MSCQR_VERIFIER_MFA_SERIAL, getMfaCode: getVerifierMfaCode });
+        const releaseDeployer = await establishReleaseDeployerIdentity({ adapter: releaseSts });
+        const verifier = await establishVerifierIdentity({ adapter: verifierSts, mfaSerial: process.env.MSCQR_VERIFIER_MFA_SERIAL, getMfaCode: getVerifierMfaCode });
         verifierSession = verifier.session || verifierSts.getVerifierSession();
         return {
           rootDrop: rootDropEvidence,
-          ...(releaseDeployer ? { releaseDeployer } : {}),
+          releaseDeployer,
           verifier,
         };
       },
@@ -422,7 +390,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       persist: async (evidence) => persistOverlapReadinessEvidence({ outputPath: config.readinessEvidenceFile, evidence }),
       authenticate: async ({ sourceSha: readinessSourceSha, rotationId: readinessRotationId, rotationStateSha256, evidenceSha256 }) => readAndAssertReadyForOverlapDeployment({ filePath: config.readinessEvidenceFile, evidenceSha256, sourceSha: readinessSourceSha, rotationId: readinessRotationId, rotationStateSha256 }),
     } : undefined,
-    deployOverlap: continuation ? undefined : createProductionOverlapDeploymentAdapter({ run: releaseRun, profile: releaseProfile, credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, readinessFile: config.readinessEvidenceFile, sourceSha, rotationId, imageDigest: config.backendImageDigest, expectedCurrentTaskDefinitionArn: config.expectedCurrentTaskDefinitionArn, versionUrl: config.rotationHealthUrl, expectedGitSha: sourceSha }),
+    deployOverlap: createProductionOverlapDeploymentAdapter({ run: releaseRun, profile: releaseProfile, credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, readinessFile: config.readinessEvidenceFile, sourceSha, rotationId, imageDigest: config.backendImageDigest, expectedCurrentTaskDefinitionArn: config.expectedCurrentTaskDefinitionArn, versionUrl: config.rotationHealthUrl, expectedGitSha: sourceSha }),
     postDeploy: { run: async ({ taskDefinitionArn, verifierSession: suppliedVerifierSession }) => {
       if (suppliedVerifierSession !== requireVerifierSession()) throw new Error("Post-deploy verification received a verifier session different from the established cutover session.");
       const service = await verifierEcs.describeService();
@@ -452,7 +420,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
         latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(proof))), proof, resumed: true };
         return latestEcsExecProof;
       }
-      const transcript = await verifierEcs.executeCommand({ taskArn, container: CONTAINER, inputFile: config.runtimeProofFixtureFile, command: runtimeProofCommand({ sourceSha, rotationId, deploymentSha: config.rotationDeploymentSha, healthUrl: config.rotationHealthUrl || `${config.onboardingBaseUrl}/api/health`, invocationRef: config.runtimeInvocationRef }) });
+      const transcript = await verifierEcs.executeCommand({ taskArn, container: CONTAINER, inputFile: config.runtimeProofFixtureFile, command: productionOverlapRuntimeProofCommand({ sourceSha, rotationId, deploymentSha: config.rotationDeploymentSha, healthUrl: config.rotationHealthUrl || `${config.onboardingBaseUrl}/api/health`, invocationRef: config.runtimeInvocationRef }) });
       const fixtureAfter = readStageBPrivateFileBytes({ filePath: config.runtimeProofFixtureFile, repositoryRoot: process.cwd(), label: "Rotation runtime fixture" });
       if (fixtureAfter.sha256 !== rotationFixtureSha256) throw new Error("Rotation runtime fixture changed during verification.");
       const proof = extractMarkedJson(transcript, "MSCQR_PROOF_BEGIN", "MSCQR_PROOF_END");

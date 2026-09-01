@@ -183,7 +183,7 @@ export async function runProductionCutoverOverlapControlPlane(input = {}) {
 
 export async function runPostOverlapVerification({ deployment, sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn, expectedImageDigest, verifierSession, postDeploy, ecsExec, rotationVerify } = {}) {
   if (!deployment || !postDeploy?.run || !ecsExec?.run || !rotationVerify?.run) throw new Error("Post-overlap verification adapters are incomplete.");
-  const resumed = deployment.resumeVerified === true;
+  const resumed = deployment.resumePersistedProof === true || deployment.resumeVerified === true;
   const deployed = resumed ? deployment.persistedDeployed : await postDeploy.run({ deployment, taskDefinitionArn, verifierSession });
   if (deployed?.valid !== true || deployed.taskDefinitionArn !== taskDefinitionArn || deployed.imageDigest !== expectedImageDigest || deployed.taskTag !== "MSCQRExecTarget=production-backend" || typeof deployed.taskArn !== "string") throw new Error("Replacement task did not converge to the reviewed task-definition, digest, and execution marker.");
   const execProof = resumed ? deployment.persistedExecProof : await ecsExec.run({ taskArn: deployed.taskArn, taskDefinitionArn, imageDigest: deployed.imageDigest, sourceSha, rotationId, rotationFixtureSha256, verifierSession });

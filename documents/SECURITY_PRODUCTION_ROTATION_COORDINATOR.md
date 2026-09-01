@@ -97,6 +97,14 @@ The persisted state machine is monotonic:
 
 ```text
 prepared -> overlap-deploy-required -> overlap-ready -> verified -> grace-wait
+
+`overlap-ready` and `verified` are authenticated successors of the original
+`overlap-deploy-required` state. Both retain `verification.preparedStateSha256`;
+readiness and the independently approved deployment receipt remain bound to
+that predecessor, never to a successor file hash. A verifier retry therefore
+cannot redeploy and may resume only the unfinished coordinator verification.
+Only `verified` can feed strict onboarding; `overlap-ready` is an interruption
+recovery state and cannot claim onboarding readiness.
   -> retirement-started -> retirement-complete -> cleanup-deploy-required
   -> cleanup-runtime-verified -> cleaned
 ```

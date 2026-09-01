@@ -3,6 +3,7 @@ import test from "node:test";
 import { createAwsStsRunner, establishInheritedVerifierIdentity, establishVerifierIdentity, VERIFIER_SESSION_MIN_REMAINING_MS } from "../aws/production-identity-adapters.mjs";
 import { ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { establishEcsExecVerifierSession } from "../aws/establish-production-ecs-exec-verifier-session.mjs";
+import { createProductionVerifierOnlyAdapters } from "../aws/production-cutover-verifier-adapters.mjs";
 
 const bootstrapArn = "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator";
 const mfaSerial = ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN;
@@ -124,4 +125,19 @@ test("inherited verifier identity rejects release-deployer and unrelated session
     });
     await assert.rejects(() => establishInheritedVerifierIdentity({ adapter: runner }), /reviewed assumed role/);
   }
+});
+
+test("verifier-only composition constructs no release-owned adapter or command runner", async () => {
+  const calls = [];
+  const session = Object.freeze({ callerArn: verifierArn, run: () => { throw new Error("AWS command must not run during composition"); }, spawn: () => { throw new Error("ECS Exec must not run during composition"); } });
+  const adapters = createProductionVerifierOnlyAdapters({
+    config: { sourceSha: "a".repeat(40), rotationId: "rotation-20260829015311-765c8a16", rotationCoordinator: "coordinator.mjs", rotationConfigFile: "/private/tmp/config.json", rotationStateFile: "/private/tmp/state.json", rotationFixtureFile: "/private/tmp/fixture.json", overlapRuntimeProofFile: "/private/tmp/proof.json" },
+    sourceSha: "a".repeat(40), rotationId: "rotation-20260829015311-765c8a16", runtimeConfigSha256: "b".repeat(64),
+    createCommandRunner: (options) => { calls.push(options); return () => ""; },
+    createStsRunner: () => ({ getCallerIdentity: async () => verifierArn, getVerifierSession: () => session }),
+  });
+  assert.deepEqual(Object.keys(adapters).sort(), ["ecsExec", "identities", "postDeploy", "rotationPrepare"]);
+  const identity = await adapters.identities.establish();
+  assert.equal(identity.verifier.callerArn, verifierArn);
+  assert.deepEqual(calls, [{ credentialSource: "inherited-ecs-exec-verifier-session" }]);
 });

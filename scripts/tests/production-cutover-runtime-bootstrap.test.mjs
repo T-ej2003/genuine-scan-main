@@ -1003,7 +1003,7 @@ test("overlap verification resumes an exact persisted runtime proof without rede
     const stateFile = path.join(directory, "state.json");
     const fixtureFile = path.join(directory, "fixture.json");
     const runtimeProofFile = path.join(directory, "runtime-proof.json");
-    const proof = { rotationId, phase: "overlap", artifactCurrentRuntimeVerify: true, artifactHistoricalRuntimeVerify: true };
+    const proof = { rotationId, phase: "overlap", runtimeInvocationRef: "overlap-proof", artifactCurrentRuntimeVerify: true, artifactHistoricalRuntimeVerify: true };
     for (const [file, value] of [[configFile, { rotationId }], [stateFile, { rotationId, phase: "overlap-deploy-required" }], [fixtureFile, { rotationId }]]) writeFileSync(file, `${JSON.stringify(value)}\n`, { mode: 0o600 });
     const hash = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
     const stateSha256 = hash(stateFile);
@@ -1011,7 +1011,10 @@ test("overlap verification resumes an exact persisted runtime proof without rede
     let coordinatorCalls = 0;
     const adapter = createProductionRotationPrepareAdapter({ coordinator: "coordinator.mjs", configFile, configSha256: hash(configFile), stateFile, fixtureFile, runtimeProofFile, repositoryRoot: process.cwd(), run: async () => {
       coordinatorCalls += 1;
-      if (coordinatorCalls === 1) throw new Error("interrupted after proof persistence");
+      if (coordinatorCalls === 1) {
+        writeFileSync(stateFile, `${JSON.stringify({ rotationId, phase: "overlap-ready", overlapRuntime: proof, overlapReadyAt: "2026-09-01T10:00:00.000Z", cleanupEligibleAt: "2026-09-02T10:00:00.000Z", verification: { preparedStateSha256: stateSha256, runtimeInvocationRef: proof.runtimeInvocationRef } })}\n`, { mode: 0o600 });
+        throw new Error("interrupted after overlap-ready persistence");
+      }
       writeFileSync(stateFile, `${JSON.stringify({ rotationId, phase: "verified", overlapRuntime: proof, overlapReadyAt: "2026-09-01T10:00:00.000Z", cleanupEligibleAt: "2026-09-02T10:00:00.000Z", verification: { preparedStateSha256: stateSha256 } })}\n`, { mode: 0o600 });
       return JSON.stringify({ phase: "verified" });
     } });

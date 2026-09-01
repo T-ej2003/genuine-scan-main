@@ -81,12 +81,12 @@ test("verified continuation reuses persisted runtime proof without post-deploy o
   let ecsExecCalls = 0;
   let coordinatorCalls = 0;
   const persistedDeployed = { valid: true, taskArn: "task", taskDefinitionArn, imageDigest, taskTag: "MSCQRExecTarget=production-backend" };
-  const persistedExecProof = { valid: true, rotationId, phase: "overlap", deploymentSha: sourceSha, runtimeInvocationRef: "persisted-proof" };
+  const persistedExecProof = { valid: true, proof: { rotationId, phase: "overlap", deploymentSha: sourceSha, runtimeInvocationRef: "persisted-proof" } };
   const result = await runPostOverlapVerification({
     deployment: { resumeVerified: true, persistedDeployed, persistedExecProof }, sourceSha, rotationId, rotationStateSha256: sha("c"), rotationFixtureSha256: sha("e"), taskDefinitionArn, expectedImageDigest: imageDigest, verifierSession: {},
     postDeploy: { run: async () => { postDeployCalls += 1; throw new Error("must not read deployment again"); } },
     ecsExec: { run: async () => { ecsExecCalls += 1; throw new Error("must not replay ECS Exec"); } },
-    rotationVerify: { run: async () => { coordinatorCalls += 1; return { terminalState: "VERIFIED_OVERLAP", rotationId, rotationStateSha256: sha("f"), overlapReadyAt: "2026-09-01T10:02:00.000Z", cleanupEligibleAt: "2026-09-02T10:02:00.000Z" }; } },
+    rotationVerify: { run: async ({ execProof }) => { coordinatorCalls += 1; assert.deepEqual(execProof, persistedExecProof); return { terminalState: "VERIFIED_OVERLAP", rotationId, rotationStateSha256: sha("f"), overlapReadyAt: "2026-09-01T10:02:00.000Z", cleanupEligibleAt: "2026-09-02T10:02:00.000Z" }; } },
   });
   assert.equal(result.terminalState, "VERIFIED_OVERLAP");
   assert.equal(postDeployCalls, 0);

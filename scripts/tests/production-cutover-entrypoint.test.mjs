@@ -18,9 +18,12 @@ test("rotation-overlap has one governed production entrypoint", () => {
   assert.match(workflow, /Upload overlap deployment receipt/);
   assert.match(workflow, /production-overlap-deployment-receipt/);
   const verifier = readFileSync("scripts/aws/verify-production-cutover-overlap.mjs", "utf8");
+  const verifierAdapters = readFileSync("scripts/aws/production-cutover-verifier-adapters.mjs", "utf8");
   assert.match(verifier, /runPostOverlapVerification/);
-  assert.match(verifier, /INHERITED_ECS_EXEC_VERIFIER_SESSION/);
-  assert.match(verifier, /identityMode: "INHERITED_VERIFIER"/);
+  assert.match(verifier, /createProductionVerifierOnlyAdapters/);
+  assert.doesNotMatch(verifier, /createProductionCutoverRuntimeComposition|createProductionCutoverAdapters/);
+  assert.match(verifierAdapters, /INHERITED_ECS_EXEC_VERIFIER_SESSION/);
+  assert.doesNotMatch(verifierAdapters, /checkerTrustEvidence|createProductionOverlapDeploymentAdapter|createProductionRotationInfrastructureAdapter/);
   assert.doesNotMatch(verifier, /runGovernedOverlapDeployment|update-service|register-task-definition/);
 });
 
