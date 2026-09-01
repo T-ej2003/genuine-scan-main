@@ -22,6 +22,7 @@ import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-e
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 import { createReleasePreflightCheckerTrustSignatureVerifier } from "./production-release-preflight-checker-attestation.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
+import { establishReleaseDeployerIdentity } from "./production-identity-adapters.mjs";
 
 export const STAGE_B_APPROVAL_INPUT_PRODUCER = "scripts/aws/prepare-production-green-stage-b-approval-input.mjs";
 export const STAGE_B_APPROVAL_INPUT_SCHEMA_VERSION = 1;
@@ -194,11 +195,13 @@ function restrictCheckerRunner(run) {
   };
 }
 
-export function createApprovalInputEvidenceRunners({ createRunner = createProductionCommandRunner, verifyImageEvidence = verifyImageEvidenceSignature, createReleasePreflightTrustVerifier = createReleasePreflightCheckerTrustSignatureVerifier } = {}) {
+export async function createApprovalInputEvidenceRunners({ createRunner = createProductionCommandRunner, verifyImageEvidence = verifyImageEvidenceSignature, createReleasePreflightTrustVerifier = createReleasePreflightCheckerTrustSignatureVerifier } = {}) {
   const checkerRun = restrictCheckerRunner(createRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION }));
   const releaseRun = createRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+  const releaseIdentity = await establishReleaseDeployerIdentity({ adapter: { getCallerIdentity: async () => JSON.parse(releaseRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn } });
   return Object.freeze({
     checkerRun,
+    releaseIdentity,
     verifyImageEvidence: (options) => verifyImageEvidence({ ...options, run: releaseRun }),
     verifyReleasePreflightAttestationSignature: createReleasePreflightTrustVerifier({ releaseRun }),
   });
@@ -212,7 +215,7 @@ async function run(argv = process.argv.slice(2)) {
   assertCleanSource();
   const allowed = new Set(["--ticket-id", "--image-authorization", "--tfvars", "--binding-report", "--release-preflight", "--release-preflight-attestation", "--release-preflight-attestation-signature", "--output", "--review-output"]);
   for (let index = 0; index < argv.length; index += 1) { if (!allowed.has(argv[index])) throw new Error("Unknown approval-input option."); index += 1; }
-  const runners = createApprovalInputEvidenceRunners();
+  const runners = await createApprovalInputEvidenceRunners();
   const checkerIdentity = authenticateApprovalInputCheckerIdentity(runners.checkerRun);
   const imageAuthorizationBytes = readStageBPrivateFileBytes({ filePath: requiredOption(argv, "--image-authorization"), repositoryRoot: root, label: "Stage B image authorization" }).bytes;
   const imageAuthorization = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(imageAuthorizationBytes));

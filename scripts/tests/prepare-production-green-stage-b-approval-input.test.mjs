@@ -7,6 +7,7 @@ import test from "node:test";
 import { prepareStageBApproval } from "../aws/create-production-green-stage-b-approval.mjs";
 import { collectProductionGreenStageBApprovalEvidence } from "../aws/collect-production-green-stage-b-approval-evidence.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
+import { RELEASE_ROLE_ARN } from "../aws/production-identity-adapters.mjs";
 import { buildReleasePreflightCheckerTrustAttestation } from "../aws/production-release-preflight-checker-attestation.mjs";
 import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerLambdaConfiguration, normalizeStageBBrokerRuntimeVersionConfig, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
@@ -68,7 +69,7 @@ function evidence(overrides = {}) {
   return collectProductionGreenStageBApprovalEvidence({ sourceSha: releaseSha, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => ({ ...report, ...(overrides.report || {}) }), deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }), readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }), readPreflight: () => selectedPreflight, releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true }).evidence;
 }
 
-test("approval-input keeps checker identity and root-attestation verification on their exact principals", () => {
+test("approval-input authenticates the release runner before root-attestation verification", async () => {
   const checkerCalls = [];
   const releaseCalls = [];
   const rootAttestationActions = ["describe-key", "get-key-policy", "list-resource-tags", "verify"];
@@ -80,34 +81,52 @@ test("approval-input keeps checker identity and root-attestation verification on
     };
     assert.equal(credentialSource, "named-profile");
     assert.equal(profile, "mscqr-production-release-deployer");
-    return (args) => { releaseCalls.push(args); return "true"; };
+    return (args) => {
+      releaseCalls.push(args);
+      return args[0] === "sts" ? JSON.stringify({ Arn: deployerIdentity }) : "true";
+    };
   };
-  const routes = createApprovalInputEvidenceRunners({
+  const routes = await createApprovalInputEvidenceRunners({
     createRunner,
     verifyImageEvidence: ({ run }) => rootAttestationActions.forEach((action) => run(["kms", action])),
     createReleasePreflightTrustVerifier: ({ releaseRun }) => () => rootAttestationActions.forEach((action) => releaseRun(["kms", action])),
   });
+  assert.equal(routes.releaseIdentity.roleArn, RELEASE_ROLE_ARN);
   assert.equal(authenticateApprovalInputCheckerIdentity(routes.checkerRun), checkerIdentity);
   assert.doesNotThrow(() => routes.verifyImageEvidence({}));
   assert.doesNotThrow(() => routes.verifyReleasePreflightAttestationSignature({}));
   assert.deepEqual(checkerCalls.map(([service, action]) => [service, action]), [["sts", "get-caller-identity"]]);
-  assert.deepEqual(releaseCalls.map(([service, action]) => [service, action]), [...rootAttestationActions, ...rootAttestationActions].map((action) => ["kms", action]));
+  assert.deepEqual(releaseCalls.map(([service, action]) => [service, action]), [["sts", "get-caller-identity"], ...[...rootAttestationActions, ...rootAttestationActions].map((action) => ["kms", action])]);
 });
 
-test("approval-input fails closed when either mandatory principal fails", () => {
-  const releaseFailure = createApprovalInputEvidenceRunners({
+test("approval-input rejects substitute release identities before KMS", async () => {
+  for (const substitute of ["arn:aws:iam::368992683803:root", checkerIdentity, "arn:aws:sts::368992683803:assumed-role/other-role/session", "arn:aws:iam::368992683803:user/operator"]) {
+    const releaseCalls = [];
+    await assert.rejects(() => createApprovalInputEvidenceRunners({
+      createRunner: ({ credentialSource }) => credentialSource === "inherited-checker-session"
+        ? () => JSON.stringify({ Arn: checkerIdentity })
+        : (args) => { releaseCalls.push(args); return JSON.stringify({ Arn: substitute }); },
+      verifyImageEvidence: () => true,
+      createReleasePreflightTrustVerifier: () => () => true,
+    }), /Caller is not the reviewed assumed role/);
+    assert.deepEqual(releaseCalls.map(([service, action]) => [service, action]), [["sts", "get-caller-identity"]]);
+  }
+});
+
+test("approval-input fails closed when either mandatory principal fails", async () => {
+  const releaseFailure = await createApprovalInputEvidenceRunners({
     createRunner: ({ credentialSource }) => credentialSource === "inherited-checker-session"
       ? () => JSON.stringify({ Arn: checkerIdentity })
-      : () => { throw new Error("release root-attestation verification denied"); },
+      : (args) => args[0] === "sts" ? JSON.stringify({ Arn: deployerIdentity }) : (() => { throw new Error("release root-attestation verification denied"); })(),
     verifyImageEvidence: ({ run }) => run(["kms", "describe-key"]),
     createReleasePreflightTrustVerifier: ({ releaseRun }) => () => releaseRun(["kms", "verify"]),
   });
   assert.throws(() => releaseFailure.verifyImageEvidence({}), /release root-attestation verification denied/);
   assert.throws(() => releaseFailure.verifyReleasePreflightAttestationSignature({}), /release root-attestation verification denied/);
-  const checkerFailure = createApprovalInputEvidenceRunners({
+  const checkerFailure = await createApprovalInputEvidenceRunners({
     createRunner: ({ credentialSource }) => credentialSource === "inherited-checker-session"
       ? () => { throw new Error("checker identity denied"); }
-      : () => "true",
+      : () => JSON.stringify({ Arn: deployerIdentity }),
     verifyImageEvidence: () => true,
     createReleasePreflightTrustVerifier: () => () => true,
   });
