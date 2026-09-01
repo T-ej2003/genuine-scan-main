@@ -9,7 +9,7 @@ import { collectProductionGreenStageBApprovalEvidence } from "../aws/collect-pro
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { buildReleasePreflightCheckerTrustAttestation } from "../aws/production-release-preflight-checker-attestation.mjs";
 import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
-import { assertStageBBrokerLambdaConfiguration, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
+import { assertStageBBrokerLambdaConfiguration, normalizeStageBBrokerRuntimeVersionConfig, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import { assertStableBrokerAliasObservation, prepareProductionGreenStageBApprovalInput, writeProductionGreenStageBApprovalInput } from "../aws/prepare-production-green-stage-b-approval-input.mjs";
 import { renderStageBTaskDefinition, stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
 
@@ -165,7 +165,41 @@ test("collector binds the alias-resolved Lambda code bytes, not only its environ
 
 test("production-shaped Lambda configuration fixture binds the reviewed executable contract", () => {
   const configuration = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-stage-b-broker-get-function-configuration.json", "utf8"));
-  assert.doesNotThrow(() => assertStageBBrokerLambdaConfiguration({ configuration, alias: live().alias, brokerPackageRawSha256: report.brokerPackageRawSha256 }));
+  const result = assertStageBBrokerLambdaConfiguration({ configuration, alias: live().alias, brokerPackageRawSha256: report.brokerPackageRawSha256 });
+  assert.deepEqual(result.configuration.RuntimeVersionConfig, configuration.RuntimeVersionConfig);
+});
+
+const runtimeVersionArn = "arn:aws:lambda:eu-west-2::runtime:8eeff65f6809a3ce81507fe733fe09b835899b99481ba22fd75b5a7338290ec1";
+
+test("RuntimeVersionConfig accepts absent or opaque AWS-managed runtime state and binds it canonically", () => {
+  assert.deepEqual(normalizeStageBBrokerRuntimeVersionConfig(undefined), null);
+  assert.deepEqual(normalizeStageBBrokerRuntimeVersionConfig({ RuntimeVersionArn: runtimeVersionArn }), { RuntimeVersionArn: runtimeVersionArn });
+  const absent = evidence().runtimeBindingSha256;
+  const observed = evidence({ live: { configuration: { ...live().configuration, RuntimeVersionConfig: { RuntimeVersionArn: runtimeVersionArn } } } }).runtimeBindingSha256;
+  assert.notEqual(absent, observed);
+  const otherObserved = evidence({ live: { configuration: { ...live().configuration, RuntimeVersionConfig: { RuntimeVersionArn: `${runtimeVersionArn.slice(0, -1)}2` } } } }).runtimeBindingSha256;
+  assert.notEqual(observed, otherObserved);
+});
+
+test("RuntimeVersionConfig rejects invalid managed-runtime ARNs and malformed shapes", () => {
+  for (const value of [
+    { RuntimeVersionArn: "arn:aws-us-gov:lambda:eu-west-2::runtime:opaque" },
+    { RuntimeVersionArn: "arn:aws:s3:eu-west-2::runtime:opaque" },
+    { RuntimeVersionArn: "arn:aws:lambda:us-east-1::runtime:opaque" },
+    { RuntimeVersionArn: "arn:aws:lambda:eu-west-2::function:opaque" },
+    { RuntimeVersionArn: "arn:aws:lambda:eu-west-2::runtime:" },
+    null,
+    [],
+    { Unknown: true },
+    { RuntimeVersionArn: runtimeVersionArn, Unknown: true },
+  ]) assert.throws(() => normalizeStageBBrokerRuntimeVersionConfig(value), /runtime|malformed|unknown/i);
+});
+
+test("RuntimeVersionConfig rejects documented runtime retrieval errors after validating their shape", () => {
+  assert.throws(() => normalizeStageBBrokerRuntimeVersionConfig({ Error: { ErrorCode: "InvalidRuntime", Message: "redacted test detail" } }), /retrieval|runtime/i);
+  assert.throws(() => normalizeStageBBrokerRuntimeVersionConfig({ Error: { ErrorCode: 42 } }), /malformed|unknown/i);
+  assert.throws(() => normalizeStageBBrokerRuntimeVersionConfig({ Error: { ErrorCode: "InvalidRuntime", Unexpected: true } }), /malformed|unknown/i);
+  assert.throws(() => normalizeStageBBrokerRuntimeVersionConfig({ ErrorCode: "InvalidRuntime" }), /malformed|unknown/i);
 });
 
 test("canonical Lambda logging and disabled optional configuration defaults are accepted", () => {

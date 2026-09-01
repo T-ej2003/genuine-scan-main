@@ -40,5 +40,5 @@
   "Architectures": ["x86_64"],
   "EphemeralStorage": { "Size": 512 },
   "SnapStart": { "ApplyOn": "None", "OptimizationStatus": "Off" },
-  "RuntimeVersionConfig": { "RuntimeVersionArn": "arn:aws:lambda:eu-west-2::runtime:nodejs24.x" }
+  "RuntimeVersionConfig": { "RuntimeVersionArn": "arn:aws:lambda:eu-west-2::runtime:8eeff65f6809a3ce81507fe733fe09b835899b99481ba22fd75b5a7338290ec1" }
 }

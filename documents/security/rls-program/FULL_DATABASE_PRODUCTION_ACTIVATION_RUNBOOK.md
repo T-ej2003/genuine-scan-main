@@ -236,6 +236,13 @@ only its approval ID, contract SHA256, payload SHA256, and version ID in the
 ticket. Do not expose the signature. The complete publication, idempotency,
 rollback, and redaction contract is
 `PRODUCTION_GREEN_STAGE_B_APPROVAL_PUBLICATION_CONTRACT-v1.md`.
+The broker's configured Lambda runtime identifier remains the exact source
+value `nodejs24.x`. Any `RuntimeVersionConfig.RuntimeVersionArn` returned by
+Lambda is optional AWS-managed execution state, not a value derived from that
+identifier: the evidence path validates its documented regional runtime ARN
+shape, rejects runtime-version errors, and binds the exact observed normalized
+state into the runtime binding. Do not substitute `nodejs24.x` for the ARN or
+manually assert a runtime-version ARN.
 9. Generate the production package using the KMS-backed artifact:
 
 ```sh

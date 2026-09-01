@@ -254,6 +254,33 @@ const emptyObject = (value) => value === undefined || value && typeof value === 
 const emptyString = (value) => value === undefined || value === null || value === "";
 const noVpcConfiguration = (value) => value === undefined || value === null || value && typeof value === "object" && !Array.isArray(value)
   && !value.VpcId && emptyArray(value.SubnetIds) && emptyArray(value.SecurityGroupIds) && !value.Ipv6AllowedForDualStack;
+const RUNTIME_VERSION_CONFIG_FIELDS = Object.freeze(["Error", "RuntimeVersionArn"]);
+const RUNTIME_VERSION_ERROR_FIELDS = Object.freeze(["ErrorCode", "Message"]);
+const isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+export function normalizeStageBBrokerRuntimeVersionConfig(value) {
+  if (value === undefined) return null;
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !RUNTIME_VERSION_CONFIG_FIELDS.includes(key))) {
+    throw new Error("Resolved broker Lambda RuntimeVersionConfig is malformed or contains an unknown field.");
+  }
+  const runtimeVersionArn = value.RuntimeVersionArn;
+  if (runtimeVersionArn !== undefined
+      && (typeof runtimeVersionArn !== "string" || runtimeVersionArn.length < 26 || runtimeVersionArn.length > 2048
+        || !new RegExp(`^arn:aws:lambda:${STAGE_B.region}::runtime:.+$`).test(runtimeVersionArn))) {
+    throw new Error("Resolved broker Lambda RuntimeVersionArn is malformed or outside the AWS-managed runtime contract.");
+  }
+  if (value.Error !== undefined) {
+    const error = value.Error;
+    if (!isPlainObject(error) || Object.keys(error).some((key) => !RUNTIME_VERSION_ERROR_FIELDS.includes(key))
+        || error.ErrorCode !== undefined && typeof error.ErrorCode !== "string"
+        || error.Message !== undefined && typeof error.Message !== "string") {
+      throw new Error("Resolved broker Lambda RuntimeVersionConfig error is malformed or contains an unknown field.");
+    }
+    throw new Error("Resolved broker Lambda runtime version retrieval returned an error.");
+  }
+  return Object.freeze(runtimeVersionArn === undefined ? {} : { RuntimeVersionArn: runtimeVersionArn });
+}
+
 const LAMBDA_CONFIGURATION_RESPONSE_FIELDS = Object.freeze([
   "Architectures", "CapacityProviderConfig", "CodeSha256", "CodeSize", "ConfigSha256", "DeadLetterConfig", "Description",
   "DurableConfig", "Environment", "EphemeralStorage", "FileSystemConfigs", "FunctionArn", "FunctionName", "Handler",
@@ -290,15 +317,11 @@ function assertStageBBrokerLambdaDefaults(configuration, expected) {
       || configuration.State !== undefined && configuration.State !== "Active"
       || configuration.LastUpdateStatus !== undefined && configuration.LastUpdateStatus !== "Successful"
       || !emptyString(configuration.StateReason) || !emptyString(configuration.StateReasonCode)
-      || !emptyObject(configuration.TenancyConfig)
-      || configuration.RuntimeVersionConfig !== undefined && configuration.RuntimeVersionConfig !== null
-      && (typeof configuration.RuntimeVersionConfig !== "object" || Array.isArray(configuration.RuntimeVersionConfig)
-        || configuration.RuntimeVersionConfig.Error !== undefined
-        || configuration.RuntimeVersionConfig.RuntimeVersionArn !== undefined
-        && configuration.RuntimeVersionConfig.RuntimeVersionArn !== `arn:aws:lambda:${STAGE_B.region}::runtime:${expected.runtime}`)) {
+      || !emptyObject(configuration.TenancyConfig)) {
     throw new Error("Resolved broker Lambda configuration contains an unexpected AWS default or runtime state.");
   }
   assertStageBBrokerLoggingConfig(configuration.LoggingConfig, expected.loggingConfig);
+  return normalizeStageBBrokerRuntimeVersionConfig(configuration.RuntimeVersionConfig);
 }
 
 export function assertStageBBrokerLambdaConfiguration({ configuration, alias, brokerPackageRawSha256 } = {}) {
@@ -320,7 +343,7 @@ export function assertStageBBrokerLambdaConfiguration({ configuration, alias, br
       || configuration.TracingConfig !== undefined && configuration.TracingConfig?.Mode !== "PassThrough") {
     throw new Error("Resolved broker Lambda configuration is outside the reviewed executable contract.");
   }
-  assertStageBBrokerLambdaDefaults(configuration, expected);
+  const runtimeVersionConfig = assertStageBBrokerLambdaDefaults(configuration, expected);
   return Object.freeze({
     broker,
     codeSha256,
@@ -336,6 +359,7 @@ export function assertStageBBrokerLambdaConfiguration({ configuration, alias, br
       TracingConfig: configuration.TracingConfig || null,
       LoggingConfig: configuration.LoggingConfig || null, KMSKeyArn: configuration.KMSKeyArn || null,
       CodeSigningConfigArn: configuration.CodeSigningConfigArn || null,
+      RuntimeVersionConfig: runtimeVersionConfig,
     }),
   });
 }
