@@ -32,6 +32,10 @@ const addresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
 const BROKER_INITIAL_ADDRESSES = new Set(["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"]);
 const image = (n) => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr@sha256:${String(n).repeat(64)}`;
 const ref = (references) => ({ references });
+const runtimePlatformExpression = () => [{
+  cpu_architecture: ref(["local.task_runtime_platform.cpu_architecture", "local.task_runtime_platform"]),
+  operating_system_family: ref(["local.task_runtime_platform.operating_system_family", "local.task_runtime_platform"]),
+}];
 const envNames = [
   "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
@@ -39,10 +43,10 @@ const envNames = [
 ];
 const SCOPED_REFERENCE_CENSUS_FIELDS = [
   ["aws_ecs_task_definition.candidate", "for_each_expression"],
-  ...["container_definitions", "cpu", "execution_role_arn", "family", "memory", "network_mode", "requires_compatibilities", "tags", "task_role_arn"]
+  ...["container_definitions", "cpu", "execution_role_arn", "family", "memory", "network_mode", "requires_compatibilities", "runtime_platform[0].cpu_architecture", "runtime_platform[0].operating_system_family", "tags", "task_role_arn"]
     .map((field) => ["aws_ecs_task_definition.candidate", field]),
   ["aws_ecs_task_definition.executor", "for_each_expression"],
-  ...["container_definitions", "cpu", "execution_role_arn", "family", "memory", "network_mode", "requires_compatibilities", "tags", "task_role_arn"]
+  ...["container_definitions", "cpu", "execution_role_arn", "family", "memory", "network_mode", "requires_compatibilities", "runtime_platform[0].cpu_architecture", "runtime_platform[0].operating_system_family", "tags", "task_role_arn"]
     .map((field) => ["aws_ecs_task_definition.executor", field]),
   ["aws_iam_policy.broker", "policy"],
   ["aws_iam_policy.broker", "tags"],
@@ -124,7 +128,7 @@ function configuration() {
       memory: ref(["each.value.memory", "each.value"]),
       network_mode: ref(["each.value.networkMode", "each.value"]),
       requires_compatibilities: ref(["each.value.requiresCompatibilities", "each.value"]),
-      runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }],
+      runtime_platform: runtimePlatformExpression(),
       skip_destroy: { constant_value: true },
       tags: ref(["each.key", "local.backend_exec_tags", "local.tags"]),
       task_role_arn: ref(["aws_iam_role.task", "each.key"]),
@@ -159,8 +163,8 @@ function configuration() {
       } },
       { address: "aws_cloudwatch_log_group.stage_b", type: "aws_cloudwatch_log_group", for_each_expression: ref(["local.stage_b_logs"]), expressions: { name: ref(["each.value"]), retention_in_days: ref(["var.log_retention_days"]), tags: ref(["local.tags"]) } },
       { address: "aws_dynamodb_table.replay", type: "aws_dynamodb_table", expressions: { attribute: [{ name: { constant_value: "approvalMode" }, type: { constant_value: "S" } }], billing_mode: { constant_value: "PAY_PER_REQUEST" }, hash_key: { constant_value: "approvalMode" }, name: { constant_value: "mscqr-production-rls-stage-b-replay" }, tags: ref(["local.tags"]), ttl: [{ attribute_name: { constant_value: "expiresAt" }, enabled: { constant_value: true } }] } },
-      { address: "aws_ecs_task_definition.candidate_retained", type: "aws_ecs_task_definition", for_each_expression: ref(["local.retained_candidate_definitions"]), expressions: { container_definitions: ref(["each.value.definition.containerDefinitions", "each.value.definition", "each.value"]), cpu: ref(["each.value.definition.cpu", "each.value.definition", "each.value"]), execution_role_arn: ref(["aws_iam_role.execution", "each.value.kind", "each.value"]), family: ref(["each.value.definition.family", "each.value.definition", "each.value"]), memory: ref(["each.value.definition.memory", "each.value.definition", "each.value"]), network_mode: ref(["each.value.definition.networkMode", "each.value.definition", "each.value"]), requires_compatibilities: ref(["each.value.definition.requiresCompatibilities", "each.value.definition", "each.value"]), runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: { constant_value: true }, tags: ref(["local.tags"]), task_role_arn: ref(["aws_iam_role.task", "each.value.kind", "each.value"]) } },
-      { address: "aws_ecs_task_definition.executor_retained", type: "aws_ecs_task_definition", for_each_expression: ref(["local.retained_executor_definitions"]), expressions: { container_definitions: ref(["each.value.definition.containerDefinitions", "each.value.definition", "each.value"]), cpu: ref(["each.value.definition.cpu", "each.value.definition", "each.value"]), execution_role_arn: ref(["aws_iam_role.execution[\"executor\"].arn", "aws_iam_role.execution[\"executor\"]", "aws_iam_role.execution"]), family: ref(["each.value.definition.family", "each.value.definition", "each.value"]), memory: ref(["each.value.definition.memory", "each.value.definition", "each.value"]), network_mode: ref(["each.value.definition.networkMode", "each.value.definition", "each.value"]), requires_compatibilities: ref(["each.value.definition.requiresCompatibilities", "each.value.definition", "each.value"]), runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: { constant_value: true }, tags: ref(["local.tags"]), task_role_arn: ref(["var.stage_a_executor_task_role_arn"]) } },
+      { address: "aws_ecs_task_definition.candidate_retained", type: "aws_ecs_task_definition", for_each_expression: ref(["local.retained_candidate_definitions"]), expressions: { container_definitions: ref(["each.value.definition.containerDefinitions", "each.value.definition", "each.value"]), cpu: ref(["each.value.definition.cpu", "each.value.definition", "each.value"]), execution_role_arn: ref(["aws_iam_role.execution", "each.value.kind", "each.value"]), family: ref(["each.value.definition.family", "each.value.definition", "each.value"]), memory: ref(["each.value.definition.memory", "each.value.definition", "each.value"]), network_mode: ref(["each.value.definition.networkMode", "each.value.definition", "each.value"]), requires_compatibilities: ref(["each.value.definition.requiresCompatibilities", "each.value.definition", "each.value"]), runtime_platform: runtimePlatformExpression(), skip_destroy: { constant_value: true }, tags: ref(["local.tags"]), task_role_arn: ref(["aws_iam_role.task", "each.value.kind", "each.value"]) } },
+      { address: "aws_ecs_task_definition.executor_retained", type: "aws_ecs_task_definition", for_each_expression: ref(["local.retained_executor_definitions"]), expressions: { container_definitions: ref(["each.value.definition.containerDefinitions", "each.value.definition", "each.value"]), cpu: ref(["each.value.definition.cpu", "each.value.definition", "each.value"]), execution_role_arn: ref(["aws_iam_role.execution[\"executor\"].arn", "aws_iam_role.execution[\"executor\"]", "aws_iam_role.execution"]), family: ref(["each.value.definition.family", "each.value.definition", "each.value"]), memory: ref(["each.value.definition.memory", "each.value.definition", "each.value"]), network_mode: ref(["each.value.definition.networkMode", "each.value.definition", "each.value"]), requires_compatibilities: ref(["each.value.definition.requiresCompatibilities", "each.value.definition", "each.value"]), runtime_platform: runtimePlatformExpression(), skip_destroy: { constant_value: true }, tags: ref(["local.tags"]), task_role_arn: ref(["var.stage_a_executor_task_role_arn"]) } },
       { address: "aws_iam_role.execution", type: "aws_iam_role", for_each_expression: ref(["local.execution_role_names"]), expressions: { assume_role_policy: {}, name: ref(["each.value"]), tags: ref(["local.tags"]) } },
       { address: "aws_iam_role.task", type: "aws_iam_role", for_each_expression: ref(["local.task_role_names"]), expressions: { assume_role_policy: {}, name: ref(["each.value"]), tags: ref(["local.tags"]) } },
       { address: "aws_iam_role_policy.backend_ecs_exec", type: "aws_iam_role_policy", expressions: { name: { constant_value: "stage-b-backend-ecs-exec-ssm-channels" }, policy: {}, role: ref(["aws_iam_role.task[\"backend\"].id", "aws_iam_role.task[\"backend\"]", "aws_iam_role.task"]) } },
@@ -265,6 +269,8 @@ function terraformSourceExpression(source, resourceAddress, expressionPath) {
   const block = namedBlock(source, `aws_${match[1]}`, match[2]);
   if (expressionPath === "for_each_expression") return assignmentExpression(block, "for_each");
   if (expressionPath === "environment[0].variables") return assignmentExpression(nestedBlock(block, "environment"), "variables");
+  const runtimePlatformField = /^runtime_platform\[0\]\.(cpu_architecture|operating_system_family)$/.exec(expressionPath);
+  if (runtimePlatformField) return assignmentExpression(nestedBlock(block, "runtime_platform"), runtimePlatformField[1]);
   return assignmentExpression(block, expressionPath);
 }
 
@@ -278,6 +284,8 @@ function validatorReferences(resourceAddress, expressionPath, rules = getStageBC
 function fixtureReferences(resource, expressionPath) {
   if (expressionPath === "for_each_expression") return resource?.for_each_expression?.references;
   if (expressionPath === "environment[0].variables") return resource?.expressions?.environment?.[0]?.variables?.references;
+  const runtimePlatformField = /^runtime_platform\[0\]\.(cpu_architecture|operating_system_family)$/.exec(expressionPath);
+  if (runtimePlatformField) return resource?.expressions?.runtime_platform?.[0]?.[runtimePlatformField[1]]?.references;
   return resource?.expressions?.[expressionPath]?.references;
 }
 
@@ -288,7 +296,9 @@ function scopedReferenceCensus({ source = fs.readFileSync("infra/aws/terraform/p
     return {
       resourceAddress,
       expressionPath,
-      terraformReferences: terraformReferences(terraformSourceExpression(source, resourceAddress, expressionPath)),
+      terraformReferences: expressionPath.startsWith("runtime_platform[0].")
+        ? [...new Set([...terraformReferences(terraformSourceExpression(source, resourceAddress, expressionPath)), "local.task_runtime_platform"])].sort()
+        : terraformReferences(terraformSourceExpression(source, resourceAddress, expressionPath)),
       validatorExpectedReferences: [...(validatorReferences(resourceAddress, expressionPath, rules) || [])].sort(),
       fixtureReferences: [...(fixtureReferences(resource, expressionPath) || [])].sort(),
     };
@@ -296,12 +306,27 @@ function scopedReferenceCensus({ source = fs.readFileSync("infra/aws/terraform/p
 }
 
 function assertScopedReferenceCensus(census) {
-  assert.equal(census.length, 29);
+  assert.equal(census.length, 33);
   for (const entry of census) {
     assert.deepEqual(entry.terraformReferences, entry.validatorExpectedReferences, `${entry.resourceAddress}.${entry.expressionPath} Terraform source drift or validator drift`);
     assert.deepEqual(entry.terraformReferences, entry.fixtureReferences, `${entry.resourceAddress}.${entry.expressionPath} fixture drift`);
   }
 }
+
+test("runtime-platform configuration is source-derived and closed-world", () => {
+  const value = { configuration: configuration(), resource_changes: [] };
+  assert.doesNotThrow(() => assertStageBStaticConfigurationCoverage(value));
+  for (const mutate of [
+    (resource) => { resource.expressions.runtime_platform[0].cpu_architecture.references = ["local.unreviewed"]; },
+    (resource) => { resource.expressions.runtime_platform[0].operating_system_family.references = ["local.unreviewed"]; },
+    (resource) => { resource.expressions.runtime_platform[0].cpu_architecture = { constant_value: "ARM64" }; },
+    (resource) => { resource.expressions.runtime_platform[0].unexpected = { references: ["local.unreviewed"] }; },
+  ]) {
+    const invalid = structuredClone(value);
+    mutate(invalid.configuration.root_module.resources.find((resource) => resource.address === "aws_ecs_task_definition.candidate"));
+    assert.throws(() => assertStageBStaticConfigurationCoverage(invalid), /UNCLASSIFIED_(?:STATIC_CONFIGURATION_EXPRESSION|CONFIGURATION_REFERENCES)/);
+  }
+});
 
 function brokerChanges() {
   const policy = { address: "aws_iam_policy.broker", mode: "managed", type: "aws_iam_policy", change: { actions: ["update"], before: { policy: "old" }, after: {}, after_unknown: { policy: true }, before_sensitive: {}, after_sensitive: {} } };
@@ -641,7 +666,7 @@ test("real-plan-shaped semantic census has zero unclassified semantics", () => {
     changedPaths: 118,
     afterUnknownPaths: 79,
     replacePaths: 12,
-    configurationReferences: 117,
+    configurationReferences: 141,
     unclassifiedResourceActions: 0,
     unclassifiedChangedPaths: 0,
     unclassifiedAfterUnknownPaths: 0,
@@ -674,7 +699,7 @@ test("baseline production-shaped fixture has an exact initial-create profile", (
     changedPaths: 387,
     afterUnknownPaths: 93,
     replacePaths: 0,
-    configurationReferences: 117,
+    configurationReferences: 141,
     unclassifiedResourceActions: 0,
     unclassifiedChangedPaths: 0,
     unclassifiedAfterUnknownPaths: 0,

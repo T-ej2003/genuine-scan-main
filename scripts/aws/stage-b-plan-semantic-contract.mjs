@@ -205,6 +205,8 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
     memory: ["each.value.memory", "each.value"],
     network_mode: ["each.value.networkMode", "each.value"],
     requires_compatibilities: ["each.value.requiresCompatibilities", "each.value"],
+    "runtime_platform[0].cpu_architecture": ["local.task_runtime_platform.cpu_architecture", "local.task_runtime_platform"],
+    "runtime_platform[0].operating_system_family": ["local.task_runtime_platform.operating_system_family", "local.task_runtime_platform"],
     tags: ["each.key", "local.backend_exec_tags", "local.tags"],
     task_role_arn: ["aws_iam_role.task", "each.key"],
   },
@@ -216,6 +218,8 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
     memory: ["each.value.memory", "each.value"],
     network_mode: ["each.value.networkMode", "each.value"],
     requires_compatibilities: ["each.value.requiresCompatibilities", "each.value"],
+    "runtime_platform[0].cpu_architecture": ["local.task_runtime_platform.cpu_architecture", "local.task_runtime_platform"],
+    "runtime_platform[0].operating_system_family": ["local.task_runtime_platform.operating_system_family", "local.task_runtime_platform"],
     tags: ["local.tags"],
     task_role_arn: ["var.stage_a_executor_task_role_arn"],
   },
@@ -227,6 +231,8 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
     memory: ["each.value", "each.value.definition", "each.value.definition.memory"],
     network_mode: ["each.value", "each.value.definition", "each.value.definition.networkMode"],
     requires_compatibilities: ["each.value", "each.value.definition", "each.value.definition.requiresCompatibilities"],
+    "runtime_platform[0].cpu_architecture": ["local.task_runtime_platform.cpu_architecture", "local.task_runtime_platform"],
+    "runtime_platform[0].operating_system_family": ["local.task_runtime_platform.operating_system_family", "local.task_runtime_platform"],
     tags: ["local.tags"],
     task_role_arn: ["aws_iam_role.task", "each.value", "each.value.kind"],
   },
@@ -238,6 +244,8 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
     memory: ["each.value", "each.value.definition", "each.value.definition.memory"],
     network_mode: ["each.value", "each.value.definition", "each.value.definition.networkMode"],
     requires_compatibilities: ["each.value", "each.value.definition", "each.value.definition.requiresCompatibilities"],
+    "runtime_platform[0].cpu_architecture": ["local.task_runtime_platform.cpu_architecture", "local.task_runtime_platform"],
+    "runtime_platform[0].operating_system_family": ["local.task_runtime_platform.operating_system_family", "local.task_runtime_platform"],
     tags: ["local.tags"],
     task_role_arn: ["var.stage_a_executor_task_role_arn"],
   },
@@ -329,10 +337,10 @@ const STATIC_CONFIGURATION_CONSTANTS = Object.freeze({
     name: STAGE_B.replayTable,
     ttl: [{ attribute_name: { constant_value: "expiresAt" }, enabled: { constant_value: true } }],
   },
-  "aws_ecs_task_definition.candidate": { runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: true },
-  "aws_ecs_task_definition.executor": { runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: true },
-  "aws_ecs_task_definition.candidate_retained": { runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: true },
-  "aws_ecs_task_definition.executor_retained": { runtime_platform: [{ cpu_architecture: { constant_value: "X86_64" }, operating_system_family: { constant_value: "LINUX" } }], skip_destroy: true },
+  "aws_ecs_task_definition.candidate": { skip_destroy: true },
+  "aws_ecs_task_definition.executor": { skip_destroy: true },
+  "aws_ecs_task_definition.candidate_retained": { skip_destroy: true },
+  "aws_ecs_task_definition.executor_retained": { skip_destroy: true },
   "aws_iam_policy.broker": { name: "mscqr-production-rls-approval-broker-runtime", path: "/" },
   "aws_iam_role.execution": { assume_role_policy: {} },
   "aws_iam_role.task": { assume_role_policy: {} },
@@ -344,6 +352,18 @@ const STATIC_CONFIGURATION_CONSTANTS = Object.freeze({
   "aws_lambda_function.broker": { function_name: "mscqr-production-rls-approval-broker", handler: "index.handler", publish: true, runtime: "nodejs24.x", timeout: 180 },
   "aws_lambda_permission.release_deployer": { action: "lambda:InvokeFunction", principal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", statement_id: "OnlyProtectedReleaseRoleMayInvokeReviewedAlias" },
 });
+
+const STAGE_B_RUNTIME_PLATFORM_EXPRESSION = Object.freeze([Object.freeze({
+  cpu_architecture: Object.freeze({ references: Object.freeze(["local.task_runtime_platform.cpu_architecture", "local.task_runtime_platform"]) }),
+  operating_system_family: Object.freeze({ references: Object.freeze(["local.task_runtime_platform.operating_system_family", "local.task_runtime_platform"]) }),
+})]);
+
+const STATIC_CONFIGURATION_EXPRESSIONS = Object.freeze(Object.fromEntries([
+  "aws_ecs_task_definition.candidate",
+  "aws_ecs_task_definition.executor",
+  "aws_ecs_task_definition.candidate_retained",
+  "aws_ecs_task_definition.executor_retained",
+].map((address) => [address, Object.freeze({ runtime_platform: STAGE_B_RUNTIME_PLATFORM_EXPRESSION })])));
 
 export function getStageBConfigurationReferenceRules() {
   return Object.fromEntries(Object.entries(CONFIGURATION_REFERENCE_RULES).map(([address, fields]) => [
@@ -541,6 +561,8 @@ function rootConfigurationResources(plan) {
 }
 
 function expectedStaticExpression(plan, address, field) {
+  const expression = STATIC_CONFIGURATION_EXPRESSIONS[address]?.[field];
+  if (expression !== undefined) return expression;
   const constants = STATIC_CONFIGURATION_CONSTANTS[address]?.[field];
   if (constants !== undefined) return isObject(constants) || Array.isArray(constants) ? constants : { constant_value: constants };
   const references = allowedConfigurationReferences(plan, address, field === "environment" ? "environment[0].variables" : field);
