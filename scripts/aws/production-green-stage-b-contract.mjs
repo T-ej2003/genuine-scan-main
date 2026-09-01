@@ -38,6 +38,13 @@ export const STAGE_B = Object.freeze({
     memorySize: 128,
     packageType: "Zip",
     ephemeralStorage: Object.freeze({ Size: 512 }),
+    loggingConfig: Object.freeze({
+      logFormat: "Text",
+      logGroup: "/aws/lambda/mscqr-production-rls-approval-broker",
+      systemLogLevel: "INFO",
+    }),
+    kmsKeyArn: null,
+    codeSigningConfigArn: null,
   }),
   frontendTaskDefinition: "mscqr-frontend:20",
 });
@@ -244,10 +251,58 @@ const exactKeys = (value, expected) => value && typeof value === "object" && !Ar
   && Object.keys(value).sort().join(",") === [...expected].sort().join(",");
 const emptyArray = (value) => value === undefined || Array.isArray(value) && value.length === 0;
 const emptyObject = (value) => value === undefined || value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
+const emptyString = (value) => value === undefined || value === null || value === "";
 const noVpcConfiguration = (value) => value === undefined || value === null || value && typeof value === "object" && !Array.isArray(value)
   && !value.VpcId && emptyArray(value.SubnetIds) && emptyArray(value.SecurityGroupIds) && !value.Ipv6AllowedForDualStack;
+const LAMBDA_CONFIGURATION_RESPONSE_FIELDS = Object.freeze([
+  "Architectures", "CapacityProviderConfig", "CodeSha256", "CodeSize", "ConfigSha256", "DeadLetterConfig", "Description",
+  "DurableConfig", "Environment", "EphemeralStorage", "FileSystemConfigs", "FunctionArn", "FunctionName", "Handler",
+  "ImageConfigResponse", "KMSKeyArn", "LastModified", "LastUpdateStatus", "LastUpdateStatusReason", "LastUpdateStatusReasonCode",
+  "Layers", "LoggingConfig", "MasterArn", "MemorySize", "PackageType", "RevisionId", "Role", "Runtime", "RuntimeVersionConfig",
+  "SigningJobArn", "SigningProfileVersionArn", "SnapStart", "State", "StateReason", "StateReasonCode", "TenancyConfig", "Timeout",
+  "TracingConfig", "Version", "VpcConfig",
+]);
+
+function assertStageBBrokerLambdaResponseShape(configuration) {
+  if (!configuration || typeof configuration !== "object" || Array.isArray(configuration)
+      || Object.keys(configuration).some((key) => !LAMBDA_CONFIGURATION_RESPONSE_FIELDS.includes(key))) {
+    throw new Error("Resolved broker Lambda configuration contains an unknown or malformed GetFunctionConfiguration field.");
+  }
+}
+
+function assertStageBBrokerLoggingConfig(value, expected) {
+  if (value === undefined || value === null) return;
+  if (typeof value !== "object" || Array.isArray(value)
+      || Object.keys(value).some((key) => !["ApplicationLogLevel", "LogFormat", "LogGroup", "SystemLogLevel"].includes(key))
+      || value.ApplicationLogLevel !== undefined
+      || value.LogFormat !== undefined && value.LogFormat !== expected.logFormat
+      || value.LogGroup !== undefined && value.LogGroup !== expected.logGroup
+      || value.SystemLogLevel !== undefined && value.SystemLogLevel !== expected.systemLogLevel) {
+    throw new Error("Resolved broker Lambda LoggingConfig is outside the reviewed default logging contract.");
+  }
+}
+
+function assertStageBBrokerLambdaDefaults(configuration, expected) {
+  if (!emptyString(configuration.KMSKeyArn) || !emptyString(configuration.CodeSigningConfigArn)
+      || !emptyObject(configuration.CapacityProviderConfig) || !emptyObject(configuration.DurableConfig)
+      || !emptyString(configuration.Description) || !emptyString(configuration.MasterArn)
+      || !emptyString(configuration.SigningJobArn) || !emptyString(configuration.SigningProfileVersionArn)
+      || configuration.State !== undefined && configuration.State !== "Active"
+      || configuration.LastUpdateStatus !== undefined && configuration.LastUpdateStatus !== "Successful"
+      || !emptyString(configuration.StateReason) || !emptyString(configuration.StateReasonCode)
+      || !emptyObject(configuration.TenancyConfig)
+      || configuration.RuntimeVersionConfig !== undefined && configuration.RuntimeVersionConfig !== null
+      && (typeof configuration.RuntimeVersionConfig !== "object" || Array.isArray(configuration.RuntimeVersionConfig)
+        || configuration.RuntimeVersionConfig.Error !== undefined
+        || configuration.RuntimeVersionConfig.RuntimeVersionArn !== undefined
+        && configuration.RuntimeVersionConfig.RuntimeVersionArn !== `arn:aws:lambda:${STAGE_B.region}::runtime:${expected.runtime}`)) {
+    throw new Error("Resolved broker Lambda configuration contains an unexpected AWS default or runtime state.");
+  }
+  assertStageBBrokerLoggingConfig(configuration.LoggingConfig, expected.loggingConfig);
+}
 
 export function assertStageBBrokerLambdaConfiguration({ configuration, alias, brokerPackageRawSha256 } = {}) {
+  assertStageBBrokerLambdaResponseShape(configuration);
   const broker = assertStageBBrokerConfigurationIdentity({ configuration, alias });
   const expected = STAGE_B.brokerLambdaConfiguration;
   const codeSha256 = configuration?.CodeSha256;
@@ -265,6 +320,7 @@ export function assertStageBBrokerLambdaConfiguration({ configuration, alias, br
       || configuration.TracingConfig !== undefined && configuration.TracingConfig?.Mode !== "PassThrough") {
     throw new Error("Resolved broker Lambda configuration is outside the reviewed executable contract.");
   }
+  assertStageBBrokerLambdaDefaults(configuration, expected);
   return Object.freeze({
     broker,
     codeSha256,
@@ -278,6 +334,8 @@ export function assertStageBBrokerLambdaConfiguration({ configuration, alias, br
       DeadLetterConfig: { ...(configuration.DeadLetterConfig || {}) }, VpcConfig: configuration.VpcConfig || null,
       ImageConfigResponse: configuration.ImageConfigResponse || {}, SnapStart: configuration.SnapStart || null,
       TracingConfig: configuration.TracingConfig || null,
+      LoggingConfig: configuration.LoggingConfig || null, KMSKeyArn: configuration.KMSKeyArn || null,
+      CodeSigningConfigArn: configuration.CodeSigningConfigArn || null,
     }),
   });
 }

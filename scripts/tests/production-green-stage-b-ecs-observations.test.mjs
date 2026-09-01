@@ -74,6 +74,23 @@ test("release-deployer broker observation rejects weighted reviewed-alias routin
   }) }), /routing|unreviewed/i);
 });
 
+test("final alias revalidation rejects routing changes and accepts canonical empty routing", () => {
+  for (const finalRouting of [
+    { AdditionalVersionWeights: { "5": 0.01 } },
+    { AdditionalVersionWeights: { "5": 0.01, "6": 0.02 } },
+    { unexpected: true },
+  ]) {
+    let reads = 0;
+    assert.throws(() => observeStageBBrokerApprovalBindings({ reader: brokerReader({
+      getAlias: () => ({ AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4", ...(reads++ === 2 ? { RoutingConfig: finalRouting } : {}) }),
+    }) }), /routing|unreviewed/i);
+  }
+  let reads = 0;
+  assert.doesNotThrow(() => observeStageBBrokerApprovalBindings({ reader: brokerReader({
+    getAlias: () => ({ AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4", ...(reads++ === 2 ? { RoutingConfig: { AdditionalVersionWeights: {} } } : {}) }),
+  }) }));
+});
+
 test("the source-controlled companion policy contains audit reads plus the Stage A cluster read and no mutation", () => {
   const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json", "utf8"));
   const actions = policy.Statement.flatMap((statement) => Array.isArray(statement.Action) ? statement.Action : [statement.Action]).filter((action) => action.startsWith("ecs:"));

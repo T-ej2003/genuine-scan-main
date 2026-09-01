@@ -168,6 +168,11 @@ test("production-shaped Lambda configuration fixture binds the reviewed executab
   assert.doesNotThrow(() => assertStageBBrokerLambdaConfiguration({ configuration, alias: live().alias, brokerPackageRawSha256: report.brokerPackageRawSha256 }));
 });
 
+test("canonical Lambda logging and disabled optional configuration defaults are accepted", () => {
+  const configuration = { ...live().configuration, LoggingConfig: { LogFormat: "Text", LogGroup: "/aws/lambda/mscqr-production-rls-approval-broker", SystemLogLevel: "INFO" }, KMSKeyArn: "" };
+  assert.doesNotThrow(() => assertStageBBrokerLambdaConfiguration({ configuration, alias: live().alias, brokerPackageRawSha256: report.brokerPackageRawSha256 }));
+});
+
 test("collector and Lambda configuration reject weighted reviewed-alias routing", () => {
   const alias = { ...live().alias, RoutingConfig: { AdditionalVersionWeights: { "5": 0.01 } } };
   assert.throws(() => assertStageBBrokerLambdaConfiguration({ configuration: live().configuration, alias, brokerPackageRawSha256: report.brokerPackageRawSha256 }), /routing|unreviewed/i);
@@ -177,7 +182,8 @@ test("collector and Lambda configuration reject weighted reviewed-alias routing"
 for (const [field, value] of [
   ["Role", "arn:aws:iam::368992683803:role/unreviewed"], ["Handler", "unreviewed.handler"], ["Runtime", "nodejs22.x"],
   ["Architectures", ["arm64"]], ["Timeout", 181], ["MemorySize", 256], ["PackageType", "Image"],
-  ["EphemeralStorage", { Size: 1024 }], ["Layers", ["arn:aws:lambda:eu-west-2:368992683803:layer:unreviewed:1"]],
+  ["EphemeralStorage", { Size: 1024 }], ["Layers", ["arn:aws:lambda:eu-west-2:368992683803:layer:unreviewed:1"]], ["LoggingConfig", { LogFormat: "JSON" }],
+  ["KMSKeyArn", "arn:aws:kms:eu-west-2:368992683803:key/unreviewed"], ["CodeSigningConfigArn", "arn:aws:lambda:eu-west-2:368992683803:code-signing-config:csc-unreviewed"],
   ["FileSystemConfigs", [{ Arn: "arn:aws:elasticfilesystem:eu-west-2:368992683803:access-point/fsap-unreviewed", LocalMountPath: "/mnt" }]],
   ["DeadLetterConfig", { TargetArn: "arn:aws:sqs:eu-west-2:368992683803:unreviewed" }],
   ["VpcConfig", { VpcId: "vpc-unreviewed", SubnetIds: ["subnet-unreviewed"], SecurityGroupIds: ["sg-unreviewed"] }],
@@ -221,10 +227,11 @@ test("attested report bytes cannot be replayed with a modified observation times
 });
 
 test("qualified broker observation rejects mixed or changed Lambda versions", () => {
-  const alias = { FunctionVersion: "4" };
-  assert.equal(assertStableBrokerAliasObservation({ initialAlias: alias, confirmedAlias: { FunctionVersion: "4" }, configuration: { Version: "4" } }), "4");
-  assert.throws(() => assertStableBrokerAliasObservation({ initialAlias: alias, confirmedAlias: { FunctionVersion: "5" }, configuration: { Version: "4" } }), /changed/);
-  assert.throws(() => assertStableBrokerAliasObservation({ initialAlias: alias, confirmedAlias: { FunctionVersion: "4" }, configuration: { Version: "5" } }), /changed/);
+  const alias = { AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4" };
+  const configuration = { FunctionArn: STAGE_B.brokerAliasArn, Version: "4" };
+  assert.equal(assertStableBrokerAliasObservation({ initialAlias: alias, confirmedAlias: alias, configuration }), "4");
+  assert.throws(() => assertStableBrokerAliasObservation({ initialAlias: alias, confirmedAlias: { ...alias, FunctionVersion: "5" }, configuration }), /changed|version/);
+  assert.throws(() => assertStableBrokerAliasObservation({ initialAlias: alias, confirmedAlias: alias, configuration: { ...configuration, Version: "5" } }), /changed|version/);
 });
 
 test("collector binds every exact broker task-definition revision to reviewed content", () => {

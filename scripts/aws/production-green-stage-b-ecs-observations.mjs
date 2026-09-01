@@ -205,7 +205,8 @@ export function observeStageBBrokerApprovalBindings({ reader, now = () => new Da
   assertStageBBrokerTaskDefinitionMap(taskDefinitionArns);
   const taskDefinitions = Object.fromEntries(Object.entries(taskDefinitionArns).map(([mode, arn]) => [mode, reader.describeTaskDefinition(arn)]));
   const finalAlias = reader.getAlias();
-  if (String(finalAlias?.FunctionVersion || "") !== broker.configurationVersion) {
+  const finalBroker = assertStageBBrokerConfigurationIdentity({ configuration, alias: finalAlias });
+  if (finalBroker.configurationVersion !== broker.configurationVersion) {
     throw new Error("Reviewed broker alias changed during the exact task-definition observation.");
   }
   const capturedAt = now();

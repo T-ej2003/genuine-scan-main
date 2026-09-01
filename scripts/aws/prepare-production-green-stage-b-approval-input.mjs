@@ -9,6 +9,7 @@ import {
   STAGE_B_APPROVAL_FIELDS,
   STAGE_B_APPROVAL_SCHEMA_VERSION,
   STAGE_B_RUNTIME_APPROVAL_AUTHORITY,
+  assertStageBBrokerConfigurationIdentity,
   canonicalJson,
   stageBApprovalIdForReleaseSha,
   validateStageBApprovalPayload,
@@ -86,10 +87,9 @@ function deriveOperatorFields(operator = {}, now = new Date(), randomUuid = cryp
 }
 
 export function assertStableBrokerAliasObservation({ initialAlias, confirmedAlias, configuration } = {}) {
-  const expectedVersion = String(initialAlias?.FunctionVersion || "");
-  if (!/^[1-9][0-9]*$/.test(expectedVersion)
-      || String(confirmedAlias?.FunctionVersion || "") !== expectedVersion
-      || String(configuration?.Version || "") !== expectedVersion) {
+  const expectedVersion = assertStageBBrokerConfigurationIdentity({ configuration, alias: initialAlias }).configurationVersion;
+  const confirmedVersion = assertStageBBrokerConfigurationIdentity({ configuration, alias: confirmedAlias }).configurationVersion;
+  if (confirmedVersion !== expectedVersion) {
     throw new Error("Reviewed broker alias changed during the immutable version observation.");
   }
   return expectedVersion;
