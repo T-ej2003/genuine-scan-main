@@ -37,7 +37,7 @@ export const validateOnboardingContract = (evidence) => {
   if (evidence.taskMarker !== true || evidence.ecsExecProof !== true) throw new Error("onboarding requires task marker and ECS Exec proof");
   for (const [name, value] of Object.entries({ serviceStable: evidence.serviceStable, targetTaskDefinitionMatch: evidence.targetTaskDefinitionMatch, targetImageDigestMatch: evidence.targetImageDigestMatch, health: evidence.health?.serviceHealthy })) requiredTrue(value, name);
   if (evidence.health.healthReleaseGitSha !== evidence.sourceSha) throw new Error("health release SHA does not match source SHA");
-  if (!["overlap-ready", "verified"].includes(evidence.rotationPhase)) throw new Error("onboarding requires an overlap-safe rotation phase");
+  if (evidence.rotationPhase !== "verified") throw new Error("onboarding requires a fully verified overlap phase");
   for (const name of ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "cookieCurrentSealOnly", "cookiePreviousOpenDuringOverlap", "artifactCurrentRuntimeVerify", "artifactHistoricalRuntimeVerify"]) requiredTrue(evidence.runtime?.[name], `runtime.${name}`);
   if ((evidence.runtime?.qrPreviousRuntimeVerify === true) === (evidence.runtime?.legacyQrKeypairUnrecoverable === true)) throw new Error("runtime QR historical continuity must be either verified or explicitly unrecoverable");
   for (const name of ["superAdminLogin", "mfa", "authMe", "refresh", "dashboardStats", "qrStats", "tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "dbReady", "redisReady", "objectStorageReady", "stageANetworkingReady"]) requiredTrue(evidence.acceptance?.[name], `acceptance.${name}`);

@@ -61,7 +61,7 @@ export async function runStrictOnboardingProbes({ probes, expected } = {}) {
     taskArn: expected.taskArn,
     rotationId: expected.rotationId,
     rotationStateSha256: expected.rotationStateSha256,
-    rotationPhase: "overlap-ready",
+    rotationPhase: "verified",
     serviceStable: checks.serviceStable,
     targetTaskDefinitionMatch: checks.taskDefinition,
     targetImageDigestMatch: checks.deployedImageDigest,

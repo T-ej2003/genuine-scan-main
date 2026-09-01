@@ -75,6 +75,10 @@ on:
         description: "SHA-256 of the exact readiness evidence JSON bytes."
         required: false
         type: string
+      rotation_fixture_sha256:
+        description: "SHA-256 of the private rotation runtime fixture retained by the MFA verifier."
+        required: false
+        type: string
       backend_recovery_current_task_definition_arn:
         description: "Exact unhealthy legacy backend task definition ARN."
         required: false
@@ -169,6 +173,7 @@ jobs:
           ROTATION_DEPLOYMENT_SHA: ${{ inputs.rotation_deployment_sha }}
           ROTATION_READINESS_EVIDENCE_JSON: ${{ inputs.rotation_readiness_evidence_json }}
           ROTATION_READINESS_EVIDENCE_SHA256: ${{ inputs.rotation_readiness_evidence_sha256 }}
+          ROTATION_FIXTURE_SHA256: ${{ inputs.rotation_fixture_sha256 }}
           BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN: ${{ inputs.backend_recovery_current_task_definition_arn }}
           BACKEND_RECOVERY_IMAGE_DIGEST: ${{ inputs.backend_recovery_image_digest }}
           BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON: ${{ inputs.backend_recovery_evidence_bundle_json }}
@@ -249,6 +254,10 @@ jobs:
                   exit 1
                 fi
               done
+              if [[ "$RELEASE_MODE" == "rotation-overlap" && ! "$ROTATION_FIXTURE_SHA256" =~ ^[a-f0-9]{64}$ ]]; then
+                echo "::error::Rotation overlap requires the exact private runtime fixture hash."
+                exit 1
+              fi
               state_file="$RUNNER_TEMP/rotation-state.json"
               printf '%s' "$ROTATION_STATE_JSON" > "$state_file"
               chmod 600 "$state_file"
@@ -803,17 +812,37 @@ jobs:
           ROTATION_ID: ${{ inputs.rotation_id }}
           ROTATION_STATE_SHA256: ${{ inputs.rotation_state_sha256 }}
           DEPLOYMENT_SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          ROTATION_DEPLOYMENT_SHA: ${{ inputs.rotation_deployment_sha }}
+          ROTATION_FIXTURE_SHA256: ${{ inputs.rotation_fixture_sha256 }}
+          PRODUCTION_ENVIRONMENT_APPROVAL_FILE: ${{ steps.production-environment-approval.outputs.evidence_file }}
+          PRODUCTION_ENVIRONMENT_APPROVAL_SHA256: ${{ steps.production-environment-approval.outputs.evidence_sha256 }}
+          OVERLAP_DEPLOYMENT_RECEIPT_FILE: ${{ runner.temp }}/production-overlap-deployment-receipt.json
         run: |
           set -euo pipefail
+          receipt_args=()
+          if [[ "${{ inputs.release_mode }}" == "rotation-overlap" ]]; then
+            receipt_args=(--rotation-fixture-sha256 "$ROTATION_FIXTURE_SHA256" --environment-approval "$PRODUCTION_ENVIRONMENT_APPROVAL_FILE" --environment-approval-sha256 "$PRODUCTION_ENVIRONMENT_APPROVAL_SHA256" --deployment-receipt-output "$OVERLAP_DEPLOYMENT_RECEIPT_FILE")
+          fi
           node scripts/aws/run-production-cutover.mjs \
             --mode rotation-overlap \
+            --transition-mode "${{ inputs.release_mode }}" \
             --credential-source github-oidc-release-deployer \
             --source-sha "$DEPLOYMENT_SOURCE_SHA" \
             --rotation-id "$ROTATION_ID" \
             --rotation-state-sha256 "$ROTATION_STATE_SHA256" \
             --task-definition "$EXISTING_TASK_DEFINITION_ARN" \
             --readiness-file "$OVERLAP_READINESS_EVIDENCE_FILE" \
-            --readiness-sha256 "$OVERLAP_READINESS_EVIDENCE_SHA256"
+            --readiness-sha256 "$OVERLAP_READINESS_EVIDENCE_SHA256" \
+            "${receipt_args[@]}"
+
+      - name: Upload overlap deployment receipt
+        if: ${{ inputs.release_mode == 'rotation-overlap' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-overlap-deployment-receipt
+          path: ${{ runner.temp }}/production-overlap-deployment-receipt.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Prepare governed legacy backend health recovery
         id: backend-recovery

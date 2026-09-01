@@ -538,6 +538,10 @@ const verify = async (context) => {
   const stateFile = statePath(values);
   const state = readCurrentState(context);
   if (!["overlap-deploy-required", "overlap-ready"].includes(state.phase)) throw new Error("rotation must require an overlap deployment before verification");
+  const preparedStateSha256 = state.phase === "overlap-ready"
+    ? state.verification?.preparedStateSha256
+    : sha256(readFileSync(stateFile));
+  if (!/^[a-f0-9]{64}$/.test(preparedStateSha256 || "")) throw new Error("rotation overlap-ready state is missing its prepared predecessor binding");
   const proof = validateRuntimeProof({ file, config, phase: "overlap", expectedDeploymentSha: config.overlapDeploymentSha, clock: clockOf(context), historicalContinuity: qrHistoricalContinuity(state) });
   const overlapReadyAt = proof.observedAt;
   const cleanupEligibleAt = deriveProductionRotationCleanupEligibleAt(overlapReadyAt, state.minimumGraceSeconds);
@@ -547,10 +551,13 @@ const verify = async (context) => {
   state.overlapReadyAt = state.overlapReadyAt || overlapReadyAt;
   state.cleanupEligibleAt = state.cleanupEligibleAt || cleanupEligibleAt;
   state.overlapRuntime = proof;
+  state.verification = { ...state.verification, preparedStateSha256, runtimeInvocationRef: proof.runtimeInvocationRef };
   persist(context, state);
   state.phase = "verified";
   state.verifiedAt = nowIso(clockOf(context));
   state.verification = {
+    ...state.verification,
+    preparedStateSha256,
     runtimeInvocationRef: proof.runtimeInvocationRef,
     jwtCurrentRuntimeVerify: true,
     jwtPreviousRuntimeVerify: true,

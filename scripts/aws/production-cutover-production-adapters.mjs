@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { lstatSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createAwsArtifactSigningAdapter } from "./production-artifact-signing-secrets-adapter.mjs";
@@ -10,14 +10,16 @@ import { createProductionRuntimeInventoryAdapter } from "./production-runtime-in
 import { createProductionPreDeploymentInventoryAdapter } from "./production-predeployment-inventory-adapter.mjs";
 import { createProductionRotationPrepareAdapter } from "./production-rotation-prepare-adapter.mjs";
 import { createProductionInteractiveEcsExecRunner, extractMarkedJson } from "./production-ecs-exec-command.mjs";
+import { createLazyProductionVerifierEcsAdapter, productionOverlapRuntimeProofCommand } from "./production-cutover-verifier-primitives.mjs";
 import { establishReleaseDeployerIdentity, establishVerifierIdentity, createAwsStsRunner } from "./production-identity-adapters.mjs";
 import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
-import { assertSelectedTargetTask, selectTargetTask } from "./ecs-exec-target-selection.mjs";
+import { assertSelectedTargetTask, assertTaskBelongsToExactPrimaryDeployment, selectTargetTask } from "./ecs-exec-target-selection.mjs";
 import { createStrictHttpOnboardingAdapter } from "../security/production-strict-onboarding-http.mjs";
 import { assertOnboardingPaths } from "../security/production-onboarding-contract.mjs";
 import { promptProductionMfaCode } from "../security/production-interactive-mfa-provider.mjs";
 import { resolveSmokeAdminMfaCode } from "../lib/staging-smoke-totp.mjs";
 import { persistOverlapReadinessEvidence } from "./produce-production-overlap-readiness-evidence.mjs";
+import { readAndAssertReadyForOverlapDeployment } from "./production-overlap-readiness-contract.mjs";
 import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH } from "./production-artifact-signing-bootstrap.mjs";
 import { assertStageBCanonicalTfvarsFile } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
@@ -156,34 +158,6 @@ export function createProductionOverlapDeploymentAdapter({ run, runScript = exec
   };
 }
 
-function createEcsAdapter(run, interactive) {
-  return {
-    describeService: async () => parseJson(run, ["ecs", "describe-services", "--cluster", CLUSTER, "--services", SERVICE]).services?.[0],
-    listTasks: async () => parseJson(run, ["ecs", "list-tasks", "--cluster", CLUSTER, "--service-name", SERVICE, "--desired-status", "RUNNING"]),
-    describeTasks: async ({ taskArns, includeTags }) => parseJson(run, ["ecs", "describe-tasks", "--cluster", CLUSTER, "--tasks", ...taskArns, ...(includeTags ? ["--include", "TAGS"] : [])]),
-    executeCommand: async ({ taskArn, container, command, inputFile }) => interactive
-      ? interactive({ cluster: CLUSTER, taskArn, container, command, inputFile })
-      : parseJson(run, ["ecs", "execute-command", "--cluster", CLUSTER, "--task", taskArn, "--container", container, "--interactive", "--command", command]),
-  };
-}
-
-function createLazyEcsAdapter(getRun, getInteractive) {
-  return new Proxy({}, { get: (_target, property) => (...args) => createEcsAdapter(getRun(), getInteractive?.())[property](...args) });
-}
-
-const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
-const runtimeProofCommand = ({ sourceSha, rotationId, deploymentSha, healthUrl, invocationRef }) => {
-  if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "") || !/^https:\/\//.test(healthUrl || "")) throw new Error("Runtime proof identity is invalid.");
-  const proofPath = `/app/uploads/.mscqr-rotation-proof-${rotationId}.json`;
-  return [
-    "stty -echo",
-    `trap 'rm -f ${quote(proofPath)}; stty echo' EXIT HUP INT TERM`,
-    `ROTATION_RUNTIME_PHASE=overlap ROTATION_ID=${quote(rotationId)} ROTATION_DEPLOYMENT_SHA=${quote(deploymentSha || sourceSha)} ROTATION_RUNTIME_INVOCATION_REF=${quote(invocationRef || `cutover-${rotationId}`)} node /app/scripts/security/verify-production-rotation-runtime.mjs --fixture-stdin --output ${quote(proofPath)} --health-url ${quote(healthUrl)} --expected-release-sha ${quote(sourceSha)}`,
-    "status=$?",
-    `if [ \"$status\" -eq 0 ]; then printf '\\nMSCQR_PROOF_BEGIN\\n'; cat ${quote(proofPath)}; printf '\\nMSCQR_PROOF_END\\n'; fi`,
-    "exit $status",
-  ].join("; ");
-};
 
 export function createProductionRotationInfrastructureAdapter({ run = execFileSync, releaseProfile, credentialSource = PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, root = path.resolve("infra/aws/terraform/production-green-stage-b"), config } = {}) {
   if (!config?.stageBTfvarsPath || !config.stageBTfvarsBindingReportPath || !config.stageBTfvarsBindingReportSha256 || !config.rotationTerraformInputFile || !config.rotationTerraformPlanFile || !config.stageBTerraformDataDir) throw new Error("Canonical rotation Terraform inputs are required.");
@@ -229,6 +203,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
   if (releaseProfile !== "mscqr-production-release-deployer" || verifierProfile !== "mscqr-production-ecs-exec-verifier") throw new Error("Production cutover adapter profiles do not match the asymmetric identity contract.");
   if (typeof createCommandRunner !== "function") throw new Error("Rebaseline authorization adapters are invalid.");
   const releaseRun = createCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: releaseProfile });
+  const commandRun = releaseRun;
   const proveProtectedDescendant = ({ ancestorSha, descendantSha }) => {
     try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; }
   };
@@ -257,14 +232,14 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       } else throw new Error("Rebaseline runtime authority variant is missing or unsupported.");
       return {
         revalidate: async () => {
-          const verified = verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization, ...(runtime.runtimeVariant === "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME" ? { recoveryEnvelope: runtime.recoveryEnvelope, originalPreparation: runtime.originalPreparation, imageAuthorization: runtime.imageAuthorization, proveDescendant: proveProtectedDescendant } : {}) });
+          const verified = verifyLiveProductionDualSlotRebaselineWithRunner({ run: commandRun, bindings, authorization, ...(runtime.runtimeVariant === "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME" ? { recoveryEnvelope: runtime.recoveryEnvelope, originalPreparation: runtime.originalPreparation, imageAuthorization: runtime.imageAuthorization, proveDescendant: proveProtectedDescendant } : {}) });
           if (verified.livePostWriteSha256 !== config.livePostWriteSha256) throw new Error("Live rebaseline post-write state changed after runtime preparation.");
           return verified;
         },
       };
     })()
     : undefined;
-  const releasePreflightAttestationVerifier = verifyReleasePreflightAttestationSignature || createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun });
+  const releasePreflightAttestationVerifier = verifyReleasePreflightAttestationSignature || createReleasePreflightCheckerTrustSignatureVerifier({ releaseRun: commandRun });
   const releaseSts = createAwsStsRunner({ profile: releaseProfile });
   const verifierSts = createAwsStsRunner({ profile: config.bootstrapProfile || verifierProfile });
   let verifierSession = null;
@@ -273,7 +248,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     return verifierSession;
   };
   const verifierInteractive = () => createProductionInteractiveEcsExecRunner({ spawn: requireVerifierSession().spawn });
-  const verifierEcs = createLazyEcsAdapter(() => requireVerifierSession().run, verifierInteractive);
+  const verifierEcs = createLazyProductionVerifierEcsAdapter(() => requireVerifierSession().run, verifierInteractive);
   let latestEcsExecProof = null;
   const runtimeReadback = async ({ imageDigest, taskDefinitionArn, taskArn }) => {
     const service = await verifierEcs.describeService();
@@ -333,7 +308,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     });
   };
   const artifact = createAwsArtifactSigningAdapter({
-    run: async (args) => releaseRun(args),
+    run: async (args) => commandRun(args),
     sourceSha,
     approvedBindings: config.artifactBindingFile,
     approvedBindingsSha256: config.artifactBindingSha256,
@@ -348,21 +323,21 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     backendArgs: config.stageABackendArgs || [],
     sourceSha,
     region: REGION,
-    run: async (args) => releaseRun(args),
-    describeIngress: async ({ endpointSecurityGroupId, runtimeSecurityGroupId }) => describeStageAIngress({ run: releaseRun, endpointSecurityGroupId, runtimeSecurityGroupId }),
+    run: async (args) => commandRun(args),
+    describeIngress: async ({ endpointSecurityGroupId, runtimeSecurityGroupId }) => describeStageAIngress({ run: commandRun, endpointSecurityGroupId, runtimeSecurityGroupId }),
   });
-  const checkerChain = createLiveCheckerChainAssertionAdapter({ run: releaseRun });
-  const overlapRegistration = createAwsOverlapTaskRegistrationAdapter({ run: async (args) => releaseRun(args) });
+  const checkerChain = createLiveCheckerChainAssertionAdapter({ run: commandRun });
+  const overlapRegistration = createAwsOverlapTaskRegistrationAdapter({ run: async (args) => commandRun(args) });
   const rotationInfrastructure = createProductionRotationInfrastructureAdapter({ run: execFileSync, releaseProfile, credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, config });
   const inventoryExecute = createProductionRuntimeInventoryAdapter({
     ecs: verifierEcs,
     getVerifierSession: requireVerifierSession,
     expected: { expectedClusterArn: CLUSTER_ARN, expectedTaskDefinitionArn: config.inventoryTaskDefinitionArn || config.expectedCurrentTaskDefinitionArn, expectedImageDigest: config.backendImageDigest, serviceName: SERVICE, containerName: CONTAINER },
   });
-  const preDeploymentInventory = createProductionPreDeploymentInventoryAdapter({ run: async (args) => releaseRun(args), sourceSha, imageDigest: config.overlapTaskInput?.backendImage, config });
+  const preDeploymentInventory = createProductionPreDeploymentInventoryAdapter({ run: async (args) => commandRun(args), sourceSha, imageDigest: config.overlapTaskInput?.backendImage, config });
   return {
     iam: { report: readIamEvidence(), reconcile: async () => ({ mutationCount: 0 }) },
-    imageAuthorizationValidation: { verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }) },
+    imageAuthorizationValidation: { verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => commandRun(args) }) },
     checkerTrustEvidence: readCheckerTrustEvidence(),
     checkerChain,
     identities: {
@@ -384,34 +359,36 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
           const local = readAuthenticatedStageARecoverySources({ stageAStatePath: config.stageAStatePath, stageAHandoffPath: config.stageAHandoffPath, stageBStatePath: config.stageBStatePath, repositoryRoot: process.cwd() });
           const currentStageB = readStageBPrivateFileBytes({ filePath: config.currentStageBStatePath, repositoryRoot: process.cwd(), label: "Current Stage-B state" });
           if (currentStageB.sha256 !== config.currentStageBStateSha256) throw new Error("Current Stage-B state changed after runtime preparation.");
-          const remoteStageABytes = Buffer.from(releaseRun(["s3", "cp", STAGE_A_STATE_URI, "-"]));
-          const remoteStageBBytes = Buffer.from(releaseRun(["s3", "cp", STAGE_B_STATE_URI, "-"]));
+          const remoteStageABytes = Buffer.from(commandRun(["s3", "cp", STAGE_A_STATE_URI, "-"]));
+          const remoteStageBBytes = Buffer.from(commandRun(["s3", "cp", STAGE_B_STATE_URI, "-"]));
           const authenticated = {
             ...local,
             stageAState: { ...local.stageAState, bytes: remoteStageABytes, value: parseAuthenticatedStateBytes(remoteStageABytes) },
           };
           assertAuthenticatedCurrentStageBState(parseAuthenticatedStateBytes(remoteStageBBytes), parseAuthenticatedStateBytes(currentStageB.bytes), { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a" });
           const stageAContract = assertStageAStateContract(authenticated.stageAState.value, { phase: "POST_APPLY" });
-          return { ...authenticated, ingress: describeStageAIngress({ run: releaseRun, endpointSecurityGroupId: stageAContract.endpointSecurityGroupId, runtimeSecurityGroupId: stageAContract.executorSecurityGroupId }) };
+          return { ...authenticated, ingress: describeStageAIngress({ run: commandRun, endpointSecurityGroupId: stageAContract.endpointSecurityGroupId, runtimeSecurityGroupId: stageAContract.executorSecurityGroupId }) };
         },
       }
       : { adapter: stageA, endpointSecurityGroupId: config.endpointSecurityGroupId, runtimeSecurityGroupId: config.runtimeSecurityGroupId },
     artifactSigning: artifact,
     rebaseline,
-    overlapTask: { input: config.overlapTaskInput, register: overlapRegistration, describe: async (arn) => parseJson(releaseRun, ["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]).taskDefinition },
+    overlapTask: { input: config.overlapTaskInput, register: overlapRegistration, describe: async (arn) => parseJson(commandRun, ["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]).taskDefinition },
     preDeploymentInventory: { execute: async ({ rotationId: currentRotationId }) => preDeploymentInventory.run({ rotationId: currentRotationId }) },
     inventory: { execute: inventoryExecute, taskDefinitionArn: config.inventoryTaskDefinitionArn || config.expectedCurrentTaskDefinitionArn },
     rotationPrepare: createProductionRotationPrepareAdapter({
-      run: async (args) => releaseRun(args),
+      run: async (args) => commandRun(args),
       coordinator: config.rotationCoordinator || "backend/scripts/security/rotate-production-signing-material.mjs",
       configFile: config.rotationConfigFile,
       configSha256: runtimeConfigSha256,
       stateFile: config.rotationStateFile,
       fixtureFile: config.rotationFixtureFile,
+      runtimeProofFile: config.overlapRuntimeProofFile,
     }),
     rotationInfrastructure,
     readiness: config.readinessEvidenceFile ? {
       persist: async (evidence) => persistOverlapReadinessEvidence({ outputPath: config.readinessEvidenceFile, evidence }),
+      authenticate: async ({ sourceSha: readinessSourceSha, rotationId: readinessRotationId, rotationStateSha256, evidenceSha256 }) => readAndAssertReadyForOverlapDeployment({ filePath: config.readinessEvidenceFile, evidenceSha256, sourceSha: readinessSourceSha, rotationId: readinessRotationId, rotationStateSha256 }),
     } : undefined,
     deployOverlap: createProductionOverlapDeploymentAdapter({ run: releaseRun, profile: releaseProfile, credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, readinessFile: config.readinessEvidenceFile, sourceSha, rotationId, imageDigest: config.backendImageDigest, expectedCurrentTaskDefinitionArn: config.expectedCurrentTaskDefinitionArn, versionUrl: config.rotationHealthUrl, expectedGitSha: sourceSha }),
     postDeploy: { run: async ({ taskDefinitionArn, verifierSession: suppliedVerifierSession }) => {
@@ -430,14 +407,26 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       const result = await verifierEcs.describeTasks({ taskArns: [taskArn], includeTags: true });
       const task = result.tasks?.[0];
       assertSelectedTargetTask({ task, expectedClusterArn: CLUSTER_ARN, expectedTaskDefinitionArn: taskDefinitionArn, expectedImageDigest: imageDigest, serviceName: SERVICE, containerName: CONTAINER, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });
+      const service = await verifierEcs.describeService();
+      const primary = assertTaskBelongsToExactPrimaryDeployment({ service, task, expectedTaskDefinitionArn: taskDefinitionArn });
       const fixtureBefore = readStageBPrivateFileBytes({ filePath: config.runtimeProofFixtureFile, repositoryRoot: process.cwd(), label: "Rotation runtime fixture" });
       if (fixtureBefore.sha256 !== rotationFixtureSha256) throw new Error("Rotation runtime fixture changed after preparation.");
-      const transcript = await verifierEcs.executeCommand({ taskArn, container: CONTAINER, inputFile: config.runtimeProofFixtureFile, command: runtimeProofCommand({ sourceSha, rotationId, deploymentSha: config.rotationDeploymentSha, healthUrl: config.rotationHealthUrl || `${config.onboardingBaseUrl}/api/health`, invocationRef: config.runtimeInvocationRef }) });
+      if (lstatSync(config.overlapRuntimeProofFile, { throwIfNoEntry: false })) {
+        const captured = readStageBPrivateFileBytes({ filePath: config.overlapRuntimeProofFile, repositoryRoot: process.cwd(), label: "Overlap runtime proof" });
+        const proof = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes));
+        const expected = { rotationId, phase: "overlap", deploymentSha: config.rotationDeploymentSha || sourceSha, healthReleaseGitSha: sourceSha, targetTaskArn: task.taskArn, selectedTaskArn: task.taskArn, matchingTaskCount: 1, targetTaskDefinitionArn: task.taskDefinitionArn, targetImageDigest: imageDigest, expectedReleaseSha: sourceSha, targetService: SERVICE, targetCluster: CLUSTER, targetDeploymentId: primary.id };
+        for (const [field, value] of Object.entries(expected)) if (proof[field] !== value) throw new Error(`Persisted overlap runtime proof ${field} binding is wrong.`);
+        if (proof.artifactCurrentRuntimeVerify !== true || proof.artifactHistoricalRuntimeVerify !== true) throw new Error("Persisted overlap runtime proof is incomplete.");
+        latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(proof))), proof, resumed: true };
+        return latestEcsExecProof;
+      }
+      const transcript = await verifierEcs.executeCommand({ taskArn, container: CONTAINER, inputFile: config.runtimeProofFixtureFile, command: productionOverlapRuntimeProofCommand({ sourceSha, rotationId, deploymentSha: config.rotationDeploymentSha, healthUrl: config.rotationHealthUrl || `${config.onboardingBaseUrl}/api/health`, invocationRef: config.runtimeInvocationRef }) });
       const fixtureAfter = readStageBPrivateFileBytes({ filePath: config.runtimeProofFixtureFile, repositoryRoot: process.cwd(), label: "Rotation runtime fixture" });
       if (fixtureAfter.sha256 !== rotationFixtureSha256) throw new Error("Rotation runtime fixture changed during verification.");
       const proof = extractMarkedJson(transcript, "MSCQR_PROOF_BEGIN", "MSCQR_PROOF_END");
       if (proof.rotationId !== rotationId || proof.phase !== "overlap" || proof.deploymentSha !== (config.rotationDeploymentSha || sourceSha) || proof.healthReleaseGitSha !== sourceSha || proof.artifactCurrentRuntimeVerify !== true || proof.artifactHistoricalRuntimeVerify !== true) throw new Error("ECS Exec runtime proof is not bound to the exact deployment.");
-      latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(proof))), proof };
+      const boundProof = { ...proof, targetTaskArn: task.taskArn, selectedTaskArn: task.taskArn, matchingTaskCount: 1, targetTaskDefinitionArn: task.taskDefinitionArn, targetImageDigest: imageDigest, expectedReleaseSha: sourceSha, targetService: SERVICE, targetCluster: CLUSTER, targetDeploymentId: primary.id };
+      latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(boundProof))), proof: boundProof };
       return latestEcsExecProof;
     } },
     onboarding: { run: createStrictHttpOnboardingAdapter({

@@ -10,6 +10,9 @@ test("overlap-safe deployment can satisfy onboarding without claiming closure", 
   assert.equal(validateOnboardingContract(overlap), true);
   assert.throws(() => validateRotationClosedContract(overlap), /cleanup|grace/i);
 });
+test("overlap-ready cannot claim strict onboarding before coordinator verification", () => {
+  assert.throws(() => validateOnboardingContract({ ...overlap, rotationPhase: "overlap-ready" }), /fully verified overlap phase/);
+});
 test("onboarding fails closed for wrong release or missing runtime proof", () => {
   assert.throws(() => validateOnboardingContract({ ...overlap, health: { ...overlap.health, healthReleaseGitSha: "c".repeat(40) } }), /health release/i);
   assert.throws(() => validateOnboardingContract({ ...overlap, runtime: { ...overlap.runtime, artifactHistoricalRuntimeVerify: false } }), /artifactHistoricalRuntimeVerify/);

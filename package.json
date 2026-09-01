@@ -96,6 +96,7 @@
     "stage-b:deployment-closure:production:strict-final-rotation": "PRODUCTION_ACTIVATION_ROTATION_CONTRACT=STRICT_FINAL_ROTATION npm run stage-b:deployment-closure:production --",
     "stage-b:prepare-cutover-runtime": "node scripts/aws/prepare-production-cutover-runtime.mjs",
     "stage-b:run-cutover-operator": "node scripts/aws/run-production-cutover-operator.mjs",
+    "stage-b:verify-overlap": "node scripts/aws/verify-production-cutover-overlap.mjs",
     "stage-b:bootstrap-initial-dual-slot": "node scripts/aws/bootstrap-production-initial-dual-slot.mjs",
     "stage-b:rebaseline-dual-slot": "node scripts/aws/rebaseline-production-dual-slot.mjs",
     "stage-b:authorize-dual-slot-rebaseline": "node scripts/aws/authorize-production-dual-slot-rebaseline.mjs",

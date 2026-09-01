@@ -18,6 +18,7 @@ import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-
 
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
+export const PRODUCTION_CUTOVER_MODE = Object.freeze({ FULL: "FULL", PREPARE_OVERLAP: "PREPARE_OVERLAP" });
 const OVERLAP_SECRET_KEYS = Object.freeze([
   "JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT",
   "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION",
@@ -166,9 +167,30 @@ export async function runGovernedOverlapDeployment({ readiness, sourceSha, rotat
 // its authorization here prevents the CLI/workflow from becoming a second
 // deployment implementation.
 export async function runProductionCutoverOverlapControlPlane(input = {}) {
-  const { readiness, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256, deployOverlap } = input;
+  const { readiness, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256, deployOverlap, deploymentReceipt, transitionMode } = input;
+  if (!new Set(["rotation-overlap", "rotation-cleanup"]).has(transitionMode)) throw new Error("Governed rotation transition mode is required.");
   const deployment = await runGovernedOverlapDeployment({ readiness, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256, deployOverlap });
-  return { readyForOverlapDeployment: true, deployment, mutationSequence: [{ name: "M6_ECS_UPDATE_SERVICE", count: deployment.updateServiceCount, payloadSha256: sha(deployment.mutationPayload || deployment) }] };
+  if (!deploymentReceipt) {
+    if (transitionMode === "rotation-overlap") throw new Error("Governed overlap deployment requires authenticated receipt persistence.");
+    return { terminalState: "DEPLOYED", deployment, mutationSequence: [{ name: "M6_ECS_UPDATE_SERVICE", count: deployment.updateServiceCount, payloadSha256: sha(deployment.mutationPayload || deployment) }] };
+  }
+  if (typeof deploymentReceipt.persist !== "function" || typeof deploymentReceipt.authenticate !== "function") throw new Error("Governed overlap deployment receipt adapter is incomplete.");
+  const persistedReceipt = await deploymentReceipt.persist({ deployment, readiness, readinessSha256, rotationStateSha256, taskDefinitionArn });
+  const authenticatedReceipt = await deploymentReceipt.authenticate(persistedReceipt);
+  if (authenticatedReceipt?.terminalState !== "DEPLOYED_PENDING_VERIFICATION" || authenticatedReceipt.receiptSha256 !== persistedReceipt.receiptSha256) throw new Error("Overlap deployment receipt authentication failed.");
+  return { terminalState: "DEPLOYED_PENDING_VERIFICATION", deploymentReceipt: authenticatedReceipt, deployment, mutationSequence: [{ name: "M6_ECS_UPDATE_SERVICE", count: deployment.updateServiceCount, payloadSha256: sha(deployment.mutationPayload || deployment) }] };
+}
+
+export async function runPostOverlapVerification({ deployment, sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn, expectedImageDigest, verifierSession, postDeploy, ecsExec, rotationVerify } = {}) {
+  if (!deployment || !postDeploy?.run || !ecsExec?.run || !rotationVerify?.run) throw new Error("Post-overlap verification adapters are incomplete.");
+  const resumed = deployment.resumePersistedProof === true || deployment.resumeVerified === true;
+  const deployed = resumed ? deployment.persistedDeployed : await postDeploy.run({ deployment, taskDefinitionArn, verifierSession });
+  if (deployed?.valid !== true || deployed.taskDefinitionArn !== taskDefinitionArn || deployed.imageDigest !== expectedImageDigest || deployed.taskTag !== "MSCQRExecTarget=production-backend" || typeof deployed.taskArn !== "string") throw new Error("Replacement task did not converge to the reviewed task-definition, digest, and execution marker.");
+  const execProof = resumed ? deployment.persistedExecProof : await ecsExec.run({ taskArn: deployed.taskArn, taskDefinitionArn, imageDigest: deployed.imageDigest, sourceSha, rotationId, rotationFixtureSha256, verifierSession });
+  if (execProof?.valid !== true) throw new Error("ECS Exec runtime proof is invalid.");
+  const verified = await rotationVerify.run({ execProof, sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn, imageDigest: deployed.imageDigest, taskArn: deployed.taskArn });
+  if (verified?.terminalState !== "VERIFIED_OVERLAP" || verified.rotationId !== rotationId || !SHA256.test(verified.rotationStateSha256 || "") || !verified.overlapReadyAt || !verified.cleanupEligibleAt) throw new Error("Coordinator overlap verification did not reach VERIFIED_OVERLAP.");
+  return { terminalState: "VERIFIED_OVERLAP", deployment, deployed, execProof, verified };
 }
 
 function recordMutation(mutations, name, result) {
@@ -255,7 +277,8 @@ function assertCheckerTrustEvidence(evidence, sourceSha) {
  * Every adapter is required to return sanitized, hash-bound evidence.
  */
 export async function runProductionCutoverControlPlane(input = {}) {
-  const { sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, checkerTrustEvidence, identities: suppliedIdentities, verifyRootDropSignature, checkerChain, stageA, artifactSigning, rebaseline, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  const { mode = PRODUCTION_CUTOVER_MODE.FULL, sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, checkerTrustEvidence, identities: suppliedIdentities, verifyRootDropSignature, checkerChain, stageA, artifactSigning, rebaseline, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  if (!Object.values(PRODUCTION_CUTOVER_MODE).includes(mode)) throw new Error("Production cutover mode is invalid.");
   if (!SHA40.test(sourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
   const mutations = [];
   const results = { protectedMain: { valid: true, sourceSha, evidenceSha256: imageAuthorization?.evidenceSha256 } , imageAuthorization };
@@ -380,19 +403,21 @@ export async function runProductionCutoverControlPlane(input = {}) {
   if (persistedReadiness && !SHA256.test(persistedReadiness.evidenceSha256 || "")) throw new Error("Persisted readiness evidence hash is invalid.");
   results.readiness = readinessEvidence;
 
+  if (mode === PRODUCTION_CUTOVER_MODE.PREPARE_OVERLAP) {
+    if (!persistedReadiness?.outputPath || typeof readiness?.authenticate !== "function") throw new Error("Prepare-overlap requires persisted readiness authentication.");
+    const authenticatedReadiness = await readiness.authenticate({ sourceSha, rotationId, rotationStateSha256, evidenceSha256: persistedReadiness.evidenceSha256 });
+    if (authenticatedReadiness?.readyForOverlapDeployment !== true || authenticatedReadiness.evidenceSha256 !== persistedReadiness.evidenceSha256 || canonicalSha256(authenticatedReadiness.evidence) !== canonicalSha256(readinessEvidence)) throw new Error("Persisted readiness authentication failed.");
+    return { readyForOverlapDeployment: true, sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn: task.taskDefinitionArn, readiness: readinessEvidence, readinessFile: persistedReadiness.outputPath, readinessSha256: persistedReadiness.evidenceSha256, mutationSequence: mutations, results };
+  }
+
   const deployment = await runGovernedOverlapDeployment({ readiness: readinessEvidence, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn: task.taskDefinitionArn, readinessSha256: persistedReadiness?.evidenceSha256, deployOverlap });
   recordMutation(mutations, "M6_ECS_UPDATE_SERVICE", deployment);
   results.deployment = { ...deployment, sourceSha, rotationId, rotationStateSha256, ecsUpdateServiceCount: deployment.updateServiceCount };
 
-  const deployed = await postDeploy.run({ deployment, taskDefinitionArn: task.taskDefinitionArn, verifierSession });
-  if (deployed?.valid !== true) throw new Error("Post-deployment verification is invalid.");
   const expectedImageDigest = task.taskDefinition.containerDefinitions?.find(({ name }) => name === "backend")?.image?.split("@").at(-1);
-  if (deployed.taskDefinitionArn !== task.taskDefinitionArn || deployed.imageDigest !== expectedImageDigest || deployed.taskTag !== "MSCQRExecTarget=production-backend" || typeof deployed.taskArn !== "string") throw new Error("Replacement task did not converge to the reviewed task-definition, digest, and execution marker.");
+  const overlapVerification = await runPostOverlapVerification({ deployment, sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn: task.taskDefinitionArn, expectedImageDigest, verifierSession, postDeploy, ecsExec, rotationVerify: rotationPrepare?.verifyOverlap });
+  const { deployed, execProof } = overlapVerification;
   results.postDeploy = { ...deployed, sourceSha, rotationId, selectedTaskArn: deployed.taskArn, propagateTags: deployment.propagateTags, updateServiceCount: deployment.updateServiceCount };
-
-  let execProof = { valid: true, evidenceRef: "ecs-exec:rehearsal", evidenceSha256: sha({ taskArn: deployed.taskArn }) };
-  if (ecsExec?.run) execProof = await ecsExec.run({ taskArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, sourceSha, rotationId, rotationFixtureSha256, verifierSession });
-  if (execProof?.valid !== true) throw new Error("ECS Exec runtime proof is invalid.");
   results.ecsExec = { ...execProof, sourceSha, rotationId, taskArn: deployed.taskArn, selectedTaskArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, taskTag: "MSCQRExecTarget=production-backend", targetTaskArn: deployed.taskArn, revalidatedArn: deployed.taskArn, runtimeProof: true };
   results.ecsExecSelection = { valid: true, evidenceRef: execProof.evidenceRef, evidenceSha256: execProof.evidenceSha256, sourceSha, rotationId, taskArn: deployed.taskArn, selectedTaskArn: deployed.taskArn, targetTaskArn: deployed.taskArn, revalidatedArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, taskTag: "MSCQRExecTarget=production-backend", runtimeProof: true };
   results.ecsExecRuntime = { ...results.ecsExecSelection };

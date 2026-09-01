@@ -17,16 +17,16 @@ const SAFE_PARENT_ENVIRONMENT = Object.freeze(["HOME", "PATH", "TMPDIR", "TERM",
 const CHILD_SCRIPT = "scripts/aws/run-production-cutover.mjs";
 
 export function parseProductionCutoverOperatorArgs(argv = []) {
-  const expected = new Set(["--config", "--config-sha256", "--source-sha", "--rotation-id"]);
+  const expected = new Set(["--mode", "--config", "--config-sha256", "--source-sha", "--rotation-id"]);
   const values = {};
-  if (argv.length !== 8) throw new Error("Production cutover operator launcher requires exactly four non-secret runtime arguments.");
+  if (argv.length !== 10) throw new Error("Production cutover operator launcher requires exactly five non-secret runtime arguments.");
   for (let index = 0; index < argv.length; index += 2) {
     const name = argv[index];
     const value = argv[index + 1];
     if (!expected.has(name) || Object.hasOwn(values, name) || typeof value !== "string" || !value || value.startsWith("--")) throw new Error("Production cutover operator launcher arguments are invalid.");
     values[name] = value;
   }
-  if (!SHA256.test(values["--config-sha256"]) || !SHA1.test(values["--source-sha"]) || !/^rotation-[a-z0-9-]+$/.test(values["--rotation-id"])) throw new Error("Production cutover operator launcher runtime identity is invalid.");
+  if (values["--mode"] !== "prepare-overlap" || !SHA256.test(values["--config-sha256"]) || !SHA1.test(values["--source-sha"]) || !/^rotation-[a-z0-9-]+$/.test(values["--rotation-id"])) throw new Error("Production cutover operator launcher runtime identity is invalid.");
   return Object.freeze(values);
 }
 
@@ -56,7 +56,7 @@ export async function runProductionCutoverOperator({ argv = process.argv.slice(2
       inputs[name] = input;
     }
     childEnvironment = buildProductionCutoverChildEnvironment({ parentEnvironment, inputs });
-    const child = spawnChild(childExecutable, [CHILD_SCRIPT, "--mode", "production", "--config", runtime["--config"], "--config-sha256", runtime["--config-sha256"], "--source-sha", runtime["--source-sha"], "--rotation-id", runtime["--rotation-id"]], { cwd, env: childEnvironment, stdio: "inherit" });
+    const child = spawnChild(childExecutable, [CHILD_SCRIPT, "--mode", runtime["--mode"], "--config", runtime["--config"], "--config-sha256", runtime["--config-sha256"], "--source-sha", runtime["--source-sha"], "--rotation-id", runtime["--rotation-id"]], { cwd, env: childEnvironment, stdio: "inherit" });
     for (const { name } of REQUIRED_INPUTS) {
       delete inputs[name];
       delete childEnvironment[name];

@@ -461,7 +461,7 @@ test("generated cutover command binds runtime config and image authorization byt
   try {
     const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
     assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId }), /Hash-authenticated/);
-    assert.match(result.nextCommand, /^npm run stage-b:run-cutover-operator -- --config /);
+    assert.match(result.nextCommand, /^npm run stage-b:run-cutover-operator -- --mode prepare-overlap --config /);
     assert.match(result.nextCommand, new RegExp(`--config-sha256 ${result.runtimeConfigSha256}`));
     assert.equal(result.nextCommand.includes("MSCQR_VERIFIER_MFA_CODE"), false);
     assert.equal(JSON.stringify(result.config).includes("MSCQR_VERIFIER_MFA_CODE"), false);
@@ -993,6 +993,43 @@ test("rotation prepare authenticates persisted state before authorizing the next
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("overlap verification resumes an exact persisted runtime proof without redeployment", async () => {
+  const directory = fsTemp();
+  try {
+    const rotationId = "rotation-20260829015311-765c8a16";
+    const configFile = path.join(directory, "config.json");
+    const stateFile = path.join(directory, "state.json");
+    const fixtureFile = path.join(directory, "fixture.json");
+    const runtimeProofFile = path.join(directory, "runtime-proof.json");
+    const proof = { rotationId, phase: "overlap", runtimeInvocationRef: "overlap-proof", artifactCurrentRuntimeVerify: true, artifactHistoricalRuntimeVerify: true };
+    for (const [file, value] of [[configFile, { rotationId }], [stateFile, { rotationId, phase: "overlap-deploy-required" }], [fixtureFile, { rotationId }]]) writeFileSync(file, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+    const hash = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
+    const stateSha256 = hash(stateFile);
+    const fixtureSha256 = hash(fixtureFile);
+    let coordinatorCalls = 0;
+    const adapter = createProductionRotationPrepareAdapter({ coordinator: "coordinator.mjs", configFile, configSha256: hash(configFile), stateFile, fixtureFile, runtimeProofFile, repositoryRoot: process.cwd(), run: async () => {
+      coordinatorCalls += 1;
+      if (coordinatorCalls === 1) {
+        writeFileSync(stateFile, `${JSON.stringify({ rotationId, phase: "overlap-ready", overlapRuntime: proof, overlapReadyAt: "2026-09-01T10:00:00.000Z", cleanupEligibleAt: "2026-09-02T10:00:00.000Z", verification: { preparedStateSha256: stateSha256, runtimeInvocationRef: proof.runtimeInvocationRef } })}\n`, { mode: 0o600 });
+        throw new Error("interrupted after overlap-ready persistence");
+      }
+      writeFileSync(stateFile, `${JSON.stringify({ rotationId, phase: "verified", overlapRuntime: proof, overlapReadyAt: "2026-09-01T10:00:00.000Z", cleanupEligibleAt: "2026-09-02T10:00:00.000Z", verification: { preparedStateSha256: stateSha256 } })}\n`, { mode: 0o600 });
+      return JSON.stringify({ phase: "verified" });
+    } });
+    const input = { execProof: { valid: true, proof }, rotationId, rotationStateSha256: stateSha256, rotationFixtureSha256: fixtureSha256 };
+    await assert.rejects(() => adapter.verifyOverlap.run(input), /interrupted/);
+    assert.equal(existsSync(runtimeProofFile), true);
+    assert.equal((await adapter.verifyOverlap.run(input)).terminalState, "VERIFIED_OVERLAP");
+    assert.equal(coordinatorCalls, 2);
+    assert.equal((await adapter.verifyOverlap.run(input)).resumed, true);
+    assert.equal(coordinatorCalls, 2);
+    const tampered = JSON.parse(readFileSync(stateFile, "utf8"));
+    tampered.verification.preparedStateSha256 = "f".repeat(64);
+    writeFileSync(stateFile, `${JSON.stringify(tampered)}\n`, { mode: 0o600 });
+    await assert.rejects(() => adapter.verifyOverlap.run(input), /prepared predecessor/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("rebaseline registration requires a fresh read-only prepared-rotation status", async () => {

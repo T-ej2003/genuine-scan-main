@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { assertVerifierMfaSerial, establishEcsExecVerifierSession } from "./establish-production-ecs-exec-verifier-session.mjs";
-import { ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
+import { ECS_EXEC_OPERATOR_CALLER_PATTERN, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 import { createAssumedRoleSessionEnvironment, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const ACCOUNT = "368992683803";
@@ -11,8 +11,9 @@ export const VERIFIER_SESSION_MIN_REMAINING_MS = 60_000;
 
 const parse = (output) => JSON.parse(String(output || "{}"));
 
-export function createAwsStsRunner({ profile, credentialSource = PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, region = "eu-west-2", run = execFileSync, now = Date.now } = {}) {
-  const env = createProductionAwsCredentialEnvironment({ credentialSource, profile, region });
+export function createAwsStsRunner({ profile, credentialSource = PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, region = "eu-west-2", run = execFileSync, now = Date.now, env: parentEnvironment = process.env } = {}) {
+  const env = createProductionAwsCredentialEnvironment({ credentialSource, profile, region, env: parentEnvironment });
+  const inherited = credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION;
   let verifierCredentials = null;
   let verifierCallerArn = null;
   let verifierExpiration = null;
@@ -29,6 +30,7 @@ export function createAwsStsRunner({ profile, credentialSource = PRODUCTION_AWS_
     if (verifierExpiration.getTime() - now() < VERIFIER_SESSION_MIN_REMAINING_MS) throw expiredSessionError();
   };
   const verifierEnvironment = () => {
+    if (inherited) return env;
     assertVerifierSessionUsable();
     return createAssumedRoleSessionEnvironment({ credentials: verifierCredentials, region });
   };
@@ -38,13 +40,19 @@ export function createAwsStsRunner({ profile, credentialSource = PRODUCTION_AWS_
   };
   const spawnAsVerifier = (command, args, options = {}) => spawnSync(command, args, { ...options, env: { ...verifierEnvironment(), ...(options.env || {}) } });
   const getVerifierSession = () => {
+    if (credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION) {
+      if (!verifierCallerArn) throw new Error("Inherited verifier identity has not been authenticated in this process.");
+      return Object.freeze({ callerArn: verifierCallerArn, evidenceSha256: cryptoSha(`${ECS_EXEC_OPERATOR_ROLE_ARN}\n${verifierCallerArn}`), run: runAsVerifier, spawn: spawnAsVerifier });
+    }
     assertVerifierSessionUsable({ requireCaller: true });
     return verifierSession;
   };
   return {
     async getCallerIdentity() {
       if (verifierCredentials) assertVerifierSessionUsable();
-      return parse(invoke(["sts", "get-caller-identity"])).Arn;
+      const caller = parse(invoke(["sts", "get-caller-identity"])).Arn;
+      if (credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION) verifierCallerArn = caller;
+      return caller;
     },
     async assumeRole({ roleArn, sessionName, mfaSerial, mfaCode }) {
       if (roleArn !== ECS_EXEC_OPERATOR_ROLE_ARN) throw new Error("Verifier session can assume only the reviewed ECS Exec verifier role.");
@@ -82,6 +90,14 @@ export async function establishVerifierIdentity({ adapter, mfaSerial, mfaCode, g
   const result = await establishEcsExecVerifierSession({ adapter, mfaSerial: assertVerifierMfaSerial(mfaSerial), mfaCode, getMfaCode });
   if (result.roleArn !== ECS_EXEC_OPERATOR_ROLE_ARN) throw new Error("Verifier identity is outside the reviewed role.");
   return result;
+}
+
+export async function establishInheritedVerifierIdentity({ adapter } = {}) {
+  if (!adapter || typeof adapter.getCallerIdentity !== "function" || typeof adapter.getVerifierSession !== "function") throw new Error("Inherited verifier identity adapter is incomplete.");
+  const callerArn = await adapter.getCallerIdentity();
+  if (!new RegExp(ECS_EXEC_OPERATOR_CALLER_PATTERN).test(callerArn || "")) throw new Error("Inherited verifier session is not the reviewed assumed role.");
+  const session = adapter.getVerifierSession();
+  return { valid: true, roleArn: ECS_EXEC_OPERATOR_ROLE_ARN, callerArn, evidenceRef: `sts:${ECS_EXEC_OPERATOR_ROLE_ARN}`, evidenceSha256: cryptoSha(`${ECS_EXEC_OPERATOR_ROLE_ARN}\n${callerArn}`), session };
 }
 
 export { assertVerifierMfaSerial } from "./establish-production-ecs-exec-verifier-session.mjs";
