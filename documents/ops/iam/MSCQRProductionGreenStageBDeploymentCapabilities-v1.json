@@ -255,6 +255,94 @@
       "mutation": false
     },
     {
+      "id": "admin-image-evidence-describe-key",
+      "phase": "schema-v4-image-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+      "sourceFunction": "admin-image-evidence-describe-key",
+      "action": "kms:DescribeKey",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [
+        "runtime-candidate-kms-key"
+      ],
+      "policy": {
+        "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+        "sid": "identity-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "admin-image-evidence-read-key-policy",
+      "phase": "schema-v4-image-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+      "sourceFunction": "admin-image-evidence-read-key-policy",
+      "action": "kms:GetKeyPolicy",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [
+        "runtime-candidate-kms-key-policy"
+      ],
+      "policy": {
+        "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+        "sid": "identity-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "admin-image-evidence-read-key-tags",
+      "phase": "schema-v4-image-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+      "sourceFunction": "admin-image-evidence-read-key-tags",
+      "action": "kms:ListResourceTags",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+        "sid": "identity-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "admin-image-records",
       "phase": "schema-v4-image-evidence",
       "identity": "ADMINISTRATOR",
@@ -643,6 +731,36 @@
       "probeIds": [],
       "policy": {
         "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",
+        "sid": "identity-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "admin-verify-image-evidence",
+      "phase": "schema-v4-image-evidence",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs",
+      "sourceFunction": "admin-verify-image-evidence",
+      "action": "kms:Verify",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [
+        "runtime-consumability-signature"
+      ],
+      "policy": {
+        "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs",
         "sid": "identity-boundary",
         "livePolicyArn": null,
         "expectedVersion": "source-bound",
