@@ -508,12 +508,12 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
   try {
     reservation = await reserveConsumption(consumption);
     if (!reservation || typeof reservation !== "object" || Array.isArray(reservation)) throw new Error("Stage A reconciliation consumption reservation is invalid.");
+    if (assertSourceIntegrity !== undefined) { if (typeof assertSourceIntegrity !== "function") throw new Error("Stage A reconciliation source-integrity check is invalid."); assertSourceIntegrity(); }
     const beforeApply = await adapter.readStateIdentity();
     assertStateCas(beforeApply, "after exclusive reservation");
     assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion });
     assertStageAProductionArtifactsReconciliationAuthorization(reconciliationAuthorization, { sourceSha, recoveryCompletion, savedPlanSha256: saved.savedPlanSha256, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion, verifyReconciliationAuthorization });
     assertLivePolicyCas(await adapter.readProductionArtifactsPolicy());
-    if (assertSourceIntegrity !== undefined) { if (typeof assertSourceIntegrity !== "function") throw new Error("Stage A reconciliation source-integrity check is invalid."); assertSourceIntegrity(); }
     applyInvoked = true;
     await adapter.applySavedRefreshOnlyPlan(saved);
     const after = await adapter.readStateIdentity();

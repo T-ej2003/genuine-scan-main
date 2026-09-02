@@ -139,6 +139,8 @@ const STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES = Object.freeze([
   ["stage-a-artifacts-recovery-root-put-policy", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:PutBucketPolicy", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], true, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
   ["stage-a-artifacts-recovery-release-identify", "stage-a-production-artifacts-policy-recovery", "RELEASE_DEPLOYER", "sts:GetCallerIdentity", ["*"], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
   ["stage-a-artifacts-recovery-release-read-policy", "stage-a-production-artifacts-policy-recovery", "RELEASE_DEPLOYER", "s3:GetBucketPolicy", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
+  ["stage-a-artifacts-recovery-root-journal-read", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], false, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
+  ["stage-a-artifacts-recovery-root-journal-conditional-create", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], true, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
   ["stage-a-artifacts-journal-read", "stage-a-production-artifacts-state-reconciliation", "RELEASE_DEPLOYER", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], false, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
   ["stage-a-artifacts-journal-conditional-create", "stage-a-production-artifacts-state-reconciliation", "RELEASE_DEPLOYER", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], true, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
   ["stage-a-artifacts-reconciliation-release-identify", "stage-a-production-artifacts-state-reconciliation", "RELEASE_DEPLOYER", "sts:GetCallerIdentity", ["*"], false, "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
@@ -336,12 +338,16 @@ export function discoverAwsCliActions() {
       const operation = match[2].split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("").replaceAll("Db", "DB").replaceAll("Vpc", "VPC").replaceAll("Url", "URL");
       const action = service === "ecs" && operation === "Wait" ? "ecs:DescribeServices"
         : `${service}:${service === "lambda" && operation === "Invoke" ? "InvokeFunction" : operation}`;
-      calls.push(sourceFile === "scripts/aws/produce-production-root-drop-evidence.mjs" && action === "kms:Sign"
-        ? { sourceFile, sourceFunction: "produce-production-root-drop-evidence", phase: "root-drop-evidence-signing", identity: "ROOT_OPERATOR", action, resources: [ROOT_DROP_SIGNING_KEY_ARN], capabilityId: "root-drop-sign-evidence" }
-        : { sourceFile, action });
+      if (sourceFile === "scripts/aws/production-stage-a-production-artifacts-journal.mjs" && ["s3:GetObject", "s3:PutObject"].includes(action)) {
+        calls.push({ sourceFile, action, identity: "RELEASE_DEPLOYER" }, { sourceFile, action, identity: "ROOT_OPERATOR" });
+      } else {
+        calls.push(sourceFile === "scripts/aws/produce-production-root-drop-evidence.mjs" && action === "kms:Sign"
+          ? { sourceFile, sourceFunction: "produce-production-root-drop-evidence", phase: "root-drop-evidence-signing", identity: "ROOT_OPERATOR", action, resources: [ROOT_DROP_SIGNING_KEY_ARN], capabilityId: "root-drop-sign-evidence" }
+          : { sourceFile, action });
+      }
     }
   }
-  return calls.filter((call, index) => calls.findIndex((candidate) => candidate.sourceFile === call.sourceFile && candidate.action === call.action) === index)
+  return calls.filter((call, index) => calls.findIndex((candidate) => candidate.sourceFile === call.sourceFile && candidate.action === call.action && (candidate.identity || "RELEASE_DEPLOYER") === (call.identity || "RELEASE_DEPLOYER")) === index)
     .sort((left, right) => `${left.sourceFile}:${left.action}`.localeCompare(`${right.sourceFile}:${right.action}`));
 }
 
@@ -417,7 +423,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   const stageAProductionArtifacts = STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES.map(([id, phase, identity, action, resources, mutation, sourceFile]) => ({
     id, phase, identity, executor: "aws-cli", sourceFile, sourceFunction: id, action, resources,
     context: { account: STAGE_B.account, region: STAGE_B.region, bucket: PRODUCTION_ACTIVATION_LIFECYCLE.bucket },
-    classification: mutation ? action === "s3:PutBucketPolicy" ? "ROOT_GOVERNED_POLICY_RECOVERY" : "RELEASE_CONDITIONAL_JOURNAL_CREATE" : identity === "ROOT_OPERATOR" ? "ROOT_GOVERNED_RECOVERY_READ" : "RELEASE_DIRECT_READ",
+    classification: mutation ? action === "s3:PutBucketPolicy" ? "ROOT_GOVERNED_POLICY_RECOVERY" : identity === "ROOT_OPERATOR" ? "ROOT_CONDITIONAL_JOURNAL_CREATE" : "RELEASE_CONDITIONAL_JOURNAL_CREATE" : identity === "ROOT_OPERATOR" ? "ROOT_GOVERNED_RECOVERY_READ" : "RELEASE_DIRECT_READ",
     probe: identity === "RELEASE_DEPLOYER" ? "direct" : "structural", probeIds: identity === "RELEASE_DEPLOYER" ? [`${id}-authenticated`] : [],
     policy: { sourceFile: "infra/aws/terraform/production-green-stage-a/main.tf", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null },
     required: true, mutation,
@@ -485,6 +491,10 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   if (!graph.capabilities.some(({ identity, action, resources }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand" && resources.includes(`arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*`))) throw new Error("Dedicated ECS Exec operator capability is absent.");
   const rootDropSigning = graph.capabilities.find(({ id }) => id === "root-drop-sign-evidence");
   if (!rootDropSigning || rootDropSigning.phase !== "root-drop-evidence-signing" || rootDropSigning.identity !== "ROOT_OPERATOR" || rootDropSigning.sourceFile !== "scripts/aws/produce-production-root-drop-evidence.mjs" || rootDropSigning.action !== "kms:Sign" || JSON.stringify(rootDropSigning.resources) !== JSON.stringify([ROOT_DROP_SIGNING_KEY_ARN])) throw new Error("Root-drop signing capability is not exact.");
+  for (const [id, action, mutation] of [["stage-a-artifacts-recovery-root-journal-read", "s3:GetObject", false], ["stage-a-artifacts-recovery-root-journal-conditional-create", "s3:PutObject", true]]) {
+    const capability = graph.capabilities.find(({ id: candidate }) => candidate === id);
+    if (!capability || capability.phase !== "stage-a-production-artifacts-policy-recovery" || capability.identity !== "ROOT_OPERATOR" || capability.sourceFile !== "scripts/aws/production-stage-a-production-artifacts-journal.mjs" || capability.action !== action || capability.mutation !== mutation || JSON.stringify(capability.resources) !== JSON.stringify([PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn])) throw new Error("Stage-A root journal capability boundary is not exact.");
+  }
   const graphActions = new Set(graph.capabilities.map(({ action }) => action));
   for (const probe of RELEASE_READ_PROBES) if (!graphActions.has(probe.action)) throw new Error(`Release probe is absent from capability graph: ${probe.id}.`);
   assertStageBAwsCallCoverage(graph, graph.sourceScan);

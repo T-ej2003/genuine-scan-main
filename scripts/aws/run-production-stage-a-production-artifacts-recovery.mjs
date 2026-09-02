@@ -63,7 +63,9 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, workflow
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-production-artifacts-recovery-")); const policyPath = path.join(directory, "policy.json");
   try {
     fs.writeFileSync(policyPath, JSON.stringify(buildStageAProductionArtifactsBucketPolicy()), { mode: 0o600, flag: "wx" });
-    if (beforeSha256 === predecessorSha256) rootRun(["s3api", "put-bucket-policy", "--bucket", authorization.bucket, "--policy", `file://${policyPath}`]);
+    const finalState = await readStateIdentity();
+    if (finalState?.lineage !== preState.lineage || finalState?.serial !== preState.serial || finalState?.stateSha256 !== preState.stateSha256) throw new Error("Stage A recovery state changed before the policy write.");
+    if (beforeSha256 === predecessorSha256) await rootRun(["s3api", "put-bucket-policy", "--bucket", authorization.bucket, "--policy", `file://${policyPath}`]);
     const after = readPolicy(releaseRun); if (stageAProductionArtifactsPolicySha256(after) !== authorization.desiredPolicySha256) throw new Error("Stage A production-artifacts recovery readback is not the exact desired policy.");
     const completion = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: after, sign }); const bytes = Buffer.from(`${JSON.stringify(completion)}\n`);
     let persisted;

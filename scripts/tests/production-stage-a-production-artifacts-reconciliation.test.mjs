@@ -115,6 +115,33 @@ test("live policy is a final CAS immediately before refresh-only apply", async (
   assert.equal(applies, 0);
 });
 
+test("protected source authentication precedes the final state and live-policy CAS", async () => {
+  let state = { lineage, serial: 35, stateSha256 }; const calls = []; let applies = 0;
+  const adapter = {
+    readStateIdentity: async () => { calls.push("state"); return { ...state }; },
+    createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { ...state }, plan: refreshPlan() }),
+    applySavedRefreshOnlyPlan: async () => { calls.push("apply"); applies += 1; state = { ...state, serial: 36 }; },
+    readProductionArtifactsPolicy: async () => { calls.push("policy"); return desired; },
+  };
+  await assert.rejects(() => execute({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, assertSourceIntegrity: () => { calls.push("source"); state = { ...state, serial: 36 }; }, ...consumption() }), /state changed/);
+  assert.equal(applies, 0);
+  assert(calls.indexOf("source") < calls.lastIndexOf("state"));
+});
+
+test("final reconciliation policy CAS immediately precedes the apply after source authentication", async () => {
+  const calls = []; let state = { lineage, serial: 35, stateSha256 };
+  const adapter = {
+    readStateIdentity: async () => { calls.push("state"); return { ...state }; },
+    createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { ...state }, plan: refreshPlan() }),
+    applySavedRefreshOnlyPlan: async () => { calls.push("apply"); state = { ...state, serial: 36 }; },
+    readProductionArtifactsPolicy: async () => { calls.push("policy"); return desired; },
+  };
+  await execute({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, assertSourceIntegrity: () => calls.push("source"), ...consumption() });
+  const sourceIndex = calls.indexOf("source"); const applyIndex = calls.indexOf("apply");
+  assert(sourceIndex >= 0 && sourceIndex < applyIndex);
+  assert.equal(calls[applyIndex - 1], "policy");
+});
+
 test("live policy identity and final state CAS remain fail-closed before apply", async () => {
   const cases = [
     ["third policy", { policy: { Version: "2012-10-17", Statement: [] } }],

@@ -103,3 +103,43 @@ test("root recovery rejects every non-clean protected checkout before AWS", asyn
     assert.equal(awsCalls, 0);
   }
 });
+
+test("root recovery rejects a changed Terraform state before PutBucketPolicy", async () => {
+  const cases = ["serial", "lineage", "bytes"];
+  for (const [index, label] of cases.entries()) {
+    const baselineState = { lineage, serial: 35, stateSha256 };
+    const alteredState = label === "serial" ? { ...baselineState, serial: 36 } : label === "lineage" ? { ...baselineState, lineage: "other-lineage" } : { ...baselineState, stateSha256: "d".repeat(64) };
+    let livePolicy = buildStageAProductionArtifactsBucketPolicyPredecessor(); let stateReads = 0; let puts = 0;
+    const authorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState: baselineState, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, `30${index + 1}`), verificationRef: `state-race-${label}` });
+    const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : args[1] === "get-bucket-policy" ? JSON.stringify({ Policy: JSON.stringify(livePolicy) }) : (() => { throw new Error(`unexpected release ${args[1]}`); })();
+    const rootRun = (args) => {
+      if (args[1] === "get-caller-identity") return rootIdentity;
+      if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
+      if (args[1] === "get-bucket-lifecycle-configuration") throw new Error("NoSuchLifecycleConfiguration");
+      if (args[1] === "put-bucket-policy") { puts += 1; livePolicy = buildStageAProductionArtifactsBucketPolicy(); return ""; }
+      throw new Error(`unexpected root ${args[1]}`);
+    };
+    const recoveryJournal = { readRecoveryAttempt: () => null, writeRecoveryAttempt: () => ({ key: "attempt" }) };
+    const journal = { readRecoveryCompletion: () => null, writeRecoveryCompletion: () => ({ key: "completion" }) };
+    await assert.rejects(() => runStageAProductionArtifactsRecovery({ sourceSha, workflowRunId: `30${index + 1}`, workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => { stateReads += 1; return stateReads === 1 ? baselineState : alteredState; }, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal, recoveryJournal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true }), /state changed before the policy write/, label);
+    assert.equal(puts, 0, label);
+  }
+});
+
+test("root recovery performs no networked work between final state CAS and policy write", async () => {
+  const calls = []; let livePolicy = buildStageAProductionArtifactsBucketPolicyPredecessor(); let stateReads = 0;
+  const authorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "304"), verificationRef: "adjacency" });
+  const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : args[1] === "get-bucket-policy" ? JSON.stringify({ Policy: JSON.stringify(livePolicy) }) : (() => { throw new Error(`unexpected release ${args[1]}`); })();
+  const rootRun = (args) => {
+    if (args[1] === "get-caller-identity") return rootIdentity;
+    if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
+    if (args[1] === "get-bucket-lifecycle-configuration") throw new Error("NoSuchLifecycleConfiguration");
+    if (args[1] === "put-bucket-policy") { calls.push("put-policy"); livePolicy = buildStageAProductionArtifactsBucketPolicy(); return ""; }
+    throw new Error(`unexpected root ${args[1]}`);
+  };
+  const recoveryJournal = { readRecoveryAttempt: () => null, writeRecoveryAttempt: () => ({ key: "attempt" }) };
+  const journal = { readRecoveryCompletion: () => null, writeRecoveryCompletion: () => ({ key: "completion" }) };
+  await runStageAProductionArtifactsRecovery({ sourceSha, workflowRunId: "304", workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => { calls.push("state"); stateReads += 1; return state; }, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal, recoveryJournal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true });
+  assert.equal(calls.at(-2), "state");
+  assert.equal(calls.at(-1), "put-policy");
+});

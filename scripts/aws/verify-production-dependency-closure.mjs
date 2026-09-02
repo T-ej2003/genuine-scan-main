@@ -25,6 +25,8 @@ const CALLS = Object.freeze([
   ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
   ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:GetObject", "stage-a-artifacts-journal-read", [STAGE_A_RECONCILIATION_JOURNAL]],
   ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:PutObject", "stage-a-artifacts-journal-conditional-create", [STAGE_A_RECONCILIATION_JOURNAL]],
+  ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:GetObject", "stage-a-artifacts-recovery-root-journal-read", [STAGE_A_RECONCILIATION_JOURNAL], "ROOT_OPERATOR"],
+  ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:PutObject", "stage-a-artifacts-recovery-root-journal-conditional-create", [STAGE_A_RECONCILIATION_JOURNAL], "ROOT_OPERATOR"],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-reconciliation-release-read-policy", [PRODUCTION_ARTIFACTS_BUCKET]],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
   ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketLifecycleConfiguration", "stage-a-artifacts-recovery-root-read-lifecycle", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
@@ -75,6 +77,8 @@ const CALLS = Object.freeze([
   ["scripts/aws/recover-production-backend-health.mjs", "kms:DescribeKey", "manifest-refresh-stage-a-storage-approval-key-describe", [RUNTIME_KMS_KEY]],
   ["scripts/aws/recover-production-backend-health.mjs", "kms:GetKeyPolicy", "manifest-refresh-stage-a-storage-approval-key-policy", [RUNTIME_KMS_KEY]],
 ].map(([sourceFile, action, capabilityId, resources, identity = "RELEASE_DEPLOYER"]) => Object.freeze({ sourceFile, action, capabilityId, identity, resources: Object.freeze(resources) })));
+
+
 
 const MODE_CAPABILITIES = Object.freeze({
   NORMAL: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-runtime-repository-policy", "normal-activation-release-describe-candidate", "normal-activation-release-describe-service", "normal-activation-release-list-tasks", "normal-activation-release-describe-tasks", "normal-activation-release-update-service"],
@@ -197,11 +201,12 @@ export function buildProductionDependencyClosure() {
 }
 
 export function assertChangedAwsCallClosure(scanned, graph) {
-  const callKeys = new Set(CALLS.map(({ sourceFile, action }) => `${sourceFile}\t${action}`));
-  const normalized = scanned.map(({ sourceFile, action }) => ({ sourceFile, action }));
-  const additions = normalized.filter(({ sourceFile, action }) => callKeys.has(`${sourceFile}\t${action}`));
-  if (additions.length !== CALLS.length || new Set(additions.map(({ sourceFile, action }) => `${sourceFile}\t${action}`)).size !== CALLS.length) throw new Error("Changed production AWS calls differ from the reviewed closure contract.");
-  const baseline = normalized.filter(({ sourceFile, action }) => !callKeys.has(`${sourceFile}\t${action}`)).sort((a, b) => `${a.sourceFile}:${a.action}`.localeCompare(`${b.sourceFile}:${b.action}`));
+  const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER" }) => `${sourceFile}\t${action}\t${sourceFile === "scripts/aws/production-stage-a-production-artifacts-journal.mjs" ? identity : ""}`;
+  const callKeys = new Set(CALLS.map(key));
+  const normalized = scanned.map(({ sourceFile, action, identity }) => sourceFile === "scripts/aws/production-stage-a-production-artifacts-journal.mjs" ? { sourceFile, action, identity } : { sourceFile, action });
+  const additions = normalized.filter((call) => callKeys.has(key(call)));
+  if (additions.length !== CALLS.length || new Set(additions.map(key)).size !== CALLS.length) throw new Error("Changed production AWS calls differ from the reviewed closure contract.");
+  const baseline = normalized.filter((call) => !callKeys.has(key(call))).sort((a, b) => `${a.sourceFile}:${a.action}`.localeCompare(`${b.sourceFile}:${b.action}`));
   if (baseline.length !== BASE_CALL_COUNT || sha256(JSON.stringify(baseline)) !== BASE_CALL_SHA256) throw new Error("Unknown production AWS call requires capability classification.");
 
   const capabilityById = new Map(graph.capabilities.map((capability) => [capability.id, capability]));
