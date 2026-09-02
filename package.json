@@ -107,6 +107,7 @@
     "production:normal-backend-activation": "node scripts/aws/production-normal-backend-activation.mjs",
     "stage-a:temporary-kms-capability": "node scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs",
     "stage-a:approval-key-reconciliation": "node scripts/aws/run-production-stage-a-approval-key-reconciliation.mjs",
+    "test:stage-a-production-artifacts-reconciliation": "node --test scripts/tests/production-stage-a-production-artifacts-reconciliation.test.mjs",
     "stage-a:root-drop:census": "node scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs --mode census",
     "stage-a:root-drop:adopt": "node scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs --mode adopt",
     "test:stage-a:root-drop-recovery": "node --test scripts/tests/production-stage-a-root-drop-orphan-recovery.test.mjs",

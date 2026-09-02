@@ -107,3 +107,28 @@ predecessor-to-current-policy transition is therefore classified as
 Terraform. After a separately governed bucket-policy recovery, the normal
 Stage-A plan must converge to `NO_OP`; root must not run Terraform and no
 release-deployer exception is implied.
+
+### Production-artifacts post-recovery state reconciliation
+
+The canonical post-recovery state path is
+`runStageAProductionArtifactsStateReconciliation()` in
+`scripts/aws/production-stage-a-control-plane.mjs`, using the existing Stage-A
+Terraform adapter. It is a separate refresh-only state boundary, not a normal
+bucket-policy apply and not a root Terraform path. Its completion evidence must
+be independently authenticated and bind the exact protected source, bucket,
+six-statement predecessor, PR435 desired policy, recovery authorization,
+Stage-A state lineage, and pre-reconciliation serial. The live policy readback
+must hash to the exact desired policy before the state transition is consumed.
+
+The operation captures one exact `terraform plan -refresh-only`, validates that
+the only resource drift is the exact production-artifacts predecessor-to-desired
+policy transition (plus the existing forward RDS computed timestamp refresh),
+revalidates the saved plan and state CAS immediately before applying it, and
+advances Terraform state once. The refresh-only apply changes Terraform state
+only; AWS resource mutation count is zero. The next fresh ordinary Stage-A plan
+must contain no bucket-policy drift and the bucket-policy action must be
+`NO_OP`. Missing, stale, replayed, or mismatched completion/source/lineage/
+serial evidence fails closed. A separate reconciliation authorization must also
+bind the exact saved refresh-only plan SHA and be independently authenticated
+before the one state apply is consumed. Arbitrary resource or policy drift is
+never accepted.
