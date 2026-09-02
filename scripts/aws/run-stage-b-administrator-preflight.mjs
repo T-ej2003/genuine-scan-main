@@ -5,12 +5,12 @@ import { runStageBAdminPreflightLifecycle } from "./stage-b-admin-preflight-life
 import { parseStageBAdministratorPreflightArgs } from "./stage-b-administrator-preflight-args.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const { phase, outputPath, signaturePath, lifecycleDirectory, sourceSha, retry, forwarded } = parseStageBAdministratorPreflightArgs(process.argv.slice(2));
+const { phase, outputPath, signaturePath, lifecycleDirectory, sourceSha, imageAuthorizationPath, imageAuthorizationSha256, retry, forwarded } = parseStageBAdministratorPreflightArgs(process.argv.slice(2));
 const producerPath = phase === "initial"
   ? path.join(root, "scripts/aws/run-production-green-stage-b-preflight.mjs")
   : path.join(root, "scripts/aws/validate-production-green-stage-b-permissions.mjs");
 const producerArgs = phase === "initial"
-  ? ["--identity", "administrator", "--phase", "initial", "--source-sha", sourceSha, "--output", outputPath, "--signature-output", signaturePath]
+  ? ["--identity", "administrator", "--phase", "initial", "--source-sha", sourceSha, "--image-authorization", imageAuthorizationPath, "--image-authorization-sha256", imageAuthorizationSha256, "--output", outputPath, "--signature-output", signaturePath]
   : [...forwarded, "--output", outputPath, "--signature-output", signaturePath];
 const result = await runStageBAdminPreflightLifecycle({
   lifecycleDirectory,

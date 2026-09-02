@@ -245,3 +245,11 @@ test("plan-bound permission runbook documents every mandatory artifact input", (
     assert.match(command, new RegExp(`${option}\\s+<[^>]+>`));
   }
 });
+
+test("release preflight documentation passes the authenticated image authorization", () => {
+  const runbook = fs.readFileSync(new URL("../../documents/ops/iam/PRODUCTION_GREEN_STAGE_B_PROVIDER_RECOVERY_2026-07-29.md", import.meta.url), "utf8");
+  assert.match(runbook, /--image-authorization <absolute-private-image-authorization>/);
+  assert.match(runbook, /--image-authorization-sha256 <exact-image-authorization-file-sha256>/);
+  assert.match(runbook, /Image evidence is the signed publication report consumed to derive the/);
+  assert.match(runbook, /image authorization is the authenticated current-source artifact consumed by release/);
+});

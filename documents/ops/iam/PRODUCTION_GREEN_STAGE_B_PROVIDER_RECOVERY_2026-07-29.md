@@ -765,7 +765,13 @@ accepts only the explicit initial phase and its output/lifecycle paths. The plan
 permission invocation requires the exact approved plan, audit, and permission-manifest
 inputs. The release invocation accepts only
 `--identity release-deployer` plus those signed administrator artifacts and the canonical
-backend, state, handoff, image-evidence, broker-package, tfvars, and binding-report inputs.
+backend, state, handoff, image-evidence, image-authorization, broker-package, tfvars, and binding-report
+inputs. It must pass `--image-authorization <absolute-private-image-authorization>` and
+`--image-authorization-sha256 <exact-image-authorization-file-sha256>` alongside the existing
+`--image-evidence` inputs. Image evidence is the signed publication report consumed to derive the
+authorization; image authorization is the authenticated current-source artifact consumed by release
+preflight, and its file SHA is an independent binding. Use the exact paths and SHA values produced by
+the current protected-source image-authorization lifecycle; never substitute an image-evidence SHA.
 Invalid administrator evidence is recorded but never signed. The release phase aggregates
 all independent direct-read failures and cannot initialize Terraform until that set is
 empty.

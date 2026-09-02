@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
+import { assertImageEvidence, imageEvidenceSha256, signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
 import { publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
 import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
 import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, deriveContractDigests, deriveRecoveryOnlyBindings, deriveRetainedDefinitions, generateStageBTfvars, isTerraformDeposedInstance, parseCli, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
@@ -93,6 +93,22 @@ test("production-shaped inputs generate deterministic private tfvars and binding
   assert.equal(first.bindingReport.tfvarsFormat, "hcl");
   assert.equal(first.bindingReport.tfvarsFileName, "out.tfvars");
   assert.equal(first.bindingReport.tfvarsExtension, ".tfvars");
+});
+
+test("pinned image evidence and signature bytes survive publication-path replacement", () => {
+  const args = input();
+  const evidenceBytes = fs.readFileSync(args.imageEvidence);
+  const signatureBytes = fs.readFileSync(args.imageEvidenceSignature);
+  const originalReport = JSON.parse(evidenceBytes);
+  const replacementIdentity = { ...originalReport.publicationIdentity, workflowRunId: "30760789617" };
+  const replacementReport = { ...originalReport, workflowRunId: replacementIdentity.workflowRunId, publicationIdentity: replacementIdentity, publicationIdentitySha256: publicationIdentitySha256(replacementIdentity) };
+  const replacementSignature = signImageEvidence(replacementReport, { now, sign: () => "AQ==" });
+  assertImageEvidence(replacementReport, { signatureArtifact: replacementSignature, publicationSourceSha: releaseSha, currentSourceSha: args.toolingSha, imageReleaseSha: releaseSha, workflowRunId: replacementReport.workflowRunId, artifactSha256: replacementReport.canonicalArtifactSha256, now, verifySignature: () => true });
+  fs.writeFileSync(args.imageEvidence, `${JSON.stringify(replacementReport)}\n`, { mode: 0o600 });
+  fs.writeFileSync(args.imageEvidenceSignature, `${JSON.stringify(replacementSignature)}\n`, { mode: 0o600 });
+  const result = generateStageBTfvars({ ...args, imageEvidenceBytes: Buffer.from(evidenceBytes), imageEvidenceSignatureBytes: Buffer.from(signatureBytes) });
+  assert.equal(result.bindingReport.imageEvidenceCanonicalSha256, imageEvidenceSha256(JSON.parse(evidenceBytes)));
+  assert.equal(result.bindingReport.imageEvidenceWorkflowRunId, "30760789616");
 });
 
 test("partial-apply recovery is generated from the exact observation and refresh artifacts", () => {

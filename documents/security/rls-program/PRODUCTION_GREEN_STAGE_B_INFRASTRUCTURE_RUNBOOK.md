@@ -29,6 +29,8 @@ Start exactly one initial administrator capability producer through the reviewed
 ```bash
 npm run stage-b:administrator-capability-preflight -- \
   --source-sha <exact-protected-main-sha> \
+  --image-authorization <absolute-private-image-authorization> \
+  --image-authorization-sha256 <exact-image-authorization-file-sha256> \
   --output <absolute-private-report> \
   --signature-output <absolute-private-signature> \
   --lifecycle-directory <new-private-lifecycle-directory>
@@ -43,7 +45,10 @@ becomes `SUCCEEDED`; non-zero exit becomes `FAILED`; an active process at the de
 is terminated through the reviewed shutdown path and becomes `TIMED_OUT`.
 
 `--source-sha` must be the exact current protected-main SHA. Before signing, the producer
-requires a clean checkout whose `HEAD` and freshly fetched `origin/main` match it; the
+requires a clean checkout whose `HEAD` and freshly fetched `origin/main` match it. The
+image-authorization file and its exact raw-file SHA are required; the signed report derives
+tooling, image-release, and canonical image-evidence identities from that authenticated
+current-source artifact rather than from the static production-shaped test plan; the
 static plan fixture never supplies the live temporary-KMS absence-evidence identity.
 
 An empty output directory while lifecycle state is `RUNNING` is not a failure. A second
