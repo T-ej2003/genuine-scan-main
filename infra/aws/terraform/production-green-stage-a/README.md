@@ -28,6 +28,13 @@ GitHub deploy, and application/runtime roles cannot assume the release role.
 No GitHub OIDC trust is added here; that later migration requires separate
 review. The checker must be distinct from the release deployer.
 
+The governed production-artifacts recovery uses the same Stage-A backend
+lockfile, `mscqr/production/rls-green/stage-a/terraform.tfstate.tflock`, as
+ordinary Terraform state writers. The release-deployer acquires it with a
+conditional create and releases it conditionally after the root-only policy
+transition and readback; recovery never grants the release-deployer
+`PutBucketPolicy` and never runs Terraform as root.
+
 ## Root-drop orphan recovery boundary
 
 The canonical orphan-recovery command is bound to this Terraform root, the

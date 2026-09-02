@@ -251,6 +251,44 @@
       "negativeTestPresent": true
     },
     {
+      "sourceFile": "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs",
+      "action": "s3:PutObject",
+      "capabilityId": "stage-a-artifacts-recovery-release-lock-acquire",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+      ],
+      "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs",
+      "action": "s3:DeleteObject",
+      "capabilityId": "stage-a-artifacts-recovery-release-lock-release",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+      ],
+      "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs",
       "action": "sts:GetCallerIdentity",
       "capabilityId": "administrator-release-preflight-trust-attestation-identify",

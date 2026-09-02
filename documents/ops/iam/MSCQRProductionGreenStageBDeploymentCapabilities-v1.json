@@ -11564,6 +11564,68 @@
       "mutation": false
     },
     {
+      "id": "stage-a-artifacts-recovery-release-lock-acquire",
+      "phase": "stage-a-production-artifacts-policy-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs",
+      "sourceFunction": "stage-a-artifacts-recovery-release-lock-acquire",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "TERRAFORM_BACKEND_LOCK_ACQUIRE",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-recovery-release-lock-acquire-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "WriteExactStageALock",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "stage-a-artifacts-recovery-release-lock-release",
+      "phase": "stage-a-production-artifacts-policy-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs",
+      "sourceFunction": "stage-a-artifacts-recovery-release-lock-release",
+      "action": "s3:DeleteObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "TERRAFORM_BACKEND_LOCK_RELEASE",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-recovery-release-lock-release-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReleaseExactStageALock",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "stage-a-artifacts-recovery-release-read-policy",
       "phase": "stage-a-production-artifacts-policy-recovery",
       "identity": "RELEASE_DEPLOYER",
@@ -12497,6 +12559,14 @@
       "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
       "action": "s3:PutObject",
       "identity": "ROOT_OPERATOR"
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs",
+      "action": "s3:DeleteObject"
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs",
+      "action": "s3:PutObject"
     },
     {
       "sourceFile": "scripts/aws/publish-production-green-stage-b-approval.mjs",

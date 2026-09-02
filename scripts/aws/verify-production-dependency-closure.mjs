@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { ARTIFACT_SIGNING_BINDINGS } from "./production-artifact-signing-domain.mjs";
 import { CAPABILITY_GRAPH_PATH, assertStageBDeploymentCapabilityGraph, discoverAwsCliActions } from "./generate-production-green-stage-b-capability-graph.mjs";
 import { canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
+import { STAGE_A_TERRAFORM_LOCK_ARN } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const PRODUCTION_DEPENDENCY_CLOSURE_PATH = "documents/ops/iam/MSCQRProductionDependencyClosure-v1.json";
@@ -35,6 +36,8 @@ const CALLS = Object.freeze([
   ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketVersioning", "stage-a-artifacts-recovery-root-read-versioning", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
   ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:PutBucketPolicy", "stage-a-artifacts-recovery-root-put-policy", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
   ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-recovery-root-identify", ["*"], "ROOT_OPERATOR"],
+  ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire", [STAGE_A_TERRAFORM_LOCK_ARN]],
+  ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release", [STAGE_A_TERRAFORM_LOCK_ARN]],
   ["scripts/aws/production-release-preflight-checker-attestation.mjs", "sts:GetCallerIdentity", "administrator-release-preflight-trust-attestation-identify", ["*"], "ADMINISTRATOR"],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecr:DescribeImages", "manifest-backend-health-recovery-describe-images", [REPOSITORY]],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:DescribeServiceDeployments", "manifest-backend-health-recovery-describe-service-deployments", [SERVICE, "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"]],
@@ -225,7 +228,9 @@ export function assertChangedAwsCallClosure(scanned, graph) {
       const rotation = capabilityById.get("manifest-backend-health-recovery-describe-images");
       if (!rotation || rotation.identity !== "RELEASE_DEPLOYER" || rotation.action !== contract.action || !same(rotation.resources, contract.resources) || !rotation.policy?.sourceFile) throw new Error("Rotation rollback-image read lacks exact IAM/capability closure.");
     }
-    const reachableMode = contract.sourceFile.endsWith("deploy-ecs-service.sh")
+    const reachableMode = contract.sourceFile === "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs"
+      ? ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"]
+      : contract.sourceFile.endsWith("deploy-ecs-service.sh")
       ? ["NORMAL", "ROTATION_OVERLAP", "ROTATION_CLEANUP"]
       : contract.sourceFile.endsWith("production-normal-backend-activation.mjs") ? ["NORMAL"] : ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"];
     return { ...contract, reachableMode, executionPrincipal: contract.identity, sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true, administratorPreflightPresent: true, runtimePreflightPresent: true, negativeTestPresent: true };

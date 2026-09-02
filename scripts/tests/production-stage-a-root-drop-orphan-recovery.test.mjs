@@ -34,6 +34,9 @@ import {
   collectRootDropCensus,
   rootDropRecoverySha256,
   createRootDropRecoveryRunner,
+  createStageATerraformBackendLock,
+  STAGE_A_TERRAFORM_LOCK_KEY,
+  STAGE_A_TERRAFORM_LOCK_ARN,
   STAGE_A_TERRAFORM_BACKEND,
   assertStageATerraformBackendMetadata,
 } from "../aws/production-stage-a-root-drop-orphan-recovery.mjs";
@@ -923,7 +926,7 @@ test("missing, malformed, or wrong-identity Stage-A variables fail before Terraf
   writeFileSync(censusPath, `${JSON.stringify(census())}\n`, { mode: 0o600 });
   const saved = Object.fromEntries(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS.map((key) => [key, process.env[key]]));
   try {
-    for (const [key, value, expected] of [["TF_VAR_vpc_id", undefined, /requires TF_VAR_vpc_id/], ["TF_VAR_private_subnet_ids", "not-hcl", /Terraform must not run/], ["TF_VAR_aws_region", "us-east-1", /outside the protected production Stage-A variable contract/]]) {
+    for (const [key, value, expected] of [["TF_VAR_vpc_id", undefined, /requires TF_VAR_vpc_id/], ["TF_VAR_private_subnet_ids", "not-hcl", /must be valid JSON Terraform input/], ["TF_VAR_aws_region", "us-east-1", /outside the protected production Stage-A variable contract/]]) {
       Object.assign(process.env, stageAVars);
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
       let terraformImports = 0;
@@ -934,6 +937,42 @@ test("missing, malformed, or wrong-identity Stage-A variables fail before Terraf
     for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("Stage-A recovery uses the canonical Terraform lockfile with atomic conditional create", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-lock-"));
+  const lockPaths = [path.join(directory, "first.lock"), path.join(directory, "second.lock")];
+  let remote; let successfulPuts = 0; let putAttempts = 0; let deleteAttempts = 0; const calls = [];
+  const run = async (args) => {
+    calls.push(args);
+    if (args[1] === "put-object") {
+      putAttempts += 1;
+      if (remote) throw new Error("PreconditionFailed");
+      remote = { etag: `\"etag-${successfulPuts + 1}\"`, body: readFileSync(args[args.indexOf("--body") + 1], "utf8") }; successfulPuts += 1;
+      return JSON.stringify({ ETag: remote.etag });
+    }
+    if (args[1] === "delete-object") {
+      deleteAttempts += 1;
+      if (!remote || args[args.indexOf("--if-match") + 1] !== remote.etag) throw new Error("PreconditionFailed");
+      remote = undefined; return "{}";
+    }
+    throw new Error(`unexpected lock command: ${args.join(" ")}`);
+  };
+  try {
+    const first = createStageATerraformBackendLock({ run, lockFilePath: lockPaths[0] });
+    const second = createStageATerraformBackendLock({ run, lockFilePath: lockPaths[1] });
+    const results = await Promise.allSettled([first.acquire(), second.acquire()]);
+    assert.equal(results.filter(({ status }) => status === "fulfilled").length, 1);
+    assert.equal(successfulPuts, 1);
+    assert.equal(putAttempts, 2);
+    assert.equal(calls[0][calls[0].indexOf("--key") + 1], STAGE_A_TERRAFORM_LOCK_KEY);
+    assert.equal(calls[0][calls[0].indexOf("--if-none-match") + 1], "*");
+    assert.match(STAGE_A_TERRAFORM_LOCK_ARN, new RegExp(`${STAGE_A_TERRAFORM_LOCK_KEY.replaceAll(".", "\\.")}$`));
+    const winner = results[0].status === "fulfilled" ? first : second;
+    await winner.release();
+    assert.equal(deleteAttempts, 1);
+    assert.equal(remote, undefined);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 async function runPreImportReadinessCase(readinessPlan, { variables = stageAVars, mutateSavedPlan = false, stateAfterReadiness } = {}) {

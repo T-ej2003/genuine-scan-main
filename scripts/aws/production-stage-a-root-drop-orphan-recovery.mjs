@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageAStateIdentityBinding, buildStageAStateIdentity, normalizeStageAStateForIdentity, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
@@ -15,6 +17,31 @@ export const ROOT_DROP_EXPECTED_SIGNING_ALGORITHM = "RSASSA_PSS_SHA_256";
 export const ROOT_DROP_CENSUS_MAX_AGE_MS = 5 * 60 * 1000;
 export const ROOT_DROP_CENSUS_ACTOR_BINDINGS = Object.freeze({ discovery: "ADMINISTRATOR", resourceReads: "RELEASE_DEPLOYER", provenance: "ADMINISTRATOR" });
 export const STAGE_A_TERRAFORM_BACKEND = Object.freeze({ type: "s3", bucket: STAGE_B_TERRAFORM_BACKEND.bucketName, key: STAGE_A_STATE_OBJECT, region: STAGE_B.region, encrypt: true, use_lockfile: true });
+export const STAGE_A_TERRAFORM_LOCK_KEY = `${STAGE_A_TERRAFORM_BACKEND.key}.tflock`;
+export const STAGE_A_TERRAFORM_LOCK_ARN = `${STAGE_B_TERRAFORM_BACKEND.bucketArn}/${STAGE_A_TERRAFORM_LOCK_KEY}`;
+
+export function createStageATerraformBackendLock({ run, lockFilePath, operation = "Stage-A production-artifacts policy recovery" } = {}) {
+  if (typeof run !== "function" || !path.isAbsolute(lockFilePath || "")) throw new Error("Stage-A Terraform backend lock requires an explicit runner and private lock file.");
+  let acquired = false;
+  let etag;
+  return Object.freeze({
+    async acquire() {
+      if (acquired) throw new Error("Stage-A Terraform backend lock is already held by this execution.");
+      const lock = JSON.stringify({ ID: crypto.randomUUID(), Operation: operation, Info: operation, Who: "mscqr-production-release-deployer", Version: "1.15.8", Created: new Date().toISOString(), Path: `s3://${STAGE_A_TERRAFORM_BACKEND.bucket}/${STAGE_A_TERRAFORM_BACKEND.key}` });
+      fs.writeFileSync(lockFilePath, `${lock}\n`, { mode: 0o600, flag: "wx" });
+      try {
+        const result = JSON.parse(await run(["s3api", "put-object", "--bucket", STAGE_A_TERRAFORM_BACKEND.bucket, "--key", STAGE_A_TERRAFORM_LOCK_KEY, "--body", lockFilePath, "--if-none-match", "*", "--expected-bucket-owner", STAGE_B.account, "--server-side-encryption", "AES256", "--output", "json", "--no-cli-pager"]));
+        if (typeof result?.ETag !== "string" || !result.ETag) throw new Error("Stage-A Terraform backend lock create did not return its object identity.");
+        etag = result.ETag; acquired = true; return Object.freeze({ key: STAGE_A_TERRAFORM_LOCK_KEY, etag });
+      } catch (error) { fs.rmSync(lockFilePath, { force: true }); throw error; }
+    },
+    async release() {
+      if (!acquired) return false;
+      try { await run(["s3api", "delete-object", "--bucket", STAGE_A_TERRAFORM_BACKEND.bucket, "--key", STAGE_A_TERRAFORM_LOCK_KEY, "--if-match", etag, "--expected-bucket-owner", STAGE_B.account, "--output", "json", "--no-cli-pager"]); acquired = false; return true; }
+      finally { fs.rmSync(lockFilePath, { force: true }); }
+    },
+  });
+}
 export const ROOT_DROP_LEGACY_POLICY_BINDING = Object.freeze({
   sourceSha: "e75520d1656920cdee503fbb055d5a1f72b9e3cc",
   transitionId: "stage-a-root-drop-20260818224752-39a2e8e518aa",

@@ -9,7 +9,7 @@ const graph = () => JSON.parse(fs.readFileSync(CAPABILITY_GRAPH_PATH, "utf8"));
 test("complete production dependency closure is exact across modes and failure paths", () => {
   const report = buildProductionDependencyClosure();
   assert.equal(report.status, "PASS");
-  const stageAAdditions = report.newAwsCalls.filter(({ sourceFile, capabilityId }) => sourceFile.includes("stage-a-production-artifacts") || capabilityId === "stage-a-artifacts-recovery-root-sign").map(({ sourceFile, action, capabilityId }) => [sourceFile, action, capabilityId]);
+  const stageAAdditions = report.newAwsCalls.filter(({ sourceFile, capabilityId }) => sourceFile.includes("stage-a-production-artifacts") || capabilityId === "stage-a-artifacts-recovery-root-sign" || capabilityId?.startsWith("stage-a-artifacts-recovery-release-lock-")).map(({ sourceFile, action, capabilityId }) => [sourceFile, action, capabilityId]);
   assert.deepEqual(stageAAdditions, [
     ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify"],
     ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:GetObject", "stage-a-artifacts-journal-read"],
@@ -24,8 +24,14 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketVersioning", "stage-a-artifacts-recovery-root-read-versioning"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:PutBucketPolicy", "stage-a-artifacts-recovery-root-put-policy"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-recovery-root-identify"],
+    ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
+    ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
   assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length); // 42 reviewed baseline calls plus the exact Stage-A recovery graph above
+  assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("stage-a-artifacts-recovery-release-lock-")).map(({ action, resources, identity }) => [action, resources, identity]), [
+    ["s3:PutObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"], "RELEASE_DEPLOYER"],
+    ["s3:DeleteObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"], "RELEASE_DEPLOYER"],
+  ]);
   assert.deepEqual(report.newAwsCalls.filter(({ sourceFile }) => sourceFile.endsWith("production-stage-a-production-artifacts-journal.mjs")).map(({ action, capabilityId, identity }) => [action, capabilityId, identity]), [
     ["s3:GetObject", "stage-a-artifacts-journal-read", "RELEASE_DEPLOYER"],
     ["s3:PutObject", "stage-a-artifacts-journal-conditional-create", "RELEASE_DEPLOYER"],
