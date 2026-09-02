@@ -50,6 +50,7 @@ jobs:
         env:
           GITHUB_TOKEN: "${{ github.token }}"
           SOURCE_SHA: "${{ inputs.source_sha }}"
+          RECOVERY_SOURCE_SHA: "${{ inputs.recovery_source_sha }}"
           STATE_LINEAGE: "${{ inputs.state_lineage }}"
           STATE_SERIAL: "${{ inputs.state_serial }}"
           STATE_SHA256: "${{ inputs.state_sha256 }}"
