@@ -18,6 +18,7 @@ import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operato
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { ECR_DOCUMENTED_NO_RESOURCE_POLICY, MALFORMED_ECR_REPOSITORY_POLICIES } from "./fixtures/ecr-repository-policy-fixtures.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
+import { imageEvidenceSha256 } from "../aws/production-green-stage-b-image-evidence.mjs";
 
 const caller = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test";
 const protectedSourceSha = "73e5908658edadd9f4b2d678adec0affef0dbbac";
@@ -427,7 +428,7 @@ test("administrator preflight binds live temporary-KMS absence evidence to prote
     continueReadiness: () => { continued += 1; },
     validateCapabilityGraph: () => admin.capabilityGraph,
   };
-  const runReleaseWithPublication = (publication, overrides = {}) => runPreflightCli(releaseArguments, { ...releaseDependencies, ...overrides, readinessArgs: overrides.readinessArgs || releaseReadinessArgs(publication) });
+  const runReleaseWithPublication = (publication, overrides = {}, args = releaseArguments) => runPreflightCli(args, { ...releaseDependencies, ...overrides, readinessArgs: overrides.readinessArgs || releaseReadinessArgs(publication) });
   assert.doesNotThrow(() => runReleaseWithPublication(publicationA));
   assert.equal(continued, 1);
   assert.throws(() => runReleaseWithPublication(publicationB), /workflow-run-id|canonical-artifact-sha256|image evidence/);
@@ -436,6 +437,18 @@ test("administrator preflight binds live temporary-KMS absence evidence to prote
   assert.throws(() => runReleaseWithPublication(publicationA, { readinessArgs: releaseReadinessArgs(publicationA).map((item, index, args) => index === args.indexOf("--image-release-sha") + 1 ? "b".repeat(40) : item) }), /image-release-sha/);
   assert.throws(() => runReleaseWithPublication(publicationA, { readinessArgs: ["--image-evidence", publicationB.evidencePath, "--image-evidence-signature", publicationB.signaturePath, ...releaseReadinessArgs(publicationA).slice(4)] }), /image evidence/);
   assert.equal(continued, 1);
+
+  const originalEvidenceBytes = fs.readFileSync(publicationA.evidencePath); const originalSignatureBytes = fs.readFileSync(publicationA.signaturePath); let pinnedPublication;
+  try {
+    assert.doesNotThrow(() => runReleaseWithPublication(publicationA, {
+      releasePreflight: () => { fs.copyFileSync(publicationB.evidencePath, publicationA.evidencePath); fs.copyFileSync(publicationB.signaturePath, publicationA.signaturePath); return releaseDependencies.releasePreflight(); },
+      continueReadiness: (_args, publication) => { pinnedPublication = publication; return { backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true }; },
+    }, releaseArguments.map((item, index, args) => index === args.indexOf("--output") + 1 ? path.join(directory, "release-toctou.json") : item)));
+  } finally {
+    fs.writeFileSync(publicationA.evidencePath, originalEvidenceBytes, { mode: 0o600 }); fs.writeFileSync(publicationA.signaturePath, originalSignatureBytes, { mode: 0o600 });
+  }
+  assert.equal(imageEvidenceSha256(JSON.parse(pinnedPublication.imageEvidenceBytes)), imageFixture.authorization.imageEvidenceSha256);
+  assert.equal(imageEvidenceSha256(JSON.parse(pinnedPublication.imageEvidenceBytes)), imageEvidenceSha256(JSON.parse(originalEvidenceBytes)));
 });
 
 test("administrator preflight requires current image authorization and rejects fixture-bound identities", () => {

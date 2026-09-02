@@ -78,7 +78,7 @@ const readImageAuthorization = (filePath, expectedSha256, sourceSha, run, verify
 
 const readPrivateJson = (filePath, label) => {
   const file = readStageBPrivateFileBytes({ filePath, repositoryRoot: root, label });
-  try { return JSON.parse(file.bytes.toString("utf8")); } catch (error) { throw new Error(`${label} is not valid JSON: ${error.message}`); }
+  try { return { document: JSON.parse(file.bytes.toString("utf8")), bytes: file.bytes }; } catch (error) { throw new Error(`${label} is not valid JSON: ${error.message}`); }
 };
 
 function assertReadinessImageAuthorizationBinding(argv, authorization) {
@@ -89,12 +89,13 @@ function assertReadinessImageAuthorizationBinding(argv, authorization) {
   ];
   for (const [option, expectedValue] of expected) if (value(argv, option) !== String(expectedValue)) throw new Error(`Release readiness ${option} does not match the authenticated image authorization.`);
   const evidence = readPrivateJson(value(argv, "--image-evidence"), "Current image evidence");
-  if (imageEvidenceSha256(evidence) !== authorization.imageEvidenceSha256) throw new Error("Release readiness image evidence does not match the authenticated image authorization.");
+  if (imageEvidenceSha256(evidence.document) !== authorization.imageEvidenceSha256) throw new Error("Release readiness image evidence does not match the authenticated image authorization.");
   const signature = readPrivateJson(value(argv, "--image-evidence-signature"), "Current image-evidence signature");
-  if (canonicalizeJson(signature) !== canonicalizeJson(authorization.imageEvidenceSignature)) throw new Error("Release readiness image-evidence signature does not match the authenticated image authorization.");
+  if (canonicalizeJson(signature.document) !== canonicalizeJson(authorization.imageEvidenceSignature)) throw new Error("Release readiness image-evidence signature does not match the authenticated image authorization.");
+  return { imageEvidenceBytes: evidence.bytes, imageEvidenceSignatureBytes: signature.bytes };
 }
 
-function continueReleaseReadiness(argv, { run = (command, args, options) => execFileSync(command, args, options) } = {}) {
+function continueReleaseReadiness(argv, { run = (command, args, options) => execFileSync(command, args, options), imageEvidenceBytes, imageEvidenceSignatureBytes } = {}) {
   const backendConfig = value(argv, "--backend-config"); const terraformDataDir = value(argv, "--terraform-data-dir");
   const preflightDirectory = path.dirname(path.resolve(value(argv, "--output")));
   const stageAState = path.join(preflightDirectory, "stage-a-state.json"); const stageBState = path.join(preflightDirectory, "stage-b-state.json");
@@ -107,6 +108,7 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff, phase: "POST_APPLY", run: (args) => releaseAwsRun(args) });
   const generated = generateStageBTfvars({
     imageEvidence: value(argv, "--image-evidence"), imageEvidenceSignature: value(argv, "--image-evidence-signature"), stateBackup: stageBState,
+    imageEvidenceBytes, imageEvidenceSignatureBytes,
     stageAInput: handoff, stageAStateBackup: stageAState, brokerPackagePath: value(argv, "--broker-package"), toolingSha, toolingTreeSha256,
     imageReleaseSha: value(argv, "--image-release-sha"), workflowRunId: value(argv, "--workflow-run-id"), canonicalArtifactSha256: value(argv, "--canonical-artifact-sha256"),
     environment: "production", outputPath: tfvars, bindingReportPath: bindingReport, partialApplyRecovery, freshImagePartialApplyRecovery,
@@ -138,7 +140,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
   const verify = dependencies.verify;
   const verifyImageEvidence = dependencies.verifyImageEvidence;
   const releasePreflight = dependencies.releasePreflight || runReleaseReadPreflight;
-  const continueReadiness = dependencies.continueReadiness || ((args) => continueReleaseReadiness(args));
+  const continueReadiness = dependencies.continueReadiness || ((args, publication) => continueReleaseReadiness(args, publication));
   const validateCapabilityGraph = dependencies.validateCapabilityGraph || assertStageBDeploymentCapabilityGraph;
   const readStageATerraformSource = dependencies.readStageATerraformSource || (() => fs.readFileSync(path.join(root, "infra/aws/terraform/production-green-stage-a/main.tf"), "utf8"));
   const readProtectedMainCheckout = dependencies.readProtectedMainCheckout || (() => readStageBProtectedMainCheckout({ cwd: root }));
@@ -232,7 +234,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
     assertCutoverCriticalEvidence(adminReport);
     if (canonicalizeJson(adminReport.capabilityGraph) !== canonicalizeJson(capabilityGraph)) throw new Error("Administrator pre-plan capability graph is stale.");
     assertReleasePolicyEvidence(adminReport.policyEvidence);
-    assertReadinessImageAuthorizationBinding(argv, imageAuthorizationFile.authorization);
+    const authenticatedPublication = assertReadinessImageAuthorizationBinding(argv, imageAuthorizationFile.authorization);
     const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)), run: (args) => releaseRun(args) });
     report.sourceSha = sourceSha;
     report.requiredReads["kms:Verify"] = "allowed";
@@ -243,7 +245,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
       const reportFile = write(output, blockedReport);
       return { identity, status: report.status, releaseReadCapabilities: { failed: report.failed.length, skipped: report.skipped.length }, report: reportFile, backendReady: false, stateReady: false, handoffReady: false, tfvarsReady: false, capabilityGraph };
     }
-    const readiness = continueReadiness(argv);
+    const readiness = continueReadiness(argv, authenticatedPublication);
     const stageBApprovalLiveObservation = argv.includes("--capture-stage-b-approval-live-observation")
       ? observeStageBBrokerApprovalBindings({ reader: createAwsReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn, run: releaseRun }) })
       : undefined;
