@@ -5,6 +5,24 @@ Production-grade, multi-tenant QR issuance, controlled-print, verification, anom
 Zebra ZT410 raw TCP validation and DB-backed print lifecycle notes are documented in
 [`documents/ZEBRA_ZT410_DB_BACKED_PRINTING.md`](documents/ZEBRA_ZT410_DB_BACKED_PRINTING.md).
 
+## Stage-A production-artifacts reconciliation
+
+The canonical production path is the two-phase command pair
+`npm run stage-a:production-artifacts:prepare -- --production ...` followed by
+`npm run stage-a:production-artifacts:reconcile -- --production ...`. Prepare
+creates one external, private refresh-only plan and its exact evidence; the
+protected workflow
+`.github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml`
+independently authorizes those identities. Execute consumes that same plan and
+evidence, performs the state-CAS reconciliation once, and requires a fresh
+ordinary Stage-A plan to be `NO_OP`.
+
+The operator sequence is: complete the separately governed bucket-policy
+recovery; authenticate its completion; run prepare; obtain the independent
+protected-environment authorization; run execute with the exact prepared plan
+and evidence; verify state/live convergence; then run a fresh ordinary
+Stage-A plan. Execute never creates a replacement plan.
+
 
 ## 1. What This System Is
 
@@ -46,4 +64,3 @@ High-level flow:
 3. Manufacturer creates direct-print jobs and issues one-time render tokens via authenticated print agent.
 4. Customer scans signed token (`/scan?t=...`) or verifies by code (`/verify/:code`).
 5. System logs events, computes risk/SLA metrics, applies policy controls, and supports immutable audit export.
-

@@ -493,6 +493,22 @@ test("Stage A initializes the configured backend once before every state identit
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test("Stage A execute loads the prepared refresh-only bytes and never replans", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-prepared-refresh-"));
+  const planPath = path.join(directory, "stage-a.tfplan"); const refreshPath = path.join(directory, "prepared-refresh.tfplan");
+  const planBytes = Buffer.from("prepared-refresh-only-plan"); writeFileSync(refreshPath, planBytes, { mode: 0o600 });
+  const savedPlanSha256 = createHash("sha256").update(planBytes).digest("hex"); const calls = []; let applies = 0;
+  try {
+    const adapter = createTerraformStageAAdapter({ planPath, refreshOnlyPlanPath: refreshPath, sourceSha: "a".repeat(40), run: async (args) => { calls.push(args); if (args.includes("show")) return JSON.stringify(stageAPlan({ actions: ["no-op"] })); if (args.includes("init")) return ""; if (args.includes("apply")) { applies += 1; return ""; } throw new Error(`unexpected Terraform call: ${args.join(" ")}`); }, describeIngress: async () => ({ present: true }) });
+    const plan = await adapter.readSavedRefreshOnlyPlan(refreshPath);
+    await adapter.applySavedRefreshOnlyPlan({ planPath: refreshPath, savedPlanSha256, refreshOnly: true });
+    assert.equal(plan.resource_changes[0].change.actions[0], "no-op"); assert.equal(applies, 1); assert.equal(calls.some((args) => args.includes("plan")), false);
+    writeFileSync(refreshPath, "tampered", { mode: 0o600 });
+    await assert.rejects(() => adapter.applySavedRefreshOnlyPlan({ planPath: refreshPath, savedPlanSha256, refreshOnly: true }), /saved plan changed|already been attempted/);
+    assert.equal(applies, 1);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("Stage A rejects an invalid preserved-plan digest before Terraform show", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-plan-hash-"));
   const planPath = path.join(directory, "stage-a.tfplan");

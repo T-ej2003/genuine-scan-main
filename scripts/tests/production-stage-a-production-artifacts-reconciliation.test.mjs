@@ -12,6 +12,7 @@ import {
   buildStageAProductionArtifactsBucketPolicyPredecessor,
   createStageAProductionArtifactsRecoveryCompletion,
   createStageAProductionArtifactsReconciliationAuthorization,
+  prepareStageAProductionArtifactsStateReconciliation,
   runStageAProductionArtifactsStateReconciliation,
   STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY,
 } from "../aws/production-stage-a-control-plane.mjs";
@@ -31,6 +32,7 @@ const verifyReconciliationAuthorization = (value) => ({ authorizationSha256: val
 const verifier = (value) => ({ authorizationSha256: value.recoveryAuthorizationSha256, livePolicySha256: value.livePolicySha256, completed: true });
 const refreshPlan = ({ before = predecessor, after = desired, drift = [] } = {}) => ({ complete: true, errored: false, applyable: true, resource_changes: [], resource_drift: [{ address: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address, mode: "managed", type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type, name: "production_artifacts", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: resource(before), after: resource(after), replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } }, ...drift] });
 const consumption = (overrides = {}) => ({ reserveConsumption: async () => ({ reservation: "exact" }), finalizeConsumption: async () => {}, abortConsumption: async () => {}, ...overrides });
+const execute = async ({ adapter, ...options }) => { const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: options.recoveryCompletion || completion(), verifyRecoveryCompletion: verifier }); return runStageAProductionArtifactsStateReconciliation({ ...options, adapter, saved: prepared.saved, preparedState: prepared.preState }); };
 
 test("exact recovery drift is accepted only with independently authenticated completion", () => {
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan(), { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }));
@@ -92,11 +94,11 @@ test("one exact refresh-only apply persists state and leaves AWS policy unchange
   let state = { lineage, serial: 35, stateSha256 }; let policy = desired; const calls = [];
   const adapter = {
     readStateIdentity: async () => ({ ...state }),
-    createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { ...state }, plan: refreshPlan() }),
+    createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { ...state }, plan: refreshPlan() }),
     applySavedRefreshOnlyPlan: async () => { calls.push("apply-refresh-only"); state = { ...state, serial: 36 }; },
     readProductionArtifactsPolicy: async () => policy,
   };
-  const result = await runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption({ reserveConsumption: async (value) => { calls.push(value); return { reservation: "exact" }; } }) });
+  const result = await execute({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption({ reserveConsumption: async (value) => { calls.push(value); return { reservation: "exact" }; } }) });
   assert.equal(result.applied, true); assert.equal(result.awsResourceMutations, 0); assert.equal(result.terraformStateMutations, 1); assert.equal(state.serial, 36); assert.equal(calls[1], "apply-refresh-only");
   assert.doesNotThrow(() => assertStageAResourceDrift({ resource_drift: [] }));
 });
@@ -105,11 +107,11 @@ test("live policy is a final CAS immediately before refresh-only apply", async (
   let state = { lineage, serial: 35, stateSha256 }; let policy = desired; let applies = 0;
   const adapter = {
     readStateIdentity: async () => ({ ...state }),
-    createSavedRefreshOnlyPlan: async () => { policy = buildStageAProductionArtifactsBucketPolicyPredecessor(); return { sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { ...state }, plan: refreshPlan() }; },
+    createSavedRefreshOnlyPlan: async () => { policy = buildStageAProductionArtifactsBucketPolicyPredecessor(); return { sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { ...state }, plan: refreshPlan() }; },
     applySavedRefreshOnlyPlan: async () => { applies += 1; state = { ...state, serial: 36 }; },
     readProductionArtifactsPolicy: async () => policy,
   };
-  await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption({ reserveConsumption: () => { throw new Error("consumption must be unreachable"); } }) }), /live policy changed/);
+  await assert.rejects(() => execute({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption({ reserveConsumption: () => { throw new Error("consumption must be unreachable"); } }) }), /live policy changed/);
   assert.equal(applies, 0);
 });
 
@@ -127,11 +129,11 @@ test("live policy identity and final state CAS remain fail-closed before apply",
     let state = { lineage, serial: 35, stateSha256 }; let reads = 0; let applies = 0;
     const adapter = {
       readStateIdentity: async () => overrides.beforeApply && reads++ > 0 ? overrides.beforeApply : ({ ...state }),
-      createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: overrides.savedPlanSha256 || "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }),
+      createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: overrides.savedPlanSha256 || "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }),
       applySavedRefreshOnlyPlan: async () => { applies += 1; },
       readProductionArtifactsPolicy: async () => overrides.policy || desired,
     };
-    await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption() }), /state changed|serial|live policy|authorization/i, label);
+    await assert.rejects(() => execute({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption() }), /state (?:changed|identity)|serial|live policy|authorization/i, label);
     assert.equal(applies, 0, label);
   }
 });
@@ -140,12 +142,12 @@ test("exclusive pre-apply consumption prevents a concurrent reconciliation repla
   let state = { lineage, serial: 35, stateSha256 }; let consumed = false; let applies = 0;
   const adapter = {
     readStateIdentity: async () => ({ ...state }),
-    createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }),
+    createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }),
     applySavedRefreshOnlyPlan: async () => { applies += 1; state = { ...state, serial: 36 }; },
     readProductionArtifactsPolicy: async () => desired,
   };
-  const execute = () => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption({ reserveConsumption: async () => { if (consumed) throw new Error("authorization already consumed"); consumed = true; return { reservation: "exact" }; } }) });
-  const results = await Promise.allSettled([execute(), execute()]);
+  const executeOnce = () => execute({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption({ reserveConsumption: async () => { if (consumed) throw new Error("authorization already consumed"); consumed = true; return { reservation: "exact" }; } }) });
+  const results = await Promise.allSettled([executeOnce(), executeOnce()]);
   assert.equal(results.filter(({ status }) => status === "fulfilled").length, 1);
   assert.equal(applies, 1);
 });
@@ -153,16 +155,16 @@ test("exclusive pre-apply consumption prevents a concurrent reconciliation repla
 test("post-reservation state and live policy CAS aborts before refresh-only apply", async () => {
   for (const [label, mutate] of [["policy", ({ policy }) => { policy.value = predecessor; }], ["serial", ({ state }) => { state.value = { lineage, serial: 36, stateSha256 }; }], ["lineage", ({ state }) => { state.value = { lineage: "other", serial: 35, stateSha256 }; }], ["bytes", ({ state }) => { state.value = { lineage, serial: 35, stateSha256: "d".repeat(64) }; }]]) {
     const state = { value: { lineage, serial: 35, stateSha256 } }; const policy = { value: desired }; let applies = 0; let aborts = 0; let finalizes = 0;
-    const adapter = { readStateIdentity: async () => ({ ...state.value }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; }, readProductionArtifactsPolicy: async () => policy.value };
-    await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption({ reserveConsumption: async () => { mutate({ state, policy }); return { reservation: "exact" }; }, abortConsumption: async () => { aborts += 1; }, finalizeConsumption: async () => { finalizes += 1; } }) }), /state changed|live policy/, label);
+    const adapter = { readStateIdentity: async () => ({ ...state.value }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; }, readProductionArtifactsPolicy: async () => policy.value };
+    await assert.rejects(() => execute({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption({ reserveConsumption: async () => { mutate({ state, policy }); return { reservation: "exact" }; }, abortConsumption: async () => { aborts += 1; }, finalizeConsumption: async () => { finalizes += 1; } }) }), /state changed|live policy/, label);
     assert.equal(applies, 0, label); assert.equal(aborts, 1, label); assert.equal(finalizes, 0, label);
   }
 });
 
 test("failed refresh-only apply finalizes failure without releasing its reservation", async () => {
   let finalized = ""; let aborted = false;
-  const adapter = { readStateIdentity: async () => ({ lineage, serial: 35, stateSha256 }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { throw new Error("apply failed"); }, readProductionArtifactsPolicy: async () => desired };
-  await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption({ finalizeConsumption: async ({ status }) => { finalized = status; }, abortConsumption: async () => { aborted = true; } }) }), /apply failed/);
+  const adapter = { readStateIdentity: async () => ({ lineage, serial: 35, stateSha256 }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { throw new Error("apply failed"); }, readProductionArtifactsPolicy: async () => desired };
+  await assert.rejects(() => execute({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption({ finalizeConsumption: async ({ status }) => { finalized = status; }, abortConsumption: async () => { aborted = true; } }) }), /apply failed/);
   assert.equal(finalized, "FAILED_OR_INDETERMINATE"); assert.equal(aborted, false);
 });
 
@@ -170,30 +172,31 @@ test("state lineage and serial are CAS-bound and recovery cannot replay", async 
   let state = { lineage, serial: 36, stateSha256 }; let creates = 0; let applies = 0;
   const adapter = {
     readStateIdentity: async () => ({ ...state }),
-    createSavedRefreshOnlyPlan: async () => { creates += 1; return { sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { ...state }, plan: refreshPlan() }; },
+    createSavedRefreshOnlyPlan: async () => { creates += 1; return { sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { ...state }, plan: refreshPlan() }; },
     applySavedRefreshOnlyPlan: async () => { applies += 1; },
     readProductionArtifactsPolicy: async () => desired,
   };
-  await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(35), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(35), verifyReconciliationAuthorization, ...consumption() }), /completion binding|serial/);
+  await assert.rejects(() => execute({ adapter, sourceSha, recoveryCompletion: completion(35), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(35), verifyReconciliationAuthorization, ...consumption() }), /completion binding|serial/);
   assert.equal(creates, 0); assert.equal(applies, 0);
-  await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter: { ...adapter, readStateIdentity: async () => ({ lineage: "other", serial: 35, stateSha256 }) }, sourceSha, recoveryCompletion: completion(35), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(35), verifyReconciliationAuthorization, ...consumption() }), /state identity/);
+  await assert.rejects(() => execute({ adapter: { ...adapter, readStateIdentity: async () => ({ lineage: "other", serial: 35, stateSha256 }) }, sourceSha, recoveryCompletion: completion(35), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(35), verifyReconciliationAuthorization, ...consumption() }), /state identity/);
 });
 
 test("completion, source, and recovery authorization changes fail closed before apply", async () => {
   let applies = 0;
-  const adapter = { readStateIdentity: async () => ({ lineage, serial: 35, stateSha256 }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; }, readProductionArtifactsPolicy: async () => desired };
+  const adapter = { readStateIdentity: async () => ({ lineage, serial: 35, stateSha256 }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; }, readProductionArtifactsPolicy: async () => desired };
   const wrongAuth = { ...completion(), recoveryAuthorizationSha256: "c".repeat(64) };
   assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan(), { sourceSha, recoveryCompletion: wrongAuth, preStateSerial: 35, verifyRecoveryCompletion: verifier }), /hash|completion|independently/);
-  const wrongSource = completion(); await assert.rejects(runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha: "f".repeat(40), recoveryCompletion: wrongSource, verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption() }), /binding|source/);
+  const wrongSource = completion(); const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier }); await assert.rejects(runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha: "f".repeat(40), saved: prepared.saved, preparedState: prepared.preState, recoveryCompletion: wrongSource, verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption() }), /binding|source/);
   const wrongHash = { ...completion(), completionSha256: "d".repeat(64) }; assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan(), { sourceSha, recoveryCompletion: wrongHash, preStateSerial: 35, verifyRecoveryCompletion: verifier }), /hash/);
   assert.equal(applies, 0);
 });
 
 test("missing or non-independent reconciliation authorization fails before apply", async () => {
   let applies = 0;
-  const adapter = { readStateIdentity: async () => ({ lineage, serial: 35, stateSha256 }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; }, readProductionArtifactsPolicy: async () => desired };
-  await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, ...consumption() }), /authorization/);
-  await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization: () => ({ authorizationSha256: reconciliationAuthorization().authorizationSha256, approved: true, independent: false }), ...consumption() }), /independently authenticated/);
+  const adapter = { readStateIdentity: async () => ({ lineage, serial: 35, stateSha256 }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; }, readProductionArtifactsPolicy: async () => desired };
+  const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier });
+  await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, saved: prepared.saved, preparedState: prepared.preState, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, ...consumption() }), /authorization/);
+  await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, saved: prepared.saved, preparedState: prepared.preState, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization: () => ({ authorizationSha256: reconciliationAuthorization().authorizationSha256, approved: true, independent: false }), ...consumption() }), /independently authenticated/);
   assert.equal(applies, 0);
 });
 

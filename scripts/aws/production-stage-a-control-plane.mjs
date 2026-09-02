@@ -270,6 +270,48 @@ export function assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { s
   if (rdsDrift.length) assertStageARdsLatestRestorableTimeDrift(rdsDrift[0]);
   return Object.freeze({ valid: true, stateReconciliationRequired: true, address: entry.address, actions: change.actions, resourceDriftCount: plan.resource_drift.length, rdsLatestRestorableTimeRefreshed: rdsDrift.length === 1 });
 }
+
+const STAGE_A_PREPARE_EVIDENCE_FIELDS = Object.freeze([
+  "schemaVersion", "kind", "operation", "sourceSha", "account", "region", "executionPrincipal", "bucket",
+  "recoveryAuthorizationSha256", "recoveryCompletionSha256", "desiredPolicySha256", "preStateLineage", "preStateSerial",
+  "preStateSha256", "savedPlanSha256", "savedPlanByteLength", "terraformVersion", "awsProviderVersion", "terraformRoot", "prepareEvidenceSha256",
+]);
+
+export function createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, recoveryCompletion, saved, preState, terraformVersion = "1.15.8", awsProviderVersion = "6.56.0", terraformRoot = "infra/aws/terraform/production-green-stage-a" } = {}) {
+  if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !recoveryCompletion || !saved || saved.refreshOnly !== true || !preState
+    || !SHA256.test(saved.savedPlanSha256 || "") || !Number.isSafeInteger(saved.savedPlanByteLength) || saved.savedPlanByteLength < 1
+    || preState.lineage !== STAGE_A_STATE_LINEAGE || !Number.isSafeInteger(preState.serial) || preState.serial < 1 || !SHA256.test(preState.stateSha256 || "")
+    || typeof terraformVersion !== "string" || !terraformVersion || typeof awsProviderVersion !== "string" || !awsProviderVersion || typeof terraformRoot !== "string" || !terraformRoot) throw new Error("Stage A reconciliation prepare evidence inputs are invalid.");
+  const body = {
+    schemaVersion: 1, kind: "STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_PREPARE_EVIDENCE", operation: "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", sourceSha,
+    account: STAGE_B.account, region: STAGE_B.region, executionPrincipal: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn, bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket,
+    recoveryAuthorizationSha256: recoveryCompletion.recoveryAuthorizationSha256, recoveryCompletionSha256: recoveryCompletion.completionSha256, desiredPolicySha256: recoveryCompletion.desiredPolicySha256,
+    preStateLineage: preState.lineage, preStateSerial: preState.serial, preStateSha256: preState.stateSha256, savedPlanSha256: saved.savedPlanSha256, savedPlanByteLength: saved.savedPlanByteLength,
+    terraformVersion, awsProviderVersion, terraformRoot,
+  };
+  return Object.freeze({ ...body, prepareEvidenceSha256: stableJsonSha256(body) });
+}
+
+export function assertStageAProductionArtifactsReconciliationPrepareEvidence(value, { sourceSha, recoveryCompletion, preState, savedPlanSha256, savedPlanByteLength, terraformRoot = "infra/aws/terraform/production-green-stage-a" } = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...STAGE_A_PREPARE_EVIDENCE_FIELDS].sort())) throw new Error("Stage A reconciliation prepare evidence schema is not exact.");
+  if (value.schemaVersion !== 1 || value.kind !== "STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_PREPARE_EVIDENCE" || value.operation !== "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION" || value.sourceSha !== sourceSha || value.account !== STAGE_B.account || value.region !== STAGE_B.region || value.executionPrincipal !== PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn || value.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || value.recoveryAuthorizationSha256 !== recoveryCompletion?.recoveryAuthorizationSha256 || value.recoveryCompletionSha256 !== recoveryCompletion?.completionSha256 || value.desiredPolicySha256 !== recoveryCompletion?.desiredPolicySha256 || value.preStateLineage !== preState?.lineage || value.preStateSerial !== preState?.serial || value.preStateSha256 !== preState?.stateSha256 || value.savedPlanSha256 !== savedPlanSha256 || value.savedPlanByteLength !== savedPlanByteLength || value.terraformRoot !== terraformRoot || value.terraformVersion !== "1.15.8" || value.awsProviderVersion !== "6.56.0" || !SHA256.test(value.prepareEvidenceSha256 || "")) throw new Error("Stage A reconciliation prepare evidence binding is invalid.");
+  const { prepareEvidenceSha256, ...body } = value;
+  if (prepareEvidenceSha256 !== stableJsonSha256(body)) throw new Error("Stage A reconciliation prepare evidence hash is invalid.");
+  return Object.freeze(value);
+}
+
+export async function prepareStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion, verifyRecoveryCompletion, preState: expectedPreState, assertSourceIntegrity } = {}) {
+  if (!adapter || typeof adapter.createSavedRefreshOnlyPlan !== "function" || typeof adapter.readStateIdentity !== "function") throw new Error("Stage A production-artifacts preparation adapter is incomplete.");
+  const preState = expectedPreState || await adapter.readStateIdentity();
+  if (preState?.lineage !== STAGE_A_STATE_LINEAGE || !Number.isSafeInteger(preState.serial) || preState.serial < 1 || !SHA256.test(preState.stateSha256 || "")) throw new Error("Stage A reconciliation state identity is invalid.");
+  assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, preStateSerial: preState.serial, preStateSha256: preState.stateSha256, verifyRecoveryCompletion });
+  if (assertSourceIntegrity !== undefined) { if (typeof assertSourceIntegrity !== "function") throw new Error("Stage A reconciliation source-integrity check is invalid."); assertSourceIntegrity(); }
+  const saved = await adapter.createSavedRefreshOnlyPlan();
+  if (saved?.preState?.lineage !== preState.lineage || saved?.preState?.serial !== preState.serial || saved?.preState?.stateSha256 !== preState.stateSha256 || saved?.sourceSha !== sourceSha || saved?.refreshOnly !== true || !path.isAbsolute(saved?.planPath || "") || !SHA256.test(saved?.savedPlanSha256 || "") || !Number.isSafeInteger(saved.savedPlanByteLength) || saved.savedPlanByteLength < 1) throw new Error("Stage A refresh-only plan is not source- or operation-bound.");
+  assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(saved.plan, { sourceSha, recoveryCompletion, preStateSerial: preState.serial, preStateSha256: preState.stateSha256, verifyRecoveryCompletion });
+  const prepareEvidence = createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, recoveryCompletion, saved, preState });
+  return Object.freeze({ preState, saved, prepareEvidence });
+}
 export const STAGE_A_ROOT_DROP_RELEASE_ROLE_ARN = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
 export const STAGE_A_ROOT_DROP_PROVIDER_READ_ACTIONS = Object.freeze([
   "kms:DescribeKey",
@@ -438,16 +480,16 @@ function readAndVerifyPlanSha256(planPath, expectedSha256) {
   return actualSha256;
 }
 
-export async function runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion, verifyRecoveryCompletion, reconciliationAuthorization, verifyReconciliationAuthorization, authorizationIdentity, reserveConsumption, finalizeConsumption, abortConsumption } = {}) {
-  if (!adapter || typeof adapter.createSavedRefreshOnlyPlan !== "function" || typeof adapter.applySavedRefreshOnlyPlan !== "function" || typeof adapter.readStateIdentity !== "function" || typeof adapter.readProductionArtifactsPolicy !== "function" || typeof reserveConsumption !== "function" || typeof finalizeConsumption !== "function" || typeof abortConsumption !== "function") throw new Error("Stage A production-artifacts reconciliation adapter is incomplete.");
+export async function runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion, verifyRecoveryCompletion, reconciliationAuthorization, verifyReconciliationAuthorization, authorizationIdentity, reserveConsumption, finalizeConsumption, abortConsumption, saved, preparedState, assertSourceIntegrity } = {}) {
+  if (!adapter || typeof adapter.applySavedRefreshOnlyPlan !== "function" || typeof adapter.readStateIdentity !== "function" || typeof adapter.readProductionArtifactsPolicy !== "function" || typeof reserveConsumption !== "function" || typeof finalizeConsumption !== "function" || typeof abortConsumption !== "function" || !saved) throw new Error("Stage A production-artifacts reconciliation requires a prepared saved plan.");
   const before = await adapter.readStateIdentity();
   if (before?.lineage !== STAGE_A_STATE_LINEAGE || !Number.isSafeInteger(before.serial) || before.serial < 1 || !SHA256.test(before.stateSha256 || "")) throw new Error("Stage A reconciliation state identity is invalid.");
+  if (preparedState && (preparedState.lineage !== before.lineage || preparedState.serial !== before.serial || preparedState.stateSha256 !== before.stateSha256)) throw new Error("Stage A prepared state identity changed before execution.");
   const assertStateCas = (state, label) => {
     if (state?.lineage !== before.lineage || state.serial !== before.serial || state.stateSha256 !== before.stateSha256) throw new Error(`Stage A reconciliation state changed ${label}.`);
   };
   assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion });
-  const saved = await adapter.createSavedRefreshOnlyPlan();
-  if (saved?.preState?.lineage !== before.lineage || saved?.preState?.serial !== before.serial || saved?.preState?.stateSha256 !== before.stateSha256 || saved?.sourceSha !== sourceSha || saved?.refreshOnly !== true || !path.isAbsolute(saved?.planPath || "") || !SHA256.test(saved?.savedPlanSha256 || "")) throw new Error("Stage A refresh-only plan is not source- or operation-bound.");
+  if (saved?.preState?.lineage !== before.lineage || saved?.preState?.serial !== before.serial || saved?.preState?.stateSha256 !== before.stateSha256 || saved?.sourceSha !== sourceSha || saved?.refreshOnly !== true || !path.isAbsolute(saved?.planPath || "") || !SHA256.test(saved?.savedPlanSha256 || "") || !Number.isSafeInteger(saved.savedPlanByteLength) || saved.savedPlanByteLength < 1) throw new Error("Stage A prepared refresh-only plan is not source- or operation-bound.");
   assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(saved.plan, { sourceSha, recoveryCompletion, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion });
   assertStageAProductionArtifactsReconciliationAuthorization(reconciliationAuthorization, { sourceSha, recoveryCompletion, savedPlanSha256: saved.savedPlanSha256, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion, verifyReconciliationAuthorization });
   if (authorizationIdentity !== undefined && !SHA256.test(authorizationIdentity || "")) throw new Error("Stage A reconciliation governance authorization identity is invalid.");
@@ -471,6 +513,7 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
     assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion });
     assertStageAProductionArtifactsReconciliationAuthorization(reconciliationAuthorization, { sourceSha, recoveryCompletion, savedPlanSha256: saved.savedPlanSha256, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion, verifyReconciliationAuthorization });
     assertLivePolicyCas(await adapter.readProductionArtifactsPolicy());
+    if (assertSourceIntegrity !== undefined) { if (typeof assertSourceIntegrity !== "function") throw new Error("Stage A reconciliation source-integrity check is invalid."); assertSourceIntegrity(); }
     applyInvoked = true;
     await adapter.applySavedRefreshOnlyPlan(saved);
     const after = await adapter.readStateIdentity();
@@ -606,7 +649,7 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
       const plan = JSON.parse(await run([terraform, `-chdir=${root}`, "show", "-json", refreshOnlyPlanPath]));
       const bytes = fs.readFileSync(refreshOnlyPlanPath);
       savedRefreshOnlyPlanSha256 = createHash("sha256").update(bytes).digest("hex");
-      return { plan, planPath: refreshOnlyPlanPath, savedPlanSha256: savedRefreshOnlyPlanSha256, sourceSha, region, terraformRoot: root, refreshOnly: true, preState, evidenceRef: `terraform-refresh-only:${refreshOnlyPlanPath}`, evidenceSha256: savedRefreshOnlyPlanSha256 };
+      return { plan, planPath: refreshOnlyPlanPath, savedPlanSha256: savedRefreshOnlyPlanSha256, savedPlanByteLength: bytes.length, sourceSha, region, terraformRoot: root, refreshOnly: true, preState, evidenceRef: `terraform-refresh-only:${refreshOnlyPlanPath}`, evidenceSha256: savedRefreshOnlyPlanSha256 };
     },
     async applySavedRefreshOnlyPlan(saved) {
       if (refreshOnlyApplyAttempted) throw new Error("Stage A refresh-only reconciliation has already been attempted.");
@@ -615,6 +658,13 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
       if (currentSha256 !== savedRefreshOnlyPlanSha256) throw new Error("Stage A refresh-only saved plan changed after validation.");
       refreshOnlyApplyAttempted = true;
       await run([terraform, `-chdir=${root}`, "apply", "-input=false", refreshOnlyPlanPath]);
+    },
+    async readSavedRefreshOnlyPlan(planPath = refreshOnlyPlanPath) {
+      if (planPath !== refreshOnlyPlanPath || !path.isAbsolute(planPath)) throw new Error("Stage A prepared refresh-only plan path is invalid.");
+      await ensureBackendInitialized();
+      const bytes = fs.readFileSync(planPath);
+      savedRefreshOnlyPlanSha256 = createHash("sha256").update(bytes).digest("hex");
+      return JSON.parse(await run([terraform, `-chdir=${root}`, "show", "-json", planPath]));
     },
     async readStateIdentity() {
       await ensureBackendInitialized();
