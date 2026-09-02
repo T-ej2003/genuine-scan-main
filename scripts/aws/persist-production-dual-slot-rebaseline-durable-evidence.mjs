@@ -19,7 +19,7 @@ const exactInputKeys = (bundle) => {
   if (!bundle || typeof bundle !== "object" || Object.keys(bundle).some((key) => !expected.includes(key))) throw new Error("Durable rebaseline evidence producer input contains unsupported top-level fields.");
 };
 
-export function persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha, run, protectedCheckout = () => readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true }), fsOps = { mkdtempSync, readFileSync, rmSync, writeFileSync } } = {}) {
+export function persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha, run, protectedCheckout = () => readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true, expectedSourceSha: publisherSourceSha, requireCanonicalRepository: true }), fsOps = { mkdtempSync, readFileSync, rmSync, writeFileSync } } = {}) {
   exactInputKeys(bundle);
   const durablePayload = { manifest: bundle.manifest, preparation: bundle.preparation, completion: bundle.completion, bindings: bundle.bindings };
   assertProductionDualSlotRebaselineDurableEvidence(durablePayload, { publisherSourceSha, authorization: bundle.authorization, recoveryEnvelope: bundle.recoveryEnvelope, imageAuthorization: bundle.imageAuthorization, proveDescendant: descendant });

@@ -27,10 +27,21 @@ export const STAGE_B_PROTECTED_CHECKOUT_REPOSITORY_STATE_FIELDS = Object.freeze(
   "rebaseInProgress",
   "cherryPickInProgress",
 ]);
+export const STAGE_B_CANONICAL_REPOSITORY = "T-ej2003/genuine-scan-main";
 
 function requireSha(value, label) {
   if (!SHA_PATTERN.test(String(value || ""))) throw new Error(`${label} must be a full 40-character commit SHA.`);
   return value;
+}
+
+export function assertStageBCanonicalRepositoryUrl(remoteUrl) {
+  if (typeof remoteUrl !== "string" || remoteUrl.trim() !== remoteUrl || !remoteUrl) throw new Error("Stage B protected remote URL is malformed.");
+  const approved = remoteUrl === "https://github.com/T-ej2003/genuine-scan-main"
+    || remoteUrl === "https://github.com/T-ej2003/genuine-scan-main.git"
+    || remoteUrl === "git@github.com:T-ej2003/genuine-scan-main"
+    || remoteUrl === "git@github.com:T-ej2003/genuine-scan-main.git";
+  if (!approved) throw new Error("Stage B protected remote is not the canonical production repository.");
+  return STAGE_B_CANONICAL_REPOSITORY;
 }
 
 function requireDigest(value, label) {
@@ -157,8 +168,9 @@ export function readFreshProtectedMainIdentity({ cwd = process.cwd(), expectedSo
   return Object.freeze({ fetchSucceeded: true, freshRemoteMainSha, headSha });
 }
 
-export function readStageBProtectedMainCheckout({ cwd = process.cwd(), fetchOriginMain = true, run = (args) => git(cwd, args) } = {}) {
-  const fresh = fetchOriginMain ? readFreshProtectedMainIdentity({ cwd, run }) : undefined;
+export function readStageBProtectedMainCheckout({ cwd = process.cwd(), fetchOriginMain = true, expectedSourceSha, requireCanonicalRepository = false, run = (args) => git(cwd, args) } = {}) {
+  if (requireCanonicalRepository) assertStageBCanonicalRepositoryUrl(String(run(["remote", "get-url", "origin"])).trim());
+  const fresh = fetchOriginMain ? readFreshProtectedMainIdentity({ cwd, expectedSourceSha, run }) : undefined;
   const currentHead = fresh?.headSha || run(["rev-parse", "HEAD"]);
   let originMainHead = fresh?.freshRemoteMainSha;
   if (!fetchOriginMain) {

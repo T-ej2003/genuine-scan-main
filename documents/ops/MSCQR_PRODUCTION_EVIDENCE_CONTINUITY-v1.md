@@ -45,9 +45,10 @@ completion, and rotation bindings. The resolver reads only its deterministic
 coordinate, requires the exact canonical bytes, hashes those retrieved bytes,
 and validates every transition binding before consumption.
 
-Before the conditional write, the local publisher refreshes and authenticates
-the clean checkout against the exact protected `origin/main` and publisher
-source SHA. It then writes only the four-record durable projection; authorization,
+Before the conditional write, the local publisher authenticates `origin` as the
+canonical GitHub repository `T-ej2003/genuine-scan-main` (the remote name alone
+is not trusted), refreshes and authenticates the clean checkout against its
+protected `main` and publisher source SHA. It then writes only the four-record durable projection; authorization,
 recovery-envelope, image-authorization, and other validation context are never
 persisted.
 

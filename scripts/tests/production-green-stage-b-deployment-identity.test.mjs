@@ -8,6 +8,7 @@ import {
   assertStageBDeploymentIdentity,
   assertStageBProtectedCheckoutMatchesDeploymentIdentity,
   assertStageBProtectedMainCheckout,
+  assertStageBCanonicalRepositoryUrl,
   assertStageBToolingCheckout,
   buildStageBProtectedMainCheckoutEvidence,
   readStageBProtectedMainCheckout,
@@ -41,13 +42,14 @@ function createProtectedMainFixture() {
   git(cwd, ["add", "tracked.txt"]);
   git(cwd, ["commit", "-qm", "initial"]);
   const head = git(cwd, ["rev-parse", "HEAD"]);
+  git(cwd, ["remote", "add", "origin", "https://github.com/T-ej2003/genuine-scan-main.git"]);
   git(cwd, ["update-ref", "refs/remotes/origin/main", head]);
   git(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
   return { cwd, head };
 }
 function withProtectedMainCheckout(callback) {
   const fixture = createProtectedMainFixture();
-  try { return callback(fixture, readStageBProtectedMainCheckout({ cwd: fixture.cwd, fetchOriginMain: false })); }
+  try { return callback(fixture, readStageBProtectedMainCheckout({ cwd: fixture.cwd, fetchOriginMain: false, requireCanonicalRepository: true })); }
   finally { fs.rmSync(fixture.cwd, { recursive: true, force: true }); }
 }
 function assertExactError(fn, message) {
@@ -106,6 +108,25 @@ test("protected-main checkout is exact, complete, and clean", () => {
   assert.throws(() => assertStageBProtectedMainCheckout({ ...valid, originMainHead: undefined }), /unavailable/);
   assert.doesNotThrow(() => assertStageBProtectedMainCheckout({ ...valid, originMainHead: imageReleaseSha, mode: "review" }));
   assert.throws(() => assertStageBProtectedMainCheckout({ ...valid, mode: "unsupported" }), /mode/);
+});
+
+test("protected-main repository identity accepts only the canonical GitHub repository", () => {
+  for (const remote of [
+    "https://github.com/T-ej2003/genuine-scan-main",
+    "https://github.com/T-ej2003/genuine-scan-main.git",
+    "git@github.com:T-ej2003/genuine-scan-main",
+    "git@github.com:T-ej2003/genuine-scan-main.git",
+  ]) assert.doesNotThrow(() => assertStageBCanonicalRepositoryUrl(remote));
+  for (const remote of [
+    "https://github.com/attacker/genuine-scan-main.git",
+    "https://github.com/T-ej2003/other-repository.git",
+    "https://github.com/T-ej2003/genuine-scan-main-fork.git",
+    "https://github.com.evil/T-ej2003/genuine-scan-main.git",
+    "https://github.com/T-ej2003/genuine-scan-main.git.evil",
+    "https://github.com@evil.example/T-ej2003/genuine-scan-main.git",
+    "https://gitlab.com/T-ej2003/genuine-scan-main.git",
+    "not a remote URL",
+  ]) assert.throws(() => assertStageBCanonicalRepositoryUrl(remote), /canonical|malformed/);
 });
 
 test("strict protected-main validation is joined to the plan tooling identity", () => {
