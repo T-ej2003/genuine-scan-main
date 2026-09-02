@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { buildStageAStateIdentity } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { buildStageARootDropKeyPolicy } from "../aws/production-stage-a-control-plane.mjs";
@@ -123,7 +124,10 @@ const legacyAliasPolicyPlan = ({ key = legacyKeyId, beforePolicy = buildLegacyRo
 const refreshOnlyIdentityPlan = ({ key = legacyKeyId, beforeArn = null, beforeKeyId = null, beforeId = null, afterArn = legacyKeyArn, afterKeyId = key, afterId = key } = {}) => ({ resource_drift: [
   { address: ROOT_DROP_KEY_ADDRESS, mode: "managed", type: "aws_kms_key", name: "root_drop", change: { before: { arn: beforeArn, custom_key_store_id: null, key_id: beforeKeyId, id: beforeId, multi_region: null, rotation_period_in_days: null, xks_key_id: null, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, actions: ["update"], after: { arn: afterArn, custom_key_store_id: "", key_id: afterKeyId, id: afterId, multi_region: false, rotation_period_in_days: 0, xks_key_id: "", key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" }, replace_paths: [] } },
 ] });
-const rdsRefreshDrift = { address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-18T22:41:17Z", storage_encrypted: true }, after: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-19T19:26:15Z", storage_encrypted: true }, replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } };
+const providerEnvelope = JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures/production-stage-a-terraform-1.15.8-aws-6.56.0-envelope.json"), "utf8"));
+const rdsSensitivity = providerEnvelope.greenRdsSensitivity;
+const { ingressEntry: endpointIngressSensitivity, ...endpointSensitivity } = providerEnvelope.endpointSecurityGroupSensitivity;
+const rdsRefreshDrift = { address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-18T22:41:17Z", storage_encrypted: true }, after: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-19T19:26:15Z", storage_encrypted: true }, replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: structuredClone(rdsSensitivity), after_sensitive: structuredClone(rdsSensitivity) } };
 const endpointSecurityGroupId = "sg-04d5bf116755ba412";
 const frontendSecurityGroupId = "sg-0126cf7854fef6be6";
 const backendSecurityGroupId = "sg-0db971332ae625441";
@@ -147,7 +151,7 @@ const endpointParentRefreshPlan = ({ before = endpointParentAttributes(preRefres
   complete: true,
   errored: false,
   ...(resourceChanges === undefined ? {} : { resource_changes: resourceChanges }),
-  resource_drift: [{ address: "aws_security_group.executor_endpoints", mode: "managed", type: "aws_security_group", name: "executor_endpoints", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before, after, after_unknown: {}, before_sensitive: { egress: [], ingress: before.ingress.map(() => ({ cidr_blocks: [], ipv6_cidr_blocks: [], prefix_list_ids: [], security_groups: [false] })), tags: {}, tags_all: {} }, after_sensitive: { egress: [], ingress: after.ingress.map(() => ({ cidr_blocks: [], ipv6_cidr_blocks: [], prefix_list_ids: [], security_groups: [false] })), tags: {}, tags_all: {} } } }],
+  resource_drift: [{ address: "aws_security_group.executor_endpoints", mode: "managed", type: "aws_security_group", name: "executor_endpoints", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before, after, after_unknown: {}, before_sensitive: { ...endpointSensitivity, ingress: before.ingress.map(() => structuredClone(endpointIngressSensitivity)) }, after_sensitive: { ...endpointSensitivity, ingress: after.ingress.map(() => structuredClone(endpointIngressSensitivity)) } } }],
 });
 const keyState = () => ({ ...absentState, resources: absentState.resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, identity_schema_version: 0, identity: providerIdentity(keyId), attributes: { arn: keyArn, key_id: keyId, key_usage: "SIGN_VERIFY", customer_master_key_spec: "RSA_3072" } }] } : resource) });
 const ownedState = () => ({ ...keyState(), resources: keyState().resources.map((resource) => resource.type === "aws_kms_key" && resource.name === "root_drop" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(buildStageARootDropKeyPolicy()) } })) } : resource.type === "aws_kms_alias" && resource.name === "root_drop" ? { ...resource, instances: [{ schema_version: 0, attributes: { arn: STAGE_B.rootDropKmsKeyArn, target_key_id: keyId, target_key_arn: keyArn } }] } : resource) });
@@ -286,6 +290,7 @@ test("refresh-only classification permits only exact computed identity convergen
     ["delete", (value) => { value.resource_drift[0].change.actions = ["delete"]; }],
     ["create", (value) => { value.resource_drift[0].change.actions = ["create"]; }],
     ["unknown attribute", (value) => { value.resource_drift[0].change.after.unreviewed = true; }],
+    ["sensitive attribute", (value) => { value.resource_drift[0].change.after_sensitive = { policy: true }; }],
     ["unrelated", (value) => { value.resource_drift.push({ address: "aws_vpc.other", mode: "managed", type: "aws_vpc", name: "other", change: { actions: ["update"], before: {}, after: { changed: true } } }); }],
     ["unknown action", (value) => { value.resource_drift[0].change.actions = ["forget"]; }],
     ["actionable resource_changes", (value) => { value.resource_changes = [{ address: ROOT_DROP_ALIAS_ADDRESS, type: "aws_kms_alias", change: { actions: ["create"] } }]; }],
@@ -384,6 +389,8 @@ test("serial-50 refresh classification accepts only the Terraform-owned frontend
     ["create", (plan) => { plan.resource_drift[0].change.actions = ["create"]; }],
     ["unknown value", (plan) => { plan.resource_drift[0].change.after_unknown = { ingress: true }; }],
     ["unknown prior value", (plan) => { plan.resource_drift[0].change.before_unknown = { ingress: true }; }],
+    ["sensitivity mismatch", (plan) => { plan.resource_drift[0].change.after_sensitive.tags_all = { unexpected: true }; }],
+    ["sensitivity expansion", (plan) => { plan.resource_drift[0].change.after_sensitive.unreviewed = true; }],
     ["second parent transition", (plan) => { plan.resource_drift.push(structuredClone(plan.resource_drift[0])); }],
     ["mixed root identity convergence", (plan) => { plan.resource_drift.push(structuredClone(refreshOnlyIdentityPlan({ key: keyId }).resource_drift[0])); }],
     ["unrelated drift", (plan) => { plan.resource_drift.push({ address: "aws_security_group.database", mode: "managed", type: "aws_security_group", name: "database", change: { actions: ["update"], before: {}, after: {} } }); }],
@@ -658,6 +665,7 @@ test("runAdoption resumes S1 key-only state without reimporting", async () => {
       readRootDropCensus: async () => currentCensus,
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args) => {
+        if (args.includes("init")) return "";
         if (args.includes("workspace") && args.includes("show")) return "default\n";
         if (args.includes("state") && args.includes("pull")) return JSON.stringify(currentState);
         if (args.includes("import")) { imports += 1; throw new Error("S1 retry must not import"); }
@@ -705,6 +713,7 @@ test("runAdoption resumes legacy policy convergence from a canonical key-only st
       readRootDropCensus: async () => canonicalCensus,
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args) => {
+        if (args.includes("init")) return "";
         if (args.includes("workspace")) return "default\n";
         if (args.includes("state")) return JSON.stringify(currentState);
         if (args.includes("import")) { imports += 1; throw new Error("policy-first retry must not import"); }
@@ -850,7 +859,7 @@ test("adoption rejects a non-default workspace before state access", async () =>
       execFile: () => { terraformCalls += 1; return "wrong-workspace\n"; },
       write: () => {},
     }), /canonical default Terraform workspace/);
-    assert.equal(terraformCalls, 1);
+    assert.equal(terraformCalls, 2);
   } finally {
     for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     rmSync(directory, { recursive: true, force: true });
@@ -879,7 +888,7 @@ test("Stage-A recovery preserves only the reviewed required variables and perfor
       readRootDropCensus: async () => { sequence.push("census"); return census(); },
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args, options) => {
-        sequence.push(args.includes("plan") && args.includes("-refresh=true") ? "readiness" : args.includes("workspace") ? "workspace" : args.includes("state") ? "state" : args[0]);
+        sequence.push(args.includes("init") ? "init" : args.includes("plan") && args.includes("-refresh=true") ? "readiness" : args.includes("workspace") ? "workspace" : args.includes("state") ? "state" : args[0]);
         assert.equal(options.env.AWS_PROFILE, "release");
         for (const key of STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS) assert.equal(options.env[key], stageAVars[key]);
         assert.equal(options.env.TF_VAR_unreviewed, undefined);
@@ -894,7 +903,7 @@ test("Stage-A recovery preserves only the reviewed required variables and perfor
       write: () => {},
     });
     assert.equal(result.status, "RECOVERED");
-    assert.deepEqual(sequence.slice(0, 3), ["workspace", "state", "readiness"]);
+    assert.deepEqual(sequence.slice(0, 4), ["init", "workspace", "state", "readiness"]);
     assert(sequence.indexOf("state") < sequence.indexOf("readiness"));
     assert(sequence.lastIndexOf("state") > sequence.indexOf("readiness"));
     assert(sequence.indexOf("census") > sequence.indexOf("state"));
@@ -953,6 +962,7 @@ async function runPreImportReadinessCase(readinessPlan, { variables = stageAVars
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args) => {
         terraformArgs.push(args);
+        if (args.includes("init")) return "";
         if (args.includes("workspace")) return "default\n";
         if (args.includes("state")) { statePulls += 1; return JSON.stringify(stateAfterReadiness && statePulls === 1 ? stateAfterReadiness : currentState); }
         if (args.includes("import")) { imports += 1; currentState = keyState(); return ""; }
@@ -1484,6 +1494,7 @@ test("runAdoption accepts the authenticated legacy 1/0 ARN-populating refresh", 
       readRootDropCensus: async () => freshCensus,
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args) => {
+        if (args.includes("init")) return "";
         if (args.includes("workspace")) return "default\n";
         if (args.includes("state") && args.includes("pull")) { statePulls += 1; return JSON.stringify(currentState); }
         if (args.includes("apply")) {
@@ -1547,6 +1558,7 @@ test("runAdoption reconciles an interrupted exact root-drop untaint before recov
       readRootDropCensus: async () => makeCensus(untainted),
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args) => {
+        if (args.includes("init")) return "";
         if (args.includes("workspace")) return "default\n";
         if (args.includes("state") && args.includes("pull")) {
           if (currentState === untainted && !untaintReadbackInterrupted) { untaintReadbackInterrupted = true; throw new Error("untaint readback interrupted after confirmed state persistence"); }
@@ -1654,6 +1666,7 @@ test("completed legacy adoption replay reconciles the historical census identity
       readRootDropCensus: async () => { throw new Error("fresh census must not be required for the completed replay"); },
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args) => {
+        if (args.includes("init")) return "";
         if (args.includes("workspace")) return "default\n";
         if (args.includes("state")) return JSON.stringify(completedState);
         if (args.includes("plan") && args.includes("-out")) { writeFileSync(args[args.indexOf("-out") + 1], "zero-drift"); return ""; }
@@ -1696,6 +1709,7 @@ test("completed serial-50 recovery persists only the authenticated parent-SG ref
       readRootDropCensus: async () => { throw new Error("completed recovery must not require a fresh orphan census"); },
       readTerraformBackendMetadata: () => ({ type: STAGE_A_TERRAFORM_BACKEND.type, config: { bucket: STAGE_A_TERRAFORM_BACKEND.bucket, key: STAGE_A_TERRAFORM_BACKEND.key, region: STAGE_A_TERRAFORM_BACKEND.region, encrypt: STAGE_A_TERRAFORM_BACKEND.encrypt, use_lockfile: STAGE_A_TERRAFORM_BACKEND.use_lockfile } }),
       execFile: (command, args) => {
+        if (args.includes("init")) return "";
         if (args.includes("workspace")) return "default\n";
         if (args.includes("state") && args.includes("pull")) return JSON.stringify(currentState);
         if (args.includes("plan") && args.includes("-out")) { writeFileSync(args[args.indexOf("-out") + 1], args.includes("-refresh-only") ? "parent-sg-refresh" : "zero-drift"); return ""; }

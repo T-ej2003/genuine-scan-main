@@ -8,7 +8,10 @@ const SHA256 = /^[a-f0-9]{64}$/;
 const RDS_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const exact = (value, expected, message) => { if (value !== expected) throw new Error(message); };
 const STAGE_A_STATE_LINEAGE = "02afb75a-f902-ab8a-f4c1-751d4aef7837";
-const STAGE_A_POLICY_RESOURCE_KEYS = ["bucket", "id", "policy", "region"];
+const STAGE_A_POLICY_RESOURCE_KEYS = ["bucket", "expected_bucket_owner", "id", "policy", "region"];
+const STAGE_A_RDS_SENSITIVITY_MASK = Object.freeze({
+  blue_green_update: [], domain_dns_ips: [], enabled_cloudwatch_logs_exports: [], listener_endpoint: [], master_user_secret: [{}], password: true, password_wo: true, replicas: [], restore_to_point_in_time: [], s3_import: [], tags: {}, tags_all: {}, vpc_security_group_ids: [false],
+});
 
 export function assertStageARdsLatestRestorableTimeRefresh(before, after) {
   if (!before || typeof before !== "object" || Array.isArray(before) || !after || typeof after !== "object" || Array.isArray(after)) throw new Error("Stage A plan contains malformed RDS before/after state.");
@@ -31,7 +34,8 @@ export function assertStageARdsLatestRestorableTimeDrift(entry) {
     || entry.provider_name !== "registry.terraform.io/hashicorp/aws" || !change || !isDeepStrictEqual(change.actions, ["update"])
     || !Array.isArray(change.replace_paths) || change.replace_paths.length
     || !emptyObject(change.before_unknown) || !emptyObject(change.after_unknown)
-    || !emptyObject(change.before_sensitive) || !emptyObject(change.after_sensitive)) throw new Error("Stage A plan contains uncontracted RDS drift.");
+    || !isDeepStrictEqual(change.before_sensitive, STAGE_A_RDS_SENSITIVITY_MASK)
+    || !isDeepStrictEqual(change.after_sensitive, STAGE_A_RDS_SENSITIVITY_MASK)) throw new Error("Stage A plan contains uncontracted RDS drift.");
   return assertStageARdsLatestRestorableTimeRefresh(change.before, change.after);
 }
 
@@ -241,7 +245,7 @@ export function assertStageAProductionArtifactsReconciliationAuthorization(autho
 }
 
 function assertStageAProductionArtifactsPolicyResource(value, label, expectedPolicy) {
-  if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...STAGE_A_POLICY_RESOURCE_KEYS].sort()) || value.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || value.id !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || value.region !== STAGE_B.region || stablePolicySha256(decodePolicyDocument(value.policy, `${label} policy`)) !== stablePolicySha256(expectedPolicy)) throw new Error(`Stage A production-artifacts ${label} is not exact.`);
+  if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...STAGE_A_POLICY_RESOURCE_KEYS].sort()) || value.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || value.expected_bucket_owner !== null || value.id !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || value.region !== STAGE_B.region || stablePolicySha256(decodePolicyDocument(value.policy, `${label} policy`)) !== stablePolicySha256(expectedPolicy)) throw new Error(`Stage A production-artifacts ${label} is not exact.`);
 }
 
 export function assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { sourceSha, recoveryCompletion, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial, verifyRecoveryCompletion } = {}) {
@@ -425,8 +429,8 @@ function readAndVerifyPlanSha256(planPath, expectedSha256) {
   return actualSha256;
 }
 
-export async function runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion, verifyRecoveryCompletion, reconciliationAuthorization, verifyReconciliationAuthorization, recordConsumption } = {}) {
-  if (!adapter || typeof adapter.createSavedRefreshOnlyPlan !== "function" || typeof adapter.applySavedRefreshOnlyPlan !== "function" || typeof adapter.readStateIdentity !== "function" || typeof adapter.readProductionArtifactsPolicy !== "function" || typeof recordConsumption !== "function") throw new Error("Stage A production-artifacts reconciliation adapter is incomplete.");
+export async function runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion, verifyRecoveryCompletion, reconciliationAuthorization, verifyReconciliationAuthorization, reserveConsumption, finalizeConsumption, abortConsumption } = {}) {
+  if (!adapter || typeof adapter.createSavedRefreshOnlyPlan !== "function" || typeof adapter.applySavedRefreshOnlyPlan !== "function" || typeof adapter.readStateIdentity !== "function" || typeof adapter.readProductionArtifactsPolicy !== "function" || typeof reserveConsumption !== "function" || typeof finalizeConsumption !== "function" || typeof abortConsumption !== "function") throw new Error("Stage A production-artifacts reconciliation adapter is incomplete.");
   const before = await adapter.readStateIdentity();
   if (before?.lineage !== STAGE_A_STATE_LINEAGE || !Number.isSafeInteger(before.serial) || before.serial < 1) throw new Error("Stage A reconciliation state identity is invalid.");
   assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, preStateSerial: before.serial, verifyRecoveryCompletion });
@@ -434,19 +438,45 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
   if (saved?.preState?.lineage !== before.lineage || saved?.preState?.serial !== before.serial || saved?.sourceSha !== sourceSha || saved?.refreshOnly !== true || !path.isAbsolute(saved?.planPath || "") || !SHA256.test(saved?.savedPlanSha256 || "")) throw new Error("Stage A refresh-only plan is not source- or operation-bound.");
   assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(saved.plan, { sourceSha, recoveryCompletion, preStateSerial: before.serial, verifyRecoveryCompletion });
   assertStageAProductionArtifactsReconciliationAuthorization(reconciliationAuthorization, { sourceSha, recoveryCompletion, savedPlanSha256: saved.savedPlanSha256, preStateSerial: before.serial, verifyRecoveryCompletion, verifyReconciliationAuthorization });
-  const beforeApply = await adapter.readStateIdentity();
-  if (beforeApply?.lineage !== before.lineage || beforeApply.serial !== before.serial) throw new Error("Stage A reconciliation state changed after the refresh-only plan was saved.");
-  assertStageAProductionArtifactsReconciliationAuthorization(reconciliationAuthorization, { sourceSha, recoveryCompletion, savedPlanSha256: saved.savedPlanSha256, preStateSerial: before.serial, verifyRecoveryCompletion, verifyReconciliationAuthorization });
-  const preApplyLivePolicy = await adapter.readProductionArtifactsPolicy();
-  const preApplyLivePolicySha256 = stablePolicySha256(preApplyLivePolicy);
-  if (preApplyLivePolicySha256 !== recoveryCompletion.livePolicySha256 || preApplyLivePolicySha256 !== recoveryCompletion.desiredPolicySha256 || stablePolicyJson(preApplyLivePolicy) !== stablePolicyJson(buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A production-artifacts live policy changed before refresh-only apply.");
-  await recordConsumption({ authorizationSha256: reconciliationAuthorization.authorizationSha256, completionSha256: recoveryCompletion.completionSha256, savedPlanSha256: saved.savedPlanSha256 });
-  await adapter.applySavedRefreshOnlyPlan(saved);
-  const after = await adapter.readStateIdentity();
-  if (after?.lineage !== before.lineage || after.serial !== before.serial + 1) throw new Error("Stage A reconciliation state serial did not advance exactly once.");
-  const livePolicy = await adapter.readProductionArtifactsPolicy();
-  if (stablePolicySha256(livePolicy) !== recoveryCompletion.livePolicySha256) throw new Error("Stage A reconciled production-artifacts policy does not match the authenticated desired policy.");
-  return Object.freeze({ valid: true, applied: true, refreshOnly: true, savedPlanSha256: saved.savedPlanSha256, preState: before, postState: after, livePolicySha256: stablePolicySha256(livePolicy), awsResourceMutations: 0, terraformStateMutations: 1 });
+  const consumption = { authorizationSha256: reconciliationAuthorization.authorizationSha256, completionSha256: recoveryCompletion.completionSha256, savedPlanSha256: saved.savedPlanSha256 };
+  const assertLivePolicyCas = (policy) => {
+    const policySha256 = stablePolicySha256(policy);
+    if (policySha256 !== recoveryCompletion.livePolicySha256 || policySha256 !== recoveryCompletion.desiredPolicySha256 || stablePolicyJson(policy) !== stablePolicyJson(buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A production-artifacts live policy changed before refresh-only apply.");
+  };
+  const beforeReservation = await adapter.readStateIdentity();
+  if (beforeReservation?.lineage !== before.lineage || beforeReservation.serial !== before.serial) throw new Error("Stage A reconciliation state changed after the refresh-only plan was saved.");
+  assertLivePolicyCas(await adapter.readProductionArtifactsPolicy());
+  let reservation;
+  let applyInvoked = false;
+  let finalized = false;
+  let finalizationAttempted = false;
+  try {
+    reservation = await reserveConsumption(consumption);
+    if (!reservation || typeof reservation !== "object" || Array.isArray(reservation)) throw new Error("Stage A reconciliation consumption reservation is invalid.");
+    const beforeApply = await adapter.readStateIdentity();
+    if (beforeApply?.lineage !== before.lineage || beforeApply.serial !== before.serial) throw new Error("Stage A reconciliation state changed after the refresh-only plan was saved.");
+    assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, preStateSerial: before.serial, verifyRecoveryCompletion });
+    assertStageAProductionArtifactsReconciliationAuthorization(reconciliationAuthorization, { sourceSha, recoveryCompletion, savedPlanSha256: saved.savedPlanSha256, preStateSerial: before.serial, verifyRecoveryCompletion, verifyReconciliationAuthorization });
+    assertLivePolicyCas(await adapter.readProductionArtifactsPolicy());
+    applyInvoked = true;
+    await adapter.applySavedRefreshOnlyPlan(saved);
+    const after = await adapter.readStateIdentity();
+    if (after?.lineage !== before.lineage || after.serial !== before.serial + 1) throw new Error("Stage A reconciliation state serial did not advance exactly once.");
+    const livePolicy = await adapter.readProductionArtifactsPolicy();
+    if (stablePolicySha256(livePolicy) !== recoveryCompletion.livePolicySha256) throw new Error("Stage A reconciled production-artifacts policy does not match the authenticated desired policy.");
+    finalizationAttempted = true;
+    await finalizeConsumption({ ...consumption, reservation, status: "COMPLETED" });
+    finalized = true;
+    return Object.freeze({ valid: true, applied: true, refreshOnly: true, savedPlanSha256: saved.savedPlanSha256, preState: before, postState: after, livePolicySha256: stablePolicySha256(livePolicy), awsResourceMutations: 0, terraformStateMutations: 1 });
+  } catch (error) {
+    if (reservation && !finalized) {
+      if (applyInvoked) {
+        if (!finalizationAttempted) { finalizationAttempted = true; await finalizeConsumption({ ...consumption, reservation, status: "FAILED" }); finalized = true; }
+      }
+      else await abortConsumption({ ...consumption, reservation, status: "ABORTED" });
+    }
+    throw error;
+  }
 }
 
 export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurityGroupId } = {}) {
@@ -532,6 +562,8 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
   let savedPlanSha256 = null;
   let savedRefreshOnlyPlanSha256 = null;
   let refreshOnlyApplyAttempted = false;
+  let backendInitialization;
+  const ensureBackendInitialized = () => backendInitialization ||= run([terraform, `-chdir=${root}`, "init", "-upgrade=false", "-input=false", ...backendArgs]);
   return {
     async createSavedPlan() {
       if (fs.existsSync(planPath)) {
@@ -539,7 +571,7 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
         await run([terraform, `-chdir=${root}`, "init", "-upgrade=false", "-input=false", "-backend=false"]);
       } else {
         if (stageAPlanSha256 !== undefined) throw new Error("Stage A preserved plan is missing.");
-        await run([terraform, `-chdir=${root}`, "init", "-upgrade=false", "-input=false", ...backendArgs]);
+        await ensureBackendInitialized();
         await run([terraform, `-chdir=${root}`, "plan", "-input=false", "-out", planPath]);
       }
       const plan = JSON.parse(await run([terraform, `-chdir=${root}`, "show", "-json", planPath]));
@@ -555,8 +587,8 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
       await run([terraform, `-chdir=${root}`, "apply", "-input=false", planPath]);
     },
     async createSavedRefreshOnlyPlan() {
+      await ensureBackendInitialized();
       const preState = await this.readStateIdentity();
-      await run([terraform, `-chdir=${root}`, "init", "-upgrade=false", "-input=false", ...backendArgs]);
       await run([terraform, `-chdir=${root}`, "plan", "-refresh-only", "-input=false", "-lock=true", "-no-color", "-out", refreshOnlyPlanPath]);
       const plan = JSON.parse(await run([terraform, `-chdir=${root}`, "show", "-json", refreshOnlyPlanPath]));
       const bytes = fs.readFileSync(refreshOnlyPlanPath);
@@ -572,6 +604,7 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
       await run([terraform, `-chdir=${root}`, "apply", "-input=false", refreshOnlyPlanPath]);
     },
     async readStateIdentity() {
+      await ensureBackendInitialized();
       const bytes = Buffer.from(await run([terraform, `-chdir=${root}`, "state", "pull"]));
       const state = JSON.parse(bytes);
       return { lineage: state.lineage, serial: state.serial, stateSha256: createHash("sha256").update(bytes).digest("hex") };

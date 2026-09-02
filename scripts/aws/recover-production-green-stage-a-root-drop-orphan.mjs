@@ -224,6 +224,7 @@ async function runAdoptionInternal({ argv = process.argv.slice(2), runTerraform,
   const tf = runTerraform
     ? (args) => runTerraform(args, env)
     : (args) => execFile("terraform", [`-chdir=${terraformRoot}`, ...args], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  tf(["init", "-upgrade=false", "-input=false", "-lockfile=readonly", "-no-color"]);
   if (tf(["workspace", "show"]).trim() !== "default") throw new Error("Stage-A root-drop adoption requires the canonical default Terraform workspace");
   const readStateSnapshot = async () => { const stateBytes = Buffer.from(tf(["state", "pull"])); return { state: parseAuthenticatedStateBytes(stateBytes), stateBytes }; };
   const readState = async () => (await readStateSnapshot()).state;

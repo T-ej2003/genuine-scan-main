@@ -20,6 +20,7 @@ import { buildRootDropEvidence, buildRootDropPayload } from "../aws/production-r
 import { buildTemporaryCapabilityEvidence } from "../aws/production-stage-a-temporary-kms-capability.mjs";
 
 export const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
+const stageARdsSensitivity = { blue_green_update: [], domain_dns_ips: [], enabled_cloudwatch_logs_exports: [], listener_endpoint: [], master_user_secret: [{}], password: true, password_wo: true, replicas: [], restore_to_point_in_time: [], s3_import: [], tags: {}, tags_all: {}, vpc_security_group_ids: [false] };
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
 const imageDigest = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`;
 const rotationId = "rotation-rehearsal-1";
@@ -213,7 +214,7 @@ test("Stage A accepts only the reviewed indexed for_each instance", () => {
     { ...stageAPlan({ actions: ["no-op"], checkerActions: ["no-op"] }), resource_drift: [{ address: "aws_security_group.executor_endpoints", change: { actions: ["update"] } }] },
   ]) assert.throws(() => assertStageAPlan(plan, inputs));
   assert.throws(() => assertStageAPlan({ ...stageAPlan(), resource_drift: {} }, inputs));
-  assert.doesNotThrow(() => assertStageAPlan({ ...stageAPlan(), resource_drift: [{ address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-18T22:41:17Z", storage_encrypted: true }, after: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-19T20:01:16Z", storage_encrypted: true }, replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } }] }, inputs));
+  assert.doesNotThrow(() => assertStageAPlan({ ...stageAPlan(), resource_drift: [{ address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-18T22:41:17Z", storage_encrypted: true }, after: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-19T20:01:16Z", storage_encrypted: true }, replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: structuredClone(stageARdsSensitivity), after_sensitive: structuredClone(stageARdsSensitivity) } }] }, inputs));
 });
 
 test("Stage A admits only the exact checker role-chain policy semantics", () => {
@@ -474,6 +475,22 @@ test("Stage A resumes an existing saved plan without a state backend", async () 
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("Stage A initializes the configured backend once before every state identity read", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-state-init-"));
+  const calls = [];
+  try {
+    const adapter = createTerraformStageAAdapter({
+      root: "infra/aws/terraform/production-green-stage-a", planPath: path.join(directory, "stage-a.tfplan"), refreshOnlyPlanPath: path.join(directory, "refresh.tfplan"), backendArgs: ["-backend-config=fixture"],
+      run: async (args) => { calls.push(args); return args.includes("state") ? JSON.stringify({ lineage: "fixture", serial: 1 }) : ""; }, describeIngress: async () => ({ present: true }),
+    });
+    const [first, second] = await Promise.all([adapter.readStateIdentity(), adapter.readStateIdentity()]);
+    assert.deepEqual(first, second);
+    assert.equal(calls.filter((args) => args.includes("init")).length, 1);
+    assert.equal(calls.filter((args) => args.includes("state") && args.includes("pull")).length, 2);
+    assert.equal(calls[0].includes("-backend-config=fixture"), true);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("Stage A rejects an invalid preserved-plan digest before Terraform show", async () => {

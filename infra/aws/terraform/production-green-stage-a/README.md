@@ -121,11 +121,15 @@ Stage-A state lineage, and pre-reconciliation serial. The live policy readback
 must hash to the exact desired policy both as recovery completion evidence and
 immediately before the state transition is reserved/consumed.
 
-The operation captures one exact `terraform plan -refresh-only`, validates that
+The adapter initializes the canonical backend once before any state read. The
+operation captures one exact `terraform plan -refresh-only`, validates that
 the only resource drift is the exact production-artifacts predecessor-to-desired
 policy transition (plus the existing forward RDS computed timestamp refresh),
-revalidates the saved plan, state CAS, and live policy immediately before
-applying it, and advances Terraform state once. The refresh-only apply changes
+revalidates the saved plan and state CAS, acquires a reversible exclusive
+reservation, then revalidates state and the canonical live-policy hash
+immediately adjacent to applying it. A failed final CAS releases the
+reservation; an attempted apply is finalized as completed or failed and is
+never released for replay. The refresh-only apply changes
 Terraform state only; AWS resource mutation count is zero. The next fresh
 ordinary Stage-A plan
 must contain no bucket-policy drift and the bucket-policy action must be
@@ -134,3 +138,11 @@ serial evidence fails closed. A separate reconciliation authorization must also
 bind the exact saved refresh-only plan SHA and be independently authenticated
 before the one state apply is consumed. Arbitrary resource or policy drift is
 never accepted.
+
+All Stage-A refresh validators use the locked Terraform `1.15.8` and AWS
+provider `6.56.0` envelope contract. The green RDS computed-time refresh uses
+one shared closed-world validator across ordinary Stage A, production-artifacts
+reconciliation, and root-drop recovery; its provider sensitivity mask must be
+unchanged. Provider-owned fields and sensitivity metadata are validated at
+their exact supported shape, rather than ignored or accepted as arbitrary
+extra plan data.
