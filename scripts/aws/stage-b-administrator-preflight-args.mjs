@@ -34,7 +34,11 @@ export function parseStageBAdministratorPreflightArgs(argv) {
   const phase = required("--phase");
   if (!["initial", "plan-bound"].includes(phase)) throw new Error("--phase must be initial or plan-bound.");
   if (phase === "initial" && forwarded.some((argument) => planBoundOnlyOptions.has(argument))) throw new Error("Initial administrator capability preflight does not accept plan-bound arguments.");
-  if (phase === "plan-bound" && seen.has("--source-sha")) throw new Error("Plan-bound administrator preflight does not accept --source-sha.");
+  if (phase === "plan-bound") {
+    for (const option of ["--source-sha", "--image-authorization", "--image-authorization-sha256"]) {
+      if (seen.has(option)) throw new Error(`Plan-bound administrator preflight does not accept ${option}.`);
+    }
+  }
 
   return {
     phase,

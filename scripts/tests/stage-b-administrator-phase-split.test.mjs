@@ -144,8 +144,21 @@ test("initial launcher requires the protected source SHA", () => {
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
+test("initial launcher accepts both image authorization inputs", () => {
+  const args = parseStageBAdministratorPreflightArgs(["--phase", "initial", "--source-sha", "9".repeat(40), "--image-authorization", "/private/tmp/image.json", "--image-authorization-sha256", "a".repeat(64), "--output", "/private/tmp/report.json", "--signature-output", "/private/tmp/signature.json", "--lifecycle-directory", "/private/tmp/lifecycle"]);
+  assert.equal(args.imageAuthorizationPath, "/private/tmp/image.json");
+  assert.equal(args.imageAuthorizationSha256, "a".repeat(64));
+});
+
 test("plan-bound launcher rejects the initial-only protected source SHA", () => {
   assert.throws(() => parseStageBAdministratorPreflightArgs(["--phase", "plan-bound", "--source-sha", "9".repeat(40), "--output", "/private/tmp/report.json", "--signature-output", "/private/tmp/signature.json", "--lifecycle-directory", "/private/tmp/lifecycle"]), /does not accept --source-sha/);
+});
+
+test("plan-bound launcher rejects initial-only image authorization inputs", () => {
+  const base = ["--phase", "plan-bound", "--output", "/private/tmp/report.json", "--signature-output", "/private/tmp/signature.json", "--lifecycle-directory", "/private/tmp/lifecycle"];
+  assert.throws(() => parseStageBAdministratorPreflightArgs([...base, "--image-authorization", "/private/tmp/image.json"]), /does not accept --image-authorization\./);
+  assert.throws(() => parseStageBAdministratorPreflightArgs([...base, "--image-authorization-sha256", "a".repeat(64)]), /does not accept --image-authorization-sha256\./);
+  assert.throws(() => parseStageBAdministratorPreflightArgs([...base, "--image-authorization", "/private/tmp/image.json", "--image-authorization-sha256", "a".repeat(64)]), /does not accept --image-authorization\./);
 });
 
 test("launcher preserves producer flags around boolean retry and strips only launcher arguments", () => {
