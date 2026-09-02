@@ -111,12 +111,12 @@ export function assertRotationInfrastructureConverged(result, { sourceSha, rotat
   return { ...result, rotationInfraConverged: true, overlapSecretCount: expectedArns.size, authorizedOverlapSecretCount: authorizedArns.size };
 }
 
-function assertIdentityEvidence(identities, { sourceSha, verifyRootDropSignature } = {}) {
+function assertIdentityEvidence(identities, { sourceSha, rootDropContinuity, verifyRootDropSignature } = {}) {
   if (identities?.releaseDeployer?.valid !== true || identities?.verifier?.valid !== true || identities?.rootDrop?.valid !== true) throw new Error("Required operational identities are invalid.");
   for (const name of ["releaseDeployer", "verifier", "rootDrop"]) requiredEvidence(name, identities[name]);
   if (!/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/.test(identities.releaseDeployer.callerArn || "")) throw new Error("Release-deployer identity is not the reviewed assumed role.");
   if (!/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-ecs-exec-verifier\/[^/]+$/.test(identities.verifier.callerArn || "")) throw new Error("Verifier identity is not the reviewed assumed role.");
-  assertRootDropEvidence(identities.rootDrop, { sourceSha, ...(verifyRootDropSignature ? { verifySignature: verifyRootDropSignature } : {}) });
+  assertRootDropEvidence(identities.rootDrop, { sourceSha, ...rootDropContinuity, ...(verifyRootDropSignature ? { verifySignature: verifyRootDropSignature } : {}) });
 }
 
 export function buildTransitionMatrix(results) {
@@ -277,7 +277,7 @@ function assertCheckerTrustEvidence(evidence, sourceSha) {
  * Every adapter is required to return sanitized, hash-bound evidence.
  */
 export async function runProductionCutoverControlPlane(input = {}) {
-  const { mode = PRODUCTION_CUTOVER_MODE.FULL, sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, checkerTrustEvidence, identities: suppliedIdentities, verifyRootDropSignature, checkerChain, stageA, artifactSigning, rebaseline, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  const { mode = PRODUCTION_CUTOVER_MODE.FULL, sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, checkerTrustEvidence, identities: suppliedIdentities, rootDropContinuity, verifyRootDropSignature, checkerChain, stageA, artifactSigning, rebaseline, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
   if (!Object.values(PRODUCTION_CUTOVER_MODE).includes(mode)) throw new Error("Production cutover mode is invalid.");
   if (!SHA40.test(sourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
   const mutations = [];
@@ -296,7 +296,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.checkerSourceTrust = { ...sourceTrust, sourceSha, evidenceSha256: sha(sourceTrust) };
 
   const identities = typeof suppliedIdentities?.establish === "function" ? await suppliedIdentities.establish() : suppliedIdentities;
-  assertIdentityEvidence(identities, { sourceSha, verifyRootDropSignature });
+  assertIdentityEvidence(identities, { sourceSha, rootDropContinuity, verifyRootDropSignature });
   results.iamIdentities = iamReport;
   results.identities = { ...identities, status: "valid", iamEvaluationCensus: iamReport.iamEvaluationCensus, ecsExecVerifierTrust: iamReport.ecsExecVerifierTrust, sourceSha, evidenceSha256: sha(identities) };
   results.identitiesStageA = identities;

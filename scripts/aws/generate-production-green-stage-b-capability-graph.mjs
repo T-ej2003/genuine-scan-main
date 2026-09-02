@@ -93,6 +93,7 @@ const PHASES = Object.freeze([
   ["runtime-activation-boundary", "scripts/aws/create-production-green-stage-b-approval.mjs"],
   ["normal-backend-activation", "scripts/aws/production-normal-backend-activation.mjs"],
   ["initial-activation-lifecycle", "scripts/aws/manage-production-initial-activation-lifecycle.mjs"],
+  ["dual-slot-rebaseline-durable-evidence", "scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs"],
 ]);
 
 const NORMAL_ACTIVATION_CAPABILITIES = Object.freeze([
@@ -100,6 +101,8 @@ const NORMAL_ACTIVATION_CAPABILITIES = Object.freeze([
   ["initial-activation-read-completion", "initial-activation-lifecycle", "RELEASE_DEPLOYER", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.completionArn], false],
   ["initial-activation-create-claim", "initial-activation-lifecycle", "RELEASE_DEPLOYER", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.claimArn], true],
   ["initial-activation-create-completion", "initial-activation-lifecycle", "RELEASE_DEPLOYER", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.completionArn], true],
+  ["rebaseline-evidence-read", "dual-slot-rebaseline-durable-evidence", "RELEASE_DEPLOYER", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.rebaselineEvidenceArn], false],
+  ["rebaseline-evidence-create", "dual-slot-rebaseline-durable-evidence", "RELEASE_DEPLOYER", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.rebaselineEvidenceArn], true],
   ["normal-activation-admin-identify", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "sts:GetCallerIdentity", ["*"], false],
   ["normal-activation-admin-read-state", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "s3:GetObject", [STAGE_B_TERRAFORM_BACKEND.stateArn], false],
   ["normal-activation-admin-read-policy", "administrator-normal-backend-activation-convergence", "ADMINISTRATOR", "iam:GetPolicy", [NORMAL_ACTIVATION.policyArn], false],

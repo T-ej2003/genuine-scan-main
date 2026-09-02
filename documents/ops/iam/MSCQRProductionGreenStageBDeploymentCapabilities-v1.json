@@ -213,6 +213,11 @@
       "order": 42,
       "id": "initial-activation-lifecycle",
       "sourceFile": "scripts/aws/manage-production-initial-activation-lifecycle.mjs"
+    },
+    {
+      "order": 43,
+      "id": "dual-slot-rebaseline-durable-evidence",
+      "sourceFile": "scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs"
     }
   ],
   "identities": [
@@ -939,7 +944,7 @@
         "sid": "PublishExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "cb5923b4897aeeb681297a0209188b1473696f9ee4518039177e4c207d93f0d9"
+        "expectedPolicySha256": "57ea2ea92d90b63ecacdf8d17df21da9828badafb261c54ca2e04cbba1383e0c"
       },
       "required": true,
       "mutation": true
@@ -1221,7 +1226,7 @@
         "sid": "CreateExactActivationLifecycleConditionally",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
       },
       "required": true,
       "mutation": true
@@ -1251,7 +1256,7 @@
         "sid": "CreateExactActivationLifecycleConditionally",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
       },
       "required": true,
       "mutation": true
@@ -1284,7 +1289,7 @@
         "sid": "ReadExactActivationLifecycle",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
       },
       "required": true,
       "mutation": false
@@ -1317,7 +1322,7 @@
         "sid": "ReadExactActivationLifecycle",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
       },
       "required": true,
       "mutation": false
@@ -1497,7 +1502,7 @@
         "sid": "ApplyCompleteProductionArtifactsBucketPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
       },
       "required": true,
       "mutation": true
@@ -5169,7 +5174,7 @@
         "sid": "ReadCompleteProductionArtifactsBucketPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71"
+        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
       },
       "required": true,
       "mutation": false
@@ -9594,6 +9599,69 @@
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "rebaseline-evidence-create",
+      "phase": "dual-slot-rebaseline-durable-evidence",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "rebaseline-evidence-create",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-dual-slot-rebaseline-evidence/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "NORMAL_ACTIVATION_MUTATION",
+      "probe": "direct-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "CreateExactRebaselineEvidenceConditionally",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "rebaseline-evidence-read",
+      "phase": "dual-slot-rebaseline-durable-evidence",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
+      "sourceFunction": "rebaseline-evidence-read",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-dual-slot-rebaseline-evidence/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "releaseMode": "normal",
+        "targetBinding": "authenticated-stage-b-state-exact-revision"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct-live-read",
+      "probeIds": [
+        "stage-a-state",
+        "stage-b-state"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "ReadExactRebaselineEvidence",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+      },
+      "required": true,
+      "mutation": false
     },
     {
       "id": "recovery-describe-backend-revision",

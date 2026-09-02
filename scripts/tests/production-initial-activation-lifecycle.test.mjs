@@ -191,8 +191,18 @@ test("source policy and bucket policy enforce only exact conditional lifecycle o
     "DenyNonConditionalActivationLifecycleWrites",
     "DenyOtherPrincipalsActivationLifecycleWrites",
     "DenyActivationLifecycleDeletion",
+    "AllowReleaseDeployerReadRebaselineEvidence",
+    "AllowReleaseDeployerConditionalRebaselineEvidenceCreate",
+    "DenyNonConditionalRebaselineEvidenceWrites",
+    "DenyOtherPrincipalsRebaselineEvidenceWrites",
+    "DenyRebaselineEvidenceDeletion",
     "DenyProductionArtifactsBucketPolicyMutation",
   ]);
+  const evidence = policy.Statement.filter(({ Sid }) => ["ReadExactRebaselineEvidence", "CreateExactRebaselineEvidenceConditionally", "DenyNonConditionalRebaselineEvidenceWrites", "DenyRebaselineEvidenceDeletion"].includes(Sid));
+  assert.equal(evidence.length, 4);
+  for (const statement of evidence) assert.equal(statement.Resource, PRODUCTION_ACTIVATION_LIFECYCLE.rebaselineEvidenceArn);
+  assert.deepEqual(evidence.find(({ Sid }) => Sid === "CreateExactRebaselineEvidenceConditionally").Condition, { StringEquals: { "s3:if-none-match": "*" } });
+  assert.deepEqual(evidence.find(({ Sid }) => Sid === "DenyNonConditionalRebaselineEvidenceWrites").Condition, { StringNotEquals: { "s3:if-none-match": "*" } });
   assert.match(bucketPolicy, /DenyProductionArtifactsBucketPolicyMutation[\s\S]*s3:PutBucketPolicy[\s\S]*s3:DeleteBucketPolicy[\s\S]*var\.receipt_bucket_arn/);
   assert.doesNotMatch(bucketPolicy, /rls-(?:broker-)?receipts|ignore_changes|production-activation-lifecycle\/\*/);
 });

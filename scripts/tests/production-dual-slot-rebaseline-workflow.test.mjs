@@ -6,6 +6,7 @@ import test from "node:test";
 const root = path.resolve(new URL(".", import.meta.url).pathname, "../..");
 const workflow = readFileSync(path.join(root, ".github/workflows/authorize-production-dual-slot-rebaseline.yml"), "utf8");
 const recoveryWorkflow = readFileSync(path.join(root, ".github/workflows/authorize-production-dual-slot-rebaseline-recovery.yml"), "utf8");
+const durableEvidencePublisher = readFileSync(path.join(root, "scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs"), "utf8");
 
 test("rebaseline authorization workflow keeps dispatch inputs out of executable shell text", () => {
   const runBodies = [...workflow.matchAll(/^[ ]{8}run: \|\n((?:^[ ]{10}.*\n?)*)/gm)].map((match) => match[1]);
@@ -78,6 +79,16 @@ test("successor recovery authorization is a separate protected workflow with no 
   assert.match(recoveryWorkflow, /dual-slot-rebaseline-recovery\/recovery-authorization\.json/);
   assert.equal(/terraform\s+(plan|apply)|PutSecretValue|UpdateSecretVersionStage|UpdateService|RegisterTaskDefinition|kms\s+sign/i.test(recoveryWorkflow), false);
   for (const name of ["SOURCE_SHA", "RECOVERY_ENVELOPE_BASE64", "RECOVERY_ENVELOPE_FILE_SHA256", "IMAGE_AUTHORIZATION_BASE64", "IMAGE_AUTHORIZATION_FILE_SHA256", "LIVE_REFERENCE_AUDIT_SHA256", "LIVE_LEGACY_BASELINE_IDENTITY_SHA256", "OBSERVED_SLOT_IDENTITIES_SHA256", "REASON", "APPROVER_ROLE", "VERIFICATION_REF"]) assert.match(recoveryWorkflow, new RegExp("^          " + name + ": \\${\\{ inputs\\.", "m"));
+});
+
+test("durable rebaseline evidence uses one immutable encrypted artifact-bucket object", () => {
+  assert.match(durableEvidencePublisher, /productionDualSlotRebaselineDurableEvidenceKey/);
+  assert.match(durableEvidencePublisher, /--if-none-match", "\*"/);
+  assert.match(durableEvidencePublisher, /--server-side-encryption", "AES256"/);
+  assert.match(durableEvidencePublisher, /s3api", "head-object"/);
+  assert.match(durableEvidencePublisher, /s3api", "get-object"/);
+  assert.equal(/workflow_dispatch|durable_evidence_submission_base64|PutSecretValue|UpdateSecretVersionStage|terraform\s+(plan|apply)|RegisterTaskDefinition|UpdateService|kms\s+sign/i.test(durableEvidencePublisher), false);
+  assert.equal(durableEvidencePublisher.includes("generatedMaterial"), false);
 });
 
 test("production recovery authority has no descendant-bypass or normal-execute downgrade", () => {

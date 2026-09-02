@@ -135,7 +135,8 @@ function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha, image
     reportBytes: readFileSync(releasePreflightAttestation),
     sign: () => "AQ==",
   }));
-  const rootDrop = file("root-drop.json", buildRootDropEvidence({ payload: buildRootDropPayload({ sourceSha: expectedSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "runtime-bootstrap-root-with-entropy" }), signatureBase64: "c2lnbmF0dXJl" }));
+  const iamEvidenceSignature = file("iam-evidence.signature.json", { schemaVersion: 1, signature: "fixture" });
+  const rootDrop = file("root-drop.json", buildRootDropEvidence({ payload: buildRootDropPayload({ sourceSha: expectedSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "runtime-bootstrap-root-with-entropy", rotationId: bindings.rotationId, imageAuthorizationSha256: JSON.parse(readFileSync(imageAuthorization, "utf8")).authorizationSha256, successorRecoveryAuthorizationSha256: null, administratorEvidenceSha256: createHash("sha256").update(readFileSync(iamEvidence)).digest("hex"), administratorSignatureSha256: createHash("sha256").update(readFileSync(iamEvidenceSignature)).digest("hex") }), signatureBase64: "c2lnbmF0dXJl" }));
   const stageAPlan = file("stage-a.tfplan", "binary-fixture");
   const tfvarsBytes = Buffer.from("production_rotation_enabled = false\n");
   const stageBTfvarsPath = path.join(directory, "stage-b.tfvars");
@@ -152,7 +153,7 @@ function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha, image
     ARTIFACT_SIGN_PUBLIC_KEYS_JSON: secretArn("mscqr/production/rls-green/artifact-signing/public-keys-json-d"),
   } }, null, 2));
   chmodSync(artifactBinding, 0o600);
-  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, releasePreflightEvidence, releasePreflightAttestation, releasePreflightAttestationSignature, temporaryKmsCapability, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
+  return { imageAuthorization, imageAuthorizationFixture, iamEvidence, iamEvidenceSignature, releasePreflightEvidence, releasePreflightAttestation, releasePreflightAttestationSignature, temporaryKmsCapability, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
 }
 
 function fullInput(directory, repositoryRoot, expectedSha = sourceSha, imageReleaseSha, imageAuthorizationOverride) {
@@ -165,6 +166,7 @@ function fullInput(directory, repositoryRoot, expectedSha = sourceSha, imageRele
     git: gitFixture(expectedSha),
     imageAuthorization: { ...JSON.parse(readFileSync(evidence.imageAuthorization, "utf8")), filePath: evidence.imageAuthorization },
     iamEvidence: { ...JSON.parse(readFileSync(evidence.iamEvidence, "utf8")), filePath: evidence.iamEvidence },
+    iamEvidenceSignatureFile: evidence.iamEvidenceSignature,
     releasePreflightEvidenceFile: evidence.releasePreflightEvidence,
     releasePreflightAttestationFile: evidence.releasePreflightAttestation,
     releasePreflightAttestationSignatureFile: evidence.releasePreflightAttestationSignature,
@@ -182,6 +184,7 @@ function fullInput(directory, repositoryRoot, expectedSha = sourceSha, imageRele
     constructAdapters: ({ config, sourceSha: actualSha, rotationId, runtimeConfigSha256 }) => createProductionCutoverAdapters({ config, sourceSha: actualSha, rotationId, runtimeConfigSha256, verifyReleasePreflightAttestationSignature: () => true }),
     imageAuthorizationValidation: { now: evidence.imageAuthorizationFixture.now, verifyImageEvidence: evidence.imageAuthorizationFixture.verifyImageEvidence },
     verifyRootDropSignature: () => true,
+    verifyAdministratorEvidenceSignature: () => true,
     verifyReleasePreflightAttestationSignature: () => true,
     verifyInitialBindingOrigin,
   };
@@ -311,6 +314,13 @@ test("runtime config carries the authenticated source-advance bridge into coordi
       rotationSupersessionEvidence: evidence,
       proveSourceAdvance: () => true,
     };
+    writeFileSync(input.rootDropEvidenceFile, JSON.stringify(buildRootDropEvidence({ payload: buildRootDropPayload({
+      sourceSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "source-advance-root-with-entropy",
+      rotationId, imageAuthorizationSha256: input.imageAuthorization.authorizationSha256,
+      successorRecoveryAuthorizationSha256: null,
+      administratorEvidenceSha256: createHash("sha256").update(readFileSync(input.iamEvidence.filePath)).digest("hex"),
+      administratorSignatureSha256: createHash("sha256").update(readFileSync(input.iamEvidenceSignatureFile)).digest("hex"),
+    }), signatureBase64: "c2lnbmF0dXJl" })) + "\n", { mode: 0o600 });
     const result = prepareProductionCutoverRuntime(input);
     assert.equal(result.readyToConsumeMfa, true);
     assert.equal(result.config.initialMigrationSourceAdvance.supersessionEvidence.sourceSha, originalSourceSha);
@@ -369,6 +379,23 @@ test("runtime adapter rejects artifact binding tamper after preparation", () => 
     const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
     writeFileSync(result.config.artifactBindingFile, `${readFileSync(result.config.artifactBindingFile, "utf8")} `, { mode: 0o600 });
     assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256, verifyReleasePreflightAttestationSignature: () => true }), /changed after runtime preparation/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("production adapters carry the independently authenticated root-drop continuity bindings", () => {
+  const directory = fsTemp();
+  try {
+    const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
+    const adapters = createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId, runtimeConfigSha256: result.runtimeConfigSha256, verifyReleasePreflightAttestationSignature: () => true });
+    assert.deepEqual(adapters.rootDropContinuity, {
+      rotationId: result.config.rotationId,
+      imageAuthorizationSha256: JSON.parse(readFileSync(result.config.imageAuthorizationFile, "utf8")).authorizationSha256,
+      successorRecoveryAuthorizationSha256: null,
+      administratorEvidenceSha256: result.config.iamEvidenceFileSha256,
+      administratorSignatureSha256: result.config.iamEvidenceSignatureFileSha256,
+    });
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -1172,6 +1199,13 @@ test("REAL successor-recovery runtime path preserves recovery context through ad
     currentTaskDefinition: taskDefinition({ jwt: { currentSecretId: recoveryBindings.legacy.jwtCurrent, previousSecretId: recoveryBindings.jwt.previousSecretId, pendingSecretId: recoveryBindings.jwt.pendingSecretId }, qr: { ...recoveryBindings.qr } }),
   };
   try {
+    writeFileSync(input.rootDropEvidenceFile, JSON.stringify(buildRootDropEvidence({ payload: buildRootDropPayload({
+      sourceSha: recoverySource, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "successor-recovery-root-with-entropy",
+      rotationId: envelope.rotationId, imageAuthorizationSha256: imageFixture.authorization.authorizationSha256,
+      successorRecoveryAuthorizationSha256: authorization.authorizationSha256,
+      administratorEvidenceSha256: createHash("sha256").update(readFileSync(input.iamEvidence.filePath)).digest("hex"),
+      administratorSignatureSha256: createHash("sha256").update(readFileSync(input.iamEvidenceSignatureFile)).digest("hex"),
+    }), signatureBase64: "c2lnbmF0dXJl" })) + "\n", { mode: 0o600 });
     const result = prepareProductionCutoverRuntime(input);
     assert.equal(result.readyToConsumeMfa, true, result.blockers?.join(" | "));
     assert.equal(result.config.rebaselineRuntime.runtimeVariant, "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME");

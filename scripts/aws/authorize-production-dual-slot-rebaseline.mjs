@@ -30,6 +30,8 @@ export function runProductionDualSlotRebaselineAuthorizationCli(argv = process.a
     resources,
     writeIdentities,
     writePayloadIdentities,
+    materialJournalSha256: required(argv, "--material-journal-sha256"),
+    materialJournalFileSha256: required(argv, "--material-journal-file-sha256"),
     expectedSecretValueWrites: Number(required(argv, "--expected-secret-value-writes")),
     expectedSecretDeletes: Number(required(argv, "--expected-secret-deletes")),
     liveReferenceAudit: required(argv, "--live-reference-audit"),

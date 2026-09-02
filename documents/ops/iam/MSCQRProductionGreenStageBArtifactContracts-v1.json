@@ -250,6 +250,43 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "dual-slot-rebaseline-durable-evidence-submission",
+      "kind": "file",
+      "producer": "scripts/aws/produce-production-dual-slot-rebaseline-durable-evidence.mjs",
+      "consumers": [
+        "scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "dual-slot-rebaseline-durable-evidence-submission",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "dual-slot-rebaseline-durable-evidence",
+      "kind": "file",
+      "producer": "scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs",
+      "consumers": [
+        "scripts/aws/production-dual-slot-rebaseline-contract.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "dual-slot-rebaseline-durable-evidence",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "dual-slot-rebaseline-completion",
       "kind": "file",
       "producer": "scripts/aws/production-dual-slot-rebaseline-contract.mjs:executeProductionDualSlotRebaseline",

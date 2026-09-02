@@ -94,23 +94,35 @@ test("profile-bound AWS command runners cannot fall back to ambient static crede
   for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_DEFAULT_PROFILE"]) assert.equal(Object.hasOwn(options.env, key), false);
 });
 
-test("root-drop evidence is exact, source-bound, fresh, and tamper-evident", () => {
-  const payload = buildRootDropPayload({ sourceSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "nonce-1-with-enough-entropy" });
+test("root-drop evidence is exact, continuity-bound, fresh, and tamper-evident", () => {
+  const continuity = { rotationId, imageAuthorizationSha256: "1".repeat(64), successorRecoveryAuthorizationSha256: "2".repeat(64), administratorEvidenceSha256: "3".repeat(64), administratorSignatureSha256: "4".repeat(64) };
+  const payload = buildRootDropPayload({ sourceSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "nonce-1-with-enough-entropy", ...continuity });
   const keyPair = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const signature = sign("sha256", Buffer.from(canonicalRootDropPayload(payload)), { key: keyPair.privateKey, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 });
   const evidence = buildRootDropEvidence({ payload, signatureBase64: signature.toString("base64") });
   let signedMessage;
   const verifySignature = ({ message, signature: received }) => { signedMessage = message; return verify("sha256", message, { key: keyPair.publicKey, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, received); };
-  assert.equal(assertRootDropEvidence(evidence, { sourceSha, verifySignature }).valid, true);
+  assert.equal(assertRootDropEvidence(evidence, { sourceSha, ...continuity, verifySignature }).valid, true);
   assert.equal(signedMessage.toString(), canonicalRootDropPayload(payload));
   assert.equal(ROOT_DROP_SIGNING_KEY_ARN, STAGE_B.rootDropKmsKeyArn);
-  assert.throws(() => assertRootDropEvidence({ ...evidence, sourceSha: staleSourceSha }, { sourceSha, verifySignature: () => true }), /source/);
-  assert.throws(() => assertRootDropEvidence({ ...evidence, callerArn: "arn:aws:iam::368992683803:user:admin" }, { sourceSha, verifySignature: () => true }), /source/);
-  assert.throws(() => assertRootDropEvidence({ ...evidence, evidenceSha256: "0".repeat(64) }, { sourceSha, verifySignature: () => true }), /hash/);
+  assert.throws(() => assertRootDropEvidence({ ...evidence, sourceSha: staleSourceSha }, { sourceSha, ...continuity, verifySignature: () => true }), /source/);
+  assert.throws(() => assertRootDropEvidence({ ...evidence, rotationId: staleRotationId }, { sourceSha, ...continuity, verifySignature: () => true }), /rotation|chain/);
+  assert.throws(() => assertRootDropEvidence({ ...evidence, imageAuthorizationSha256: "5".repeat(64) }, { sourceSha, ...continuity, verifySignature: () => true }), /image|chain/);
+  assert.throws(() => assertRootDropEvidence({ ...evidence, successorRecoveryAuthorizationSha256: "5".repeat(64) }, { sourceSha, ...continuity, verifySignature: () => true }), /recovery|chain/);
+  assert.throws(() => assertRootDropEvidence({ ...evidence, administratorEvidenceSha256: "5".repeat(64) }, { sourceSha, ...continuity, verifySignature: () => true }), /administrator|chain/);
+  assert.throws(() => assertRootDropEvidence({ ...evidence, administratorSignatureSha256: "5".repeat(64) }, { sourceSha, ...continuity, verifySignature: () => true }), /administrator|chain/);
+  assert.throws(() => assertRootDropEvidence({ ...evidence, callerArn: "arn:aws:iam::368992683803:user:admin" }, { sourceSha, ...continuity, verifySignature: () => true }), /source|chain/);
+  assert.throws(() => assertRootDropEvidence({ ...evidence, accountId: "000000000000" }, { sourceSha, ...continuity, verifySignature: () => true }), /chain|source/);
+  assert.throws(() => assertRootDropEvidence({ ...evidence, region: "us-east-1" }, { sourceSha, ...continuity, verifySignature: () => true }), /chain|source/);
+  assert.throws(() => assertRootDropEvidence({ ...evidence, generatedAt: "2000-01-01T00:00:00.000Z" }, { sourceSha, ...continuity, verifySignature: () => true }), /stale/);
+  const missing = { ...evidence }; delete missing.rotationId;
+  assert.throws(() => assertRootDropEvidence(missing, { sourceSha, ...continuity, verifySignature: () => true }), /chain|canonical/);
+  assert.throws(() => assertRootDropEvidence({ ...evidence, unexpected: true }, { sourceSha, ...continuity, verifySignature: () => true }), /chain|canonical/);
+  assert.throws(() => assertRootDropEvidence({ ...evidence, evidenceSha256: "0".repeat(64) }, { sourceSha, ...continuity, verifySignature: () => true }), /hash/);
   const forged = { ...evidence, signatureBase64: "Zm9yZ2Vk", evidenceSha256: digest(JSON.stringify({ ...evidence, signatureBase64: "Zm9yZ2Vk", evidenceSha256: undefined })) };
-  assert.throws(() => assertRootDropEvidence(forged, { sourceSha, verifySignature: () => false }), /hash|signature/);
+  assert.throws(() => assertRootDropEvidence(forged, { sourceSha, ...continuity, verifySignature: () => false }), /hash|signature/);
   const mutated = buildRootDropEvidence({ payload: { ...payload, nonceHash: digest("different") }, signatureBase64: signature.toString("base64") });
-  assert.throws(() => assertRootDropEvidence(mutated, { sourceSha, verifySignature }), /signature/);
+  assert.throws(() => assertRootDropEvidence(mutated, { sourceSha, ...continuity, verifySignature }), /signature/);
   assert.throws(() => buildRootDropEvidence({ payload, signatureBase64: signature.toString("base64"), signingKeyArn: STAGE_B.approvalKmsKeyArn }), /reviewed KMS signature/);
   const rootKeyPolicy = readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
   assert.match(rootKeyPolicy, /Sid = "DenyNonRootRootDropSigning"/);

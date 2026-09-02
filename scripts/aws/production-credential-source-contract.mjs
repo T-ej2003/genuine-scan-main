@@ -90,7 +90,7 @@ export function createProductionGithubCommandRunner({ env = process.env, exec = 
     if (command === "gh") {
       const endpoint = args?.[1];
       const allowedFlags = new Set(["--paginate", "--slurp"]);
-      const allowedEndpoint = /^repos\/T-ej2003\/genuine-scan-main\/actions\/(?:runs\/[1-9][0-9]*(?:\/artifacts)?|artifacts\/[1-9][0-9]*\/zip)$/.test(endpoint || "");
+      const allowedEndpoint = /^repos\/T-ej2003\/genuine-scan-main\/(?:branches\/main|actions\/(?:runs\/[1-9][0-9]*(?:\/artifacts)?|artifacts\/[1-9][0-9]*\/zip))$/.test(endpoint || "");
       if (!Array.isArray(args) || args[0] !== "api" || !allowedEndpoint || args.slice(2).some((value) => !allowedFlags.has(value))) throw new Error("Production GitHub runner permits only the reviewed read-only authorization API calls.");
       return exec("gh", args, { cwd: process.cwd(), env: githubEnvironment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });
     }

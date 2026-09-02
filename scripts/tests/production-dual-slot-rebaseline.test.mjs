@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -12,7 +13,7 @@ import {
   createProductionDualSlotRebaselineAuthorization, deterministicWriteIdentity, executeProductionDualSlotRebaseline,
   generateRebaselineMaterial, assertBaselineCompletion, canonicalSha256, historicalSlotIdentity,
   REBASELINE_HISTORICAL_SOURCE_SHAS, REBASELINE_SLOTS, assertRebaselineRotationBindings, assertProductionDualSlotRebaselineAuthorization, resolveProductionDualSlotRebaselineAuthorizationArtifact, readBoundBaselineCompletion, readRebaselineMaterialJournal, writeRebaselineMaterialJournal, persistExactPrivateJson, rebaselineWritePayloadIdentities, verifyLiveProductionDualSlotRebaselineWithRunner, sha256, coordinatorTransitionSlotIdentity, buildAuthenticatedPreCutoverCoordinatorTransition, assertAuthenticatedPreCutoverCoordinatorTransition, coordinatorTransitionVersionId,
-  assertAuthenticatedPartialRebaselineRecovery, createPartialRebaselineRecoveryAuthorization, assertPartialRebaselineRecoveryAuthorization, classifyAuthenticatedPartialRebaselineRecoveryProgress, resolvePartialRebaselineRecoveryAuthorizationArtifact, PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA,
+  assertAuthenticatedPartialRebaselineRecovery, createPartialRebaselineRecoveryAuthorization, assertPartialRebaselineRecoveryAuthorization, classifyAuthenticatedPartialRebaselineRecoveryProgress, resolvePartialRebaselineRecoveryAuthorizationArtifact, buildProductionDualSlotRebaselineDurableEvidence, assertProductionDualSlotRebaselineDurableEvidence, resolveProductionDualSlotRebaselineDurableEvidenceArtifact, PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA,
 } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout, readDualSlotTopology, readPreparedDualSlotTopology, runProductionDualSlotRebaselineCli, verifyLiveProductionDualSlotRebaseline } from "../aws/rebaseline-production-dual-slot.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
@@ -21,6 +22,8 @@ import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from 
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
 import { productionSupersessionEvidenceIdentity } from "../security/production-initial-migration-source-advance.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
+import { persistProductionDualSlotRebaselineDurableEvidence } from "../aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs";
+import { assertStageBCanonicalRepositoryUrl, readAuthenticatedGitHubProtectedMainIdentity } from "../aws/stage-b-deployment-identity.mjs";
 
 const sourceSha = "a".repeat(40);
 // Non-secret, production-safe recovery identity fixture.  The production validator
@@ -45,10 +48,11 @@ const payloads = buildRebaselinePayloads({ sourceSha, rotationId, generatedMater
 const writePlan = buildRebaselineWritePlan({ sourceSha, rotationId, resources, baselineIdentitySha256: identity.identitySha256, payloads });
 const preparation = buildRebaselinePreparation({ preconditions, sourceSha, rotationId, baselineIdentity: identity, writePlan });
 const temporary = () => { const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-test-")); chmodSync(directory, 0o700); return { directory, completionFile: path.join(directory, "completion.json"), bindingsFile: path.join(directory, "rotation-bindings.json") }; };
+const protectedCheckout = (sha = sourceSha, overrides = {}) => ({ mode: "production", toolingSha: sha, currentHead: sha, originMainHead: sha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, ...overrides });
 
 function environmentEvidence() { return createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository, environment: "production", sourceSha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "operator", observedAt: "2026-08-28T10:01:00.000Z", actualApproval: { state: "approved", environmentId: 17, environmentName: "production", userId: 7, userLogin: "checker" } }); }
 const verifyInitialBindingOrigin = () => { throw new Error("fixture is not an initial binding"); };
-function authorization({ baselineIdentitySha256 = identity.identitySha256, writePayloadIdentities = rebaselineWritePayloadIdentities(writePlan) } = {}) { return createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: environmentEvidence(), sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256, resources, writeIdentities: Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, deterministicWriteIdentity({ sourceSha, rotationId, slot, secretArn: resources[slot], baselineIdentitySha256 })])), writePayloadIdentities, expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "Abandon pre-cutover state and establish a clean baseline", approvedBy: "checker", approverRole: "production-independent-checker", verificationRef: "ticket-rebaseline-1" }); }
+function authorization({ baselineIdentitySha256 = identity.identitySha256, writePayloadIdentities = rebaselineWritePayloadIdentities(writePlan), materialJournalSha256 = "b".repeat(64), materialJournalFileSha256 = "c".repeat(64) } = {}) { return createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: environmentEvidence(), sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256, resources, writeIdentities: Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, deterministicWriteIdentity({ sourceSha, rotationId, slot, secretArn: resources[slot], baselineIdentitySha256 })])), writePayloadIdentities, materialJournalSha256, materialJournalFileSha256, expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "Abandon pre-cutover state and establish a clean baseline", approvedBy: "checker", approverRole: "production-independent-checker", verificationRef: "ticket-rebaseline-1" }); }
 function executionAdapters({ failAt = -1, liveReferenceAudit = audit, postWriteHistoricalReadLag = 0 } = {}) {
   const store = new Map(REBASELINE_SLOT_ORDER.map((slot) => [slot, [{
     versionId: currentVersionIds[slot], stages: ["AWSCURRENT"],
@@ -754,6 +758,114 @@ test("runtime admits only a declared rebaseline producer anchored to independent
   rmSync(outputs.directory, { recursive: true, force: true });
 });
 
+test("durable rebaseline evidence persists only non-secret exact transition records", async () => {
+  const outputs = temporary(); const materialFile = path.join(outputs.directory, "material-journal.json");
+  writeRebaselineMaterialJournal({ filePath: materialFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: material });
+  const materialBytes = readFileSync(materialFile); const auth = authorization({ materialJournalSha256: JSON.parse(materialBytes).journalSha256, materialJournalFileSha256: sha256(materialBytes) });
+  await execute(executionAdapters(), outputs, { authorization: auth });
+  const bundle = buildProductionDualSlotRebaselineDurableEvidence({
+    publisherSourceSha: sourceSha, authorizationWorkflowRunId: "123456", authorizationWorkflowRunAttempt: "1",
+    preparationBytes: Buffer.from(JSON.stringify(preparation)), materialJournalBytes: readFileSync(materialFile), completionBytes: readFileSync(outputs.completionFile), bindingsBytes: readFileSync(outputs.bindingsFile), authorization: auth,
+  });
+  assert.throws(() => buildProductionDualSlotRebaselineDurableEvidence({
+    publisherSourceSha: sourceSha, authorizationWorkflowRunId: "765432", authorizationWorkflowRunAttempt: "1",
+    preparationBytes: Buffer.from(JSON.stringify(preparation)), materialJournalBytes: readFileSync(materialFile), completionBytes: readFileSync(outputs.completionFile), bindingsBytes: readFileSync(outputs.bindingsFile), authorization: auth,
+  }), /coordinates do not match the authenticated approval/);
+  assert.equal(Object.hasOwn(bundle, "generatedMaterial"), false);
+  assert.doesNotMatch(JSON.stringify(bundle), /generatedMaterial|BEGIN PRIVATE KEY|"value"\s*:/i);
+  assert.doesNotThrow(() => assertProductionDualSlotRebaselineDurableEvidence(bundle, { publisherSourceSha: sourceSha, authorization: auth }));
+  const alteredJournal = structuredClone(bundle); alteredJournal.manifest.materialJournalSha256 = "f".repeat(64); const { evidenceSha256: journalEvidenceSha, ...journalBody } = alteredJournal.manifest; alteredJournal.manifest.evidenceSha256 = canonicalSha256(journalBody);
+  assert.throws(() => assertProductionDualSlotRebaselineDurableEvidence(alteredJournal, { publisherSourceSha: sourceSha, authorization: auth }), /material journal|authenticated transition/i);
+  const alteredJournalFile = structuredClone(bundle); alteredJournalFile.manifest.materialJournalFileSha256 = "f".repeat(64); const { evidenceSha256: journalFileEvidenceSha, ...journalFileBody } = alteredJournalFile.manifest; alteredJournalFile.manifest.evidenceSha256 = canonicalSha256(journalFileBody);
+  assert.throws(() => assertProductionDualSlotRebaselineDurableEvidence(alteredJournalFile, { publisherSourceSha: sourceSha, authorization: auth }), /material journal|authenticated transition/i);
+  const alternatePreparationBytes = Buffer.from(`${JSON.stringify(preparation, null, 4)}\n`);
+  const canonicalized = buildProductionDualSlotRebaselineDurableEvidence({ publisherSourceSha: sourceSha, authorizationWorkflowRunId: "123456", authorizationWorkflowRunAttempt: "1", preparationBytes: alternatePreparationBytes, materialJournalBytes: materialBytes, completionBytes: readFileSync(outputs.completionFile), bindingsBytes: readFileSync(outputs.bindingsFile), authorization: auth });
+  assert.equal(canonicalized.manifest.preparationFileSha256, bundle.manifest.preparationFileSha256);
+  const substitutedMaterialFile = path.join(outputs.directory, "substituted-material-journal.json");
+  writeRebaselineMaterialJournal({ filePath: substitutedMaterialFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: generateRebaselineMaterial() });
+  assert.throws(() => buildProductionDualSlotRebaselineDurableEvidence({
+    publisherSourceSha: sourceSha, authorizationWorkflowRunId: "123456", authorizationWorkflowRunAttempt: "1",
+    preparationBytes: Buffer.from(JSON.stringify(preparation)), materialJournalBytes: readFileSync(substitutedMaterialFile), completionBytes: readFileSync(outputs.completionFile), bindingsBytes: readFileSync(outputs.bindingsFile), authorization: auth,
+  }), /material journal does not produce the authenticated prepared writes/);
+  const alteredPreparation = structuredClone(bundle); alteredPreparation.preparation.sourceSha = "f".repeat(40);
+  assert.throws(() => assertProductionDualSlotRebaselineDurableEvidence(alteredPreparation, { publisherSourceSha: sourceSha, authorization: auth }), /preparation|source/i);
+  const alteredCompletion = structuredClone(bundle); alteredCompletion.completion.authorizationBinding = "f".repeat(64);
+  assert.throws(() => assertProductionDualSlotRebaselineDurableEvidence(alteredCompletion, { publisherSourceSha: sourceSha, authorization: auth }), /completion|authorization/i);
+  const alteredBindings = structuredClone(bundle); alteredBindings.bindings.rotationId = "rotation-other-20260828";
+  assert.throws(() => assertProductionDualSlotRebaselineDurableEvidence(alteredBindings, { publisherSourceSha: sourceSha, authorization: auth }), /authorization|binding|rotation/i);
+  const alteredManifest = structuredClone(bundle); alteredManifest.manifest.publisherSourceSha = "f".repeat(40); const { evidenceSha256, ...manifestBody } = alteredManifest.manifest; alteredManifest.manifest.evidenceSha256 = canonicalSha256(manifestBody);
+  assert.throws(() => assertProductionDualSlotRebaselineDurableEvidence(alteredManifest, { publisherSourceSha: sourceSha, authorization: auth }), /manifest|source/i);
+  const alteredCoordinates = structuredClone(bundle); alteredCoordinates.manifest.authorizationWorkflowRunId = "765432"; const { evidenceSha256: coordinateHash, ...coordinateBody } = alteredCoordinates.manifest; alteredCoordinates.manifest.evidenceSha256 = canonicalSha256(coordinateBody);
+  assert.throws(() => assertProductionDualSlotRebaselineDurableEvidence(alteredCoordinates, { publisherSourceSha: sourceSha, authorization: auth }), /coordinates do not match the authenticated approval/);
+  rmSync(outputs.directory, { recursive: true, force: true });
+});
+
+test("durable publisher conditionally creates and reads back the exact canonical bytes", async () => {
+  const outputs = temporary(); const materialFile = path.join(outputs.directory, "material-journal.json");
+  writeRebaselineMaterialJournal({ filePath: materialFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: material });
+  const materialBytes = readFileSync(materialFile); const auth = authorization({ materialJournalSha256: JSON.parse(materialBytes).journalSha256, materialJournalFileSha256: sha256(materialBytes) });
+  await execute(executionAdapters(), outputs, { authorization: auth });
+  const bundle = { ...buildProductionDualSlotRebaselineDurableEvidence({ publisherSourceSha: sourceSha, authorizationWorkflowRunId: "123456", authorizationWorkflowRunAttempt: "1", preparationBytes: Buffer.from(JSON.stringify(preparation)), materialJournalBytes: materialBytes, completionBytes: readFileSync(outputs.completionFile), bindingsBytes: readFileSync(outputs.bindingsFile), authorization: auth }), authorization: auth };
+  let body; const run = (args) => {
+    if (args[1] === "put-object") { body = readFileSync(args[args.indexOf("--body") + 1]); return "{}"; }
+    if (args[1] === "head-object") return JSON.stringify({ ServerSideEncryption: "AES256", ContentLength: body.length });
+    if (args[1] === "get-object") { writeFileSync(args.at(-1), body); return "{}"; }
+    throw new Error(`unexpected ${args.join(" ")}`);
+  };
+  const persisted = persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run, protectedCheckout: () => { assertStageBCanonicalRepositoryUrl("https://github.com/T-ej2003/genuine-scan-main.git"); return protectedCheckout(); } });
+  assert.equal(persisted.status, "CREATED"); assert.match(persisted.key, new RegExp(`^production-dual-slot-rebaseline-evidence/${rotationId}/`));
+  assert.deepEqual(Object.keys(JSON.parse(body)).sort(), ["bindings", "completion", "manifest", "preparation"]);
+  assert.equal(Object.hasOwn(JSON.parse(body), "authorization"), false);
+  assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle: { ...bundle, attackerControlled: { not: "durable" } }, publisherSourceSha: sourceSha, run, protectedCheckout: () => protectedCheckout() }), /unsupported top-level/i);
+  assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run: () => { throw new Error("PreconditionFailed"); }, protectedCheckout: () => protectedCheckout() }), /conditional create failed/i);
+  for (const [label, checkout] of [
+    ["local HEAD mismatch", protectedCheckout("b".repeat(40))],
+    ["origin/main mismatch", protectedCheckout(sourceSha, { originMainHead: "b".repeat(40) })],
+    ["dirty worktree", protectedCheckout(sourceSha, { porcelainStatus: " M tracked.js" })],
+    ["malformed source evidence", {}],
+  ]) {
+    let putCount = 0;
+    assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run: (args) => { if (args[1] === "put-object") putCount += 1; }, protectedCheckout: () => checkout }), /Stage B|protected|checkout|field/i, label);
+    assert.equal(putCount, 0, label);
+  }
+  assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run: () => { throw new Error("source CAS failed"); }, protectedCheckout: () => { throw new Error("source authentication failed"); } }), /source authentication failed/);
+  for (const githubResponse of [{ name: "main", commit: { sha: "b".repeat(40) } }, { name: "main", commit: { sha: "not-a-sha" } }]) {
+    let putCount = 0;
+    assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run: (args) => { if (args[1] === "put-object") putCount += 1; }, protectedCheckout: () => readAuthenticatedGitHubProtectedMainIdentity({ expectedSourceSha: sourceSha, githubRun: () => JSON.stringify(githubResponse) }) }), /source SHA|malformed|SHA/);
+    assert.equal(putCount, 0, "GitHub source authentication failure");
+  }
+  for (const remote of [
+    "https://github.com/attacker/genuine-scan-main.git",
+    "https://github.com/T-ej2003/other-repository.git",
+    "https://github.com/T-ej2003/genuine-scan-main-fork.git",
+    "https://gitlab.com/T-ej2003/genuine-scan-main.git",
+    "malformed-remote",
+  ]) {
+    let putCount = 0;
+    assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run: (args) => { if (args[1] === "put-object") putCount += 1; }, protectedCheckout: () => { assertStageBCanonicalRepositoryUrl(remote); return protectedCheckout(); } }), /canonical|malformed/);
+    assert.equal(putCount, 0, remote);
+  }
+  rmSync(outputs.directory, { recursive: true, force: true });
+});
+
+test("durable rebaseline resolver reads only its immutable S3 coordinate", async () => {
+  const outputs = temporary(); const materialFile = path.join(outputs.directory, "material-journal.json");
+  writeRebaselineMaterialJournal({ filePath: materialFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: material });
+  const materialBytes = readFileSync(materialFile); const auth = authorization({ materialJournalSha256: JSON.parse(materialBytes).journalSha256, materialJournalFileSha256: sha256(materialBytes) });
+  await execute(executionAdapters(), outputs, { authorization: auth });
+  const bundle = buildProductionDualSlotRebaselineDurableEvidence({ publisherSourceSha: sourceSha, authorizationWorkflowRunId: "123456", authorizationWorkflowRunAttempt: "1", preparationBytes: Buffer.from(JSON.stringify(preparation)), materialJournalBytes: readFileSync(materialFile), completionBytes: readFileSync(outputs.completionFile), bindingsBytes: readFileSync(outputs.bindingsFile), authorization: auth });
+  const run = (command, args) => {
+    if (command === "aws" && args[0] === "s3api" && args[1] === "get-object") { writeFileSync(args.at(-1), `${JSON.stringify(bundle, null, 2)}\n`); return "{}"; }
+    throw new Error(`unexpected ${command} ${args.join(" ")}`);
+  };
+  const options = { evidenceSha256: bundle.manifest.evidenceSha256, publisherSourceSha: sourceSha, authorization: auth, run };
+  assert.equal(resolveProductionDualSlotRebaselineDurableEvidenceArtifact(options).evidence.manifest.evidenceSha256, bundle.manifest.evidenceSha256);
+  assert.throws(() => resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ ...options, run: (command, args) => { if (command === "aws" && args[0] === "s3api" && args[1] === "get-object") { writeFileSync(args.at(-1), `${JSON.stringify({ ...bundle, attackerControlled: "not authenticated" }, null, 2)}\n`); return "{}"; } throw new Error(`unexpected ${command} ${args.join(" ")}`); } }), /schema|unsupported field/i);
+  assert.throws(() => resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ ...options, evidenceSha256: "f".repeat(64) }), /coordinate|immutable/i);
+  assert.throws(() => resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ ...options, publisherSourceSha: "f".repeat(40) }), /source|manifest/i);
+  rmSync(outputs.directory, { recursive: true, force: true });
+});
+
 test("runtime legacy/current secret identifiers are anchored to the authorized baseline identity", async () => {
   const outputs = temporary(); const result = await execute(executionAdapters(), outputs); const auth = authorization();
   for (const [group, field] of [["jwt", "currentSecretId"], ["qr", "privateCurrentSecretId"], ["qr", "publicCurrentSecretId"]]) {
@@ -807,7 +919,7 @@ test("successor recovery resolver accepts only its exact protected workflow arti
 
 test("dispatcher reviewer text cannot replace the actual protected-environment approver", () => {
   const actual = authorization();
-  assert.throws(() => createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: actual.protectedEnvironmentApprovalEvidence, sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256: identity.identitySha256, resources, writeIdentities: actual.writeIdentities, writePayloadIdentities: actual.writePayloadIdentities, expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "fixture", approvedBy: "dispatcher-not-actual", approverRole: "production-independent-checker", verificationRef: "ticket" }), /Dispatcher-supplied|authenticated/i);
+  assert.throws(() => createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: actual.protectedEnvironmentApprovalEvidence, sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256: identity.identitySha256, resources, writeIdentities: actual.writeIdentities, writePayloadIdentities: actual.writePayloadIdentities, materialJournalSha256: actual.materialJournalSha256, materialJournalFileSha256: actual.materialJournalFileSha256, expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "fixture", approvedBy: "dispatcher-not-actual", approverRole: "production-independent-checker", verificationRef: "ticket" }), /Dispatcher-supplied|authenticated/i);
 });
 
 test("full live ECS audit rejects a legacy running revision when service points at a newer revision", () => {

@@ -8,8 +8,11 @@ import {
   assertStageBDeploymentIdentity,
   assertStageBProtectedCheckoutMatchesDeploymentIdentity,
   assertStageBProtectedMainCheckout,
+  assertStageBCanonicalRepositoryUrl,
   assertStageBToolingCheckout,
   buildStageBProtectedMainCheckoutEvidence,
+  readAuthenticatedGitHubProtectedMainIdentity,
+  readStageBProtectedMainCheckoutFromGitHub,
   readStageBProtectedMainCheckout,
   STAGE_B_PROTECTED_CHECKOUT_FIELDS,
   STAGE_B_PROTECTED_CHECKOUT_REPOSITORY_STATE_FIELDS,
@@ -41,13 +44,14 @@ function createProtectedMainFixture() {
   git(cwd, ["add", "tracked.txt"]);
   git(cwd, ["commit", "-qm", "initial"]);
   const head = git(cwd, ["rev-parse", "HEAD"]);
+  git(cwd, ["remote", "add", "origin", "https://github.com/T-ej2003/genuine-scan-main.git"]);
   git(cwd, ["update-ref", "refs/remotes/origin/main", head]);
   git(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
   return { cwd, head };
 }
 function withProtectedMainCheckout(callback) {
   const fixture = createProtectedMainFixture();
-  try { return callback(fixture, readStageBProtectedMainCheckout({ cwd: fixture.cwd, fetchOriginMain: false })); }
+  try { return callback(fixture, readStageBProtectedMainCheckout({ cwd: fixture.cwd, fetchOriginMain: false, requireCanonicalRepository: true })); }
   finally { fs.rmSync(fixture.cwd, { recursive: true, force: true }); }
 }
 function assertExactError(fn, message) {
@@ -106,6 +110,73 @@ test("protected-main checkout is exact, complete, and clean", () => {
   assert.throws(() => assertStageBProtectedMainCheckout({ ...valid, originMainHead: undefined }), /unavailable/);
   assert.doesNotThrow(() => assertStageBProtectedMainCheckout({ ...valid, originMainHead: imageReleaseSha, mode: "review" }));
   assert.throws(() => assertStageBProtectedMainCheckout({ ...valid, mode: "unsupported" }), /mode/);
+});
+
+test("protected-main repository identity accepts only the canonical GitHub repository", () => {
+  for (const remote of [
+    "https://github.com/T-ej2003/genuine-scan-main",
+    "https://github.com/T-ej2003/genuine-scan-main.git",
+    "git@github.com:T-ej2003/genuine-scan-main",
+    "git@github.com:T-ej2003/genuine-scan-main.git",
+  ]) assert.doesNotThrow(() => assertStageBCanonicalRepositoryUrl(remote));
+  for (const remote of [
+    "https://github.com/attacker/genuine-scan-main.git",
+    "https://github.com/T-ej2003/other-repository.git",
+    "https://github.com/T-ej2003/genuine-scan-main-fork.git",
+    "https://github.com.evil/T-ej2003/genuine-scan-main.git",
+    "https://github.com/T-ej2003/genuine-scan-main.git.evil",
+    "https://github.com@evil.example/T-ej2003/genuine-scan-main.git",
+    "https://gitlab.com/T-ej2003/genuine-scan-main.git",
+    "not a remote URL",
+  ]) assert.throws(() => assertStageBCanonicalRepositoryUrl(remote), /canonical|malformed/);
+});
+
+test("authenticated GitHub protected-main lookup is fixed to repository and branch", () => {
+  const calls = [];
+  const identity = readAuthenticatedGitHubProtectedMainIdentity({
+    expectedSourceSha: toolingSha,
+    githubRun: (command, args) => { calls.push({ command, args }); return JSON.stringify({ name: "main", protected: true, commit: { sha: toolingSha } }); },
+  });
+  assert.deepEqual(identity, { repository: "T-ej2003/genuine-scan-main", branch: "main", protectedMainSha: toolingSha });
+  assert.deepEqual(calls, [{ command: "gh", args: ["api", "repos/T-ej2003/genuine-scan-main/branches/main"] }]);
+  for (const response of [
+    {},
+    { name: "main", commit: { sha: toolingSha } },
+    { name: "main", protected: false, commit: { sha: toolingSha } },
+    { name: "main", protected: null, commit: { sha: toolingSha } },
+    { name: "main", protected: "true", commit: { sha: toolingSha } },
+    { name: "main", protected: 1, commit: { sha: toolingSha } },
+    { name: "develop", commit: { sha: toolingSha } },
+    { name: "main", protected: true, commit: { sha: imageReleaseSha } },
+    { name: "main", commit: { sha: "not-a-sha" } },
+    [],
+    "main",
+  ]) assert.throws(() => readAuthenticatedGitHubProtectedMainIdentity({ expectedSourceSha: toolingSha, githubRun: () => JSON.stringify(response) }), /malformed|SHA|source/);
+  assert.throws(() => readAuthenticatedGitHubProtectedMainIdentity({ expectedSourceSha: toolingSha, githubRun: () => { throw new Error("GitHub unavailable"); } }), /lookup failed/);
+});
+
+test("GitHub protected-main checkout ignores mutable Git remotes and transport overrides", () => {
+  const fixture = createProtectedMainFixture();
+  try {
+    git(fixture.cwd, ["remote", "set-url", "origin", "git@github.com:T-ej2003/genuine-scan-main.git"]);
+    git(fixture.cwd, ["config", "core.sshCommand", "ssh -o ProxyCommand=attacker-mirror"]);
+    const previousSshCommand = process.env.GIT_SSH_COMMAND;
+    process.env.GIT_SSH_COMMAND = "ssh -o ProxyCommand=attacker-mirror";
+    const gitCalls = [];
+    try {
+      const checkout = readStageBProtectedMainCheckoutFromGitHub({
+        cwd: fixture.cwd,
+        expectedSourceSha: fixture.head,
+      githubRun: (command, args) => JSON.stringify({ name: "main", protected: true, commit: { sha: fixture.head } }),
+        run: (args) => { gitCalls.push(args); return git(fixture.cwd, args); },
+      });
+      assert.equal(checkout.currentHead, fixture.head);
+      assert.equal(gitCalls.some((args) => args[0] === "fetch" || args[0] === "remote" || args[0] === "ls-remote"), false);
+    } finally {
+      if (previousSshCommand === undefined) delete process.env.GIT_SSH_COMMAND;
+      else process.env.GIT_SSH_COMMAND = previousSshCommand;
+    }
+  } finally { fs.rmSync(fixture.cwd, { recursive: true, force: true }); }
 });
 
 test("strict protected-main validation is joined to the plan tooling identity", () => {
