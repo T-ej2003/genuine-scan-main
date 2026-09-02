@@ -105,11 +105,13 @@ function taskDefinition(taskBindings = bindings) {
   return { taskDefinition: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", containerDefinitions: [{ name: "backend", environment: [{ name: "PUBLIC_APP_URL", value: "https://www.mscqr.com" }, { name: "QR_SIGN_ACTIVE_KEY_VERSION", value: taskBindings.qr.previousKeyVersion }], secrets: [{ name: "JWT_SECRET", valueFrom: taskBindings.jwt.currentSecretId }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: taskBindings.qr.privateCurrentSecretId }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: taskBindings.qr.publicCurrentSecretId }] }] } };
 }
 
-function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha, imageReleaseSha) {
+function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha, imageReleaseSha, imageAuthorizationOverride) {
   const file = (name, value) => { const target = path.join(directory, name); writeFileSync(target, JSON.stringify(value) + "\n", { mode: 0o600 }); chmodSync(target, 0o600); return target; };
-  const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha: expectedSha, ...(imageReleaseSha ? { imageReleaseSha } : {}) });
+  const imageAuthorizationFixture = imageAuthorizationOverride || makeCanonicalImageAuthorization({ sourceSha: expectedSha, ...(imageReleaseSha ? { imageReleaseSha } : {}) });
   const imageAuthorization = file("image-authorization.json", imageAuthorizationFixture.authorization);
-  const iamEvidence = file("iam-evidence.json", { status: "valid", iamEvaluationCensus: { total: 158, executed: 158, invalid: 0, failures: [] }, evidenceSha256: "d".repeat(64) });
+  const imageAuthorizationDocument = JSON.parse(readFileSync(imageAuthorization, "utf8"));
+  const imageAuthorizationFileSha256 = createHash("sha256").update(readFileSync(imageAuthorization)).digest("hex");
+  const iamEvidence = file("iam-evidence.json", { evidenceKind: "INITIAL_ADMIN_CAPABILITY", phase: "initial", sourceSha: expectedSha, toolingSha: expectedSha, imageReleaseSha: imageAuthorizationDocument.imageReleaseSha, canonicalImageEvidenceSha256: imageAuthorizationDocument.imageEvidenceSha256, imageAuthorizationSha256: imageAuthorizationDocument.authorizationSha256, imageAuthorizationFileSha256, status: "valid", iamEvaluationCensus: { total: 158, executed: 158, invalid: 0, failures: [] }, evidenceSha256: "d".repeat(64) });
   const temporaryKmsCapability = file("temporary-kms-capability.json", buildTemporaryCapabilityEvidence({ state: "ABSENCE_VERIFIED", sourceSha: expectedSha, transitionId: "rehearsal-transition", defaultVersionId: "v1", observedAt: "2026-08-18T12:00:00.000Z" }));
   const iamDocument = JSON.parse(readFileSync(iamEvidence, "utf8"));
   iamDocument.temporaryKmsCapability = JSON.parse(readFileSync(temporaryKmsCapability, "utf8"));
@@ -153,8 +155,8 @@ function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha, image
   return { imageAuthorization, imageAuthorizationFixture, iamEvidence, releasePreflightEvidence, releasePreflightAttestation, releasePreflightAttestationSignature, temporaryKmsCapability, rootDrop, stageAPlan, artifactBinding, stageBTfvarsPath, stageBTfvarsBindingReportPath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(stageBTfvarsBindingReportPath)).digest("hex"), stageBTerraformDataDir };
 }
 
-function fullInput(directory, repositoryRoot, expectedSha = sourceSha, imageReleaseSha) {
-  const evidence = evidenceFiles(directory, repositoryRoot, expectedSha, imageReleaseSha);
+function fullInput(directory, repositoryRoot, expectedSha = sourceSha, imageReleaseSha, imageAuthorizationOverride) {
+  const evidence = evidenceFiles(directory, repositoryRoot, expectedSha, imageReleaseSha, imageAuthorizationOverride);
   return {
     outputDirectory: path.join(directory, "runtime"),
     repositoryRoot,
@@ -1157,7 +1159,7 @@ test("REAL successor-recovery runtime path preserves recovery context through ad
   const recoveryBindings = buildPartialRebaselineRecoveryRotationBindings({ sourceSha: recoverySource, originalPreparation, recoveryEnvelope: envelope, recoveryAuthorization: authorization, completion });
   const livePostWriteBody = { kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha: recoverySource, rotationId: envelope.rotationId, authorizationSha256: authorization.authorizationSha256, resources: envelope.resources, versionIds: authorization.writeIdentities, payloadIdentities: authorization.writePayloadIdentities };
   const input = {
-    ...fullInput(directory, process.cwd(), recoverySource, recoverySource),
+    ...fullInput(directory, process.cwd(), recoverySource, recoverySource, imageFixture),
     rotationId: envelope.rotationId,
     rotationBindings: recoveryBindings,
     recoveryEnvelope: envelope,
@@ -1169,8 +1171,6 @@ test("REAL successor-recovery runtime path preserves recovery context through ad
     proveRecoveryDescendant: proveDescendant,
     currentTaskDefinition: taskDefinition({ jwt: { currentSecretId: recoveryBindings.legacy.jwtCurrent, previousSecretId: recoveryBindings.jwt.previousSecretId, pendingSecretId: recoveryBindings.jwt.pendingSecretId }, qr: { ...recoveryBindings.qr } }),
   };
-  writeFileSync(input.imageAuthorization.filePath, `${JSON.stringify(imageFixture.authorization)}\n`, { mode: 0o600 });
-  input.imageAuthorization = { ...imageFixture.authorization, filePath: input.imageAuthorization.filePath };
   try {
     const result = prepareProductionCutoverRuntime(input);
     assert.equal(result.readyToConsumeMfa, true, result.blockers?.join(" | "));

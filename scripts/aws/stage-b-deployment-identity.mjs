@@ -44,6 +44,17 @@ function planVariable(plan, name) {
   return value;
 }
 
+export function assertStageBDeploymentIdentityValues({ toolingSha, imageReleaseSha, canonicalImageEvidenceSha256, expectedToolingSha, expectedImageReleaseSha, expectedCanonicalImageEvidenceSha256, imageEvidence } = {}) {
+  requireSha(toolingSha, "toolingSha");
+  requireSha(imageReleaseSha, "imageReleaseSha");
+  requireDigest(canonicalImageEvidenceSha256, "canonicalImageEvidenceSha256");
+  if (expectedToolingSha !== undefined && toolingSha !== expectedToolingSha) throw new Error("Stage B tooling SHA does not match the protected source.");
+  if (expectedImageReleaseSha !== undefined && imageReleaseSha !== expectedImageReleaseSha) throw new Error("Stage B image release SHA does not match the authenticated image authorization.");
+  if (expectedCanonicalImageEvidenceSha256 !== undefined && canonicalImageEvidenceSha256 !== expectedCanonicalImageEvidenceSha256) throw new Error("Stage B canonical image-evidence digest does not match the authenticated image authorization.");
+  if (imageEvidence && imageEvidence.imageReleaseSha !== imageReleaseSha) throw new Error("Stage B image evidence imageReleaseSha does not match the authenticated image authorization.");
+  return Object.freeze({ toolingSha, imageReleaseSha, canonicalImageEvidenceSha256 });
+}
+
 export function assertStageBDeploymentIdentity({
   plan,
   expectedToolingSha,
@@ -51,14 +62,15 @@ export function assertStageBDeploymentIdentity({
   expectedCanonicalImageEvidenceSha256,
   imageEvidence,
 } = {}) {
-  const toolingSha = requireSha(planVariable(plan, STAGE_B_PLAN_IDENTITY_VARIABLES.toolingSha), "tooling_sha");
-  const imageReleaseSha = requireSha(planVariable(plan, STAGE_B_PLAN_IDENTITY_VARIABLES.imageReleaseSha), "image_release_sha");
-  const canonicalImageEvidenceSha256 = requireDigest(planVariable(plan, STAGE_B_PLAN_IDENTITY_VARIABLES.canonicalImageEvidenceSha256), "canonical_image_evidence_sha256");
-  if (expectedToolingSha !== undefined && toolingSha !== expectedToolingSha) throw new Error("Stage B plan tooling_sha does not match the approved tooling SHA.");
-  if (expectedImageReleaseSha !== undefined && imageReleaseSha !== expectedImageReleaseSha) throw new Error("Stage B plan image_release_sha does not match the approved image release SHA.");
-  if (expectedCanonicalImageEvidenceSha256 !== undefined && canonicalImageEvidenceSha256 !== expectedCanonicalImageEvidenceSha256) throw new Error("Stage B plan canonical image-evidence digest does not match the approved digest.");
-  if (imageEvidence && imageEvidence.imageReleaseSha !== imageReleaseSha) throw new Error("Stage B image evidence imageReleaseSha does not match the plan image_release_sha.");
-  return Object.freeze({ toolingSha, imageReleaseSha, canonicalImageEvidenceSha256 });
+  return assertStageBDeploymentIdentityValues({
+    toolingSha: planVariable(plan, STAGE_B_PLAN_IDENTITY_VARIABLES.toolingSha),
+    imageReleaseSha: planVariable(plan, STAGE_B_PLAN_IDENTITY_VARIABLES.imageReleaseSha),
+    canonicalImageEvidenceSha256: planVariable(plan, STAGE_B_PLAN_IDENTITY_VARIABLES.canonicalImageEvidenceSha256),
+    expectedToolingSha,
+    expectedImageReleaseSha,
+    expectedCanonicalImageEvidenceSha256,
+    imageEvidence,
+  });
 }
 
 function requireExactFields(value, fields, label) {

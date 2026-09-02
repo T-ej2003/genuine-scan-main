@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
 import { assertStageBImportedBackendMetadataNormalization, assertStageBFreshImageDeposedCleanupSet, assertStageBFreshImagePartialApplyRecoveryPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_BROKER_POLICY, STAGE_B_BROKER_POLICY_STATEMENTS, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS, STAGE_B_IMPORTED_BACKEND_METADATA_NORMALIZATION } from "./stage-b-deployment-contract.mjs";
-import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
+import { assertStageBDeploymentIdentity, assertStageBDeploymentIdentityValues } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTerraformBackendManifest } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBDeploymentEvidenceFreshness, assertStageBDeploymentEvidenceTimestamp, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
@@ -67,6 +67,24 @@ export function assertStageBPermissionEvidenceKind(report, expectedKind, expecte
     throw new Error(`Stage B evidence kind must be ${expectedKind} with phase ${expectedPhase}.`);
   }
   return true;
+}
+
+export function assertStageBAdministratorEvidenceIdentity(report, { sourceSha, imageAuthorization, imageAuthorizationFileSha256 } = {}) {
+  if (report?.evidenceKind !== INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND || report?.phase !== "initial") throw new Error("Administrator capability evidence kind is invalid.");
+  if (!/^[a-f0-9]{40}$/.test(sourceSha || "")) throw new Error("Administrator capability evidence source binding is required.");
+  if (!imageAuthorization || typeof imageAuthorization !== "object") throw new Error("Administrator capability evidence image authorization binding is required.");
+  const identity = assertStageBDeploymentIdentityValues({
+    toolingSha: report.toolingSha,
+    imageReleaseSha: report.imageReleaseSha,
+    canonicalImageEvidenceSha256: report.canonicalImageEvidenceSha256,
+    expectedToolingSha: sourceSha,
+    expectedImageReleaseSha: imageAuthorization?.imageReleaseSha,
+    expectedCanonicalImageEvidenceSha256: imageAuthorization?.imageEvidenceSha256,
+  });
+  if (report.sourceSha !== sourceSha) throw new Error("Administrator capability evidence source binding is missing or wrong.");
+  if (report.imageAuthorizationSha256 !== imageAuthorization?.authorizationSha256) throw new Error("Administrator capability evidence image-authorization binding is missing or wrong.");
+  if (imageAuthorizationFileSha256 !== undefined && report.imageAuthorizationFileSha256 !== imageAuthorizationFileSha256) throw new Error("Administrator capability evidence image-authorization file binding is missing or wrong.");
+  return identity;
 }
 export const PERMISSION_REPORT_SIGNING_KEY_ARN = ROOT_ATTESTATION_KEY_ALIAS_ARN;
 export const PERMISSION_REPORT_SIGNING_ALGORITHM = ROOT_ATTESTATION_SIGNING_ALGORITHM;
@@ -1165,6 +1183,9 @@ export function runPermissionPreflight({
   cloudTrail = ({ sessionName, startTime, endTime, requiredActions }) => inspectCloudTrailDenials({ sessionName, startTime, endTime, requiredActions }),
   ecsExecVerifierEvidence,
   contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY,
+  deploymentIdentity,
+  imageAuthorizationSha256,
+  imageAuthorizationFileSha256,
 } = {}) {
   if (!["initial", "plan-bound"].includes(phase)) throw new Error("Permission preflight phase is unsupported.");
   const planBound = phase === "plan-bound";
@@ -1180,7 +1201,9 @@ export function runPermissionPreflight({
   const reviewedContextRegistry = assertReviewedSimulationContextRegistry({ conditionKeyOrigins, registry: contextRegistry });
   validateManifest(manifest, { account: expectedAccount, region: expectedRegion, conditionKeyOrigins, contextRegistry: reviewedContextRegistry });
   if (!plan?.variables || plan.variables.account_id?.value !== expectedAccount || plan.variables.aws_region?.value !== expectedRegion) throw new Error("Plan account or region is wrong.");
-  const deploymentIdentity = assertStageBDeploymentIdentity({ plan });
+  const authenticatedDeploymentIdentity = deploymentIdentity
+    ? assertStageBDeploymentIdentityValues(deploymentIdentity)
+    : assertStageBDeploymentIdentity({ plan });
   validateFreshness(generatedAt, now);
   if (!policyPublishedAt) throw new Error("Policy publication timestamp is required and must be valid.");
   assertStageBDeploymentEvidenceTimestamp(policyPublishedAt, { now, evidenceType: "Policy publication" });
@@ -1212,7 +1235,7 @@ export function runPermissionPreflight({
     savedPlanSha256: planBound ? sha256(savedPlanBytes) : undefined,
     canonicalPlanJsonSha256: planBound ? sha256(Buffer.from(canonicalizeJson(plan))) : undefined,
     planApprovalReportSha256: planBound ? planApprovalReportSha256 : undefined,
-    toolingSha: deploymentIdentity.toolingSha,
+    toolingSha: authenticatedDeploymentIdentity.toolingSha,
     terraformConfiguration,
   }) : undefined;
   const report = {
@@ -1222,9 +1245,12 @@ export function runPermissionPreflight({
     purpose,
     planProfile: permissionProfileBinding.planProfile,
     permissionProfile: permissionProfileBinding.permissionProfile,
-    toolingSha: deploymentIdentity.toolingSha,
-    imageReleaseSha: deploymentIdentity.imageReleaseSha,
-    canonicalImageEvidenceSha256: deploymentIdentity.canonicalImageEvidenceSha256,
+    sourceSha: authenticatedDeploymentIdentity.toolingSha,
+    toolingSha: authenticatedDeploymentIdentity.toolingSha,
+    imageReleaseSha: authenticatedDeploymentIdentity.imageReleaseSha,
+    canonicalImageEvidenceSha256: authenticatedDeploymentIdentity.canonicalImageEvidenceSha256,
+    ...(imageAuthorizationSha256 !== undefined ? { imageAuthorizationSha256 } : {}),
+    ...(imageAuthorizationFileSha256 !== undefined ? { imageAuthorizationFileSha256 } : {}),
     reportGeneratorCallerArn,
     simulatedRoleArn,
     applyRoleArn: RELEASE_ROLE_ARN,
@@ -1249,8 +1275,8 @@ export function runPermissionPreflight({
     ecsExecVerifierTrust: ecsExecVerifierEvidence || null,
     temporaryKmsCapability: buildTemporaryCapabilityEvidence({
       state: "ABSENCE_VERIFIED",
-      sourceSha: deploymentIdentity.toolingSha,
-      transitionId: `preflight-${deploymentIdentity.toolingSha.slice(0, 12)}`,
+      sourceSha: authenticatedDeploymentIdentity.toolingSha,
+      transitionId: `preflight-${authenticatedDeploymentIdentity.toolingSha.slice(0, 12)}`,
       defaultVersionId: policyEvidence.policies.find(({ name }) => name === "MSCQRProductionGreenStageARelease")?.defaultVersionId,
       observedAt: generatedAt,
     }),

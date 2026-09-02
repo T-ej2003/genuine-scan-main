@@ -79,7 +79,7 @@ test("image evidence does not require toolingSha", () => {
 
 test("legacy single release identity and missing joins fail closed", () => {
   assert.throws(() => assertStageBDeploymentIdentity({ plan: { variables: { release_sha: { value: imageReleaseSha } } } }), /tooling_sha/);
-  assert.throws(() => assertStageBDeploymentIdentity({ plan: plan({ image_release_sha: { value: toolingSha } }), imageEvidence: { imageReleaseSha } }), /image_release_sha/);
+  assert.throws(() => assertStageBDeploymentIdentity({ plan: plan({ image_release_sha: { value: toolingSha } }), imageEvidence: { imageReleaseSha } }), /image_release_sha|image evidence/);
   assert.throws(() => assertStageBDeploymentIdentity({ plan: plan({ canonical_image_evidence_sha256: { value: "d".repeat(64) } }), expectedCanonicalImageEvidenceSha256: evidenceSha }), /canonical image-evidence/);
 });
 

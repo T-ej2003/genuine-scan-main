@@ -1,4 +1,4 @@
-const launcherValueOptions = new Set(["--phase", "--output", "--signature-output", "--lifecycle-directory", "--source-sha"]);
+const launcherValueOptions = new Set(["--phase", "--output", "--signature-output", "--lifecycle-directory", "--source-sha", "--image-authorization", "--image-authorization-sha256"]);
 const launcherBooleanOptions = new Set(["--retry"]);
 const planBoundOnlyOptions = new Set(["--report-generator-caller-arn", "--simulated-role-arn", "--plan-json", "--canonical-plan-json", "--saved-plan", "--plan-approval-report", "--plan-approval-report-sha256", "--manifest", "--expected-account", "--expected-region", "--policy-published-at", "--cloudtrail-session-name", "--reference-audit", "--refresh-report"]);
 
@@ -42,6 +42,8 @@ export function parseStageBAdministratorPreflightArgs(argv) {
     signaturePath: required("--signature-output"),
     lifecycleDirectory: required("--lifecycle-directory"),
     sourceSha: phase === "initial" ? required("--source-sha") : undefined,
+    imageAuthorizationPath: phase === "initial" ? required("--image-authorization") : undefined,
+    imageAuthorizationSha256: phase === "initial" ? required("--image-authorization-sha256") : undefined,
     retry: seen.has("--retry"),
     forwarded,
   };

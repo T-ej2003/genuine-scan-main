@@ -13,6 +13,7 @@ import { assertOnboardingPaths, PRODUCTION_ONBOARDING_PATHS } from "../security/
 import { assertAuthenticatedCurrentStageBState, assertPostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
 import { assertRootDropEvidence } from "./production-root-drop-evidence.mjs";
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
+import { assertStageBAdministratorEvidenceIdentity } from "./validate-production-green-stage-b-permissions.mjs";
 import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertProductionRotationGraceSeconds } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 import {
@@ -305,6 +306,7 @@ export function prepareProductionCutoverRuntime({
     const suppliedIamEvidence = { ...iamEvidence }; delete suppliedIamEvidence.filePath;
     if (canonicalHash(suppliedIamEvidence) !== canonicalHash(preparedIamEvidence.value)) throw new Error("IAM evidence input differs from its authenticated file.");
     if (preparedIamEvidence.value.status !== "valid" || preparedIamEvidence.value.iamEvaluationCensus?.executed !== preparedIamEvidence.value.iamEvaluationCensus?.total || preparedIamEvidence.value.iamEvaluationCensus?.invalid !== 0) throw new Error("IAM evidence is incomplete.");
+    assertStageBAdministratorEvidenceIdentity(preparedIamEvidence.value, { sourceSha: protectedSha, imageAuthorization: preparedImageAuthorization.value, imageAuthorizationFileSha256: preparedImageAuthorization.sha256 });
     assertPreCutoverTemporaryCapabilityAbsent(preparedIamEvidence.value.temporaryKmsCapability, { sourceSha: protectedSha });
     if (!releasePreflightEvidenceFile) throw new Error("Release-preflight checker-trust evidence file is required.");
     const releasePreflightEvidence = readInputFile(releasePreflightEvidenceFile, repositoryRoot, "Release-preflight checker-trust evidence");
