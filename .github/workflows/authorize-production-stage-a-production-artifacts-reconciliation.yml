@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_sha: { description: Exact protected main SHA, required: true, type: string }
+      recovery_source_sha: { description: Exact protected main SHA that executed the recovery, required: true, type: string }
       state_lineage: { description: Exact pre-reconciliation Stage-A state lineage, required: true, type: string }
       state_serial: { description: Exact pre-reconciliation Stage-A state serial, required: true, type: string }
       state_sha256: { description: Exact pre-reconciliation Stage-A raw-state SHA256, required: true, type: string }
@@ -29,6 +30,7 @@ jobs:
         env:
           GITHUB_TOKEN: "${{ github.token }}"
           SOURCE_SHA: "${{ inputs.source_sha }}"
+          RECOVERY_SOURCE_SHA: "${{ inputs.recovery_source_sha }}"
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = T-ej2003/genuine-scan-main
@@ -61,7 +63,7 @@ jobs:
           d="$RUNNER_TEMP/stage-a-production-artifacts-reconciliation"; install -d -m 700 "$d"
           printf '%s' "$PREPARE_EVIDENCE_BASE64" | base64 --decode > "$d/prepare-evidence.json"
           node scripts/aws/production-github-environment-approval.mjs --output "$d/environment-approval.json" --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
-          node scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs --source-sha "$SOURCE_SHA" --state-lineage "$STATE_LINEAGE" --state-serial "$STATE_SERIAL" --state-sha256 "$STATE_SHA256" --saved-plan-sha256 "$SAVED_PLAN_SHA256" --prepare-evidence "$d/prepare-evidence.json" --verification-ref "$VERIFICATION_REF" --recovery-authorization-workflow-run-id "$RECOVERY_RUN_ID" --recovery-authorization-workflow-run-attempt "$RECOVERY_RUN_ATTEMPT" --environment-approval "$d/environment-approval.json" --output "$d/authorization.json"
+          node scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs --source-sha "$SOURCE_SHA" --recovery-source-sha "$RECOVERY_SOURCE_SHA" --state-lineage "$STATE_LINEAGE" --state-serial "$STATE_SERIAL" --state-sha256 "$STATE_SHA256" --saved-plan-sha256 "$SAVED_PLAN_SHA256" --prepare-evidence "$d/prepare-evidence.json" --verification-ref "$VERIFICATION_REF" --recovery-authorization-workflow-run-id "$RECOVERY_RUN_ID" --recovery-authorization-workflow-run-attempt "$RECOVERY_RUN_ATTEMPT" --environment-approval "$d/environment-approval.json" --output "$d/authorization.json"
       - uses: actions/upload-artifact@v4
         with:
           name: stage-a-production-artifacts-reconciliation-authorization

@@ -81,6 +81,8 @@ const CALLS = Object.freeze([
   ["scripts/aws/recover-production-backend-health.mjs", "kms:DescribeKey", "manifest-refresh-stage-a-storage-approval-key-describe", [RUNTIME_KMS_KEY]],
   ["scripts/aws/recover-production-backend-health.mjs", "kms:GetKeyPolicy", "manifest-refresh-stage-a-storage-approval-key-policy", [RUNTIME_KMS_KEY]],
 ].map(([sourceFile, action, capabilityId, resources, identity = "RELEASE_DEPLOYER"]) => Object.freeze({ sourceFile, action, capabilityId, identity, resources: Object.freeze(resources) })));
+const stageARecoveryCapability = (capabilityId) => capabilityId?.startsWith("stage-a-artifacts-recovery-");
+const stageAReconciliationCapability = (capabilityId) => capabilityId?.startsWith("stage-a-artifacts-journal-") || capabilityId?.startsWith("stage-a-artifacts-reconciliation-");
 
 
 
@@ -195,6 +197,8 @@ export function buildProductionDependencyClosure() {
     runtimeModeClosure: {
       NORMAL: "Terraform-rendered final candidates and exact execution policies are jointly authenticated by Stage-B plan/closure before apply; normal activation registers nothing",
       BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: "signed candidate-derived closure is re-read before RegisterTaskDefinition and before UpdateService",
+      STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY: "the governed P0-to-P2 production-artifacts recovery uses its exact root/release journal, policy, lock, and attestation boundaries",
+      STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION: "the independently authorized exact refresh-only plan uses its exact release journal and live-policy read boundary",
       ROTATION_OVERLAP: "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
       ROTATION_CLEANUP: "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
       ROLLBACK_RECONCILIATION: "rollback viability uses immutable image/resource identity and performs no candidate registration",
@@ -228,8 +232,10 @@ export function assertChangedAwsCallClosure(scanned, graph) {
       const rotation = capabilityById.get("manifest-backend-health-recovery-describe-images");
       if (!rotation || rotation.identity !== "RELEASE_DEPLOYER" || rotation.action !== contract.action || !same(rotation.resources, contract.resources) || !rotation.policy?.sourceFile) throw new Error("Rotation rollback-image read lacks exact IAM/capability closure.");
     }
-    const reachableMode = contract.sourceFile === "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs"
+    const reachableMode = stageARecoveryCapability(contract.capabilityId) || contract.sourceFile === "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs"
       ? ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"]
+      : stageAReconciliationCapability(contract.capabilityId)
+      ? ["STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]
       : contract.sourceFile.endsWith("deploy-ecs-service.sh")
       ? ["NORMAL", "ROTATION_OVERLAP", "ROTATION_CLEANUP"]
       : contract.sourceFile.endsWith("production-normal-backend-activation.mjs") ? ["NORMAL"] : ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"];

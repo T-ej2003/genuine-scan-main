@@ -21,7 +21,10 @@ The operator sequence is: complete the separately governed bucket-policy
 recovery; authenticate its completion; run prepare; obtain the independent
 protected-environment authorization; run execute with the exact prepared plan
 and evidence; verify state/live convergence; then run a fresh ordinary
-Stage-A plan. Prepare authenticates the invoked Terraform executable with
+Stage-A plan. If protected main advances after recovery, pass the historical
+recovery source SHA as `--recovery-source-sha`; the reconciliation authorization
+then records and verifies the authenticated descendant relationship without
+replaying recovery. Prepare authenticates the invoked Terraform executable with
 `terraform version -json` and records the exact verified 1.15.8 runtime in its
 evidence; a mismatched or malformed executable fails before init/plan. Execute
 never creates a replacement plan.

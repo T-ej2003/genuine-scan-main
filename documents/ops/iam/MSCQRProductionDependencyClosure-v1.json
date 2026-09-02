@@ -12,7 +12,7 @@
         "*"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",
       "sourcePolicyPresent": true,
@@ -31,7 +31,7 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-stage-a-production-artifacts-reconciliation/*"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",
       "sourcePolicyPresent": true,
@@ -50,7 +50,7 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-stage-a-production-artifacts-reconciliation/*"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",
       "sourcePolicyPresent": true,
@@ -69,7 +69,7 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-stage-a-production-artifacts-reconciliation/*"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -88,7 +88,7 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-stage-a-production-artifacts-reconciliation/*"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -107,7 +107,7 @@
         "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -126,7 +126,7 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",
       "sourcePolicyPresent": true,
@@ -145,7 +145,7 @@
         "*"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",
       "sourcePolicyPresent": true,
@@ -164,7 +164,7 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -183,7 +183,7 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",
       "sourcePolicyPresent": true,
@@ -202,7 +202,7 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -221,7 +221,7 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -240,7 +240,7 @@
         "*"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -1168,6 +1168,8 @@
   "runtimeModeClosure": {
     "NORMAL": "Terraform-rendered final candidates and exact execution policies are jointly authenticated by Stage-B plan/closure before apply; normal activation registers nothing",
     "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME": "signed candidate-derived closure is re-read before RegisterTaskDefinition and before UpdateService",
+    "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY": "the governed P0-to-P2 production-artifacts recovery uses its exact root/release journal, policy, lock, and attestation boundaries",
+    "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION": "the independently authorized exact refresh-only plan uses its exact release journal and live-policy read boundary",
     "ROTATION_OVERLAP": "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
     "ROTATION_CLEANUP": "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
     "ROLLBACK_RECONCILIATION": "rollback viability uses immutable image/resource identity and performs no candidate registration",

@@ -86,5 +86,9 @@ After the corresponding workflow has completed with a legitimate independent
 
 The reconciliation runner fails if the recovery completion, exact plan,
 pre-state lineage/serial/raw-byte hash, source, account, region, or release
-principal differs. A subsequent ordinary Stage-A plan is permitted only after
-that runner records `COMPLETED` and produces a no-op plan.
+principal differs. If protected main has advanced since the recovery, the
+runner takes the historical recovery source SHA explicitly, requires it to be
+an authenticated ancestor of current protected main, and preserves the
+historical completion without replaying policy recovery. A subsequent ordinary
+Stage-A plan is permitted only after that runner records `COMPLETED` and
+produces a no-op plan.
