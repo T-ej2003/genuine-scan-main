@@ -39,7 +39,7 @@ import { buildTemporaryCapabilityEvidence } from "./production-stage-a-temporary
 import { assertStageBDeploymentIdentityValues, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment } from "./production-credential-source-contract.mjs";
-import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
+import { imageEvidenceSha256, verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { assertImageAuthorization } from "./production-cutover-control-plane.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { createAwsReader, observeStageBBrokerApprovalBindings } from "./production-green-stage-b-ecs-observations.mjs";
@@ -75,6 +75,24 @@ const readImageAuthorization = (filePath, expectedSha256, sourceSha, run, verify
   assertImageAuthorization(authorization, sourceSha, { verifyImageEvidence });
   return { authorization, fileSha256: file.sha256 };
 };
+
+const readPrivateJson = (filePath, label) => {
+  const file = readStageBPrivateFileBytes({ filePath, repositoryRoot: root, label });
+  try { return JSON.parse(file.bytes.toString("utf8")); } catch (error) { throw new Error(`${label} is not valid JSON: ${error.message}`); }
+};
+
+function assertReadinessImageAuthorizationBinding(argv, authorization) {
+  const expected = [
+    ["--image-release-sha", authorization.imageReleaseSha],
+    ["--workflow-run-id", authorization.workflowRunId],
+    ["--canonical-artifact-sha256", authorization.imageEvidence?.canonicalArtifactSha256],
+  ];
+  for (const [option, expectedValue] of expected) if (value(argv, option) !== String(expectedValue)) throw new Error(`Release readiness ${option} does not match the authenticated image authorization.`);
+  const evidence = readPrivateJson(value(argv, "--image-evidence"), "Current image evidence");
+  if (imageEvidenceSha256(evidence) !== authorization.imageEvidenceSha256) throw new Error("Release readiness image evidence does not match the authenticated image authorization.");
+  const signature = readPrivateJson(value(argv, "--image-evidence-signature"), "Current image-evidence signature");
+  if (canonicalizeJson(signature) !== canonicalizeJson(authorization.imageEvidenceSignature)) throw new Error("Release readiness image-evidence signature does not match the authenticated image authorization.");
+}
 
 function continueReleaseReadiness(argv, { run = (command, args, options) => execFileSync(command, args, options) } = {}) {
   const backendConfig = value(argv, "--backend-config"); const terraformDataDir = value(argv, "--terraform-data-dir");
@@ -214,6 +232,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
     assertCutoverCriticalEvidence(adminReport);
     if (canonicalizeJson(adminReport.capabilityGraph) !== canonicalizeJson(capabilityGraph)) throw new Error("Administrator pre-plan capability graph is stale.");
     assertReleasePolicyEvidence(adminReport.policyEvidence);
+    assertReadinessImageAuthorizationBinding(argv, imageAuthorizationFile.authorization);
     const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)), run: (args) => releaseRun(args) });
     report.sourceSha = sourceSha;
     report.requiredReads["kms:Verify"] = "allowed";

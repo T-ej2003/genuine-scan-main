@@ -14,7 +14,7 @@ const digests = {
   "rls-canary": "sha256:f26b3c87ef6b7d1545936e50a41a049e5d02b3f11ef81bd41946ca1c967b05ab",
 };
 
-export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = defaultImageReleaseSha, impactImageReleaseSha = imageReleaseSha, imageDigests = digests } = {}) {
+export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = defaultImageReleaseSha, impactImageReleaseSha = imageReleaseSha, imageDigests = digests, publicationWorkflowRunId = workflowRunId, publicationWorkflowDatabaseId = "401" } = {}) {
   const observedAt = new Date().toISOString();
   const records = [
     ["backend", "mscqr-backend", imageReleaseSha],
@@ -35,7 +35,7 @@ export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = d
     expectedReleaseSha: imageReleaseSha,
     artifactBytes,
     observed: {
-      workflowRunId, workflowDatabaseId: "401", workflowFile: ".github/workflows/production-green-stage-b-images.yml",
+      workflowRunId: publicationWorkflowRunId, workflowDatabaseId: publicationWorkflowDatabaseId, workflowFile: ".github/workflows/production-green-stage-b-images.yml",
       workflowName: "Production Green Stage B Images", event: "workflow_dispatch", workflowDefinitionSha: imageReleaseSha, imageReleaseSha,
       headBranch: "main", conclusion: "success", artifactId: "501", artifactName: "production-green-stage-b-images",
       artifactExpired: false, artifactArchiveFilename: null,
@@ -51,7 +51,7 @@ export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = d
   }));
   const imageReuseEvidence = deriveStageBImageImpactReport({ imageReleaseSha: impactImageReleaseSha, toolingSha: sourceSha });
   const imageEvidence = generateImageEvidence({
-    artifactBytes, publicationSourceSha: imageReleaseSha, currentSourceSha: sourceSha, imageReleaseSha, workflowRunId, artifactSha256, publicationIdentity,
+    artifactBytes, publicationSourceSha: imageReleaseSha, currentSourceSha: sourceSha, imageReleaseSha, workflowRunId: publicationWorkflowRunId, artifactSha256, publicationIdentity,
     imageReuseEvidence: imageReleaseSha === sourceSha ? undefined : imageReuseEvidence,
     verifierCallerArn: `arn:aws:iam::${STAGE_B.account}:root`, observedAt,
     describe: (repository, tag) => ({ digest: records.find((record) => record.repository === repository && record.image_tag === tag).image_digest, imagePushedAt: observedAt }),
@@ -60,5 +60,5 @@ export function makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha = d
   const imageEvidenceSignature = signImageEvidence(imageEvidence, { now: observedAt, sign: () => "AQ==" });
   const verifyImageEvidence = ({ report, signatureArtifact, now }) => verifyImageEvidenceSignature({ report, signatureArtifact, now, verify: () => true });
   const authorization = createImageAuthorization({ sourceSha, freshProtectedMain: { fetchSucceeded: true, headSha: sourceSha, freshRemoteMainSha: sourceSha }, imageEvidence, imageEvidenceSignature, imageReuseEvidence, now: observedAt, verifyImageEvidence });
-  return { authorization, now: observedAt, verifyImageEvidence, imageReleaseSha, workflowRunId, digests: imageDigests };
+  return { authorization, now: observedAt, verifyImageEvidence, imageReleaseSha, workflowRunId: publicationWorkflowRunId, digests: imageDigests };
 }

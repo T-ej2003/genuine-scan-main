@@ -32,8 +32,33 @@ const imageAuthorizationPath = path.join(temp(), "image-authorization.json");
 const imageAuthorizationBytes = Buffer.from(`${JSON.stringify(imageFixture.authorization, null, 2)}\n`);
 fs.writeFileSync(imageAuthorizationPath, imageAuthorizationBytes, { mode: 0o600 });
 const imageAuthorizationSha256 = crypto.createHash("sha256").update(imageAuthorizationBytes).digest("hex");
+const writePublicationFiles = (fixture, name) => {
+  const directory = temp(); const evidencePath = path.join(directory, `${name}.image-evidence.json`); const signaturePath = path.join(directory, `${name}.image-evidence.signature.json`);
+  fs.writeFileSync(evidencePath, `${JSON.stringify(fixture.authorization.imageEvidence, null, 2)}\n`, { mode: 0o600 });
+  fs.writeFileSync(signaturePath, `${JSON.stringify(fixture.authorization.imageEvidenceSignature, null, 2)}\n`, { mode: 0o600 });
+  return { evidencePath, signaturePath, artifactSha256: fixture.authorization.imageEvidence.canonicalArtifactSha256, workflowRunId: fixture.workflowRunId, imageReleaseSha: fixture.authorization.imageReleaseSha };
+};
+const publicationA = writePublicationFiles(imageFixture, "publication-a");
+const imageFixtureB = makeCanonicalImageAuthorization({
+  sourceSha: protectedSourceSha,
+  imageReleaseSha: protectedSourceSha,
+  publicationWorkflowRunId: "31582010245",
+  publicationWorkflowDatabaseId: "402",
+  imageDigests: {
+    backend: "sha256:7c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad",
+    worker: "sha256:849a4f25d9cc5d67358722c7af75e91bd9a944e75496c76fa36b4677fd152cfe",
+    "rls-executor": "sha256:9a06c2435f7330c0b5efacce91e526aa0cca9f3f1df02efaec2c8f993b6fde37",
+    "rls-canary": "sha256:026b3c87ef6b7d1545936e50a41a049e5d02b3f11ef81bd41946ca1c967b05ab",
+  },
+});
+const publicationB = writePublicationFiles(imageFixtureB, "publication-b");
+const releaseReadinessArgs = (publication = publicationA) => [
+  "--image-evidence", publication.evidencePath, "--image-evidence-signature", publication.signaturePath,
+  "--image-release-sha", publication.imageReleaseSha, "--workflow-run-id", publication.workflowRunId,
+  "--canonical-artifact-sha256", publication.artifactSha256,
+];
 const runPreflightCli = (argv, dependencies = {}) => runProductionPreflightCli([
-  ...argv,
+  ...argv, ...(dependencies.readinessArgs || releaseReadinessArgs()),
   "--image-authorization", imageAuthorizationPath,
   "--image-authorization-sha256", imageAuthorizationSha256,
 ], { verifyImageEvidence: imageFixture.verifyImageEvidence, ...dependencies });
@@ -391,6 +416,26 @@ test("administrator preflight binds live temporary-KMS absence evidence to prote
   });
   assert.equal(release.status, "ready-for-plan"); assert.equal(releaseReads, 1);
   assert.equal(JSON.parse(fs.readFileSync(releasePath, "utf8")).sourceSha, protectedSourceSha);
+
+  const releaseArguments = ["--identity", "release-deployer", "--tooling-sha", protectedSourceSha, "--output", path.join(directory, "release-cross-binding.json"), "--administrator-report", adminPath, "--administrator-report-signature", signaturePath];
+  let continued = 0;
+  const releaseDependencies = {
+    caller: () => caller,
+    verify: () => true,
+    readProtectedMainCheckout: () => ({ toolingSha: protectedSourceSha, currentHead: protectedSourceSha, originMainHead: protectedSourceSha, porcelainStatus: "" }),
+    releasePreflight: () => ({ schemaVersion: 1, caller, account: "368992683803", region: "eu-west-2", requiredReads: {}, failed: [], skipped: [], status: "valid" }),
+    continueReadiness: () => { continued += 1; },
+    validateCapabilityGraph: () => admin.capabilityGraph,
+  };
+  const runReleaseWithPublication = (publication, overrides = {}) => runPreflightCli(releaseArguments, { ...releaseDependencies, ...overrides, readinessArgs: overrides.readinessArgs || releaseReadinessArgs(publication) });
+  assert.doesNotThrow(() => runReleaseWithPublication(publicationA));
+  assert.equal(continued, 1);
+  assert.throws(() => runReleaseWithPublication(publicationB), /workflow-run-id|canonical-artifact-sha256|image evidence/);
+  assert.throws(() => runReleaseWithPublication(publicationA, { readinessArgs: releaseReadinessArgs(publicationA).map((item, index, args) => index === args.indexOf("--workflow-run-id") + 1 ? publicationB.workflowRunId : item) }), /workflow-run-id/);
+  assert.throws(() => runReleaseWithPublication(publicationA, { readinessArgs: releaseReadinessArgs(publicationA).map((item, index, args) => index === args.indexOf("--canonical-artifact-sha256") + 1 ? "0".repeat(64) : item) }), /canonical-artifact-sha256/);
+  assert.throws(() => runReleaseWithPublication(publicationA, { readinessArgs: releaseReadinessArgs(publicationA).map((item, index, args) => index === args.indexOf("--image-release-sha") + 1 ? "b".repeat(40) : item) }), /image-release-sha/);
+  assert.throws(() => runReleaseWithPublication(publicationA, { readinessArgs: ["--image-evidence", publicationB.evidencePath, "--image-evidence-signature", publicationB.signaturePath, ...releaseReadinessArgs(publicationA).slice(4)] }), /image evidence/);
+  assert.equal(continued, 1);
 });
 
 test("administrator preflight requires current image authorization and rejects fixture-bound identities", () => {
