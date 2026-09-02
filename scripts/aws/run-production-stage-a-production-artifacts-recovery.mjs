@@ -12,7 +12,7 @@ import { createStageATerraformBackendLock, STAGE_A_TERRAFORM_BACKEND } from "./p
 import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
 import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
 import { createStageAProductionArtifactsJournal } from "./production-stage-a-production-artifacts-journal.mjs";
-import { createStageAProductionArtifactsRecoveryAttemptEvidence, assertStageAProductionArtifactsRecoveryAttemptEvidence, createStageAProductionArtifactsRecoveryCompletionEvidence, assertStageAProductionArtifactsRecoveryAuthorization, assertStageAProductionArtifactsRecoveryCompletionEvidence, resolveStageAProductionArtifactsAuthorizationArtifact, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION } from "./production-stage-a-production-artifacts-recovery-governance.mjs";
+import { createStageAProductionArtifactsRecoveryAttemptEvidence, assertStageAProductionArtifactsRecoveryAttemptEvidence, createStageAProductionArtifactsRecoveryCompletionEvidence, assertStageAProductionArtifactsRecoveryAuthorization, assertStageAProductionArtifactsRecoveryCompletionEvidence, assertStageAProductionArtifactsRecoverySourceCompatibility, resolveStageAProductionArtifactsAuthorizationArtifact, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION } from "./production-stage-a-production-artifacts-recovery-governance.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -25,6 +25,10 @@ function readPolicy(run) {
   const encoded = awsJson(run, ["s3api", "get-bucket-policy", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket]);
   return JSON.parse(encoded.Policy);
 }
+
+const proveProtectedMainDescendant = ({ ancestorSha, descendantSha }) => {
+  try { execFileSync("git", ["cat-file", "-e", `${ancestorSha}^{commit}`], { cwd: root, stdio: "ignore" }); execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
+};
 
 export function assertStageAProductionArtifactsJournalRetention(lifecycle, journalPrefix = "production-stage-a-production-artifacts-reconciliation/") {
   if (!lifecycle || !Array.isArray(lifecycle.Rules)) throw new Error("Stage A recovery journal lifecycle response is malformed.");
@@ -54,10 +58,12 @@ function assertJournalRetention(run) {
   } catch (error) { if (!/NoSuchLifecycleConfiguration/i.test(`${error.message || ""}\n${error.stderr || ""}`)) throw error; }
 }
 
-export async function runStageAProductionArtifactsRecovery({ sourceSha, workflowRunId, workflowRunAttempt, rootRun, releaseRun, readStateIdentity, terraformStateLock, resolveAuthorization = resolveStageAProductionArtifactsAuthorizationArtifact, journal, recoveryJournal = journal, sign, verify, readProtectedSource = readStageBProtectedMainCheckout } = {}) {
+export async function runStageAProductionArtifactsRecovery({ sourceSha, recoverySourceSha = sourceSha, workflowRunId, workflowRunAttempt, rootRun, releaseRun, readStateIdentity, terraformStateLock, resolveAuthorization = resolveStageAProductionArtifactsAuthorizationArtifact, journal, recoveryJournal = journal, sign, verify, readProtectedSource = readStageBProtectedMainCheckout, proveDescendant = proveProtectedMainDescendant } = {}) {
   if (typeof rootRun !== "function" || typeof releaseRun !== "function" || typeof readStateIdentity !== "function" || !terraformStateLock || typeof terraformStateLock.acquire !== "function" || typeof terraformStateLock.release !== "function" || typeof resolveAuthorization !== "function" || !journal || typeof journal.writeRecoveryCompletion !== "function" || typeof journal.readRecoveryCompletion !== "function" || !recoveryJournal || typeof recoveryJournal.writeRecoveryAttempt !== "function" || typeof recoveryJournal.readRecoveryAttempt !== "function" || typeof sign !== "function" || typeof verify !== "function") throw new Error("Stage A production-artifacts recovery composition is incomplete.");
   const fresh = readProtectedSource({ cwd: root, requireCanonicalRepository: true, run: (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), expectedSourceSha: sourceSha }); const authenticatedSourceSha = fresh.toolingSha || fresh.headSha;
-  const authenticated = resolveAuthorization({ workflowRunId, workflowRunAttempt, sourceSha: authenticatedSourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION }); const authorization = authenticated.authorization;
+  assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: authenticatedSourceSha, recoverySourceSha, proveDescendant });
+  const historicalResume = authenticatedSourceSha !== recoverySourceSha;
+  const authenticated = resolveAuthorization({ workflowRunId, workflowRunAttempt, sourceSha: recoverySourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION }); const authorization = authenticated.authorization;
   if (!exactRoot(awsJson(rootRun, ["sts", "get-caller-identity"])) || !exactRelease(awsJson(releaseRun, ["sts", "get-caller-identity"]))) throw new Error("Stage A production-artifacts recovery caller identity is outside the exact root/release split.");
   assertJournalRetention(rootRun);
   const before = readPolicy(releaseRun); const beforeSha256 = stageAProductionArtifactsPolicySha256(before); const predecessorSha256 = stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyPredecessor());
@@ -69,6 +75,7 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, workflow
     if (beforeSha256 !== authorization.desiredPolicySha256) throw new Error("Stage A recovery completion exists but live policy is not exact desired policy.");
     return Object.freeze({ recovered: true, resumed: true, alreadyComplete: true, putBucketPolicyCount: 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: existingCompletion.completionEvidenceSha256 });
   }
+  if (historicalResume && beforeSha256 === predecessorSha256) throw new Error("Stage A descendant recovery continuation cannot start a new P0 policy execution under the descendant source.");
   let attempt = decode(recoveryJournal.readRecoveryAttempt(authorization.authorizationSha256), "Stage A recovery attempt");
   if (!attempt) {
     if (beforeSha256 !== predecessorSha256) throw new Error("Stage A recovery desired-policy resume lacks the immutable signed pre-write attempt.");
@@ -82,7 +89,7 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, workflow
     fs.writeFileSync(policyPath, JSON.stringify(buildStageAProductionArtifactsBucketPolicy()), { mode: 0o600, flag: "wx" });
     await terraformStateLock.acquire(); lockHeld = true;
     const finalState = await readStateIdentity();
-    assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha: authenticatedSourceSha, preState: finalState });
+    assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha: recoverySourceSha, preState: finalState });
     const finalPolicy = readPolicy(releaseRun); const finalPolicySha256 = stageAProductionArtifactsPolicySha256(finalPolicy);
     if (finalPolicySha256 !== beforeSha256) throw new Error("Stage A recovery live policy changed before the policy write.");
     if (beforeSha256 === predecessorSha256) await rootRun(["s3api", "put-bucket-policy", "--bucket", authorization.bucket, "--policy", `file://${policyPath}`]);
@@ -97,14 +104,14 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, workflow
 
 export async function runStageAProductionArtifactsRecoveryCli(argv = process.argv.slice(2), deps = {}) {
   if (!argv.includes("--production")) throw new Error("Stage A production-artifacts recovery requires --production.");
-  const sourceSha = required(argv, "--source-sha"); const rootProfile = required(argv, "--root-profile"); const terraformDataDir = path.resolve(required(argv, "--terraform-data-dir"));
+  const sourceSha = required(argv, "--source-sha"); const recoverySourceSha = argv.includes("--recovery-source-sha") ? required(argv, "--recovery-source-sha") : sourceSha; const rootProfile = required(argv, "--root-profile"); const terraformDataDir = path.resolve(required(argv, "--terraform-data-dir"));
   if (!path.isAbsolute(terraformDataDir) || terraformDataDir.startsWith(`${root}${path.sep}`)) throw new Error("Stage A recovery Terraform data directory must be external and absolute.");
   fs.mkdirSync(terraformDataDir, { recursive: true, mode: 0o700 }); fs.chmodSync(terraformDataDir, 0o700);
   const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: "eu-west-2" }); const rootRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: rootProfile, region: "eu-west-2" });
   const terraformEnvironment = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: "eu-west-2" }), TF_DATA_DIR: terraformDataDir };
   const terraformRun = async (args) => execFileSync(args[0], args.slice(1), { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const adapter = createTerraformStageAAdapter({ root: "infra/aws/terraform/production-green-stage-a", planPath: path.join(terraformDataDir, "unused.tfplan"), backendArgs: Object.entries(STAGE_A_TERRAFORM_BACKEND).filter(([key]) => key !== "type").map(([key, value]) => `-backend-config=${key}=${value}`), run: terraformRun, describeIngress: async () => ({ present: false }), readProductionArtifactsPolicy: async () => readPolicy(releaseRun), sourceSha });
-  const result = await runStageAProductionArtifactsRecovery({ sourceSha, workflowRunId: required(argv, "--authorization-workflow-run-id"), workflowRunAttempt: required(argv, "--authorization-workflow-run-attempt"), rootRun, releaseRun, readStateIdentity: () => adapter.readStateIdentity(), terraformStateLock: createStageATerraformBackendLock({ run: releaseRun, lockFilePath: path.join(terraformDataDir, `stage-a-recovery-${crypto.randomUUID()}.tflock`) }), journal: createStageAProductionArtifactsJournal({ run: releaseRun }), recoveryJournal: createStageAProductionArtifactsJournal({ run: rootRun }), sign: createRootAttestationKmsSigner({ run: rootRun }), verify: createRootAttestationKmsVerifier({ run: releaseRun }), ...deps });
+  const result = await runStageAProductionArtifactsRecovery({ sourceSha, recoverySourceSha, workflowRunId: required(argv, "--authorization-workflow-run-id"), workflowRunAttempt: required(argv, "--authorization-workflow-run-attempt"), rootRun, releaseRun, readStateIdentity: () => adapter.readStateIdentity(), terraformStateLock: createStageATerraformBackendLock({ run: releaseRun, lockFilePath: path.join(terraformDataDir, `stage-a-recovery-${crypto.randomUUID()}.tflock`) }), journal: createStageAProductionArtifactsJournal({ run: releaseRun }), recoveryJournal: createStageAProductionArtifactsJournal({ run: rootRun }), sign: createRootAttestationKmsSigner({ run: rootRun }), verify: createRootAttestationKmsVerifier({ run: releaseRun }), proveDescendant: proveProtectedMainDescendant, ...deps });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`); return result;
 }
 

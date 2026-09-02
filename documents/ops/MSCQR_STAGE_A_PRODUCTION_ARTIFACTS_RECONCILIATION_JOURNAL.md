@@ -92,3 +92,10 @@ an authenticated ancestor of current protected main, and preserves the
 historical completion without replaying policy recovery. A subsequent ordinary
 Stage-A plan is permitted only after that runner records `COMPLETED` and
 produces a no-op plan.
+
+If recovery has written `P2` but completion publication failed, recovery itself
+may be retried with the current protected source and the historical recovery
+source SHA. The existing authorization-namespaced signed attempt must be
+present, the current source must satisfy the same descendant compatibility
+contract, and live policy must be exact `P2`; this completion-only resume never
+issues another policy write.

@@ -24,7 +24,11 @@ and evidence; verify state/live convergence; then run a fresh ordinary
 Stage-A plan. If protected main advances after recovery, pass the historical
 recovery source SHA as `--recovery-source-sha`; the reconciliation authorization
 then records and verifies the authenticated descendant relationship without
-replaying recovery. Prepare authenticates the invoked Terraform executable with
+replaying recovery. If the recovery policy write succeeded but completion
+publication failed before main advanced, retry recovery with the same
+authorization and `--recovery-source-sha`; the authenticated attempt and exact
+P2 policy permit completion-only resume with no second policy write. Prepare
+authenticates the invoked Terraform executable with
 `terraform version -json` and records the exact verified 1.15.8 runtime in its
 evidence; a mismatched or malformed executable fails before init/plan. Execute
 never creates a replacement plan.
