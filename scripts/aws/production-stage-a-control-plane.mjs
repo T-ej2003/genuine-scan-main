@@ -8,6 +8,7 @@ const SHA256 = /^[a-f0-9]{64}$/;
 const RDS_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const exact = (value, expected, message) => { if (value !== expected) throw new Error(message); };
 const STAGE_A_STATE_LINEAGE = "02afb75a-f902-ab8a-f4c1-751d4aef7837";
+export const STAGE_A_TERRAFORM_VERSION = "1.15.8";
 const STAGE_A_POLICY_RESOURCE_KEYS = ["bucket", "expected_bucket_owner", "id", "policy", "region"];
 const STAGE_A_RDS_SENSITIVITY_MASK = Object.freeze({
   blue_green_update: [], domain_dns_ips: [], enabled_cloudwatch_logs_exports: [], listener_endpoint: [], master_user_secret: [{}], password: true, password_wo: true, replicas: [], restore_to_point_in_time: [], s3_import: [], tags: {}, tags_all: {}, vpc_security_group_ids: [false],
@@ -277,11 +278,12 @@ const STAGE_A_PREPARE_EVIDENCE_FIELDS = Object.freeze([
   "preStateSha256", "savedPlanSha256", "savedPlanByteLength", "terraformVersion", "awsProviderVersion", "terraformRoot", "prepareEvidenceSha256",
 ]);
 
-export function createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, recoveryCompletion, saved, preState, terraformVersion = "1.15.8", awsProviderVersion = "6.56.0", terraformRoot = "infra/aws/terraform/production-green-stage-a" } = {}) {
+export function createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, recoveryCompletion, saved, preState, awsProviderVersion = "6.56.0", terraformRoot = "infra/aws/terraform/production-green-stage-a" } = {}) {
+  const terraformVersion = saved?.terraformVersion;
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !recoveryCompletion || !saved || saved.refreshOnly !== true || !preState
     || !SHA256.test(saved.savedPlanSha256 || "") || !Number.isSafeInteger(saved.savedPlanByteLength) || saved.savedPlanByteLength < 1
     || preState.lineage !== STAGE_A_STATE_LINEAGE || !Number.isSafeInteger(preState.serial) || preState.serial < 1 || !SHA256.test(preState.stateSha256 || "")
-    || typeof terraformVersion !== "string" || !terraformVersion || typeof awsProviderVersion !== "string" || !awsProviderVersion || typeof terraformRoot !== "string" || !terraformRoot) throw new Error("Stage A reconciliation prepare evidence inputs are invalid.");
+    || terraformVersion !== STAGE_A_TERRAFORM_VERSION || typeof awsProviderVersion !== "string" || !awsProviderVersion || typeof terraformRoot !== "string" || !terraformRoot) throw new Error("Stage A reconciliation prepare evidence inputs are invalid.");
   const body = {
     schemaVersion: 1, kind: "STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_PREPARE_EVIDENCE", operation: "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", sourceSha,
     account: STAGE_B.account, region: STAGE_B.region, executionPrincipal: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn, bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket,
@@ -307,7 +309,7 @@ export async function prepareStageAProductionArtifactsStateReconciliation({ adap
   assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, preStateSerial: preState.serial, preStateSha256: preState.stateSha256, verifyRecoveryCompletion });
   if (assertSourceIntegrity !== undefined) { if (typeof assertSourceIntegrity !== "function") throw new Error("Stage A reconciliation source-integrity check is invalid."); assertSourceIntegrity(); }
   const saved = await adapter.createSavedRefreshOnlyPlan();
-  if (saved?.preState?.lineage !== preState.lineage || saved?.preState?.serial !== preState.serial || saved?.preState?.stateSha256 !== preState.stateSha256 || saved?.sourceSha !== sourceSha || saved?.refreshOnly !== true || !path.isAbsolute(saved?.planPath || "") || !SHA256.test(saved?.savedPlanSha256 || "") || !Number.isSafeInteger(saved.savedPlanByteLength) || saved.savedPlanByteLength < 1) throw new Error("Stage A refresh-only plan is not source- or operation-bound.");
+  if (saved?.preState?.lineage !== preState.lineage || saved?.preState?.serial !== preState.serial || saved?.preState?.stateSha256 !== preState.stateSha256 || saved?.sourceSha !== sourceSha || saved?.refreshOnly !== true || saved?.terraformVersion !== STAGE_A_TERRAFORM_VERSION || !path.isAbsolute(saved?.planPath || "") || !SHA256.test(saved?.savedPlanSha256 || "") || !Number.isSafeInteger(saved.savedPlanByteLength) || saved.savedPlanByteLength < 1) throw new Error("Stage A refresh-only plan is not source-, runtime-, or operation-bound.");
   assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(saved.plan, { sourceSha, recoveryCompletion, preStateSerial: preState.serial, preStateSha256: preState.stateSha256, verifyRecoveryCompletion });
   const prepareEvidence = createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, recoveryCompletion, saved, preState });
   return Object.freeze({ preState, saved, prepareEvidence });
@@ -619,7 +621,13 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
   let savedRefreshOnlyPlanSha256 = null;
   let refreshOnlyApplyAttempted = false;
   let backendInitialization;
-  const ensureBackendInitialized = () => backendInitialization ||= run([terraform, `-chdir=${root}`, "init", "-upgrade=false", "-input=false", ...backendArgs]);
+  let terraformVersionVerification;
+  const ensureTerraformRuntimeVersion = () => terraformVersionVerification ||= Promise.resolve(run([terraform, "version", "-json"])).then((output) => {
+    let parsed; try { parsed = JSON.parse(output); } catch { throw new Error("Stage A Terraform runtime version output is malformed."); }
+    if (parsed?.terraform_version !== STAGE_A_TERRAFORM_VERSION) throw new Error(`Stage A requires Terraform ${STAGE_A_TERRAFORM_VERSION}; observed ${parsed?.terraform_version || "unknown"}.`);
+    return parsed.terraform_version;
+  });
+  const ensureBackendInitialized = () => backendInitialization ||= ensureTerraformRuntimeVersion().then(() => run([terraform, `-chdir=${root}`, "init", "-upgrade=false", "-input=false", ...backendArgs]));
   return {
     async createSavedPlan() {
       if (fs.existsSync(planPath)) {
@@ -643,13 +651,14 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
       await run([terraform, `-chdir=${root}`, "apply", "-input=false", planPath]);
     },
     async createSavedRefreshOnlyPlan() {
+      const terraformVersion = await ensureTerraformRuntimeVersion();
       await ensureBackendInitialized();
       const preState = await this.readStateIdentity();
       await run([terraform, `-chdir=${root}`, "plan", "-refresh-only", "-input=false", "-lock=true", "-no-color", "-out", refreshOnlyPlanPath]);
       const plan = JSON.parse(await run([terraform, `-chdir=${root}`, "show", "-json", refreshOnlyPlanPath]));
       const bytes = fs.readFileSync(refreshOnlyPlanPath);
       savedRefreshOnlyPlanSha256 = createHash("sha256").update(bytes).digest("hex");
-      return { plan, planPath: refreshOnlyPlanPath, savedPlanSha256: savedRefreshOnlyPlanSha256, savedPlanByteLength: bytes.length, sourceSha, region, terraformRoot: root, refreshOnly: true, preState, evidenceRef: `terraform-refresh-only:${refreshOnlyPlanPath}`, evidenceSha256: savedRefreshOnlyPlanSha256 };
+      return { plan, planPath: refreshOnlyPlanPath, savedPlanSha256: savedRefreshOnlyPlanSha256, savedPlanByteLength: bytes.length, sourceSha, region, terraformRoot: root, terraformVersion, refreshOnly: true, preState, evidenceRef: `terraform-refresh-only:${refreshOnlyPlanPath}`, evidenceSha256: savedRefreshOnlyPlanSha256 };
     },
     async applySavedRefreshOnlyPlan(saved) {
       if (refreshOnlyApplyAttempted) throw new Error("Stage A refresh-only reconciliation has already been attempted.");

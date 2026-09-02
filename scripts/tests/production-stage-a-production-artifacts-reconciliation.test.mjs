@@ -12,9 +12,12 @@ import {
   buildStageAProductionArtifactsBucketPolicyPredecessor,
   createStageAProductionArtifactsRecoveryCompletion,
   createStageAProductionArtifactsReconciliationAuthorization,
+  createStageAProductionArtifactsReconciliationPrepareEvidence,
+  createTerraformStageAAdapter,
   prepareStageAProductionArtifactsStateReconciliation,
   runStageAProductionArtifactsStateReconciliation,
   STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY,
+  STAGE_A_TERRAFORM_VERSION,
 } from "../aws/production-stage-a-control-plane.mjs";
 
 const sourceSha = "e".repeat(40);
@@ -32,7 +35,36 @@ const verifyReconciliationAuthorization = (value) => ({ authorizationSha256: val
 const verifier = (value) => ({ authorizationSha256: value.recoveryAuthorizationSha256, livePolicySha256: value.livePolicySha256, completed: true });
 const refreshPlan = ({ before = predecessor, after = desired, drift = [] } = {}) => ({ complete: true, errored: false, applyable: true, resource_changes: [], resource_drift: [{ address: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address, mode: "managed", type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type, name: "production_artifacts", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: resource(before), after: resource(after), replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } }, ...drift] });
 const consumption = (overrides = {}) => ({ reserveConsumption: async () => ({ reservation: "exact" }), finalizeConsumption: async () => {}, abortConsumption: async () => {}, ...overrides });
-const execute = async ({ adapter, ...options }) => { const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: options.recoveryCompletion || completion(), verifyRecoveryCompletion: verifier }); return runStageAProductionArtifactsStateReconciliation({ ...options, adapter, saved: prepared.saved, preparedState: prepared.preState }); };
+const execute = async ({ adapter, ...options }) => { const preparedAdapter = { ...adapter, createSavedRefreshOnlyPlan: async () => ({ ...(await adapter.createSavedRefreshOnlyPlan()), terraformVersion: STAGE_A_TERRAFORM_VERSION }) }; const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter: preparedAdapter, sourceSha, recoveryCompletion: options.recoveryCompletion || completion(), verifyRecoveryCompletion: verifier }); return runStageAProductionArtifactsStateReconciliation({ ...options, adapter: preparedAdapter, saved: prepared.saved, preparedState: prepared.preState }); };
+
+test("refresh-only prepare authenticates the exact Terraform executable version before init or plan", async () => {
+  const versions = [
+    [STAGE_A_TERRAFORM_VERSION, true],
+    ["1.15.7", false],
+    ["1.16.0", false],
+    ["malformed", false],
+    [new Error("terraform not executable"), false],
+  ];
+  for (const [version, expectedPass] of versions) {
+    const directory = fs.mkdtempSync(path.join("/tmp", "stage-a-runtime-version-")); const refreshPath = path.join(directory, "refresh.tfplan"); const calls = [];
+    const adapter = createTerraformStageAAdapter({ planPath: path.join(directory, "plan.tfplan"), refreshOnlyPlanPath: refreshPath, run: async (args) => {
+      calls.push(args); if (args[1] === "version") { if (version instanceof Error) throw version; return typeof version === "string" && version.startsWith("1.") ? JSON.stringify({ terraform_version: version }) : version; }
+      if (args.includes("state")) return JSON.stringify({ lineage, serial: 35 });
+      if (args.includes("plan")) { fs.writeFileSync(refreshPath, "refresh-only-plan", { mode: 0o600 }); return ""; }
+      if (args.includes("show")) return JSON.stringify(refreshPlan());
+      return "";
+    }, describeIngress: async () => ({ present: true }) });
+    try {
+      if (expectedPass) { const saved = await adapter.createSavedRefreshOnlyPlan(); assert.equal(saved.terraformVersion, STAGE_A_TERRAFORM_VERSION); assert.equal(calls.filter((args) => args.includes("version")).length, 1); assert.equal(calls.filter((args) => args.includes("plan")).length, 1); }
+      else { await assert.rejects(() => adapter.createSavedRefreshOnlyPlan(), /requires Terraform|version output|not executable/); assert.equal(calls.filter((args) => args.includes("init")).length, 0); assert.equal(calls.filter((args) => args.includes("plan")).length, 0); }
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
+test("prepare evidence cannot be caller-stamped without an authenticated runtime version", () => {
+  assert.throws(() => createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, recoveryCompletion: completion(), preState: { lineage, serial: 35, stateSha256 }, saved: { refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/plan" } }), /inputs are invalid/);
+  assert.throws(() => createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, recoveryCompletion: completion(), preState: { lineage, serial: 35, stateSha256 }, saved: { refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/plan", terraformVersion: "1.15.7" } }), /inputs are invalid/);
+});
 
 test("exact recovery drift is accepted only with independently authenticated completion", () => {
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan(), { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }));
@@ -210,7 +242,7 @@ test("state lineage and serial are CAS-bound and recovery cannot replay", async 
 
 test("completion, source, and recovery authorization changes fail closed before apply", async () => {
   let applies = 0;
-  const adapter = { readStateIdentity: async () => ({ lineage, serial: 35, stateSha256 }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; }, readProductionArtifactsPolicy: async () => desired };
+  const adapter = { readStateIdentity: async () => ({ lineage, serial: 35, stateSha256 }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, terraformVersion: STAGE_A_TERRAFORM_VERSION, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; }, readProductionArtifactsPolicy: async () => desired };
   const wrongAuth = { ...completion(), recoveryAuthorizationSha256: "c".repeat(64) };
   assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan(), { sourceSha, recoveryCompletion: wrongAuth, preStateSerial: 35, verifyRecoveryCompletion: verifier }), /hash|completion|independently/);
   const wrongSource = completion(); const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier }); await assert.rejects(runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha: "f".repeat(40), saved: prepared.saved, preparedState: prepared.preState, recoveryCompletion: wrongSource, verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption() }), /binding|source/);
@@ -220,7 +252,7 @@ test("completion, source, and recovery authorization changes fail closed before 
 
 test("missing or non-independent reconciliation authorization fails before apply", async () => {
   let applies = 0;
-  const adapter = { readStateIdentity: async () => ({ lineage, serial: 35, stateSha256 }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; }, readProductionArtifactsPolicy: async () => desired };
+  const adapter = { readStateIdentity: async () => ({ lineage, serial: 35, stateSha256 }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, terraformVersion: STAGE_A_TERRAFORM_VERSION, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; }, readProductionArtifactsPolicy: async () => desired };
   const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier });
   await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, saved: prepared.saved, preparedState: prepared.preState, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, ...consumption() }), /authorization/);
   await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, saved: prepared.saved, preparedState: prepared.preState, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization: () => ({ authorizationSha256: reconciliationAuthorization().authorizationSha256, approved: true, independent: false }), ...consumption() }), /independently authenticated/);

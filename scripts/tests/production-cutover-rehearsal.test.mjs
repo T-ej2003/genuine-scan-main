@@ -459,7 +459,7 @@ test("Stage A resumes an existing saved plan without a state backend", async () 
       backendArgs: ["-backend-config=must-not-be-used"],
       sourceSha: "a".repeat(40),
       run: async (args) => {
-        calls.push(args);
+        calls.push(args); if (args[1] === "version") return JSON.stringify({ terraform_version: "1.15.8" });
         if (args.includes("show")) return JSON.stringify(stageAPlan({ actions: ["no-op"] }));
         if (args.includes("-backend=false")) return "";
         throw new Error(`unexpected Terraform call: ${args.join(" ")}`);
@@ -483,13 +483,13 @@ test("Stage A initializes the configured backend once before every state identit
   try {
     const adapter = createTerraformStageAAdapter({
       root: "infra/aws/terraform/production-green-stage-a", planPath: path.join(directory, "stage-a.tfplan"), refreshOnlyPlanPath: path.join(directory, "refresh.tfplan"), backendArgs: ["-backend-config=fixture"],
-      run: async (args) => { calls.push(args); return args.includes("state") ? JSON.stringify({ lineage: "fixture", serial: 1 }) : ""; }, describeIngress: async () => ({ present: true }),
+      run: async (args) => { calls.push(args); if (args[1] === "version") return JSON.stringify({ terraform_version: "1.15.8" }); return args.includes("state") ? JSON.stringify({ lineage: "fixture", serial: 1 }) : ""; }, describeIngress: async () => ({ present: true }),
     });
     const [first, second] = await Promise.all([adapter.readStateIdentity(), adapter.readStateIdentity()]);
     assert.deepEqual(first, second);
     assert.equal(calls.filter((args) => args.includes("init")).length, 1);
     assert.equal(calls.filter((args) => args.includes("state") && args.includes("pull")).length, 2);
-    assert.equal(calls[0].includes("-backend-config=fixture"), true);
+    assert.equal(calls.find((args) => args.includes("init")).includes("-backend-config=fixture"), true);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -499,7 +499,7 @@ test("Stage A execute loads the prepared refresh-only bytes and never replans", 
   const planBytes = Buffer.from("prepared-refresh-only-plan"); writeFileSync(refreshPath, planBytes, { mode: 0o600 });
   const savedPlanSha256 = createHash("sha256").update(planBytes).digest("hex"); const calls = []; let applies = 0;
   try {
-    const adapter = createTerraformStageAAdapter({ planPath, refreshOnlyPlanPath: refreshPath, sourceSha: "a".repeat(40), run: async (args) => { calls.push(args); if (args.includes("show")) return JSON.stringify(stageAPlan({ actions: ["no-op"] })); if (args.includes("init")) return ""; if (args.includes("apply")) { applies += 1; return ""; } throw new Error(`unexpected Terraform call: ${args.join(" ")}`); }, describeIngress: async () => ({ present: true }) });
+    const adapter = createTerraformStageAAdapter({ planPath, refreshOnlyPlanPath: refreshPath, sourceSha: "a".repeat(40), run: async (args) => { calls.push(args); if (args[1] === "version") return JSON.stringify({ terraform_version: "1.15.8" }); if (args.includes("show")) return JSON.stringify(stageAPlan({ actions: ["no-op"] })); if (args.includes("init")) return ""; if (args.includes("apply")) { applies += 1; return ""; } throw new Error(`unexpected Terraform call: ${args.join(" ")}`); }, describeIngress: async () => ({ present: true }) });
     const plan = await adapter.readSavedRefreshOnlyPlan(refreshPath);
     await adapter.applySavedRefreshOnlyPlan({ planPath: refreshPath, savedPlanSha256, refreshOnly: true });
     assert.equal(plan.resource_changes[0].change.actions[0], "no-op"); assert.equal(applies, 1); assert.equal(calls.some((args) => args.includes("plan")), false);
