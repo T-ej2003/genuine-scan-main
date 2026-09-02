@@ -134,7 +134,8 @@ export function resolveStageAProductionArtifactsAuthorizationArtifact({ workflow
     const authorization = JSON.parse(Buffer.from(githubRun("unzip", ["-p", archive, "authorization.json"])).toString("utf8"));
     if (recovery) assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha, preState: { lineage: authorization.preStateLineage, serial: authorization.preStateSerial, stateSha256: authorization.preStateSha256 } });
     const approvalEvidence = authorization.protectedEnvironmentApprovalEvidence;
-    if (approvalEvidence?.workflowRunId !== workflow.id || approvalEvidence?.workflowRunAttempt !== workflow.run_attempt || approvalEvidence?.executionActor !== workflow.actor?.login) throw new Error("Stage A production-artifacts authorization approval evidence does not belong to its workflow.");
+    const workflowRunId = String(approvalEvidence?.workflowRunId || ""); const workflowRunAttempt = String(approvalEvidence?.workflowRunAttempt || "");
+    if (!/^[1-9][0-9]*$/.test(workflowRunId) || !/^[1-9][0-9]*$/.test(workflowRunAttempt) || workflowRunId !== String(workflow.id || "") || workflowRunAttempt !== String(workflow.run_attempt || "") || approvalEvidence?.executionActor !== workflow.actor?.login) throw new Error("Stage A production-artifacts authorization approval evidence does not belong to its workflow.");
     return Object.freeze({ workflow, artifact: matches[0], authorization, authorizationArtifactDigest: matches[0].digest });
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
