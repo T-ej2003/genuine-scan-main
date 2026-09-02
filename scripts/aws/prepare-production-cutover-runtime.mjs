@@ -16,12 +16,14 @@ const capture = (name, label = name) => readStageBPrivateFileBytes({ filePath: r
 const read = (name, label) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(capture(name, label).bytes));
 const imageAuthorizationPath = required("image-authorization");
 const iamEvidencePath = required("iam-evidence");
+const iamEvidenceSignaturePath = required("iam-evidence-signature");
 const releasePreflightEvidencePath = required("release-preflight-evidence");
 const releasePreflightAttestationPath = required("release-preflight-attestation");
 const releasePreflightAttestationSignaturePath = required("release-preflight-attestation-signature");
 const temporaryKmsCapabilityPath = args.get("temporary-kms-capability");
 const imageAuthorization = read("image-authorization", "Image authorization evidence");
 const iamEvidence = read("iam-evidence", "IAM evidence");
+capture("iam-evidence-signature", "Administrator capability evidence signature");
 capture("release-preflight-evidence", "Release-preflight checker-trust evidence");
 capture("release-preflight-attestation", "Release-preflight checker-trust attestation");
 capture("release-preflight-attestation-signature", "Release-preflight checker-trust attestation signature");
@@ -97,6 +99,7 @@ const result = prepareProductionCutoverRuntime({
   rotationId: rotationBindings?.rotationId,
   imageAuthorization,
   iamEvidence,
+  iamEvidenceSignatureFile: path.resolve(iamEvidenceSignaturePath),
   releasePreflightEvidenceFile: path.resolve(releasePreflightEvidencePath),
   releasePreflightAttestationFile: path.resolve(releasePreflightAttestationPath),
   releasePreflightAttestationSignatureFile: path.resolve(releasePreflightAttestationSignaturePath),

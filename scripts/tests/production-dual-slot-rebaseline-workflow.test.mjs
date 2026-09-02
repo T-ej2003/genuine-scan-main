@@ -6,6 +6,7 @@ import test from "node:test";
 const root = path.resolve(new URL(".", import.meta.url).pathname, "../..");
 const workflow = readFileSync(path.join(root, ".github/workflows/authorize-production-dual-slot-rebaseline.yml"), "utf8");
 const recoveryWorkflow = readFileSync(path.join(root, ".github/workflows/authorize-production-dual-slot-rebaseline-recovery.yml"), "utf8");
+const durableEvidenceWorkflow = readFileSync(path.join(root, ".github/workflows/persist-production-dual-slot-rebaseline-evidence.yml"), "utf8");
 
 test("rebaseline authorization workflow keeps dispatch inputs out of executable shell text", () => {
   const runBodies = [...workflow.matchAll(/^[ ]{8}run: \|\n((?:^[ ]{10}.*\n?)*)/gm)].map((match) => match[1]);
@@ -78,6 +79,18 @@ test("successor recovery authorization is a separate protected workflow with no 
   assert.match(recoveryWorkflow, /dual-slot-rebaseline-recovery\/recovery-authorization\.json/);
   assert.equal(/terraform\s+(plan|apply)|PutSecretValue|UpdateSecretVersionStage|UpdateService|RegisterTaskDefinition|kms\s+sign/i.test(recoveryWorkflow), false);
   for (const name of ["SOURCE_SHA", "RECOVERY_ENVELOPE_BASE64", "RECOVERY_ENVELOPE_FILE_SHA256", "IMAGE_AUTHORIZATION_BASE64", "IMAGE_AUTHORIZATION_FILE_SHA256", "LIVE_REFERENCE_AUDIT_SHA256", "LIVE_LEGACY_BASELINE_IDENTITY_SHA256", "OBSERVED_SLOT_IDENTITIES_SHA256", "REASON", "APPROVER_ROLE", "VERIFICATION_REF"]) assert.match(recoveryWorkflow, new RegExp("^          " + name + ": \\${\\{ inputs\\.", "m"));
+});
+
+test("durable rebaseline evidence uses the protected artifact store without publishing secret material", () => {
+  assert.match(durableEvidenceWorkflow, /environment: production/);
+  assert.match(durableEvidenceWorkflow, /branches\/main/);
+  assert.match(durableEvidenceWorkflow, /test "\$\(git rev-parse HEAD\)" = "\$SOURCE_SHA"/);
+  assert.match(durableEvidenceWorkflow, /--source-sha "\$SOURCE_SHA"/);
+  assert.match(durableEvidenceWorkflow, /publish-production-dual-slot-rebaseline-durable-evidence\.mjs/);
+  assert.match(durableEvidenceWorkflow, /production-dual-slot-rebaseline-durable-evidence/);
+  assert.match(durableEvidenceWorkflow, /retention-days: 90/);
+  assert.equal(/PutSecretValue|UpdateSecretVersionStage|terraform\s+(plan|apply)|RegisterTaskDefinition|UpdateService|kms\s+sign/i.test(durableEvidenceWorkflow), false);
+  assert.equal(durableEvidenceWorkflow.includes("material-journal"), false);
 });
 
 test("production recovery authority has no descendant-bypass or normal-execute downgrade", () => {

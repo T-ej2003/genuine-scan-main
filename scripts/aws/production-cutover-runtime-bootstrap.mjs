@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { lstatSync, rmSync } from "node:fs";
 import path from "node:path";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, readStageBPrivateFileBytes, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
@@ -13,7 +13,7 @@ import { assertOnboardingPaths, PRODUCTION_ONBOARDING_PATHS } from "../security/
 import { assertAuthenticatedCurrentStageBState, assertPostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
 import { assertRootDropEvidence } from "./production-root-drop-evidence.mjs";
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
-import { assertStageBAdministratorEvidenceIdentity } from "./validate-production-green-stage-b-permissions.mjs";
+import { assertStageBAdministratorEvidenceIdentity, verifyPermissionReportSignature } from "./validate-production-green-stage-b-permissions.mjs";
 import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertProductionRotationGraceSeconds } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 import {
@@ -241,6 +241,7 @@ export function prepareProductionCutoverRuntime({
   git,
   imageAuthorization,
   iamEvidence,
+  iamEvidenceSignatureFile,
   releasePreflightEvidenceFile,
   releasePreflightAttestationFile,
   releasePreflightAttestationSignatureFile,
@@ -266,6 +267,7 @@ export function prepareProductionCutoverRuntime({
   constructAdapters,
   imageAuthorizationValidation,
   verifyRootDropSignature,
+  verifyAdministratorEvidenceSignature,
   verifyReleasePreflightAttestationSignature,
   proveSourceAdvance,
 } = {}) {
@@ -292,7 +294,7 @@ export function prepareProductionCutoverRuntime({
     if (!protectedSha || !SHA40.test(protectedSha)) throw new Error("protected-main source SHA is unresolved.");
     if (typeof verifyReleasePreflightAttestationSignature !== "function") throw new Error("Release-preflight checker-trust verification requires the canonical release-profile verifier.");
     if (!rotationBindings) throw new Error("rotation secret binding manifest is required; current/previous/pending JWT/QR bindings are not derivable from the legacy live task.");
-    const rotationId = requestedRotationId || `rotation-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
+    const rotationId = requestedRotationId || rotationBindings.rotationId;
     if (!ROTATION_ID.test(rotationId)) throw new Error("Requested rotation ID is invalid.");
     if (!imageAuthorization?.filePath) throw new Error("image authorization evidence file is required.");
     const preparedImageAuthorization = readInputFile(imageAuthorization.filePath, repositoryRoot, "Image authorization evidence");
@@ -307,6 +309,10 @@ export function prepareProductionCutoverRuntime({
     if (canonicalHash(suppliedIamEvidence) !== canonicalHash(preparedIamEvidence.value)) throw new Error("IAM evidence input differs from its authenticated file.");
     if (preparedIamEvidence.value.status !== "valid" || preparedIamEvidence.value.iamEvaluationCensus?.executed !== preparedIamEvidence.value.iamEvaluationCensus?.total || preparedIamEvidence.value.iamEvaluationCensus?.invalid !== 0) throw new Error("IAM evidence is incomplete.");
     assertStageBAdministratorEvidenceIdentity(preparedIamEvidence.value, { sourceSha: protectedSha, imageAuthorization: preparedImageAuthorization.value, imageAuthorizationFileSha256: preparedImageAuthorization.sha256 });
+    if (!iamEvidenceSignatureFile) throw new Error("Administrator capability evidence signature file is required.");
+    const preparedIamEvidenceSignature = readInputFile(iamEvidenceSignatureFile, repositoryRoot, "Administrator capability evidence signature");
+    const verifyAdministrator = verifyAdministratorEvidenceSignature || ((options) => verifyPermissionReportSignature(options));
+    if (typeof verifyAdministrator !== "function" || verifyAdministrator({ report: preparedIamEvidence.value, signatureArtifact: preparedIamEvidenceSignature.value, reportBytes: readStageBPrivateFileBytes({ filePath: preparedIamEvidence.path, repositoryRoot, label: "IAM evidence" }).bytes, signatureBytes: readStageBPrivateFileBytes({ filePath: preparedIamEvidenceSignature.path, repositoryRoot, label: "Administrator capability evidence signature" }).bytes }) !== true) throw new Error("Administrator capability evidence signature verification failed.");
     assertPreCutoverTemporaryCapabilityAbsent(preparedIamEvidence.value.temporaryKmsCapability, { sourceSha: protectedSha });
     if (!releasePreflightEvidenceFile) throw new Error("Release-preflight checker-trust evidence file is required.");
     const releasePreflightEvidence = readInputFile(releasePreflightEvidenceFile, repositoryRoot, "Release-preflight checker-trust evidence");
@@ -336,7 +342,6 @@ export function prepareProductionCutoverRuntime({
     const artifactBindings = loadApprovedArtifactSigningBindings(artifactBinding.path, { expectedSourceSha: protectedSha, expectedSha256: artifactBinding.sha256, repositoryRoot });
     if (!rootDropEvidenceFile) throw new Error("Root-drop evidence file is required.");
     const rootDrop = readInputFile(rootDropEvidenceFile, repositoryRoot, "Root-drop evidence");
-    assertRootDropEvidence(rootDrop.value, { sourceSha: protectedSha, ...(verifyRootDropSignature ? { verifySignature: verifyRootDropSignature } : {}) });
     if ((stageAPlanPath && stageARecoveryEvidenceFile) || (!stageAPlanPath && !stageARecoveryEvidenceFile)) throw new Error("Exactly one of preserved Stage-A saved plan or post-apply Stage-A recovery evidence is required.");
     const stageARecovery = stageARecoveryEvidenceFile ? readInputFile(stageARecoveryEvidenceFile, repositoryRoot, "Stage-A recovery evidence") : null;
     if (stageARecovery && (!stageAStatePath || !stageAHandoffPath || !stageBStatePath || !currentStageBStatePath)) throw new Error("Stage-A recovery requires historical provenance and the authenticated current Stage-B state.");
@@ -379,6 +384,15 @@ export function prepareProductionCutoverRuntime({
       }),
     });
     const approvalConfig = { ...buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, rebaselineAuthorization, rebaselineAuthorizationCoordinates, recoveryEnvelope, originalPreparation, imageAuthorization: preparedImageAuthorization.value, proveRecoveryDescendant, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin, liveCurrentKeyVersion: currentKeyVersion }), ...(initialMigrationSourceAdvance ? { initialMigrationSourceAdvance } : {}) };
+    assertRootDropEvidence(rootDrop.value, {
+      sourceSha: protectedSha,
+      rotationId: approvalConfig.rotationId,
+      imageAuthorizationSha256: preparedImageAuthorization.value.authorizationSha256,
+      successorRecoveryAuthorizationSha256: recoveryEnvelope ? rebaselineAuthorization?.authorizationSha256 || null : null,
+      administratorEvidenceSha256: preparedIamEvidence.sha256,
+      administratorSignatureSha256: preparedIamEvidenceSignature.sha256,
+      ...(verifyRootDropSignature ? { verifySignature: verifyRootDropSignature } : {}),
+    });
     const overlapTaskInput = buildOverlapTaskDefinition({
       backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${backendImageDigest}`,
       releaseSha: protectedSha,
@@ -403,6 +417,7 @@ export function prepareProductionCutoverRuntime({
       artifactBindingFile: path.resolve(artifactBindingFile),
       imageAuthorizationFile: preparedImageAuthorization.path,
       iamEvidenceFile: preparedIamEvidence.path,
+      iamEvidenceSignatureFile: preparedIamEvidenceSignature.path,
       iamEvidenceSha256: preparedIamEvidence.value.evidence?.evidenceSha256 || preparedIamEvidence.value.evidenceSha256 || null,
       releasePreflightEvidenceFile: releasePreflightEvidence.path,
       releasePreflightEvidenceFileSha256: releasePreflightEvidence.sha256,
@@ -428,6 +443,7 @@ export function prepareProductionCutoverRuntime({
       artifactBindingSha256: artifactBinding.sha256,
       imageAuthorizationSha256: preparedImageAuthorization.sha256,
       iamEvidenceFileSha256: preparedIamEvidence.sha256,
+      iamEvidenceSignatureFileSha256: preparedIamEvidenceSignature.sha256,
       backendImageDigest,
       expectedCurrentTaskDefinitionArn: taskDefinition?.taskDefinitionArn,
       inventoryApprovalId,
@@ -529,7 +545,7 @@ const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
 export function parseBootstrapArgs(argv) {
   const supported = new Set([
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
-    "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "rebaseline-authorization-run-id", "rebaseline-authorization-run-attempt", "recovery-envelope", "original-rebaseline-preparation", "image-authorization", "iam-evidence", "release-preflight-evidence", "release-preflight-attestation", "release-preflight-attestation-signature",
+    "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "rebaseline-authorization-run-id", "rebaseline-authorization-run-attempt", "recovery-envelope", "original-rebaseline-preparation", "image-authorization", "iam-evidence", "iam-evidence-signature", "release-preflight-evidence", "release-preflight-attestation", "release-preflight-attestation-signature",
     "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "inventory-task-definition-arn", "onboarding-paths",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir",
   ]);

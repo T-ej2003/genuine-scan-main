@@ -260,7 +260,15 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     const captured = readStageBPrivateFileBytes({ filePath: config.rotationStateFile, repositoryRoot: process.cwd(), label: "Persisted rotation state" });
     return { state: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes)), sha256: captured.sha256 };
   };
+  const authenticatedImageAuthorization = readBoundStageBPrivateJson({ filePath: config.imageAuthorizationFile, expectedSha256: config.imageAuthorizationSha256, label: "Image authorization evidence" });
   const rootDropEvidence = readBoundStageBPrivateJson({ filePath: config.rootDropEvidenceFile, expectedSha256: config.rootDropEvidenceSha256, label: "Root-drop evidence" });
+  const rootDropContinuity = Object.freeze({
+    rotationId,
+    imageAuthorizationSha256: authenticatedImageAuthorization.authorizationSha256,
+    successorRecoveryAuthorizationSha256: config.rebaselineRuntime?.runtimeVariant === "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME" ? config.rebaselineRuntime.authorization?.authorizationSha256 || null : null,
+    administratorEvidenceSha256: config.iamEvidenceFileSha256,
+    administratorSignatureSha256: config.iamEvidenceSignatureFileSha256,
+  });
   const stageARecoveryEvidence = config.stageARecoveryEvidenceFile ? readBoundStageBPrivateJson({ filePath: config.stageARecoveryEvidenceFile, expectedSha256: config.stageARecoveryEvidenceSha256, label: "Stage-A recovery evidence" }) : null;
   const onboardingPaths = assertOnboardingPaths(readBoundStageBPrivateJson({ filePath: config.onboardingPathsFile, expectedSha256: config.onboardingPathsSha256, label: "Onboarding path manifest" }));
   if (canonicalJson(onboardingPaths) !== canonicalJson(config.onboardingPaths)) throw new Error("Onboarding path manifest diverges from the authenticated runtime config.");
@@ -340,6 +348,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     imageAuthorizationValidation: { verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => commandRun(args) }) },
     checkerTrustEvidence: readCheckerTrustEvidence(),
     checkerChain,
+    rootDropContinuity,
     identities: {
       establish: async () => {
         const releaseDeployer = await establishReleaseDeployerIdentity({ adapter: releaseSts });

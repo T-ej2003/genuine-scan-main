@@ -126,6 +126,13 @@ export function fixtureInput(overrides = {}) {
   const mutations = [];
   let registeredOverlapDefinition;
   const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha });
+  const rootDropContinuity = {
+    rotationId,
+    imageAuthorizationSha256: imageAuthorizationFixture.authorization.authorizationSha256,
+    successorRecoveryAuthorizationSha256: null,
+    administratorEvidenceSha256: "a".repeat(64),
+    administratorSignatureSha256: "b".repeat(64),
+  };
   const strictProbes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
   const stageA = {
     endpointSecurityGroupId: "sg-endpoint",
@@ -151,7 +158,8 @@ export function fixtureInput(overrides = {}) {
       verifySourceTrust: async () => ({ exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }),
       verifyComplete: async () => ({ valid: true, sourceTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }, sourcePermission: { exact: true, action: "sts:AssumeRole", resource: CHECKER_TARGET_ROLE_ARN }, targetTrust: { exact: true, secondHopMfaRequired: false, principal: CHECKER_SOURCE_ROLE_ARN, roleArn: CHECKER_TARGET_ROLE_ARN }, checkerUserExact: true, firstHopMfaRequired: true, roleAAssumeTargetPermissionExact: true, roleBTrustExactRoleA: true, roleBSecondHopMfaRequired: false }),
     },
-    identities: { rootDrop: buildRootDropEvidence({ payload: buildRootDropPayload({ sourceSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "rehearsal-root-with-enough-entropy" }), signatureBase64: "c2lnbmF0dXJl" }), releaseDeployer: { ...validEvidence("sts:release"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/rehearsal" }, verifier: { ...validEvidence("sts:verifier"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecs-exec-verifier/rehearsal" } },
+    rootDropContinuity,
+    identities: { rootDrop: buildRootDropEvidence({ payload: buildRootDropPayload({ sourceSha, callerArn: "arn:aws:iam::368992683803:root", now: new Date().toISOString(), nonce: "rehearsal-root-with-enough-entropy", ...rootDropContinuity }), signatureBase64: "c2lnbmF0dXJl" }), releaseDeployer: { ...validEvidence("sts:release"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/rehearsal" }, verifier: { ...validEvidence("sts:verifier"), callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecs-exec-verifier/rehearsal" } },
     verifyRootDropSignature: () => true,
     stageA,
     artifactSigning: artifactFixture(),

@@ -456,6 +456,107 @@ function assertRebaselineWritePayloadIdentities(value, label = "writePayloadIden
 
 export function safeWriteDescriptors(writePlan) { if (!Array.isArray(writePlan) || writePlan.length !== 7) fail("Rebaseline write plan is incomplete."); const payloadIdentities = rebaselineWritePayloadIdentities(writePlan); return Object.freeze(writePlan.map(({ slot, secretArn, clientRequestToken, payloadSha256, materialType }) => ({ slot, secretArn, clientRequestToken, payloadSha256, materialType, payloadIdentity: payloadIdentities[slot] }))); }
 
+export const DURABLE_REBASELINE_EVIDENCE_KIND = "PRODUCTION_DUAL_SLOT_REBASELINE_DURABLE_EVIDENCE";
+export const DURABLE_REBASELINE_EVIDENCE_ARTIFACT = "production-dual-slot-rebaseline-durable-evidence";
+const DURABLE_REBASELINE_EVIDENCE_FILES = Object.freeze(["manifest.json", "preparation.json", "completion.json", "rotation-bindings.json"]);
+
+function assertNonSecretDurableEvidence(value, label) {
+  if (/(generatedMaterial|SecretString|BEGIN [A-Z ]+PRIVATE KEY|AccessKeyId|SecretAccessKey|SessionToken|DATABASE_URL|"value"\s*:)/i.test(JSON.stringify(value))) fail(`${label} contains prohibited secret material.`);
+  return value;
+}
+
+function parseDurableEvidenceBytes(bytes, label, { allowSecretMaterial = false } = {}) {
+  if (!Buffer.isBuffer(bytes) || bytes.length === 0) fail(`${label} bytes are required.`);
+  let value;
+  try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { fail(`${label} bytes are malformed.`); }
+  if (!allowSecretMaterial) assertNonSecretDurableEvidence(value, label);
+  return Object.freeze({ value, fileSha256: sha256(bytes), bytes });
+}
+
+function assertMaterialJournalMatchesPreparation(journal, preparation) {
+  const payloads = buildRebaselinePayloads({ sourceSha: preparation.sourceSha, rotationId: preparation.rotationId, generatedMaterial: journal.generatedMaterial, legacyBaseline: preparation.legacyBaseline });
+  const plan = buildRebaselineWritePlan({ sourceSha: preparation.sourceSha, rotationId: preparation.rotationId, resources: preparation.resources, baselineIdentitySha256: preparation.baselineIdentity.identitySha256, payloads });
+  if (canonical(safeWriteDescriptors(plan)) !== canonical(preparation.writePlan)) fail("Rebaseline material journal does not produce the authenticated prepared writes.");
+  return journal;
+}
+
+function assertDurableAuthorizationCoordinates(authorization, workflowRunId, workflowRunAttempt) {
+  const approval = authorization?.protectedEnvironmentApprovalEvidence;
+  if (String(approval?.workflowRunId || "") !== String(workflowRunId) || String(approval?.workflowRunAttempt || "") !== String(workflowRunAttempt)) fail("Durable rebaseline authorization workflow coordinates do not match the authenticated approval.");
+}
+
+export function buildProductionDualSlotRebaselineDurableEvidence({ publisherSourceSha, authorizationWorkflowRunId, authorizationWorkflowRunAttempt, preparationBytes, materialJournalBytes, completionBytes, bindingsBytes, authorization, recoveryEnvelope, imageAuthorization, proveDescendant } = {}) {
+  assertSha40(publisherSourceSha, "Durable rebaseline evidence publisher sourceSha");
+  if (!/^[1-9][0-9]*$/.test(String(authorizationWorkflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(authorizationWorkflowRunAttempt || ""))) fail("Durable rebaseline authorization workflow coordinates are invalid.");
+  assertDurableAuthorizationCoordinates(authorization, authorizationWorkflowRunId, authorizationWorkflowRunAttempt);
+  const preparation = parseDurableEvidenceBytes(preparationBytes, "Durable rebaseline preparation");
+  const material = parseDurableEvidenceBytes(materialJournalBytes, "Durable rebaseline material journal", { allowSecretMaterial: true });
+  const completion = parseDurableEvidenceBytes(completionBytes, "Durable rebaseline completion");
+  const bindings = parseDurableEvidenceBytes(bindingsBytes, "Durable rebaseline rotation bindings");
+  const recovery = authorization?.kind === PARTIAL_REBASELINE_RECOVERY_AUTHORIZATION_KIND;
+  if (recovery) {
+    const envelope = assertAuthenticatedPartialRebaselineRecovery(recoveryEnvelope);
+    assertRebaselinePreparation(preparation.value, { sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId });
+    const journal = assertMaterialJournalMatchesPreparation(assertRebaselineMaterialJournal(material.value, { sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, baselineIdentitySha256: preparation.value.baselineIdentity.identitySha256 }), preparation.value);
+    assertPartialRebaselineRecoveryAuthorization(authorization, { sourceSha: publisherSourceSha, recoveryEnvelope: envelope, imageAuthorization, proveDescendant });
+    assertPartialRebaselineRecoveryCompletion(completion.value, { sourceSha: publisherSourceSha, recoveryEnvelope: envelope, recoveryAuthorization: authorization, originalPreparation: preparation.value });
+    assertPartialRebaselineRecoveryRotationBindings(bindings.value, { authorization, recoveryEnvelope: envelope, originalPreparation: preparation.value });
+    const manifestBody = {
+      schemaVersion: 1, kind: DURABLE_REBASELINE_EVIDENCE_KIND, mode: "SUCCESSOR_RECOVERY", publisherSourceSha, executionSourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId,
+      preparationSha256: preparation.value.preparationSha256, preparationFileSha256: preparation.fileSha256,
+      materialJournalSha256: journal.journalSha256, materialJournalFileSha256: material.fileSha256,
+      authorizationSha256: authorization.authorizationSha256, authorizationWorkflowRunId: String(authorizationWorkflowRunId), authorizationWorkflowRunAttempt: String(authorizationWorkflowRunAttempt),
+      completionSha256: completion.value.baselineBindingSha256, completionFileSha256: completion.fileSha256,
+      rotationBindingsSha256: bindings.fileSha256, liveReferenceAuditSha256: completion.value.liveReferenceAuditSha256,
+      recoveryEnvelopeSha256: envelope.recoverySha256, successorRecoveryAuthorizationSha256: authorization.authorizationSha256, imageAuthorizationSha256: authorization.currentImageAuthorizationSha256,
+    };
+    return Object.freeze({ manifest: Object.freeze({ ...manifestBody, evidenceSha256: canonicalSha256(manifestBody) }), preparation: preparation.value, completion: completion.value, bindings: bindings.value });
+  }
+  assertRebaselinePreparation(preparation.value, { sourceSha: publisherSourceSha, rotationId: preparation.value.rotationId });
+  const journal = assertMaterialJournalMatchesPreparation(assertRebaselineMaterialJournal(material.value, { sourceSha: publisherSourceSha, rotationId: preparation.value.rotationId, baselineIdentitySha256: preparation.value.baselineIdentity.identitySha256 }), preparation.value);
+  assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: publisherSourceSha, rotationId: preparation.value.rotationId, resources: preparation.value.resources });
+  assertBaselineCompletion(completion.value, { sourceSha: publisherSourceSha, rotationId: preparation.value.rotationId, resources: preparation.value.resources, authorizationBinding: authorization.authorizationSha256, writeIdentities: authorization.writeIdentities, writePayloadIdentities: authorization.writePayloadIdentities, liveReferenceAuditSha256: authorization.liveReferenceAuditSha256 });
+  assertRebaselineRotationBindings(bindings.value, { authorization });
+  const manifestBody = {
+    schemaVersion: 1, kind: DURABLE_REBASELINE_EVIDENCE_KIND, mode: "INITIAL", publisherSourceSha, executionSourceSha: publisherSourceSha, rotationId: preparation.value.rotationId,
+    preparationSha256: preparation.value.preparationSha256, preparationFileSha256: preparation.fileSha256,
+    materialJournalSha256: journal.journalSha256, materialJournalFileSha256: material.fileSha256,
+    authorizationSha256: authorization.authorizationSha256, authorizationWorkflowRunId: String(authorizationWorkflowRunId), authorizationWorkflowRunAttempt: String(authorizationWorkflowRunAttempt),
+    completionSha256: completion.value.baselineBindingSha256, completionFileSha256: completion.fileSha256,
+    rotationBindingsSha256: bindings.fileSha256, liveReferenceAuditSha256: completion.value.liveReferenceAuditSha256,
+    recoveryEnvelopeSha256: null, successorRecoveryAuthorizationSha256: null, imageAuthorizationSha256: null,
+  };
+  return Object.freeze({ manifest: Object.freeze({ ...manifestBody, evidenceSha256: canonicalSha256(manifestBody) }), preparation: preparation.value, completion: completion.value, bindings: bindings.value });
+}
+
+export function assertProductionDualSlotRebaselineDurableEvidence(value, { publisherSourceSha, authorization, recoveryEnvelope, imageAuthorization, proveDescendant } = {}) {
+  if (!value || typeof value !== "object" || !value.manifest || !value.preparation || !value.completion || !value.bindings) fail("Durable rebaseline evidence bundle is incomplete.");
+  const manifest = value.manifest;
+  const fields = ["schemaVersion", "kind", "mode", "publisherSourceSha", "executionSourceSha", "rotationId", "preparationSha256", "preparationFileSha256", "materialJournalSha256", "materialJournalFileSha256", "authorizationSha256", "authorizationWorkflowRunId", "authorizationWorkflowRunAttempt", "completionSha256", "completionFileSha256", "rotationBindingsSha256", "liveReferenceAuditSha256", "recoveryEnvelopeSha256", "successorRecoveryAuthorizationSha256", "imageAuthorizationSha256", "evidenceSha256"];
+  exactKeys(manifest, fields, "Durable rebaseline evidence manifest");
+  if (manifest.schemaVersion !== 1 || manifest.kind !== DURABLE_REBASELINE_EVIDENCE_KIND || manifest.publisherSourceSha !== publisherSourceSha || !["INITIAL", "SUCCESSOR_RECOVERY"].includes(manifest.mode) || !/^[1-9][0-9]*$/.test(manifest.authorizationWorkflowRunId) || !/^[1-9][0-9]*$/.test(manifest.authorizationWorkflowRunAttempt)) fail("Durable rebaseline evidence manifest identity is invalid.");
+  for (const field of ["preparationSha256", "preparationFileSha256", "materialJournalSha256", "materialJournalFileSha256", "authorizationSha256", "completionSha256", "completionFileSha256", "rotationBindingsSha256", "liveReferenceAuditSha256", "evidenceSha256"]) assertSha256(manifest[field], `Durable rebaseline ${field}`);
+  const { evidenceSha256, ...body } = manifest;
+  if (canonicalSha256(body) !== evidenceSha256) fail("Durable rebaseline evidence manifest hash is invalid.");
+  assertDurableAuthorizationCoordinates(authorization, manifest.authorizationWorkflowRunId, manifest.authorizationWorkflowRunAttempt);
+  assertNonSecretDurableEvidence(value, "Durable rebaseline evidence bundle");
+  if (manifest.mode === "SUCCESSOR_RECOVERY") {
+    const envelope = assertAuthenticatedPartialRebaselineRecovery(recoveryEnvelope);
+    assertPartialRebaselineRecoveryAuthorization(authorization, { sourceSha: publisherSourceSha, recoveryEnvelope: envelope, imageAuthorization, proveDescendant });
+    assertRebaselinePreparation(value.preparation, { sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId });
+    assertPartialRebaselineRecoveryCompletion(value.completion, { sourceSha: publisherSourceSha, recoveryEnvelope: envelope, recoveryAuthorization: authorization, originalPreparation: value.preparation });
+    assertPartialRebaselineRecoveryRotationBindings(value.bindings, { authorization, recoveryEnvelope: envelope, originalPreparation: value.preparation });
+    if (manifest.executionSourceSha !== envelope.originalSourceSha || manifest.rotationId !== envelope.rotationId || manifest.preparationSha256 !== value.preparation.preparationSha256 || manifest.materialJournalSha256 !== envelope.originalMaterialJournalSha256 || manifest.authorizationSha256 !== authorization.authorizationSha256 || manifest.completionSha256 !== value.completion.baselineBindingSha256 || manifest.liveReferenceAuditSha256 !== authorization.liveReferenceAuditSha256 || manifest.recoveryEnvelopeSha256 !== envelope.recoverySha256 || manifest.successorRecoveryAuthorizationSha256 !== authorization.authorizationSha256 || manifest.imageAuthorizationSha256 !== authorization.currentImageAuthorizationSha256) fail("Durable successor-recovery evidence is not bound to the exact authenticated transition.");
+  } else {
+    assertRebaselinePreparation(value.preparation, { sourceSha: publisherSourceSha, rotationId: manifest.rotationId });
+    assertProductionDualSlotRebaselineAuthorization(authorization, { sourceSha: publisherSourceSha, rotationId: manifest.rotationId, resources: value.preparation.resources });
+    assertBaselineCompletion(value.completion, { sourceSha: publisherSourceSha, rotationId: manifest.rotationId, resources: value.preparation.resources, authorizationBinding: authorization.authorizationSha256, writeIdentities: authorization.writeIdentities, writePayloadIdentities: authorization.writePayloadIdentities, liveReferenceAuditSha256: authorization.liveReferenceAuditSha256 });
+    assertRebaselineRotationBindings(value.bindings, { authorization });
+    if (manifest.executionSourceSha !== publisherSourceSha || manifest.preparationSha256 !== value.preparation.preparationSha256 || manifest.authorizationSha256 !== authorization.authorizationSha256 || manifest.completionSha256 !== value.completion.baselineBindingSha256 || manifest.liveReferenceAuditSha256 !== authorization.liveReferenceAuditSha256 || manifest.recoveryEnvelopeSha256 !== null || manifest.successorRecoveryAuthorizationSha256 !== null || manifest.imageAuthorizationSha256 !== null) fail("Durable initial rebaseline evidence is not bound to the exact authenticated transition.");
+  }
+  return Object.freeze(value);
+}
+
 function assertRecoveryWritePlan(value, resources) {
   if (!Array.isArray(value) || value.length !== REBASELINE_SLOT_ORDER.length || new Set(value.map(({ slot }) => slot)).size !== REBASELINE_SLOT_ORDER.length) fail("Partial rebaseline recovery write plan is incomplete.");
   const bySlot = Object.fromEntries(value.map((entry) => [entry.slot, entry]));
@@ -1027,5 +1128,33 @@ export function resolvePartialRebaselineRecoveryAuthorizationArtifact({ workflow
     const evidence = authorization.protectedEnvironmentApprovalEvidence;
     if (evidence.workflowRunId !== String(workflow.id) || evidence.workflowRunAttempt !== String(workflow.run_attempt) || evidence.executionActor?.toLowerCase() !== String(workflow.actor?.login || "").toLowerCase()) fail("Partial recovery authorization artifact is not bound to the authenticated workflow execution.");
     return Object.freeze({ workflow, artifact: matches[0], authorization, authorizationArtifactDigest: matches[0].digest });
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+}
+
+export function resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ workflowRunId, workflowRunAttempt, publisherSourceSha, authorization, recoveryEnvelope, imageAuthorization, proveDescendant, run = (command, args, options = {}) => execFileSync(command, args, { encoding: options.encoding === null ? null : "utf8", maxBuffer: options.maxBuffer }) } = {}) {
+  if (!/^[1-9][0-9]*$/.test(String(workflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(workflowRunAttempt || "")) || !SHA40.test(publisherSourceSha || "")) fail("Durable rebaseline evidence workflow coordinates are invalid.");
+  const workflow = JSON.parse(run("gh", ["api", `repos/${PRODUCTION_DUAL_SLOT_REBASELINE.repository}/actions/runs/${workflowRunId}`]));
+  if (String(workflow.id) !== String(workflowRunId) || workflow.repository?.full_name !== PRODUCTION_DUAL_SLOT_REBASELINE.repository || workflow.head_repository?.full_name !== PRODUCTION_DUAL_SLOT_REBASELINE.repository || workflow.path !== ".github/workflows/persist-production-dual-slot-rebaseline-evidence.yml" || workflow.event !== "workflow_dispatch" || workflow.head_sha !== publisherSourceSha || workflow.status !== "completed" || workflow.conclusion !== "success" || String(workflow.run_attempt) !== String(workflowRunAttempt)) fail("Durable rebaseline evidence workflow provenance is not authentic.");
+  const pages = JSON.parse(run("gh", ["api", `repos/${PRODUCTION_DUAL_SLOT_REBASELINE.repository}/actions/runs/${workflowRunId}/artifacts`, "--paginate", "--slurp"]));
+  const artifacts = Array.isArray(pages) ? pages.flatMap((page) => page?.artifacts || []) : [];
+  const matches = artifacts.filter((artifact) => artifact.name === DURABLE_REBASELINE_EVIDENCE_ARTIFACT && artifact.expired === false && String(artifact.workflow_run?.id) === String(workflowRunId) && artifact.workflow_run?.head_sha === publisherSourceSha && artifact.workflow_run?.repository_id === workflow.repository.id && /^sha256:[a-f0-9]{64}$/.test(artifact.digest || ""));
+  if (matches.length !== 1 || !Number.isSafeInteger(matches[0]?.id) || matches[0].id < 1) fail("Durable rebaseline evidence artifact identity is not exact.");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-durable-evidence-")); const archive = path.join(directory, "evidence.zip");
+  try {
+    const archiveBytes = run("gh", ["api", `repos/${PRODUCTION_DUAL_SLOT_REBASELINE.repository}/actions/artifacts/${matches[0].id}/zip`], { encoding: null, maxBuffer: 64 * 1024 * 1024 });
+    if (!Buffer.isBuffer(archiveBytes) || archiveBytes.length === 0 || `sha256:${sha256(archiveBytes)}` !== matches[0].digest) fail("Durable rebaseline evidence archive bytes are not authenticated.");
+    fs.writeFileSync(archive, archiveBytes, { mode: 0o600, flag: "wx" });
+    const entries = String(run("unzip", ["-Z1", archive])).trim().split("\n").filter(Boolean);
+    if (canonical(entries) !== canonical(DURABLE_REBASELINE_EVIDENCE_FILES)) fail("Durable rebaseline evidence archive contents are not exact.");
+    for (const entry of DURABLE_REBASELINE_EVIDENCE_FILES) {
+      const listing = String(run("unzip", ["-Z", "-l", archive])).split("\n").filter((line) => line.trim().endsWith(` ${entry}`));
+      if (listing.length !== 1 || !listing[0].trim().startsWith("-")) fail("Durable rebaseline evidence archive contains a non-regular file.");
+    }
+    const read = (entry) => Buffer.from(run("unzip", ["-p", archive, entry]));
+    const manifestBytes = read("manifest.json"); const preparationBytes = read("preparation.json"); const completionBytes = read("completion.json"); const bindingsBytes = read("rotation-bindings.json");
+    const value = { manifest: JSON.parse(manifestBytes), preparation: JSON.parse(preparationBytes), completion: JSON.parse(completionBytes), bindings: JSON.parse(bindingsBytes) };
+    if (value.manifest.preparationFileSha256 !== sha256(preparationBytes) || value.manifest.completionFileSha256 !== sha256(completionBytes) || value.manifest.rotationBindingsSha256 !== sha256(bindingsBytes)) fail("Durable rebaseline evidence file bytes do not match the manifest.");
+    assertProductionDualSlotRebaselineDurableEvidence(value, { publisherSourceSha, authorization, recoveryEnvelope, imageAuthorization, proveDescendant });
+    return Object.freeze({ workflow, artifact: matches[0], evidence: Object.freeze(value), artifactDigest: matches[0].digest });
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
