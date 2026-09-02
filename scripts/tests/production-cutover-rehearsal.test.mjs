@@ -213,7 +213,7 @@ test("Stage A accepts only the reviewed indexed for_each instance", () => {
     { ...stageAPlan({ actions: ["no-op"], checkerActions: ["no-op"] }), resource_drift: [{ address: "aws_security_group.executor_endpoints", change: { actions: ["update"] } }] },
   ]) assert.throws(() => assertStageAPlan(plan, inputs));
   assert.throws(() => assertStageAPlan({ ...stageAPlan(), resource_drift: {} }, inputs));
-  assert.doesNotThrow(() => assertStageAPlan({ ...stageAPlan(), resource_drift: [{ address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", change: { actions: ["update"], before: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-18T22:41:17Z", storage_encrypted: true }, after: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-19T20:01:16Z", storage_encrypted: true }, replace_paths: [] } }] }, inputs));
+  assert.doesNotThrow(() => assertStageAPlan({ ...stageAPlan(), resource_drift: [{ address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-18T22:41:17Z", storage_encrypted: true }, after: { identifier: "mscqr-production-rls-green", latest_restorable_time: "2026-08-19T20:01:16Z", storage_encrypted: true }, replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } }] }, inputs));
 });
 
 test("Stage A admits only the exact checker role-chain policy semantics", () => {

@@ -23,18 +23,24 @@ export function assertStageARdsLatestRestorableTimeRefresh(before, after) {
   return true;
 }
 
+const emptyObject = (value) => value === undefined || value === null || value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
+
+export function assertStageARdsLatestRestorableTimeDrift(entry) {
+  const change = entry?.change;
+  if (entry?.address !== "aws_db_instance.green" || entry.mode !== "managed" || entry.type !== "aws_db_instance" || entry.name !== "green"
+    || entry.provider_name !== "registry.terraform.io/hashicorp/aws" || !change || !isDeepStrictEqual(change.actions, ["update"])
+    || !Array.isArray(change.replace_paths) || change.replace_paths.length
+    || !emptyObject(change.before_unknown) || !emptyObject(change.after_unknown)
+    || !emptyObject(change.before_sensitive) || !emptyObject(change.after_sensitive)) throw new Error("Stage A plan contains uncontracted RDS drift.");
+  return assertStageARdsLatestRestorableTimeRefresh(change.before, change.after);
+}
+
 export function assertStageAResourceDrift(plan) {
   if (plan?.resource_drift === undefined) return true;
   if (!Array.isArray(plan.resource_drift) || plan.resource_drift.length > 1) throw new Error("Stage A plan contains uncontracted provider drift.");
   if (plan.resource_drift.length === 0) return true;
   const [entry] = plan.resource_drift;
-  const change = entry?.change;
-  const emptyObject = (value) => value === undefined || value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
-  if (entry?.address !== "aws_db_instance.green" || entry.mode !== "managed" || entry.type !== "aws_db_instance" || entry.name !== "green"
-    || !change || !isDeepStrictEqual(change.actions, ["update"])
-    || change.replace_paths !== undefined && (!Array.isArray(change.replace_paths) || change.replace_paths.length)
-    || !emptyObject(change.before_unknown) || !emptyObject(change.after_unknown)) throw new Error("Stage A plan contains uncontracted provider drift.");
-  return assertStageARdsLatestRestorableTimeRefresh(change.before, change.after);
+  return assertStageARdsLatestRestorableTimeDrift(entry);
 }
 export const STAGE_A_CHECKER_POLICY = Object.freeze({
   address: "aws_iam_role_policy.checker_assume_target",
@@ -241,7 +247,6 @@ function assertStageAProductionArtifactsPolicyResource(value, label, expectedPol
 export function assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { sourceSha, recoveryCompletion, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial, verifyRecoveryCompletion } = {}) {
   assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, stateLineage, preStateSerial, verifyRecoveryCompletion });
   if (!plan || plan.complete !== true || plan.errored !== false || plan.applyable !== true || plan.resource_changes !== undefined && (!Array.isArray(plan.resource_changes) || plan.resource_changes.some(({ change } = {}) => !exactActions(change?.actions, ["no-op"]) && !exactActions(change?.actions, ["read"]))) || !Array.isArray(plan.resource_drift) || plan.resource_drift.length < 1 || plan.resource_drift.length > 2) throw new Error("Stage A production-artifacts refresh-only plan is not exact.");
-  const emptyObject = (value) => value === undefined || value === null || value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
   const bucketDrift = plan.resource_drift.filter(({ address }) => address === STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address);
   const rdsDrift = plan.resource_drift.filter(({ address }) => address === "aws_db_instance.green");
   if (bucketDrift.length !== 1 || rdsDrift.length > 1 || bucketDrift.length + rdsDrift.length !== plan.resource_drift.length) throw new Error("Stage A production-artifacts refresh-only plan contains uncontracted drift.");
@@ -249,7 +254,7 @@ export function assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { s
   if (entry.mode !== "managed" || entry.type !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type || entry.name !== "production_artifacts" || entry.provider_name !== "registry.terraform.io/hashicorp/aws" || !change || !exactActions(change.actions, ["update"]) || change.replace_paths?.length || !emptyObject(change.before_unknown) || !emptyObject(change.after_unknown) || !emptyObject(change.before_sensitive) || !emptyObject(change.after_sensitive)) throw new Error("Stage A production-artifacts refresh-only bucket drift is not exact.");
   assertStageAProductionArtifactsPolicyResource(change.before, "predecessor", buildStageAProductionArtifactsBucketPolicyPredecessor());
   assertStageAProductionArtifactsPolicyResource(change.after, "desired", buildStageAProductionArtifactsBucketPolicy());
-  if (rdsDrift.length) assertStageARdsLatestRestorableTimeRefresh(rdsDrift[0].change?.before, rdsDrift[0].change?.after);
+  if (rdsDrift.length) assertStageARdsLatestRestorableTimeDrift(rdsDrift[0]);
   return Object.freeze({ valid: true, stateReconciliationRequired: true, address: entry.address, actions: change.actions, resourceDriftCount: plan.resource_drift.length, rdsLatestRestorableTimeRefreshed: rdsDrift.length === 1 });
 }
 export const STAGE_A_ROOT_DROP_RELEASE_ROLE_ARN = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
@@ -432,6 +437,9 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
   const beforeApply = await adapter.readStateIdentity();
   if (beforeApply?.lineage !== before.lineage || beforeApply.serial !== before.serial) throw new Error("Stage A reconciliation state changed after the refresh-only plan was saved.");
   assertStageAProductionArtifactsReconciliationAuthorization(reconciliationAuthorization, { sourceSha, recoveryCompletion, savedPlanSha256: saved.savedPlanSha256, preStateSerial: before.serial, verifyRecoveryCompletion, verifyReconciliationAuthorization });
+  const preApplyLivePolicy = await adapter.readProductionArtifactsPolicy();
+  const preApplyLivePolicySha256 = stablePolicySha256(preApplyLivePolicy);
+  if (preApplyLivePolicySha256 !== recoveryCompletion.livePolicySha256 || preApplyLivePolicySha256 !== recoveryCompletion.desiredPolicySha256 || stablePolicyJson(preApplyLivePolicy) !== stablePolicyJson(buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A production-artifacts live policy changed before refresh-only apply.");
   await recordConsumption({ authorizationSha256: reconciliationAuthorization.authorizationSha256, completionSha256: recoveryCompletion.completionSha256, savedPlanSha256: saved.savedPlanSha256 });
   await adapter.applySavedRefreshOnlyPlan(saved);
   const after = await adapter.readStateIdentity();

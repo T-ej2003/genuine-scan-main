@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   assertStageAPlan,
   assertStageAProductionArtifactsRecoveryRefreshOnlyPlan,
+  assertStageARdsLatestRestorableTimeDrift,
   assertStageAResourceDrift,
   buildStageAProductionArtifactsBucketPolicy,
   buildStageAProductionArtifactsBucketPolicyPredecessor,
@@ -48,22 +49,80 @@ test("recovery refresh validator is closed-world for policy and resource drift",
 });
 
 test("RDS timestamp drift remains the only additional refresh allowance", () => {
-  const rds = { address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", change: { actions: ["update"], before: { identifier: "green", latest_restorable_time: "2026-08-19T20:01:16Z" }, after: { identifier: "green", latest_restorable_time: "2026-08-20T20:01:16Z" }, replace_paths: [], before_unknown: {}, after_unknown: {} } };
+  const rds = { address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: { identifier: "green", latest_restorable_time: "2026-08-19T20:01:16Z" }, after: { identifier: "green", latest_restorable_time: "2026-08-20T20:01:16Z" }, replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } };
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan({ drift: [rds] }), { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }));
   assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan({ drift: [{ ...rds, address: "aws_vpc_security_group_ingress_rule.other" }] }), { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }), /uncontracted/);
+  const invalid = [
+    ["mode", (value) => { value.mode = "data"; }], ["type", (value) => { value.type = "aws_db_instance_replica"; }], ["name", (value) => { value.name = "other"; }],
+    ["provider", (value) => { value.provider_name = "registry.terraform.io/hashicorp/other"; }], ["action", (value) => { value.change.actions = ["read"]; }],
+    ["replacement", (value) => { value.change.replace_paths = ["latest_restorable_time"]; }], ["before unknown", (value) => { value.change.before_unknown = { id: true }; }],
+    ["after unknown", (value) => { value.change.after_unknown = { id: true }; }], ["before sensitive", (value) => { value.change.before_sensitive = { id: true }; }],
+    ["after sensitive", (value) => { value.change.after_sensitive = { id: true }; }], ["extra attribute", (value) => { value.change.after.extra = true; }],
+    ["backward timestamp", (value) => { value.change.after.latest_restorable_time = "2026-08-18T20:01:16Z"; }], ["malformed timestamp", (value) => { value.change.after.latest_restorable_time = "invalid"; }],
+  ];
+  for (const [label, mutate] of invalid) { const candidate = structuredClone(rds); mutate(candidate); assert.throws(() => assertStageARdsLatestRestorableTimeDrift(candidate), /RDS|restorable|uncontracted/i, label); }
+  assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan({ drift: [rds, structuredClone(rds)] }), { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }), /uncontracted|exact/i);
 });
 
 test("one exact refresh-only apply persists state and leaves AWS policy unchanged", async () => {
-  let state = { lineage, serial: 35 }; let policy = predecessor; const calls = [];
+  let state = { lineage, serial: 35 }; let policy = desired; const calls = [];
   const adapter = {
     readStateIdentity: async () => ({ ...state }),
     createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { ...state }, plan: refreshPlan() }),
-    applySavedRefreshOnlyPlan: async () => { calls.push("apply-refresh-only"); state = { ...state, serial: 36 }; policy = desired; },
+    applySavedRefreshOnlyPlan: async () => { calls.push("apply-refresh-only"); state = { ...state, serial: 36 }; },
     readProductionArtifactsPolicy: async () => policy,
   };
   const result = await runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, recordConsumption: (value) => calls.push(value) });
   assert.equal(result.applied, true); assert.equal(result.awsResourceMutations, 0); assert.equal(result.terraformStateMutations, 1); assert.equal(state.serial, 36); assert.equal(calls[1], "apply-refresh-only");
   assert.doesNotThrow(() => assertStageAResourceDrift({ resource_drift: [] }));
+});
+
+test("live policy is a final CAS immediately before refresh-only apply", async () => {
+  let state = { lineage, serial: 35 }; let policy = desired; let applies = 0;
+  const adapter = {
+    readStateIdentity: async () => ({ ...state }),
+    createSavedRefreshOnlyPlan: async () => { policy = buildStageAProductionArtifactsBucketPolicyPredecessor(); return { sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { ...state }, plan: refreshPlan() }; },
+    applySavedRefreshOnlyPlan: async () => { applies += 1; state = { ...state, serial: 36 }; },
+    readProductionArtifactsPolicy: async () => policy,
+  };
+  await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, recordConsumption: () => { throw new Error("consumption must be unreachable"); } }), /live policy changed/);
+  assert.equal(applies, 0);
+});
+
+test("live policy identity and final state CAS remain fail-closed before apply", async () => {
+  const cases = [
+    ["third policy", { policy: { Version: "2012-10-17", Statement: [] } }],
+    ["changed desired statement", { policy: { ...desired, Statement: desired.Statement.map((statement, index) => index === desired.Statement.length - 1 ? { ...statement, Effect: "Allow" } : statement) } }],
+    ["extra desired statement", { policy: { ...desired, Statement: [...desired.Statement, { Sid: "Unreviewed", Effect: "Allow", Action: "s3:*", Resource: "*" }] } }],
+    ["state serial", { beforeApply: { lineage, serial: 36 } }],
+    ["state lineage", { beforeApply: { lineage: "other", serial: 35 } }],
+    ["saved plan substitution", { savedPlanSha256: "c".repeat(64) }],
+  ];
+  for (const [label, overrides] of cases) {
+    let state = { lineage, serial: 35 }; let reads = 0; let applies = 0;
+    const adapter = {
+      readStateIdentity: async () => overrides.beforeApply && reads++ > 0 ? overrides.beforeApply : ({ ...state }),
+      createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: overrides.savedPlanSha256 || "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35 }, plan: refreshPlan() }),
+      applySavedRefreshOnlyPlan: async () => { applies += 1; },
+      readProductionArtifactsPolicy: async () => overrides.policy || desired,
+    };
+    await assert.rejects(() => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, recordConsumption: () => {}, }), /state changed|serial|live policy|authorization/i, label);
+    assert.equal(applies, 0, label);
+  }
+});
+
+test("exclusive pre-apply consumption prevents a concurrent reconciliation replay", async () => {
+  let state = { lineage, serial: 35 }; let consumed = false; let applies = 0;
+  const adapter = {
+    readStateIdentity: async () => ({ ...state }),
+    createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35 }, plan: refreshPlan() }),
+    applySavedRefreshOnlyPlan: async () => { applies += 1; state = { ...state, serial: 36 }; },
+    readProductionArtifactsPolicy: async () => desired,
+  };
+  const execute = () => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, recordConsumption: async () => { if (consumed) throw new Error("authorization already consumed"); consumed = true; } });
+  const results = await Promise.allSettled([execute(), execute()]);
+  assert.equal(results.filter(({ status }) => status === "fulfilled").length, 1);
+  assert.equal(applies, 1);
 });
 
 test("state lineage and serial are CAS-bound and recovery cannot replay", async () => {

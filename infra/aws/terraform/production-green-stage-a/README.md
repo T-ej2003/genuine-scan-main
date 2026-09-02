@@ -118,14 +118,16 @@ bucket-policy apply and not a root Terraform path. Its completion evidence must
 be independently authenticated and bind the exact protected source, bucket,
 six-statement predecessor, PR435 desired policy, recovery authorization,
 Stage-A state lineage, and pre-reconciliation serial. The live policy readback
-must hash to the exact desired policy before the state transition is consumed.
+must hash to the exact desired policy both as recovery completion evidence and
+immediately before the state transition is reserved/consumed.
 
 The operation captures one exact `terraform plan -refresh-only`, validates that
 the only resource drift is the exact production-artifacts predecessor-to-desired
 policy transition (plus the existing forward RDS computed timestamp refresh),
-revalidates the saved plan and state CAS immediately before applying it, and
-advances Terraform state once. The refresh-only apply changes Terraform state
-only; AWS resource mutation count is zero. The next fresh ordinary Stage-A plan
+revalidates the saved plan, state CAS, and live policy immediately before
+applying it, and advances Terraform state once. The refresh-only apply changes
+Terraform state only; AWS resource mutation count is zero. The next fresh
+ordinary Stage-A plan
 must contain no bucket-policy drift and the bucket-policy action must be
 `NO_OP`. Missing, stale, replayed, or mismatched completion/source/lineage/
 serial evidence fails closed. A separate reconciliation authorization must also
