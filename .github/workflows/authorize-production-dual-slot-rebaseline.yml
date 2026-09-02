@@ -11,6 +11,8 @@ on:
       resources_json: { description: Exact seven secret ARN map as JSON, required: true, type: string }
       write_identities_json: { description: Exact seven deterministic write identities as JSON, required: true, type: string }
       write_payload_identities_json: { description: Exact seven safe payload identities as JSON, required: true, type: string }
+      material_journal_sha256: { description: Canonical private material-journal identity SHA256, required: true, type: string }
+      material_journal_file_sha256: { description: Private material-journal file SHA256, required: true, type: string }
       expected_secret_value_writes: { description: Exact number of secret writes, required: true, type: string }
       expected_secret_deletes: { description: Exact number of secret deletes, required: true, type: string }
       live_reference_audit: { description: Authenticated live reference audit result, required: true, type: string }
@@ -92,6 +94,8 @@ jobs:
           RESOURCES_JSON: ${{ inputs.resources_json }}
           WRITE_IDENTITIES_JSON: ${{ inputs.write_identities_json }}
           WRITE_PAYLOAD_IDENTITIES_JSON: ${{ inputs.write_payload_identities_json }}
+          MATERIAL_JOURNAL_SHA256: ${{ inputs.material_journal_sha256 }}
+          MATERIAL_JOURNAL_FILE_SHA256: ${{ inputs.material_journal_file_sha256 }}
           EXPECTED_SECRET_VALUE_WRITES: ${{ inputs.expected_secret_value_writes }}
           EXPECTED_SECRET_DELETES: ${{ inputs.expected_secret_deletes }}
           LIVE_REFERENCE_AUDIT: ${{ inputs.live_reference_audit }}
@@ -112,6 +116,7 @@ jobs:
             --baseline-identity-sha256 "$BASELINE_IDENTITY_SHA256" \
             --resources-json "$RESOURCES_JSON" --write-identities-json "$WRITE_IDENTITIES_JSON" \
             --write-payload-identities-json "$WRITE_PAYLOAD_IDENTITIES_JSON" \
+            --material-journal-sha256 "$MATERIAL_JOURNAL_SHA256" --material-journal-file-sha256 "$MATERIAL_JOURNAL_FILE_SHA256" \
             --expected-secret-value-writes "$EXPECTED_SECRET_VALUE_WRITES" --expected-secret-deletes "$EXPECTED_SECRET_DELETES" \
             --live-reference-audit "$LIVE_REFERENCE_AUDIT" --live-reference-audit-sha256 "$LIVE_REFERENCE_AUDIT_SHA256" \
             --observed-slot-identities-sha256 "$OBSERVED_SLOT_IDENTITIES_SHA256" --reason "$REASON" \

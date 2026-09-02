@@ -67,6 +67,7 @@ export const STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY = Object.freeze({
 });
 export function buildStageAProductionArtifactsBucketPolicy() {
   const objects = [PRODUCTION_ACTIVATION_LIFECYCLE.claimArn, PRODUCTION_ACTIVATION_LIFECYCLE.completionArn];
+  const immutableEvidence = [PRODUCTION_ACTIVATION_LIFECYCLE.rebaselineEvidenceArn];
   return {
     Version: "2012-10-17",
     Statement: [
@@ -75,6 +76,11 @@ export function buildStageAProductionArtifactsBucketPolicy() {
       { Sid: "DenyNonConditionalActivationLifecycleWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: objects, Condition: { StringNotEquals: { "s3:if-none-match": "*" } } },
       { Sid: "DenyOtherPrincipalsActivationLifecycleWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: objects, Condition: { StringNotEquals: { "aws:PrincipalArn": PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn } } },
       { Sid: "DenyActivationLifecycleDeletion", Effect: "Deny", Principal: "*", Action: ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource: objects },
+      { Sid: "AllowReleaseDeployerReadRebaselineEvidence", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn }, Action: "s3:GetObject", Resource: immutableEvidence },
+      { Sid: "AllowReleaseDeployerConditionalRebaselineEvidenceCreate", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn }, Action: "s3:PutObject", Resource: immutableEvidence, Condition: { StringEquals: { "s3:if-none-match": "*" } } },
+      { Sid: "DenyNonConditionalRebaselineEvidenceWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: immutableEvidence, Condition: { StringNotEquals: { "s3:if-none-match": "*" } } },
+      { Sid: "DenyOtherPrincipalsRebaselineEvidenceWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: immutableEvidence, Condition: { StringNotEquals: { "aws:PrincipalArn": PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn } } },
+      { Sid: "DenyRebaselineEvidenceDeletion", Effect: "Deny", Principal: "*", Action: ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource: immutableEvidence },
       { Sid: "DenyProductionArtifactsBucketPolicyMutation", Effect: "Deny", Principal: "*", Action: ["s3:PutBucketPolicy", "s3:DeleteBucketPolicy"], Resource: `arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}` },
     ],
   };

@@ -81,6 +81,7 @@ for (const file of requiredAutomationCoverage) {
   }
 }
 for (const file of automationFiles) {
+  if (!fs.existsSync(path.join(repoRoot, file))) continue;
   const source = fs.readFileSync(path.join(repoRoot, file), "utf8");
   for (const artifact of rlsIndexArtifacts) {
     const artifactName = path.basename(artifact);

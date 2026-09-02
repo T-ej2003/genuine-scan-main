@@ -18,6 +18,7 @@ locals {
     "${var.receipt_bucket_arn}/production-activation-lifecycle/claim.json",
     "${var.receipt_bucket_arn}/production-activation-lifecycle/completion.json",
   ]
+  rebaseline_evidence_object_arns = ["${var.receipt_bucket_arn}/production-dual-slot-rebaseline-evidence/*"]
 }
 
 resource "aws_s3_bucket_policy" "production_artifacts" {
@@ -28,6 +29,11 @@ resource "aws_s3_bucket_policy" "production_artifacts" {
     { Sid = "DenyNonConditionalActivationLifecycleWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.activation_lifecycle_object_arns, Condition = { StringNotEquals = { "s3:if-none-match" = "*" } } },
     { Sid = "DenyOtherPrincipalsActivationLifecycleWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.activation_lifecycle_object_arns, Condition = { StringNotEquals = { "aws:PrincipalArn" = var.release_role_arn } } },
     { Sid = "DenyActivationLifecycleDeletion", Effect = "Deny", Principal = "*", Action = ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource = local.activation_lifecycle_object_arns },
+    { Sid = "AllowReleaseDeployerReadRebaselineEvidence", Effect = "Allow", Principal = { AWS = var.release_role_arn }, Action = "s3:GetObject", Resource = local.rebaseline_evidence_object_arns },
+    { Sid = "AllowReleaseDeployerConditionalRebaselineEvidenceCreate", Effect = "Allow", Principal = { AWS = var.release_role_arn }, Action = "s3:PutObject", Resource = local.rebaseline_evidence_object_arns, Condition = { StringEquals = { "s3:if-none-match" = "*" } } },
+    { Sid = "DenyNonConditionalRebaselineEvidenceWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.rebaseline_evidence_object_arns, Condition = { StringNotEquals = { "s3:if-none-match" = "*" } } },
+    { Sid = "DenyOtherPrincipalsRebaselineEvidenceWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.rebaseline_evidence_object_arns, Condition = { StringNotEquals = { "aws:PrincipalArn" = var.release_role_arn } } },
+    { Sid = "DenyRebaselineEvidenceDeletion", Effect = "Deny", Principal = "*", Action = ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource = local.rebaseline_evidence_object_arns },
     { Sid = "DenyProductionArtifactsBucketPolicyMutation", Effect = "Deny", Principal = "*", Action = ["s3:PutBucketPolicy", "s3:DeleteBucketPolicy"], Resource = var.receipt_bucket_arn },
   ] })
 }

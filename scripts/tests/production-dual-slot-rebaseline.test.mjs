@@ -22,6 +22,7 @@ import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from 
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
 import { productionSupersessionEvidenceIdentity } from "../security/production-initial-migration-source-advance.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
+import { persistProductionDualSlotRebaselineDurableEvidence } from "../aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs";
 
 const sourceSha = "a".repeat(40);
 // Non-secret, production-safe recovery identity fixture.  The production validator
@@ -49,7 +50,7 @@ const temporary = () => { const directory = mkdtempSync(path.join(os.tmpdir(), "
 
 function environmentEvidence() { return createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository, environment: "production", sourceSha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "operator", observedAt: "2026-08-28T10:01:00.000Z", actualApproval: { state: "approved", environmentId: 17, environmentName: "production", userId: 7, userLogin: "checker" } }); }
 const verifyInitialBindingOrigin = () => { throw new Error("fixture is not an initial binding"); };
-function authorization({ baselineIdentitySha256 = identity.identitySha256, writePayloadIdentities = rebaselineWritePayloadIdentities(writePlan) } = {}) { return createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: environmentEvidence(), sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256, resources, writeIdentities: Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, deterministicWriteIdentity({ sourceSha, rotationId, slot, secretArn: resources[slot], baselineIdentitySha256 })])), writePayloadIdentities, expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "Abandon pre-cutover state and establish a clean baseline", approvedBy: "checker", approverRole: "production-independent-checker", verificationRef: "ticket-rebaseline-1" }); }
+function authorization({ baselineIdentitySha256 = identity.identitySha256, writePayloadIdentities = rebaselineWritePayloadIdentities(writePlan), materialJournalSha256 = "b".repeat(64), materialJournalFileSha256 = "c".repeat(64) } = {}) { return createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: environmentEvidence(), sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256, resources, writeIdentities: Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, deterministicWriteIdentity({ sourceSha, rotationId, slot, secretArn: resources[slot], baselineIdentitySha256 })])), writePayloadIdentities, materialJournalSha256, materialJournalFileSha256, expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "Abandon pre-cutover state and establish a clean baseline", approvedBy: "checker", approverRole: "production-independent-checker", verificationRef: "ticket-rebaseline-1" }); }
 function executionAdapters({ failAt = -1, liveReferenceAudit = audit, postWriteHistoricalReadLag = 0 } = {}) {
   const store = new Map(REBASELINE_SLOT_ORDER.map((slot) => [slot, [{
     versionId: currentVersionIds[slot], stages: ["AWSCURRENT"],
@@ -756,8 +757,10 @@ test("runtime admits only a declared rebaseline producer anchored to independent
 });
 
 test("durable rebaseline evidence persists only non-secret exact transition records", async () => {
-  const outputs = temporary(); const materialFile = path.join(outputs.directory, "material-journal.json"); await execute(executionAdapters(), outputs); const auth = authorization();
+  const outputs = temporary(); const materialFile = path.join(outputs.directory, "material-journal.json");
   writeRebaselineMaterialJournal({ filePath: materialFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: material });
+  const materialBytes = readFileSync(materialFile); const auth = authorization({ materialJournalSha256: JSON.parse(materialBytes).journalSha256, materialJournalFileSha256: sha256(materialBytes) });
+  await execute(executionAdapters(), outputs, { authorization: auth });
   const bundle = buildProductionDualSlotRebaselineDurableEvidence({
     publisherSourceSha: sourceSha, authorizationWorkflowRunId: "123456", authorizationWorkflowRunAttempt: "1",
     preparationBytes: Buffer.from(JSON.stringify(preparation)), materialJournalBytes: readFileSync(materialFile), completionBytes: readFileSync(outputs.completionFile), bindingsBytes: readFileSync(outputs.bindingsFile), authorization: auth,
@@ -769,6 +772,13 @@ test("durable rebaseline evidence persists only non-secret exact transition reco
   assert.equal(Object.hasOwn(bundle, "generatedMaterial"), false);
   assert.doesNotMatch(JSON.stringify(bundle), /generatedMaterial|BEGIN PRIVATE KEY|"value"\s*:/i);
   assert.doesNotThrow(() => assertProductionDualSlotRebaselineDurableEvidence(bundle, { publisherSourceSha: sourceSha, authorization: auth }));
+  const alteredJournal = structuredClone(bundle); alteredJournal.manifest.materialJournalSha256 = "f".repeat(64); const { evidenceSha256: journalEvidenceSha, ...journalBody } = alteredJournal.manifest; alteredJournal.manifest.evidenceSha256 = canonicalSha256(journalBody);
+  assert.throws(() => assertProductionDualSlotRebaselineDurableEvidence(alteredJournal, { publisherSourceSha: sourceSha, authorization: auth }), /material journal|authenticated transition/i);
+  const alteredJournalFile = structuredClone(bundle); alteredJournalFile.manifest.materialJournalFileSha256 = "f".repeat(64); const { evidenceSha256: journalFileEvidenceSha, ...journalFileBody } = alteredJournalFile.manifest; alteredJournalFile.manifest.evidenceSha256 = canonicalSha256(journalFileBody);
+  assert.throws(() => assertProductionDualSlotRebaselineDurableEvidence(alteredJournalFile, { publisherSourceSha: sourceSha, authorization: auth }), /material journal|authenticated transition/i);
+  const alternatePreparationBytes = Buffer.from(`${JSON.stringify(preparation, null, 4)}\n`);
+  const canonicalized = buildProductionDualSlotRebaselineDurableEvidence({ publisherSourceSha: sourceSha, authorizationWorkflowRunId: "123456", authorizationWorkflowRunAttempt: "1", preparationBytes: alternatePreparationBytes, materialJournalBytes: materialBytes, completionBytes: readFileSync(outputs.completionFile), bindingsBytes: readFileSync(outputs.bindingsFile), authorization: auth });
+  assert.equal(canonicalized.manifest.preparationFileSha256, bundle.manifest.preparationFileSha256);
   const substitutedMaterialFile = path.join(outputs.directory, "substituted-material-journal.json");
   writeRebaselineMaterialJournal({ filePath: substitutedMaterialFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: generateRebaselineMaterial() });
   assert.throws(() => buildProductionDualSlotRebaselineDurableEvidence({
@@ -788,36 +798,38 @@ test("durable rebaseline evidence persists only non-secret exact transition reco
   rmSync(outputs.directory, { recursive: true, force: true });
 });
 
-test("durable evidence publisher rejects a submission for a different protected source", () => {
-  const directory = temporary();
-  try {
-    const input = path.join(directory.directory, "submission.json");
-    writeFileSync(input, JSON.stringify({ sourceSha: "f".repeat(40) }), { mode: 0o600 });
-    assert.throws(() => execFileSync(process.execPath, ["scripts/aws/publish-production-dual-slot-rebaseline-durable-evidence.mjs", "--source-sha", sourceSha, "--input", input, "--output-directory", path.join(directory.directory, "artifact")], { cwd: process.cwd(), stdio: "pipe" }), /Durable rebaseline evidence submission is invalid/);
-  } finally {
-    rmSync(directory.directory, { recursive: true, force: true });
-  }
+test("durable publisher conditionally creates and reads back the exact canonical bytes", async () => {
+  const outputs = temporary(); const materialFile = path.join(outputs.directory, "material-journal.json");
+  writeRebaselineMaterialJournal({ filePath: materialFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: material });
+  const materialBytes = readFileSync(materialFile); const auth = authorization({ materialJournalSha256: JSON.parse(materialBytes).journalSha256, materialJournalFileSha256: sha256(materialBytes) });
+  await execute(executionAdapters(), outputs, { authorization: auth });
+  const bundle = { ...buildProductionDualSlotRebaselineDurableEvidence({ publisherSourceSha: sourceSha, authorizationWorkflowRunId: "123456", authorizationWorkflowRunAttempt: "1", preparationBytes: Buffer.from(JSON.stringify(preparation)), materialJournalBytes: materialBytes, completionBytes: readFileSync(outputs.completionFile), bindingsBytes: readFileSync(outputs.bindingsFile), authorization: auth }), authorization: auth };
+  let body; const run = (args) => {
+    if (args[1] === "put-object") { body = readFileSync(args[args.indexOf("--body") + 1]); return "{}"; }
+    if (args[1] === "head-object") return JSON.stringify({ ServerSideEncryption: "AES256", ContentLength: body.length });
+    if (args[1] === "get-object") { writeFileSync(args.at(-1), body); return "{}"; }
+    throw new Error(`unexpected ${args.join(" ")}`);
+  };
+  const persisted = persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run });
+  assert.equal(persisted.status, "CREATED"); assert.match(persisted.key, new RegExp(`^production-dual-slot-rebaseline-evidence/${rotationId}/`));
+  assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run: () => { throw new Error("PreconditionFailed"); } }), /conditional create failed/i);
+  rmSync(outputs.directory, { recursive: true, force: true });
 });
 
-test("durable rebaseline resolver rejects conflicting archives and local substitutes", async () => {
-  const outputs = temporary(); const materialFile = path.join(outputs.directory, "material-journal.json"); await execute(executionAdapters(), outputs); const auth = authorization();
+test("durable rebaseline resolver reads only its immutable S3 coordinate", async () => {
+  const outputs = temporary(); const materialFile = path.join(outputs.directory, "material-journal.json");
   writeRebaselineMaterialJournal({ filePath: materialFile, repositoryRoot: process.cwd(), sourceSha, rotationId, baselineIdentitySha256: identity.identitySha256, generatedMaterial: material });
+  const materialBytes = readFileSync(materialFile); const auth = authorization({ materialJournalSha256: JSON.parse(materialBytes).journalSha256, materialJournalFileSha256: sha256(materialBytes) });
+  await execute(executionAdapters(), outputs, { authorization: auth });
   const bundle = buildProductionDualSlotRebaselineDurableEvidence({ publisherSourceSha: sourceSha, authorizationWorkflowRunId: "123456", authorizationWorkflowRunAttempt: "1", preparationBytes: Buffer.from(JSON.stringify(preparation)), materialJournalBytes: readFileSync(materialFile), completionBytes: readFileSync(outputs.completionFile), bindingsBytes: readFileSync(outputs.bindingsFile), authorization: auth });
-  const archive = Buffer.from("durable-rebaseline-fixture"); const entries = ["manifest.json", "preparation.json", "completion.json", "rotation-bindings.json"];
-  const artifactFiles = { "manifest.json": Buffer.from(JSON.stringify(bundle.manifest)), "preparation.json": Buffer.from(JSON.stringify(bundle.preparation)), "completion.json": readFileSync(outputs.completionFile), "rotation-bindings.json": readFileSync(outputs.bindingsFile) };
   const run = (command, args) => {
-    if (command === "gh" && args[1].endsWith("/actions/runs/123456")) return JSON.stringify({ id: 123456, repository: { id: 9, full_name: PRODUCTION_DUAL_SLOT_REBASELINE.repository }, head_repository: { full_name: PRODUCTION_DUAL_SLOT_REBASELINE.repository }, path: ".github/workflows/persist-production-dual-slot-rebaseline-evidence.yml", event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1 });
-    if (command === "gh" && args[1].endsWith("/artifacts")) return JSON.stringify([{ artifacts: [{ id: 93, name: "production-dual-slot-rebaseline-durable-evidence", expired: false, workflow_run: { id: 123456, head_sha: sourceSha, repository_id: 9 }, digest: `sha256:${sha256(archive)}` }] }]);
-    if (command === "gh" && args[1].endsWith("/zip")) return archive;
-    if (command === "unzip" && args[0] === "-Z1") return `${entries.join("\n")}\n`;
-    if (command === "unzip" && args[0] === "-Z") return entries.map((entry) => `-  ${entry}`).join("\n");
-    if (command === "unzip" && args[0] === "-p") return artifactFiles[args[2]];
+    if (command === "aws" && args[0] === "s3api" && args[1] === "get-object") { writeFileSync(args.at(-1), `${JSON.stringify(bundle, null, 2)}\n`); return "{}"; }
     throw new Error(`unexpected ${command} ${args.join(" ")}`);
   };
-  const options = { workflowRunId: "123456", workflowRunAttempt: "1", publisherSourceSha: sourceSha, authorization: auth, run };
+  const options = { evidenceSha256: bundle.manifest.evidenceSha256, publisherSourceSha: sourceSha, authorization: auth, run };
   assert.equal(resolveProductionDualSlotRebaselineDurableEvidenceArtifact(options).evidence.manifest.evidenceSha256, bundle.manifest.evidenceSha256);
-  assert.throws(() => resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ ...options, workflowRunAttempt: "2" }), /provenance/i);
-  assert.throws(() => resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ ...options, publisherSourceSha: "f".repeat(40) }), /provenance|source/i);
+  assert.throws(() => resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ ...options, evidenceSha256: "f".repeat(64) }), /coordinate|immutable/i);
+  assert.throws(() => resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ ...options, publisherSourceSha: "f".repeat(40) }), /source|manifest/i);
   rmSync(outputs.directory, { recursive: true, force: true });
 });
 
@@ -874,7 +886,7 @@ test("successor recovery resolver accepts only its exact protected workflow arti
 
 test("dispatcher reviewer text cannot replace the actual protected-environment approver", () => {
   const actual = authorization();
-  assert.throws(() => createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: actual.protectedEnvironmentApprovalEvidence, sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256: identity.identitySha256, resources, writeIdentities: actual.writeIdentities, writePayloadIdentities: actual.writePayloadIdentities, expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "fixture", approvedBy: "dispatcher-not-actual", approverRole: "production-independent-checker", verificationRef: "ticket" }), /Dispatcher-supplied|authenticated/i);
+  assert.throws(() => createProductionDualSlotRebaselineAuthorization({ protectedEnvironmentApprovalEvidence: actual.protectedEnvironmentApprovalEvidence, sourceSha, historicalRotationId, rotationId, abandonmentEvidenceSha256: abandoned.evidenceSha256, baselineIdentitySha256: identity.identitySha256, resources, writeIdentities: actual.writeIdentities, writePayloadIdentities: actual.writePayloadIdentities, materialJournalSha256: actual.materialJournalSha256, materialJournalFileSha256: actual.materialJournalFileSha256, expectedSecretValueWrites: 7, expectedSecretDeletes: 0, liveReferenceAudit: "PASS", liveReferenceAuditSha256: audit.stableAuditSha256, observedSlotIdentitiesSha256: abandoned.observedSlotIdentitiesSha256, reason: "fixture", approvedBy: "dispatcher-not-actual", approverRole: "production-independent-checker", verificationRef: "ticket" }), /Dispatcher-supplied|authenticated/i);
 });
 
 test("full live ECS audit rejects a legacy running revision when service points at a newer revision", () => {

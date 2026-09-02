@@ -32,22 +32,18 @@ signature before it hashes and cross-binds the root-drop payload.
 
 ## Durable rebaseline evidence
 
-The repository-approved durable store is a protected GitHub Actions artifact
-named `production-dual-slot-rebaseline-durable-evidence`, produced only by
-`.github/workflows/persist-production-dual-slot-rebaseline-evidence.yml`.
-Its deterministic retrieval coordinate is its protected workflow run ID and
-attempt. The resolver authenticates the workflow repository, path, event,
-source SHA, run attempt, artifact digest, exact archive entries, file hashes,
-and every transition binding before consumption.
-The publishing workflow also rejects a submission unless its `sourceSha`
-equals the protected source SHA authenticated by that same workflow run.
+The repository-approved durable store is the existing protected production
+artifact bucket. The release-deployer conditionally creates exactly one object
+under `production-dual-slot-rebaseline-evidence/<rotationId>/<executionSourceSha>/<authorizationSha256>/<evidenceSha256>.json`.
+That immutable coordinate is the retrieval contract; there is no `latest`
+pointer, list operation, GitHub Actions republishing hop, overwrite, or delete
+capability. The producer sends `If-None-Match: *`, then verifies the exact
+encrypted object bytes by readback before reporting success.
 
-The artifact contains exactly:
-
-- `manifest.json`
-- `preparation.json`
-- `completion.json`
-- `rotation-bindings.json`
+The object contains one canonical JSON bundle: manifest, preparation,
+completion, and rotation bindings. The resolver reads only its deterministic
+coordinate, requires the exact canonical bytes, hashes those retrieved bytes,
+and validates every transition binding before consumption.
 
 It never contains the material journal. The local canonical producer reads
 that private journal only to bind its canonical journal SHA-256 and its exact
@@ -55,9 +51,9 @@ write identities into the manifest. This preserves recovery provenance without
 persisting JWT material, private keys, secret values, credentials, or a
 replayable secret journal in GitHub.
 
-Produce the non-secret submission from authenticated private inputs, then send
-its exact base64 bytes to the protected workflow. Do not hand-author the
-submission or recover from an undocumented local file:
+Produce and conditionally persist the non-secret bundle from authenticated
+private inputs. Do not hand-author it or recover from an undocumented local
+file:
 
 ```sh
 node scripts/aws/produce-production-dual-slot-rebaseline-durable-evidence.mjs \
@@ -70,11 +66,16 @@ node scripts/aws/produce-production-dual-slot-rebaseline-durable-evidence.mjs \
   --recovery-envelope <authenticated-envelope> \
   --image-authorization <authenticated-image-authorization> \
   --output <private-non-secret-submission>
+
+node scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs \
+  --source-sha <current-protected-source-sha> \
+  --input <private-non-secret-submission> \
+  --profile mscqr-production-release-deployer
 ```
 
-The protected workflow is an evidence-publication boundary, not permission to
-write secrets, alter labels, prepare a rotation, register a task definition,
-or update a service. A later recovery must resolve the artifact through
+Durable publication is not permission to write secrets, alter labels, prepare
+a rotation, register a task definition, or update a service. A later recovery
+must resolve the object through
 `resolveProductionDualSlotRebaselineDurableEvidenceArtifact()` and still
 validate it against the independently authenticated authorization and live
 state.

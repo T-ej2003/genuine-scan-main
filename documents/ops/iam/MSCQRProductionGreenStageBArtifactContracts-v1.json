@@ -254,8 +254,7 @@
       "kind": "file",
       "producer": "scripts/aws/produce-production-dual-slot-rebaseline-durable-evidence.mjs",
       "consumers": [
-        "scripts/aws/publish-production-dual-slot-rebaseline-durable-evidence.mjs",
-        ".github/workflows/persist-production-dual-slot-rebaseline-evidence.yml"
+        "scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -271,7 +270,7 @@
     {
       "id": "dual-slot-rebaseline-durable-evidence",
       "kind": "file",
-      "producer": ".github/workflows/persist-production-dual-slot-rebaseline-evidence.yml",
+      "producer": "scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs",
       "consumers": [
         "scripts/aws/production-dual-slot-rebaseline-contract.mjs"
       ],
