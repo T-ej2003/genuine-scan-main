@@ -7,22 +7,32 @@ import path from "node:path";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { assertProductionDualSlotRebaselineDurableEvidence, productionDualSlotRebaselineDurableEvidenceKey } from "./production-dual-slot-rebaseline-contract.mjs";
 import { PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
+import { assertStageBProtectedMainCheckout, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const required = (args, name) => { const value = args.get(name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const canonicalBytes = (value) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
 const descendant = ({ ancestorSha, descendantSha }) => { try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; } };
+const exactInputKeys = (bundle) => {
+  const expected = ["manifest", "preparation", "completion", "bindings", "authorization"];
+  if (bundle?.manifest?.mode === "SUCCESSOR_RECOVERY") expected.push("recoveryEnvelope", "imageAuthorization");
+  if (!bundle || typeof bundle !== "object" || Object.keys(bundle).some((key) => !expected.includes(key))) throw new Error("Durable rebaseline evidence producer input contains unsupported top-level fields.");
+};
 
-export function persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha, run, fsOps = { mkdtempSync, readFileSync, rmSync, writeFileSync } } = {}) {
-  const bytes = canonicalBytes(bundle);
-  assertProductionDualSlotRebaselineDurableEvidence(bundle, { publisherSourceSha, authorization: bundle.authorization, recoveryEnvelope: bundle.recoveryEnvelope, imageAuthorization: bundle.imageAuthorization, proveDescendant: descendant });
-  const manifest = bundle.manifest;
+export function persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha, run, protectedCheckout = () => readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true }), fsOps = { mkdtempSync, readFileSync, rmSync, writeFileSync } } = {}) {
+  exactInputKeys(bundle);
+  const durablePayload = { manifest: bundle.manifest, preparation: bundle.preparation, completion: bundle.completion, bindings: bundle.bindings };
+  assertProductionDualSlotRebaselineDurableEvidence(durablePayload, { publisherSourceSha, authorization: bundle.authorization, recoveryEnvelope: bundle.recoveryEnvelope, imageAuthorization: bundle.imageAuthorization, proveDescendant: descendant });
+  const bytes = canonicalBytes(durablePayload);
+  const manifest = durablePayload.manifest;
   const key = productionDualSlotRebaselineDurableEvidenceKey({ rotationId: manifest.rotationId, executionSourceSha: manifest.executionSourceSha, authorizationSha256: manifest.authorizationSha256, evidenceSha256: manifest.evidenceSha256 });
   const directory = fsOps.mkdtempSync(path.join(tmpdir(), "mscqr-rebaseline-evidence-")); const body = path.join(directory, "evidence.json"); const readback = path.join(directory, "readback.json");
   try {
     fsOps.writeFileSync(body, bytes, { mode: 0o600, flag: "wx" });
+    const checkout = assertStageBProtectedMainCheckout({ ...protectedCheckout({ expectedSourceSha: publisherSourceSha }), mode: "production" });
+    if (checkout.currentHead !== publisherSourceSha || checkout.originMainHead !== publisherSourceSha || checkout.toolingSha !== publisherSourceSha || checkout.porcelainStatus !== "") throw new Error("Durable rebaseline evidence publisher checkout is not the exact clean protected main source.");
     try { run(["s3api", "put-object", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket, "--key", key, "--body", body, "--content-type", "application/json", "--server-side-encryption", "AES256", "--if-none-match", "*", "--output", "json", "--no-cli-pager"]); }
-    catch (error) { throw new Error(`Durable rebaseline evidence conditional create failed; object may already exist and must be resolved by authenticated readback: ${error.message}`); }
+    catch (error) { throw new Error(`Durable rebaseline evidence conditional create failed; no overwrite or retry was performed: ${error.message}`); }
     const head = JSON.parse(run(["s3api", "head-object", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket, "--key", key, "--output", "json", "--no-cli-pager"]));
     if (head.ServerSideEncryption !== "AES256" || head.ContentLength !== bytes.length) throw new Error("Durable rebaseline evidence object encryption or length is not exact.");
     run(["s3api", "get-object", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket, "--key", key, "--output", "json", "--no-cli-pager", readback]);

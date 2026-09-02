@@ -47,6 +47,7 @@ const payloads = buildRebaselinePayloads({ sourceSha, rotationId, generatedMater
 const writePlan = buildRebaselineWritePlan({ sourceSha, rotationId, resources, baselineIdentitySha256: identity.identitySha256, payloads });
 const preparation = buildRebaselinePreparation({ preconditions, sourceSha, rotationId, baselineIdentity: identity, writePlan });
 const temporary = () => { const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-test-")); chmodSync(directory, 0o700); return { directory, completionFile: path.join(directory, "completion.json"), bindingsFile: path.join(directory, "rotation-bindings.json") }; };
+const protectedCheckout = (sha = sourceSha, overrides = {}) => ({ mode: "production", toolingSha: sha, currentHead: sha, originMainHead: sha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, ...overrides });
 
 function environmentEvidence() { return createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: PRODUCTION_DUAL_SLOT_REBASELINE.repository, environment: "production", sourceSha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "operator", observedAt: "2026-08-28T10:01:00.000Z", actualApproval: { state: "approved", environmentId: 17, environmentName: "production", userId: 7, userLogin: "checker" } }); }
 const verifyInitialBindingOrigin = () => { throw new Error("fixture is not an initial binding"); };
@@ -810,9 +811,23 @@ test("durable publisher conditionally creates and reads back the exact canonical
     if (args[1] === "get-object") { writeFileSync(args.at(-1), body); return "{}"; }
     throw new Error(`unexpected ${args.join(" ")}`);
   };
-  const persisted = persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run });
+  const persisted = persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run, protectedCheckout: () => protectedCheckout() });
   assert.equal(persisted.status, "CREATED"); assert.match(persisted.key, new RegExp(`^production-dual-slot-rebaseline-evidence/${rotationId}/`));
-  assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run: () => { throw new Error("PreconditionFailed"); } }), /conditional create failed/i);
+  assert.deepEqual(Object.keys(JSON.parse(body)).sort(), ["bindings", "completion", "manifest", "preparation"]);
+  assert.equal(Object.hasOwn(JSON.parse(body), "authorization"), false);
+  assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle: { ...bundle, attackerControlled: { not: "durable" } }, publisherSourceSha: sourceSha, run, protectedCheckout: () => protectedCheckout() }), /unsupported top-level/i);
+  assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run: () => { throw new Error("PreconditionFailed"); }, protectedCheckout: () => protectedCheckout() }), /conditional create failed/i);
+  for (const [label, checkout] of [
+    ["local HEAD mismatch", protectedCheckout("b".repeat(40))],
+    ["origin/main mismatch", protectedCheckout(sourceSha, { originMainHead: "b".repeat(40) })],
+    ["dirty worktree", protectedCheckout(sourceSha, { porcelainStatus: " M tracked.js" })],
+    ["malformed source evidence", {}],
+  ]) {
+    let putCount = 0;
+    assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run: (args) => { if (args[1] === "put-object") putCount += 1; }, protectedCheckout: () => checkout }), /Stage B|protected|checkout|field/i, label);
+    assert.equal(putCount, 0, label);
+  }
+  assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run: () => { throw new Error("source CAS failed"); }, protectedCheckout: () => { throw new Error("source authentication failed"); } }), /source authentication failed/);
   rmSync(outputs.directory, { recursive: true, force: true });
 });
 
@@ -828,6 +843,7 @@ test("durable rebaseline resolver reads only its immutable S3 coordinate", async
   };
   const options = { evidenceSha256: bundle.manifest.evidenceSha256, publisherSourceSha: sourceSha, authorization: auth, run };
   assert.equal(resolveProductionDualSlotRebaselineDurableEvidenceArtifact(options).evidence.manifest.evidenceSha256, bundle.manifest.evidenceSha256);
+  assert.throws(() => resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ ...options, run: (command, args) => { if (command === "aws" && args[0] === "s3api" && args[1] === "get-object") { writeFileSync(args.at(-1), `${JSON.stringify({ ...bundle, attackerControlled: "not authenticated" }, null, 2)}\n`); return "{}"; } throw new Error(`unexpected ${command} ${args.join(" ")}`); } }), /schema|unsupported field/i);
   assert.throws(() => resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ ...options, evidenceSha256: "f".repeat(64) }), /coordinate|immutable/i);
   assert.throws(() => resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ ...options, publisherSourceSha: "f".repeat(40) }), /source|manifest/i);
   rmSync(outputs.directory, { recursive: true, force: true });

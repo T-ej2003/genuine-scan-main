@@ -536,6 +536,7 @@ export function buildProductionDualSlotRebaselineDurableEvidence({ publisherSour
 
 export function assertProductionDualSlotRebaselineDurableEvidence(value, { publisherSourceSha, authorization, recoveryEnvelope, imageAuthorization, proveDescendant } = {}) {
   if (!value || typeof value !== "object" || !value.manifest || !value.preparation || !value.completion || !value.bindings) fail("Durable rebaseline evidence bundle is incomplete.");
+  exactKeys(value, ["manifest", "preparation", "completion", "bindings"], "Durable rebaseline evidence bundle");
   const manifest = value.manifest;
   const fields = ["schemaVersion", "kind", "mode", "publisherSourceSha", "executionSourceSha", "rotationId", "preparationSha256", "preparationFileSha256", "materialJournalSha256", "materialJournalFileSha256", "authorizationSha256", "authorizationWorkflowRunId", "authorizationWorkflowRunAttempt", "completionSha256", "completionFileSha256", "rotationBindingsSha256", "liveReferenceAuditSha256", "recoveryEnvelopeSha256", "successorRecoveryAuthorizationSha256", "imageAuthorizationSha256", "evidenceSha256"];
   exactKeys(manifest, fields, "Durable rebaseline evidence manifest");
