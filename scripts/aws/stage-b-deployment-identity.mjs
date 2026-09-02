@@ -52,7 +52,7 @@ export function readAuthenticatedGitHubProtectedMainIdentity({ expectedSourceSha
   } catch (error) {
     throw new Error(`Authenticated GitHub protected-main lookup failed: ${error.message}`);
   }
-  if (!response || typeof response !== "object" || Array.isArray(response) || response.name !== "main" || !response.commit || typeof response.commit !== "object" || Array.isArray(response.commit)) {
+  if (!response || typeof response !== "object" || Array.isArray(response) || response.name !== "main" || response.protected !== true || !response.commit || typeof response.commit !== "object" || Array.isArray(response.commit)) {
     throw new Error("Authenticated GitHub protected-main response is malformed.");
   }
   const protectedMainSha = String(response.commit.sha || "");

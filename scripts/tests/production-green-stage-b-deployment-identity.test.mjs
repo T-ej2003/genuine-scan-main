@@ -135,14 +135,19 @@ test("authenticated GitHub protected-main lookup is fixed to repository and bran
   const calls = [];
   const identity = readAuthenticatedGitHubProtectedMainIdentity({
     expectedSourceSha: toolingSha,
-    githubRun: (command, args) => { calls.push({ command, args }); return JSON.stringify({ name: "main", commit: { sha: toolingSha } }); },
+    githubRun: (command, args) => { calls.push({ command, args }); return JSON.stringify({ name: "main", protected: true, commit: { sha: toolingSha } }); },
   });
   assert.deepEqual(identity, { repository: "T-ej2003/genuine-scan-main", branch: "main", protectedMainSha: toolingSha });
   assert.deepEqual(calls, [{ command: "gh", args: ["api", "repos/T-ej2003/genuine-scan-main/branches/main"] }]);
   for (const response of [
     {},
+    { name: "main", commit: { sha: toolingSha } },
+    { name: "main", protected: false, commit: { sha: toolingSha } },
+    { name: "main", protected: null, commit: { sha: toolingSha } },
+    { name: "main", protected: "true", commit: { sha: toolingSha } },
+    { name: "main", protected: 1, commit: { sha: toolingSha } },
     { name: "develop", commit: { sha: toolingSha } },
-    { name: "main", commit: { sha: imageReleaseSha } },
+    { name: "main", protected: true, commit: { sha: imageReleaseSha } },
     { name: "main", commit: { sha: "not-a-sha" } },
     [],
     "main",
@@ -162,7 +167,7 @@ test("GitHub protected-main checkout ignores mutable Git remotes and transport o
       const checkout = readStageBProtectedMainCheckoutFromGitHub({
         cwd: fixture.cwd,
         expectedSourceSha: fixture.head,
-        githubRun: (command, args) => JSON.stringify({ name: "main", commit: { sha: fixture.head } }),
+      githubRun: (command, args) => JSON.stringify({ name: "main", protected: true, commit: { sha: fixture.head } }),
         run: (args) => { gitCalls.push(args); return git(fixture.cwd, args); },
       });
       assert.equal(checkout.currentHead, fixture.head);
