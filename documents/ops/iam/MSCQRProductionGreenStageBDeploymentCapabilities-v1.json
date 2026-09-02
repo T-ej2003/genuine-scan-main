@@ -218,6 +218,16 @@
       "order": 43,
       "id": "dual-slot-rebaseline-durable-evidence",
       "sourceFile": "scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs"
+    },
+    {
+      "order": 44,
+      "id": "stage-a-production-artifacts-policy-recovery",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"
+    },
+    {
+      "order": 45,
+      "id": "stage-a-production-artifacts-state-reconciliation",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"
     }
   ],
   "identities": [
@@ -944,7 +954,7 @@
         "sid": "PublishExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "57ea2ea92d90b63ecacdf8d17df21da9828badafb261c54ca2e04cbba1383e0c"
+        "expectedPolicySha256": "05baad37948eae39251e9db6bca13450548c3487b77c8ca7e42752da80e18701"
       },
       "required": true,
       "mutation": true
@@ -11397,6 +11407,308 @@
       },
       "required": false,
       "mutation": true
+    },
+    {
+      "id": "stage-a-artifacts-journal-conditional-create",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+      "sourceFunction": "stage-a-artifacts-journal-conditional-create",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-stage-a-production-artifacts-reconciliation/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "RELEASE_CONDITIONAL_JOURNAL_CREATE",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-journal-conditional-create-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-journal-conditional-create",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "stage-a-artifacts-journal-read",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+      "sourceFunction": "stage-a-artifacts-journal-read",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-stage-a-production-artifacts-reconciliation/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-journal-read-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-journal-read",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-a-artifacts-reconciliation-release-identify",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "sourceFunction": "stage-a-artifacts-reconciliation-release-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-reconciliation-release-identify-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-reconciliation-release-identify",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-a-artifacts-reconciliation-release-read-policy",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "sourceFunction": "stage-a-artifacts-reconciliation-release-read-policy",
+      "action": "s3:GetBucketPolicy",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-reconciliation-release-read-policy-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-reconciliation-release-read-policy",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-a-artifacts-recovery-release-identify",
+      "phase": "stage-a-production-artifacts-policy-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "sourceFunction": "stage-a-artifacts-recovery-release-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-recovery-release-identify-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-recovery-release-identify",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-a-artifacts-recovery-release-read-policy",
+      "phase": "stage-a-production-artifacts-policy-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "sourceFunction": "stage-a-artifacts-recovery-release-read-policy",
+      "action": "s3:GetBucketPolicy",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-recovery-release-read-policy-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-recovery-release-read-policy",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-a-artifacts-recovery-root-identify",
+      "phase": "stage-a-production-artifacts-policy-recovery",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "sourceFunction": "stage-a-artifacts-recovery-root-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "ROOT_GOVERNED_RECOVERY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-recovery-root-identify",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-a-artifacts-recovery-root-put-policy",
+      "phase": "stage-a-production-artifacts-policy-recovery",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "sourceFunction": "stage-a-artifacts-recovery-root-put-policy",
+      "action": "s3:PutBucketPolicy",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "ROOT_GOVERNED_POLICY_RECOVERY",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-recovery-root-put-policy",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "stage-a-artifacts-recovery-root-read-lifecycle",
+      "phase": "stage-a-production-artifacts-policy-recovery",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "sourceFunction": "stage-a-artifacts-recovery-root-read-lifecycle",
+      "action": "s3:GetBucketLifecycleConfiguration",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "ROOT_GOVERNED_RECOVERY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-recovery-root-read-lifecycle",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-a-artifacts-recovery-root-read-versioning",
+      "phase": "stage-a-production-artifacts-policy-recovery",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "sourceFunction": "stage-a-artifacts-recovery-root-read-versioning",
+      "action": "s3:GetBucketVersioning",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "ROOT_GOVERNED_RECOVERY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-recovery-root-read-versioning",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
     }
   ],
   "directProbes": [
@@ -11592,6 +11904,10 @@
     },
     {
       "sourceFile": "scripts/apply-production-green-stage-b.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs",
       "action": "sts:GetCallerIdentity"
     },
     {
@@ -12070,6 +12386,14 @@
       "action": "kms:GetPublicKey"
     },
     {
+      "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+      "action": "s3:GetObject"
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+      "action": "s3:PutObject"
+    },
+    {
       "sourceFile": "scripts/aws/publish-production-green-stage-b-approval.mjs",
       "action": "kms:Verify"
     },
@@ -12135,6 +12459,34 @@
     },
     {
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "action": "s3:GetBucketPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "action": "s3:GetBucketLifecycleConfiguration"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "action": "s3:GetBucketPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "action": "s3:GetBucketVersioning"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "action": "s3:PutBucketPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
       "action": "sts:GetCallerIdentity"
     },
     {

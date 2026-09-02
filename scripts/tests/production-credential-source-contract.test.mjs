@@ -265,7 +265,7 @@ test("production image publisher workflows select explicit OIDC or the documente
 
 test("every GitHub workflow credential root is classified by its authenticated mode", () => {
   const oidcWorkflows = [
-    ".github/workflows/auto-failover-monitor.yml", ".github/workflows/aws-dr-alb-apply.yml", ".github/workflows/aws-dr-cleanup-apply.yml", ".github/workflows/aws-dr-db-apply.yml", ".github/workflows/aws-dr-dns-apply.yml", ".github/workflows/aws-dr-hardening-apply.yml", ".github/workflows/aws-dr-object-storage-apply.yml", ".github/workflows/aws-dr-operations.yml", ".github/workflows/aws-dr-regional-readiness.yml", ".github/workflows/aws-dr-snapshot-apply.yml", ".github/workflows/production-green-backend-image-publish.yml", ".github/workflows/production-green-stage-b-image-build.yml", ".github/workflows/release-gate.yml", ".github/workflows/staging-terraform-remote-state-drift.yml",
+    ".github/workflows/auto-failover-monitor.yml", ".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml", ".github/workflows/aws-dr-alb-apply.yml", ".github/workflows/aws-dr-cleanup-apply.yml", ".github/workflows/aws-dr-db-apply.yml", ".github/workflows/aws-dr-dns-apply.yml", ".github/workflows/aws-dr-hardening-apply.yml", ".github/workflows/aws-dr-object-storage-apply.yml", ".github/workflows/aws-dr-operations.yml", ".github/workflows/aws-dr-regional-readiness.yml", ".github/workflows/aws-dr-snapshot-apply.yml", ".github/workflows/production-green-backend-image-publish.yml", ".github/workflows/production-green-stage-b-image-build.yml", ".github/workflows/release-gate.yml", ".github/workflows/staging-terraform-remote-state-drift.yml",
   ];
   const configured = fs.readdirSync(".github/workflows").filter((name) => name.endsWith(".yml") && fs.readFileSync(`.github/workflows/${name}`, "utf8").includes("aws-actions/configure-aws-credentials@v6")).sort();
   assert.deepEqual(configured, [...oidcWorkflows, ".github/workflows/publish-ecs-images.yml"].map((file) => file.split("/").at(-1)).sort());
@@ -301,6 +301,9 @@ test("every direct production AWS root declares its credential provenance before
     ["scripts/aws/check-production-green-stage-b-approval-publication.mjs", "NAMED_PROFILE"],
     ["scripts/aws/production-normal-backend-activation.mjs", "GITHUB_OIDC_RELEASE_DEPLOYER"],
     ["scripts/aws/recover-stage-b-backend-task-definition.mjs", "NAMED_PROFILE"],
+    ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "GITHUB_OIDC_RELEASE_DEPLOYER"],
+    ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "NAMED_PROFILE"],
+    ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "NAMED_PROFILE"],
   ];
   for (const [file, source] of roots) assertLiteralIncludes(fs.readFileSync(file, "utf8"), `PRODUCTION_AWS_CREDENTIAL_SOURCE.${source}`, file);
 });
@@ -364,7 +367,7 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
   const walk = (directory) => fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(`${directory}/${entry.name}`) : [`${directory}/${entry.name}`]);
   const direct = walk("scripts/aws").filter((file) => /\.(mjs|sh)$/.test(file) && /(?:execFileSync|execFile|spawnSync|spawn|run)\(["']aws["']|\baws\s+(?:sts|kms|ecr|ecs|iam|s3|secretsmanager|rds|cloudtrail)/.test(fs.readFileSync(file, "utf8"))).sort();
   const classified = [
-    "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs",
+    "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs",
   ].sort();
   assert.deepEqual(direct, classified);
   const boundaries = {
@@ -374,6 +377,7 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
     "scripts/aws/discover-staging-endpoints.mjs": /--profile", C\.profile/,
     "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs": /createProductionAwsCommandRunner/,
     "scripts/aws/production-cutover-production-adapters.mjs": /createProductionAwsCredentialEnvironment/,
+    "scripts/aws/production-dual-slot-rebaseline-contract.mjs": /explicit credential-bound AWS runner/,
     "scripts/aws/production-identity-adapters.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/production-initial-activation-lifecycle.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/publish-ecs-images.sh": /configure_production_aws_credential_source/,

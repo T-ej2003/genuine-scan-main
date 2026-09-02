@@ -18,8 +18,20 @@ const RUNTIME_REPOSITORIES = [REPOSITORY, "arn:aws:ecr:eu-west-2:368992683803:re
 const TASKS = "*";
 const RUNTIME_KMS_KEY = "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478";
 const ROOT_ATTESTATION_KEY = "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation";
+const PRODUCTION_ARTIFACTS_BUCKET = "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an";
+const STAGE_A_RECONCILIATION_JOURNAL = `${PRODUCTION_ARTIFACTS_BUCKET}/production-stage-a-production-artifacts-reconciliation/*`;
 
 const CALLS = Object.freeze([
+  ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
+  ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:GetObject", "stage-a-artifacts-journal-read", [STAGE_A_RECONCILIATION_JOURNAL]],
+  ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:PutObject", "stage-a-artifacts-journal-conditional-create", [STAGE_A_RECONCILIATION_JOURNAL]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-reconciliation-release-read-policy", [PRODUCTION_ARTIFACTS_BUCKET]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketLifecycleConfiguration", "stage-a-artifacts-recovery-root-read-lifecycle", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-recovery-release-read-policy", [PRODUCTION_ARTIFACTS_BUCKET]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketVersioning", "stage-a-artifacts-recovery-root-read-versioning", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:PutBucketPolicy", "stage-a-artifacts-recovery-root-put-policy", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-recovery-root-identify", ["*"], "ROOT_OPERATOR"],
   ["scripts/aws/production-release-preflight-checker-attestation.mjs", "sts:GetCallerIdentity", "administrator-release-preflight-trust-attestation-identify", ["*"], "ADMINISTRATOR"],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecr:DescribeImages", "manifest-backend-health-recovery-describe-images", [REPOSITORY]],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:DescribeServiceDeployments", "manifest-backend-health-recovery-describe-service-deployments", [SERVICE, "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"]],

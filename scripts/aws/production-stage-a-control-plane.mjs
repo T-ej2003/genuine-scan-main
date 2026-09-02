@@ -94,6 +94,7 @@ export function buildStageAProductionArtifactsBucketPolicyPredecessor() {
 export function buildStageAProductionArtifactsBucketPolicy() {
   const predecessor = buildStageAProductionArtifactsBucketPolicyPredecessor();
   const immutableEvidence = [PRODUCTION_ACTIVATION_LIFECYCLE.rebaselineEvidenceArn];
+  const reconciliationJournal = [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn];
   return {
     ...predecessor,
     Statement: [
@@ -103,6 +104,11 @@ export function buildStageAProductionArtifactsBucketPolicy() {
       { Sid: "DenyNonConditionalRebaselineEvidenceWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: immutableEvidence, Condition: { StringNotEquals: { "s3:if-none-match": "*" } } },
       { Sid: "DenyOtherPrincipalsRebaselineEvidenceWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: immutableEvidence, Condition: { StringNotEquals: { "aws:PrincipalArn": PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn } } },
       { Sid: "DenyRebaselineEvidenceDeletion", Effect: "Deny", Principal: "*", Action: ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource: immutableEvidence },
+      { Sid: "AllowReleaseDeployerReadStageAProductionArtifactsReconciliation", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn }, Action: "s3:GetObject", Resource: reconciliationJournal },
+      { Sid: "AllowReleaseDeployerConditionalStageAProductionArtifactsReconciliationCreate", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn }, Action: "s3:PutObject", Resource: reconciliationJournal, Condition: { StringEquals: { "s3:if-none-match": "*" } } },
+      { Sid: "DenyNonConditionalStageAProductionArtifactsReconciliationWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: reconciliationJournal, Condition: { StringNotEquals: { "s3:if-none-match": "*" } } },
+      { Sid: "DenyOtherPrincipalsStageAProductionArtifactsReconciliationWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: reconciliationJournal, Condition: { StringNotEquals: { "aws:PrincipalArn": PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn } } },
+      { Sid: "DenyStageAProductionArtifactsReconciliationDeletion", Effect: "Deny", Principal: "*", Action: ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource: reconciliationJournal },
     ],
   };
 }
@@ -149,6 +155,7 @@ const stablePolicy = (value, key) => {
 const stablePolicyJson = (value) => JSON.stringify(stablePolicy(value));
 const stablePolicySha256 = (value) => createHash("sha256").update(stablePolicyJson(value)).digest("hex");
 const stableJsonSha256 = (value) => createHash("sha256").update(stableJson(value)).digest("hex");
+export const stageAProductionArtifactsPolicySha256 = stablePolicySha256;
 
 export const STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY = Object.freeze({
   schemaVersion: 1,
@@ -167,11 +174,11 @@ export const STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_AUTHORIZATION = Object.
 const STAGE_A_RECOVERY_COMPLETION_FIELDS = Object.freeze([
   "schemaVersion", "kind", "sourceSha", "account", "region", "bucket", "address", "type",
   "recoveryAuthorizationSha256", "predecessorPolicySha256", "desiredPolicySha256",
-  "livePolicySha256", "stateLineage", "preStateSerial", "completionSha256",
+  "livePolicySha256", "stateLineage", "preStateSerial", "preStateSha256", "completionSha256",
 ]);
 
-export function createStageAProductionArtifactsRecoveryCompletion({ sourceSha, recoveryAuthorizationSha256, livePolicy, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial } = {}) {
-  if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !SHA256.test(recoveryAuthorizationSha256 || "") || stateLineage !== STAGE_A_STATE_LINEAGE || !Number.isSafeInteger(preStateSerial) || preStateSerial < 1 || stablePolicySha256(livePolicy) !== stablePolicySha256(buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A production-artifacts recovery completion inputs are invalid.");
+export function createStageAProductionArtifactsRecoveryCompletion({ sourceSha, recoveryAuthorizationSha256, livePolicy, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial, preStateSha256 } = {}) {
+  if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !SHA256.test(recoveryAuthorizationSha256 || "") || stateLineage !== STAGE_A_STATE_LINEAGE || !Number.isSafeInteger(preStateSerial) || preStateSerial < 1 || !SHA256.test(preStateSha256 || "") || stablePolicySha256(livePolicy) !== stablePolicySha256(buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A production-artifacts recovery completion inputs are invalid.");
   const body = {
     schemaVersion: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY.schemaVersion,
     kind: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY.kind,
@@ -187,13 +194,14 @@ export function createStageAProductionArtifactsRecoveryCompletion({ sourceSha, r
     livePolicySha256: stablePolicySha256(livePolicy),
     stateLineage,
     preStateSerial,
+    preStateSha256,
   };
   return Object.freeze({ ...body, completionSha256: stableJsonSha256(body) });
 }
 
-export function assertStageAProductionArtifactsRecoveryCompletion(completion, { sourceSha, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial, verifyRecoveryCompletion } = {}) {
+export function assertStageAProductionArtifactsRecoveryCompletion(completion, { sourceSha, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial, preStateSha256, verifyRecoveryCompletion } = {}) {
   if (!completion || typeof completion !== "object" || Array.isArray(completion) || JSON.stringify(Object.keys(completion).sort()) !== JSON.stringify([...STAGE_A_RECOVERY_COMPLETION_FIELDS].sort())) throw new Error("Stage A production-artifacts recovery completion schema is not exact.");
-  if (completion.schemaVersion !== STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY.schemaVersion || completion.kind !== STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY.kind || completion.sourceSha !== sourceSha || completion.account !== STAGE_B.account || completion.region !== STAGE_B.region || completion.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || completion.address !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address || completion.type !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type || completion.stateLineage !== stateLineage || completion.stateLineage !== STAGE_A_STATE_LINEAGE || completion.preStateSerial !== preStateSerial || !/^[a-f0-9]{40}$/.test(completion.sourceSha || "") || !SHA256.test(completion.recoveryAuthorizationSha256 || "") || completion.predecessorPolicySha256 !== stablePolicySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()) || completion.desiredPolicySha256 !== stablePolicySha256(buildStageAProductionArtifactsBucketPolicy()) || completion.livePolicySha256 !== completion.desiredPolicySha256 || !SHA256.test(completion.completionSha256 || "")) throw new Error("Stage A production-artifacts recovery completion binding is invalid.");
+  if (completion.schemaVersion !== STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY.schemaVersion || completion.kind !== STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY.kind || completion.sourceSha !== sourceSha || completion.account !== STAGE_B.account || completion.region !== STAGE_B.region || completion.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || completion.address !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address || completion.type !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type || completion.stateLineage !== stateLineage || completion.stateLineage !== STAGE_A_STATE_LINEAGE || completion.preStateSerial !== preStateSerial || completion.preStateSha256 !== preStateSha256 || !/^[a-f0-9]{40}$/.test(completion.sourceSha || "") || !SHA256.test(completion.recoveryAuthorizationSha256 || "") || !SHA256.test(completion.preStateSha256 || "") || completion.predecessorPolicySha256 !== stablePolicySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()) || completion.desiredPolicySha256 !== stablePolicySha256(buildStageAProductionArtifactsBucketPolicy()) || completion.livePolicySha256 !== completion.desiredPolicySha256 || !SHA256.test(completion.completionSha256 || "")) throw new Error("Stage A production-artifacts recovery completion binding is invalid.");
   const { completionSha256, ...body } = completion;
   if (stableJsonSha256(body) !== completionSha256) throw new Error("Stage A production-artifacts recovery completion hash is invalid.");
   if (typeof verifyRecoveryCompletion !== "function") throw new Error("Stage A production-artifacts recovery completion requires an independent verifier.");
@@ -206,11 +214,11 @@ export function assertStageAProductionArtifactsRecoveryCompletion(completion, { 
 const STAGE_A_RECONCILIATION_AUTHORIZATION_FIELDS = Object.freeze([
   "schemaVersion", "kind", "sourceSha", "account", "region", "bucket", "address", "type",
   "recoveryCompletionSha256", "savedPlanSha256", "predecessorPolicySha256", "desiredPolicySha256",
-  "stateLineage", "preStateSerial", "maxRefreshOnlyApplies", "authorizationSha256",
+  "stateLineage", "preStateSerial", "preStateSha256", "maxRefreshOnlyApplies", "authorizationSha256",
 ]);
 
-export function createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, recoveryCompletion, savedPlanSha256, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial, verifyRecoveryCompletion } = {}) {
-  assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, stateLineage, preStateSerial, verifyRecoveryCompletion });
+export function createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, recoveryCompletion, savedPlanSha256, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial, preStateSha256, verifyRecoveryCompletion } = {}) {
+  assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, stateLineage, preStateSerial, preStateSha256, verifyRecoveryCompletion });
   if (!SHA256.test(savedPlanSha256 || "")) throw new Error("Stage A production-artifacts reconciliation saved plan hash is invalid.");
   const body = {
     schemaVersion: STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_AUTHORIZATION.schemaVersion,
@@ -227,15 +235,16 @@ export function createStageAProductionArtifactsReconciliationAuthorization({ sou
     desiredPolicySha256: stablePolicySha256(buildStageAProductionArtifactsBucketPolicy()),
     stateLineage,
     preStateSerial,
+    preStateSha256,
     maxRefreshOnlyApplies: STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_AUTHORIZATION.maxRefreshOnlyApplies,
   };
   return Object.freeze({ ...body, authorizationSha256: stableJsonSha256(body) });
 }
 
-export function assertStageAProductionArtifactsReconciliationAuthorization(authorization, { sourceSha, recoveryCompletion, savedPlanSha256, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial, verifyRecoveryCompletion, verifyReconciliationAuthorization } = {}) {
+export function assertStageAProductionArtifactsReconciliationAuthorization(authorization, { sourceSha, recoveryCompletion, savedPlanSha256, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial, preStateSha256, verifyRecoveryCompletion, verifyReconciliationAuthorization } = {}) {
   if (!authorization || typeof authorization !== "object" || Array.isArray(authorization) || JSON.stringify(Object.keys(authorization).sort()) !== JSON.stringify([...STAGE_A_RECONCILIATION_AUTHORIZATION_FIELDS].sort())) throw new Error("Stage A production-artifacts reconciliation authorization schema is not exact.");
-  assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, stateLineage, preStateSerial, verifyRecoveryCompletion });
-  if (authorization.schemaVersion !== STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_AUTHORIZATION.schemaVersion || authorization.kind !== STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_AUTHORIZATION.kind || authorization.sourceSha !== sourceSha || authorization.account !== STAGE_B.account || authorization.region !== STAGE_B.region || authorization.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || authorization.address !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address || authorization.type !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type || authorization.recoveryCompletionSha256 !== recoveryCompletion.completionSha256 || authorization.savedPlanSha256 !== savedPlanSha256 || !SHA256.test(authorization.savedPlanSha256 || "") || authorization.predecessorPolicySha256 !== stablePolicySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()) || authorization.desiredPolicySha256 !== stablePolicySha256(buildStageAProductionArtifactsBucketPolicy()) || authorization.stateLineage !== stateLineage || authorization.stateLineage !== STAGE_A_STATE_LINEAGE || authorization.preStateSerial !== preStateSerial || authorization.maxRefreshOnlyApplies !== 1 || !SHA256.test(authorization.authorizationSha256 || "")) throw new Error("Stage A production-artifacts reconciliation authorization binding is invalid.");
+  assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, stateLineage, preStateSerial, preStateSha256, verifyRecoveryCompletion });
+  if (authorization.schemaVersion !== STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_AUTHORIZATION.schemaVersion || authorization.kind !== STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_AUTHORIZATION.kind || authorization.sourceSha !== sourceSha || authorization.account !== STAGE_B.account || authorization.region !== STAGE_B.region || authorization.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || authorization.address !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address || authorization.type !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type || authorization.recoveryCompletionSha256 !== recoveryCompletion.completionSha256 || authorization.savedPlanSha256 !== savedPlanSha256 || !SHA256.test(authorization.savedPlanSha256 || "") || authorization.predecessorPolicySha256 !== stablePolicySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()) || authorization.desiredPolicySha256 !== stablePolicySha256(buildStageAProductionArtifactsBucketPolicy()) || authorization.stateLineage !== stateLineage || authorization.stateLineage !== STAGE_A_STATE_LINEAGE || authorization.preStateSerial !== preStateSerial || authorization.preStateSha256 !== preStateSha256 || !SHA256.test(authorization.preStateSha256 || "") || authorization.maxRefreshOnlyApplies !== 1 || !SHA256.test(authorization.authorizationSha256 || "")) throw new Error("Stage A production-artifacts reconciliation authorization binding is invalid.");
   const { authorizationSha256, ...body } = authorization;
   if (stableJsonSha256(body) !== authorizationSha256) throw new Error("Stage A production-artifacts reconciliation authorization hash is invalid.");
   if (typeof verifyReconciliationAuthorization !== "function") throw new Error("Stage A production-artifacts reconciliation requires independent authorization.");
@@ -248,8 +257,8 @@ function assertStageAProductionArtifactsPolicyResource(value, label, expectedPol
   if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...STAGE_A_POLICY_RESOURCE_KEYS].sort()) || value.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || value.expected_bucket_owner !== null || value.id !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || value.region !== STAGE_B.region || stablePolicySha256(decodePolicyDocument(value.policy, `${label} policy`)) !== stablePolicySha256(expectedPolicy)) throw new Error(`Stage A production-artifacts ${label} is not exact.`);
 }
 
-export function assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { sourceSha, recoveryCompletion, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial, verifyRecoveryCompletion } = {}) {
-  assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, stateLineage, preStateSerial, verifyRecoveryCompletion });
+export function assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { sourceSha, recoveryCompletion, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial, preStateSha256 = recoveryCompletion?.preStateSha256, verifyRecoveryCompletion } = {}) {
+  assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, stateLineage, preStateSerial, preStateSha256, verifyRecoveryCompletion });
   if (!plan || plan.complete !== true || plan.errored !== false || plan.applyable !== true || plan.resource_changes !== undefined && (!Array.isArray(plan.resource_changes) || plan.resource_changes.some(({ change } = {}) => !exactActions(change?.actions, ["no-op"]) && !exactActions(change?.actions, ["read"]))) || !Array.isArray(plan.resource_drift) || plan.resource_drift.length < 1 || plan.resource_drift.length > 2) throw new Error("Stage A production-artifacts refresh-only plan is not exact.");
   const bucketDrift = plan.resource_drift.filter(({ address }) => address === STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address);
   const rdsDrift = plan.resource_drift.filter(({ address }) => address === "aws_db_instance.green");
@@ -429,22 +438,26 @@ function readAndVerifyPlanSha256(planPath, expectedSha256) {
   return actualSha256;
 }
 
-export async function runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion, verifyRecoveryCompletion, reconciliationAuthorization, verifyReconciliationAuthorization, reserveConsumption, finalizeConsumption, abortConsumption } = {}) {
+export async function runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion, verifyRecoveryCompletion, reconciliationAuthorization, verifyReconciliationAuthorization, authorizationIdentity, reserveConsumption, finalizeConsumption, abortConsumption } = {}) {
   if (!adapter || typeof adapter.createSavedRefreshOnlyPlan !== "function" || typeof adapter.applySavedRefreshOnlyPlan !== "function" || typeof adapter.readStateIdentity !== "function" || typeof adapter.readProductionArtifactsPolicy !== "function" || typeof reserveConsumption !== "function" || typeof finalizeConsumption !== "function" || typeof abortConsumption !== "function") throw new Error("Stage A production-artifacts reconciliation adapter is incomplete.");
   const before = await adapter.readStateIdentity();
-  if (before?.lineage !== STAGE_A_STATE_LINEAGE || !Number.isSafeInteger(before.serial) || before.serial < 1) throw new Error("Stage A reconciliation state identity is invalid.");
-  assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, preStateSerial: before.serial, verifyRecoveryCompletion });
+  if (before?.lineage !== STAGE_A_STATE_LINEAGE || !Number.isSafeInteger(before.serial) || before.serial < 1 || !SHA256.test(before.stateSha256 || "")) throw new Error("Stage A reconciliation state identity is invalid.");
+  const assertStateCas = (state, label) => {
+    if (state?.lineage !== before.lineage || state.serial !== before.serial || state.stateSha256 !== before.stateSha256) throw new Error(`Stage A reconciliation state changed ${label}.`);
+  };
+  assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion });
   const saved = await adapter.createSavedRefreshOnlyPlan();
-  if (saved?.preState?.lineage !== before.lineage || saved?.preState?.serial !== before.serial || saved?.sourceSha !== sourceSha || saved?.refreshOnly !== true || !path.isAbsolute(saved?.planPath || "") || !SHA256.test(saved?.savedPlanSha256 || "")) throw new Error("Stage A refresh-only plan is not source- or operation-bound.");
-  assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(saved.plan, { sourceSha, recoveryCompletion, preStateSerial: before.serial, verifyRecoveryCompletion });
-  assertStageAProductionArtifactsReconciliationAuthorization(reconciliationAuthorization, { sourceSha, recoveryCompletion, savedPlanSha256: saved.savedPlanSha256, preStateSerial: before.serial, verifyRecoveryCompletion, verifyReconciliationAuthorization });
-  const consumption = { authorizationSha256: reconciliationAuthorization.authorizationSha256, completionSha256: recoveryCompletion.completionSha256, savedPlanSha256: saved.savedPlanSha256 };
+  if (saved?.preState?.lineage !== before.lineage || saved?.preState?.serial !== before.serial || saved?.preState?.stateSha256 !== before.stateSha256 || saved?.sourceSha !== sourceSha || saved?.refreshOnly !== true || !path.isAbsolute(saved?.planPath || "") || !SHA256.test(saved?.savedPlanSha256 || "")) throw new Error("Stage A refresh-only plan is not source- or operation-bound.");
+  assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(saved.plan, { sourceSha, recoveryCompletion, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion });
+  assertStageAProductionArtifactsReconciliationAuthorization(reconciliationAuthorization, { sourceSha, recoveryCompletion, savedPlanSha256: saved.savedPlanSha256, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion, verifyReconciliationAuthorization });
+  if (authorizationIdentity !== undefined && !SHA256.test(authorizationIdentity || "")) throw new Error("Stage A reconciliation governance authorization identity is invalid.");
+  const consumption = { authorizationSha256: authorizationIdentity || reconciliationAuthorization.authorizationSha256, completionSha256: recoveryCompletion.completionSha256, savedPlanSha256: saved.savedPlanSha256, preStateSha256: before.stateSha256 };
   const assertLivePolicyCas = (policy) => {
     const policySha256 = stablePolicySha256(policy);
     if (policySha256 !== recoveryCompletion.livePolicySha256 || policySha256 !== recoveryCompletion.desiredPolicySha256 || stablePolicyJson(policy) !== stablePolicyJson(buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A production-artifacts live policy changed before refresh-only apply.");
   };
   const beforeReservation = await adapter.readStateIdentity();
-  if (beforeReservation?.lineage !== before.lineage || beforeReservation.serial !== before.serial) throw new Error("Stage A reconciliation state changed after the refresh-only plan was saved.");
+  assertStateCas(beforeReservation, "after the refresh-only plan was saved");
   assertLivePolicyCas(await adapter.readProductionArtifactsPolicy());
   let reservation;
   let applyInvoked = false;
@@ -454,9 +467,9 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
     reservation = await reserveConsumption(consumption);
     if (!reservation || typeof reservation !== "object" || Array.isArray(reservation)) throw new Error("Stage A reconciliation consumption reservation is invalid.");
     const beforeApply = await adapter.readStateIdentity();
-    if (beforeApply?.lineage !== before.lineage || beforeApply.serial !== before.serial) throw new Error("Stage A reconciliation state changed after the refresh-only plan was saved.");
-    assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, preStateSerial: before.serial, verifyRecoveryCompletion });
-    assertStageAProductionArtifactsReconciliationAuthorization(reconciliationAuthorization, { sourceSha, recoveryCompletion, savedPlanSha256: saved.savedPlanSha256, preStateSerial: before.serial, verifyRecoveryCompletion, verifyReconciliationAuthorization });
+    assertStateCas(beforeApply, "after exclusive reservation");
+    assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion });
+    assertStageAProductionArtifactsReconciliationAuthorization(reconciliationAuthorization, { sourceSha, recoveryCompletion, savedPlanSha256: saved.savedPlanSha256, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion, verifyReconciliationAuthorization });
     assertLivePolicyCas(await adapter.readProductionArtifactsPolicy());
     applyInvoked = true;
     await adapter.applySavedRefreshOnlyPlan(saved);
@@ -465,13 +478,13 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
     const livePolicy = await adapter.readProductionArtifactsPolicy();
     if (stablePolicySha256(livePolicy) !== recoveryCompletion.livePolicySha256) throw new Error("Stage A reconciled production-artifacts policy does not match the authenticated desired policy.");
     finalizationAttempted = true;
-    await finalizeConsumption({ ...consumption, reservation, status: "COMPLETED" });
+    await finalizeConsumption({ ...consumption, reservation, status: "COMPLETED", postState: after, postLivePolicySha256: stablePolicySha256(livePolicy) });
     finalized = true;
     return Object.freeze({ valid: true, applied: true, refreshOnly: true, savedPlanSha256: saved.savedPlanSha256, preState: before, postState: after, livePolicySha256: stablePolicySha256(livePolicy), awsResourceMutations: 0, terraformStateMutations: 1 });
   } catch (error) {
     if (reservation && !finalized) {
       if (applyInvoked) {
-        if (!finalizationAttempted) { finalizationAttempted = true; await finalizeConsumption({ ...consumption, reservation, status: "FAILED" }); finalized = true; }
+        if (!finalizationAttempted) { finalizationAttempted = true; await finalizeConsumption({ ...consumption, reservation, status: "FAILED_OR_INDETERMINATE" }); finalized = true; }
       }
       else await abortConsumption({ ...consumption, reservation, status: "ABORTED" });
     }

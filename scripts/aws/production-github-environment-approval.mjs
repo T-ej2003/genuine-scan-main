@@ -11,6 +11,8 @@ export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
   environment: "production",
   workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main",
   stageAReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-stage-a-reconciliation.yml@refs/heads/main",
+  stageAProductionArtifactsRecoveryWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-stage-a-production-artifacts-recovery.yml@refs/heads/main",
+  stageAProductionArtifactsReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml@refs/heads/main",
   dualSlotRebaselineWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-dual-slot-rebaseline.yml@refs/heads/main",
   dualSlotRebaselineRecoveryWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-dual-slot-rebaseline-recovery.yml@refs/heads/main",
   stageBApplyAttemptReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-green-stage-b-apply-attempt-reconciliation.yml@refs/heads/main",
@@ -21,6 +23,8 @@ export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
 const approvedWorkflowRefs = new Set([
   PRODUCTION_ENVIRONMENT_APPROVAL.workflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.stageAReconciliationWorkflowRef,
+  PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef,
+  PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsReconciliationWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineRecoveryWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.stageBApplyAttemptReconciliationWorkflowRef,

@@ -44,6 +44,10 @@ const awsCliSourceFiles = [
   "scripts/aws/deploy-ecs-service.sh",
   "scripts/aws/production-release-oidc-contract.mjs",
   "scripts/aws/production-root-drop-evidence.mjs", "scripts/aws/produce-production-root-drop-evidence.mjs",
+  "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+  "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+  "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+  "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs",
 ];
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const readJson = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
@@ -94,6 +98,8 @@ const PHASES = Object.freeze([
   ["normal-backend-activation", "scripts/aws/production-normal-backend-activation.mjs"],
   ["initial-activation-lifecycle", "scripts/aws/manage-production-initial-activation-lifecycle.mjs"],
   ["dual-slot-rebaseline-durable-evidence", "scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs"],
+  ["stage-a-production-artifacts-policy-recovery", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
+  ["stage-a-production-artifacts-state-reconciliation", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
 ]);
 
 const NORMAL_ACTIVATION_CAPABILITIES = Object.freeze([
@@ -124,6 +130,19 @@ const NORMAL_ACTIVATION_CAPABILITIES = Object.freeze([
   ["normal-activation-release-update-service", "normal-backend-activation", "RELEASE_DEPLOYER", "ecs:UpdateService", [NORMAL_ACTIVATION.serviceArn], true],
   ["normal-activation-release-list-tasks", "normal-backend-activation", "RELEASE_DEPLOYER", "ecs:ListTasks", [NORMAL_ACTIVATION.serviceArn], false],
   ["normal-activation-release-describe-tasks", "normal-backend-activation", "RELEASE_DEPLOYER", "ecs:DescribeTasks", [`arn:aws:ecs:${NORMAL_ACTIVATION.region}:${NORMAL_ACTIVATION.account}:task/${NORMAL_ACTIVATION.cluster}/*`], false],
+]);
+
+const STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES = Object.freeze([
+  ["stage-a-artifacts-recovery-root-identify", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "sts:GetCallerIdentity", ["*"], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
+  ["stage-a-artifacts-recovery-root-read-versioning", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:GetBucketVersioning", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
+  ["stage-a-artifacts-recovery-root-read-lifecycle", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:GetBucketLifecycleConfiguration", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
+  ["stage-a-artifacts-recovery-root-put-policy", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:PutBucketPolicy", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], true, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
+  ["stage-a-artifacts-recovery-release-identify", "stage-a-production-artifacts-policy-recovery", "RELEASE_DEPLOYER", "sts:GetCallerIdentity", ["*"], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
+  ["stage-a-artifacts-recovery-release-read-policy", "stage-a-production-artifacts-policy-recovery", "RELEASE_DEPLOYER", "s3:GetBucketPolicy", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
+  ["stage-a-artifacts-journal-read", "stage-a-production-artifacts-state-reconciliation", "RELEASE_DEPLOYER", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], false, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
+  ["stage-a-artifacts-journal-conditional-create", "stage-a-production-artifacts-state-reconciliation", "RELEASE_DEPLOYER", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], true, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
+  ["stage-a-artifacts-reconciliation-release-identify", "stage-a-production-artifacts-state-reconciliation", "RELEASE_DEPLOYER", "sts:GetCallerIdentity", ["*"], false, "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
+  ["stage-a-artifacts-reconciliation-release-read-policy", "stage-a-production-artifacts-state-reconciliation", "RELEASE_DEPLOYER", "s3:GetBucketPolicy", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], false, "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
 ]);
 
 const FIXED = Object.freeze([
@@ -395,6 +414,14 @@ export function buildStageBDeploymentCapabilityGraph() {
         : authority({ id, action, resources, context: [] }, false, policies);
     return { id, phase, identity, executor: "aws-cli", sourceFile: "scripts/aws/production-normal-backend-activation.mjs", sourceFunction: id, action, resources, context: { account: NORMAL_ACTIVATION.account, region: NORMAL_ACTIVATION.region, releaseMode: "normal", targetBinding: "authenticated-stage-b-state-exact-revision" }, classification: mutation ? identity === "ADMINISTRATOR" ? "ADMIN_IAM_MUTATION" : "NORMAL_ACTIVATION_MUTATION" : identity === "ADMINISTRATOR" ? "ADMIN_DIRECT_READ" : "RELEASE_DIRECT_READ", probe: identity === "ADMINISTRATOR" ? "administrator-live-read-or-simulation" : "direct-live-read", probeIds: probesByAction.get(action) || [], policy, required: true, mutation };
   });
+  const stageAProductionArtifacts = STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES.map(([id, phase, identity, action, resources, mutation, sourceFile]) => ({
+    id, phase, identity, executor: "aws-cli", sourceFile, sourceFunction: id, action, resources,
+    context: { account: STAGE_B.account, region: STAGE_B.region, bucket: PRODUCTION_ACTIVATION_LIFECYCLE.bucket },
+    classification: mutation ? action === "s3:PutBucketPolicy" ? "ROOT_GOVERNED_POLICY_RECOVERY" : "RELEASE_CONDITIONAL_JOURNAL_CREATE" : identity === "ROOT_OPERATOR" ? "ROOT_GOVERNED_RECOVERY_READ" : "RELEASE_DIRECT_READ",
+    probe: identity === "RELEASE_DEPLOYER" ? "direct" : "structural", probeIds: identity === "RELEASE_DEPLOYER" ? [`${id}-authenticated`] : [],
+    policy: { sourceFile: "infra/aws/terraform/production-green-stage-a/main.tf", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null },
+    required: true, mutation,
+  }));
   const recovery = RECOVERY_CAPABILITIES.map(([id, action, resources]) => {
     const entry = { id, action, resources };
     return { id, phase: "canonical-backend-recovery", identity: "RELEASE_DEPLOYER", executor: "aws-cli-or-terraform", sourceFile: "scripts/aws/recover-stage-b-backend-task-definition.mjs", sourceFunction: id, action, resources, context: { account: "368992683803", region: "eu-west-2" }, classification: /^(?:ecs:RegisterTaskDefinition|ecs:TagResource|s3:PutObject|s3:DeleteObject)$/.test(action) ? "CANONICAL_RECOVERY_MUTATION" : "CANONICAL_RECOVERY_READ", probe: "administrator-simulation", probeIds: [], policy: authority(entry, false, policies), required: true, mutation: /^(?:ecs:RegisterTaskDefinition|ecs:TagResource|s3:PutObject|s3:DeleteObject)$/.test(action) };
@@ -406,7 +433,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   });
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: !/^(?:ecr:|kms:Verify|secretsmanager:Get|s3:Get)/.test(action) }));
   const runtimeAdmin = RUNTIME_ADMIN_CAPABILITIES.map(([id, phase, action, resources, mutation]) => ({ id, phase, identity: "ADMINISTRATOR", executor: "aws-cli", sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/prepare-production-ecs-runtime-consumability.mjs", sourceFunction: id, action, resources, context: { account: STAGE_B.account, region: STAGE_B.region }, classification: mutation ? "ADMIN_IAM_OR_SIGNING_MUTATION" : "ADMIN_RUNTIME_CLOSURE_READ", probe: action === "iam:SimulatePrincipalPolicy" ? "administrator-simulation" : "administrator-live-read", probeIds: [], policy: { sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/production-ecs-runtime-consumability.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation }));
-  const capabilities = [...fixed, ...normalActivation, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, ...normalActivation, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),

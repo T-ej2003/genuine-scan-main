@@ -91,6 +91,21 @@ test("Stage-A state identity registers its producer and authorization consumer",
   assert.deepEqual(generated[0], { ...artifact, atomicGroup: "stage-a-state-identity", allOrNone: true, rollback: "remove-committed-or-restore-backups" });
 });
 
+test("Stage-A production-artifacts recovery artifacts have closed producer-consumer paths", () => {
+  const expected = {
+    "stage-a-production-artifacts-recovery-authorization": ["scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
+    "stage-a-production-artifacts-recovery-completion": ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
+    "stage-a-production-artifacts-reconciliation-authorization": ["scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
+    "stage-a-production-artifacts-reconciliation-journal": ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
+  };
+  for (const [id, consumers] of Object.entries(expected)) {
+    const artifact = STAGE_B_ARTIFACT_CONTRACTS.find((candidate) => candidate.id === id);
+    assert.deepEqual(artifact?.consumers, consumers);
+    assert.equal(artifact?.externalProducer, true);
+    assert.deepEqual(canonicalStageBArtifactContracts().artifacts.find((candidate) => candidate.id === id)?.consumers, consumers);
+  }
+});
+
 test("reference-audit contract registers every production consumer", () => {
   const referenceAudit = STAGE_B_ARTIFACT_CONTRACTS.find(({ id }) => id === "reference-audit");
   assert.deepEqual(referenceAudit?.consumers, [

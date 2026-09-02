@@ -4,6 +4,196 @@
   "status": "PASS",
   "newAwsCalls": [
     {
+      "sourceFile": "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "stage-a-artifacts-reconciliation-release-identify",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+      "action": "s3:GetObject",
+      "capabilityId": "stage-a-artifacts-journal-read",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-stage-a-production-artifacts-reconciliation/*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+      "action": "s3:PutObject",
+      "capabilityId": "stage-a-artifacts-journal-conditional-create",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-stage-a-production-artifacts-reconciliation/*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "action": "s3:GetBucketPolicy",
+      "capabilityId": "stage-a-artifacts-reconciliation-release-read-policy",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "stage-a-artifacts-reconciliation-release-identify",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "action": "s3:GetBucketLifecycleConfiguration",
+      "capabilityId": "stage-a-artifacts-recovery-root-read-lifecycle",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "action": "s3:GetBucketPolicy",
+      "capabilityId": "stage-a-artifacts-recovery-release-read-policy",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "action": "s3:GetBucketVersioning",
+      "capabilityId": "stage-a-artifacts-recovery-root-read-versioning",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "action": "s3:PutBucketPolicy",
+      "capabilityId": "stage-a-artifacts-recovery-root-put-policy",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "stage-a-artifacts-recovery-root-identify",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs",
       "action": "sts:GetCallerIdentity",
       "capabilityId": "administrator-release-preflight-trust-attestation-identify",
