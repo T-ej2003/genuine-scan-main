@@ -130,6 +130,7 @@ test("GitHub authorization runner supports token and credential-store domains wi
 
 test("GitHub authorization runner rejects write-shaped gh api invocations", () => {
   const run = createProductionGithubCommandRunner({ env: { GH_TOKEN: "fixture-token" }, exec: () => "{}" });
+  assert.doesNotThrow(() => run("gh", ["api", "repos/T-ej2003/genuine-scan-main/branches/main"]));
   for (const flag of ["--method", "-X", "--input", "--field", "-f", "--raw-field", "-F", "--method=POST", "-XPOST"]) assert.throws(() => run("gh", ["api", "repos/T-ej2003/genuine-scan-main/actions/runs/123", flag, "value"]), /reviewed read-only/);
   assert.throws(() => run("gh", ["api", "repos/example/repository"]), /reviewed read-only/);
   for (const member of ["other.json", "../authorization.json", "arbitrary.json", "recovery/authorization.json"]) assert.throws(() => run("unzip", ["-p", "/tmp/authorization.zip", member]), /reviewed local/);

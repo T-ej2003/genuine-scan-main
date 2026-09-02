@@ -7,7 +7,8 @@ import path from "node:path";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { assertProductionDualSlotRebaselineDurableEvidence, productionDualSlotRebaselineDurableEvidenceKey } from "./production-dual-slot-rebaseline-contract.mjs";
 import { PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
-import { assertStageBProtectedMainCheckout, readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
+import { assertStageBProtectedMainCheckout, readStageBProtectedMainCheckoutFromGitHub } from "./stage-b-deployment-identity.mjs";
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const required = (args, name) => { const value = args.get(name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
@@ -19,7 +20,7 @@ const exactInputKeys = (bundle) => {
   if (!bundle || typeof bundle !== "object" || Object.keys(bundle).some((key) => !expected.includes(key))) throw new Error("Durable rebaseline evidence producer input contains unsupported top-level fields.");
 };
 
-export function persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha, run, protectedCheckout = () => readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true, expectedSourceSha: publisherSourceSha, requireCanonicalRepository: true }), fsOps = { mkdtempSync, readFileSync, rmSync, writeFileSync } } = {}) {
+export function persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha, run, githubRun = createProductionGithubCommandRunner(), protectedCheckout = () => readStageBProtectedMainCheckoutFromGitHub({ cwd: process.cwd(), expectedSourceSha: publisherSourceSha, githubRun }), fsOps = { mkdtempSync, readFileSync, rmSync, writeFileSync } } = {}) {
   exactInputKeys(bundle);
   const durablePayload = { manifest: bundle.manifest, preparation: bundle.preparation, completion: bundle.completion, bindings: bundle.bindings };
   assertProductionDualSlotRebaselineDurableEvidence(durablePayload, { publisherSourceSha, authorization: bundle.authorization, recoveryEnvelope: bundle.recoveryEnvelope, imageAuthorization: bundle.imageAuthorization, proveDescendant: descendant });

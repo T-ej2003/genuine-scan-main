@@ -44,6 +44,23 @@ export function assertStageBCanonicalRepositoryUrl(remoteUrl) {
   return STAGE_B_CANONICAL_REPOSITORY;
 }
 
+export function readAuthenticatedGitHubProtectedMainIdentity({ expectedSourceSha, githubRun } = {}) {
+  if (typeof githubRun !== "function") throw new Error("Authenticated GitHub protected-main lookup requires the canonical GitHub command runner.");
+  let response;
+  try {
+    response = JSON.parse(githubRun("gh", ["api", `repos/${STAGE_B_CANONICAL_REPOSITORY}/branches/main`]));
+  } catch (error) {
+    throw new Error(`Authenticated GitHub protected-main lookup failed: ${error.message}`);
+  }
+  if (!response || typeof response !== "object" || Array.isArray(response) || response.name !== "main" || !response.commit || typeof response.commit !== "object" || Array.isArray(response.commit)) {
+    throw new Error("Authenticated GitHub protected-main response is malformed.");
+  }
+  const protectedMainSha = String(response.commit.sha || "");
+  requireSha(protectedMainSha, "Authenticated GitHub protected-main SHA");
+  if (expectedSourceSha !== undefined && protectedMainSha !== expectedSourceSha) throw new Error("Authenticated GitHub protected main does not match the requested source SHA.");
+  return Object.freeze({ repository: STAGE_B_CANONICAL_REPOSITORY, branch: "main", protectedMainSha });
+}
+
 function requireDigest(value, label) {
   if (!DIGEST_PATTERN.test(String(value || ""))) throw new Error(`${label} must be a 64-character SHA256 digest.`);
   return value;
@@ -152,6 +169,19 @@ function exists(cwd, name) {
   return fs.existsSync(path.resolve(cwd, gitPath(cwd, name)));
 }
 
+function assertStageBCleanCheckout(evidence) {
+  const { toolingSha, currentHead, porcelainStatus, repositoryState } = evidence;
+  requireSha(toolingSha, "toolingSha");
+  if (currentHead !== toolingSha) throw new Error("Stage B tooling HEAD does not match toolingSha.");
+  if (repositoryState.mergeInProgress) throw new Error("Stage B tooling checkout has a merge in progress.");
+  if (repositoryState.rebaseInProgress) throw new Error("Stage B tooling checkout has a rebase in progress.");
+  if (repositoryState.cherryPickInProgress) throw new Error("Stage B tooling checkout has a cherry-pick in progress.");
+  if (porcelainStatus) {
+    if (porcelainStatus.split("\n").some((line) => line.startsWith("??"))) throw new Error("Stage B tooling checkout contains an untracked file.");
+    throw new Error("Stage B tooling checkout has tracked modifications.");
+  }
+}
+
 export function readFreshProtectedMainIdentity({ cwd = process.cwd(), expectedSourceSha, run = (args) => git(cwd, args) } = {}) {
   try {
     run(["fetch", "--no-tags", "origin", "main"]);
@@ -166,6 +196,31 @@ export function readFreshProtectedMainIdentity({ cwd = process.cwd(), expectedSo
     throw new Error("Requested source SHA does not match the freshly fetched protected main.");
   }
   return Object.freeze({ fetchSucceeded: true, freshRemoteMainSha, headSha });
+}
+
+export function readStageBProtectedMainCheckoutFromGitHub({ cwd = process.cwd(), expectedSourceSha, githubRun, run = (args) => git(cwd, args) } = {}) {
+  const githubIdentity = readAuthenticatedGitHubProtectedMainIdentity({ expectedSourceSha, githubRun });
+  const currentHead = String(run(["rev-parse", "HEAD"])).trim();
+  const porcelainStatus = String(run(["status", "--porcelain=v1", "--untracked-files=all"]));
+  const repositoryState = {
+    remoteDefaultBranch: "main",
+    shallow: run(["rev-parse", "--is-shallow-repository"]) === "true",
+    mergeInProgress: exists(cwd, "MERGE_HEAD"),
+    rebaseInProgress: exists(cwd, "rebase-merge") || exists(cwd, "rebase-apply"),
+    cherryPickInProgress: exists(cwd, "CHERRY_PICK_HEAD"),
+  };
+  const evidence = buildStageBProtectedMainCheckoutEvidence({
+    mode: "production",
+    toolingSha: currentHead,
+    currentHead,
+    originMainHead: githubIdentity.protectedMainSha,
+    isAncestor: currentHead === githubIdentity.protectedMainSha,
+    porcelainStatus,
+    repositoryState,
+  });
+  assertStageBCleanCheckout(evidence);
+  if (currentHead !== githubIdentity.protectedMainSha) throw new Error("Local checkout HEAD does not match authenticated GitHub protected main.");
+  return evidence;
 }
 
 export function readStageBProtectedMainCheckout({ cwd = process.cwd(), fetchOriginMain = true, expectedSourceSha, requireCanonicalRepository = false, run = (args) => git(cwd, args) } = {}) {

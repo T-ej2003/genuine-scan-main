@@ -11,6 +11,8 @@ import {
   assertStageBCanonicalRepositoryUrl,
   assertStageBToolingCheckout,
   buildStageBProtectedMainCheckoutEvidence,
+  readAuthenticatedGitHubProtectedMainIdentity,
+  readStageBProtectedMainCheckoutFromGitHub,
   readStageBProtectedMainCheckout,
   STAGE_B_PROTECTED_CHECKOUT_FIELDS,
   STAGE_B_PROTECTED_CHECKOUT_REPOSITORY_STATE_FIELDS,
@@ -127,6 +129,49 @@ test("protected-main repository identity accepts only the canonical GitHub repos
     "https://gitlab.com/T-ej2003/genuine-scan-main.git",
     "not a remote URL",
   ]) assert.throws(() => assertStageBCanonicalRepositoryUrl(remote), /canonical|malformed/);
+});
+
+test("authenticated GitHub protected-main lookup is fixed to repository and branch", () => {
+  const calls = [];
+  const identity = readAuthenticatedGitHubProtectedMainIdentity({
+    expectedSourceSha: toolingSha,
+    githubRun: (command, args) => { calls.push({ command, args }); return JSON.stringify({ name: "main", commit: { sha: toolingSha } }); },
+  });
+  assert.deepEqual(identity, { repository: "T-ej2003/genuine-scan-main", branch: "main", protectedMainSha: toolingSha });
+  assert.deepEqual(calls, [{ command: "gh", args: ["api", "repos/T-ej2003/genuine-scan-main/branches/main"] }]);
+  for (const response of [
+    {},
+    { name: "develop", commit: { sha: toolingSha } },
+    { name: "main", commit: { sha: imageReleaseSha } },
+    { name: "main", commit: { sha: "not-a-sha" } },
+    [],
+    "main",
+  ]) assert.throws(() => readAuthenticatedGitHubProtectedMainIdentity({ expectedSourceSha: toolingSha, githubRun: () => JSON.stringify(response) }), /malformed|SHA|source/);
+  assert.throws(() => readAuthenticatedGitHubProtectedMainIdentity({ expectedSourceSha: toolingSha, githubRun: () => { throw new Error("GitHub unavailable"); } }), /lookup failed/);
+});
+
+test("GitHub protected-main checkout ignores mutable Git remotes and transport overrides", () => {
+  const fixture = createProtectedMainFixture();
+  try {
+    git(fixture.cwd, ["remote", "set-url", "origin", "git@github.com:T-ej2003/genuine-scan-main.git"]);
+    git(fixture.cwd, ["config", "core.sshCommand", "ssh -o ProxyCommand=attacker-mirror"]);
+    const previousSshCommand = process.env.GIT_SSH_COMMAND;
+    process.env.GIT_SSH_COMMAND = "ssh -o ProxyCommand=attacker-mirror";
+    const gitCalls = [];
+    try {
+      const checkout = readStageBProtectedMainCheckoutFromGitHub({
+        cwd: fixture.cwd,
+        expectedSourceSha: fixture.head,
+        githubRun: (command, args) => JSON.stringify({ name: "main", commit: { sha: fixture.head } }),
+        run: (args) => { gitCalls.push(args); return git(fixture.cwd, args); },
+      });
+      assert.equal(checkout.currentHead, fixture.head);
+      assert.equal(gitCalls.some((args) => args[0] === "fetch" || args[0] === "remote" || args[0] === "ls-remote"), false);
+    } finally {
+      if (previousSshCommand === undefined) delete process.env.GIT_SSH_COMMAND;
+      else process.env.GIT_SSH_COMMAND = previousSshCommand;
+    }
+  } finally { fs.rmSync(fixture.cwd, { recursive: true, force: true }); }
 });
 
 test("strict protected-main validation is joined to the plan tooling identity", () => {

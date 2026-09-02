@@ -23,7 +23,7 @@ import { createProductionGithubCommandRunner } from "../aws/production-credentia
 import { productionSupersessionEvidenceIdentity } from "../security/production-initial-migration-source-advance.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { persistProductionDualSlotRebaselineDurableEvidence } from "../aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs";
-import { assertStageBCanonicalRepositoryUrl } from "../aws/stage-b-deployment-identity.mjs";
+import { assertStageBCanonicalRepositoryUrl, readAuthenticatedGitHubProtectedMainIdentity } from "../aws/stage-b-deployment-identity.mjs";
 
 const sourceSha = "a".repeat(40);
 // Non-secret, production-safe recovery identity fixture.  The production validator
@@ -829,6 +829,11 @@ test("durable publisher conditionally creates and reads back the exact canonical
     assert.equal(putCount, 0, label);
   }
   assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run: () => { throw new Error("source CAS failed"); }, protectedCheckout: () => { throw new Error("source authentication failed"); } }), /source authentication failed/);
+  for (const githubResponse of [{ name: "main", commit: { sha: "b".repeat(40) } }, { name: "main", commit: { sha: "not-a-sha" } }]) {
+    let putCount = 0;
+    assert.throws(() => persistProductionDualSlotRebaselineDurableEvidence({ bundle, publisherSourceSha: sourceSha, run: (args) => { if (args[1] === "put-object") putCount += 1; }, protectedCheckout: () => readAuthenticatedGitHubProtectedMainIdentity({ expectedSourceSha: sourceSha, githubRun: () => JSON.stringify(githubResponse) }) }), /source SHA|malformed|SHA/);
+    assert.equal(putCount, 0, "GitHub source authentication failure");
+  }
   for (const remote of [
     "https://github.com/attacker/genuine-scan-main.git",
     "https://github.com/T-ej2003/other-repository.git",
