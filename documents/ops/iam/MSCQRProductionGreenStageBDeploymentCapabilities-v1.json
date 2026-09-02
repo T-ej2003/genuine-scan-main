@@ -11767,6 +11767,35 @@
       },
       "required": true,
       "mutation": false
+    },
+    {
+      "id": "stage-a-artifacts-recovery-root-sign",
+      "phase": "stage-a-production-artifacts-policy-recovery",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-root-attestation-signer.mjs",
+      "sourceFunction": "stage-a-artifacts-recovery-root-sign",
+      "action": "kms:Sign",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "ROOT_GOVERNED_ATTESTATION_SIGNING",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-recovery-root-sign",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
     }
   ],
   "directProbes": [
@@ -12437,7 +12466,13 @@
     },
     {
       "sourceFile": "scripts/aws/production-root-attestation-signer.mjs",
-      "action": "kms:Sign"
+      "action": "kms:Sign",
+      "identity": "ADMINISTRATOR"
+    },
+    {
+      "sourceFile": "scripts/aws/production-root-attestation-signer.mjs",
+      "action": "kms:Sign",
+      "identity": "ROOT_OPERATOR"
     },
     {
       "sourceFile": "scripts/aws/production-root-drop-evidence.mjs",

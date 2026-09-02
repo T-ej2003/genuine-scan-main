@@ -27,6 +27,7 @@ const CALLS = Object.freeze([
   ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:PutObject", "stage-a-artifacts-journal-conditional-create", [STAGE_A_RECONCILIATION_JOURNAL]],
   ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:GetObject", "stage-a-artifacts-recovery-root-journal-read", [STAGE_A_RECONCILIATION_JOURNAL], "ROOT_OPERATOR"],
   ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:PutObject", "stage-a-artifacts-recovery-root-journal-conditional-create", [STAGE_A_RECONCILIATION_JOURNAL], "ROOT_OPERATOR"],
+  ["scripts/aws/production-root-attestation-signer.mjs", "kms:Sign", "stage-a-artifacts-recovery-root-sign", [ROOT_ATTESTATION_KEY], "ROOT_OPERATOR"],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-reconciliation-release-read-policy", [PRODUCTION_ARTIFACTS_BUCKET]],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
   ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketLifecycleConfiguration", "stage-a-artifacts-recovery-root-read-lifecycle", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
@@ -201,9 +202,10 @@ export function buildProductionDependencyClosure() {
 }
 
 export function assertChangedAwsCallClosure(scanned, graph) {
-  const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER" }) => `${sourceFile}\t${action}\t${sourceFile === "scripts/aws/production-stage-a-production-artifacts-journal.mjs" ? identity : ""}`;
+  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs"].includes(sourceFile);
+  const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER" }) => `${sourceFile}\t${action}\t${identityBound(sourceFile) ? identity : ""}`;
   const callKeys = new Set(CALLS.map(key));
-  const normalized = scanned.map(({ sourceFile, action, identity }) => sourceFile === "scripts/aws/production-stage-a-production-artifacts-journal.mjs" ? { sourceFile, action, identity } : { sourceFile, action });
+  const normalized = scanned.map(({ sourceFile, action, identity }) => identityBound(sourceFile) ? { sourceFile, action, identity } : { sourceFile, action });
   const additions = normalized.filter((call) => callKeys.has(key(call)));
   if (additions.length !== CALLS.length || new Set(additions.map(key)).size !== CALLS.length) throw new Error("Changed production AWS calls differ from the reviewed closure contract.");
   const baseline = normalized.filter((call) => !callKeys.has(key(call))).sort((a, b) => `${a.sourceFile}:${a.action}`.localeCompare(`${b.sourceFile}:${b.action}`));

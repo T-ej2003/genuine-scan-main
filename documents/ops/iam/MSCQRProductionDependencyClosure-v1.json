@@ -99,6 +99,25 @@
       "negativeTestPresent": true
     },
     {
+      "sourceFile": "scripts/aws/production-root-attestation-signer.mjs",
+      "action": "kms:Sign",
+      "capabilityId": "stage-a-artifacts-recovery-root-sign",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
       "action": "s3:GetBucketPolicy",
       "capabilityId": "stage-a-artifacts-reconciliation-release-read-policy",

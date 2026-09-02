@@ -7,7 +7,7 @@ import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, createStageAProductionArtifactsReconciliationPrepareEvidence, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
 import { createStageAProductionArtifactsRecoveryAuthorization, createStageAProductionArtifactsRecoveryCompletionEvidence, createStageAProductionArtifactsReconciliationAuthorization, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
-import { runStageAProductionArtifactsRecovery } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
+import { assertStageAProductionArtifactsJournalRetention, runStageAProductionArtifactsRecovery } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
 import { runStageAProductionArtifactsReconciliation, runStageAProductionArtifactsReconciliationCli } from "../aws/run-production-stage-a-production-artifacts-reconciliation.mjs";
 
 const sourceSha = "a".repeat(40); const lineage = "02afb75a-f902-ab8a-f4c1-751d4aef7837"; const stateSha256 = "b".repeat(64);
@@ -129,7 +129,7 @@ test("root recovery rejects a changed Terraform state before PutBucketPolicy", a
 test("root recovery performs no networked work between final state CAS and policy write", async () => {
   const calls = []; let livePolicy = buildStageAProductionArtifactsBucketPolicyPredecessor(); let stateReads = 0;
   const authorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "304"), verificationRef: "adjacency" });
-  const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : args[1] === "get-bucket-policy" ? JSON.stringify({ Policy: JSON.stringify(livePolicy) }) : (() => { throw new Error(`unexpected release ${args[1]}`); })();
+  const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : args[1] === "get-bucket-policy" ? (calls.push("policy"), JSON.stringify({ Policy: JSON.stringify(livePolicy) })) : (() => { throw new Error(`unexpected release ${args[1]}`); })();
   const rootRun = (args) => {
     if (args[1] === "get-caller-identity") return rootIdentity;
     if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
@@ -140,6 +140,47 @@ test("root recovery performs no networked work between final state CAS and polic
   const recoveryJournal = { readRecoveryAttempt: () => null, writeRecoveryAttempt: () => ({ key: "attempt" }) };
   const journal = { readRecoveryCompletion: () => null, writeRecoveryCompletion: () => ({ key: "completion" }) };
   await runStageAProductionArtifactsRecovery({ sourceSha, workflowRunId: "304", workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => { calls.push("state"); stateReads += 1; return state; }, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal, recoveryJournal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true });
-  assert.equal(calls.at(-2), "state");
-  assert.equal(calls.at(-1), "put-policy");
+  const putIndex = calls.indexOf("put-policy");
+  assert.equal(calls[putIndex - 1], "policy");
+  assert.deepEqual(calls.slice(putIndex - 1, putIndex + 2), ["policy", "put-policy", "policy"]);
+});
+
+test("root recovery rejects an intervening live policy before PutBucketPolicy", async () => {
+  for (const [index, [label, interveningPolicy]] of [["desired", buildStageAProductionArtifactsBucketPolicy()], ["unknown", { Version: "2012-10-17", Statement: [] }]].entries()) {
+    let livePolicy = buildStageAProductionArtifactsBucketPolicyPredecessor(); let policyReads = 0; let puts = 0;
+    const authorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, String(305 + index)), verificationRef: `policy-race-${label}` });
+    const releaseRun = (args) => {
+      if (args[1] === "get-caller-identity") return releaseIdentity;
+      if (args[1] === "get-bucket-policy") { policyReads += 1; if (policyReads === 2) livePolicy = interveningPolicy; return JSON.stringify({ Policy: JSON.stringify(livePolicy) }); }
+      throw new Error(`unexpected release ${args[1]}`);
+    };
+    const rootRun = (args) => {
+      if (args[1] === "get-caller-identity") return rootIdentity;
+      if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
+      if (args[1] === "get-bucket-lifecycle-configuration") throw new Error("NoSuchLifecycleConfiguration");
+      if (args[1] === "put-bucket-policy") { puts += 1; return ""; }
+      throw new Error(`unexpected root ${args[1]}`);
+    };
+    const recoveryJournal = { readRecoveryAttempt: () => null, writeRecoveryAttempt: () => ({ key: "attempt" }) };
+    const journal = { readRecoveryCompletion: () => null, writeRecoveryCompletion: () => ({ key: "completion" }) };
+    await assert.rejects(() => runStageAProductionArtifactsRecovery({ sourceSha, workflowRunId: String(305 + index), workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => state, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal, recoveryJournal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true }), /live policy changed before the policy write/);
+    assert.equal(puts, 0, label);
+  }
+});
+
+test("recovery journal retention rejects every overlapping destructive lifecycle filter", () => {
+  const destructive = (rule) => ({ Status: "Enabled", Expiration: { Days: 1 }, ...rule });
+  for (const rule of [
+    { Prefix: "" },
+    { Prefix: "production-" },
+    { Filter: { Prefix: "production-stage-a-production-artifacts-reconciliation/" } },
+    { Prefix: "production-stage-a-production-artifacts-reconciliation/recovery/" },
+    { Filter: { And: { Prefix: "production-stage-a-production-artifacts-reconciliation/recovery/abc/" } } },
+    { Filter: { Tag: { Key: "retention", Value: "short" } } },
+    { Filter: { ObjectSizeGreaterThan: 1 } },
+  ]) assert.throws(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive(rule)] }), /expire its immutable records/);
+  assert.throws(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive({ Filter: { And: { Prefix: "production-stage-a-production-artifacts-reconciliation/recovery/", Tag: { Key: "retention", Value: "short" } } } })] }), /expire its immutable records/);
+  assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive({ Prefix: "some-other-prefix/" })] }));
+  assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive({ Filter: { And: { Prefix: "some-other-prefix/", Tag: { Key: "retention", Value: "short" } } } })] }));
+  assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Disabled", Prefix: "", Expiration: { Days: 1 } }] }));
 });

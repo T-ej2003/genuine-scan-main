@@ -25,15 +25,31 @@ function readPolicy(run) {
   return JSON.parse(encoded.Policy);
 }
 
+export function assertStageAProductionArtifactsJournalRetention(lifecycle, journalPrefix = "production-stage-a-production-artifacts-reconciliation/") {
+  if (!lifecycle || !Array.isArray(lifecycle.Rules)) throw new Error("Stage A recovery journal lifecycle response is malformed.");
+  const prefixFor = (rule) => {
+    if (typeof rule?.Prefix === "string") return rule.Prefix;
+    if (typeof rule?.Filter?.Prefix === "string") return rule.Filter.Prefix;
+    if (typeof rule?.Filter?.And?.Prefix === "string") return rule.Filter.And.Prefix;
+    return null;
+  };
+  const canProveDisjoint = (rule) => {
+    const prefix = prefixFor(rule);
+    return prefix !== null && !journalPrefix.startsWith(prefix) && !prefix.startsWith(journalPrefix);
+  };
+  const deletesEvidence = (rule) => Boolean(rule?.Expiration || rule?.NoncurrentVersionExpiration);
+  for (const rule of lifecycle.Rules) {
+    if (rule?.Status === "Enabled" && deletesEvidence(rule) && !canProveDisjoint(rule)) throw new Error("Stage A recovery journal lifecycle would expire its immutable records.");
+  }
+  return true;
+}
+
 function assertJournalRetention(run) {
   const versioning = awsJson(run, ["s3api", "get-bucket-versioning", "--bucket", "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"]);
   if (versioning.Status !== "Enabled") throw new Error("Stage A recovery journal requires production-artifacts bucket versioning.");
   try {
     const lifecycle = awsJson(run, ["s3api", "get-bucket-lifecycle-configuration", "--bucket", "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"]);
-    for (const rule of lifecycle.Rules || []) {
-      const prefix = rule?.Filter?.Prefix ?? rule?.Prefix ?? "";
-      if (rule?.Status === "Enabled" && (prefix === "" || "production-stage-a-production-artifacts-reconciliation/".startsWith(prefix)) && (rule.Expiration || rule.NoncurrentVersionExpiration)) throw new Error("Stage A recovery journal lifecycle would expire its immutable records.");
-    }
+    assertStageAProductionArtifactsJournalRetention(lifecycle);
   } catch (error) { if (!/NoSuchLifecycleConfiguration/i.test(`${error.message || ""}\n${error.stderr || ""}`)) throw error; }
 }
 
@@ -65,6 +81,8 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, workflow
     fs.writeFileSync(policyPath, JSON.stringify(buildStageAProductionArtifactsBucketPolicy()), { mode: 0o600, flag: "wx" });
     const finalState = await readStateIdentity();
     if (finalState?.lineage !== preState.lineage || finalState?.serial !== preState.serial || finalState?.stateSha256 !== preState.stateSha256) throw new Error("Stage A recovery state changed before the policy write.");
+    const finalPolicy = readPolicy(releaseRun); const finalPolicySha256 = stageAProductionArtifactsPolicySha256(finalPolicy);
+    if (finalPolicySha256 !== beforeSha256) throw new Error("Stage A recovery live policy changed before the policy write.");
     if (beforeSha256 === predecessorSha256) await rootRun(["s3api", "put-bucket-policy", "--bucket", authorization.bucket, "--policy", `file://${policyPath}`]);
     const after = readPolicy(releaseRun); if (stageAProductionArtifactsPolicySha256(after) !== authorization.desiredPolicySha256) throw new Error("Stage A production-artifacts recovery readback is not the exact desired policy.");
     const completion = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: after, sign }); const bytes = Buffer.from(`${JSON.stringify(completion)}\n`);

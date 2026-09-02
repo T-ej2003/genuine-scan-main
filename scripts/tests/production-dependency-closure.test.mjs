@@ -9,13 +9,14 @@ const graph = () => JSON.parse(fs.readFileSync(CAPABILITY_GRAPH_PATH, "utf8"));
 test("complete production dependency closure is exact across modes and failure paths", () => {
   const report = buildProductionDependencyClosure();
   assert.equal(report.status, "PASS");
-  const stageAAdditions = report.newAwsCalls.filter(({ sourceFile }) => sourceFile.includes("stage-a-production-artifacts")).map(({ sourceFile, action, capabilityId }) => [sourceFile, action, capabilityId]);
+  const stageAAdditions = report.newAwsCalls.filter(({ sourceFile, capabilityId }) => sourceFile.includes("stage-a-production-artifacts") || capabilityId === "stage-a-artifacts-recovery-root-sign").map(({ sourceFile, action, capabilityId }) => [sourceFile, action, capabilityId]);
   assert.deepEqual(stageAAdditions, [
     ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify"],
     ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:GetObject", "stage-a-artifacts-journal-read"],
     ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:PutObject", "stage-a-artifacts-journal-conditional-create"],
     ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:GetObject", "stage-a-artifacts-recovery-root-journal-read"],
     ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:PutObject", "stage-a-artifacts-recovery-root-journal-conditional-create"],
+    ["scripts/aws/production-root-attestation-signer.mjs", "kms:Sign", "stage-a-artifacts-recovery-root-sign"],
     ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-reconciliation-release-read-policy"],
     ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketLifecycleConfiguration", "stage-a-artifacts-recovery-root-read-lifecycle"],
