@@ -234,7 +234,10 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
   const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
   assert.doesNotThrow(() => assertStageAPlan(stageAPlan(), inputs));
   const exactUpdate = artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor() });
-  assert.equal(assertStageAPlan(stageAPlan({ artifactsBucketPolicy: exactUpdate }), inputs).changes, 3);
+  const exactUpdateValidation = assertStageAPlan(stageAPlan({ artifactsBucketPolicy: exactUpdate }), inputs);
+  assert.equal(exactUpdateValidation.changes, 3);
+  assert.equal(exactUpdateValidation.recoveryRequired, true);
+  assert.equal(exactUpdateValidation.executionDisposition, "RECOVERY_REQUIRED");
   assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: { ...exactUpdate, address: "aws_s3_bucket_policy.unrelated" } }), inputs));
   for (const actions of [["update", "create"], ["replace"], ["delete"]]) {
     assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions, beforePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor() }) }), inputs));
@@ -298,6 +301,18 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
     artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: nonConditionalDenyWeakened }),
   ]) assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy }), inputs));
   assert.equal(assertStageAPlan(stageAPlan({ actions: ["no-op"], checkerActions: ["no-op"] }), inputs).alreadyConverged, true);
+});
+
+test("Stage A refuses to apply the self-denied bucket-policy transition through the release deployer", async () => {
+  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  const saved = { sourceSha: "a".repeat(40), savedPlanSha256: "b".repeat(64), evidenceRef: "terraform-plan:test", evidenceSha256: "b".repeat(64), plan: stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor() }) }) };
+  let applyCalls = 0;
+  await assert.rejects(() => runStageAControlPlane({
+    adapter: { createSavedPlan: async () => saved, applySavedPlan: async () => { applyCalls += 1; }, describeIngress: async () => ({ present: true }) },
+    ...inputs,
+    sourceSha: saved.sourceSha,
+  }), /separately governed recovery transition/);
+  assert.equal(applyCalls, 0);
 });
 
 test("Stage A rejects destructive security-group transitions", () => {

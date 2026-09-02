@@ -283,7 +283,13 @@ function assertStageAProductionArtifactsBucketPolicyChange(entry) {
     }
   } else if (stablePolicyJson(decodePolicyDocument(change.before?.policy, "Stage A converged production-artifacts bucket policy")) !== expected
     || change.before?.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket) throw new Error("Stage A converged production-artifacts bucket-policy predecessor is not exact.");
-  return { alreadyConverged: exactActions(change.actions, ["no-op"]), mutationCount: exactActions(change.actions, ["create"]) || exactActions(change.actions, ["update"]) ? 1 : 0 };
+  const recoveryRequired = exactActions(change.actions, ["update"]);
+  return {
+    alreadyConverged: exactActions(change.actions, ["no-op"]),
+    recoveryRequired,
+    executionDisposition: recoveryRequired ? "RECOVERY_REQUIRED" : "ORDINARY_STAGE_A",
+    mutationCount: exactActions(change.actions, ["create"]) || recoveryRequired ? 1 : 0,
+  };
 }
 
 function readAndVerifyPlanSha256(planPath, expectedSha256) {
@@ -355,7 +361,7 @@ export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurit
   exact(after.ip_protocol, "tcp", "Stage A plan ingress protocol is wrong.");
   if (after.cidr_ipv4 !== null || after.cidr_ipv6 !== null || after.prefix_list_id !== null) throw new Error("Stage A plan ingress source is not the reviewed security group.");
   const mutationCount = [actions, checkerActions].filter((value) => exactActions(value, ["create"])).length + checkerRoleValidation.mutationCount + checkerPublicationValidation.mutationCount + artifactsBucketPolicyValidation.mutationCount;
-  return { valid: true, changes: mutationCount, address: change.address, actions, checkerActions, checkerRoleActions: checkerRole[0].actions, checkerPublicationActions: checkerPublication[0].actions, alreadyConverged: exactActions(actions, ["no-op"]) && exactActions(checkerActions, ["no-op"]) && checkerRoleValidation.alreadyConverged && checkerPublicationValidation.alreadyConverged && artifactsBucketPolicyValidation.alreadyConverged };
+  return { valid: true, changes: mutationCount, address: change.address, actions, checkerActions, checkerRoleActions: checkerRole[0].actions, checkerPublicationActions: checkerPublication[0].actions, alreadyConverged: exactActions(actions, ["no-op"]) && exactActions(checkerActions, ["no-op"]) && checkerRoleValidation.alreadyConverged && checkerPublicationValidation.alreadyConverged && artifactsBucketPolicyValidation.alreadyConverged, recoveryRequired: artifactsBucketPolicyValidation.recoveryRequired, executionDisposition: artifactsBucketPolicyValidation.recoveryRequired ? "RECOVERY_REQUIRED" : "ORDINARY_STAGE_A" };
 }
 
 export async function runStageAControlPlane({ adapter, endpointSecurityGroupId, runtimeSecurityGroupId, sourceSha } = {}) {
@@ -365,6 +371,7 @@ export async function runStageAControlPlane({ adapter, endpointSecurityGroupId, 
   if (!/^[a-f0-9]{64}$/.test(saved?.savedPlanSha256 || "")) throw new Error("Stage A saved plan bytes are not hash-bound.");
   const plan = saved?.plan;
   const validation = assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurityGroupId });
+  if (validation.recoveryRequired) throw new Error("Stage A production-artifacts bucket policy predecessor requires a separately governed recovery transition; ordinary release-deployer Terraform apply is forbidden.");
   if (!validation.alreadyConverged) await adapter.applySavedPlan(saved);
   const rule = await adapter.describeIngress({ endpointSecurityGroupId, runtimeSecurityGroupId, protocol: "tcp", fromPort: 443, toPort: 443 });
   if (rule?.present !== true) throw new Error("Stage A endpoint ingress postcondition is absent.");
