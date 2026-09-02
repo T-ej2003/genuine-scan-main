@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assertStageAPlan, buildStageAProductionArtifactsBucketPolicy, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
+import { assertStageAPlan, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, PRODUCTION_CUTOVER_MODE, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { persistOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
@@ -63,12 +63,12 @@ const checkerRoleChange = ({ actions = ["no-op"], before = {}, after = {} } = {}
     after: { name: STAGE_A_CHECKER_ROLE_TRUST.name, assume_role_policy: checkerRoleTrustDocument(), ...after },
   },
 });
-const artifactsBucketPolicyChange = ({ actions = ["create"], before = null, after = {}, policy = buildStageAProductionArtifactsBucketPolicy() } = {}) => ({
+const artifactsBucketPolicyChange = ({ actions = ["create"], before = null, beforePolicy, after = {}, policy = buildStageAProductionArtifactsBucketPolicy() } = {}) => ({
   address: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address,
   type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type,
   change: {
     actions,
-    before: actions[0] === "no-op" ? { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(buildStageAProductionArtifactsBucketPolicy()), ...before } : before,
+    before: actions[0] === "no-op" ? { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(buildStageAProductionArtifactsBucketPolicy()), ...before } : beforePolicy ? { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(beforePolicy), ...before } : before,
     after: { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(policy), ...after },
   },
 });
@@ -230,20 +230,82 @@ test("Stage A admits only the exact checker role-chain policy semantics", () => 
   assert.throws(() => assertStageAPlan(stageAPlan({ extra: [{ address: "aws_iam_role_policy.unrelated", type: "aws_iam_role_policy", change: { actions: ["create"], after: {} } }] }), inputs));
 });
 
-test("Stage A admits only the exact first-owner production-artifacts bucket policy", () => {
+test("Stage A admits only the exact production-artifacts bucket policy lifecycle", () => {
   const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
   assert.doesNotThrow(() => assertStageAPlan(stageAPlan(), inputs));
+  const exactUpdate = artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor() });
+  assert.equal(assertStageAPlan(stageAPlan({ artifactsBucketPolicy: exactUpdate }), inputs).changes, 3);
+  assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: { ...exactUpdate, address: "aws_s3_bucket_policy.unrelated" } }), inputs));
+  for (const actions of [["update", "create"], ["replace"], ["delete"]]) {
+    assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions, beforePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor() }) }), inputs));
+  }
+  const predecessor = buildStageAProductionArtifactsBucketPolicyPredecessor();
+  const desired = buildStageAProductionArtifactsBucketPolicy();
+  const predecessorMutation = structuredClone(predecessor);
+  predecessorMutation.Statement[0].Action = "s3:PutObject";
+  const predecessorRemoved = structuredClone(predecessor);
+  predecessorRemoved.Statement.pop();
+  const predecessorExtra = structuredClone(predecessor);
+  predecessorExtra.Statement.push({ Sid: "Unexpected", Effect: "Allow", Action: "s3:GetObject", Resource: "*" });
+  for (const beforePolicy of [predecessorMutation, predecessorRemoved, predecessorExtra, desired]) {
+    assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy }) }), inputs));
+  }
   const broadened = buildStageAProductionArtifactsBucketPolicy();
   broadened.Statement[0].Resource = [`arn:aws:s3:::${STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket}/*`];
   const missingSelfProtection = buildStageAProductionArtifactsBucketPolicy();
   missingSelfProtection.Statement.pop();
+  const durableEvidenceMissing = buildStageAProductionArtifactsBucketPolicy();
+  durableEvidenceMissing.Statement = durableEvidenceMissing.Statement.filter(({ Sid }) => Sid !== "DenyRebaselineEvidenceDeletion");
+  const durableEvidenceModified = buildStageAProductionArtifactsBucketPolicy();
+  durableEvidenceModified.Statement.find(({ Sid }) => Sid === "AllowReleaseDeployerConditionalRebaselineEvidenceCreate").Condition = {};
+  const durableEvidenceExtra = buildStageAProductionArtifactsBucketPolicy();
+  durableEvidenceExtra.Statement.push({ Sid: "Unexpected", Effect: "Allow", Action: "s3:GetObject", Resource: "*" });
+  const principalBroadened = buildStageAProductionArtifactsBucketPolicy();
+  principalBroadened.Statement.find(({ Sid }) => Sid === "AllowReleaseDeployerReadRebaselineEvidence").Principal = "*";
+  const actionBroadened = buildStageAProductionArtifactsBucketPolicy();
+  actionBroadened.Statement.find(({ Sid }) => Sid === "AllowReleaseDeployerReadRebaselineEvidence").Action = "s3:*";
+  const conditionRemoved = buildStageAProductionArtifactsBucketPolicy();
+  delete conditionRemoved.Statement.find(({ Sid }) => Sid === "AllowReleaseDeployerConditionalRebaselineEvidenceCreate").Condition;
+  const denyChangedToAllow = buildStageAProductionArtifactsBucketPolicy();
+  denyChangedToAllow.Statement.find(({ Sid }) => Sid === "DenyRebaselineEvidenceDeletion").Effect = "Allow";
+  const nonConditionalDenyWeakened = buildStageAProductionArtifactsBucketPolicy();
+  nonConditionalDenyWeakened.Statement.find(({ Sid }) => Sid === "DenyNonConditionalRebaselineEvidenceWrites").Condition = { StringEquals: { "s3:if-none-match": "*" } };
+  const durableEvidenceSids = [
+    "AllowReleaseDeployerReadRebaselineEvidence",
+    "AllowReleaseDeployerConditionalRebaselineEvidenceCreate",
+    "DenyNonConditionalRebaselineEvidenceWrites",
+    "DenyOtherPrincipalsRebaselineEvidenceWrites",
+    "DenyRebaselineEvidenceDeletion",
+  ];
+  for (const sid of durableEvidenceSids) {
+    const missing = buildStageAProductionArtifactsBucketPolicy();
+    missing.Statement = missing.Statement.filter((statement) => statement.Sid !== sid);
+    assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: missing }) }), inputs));
+  }
   for (const artifactsBucketPolicy of [
-    artifactsBucketPolicyChange({ actions: ["update"] }),
     artifactsBucketPolicyChange({ before: {} }),
     artifactsBucketPolicyChange({ after: { bucket: "unrelated-bucket" } }),
     artifactsBucketPolicyChange({ policy: broadened }),
     artifactsBucketPolicyChange({ policy: missingSelfProtection }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: broadened }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: durableEvidenceMissing }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: durableEvidenceModified }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: durableEvidenceExtra }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: principalBroadened }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: actionBroadened }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: conditionRemoved }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: denyChangedToAllow }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: nonConditionalDenyWeakened }),
   ]) assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy }), inputs));
+  assert.equal(assertStageAPlan(stageAPlan({ actions: ["no-op"], checkerActions: ["no-op"] }), inputs).alreadyConverged, true);
+});
+
+test("Stage A rejects destructive security-group transitions", () => {
+  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  for (const address of [
+    'aws_vpc_security_group_ingress_rule.runtime_database["sg-runtime"]',
+    'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]',
+  ]) assert.throws(() => assertStageAPlan(stageAPlan({ address, actions: ["delete"] }), inputs));
 });
 
 test("Stage A admits only the exact checker publication policy transition", () => {
