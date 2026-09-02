@@ -97,6 +97,14 @@ test("local governed composition removes ambient credentials and pins the exact 
   assertAwsOverridesAbsent({ ...calls[0].options.env, AWS_PROFILE: undefined });
 });
 
+test("Stage A Terraform runners use the canonical sanitized named-profile environment", () => {
+  for (const file of ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"]) {
+    const source = fs.readFileSync(file, "utf8");
+    assert.match(source, /createProductionAwsCredentialEnvironment/);
+    assert.doesNotMatch(source, /env:\s*\{\s*\.\.\.process\.env/);
+  }
+});
+
 test("AWS command environments never inherit GitHub control-plane credentials", () => {
   const calls = [];
   const run = createProductionCommandRunner({

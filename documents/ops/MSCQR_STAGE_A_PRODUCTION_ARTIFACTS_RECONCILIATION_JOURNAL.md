@@ -15,10 +15,13 @@ binds one root-operated `PutBucketPolicy` from `P0` directly to the final
 policy (`P2`). `P2` contains the existing rebaseline-evidence rules plus the
 isolated journal rules. There is no `P0 -> P1 -> P2` sequence.
 
-The recovery runner verifies the exact predecessor and protected source before
-the one policy write, reads back `P2`, and emits root-attested completion
-evidence. Only after that readback may the release-deployer write journal
-records or persist the refresh-only state reconciliation.
+The recovery runner requires the exact clean protected checkout, authorization,
+state identity, and predecessor before it creates a root-attested conditional
+`recovery/<authorization-sha256>/attempt.json` record. It then performs the one
+policy write, reads back `P2`, and emits root-attested completion evidence. If
+the process stops after the policy write, the same authorization may resume
+only when that immutable signed attempt exists and live policy is exact `P2`;
+the retry performs no policy write. An existing valid completion is idempotent.
 
 ## Namespace and permissions
 
@@ -31,6 +34,11 @@ The release-deployer receives only `s3:GetObject` and `s3:PutObject` with
 nonconditional writes, writes by every other principal, `DeleteObject`, and
 `DeleteObjectVersion`. No list permission, overwrite, or cross-Stage-B access
 is used.
+
+Before `P2` exists, the already-governed bucket-owner recovery principal writes
+only the signed attempt object with conditional create. After `P2`, the policy
+prevents that principal from writing or deleting journal objects; completion
+and reconciliation records use the release-deployer's narrow journal grant.
 
 ## Immutable records
 

@@ -57,3 +57,12 @@ test("Stage A reconciliation journal makes non-success terminal and rejects subs
   assert.throws(() => assertStageAProductionArtifactsReservation(substituted, { preStateSha256: identity.preStateSha256 }), /authorized operation/);
   assert.throws(() => createStageAProductionArtifactsJournalResult({ reservation, status: "COMPLETED", postState: { lineage: reservation.preStateLineage, serial: reservation.preStateSerial, stateSha256: "1".repeat(64) }, postLivePolicySha256: reservation.desiredPolicySha256 }), /completed result/);
 });
+
+test("Stage A recovery attempt is immutable and authorization-namespaced", () => {
+  const s3 = memoryS3(); const journal = createStageAProductionArtifactsJournal({ run: s3.run }); const bytes = Buffer.from('{"signed":"attempt"}\n');
+  const first = journal.writeRecoveryAttempt({ recoveryAuthorizationSha256: "9".repeat(64), bytes });
+  assert.match(first.key, /recovery\/9{64}\/attempt\.json$/);
+  assert.deepEqual(journal.readRecoveryAttempt("9".repeat(64)).bytes, bytes);
+  assert.throws(() => journal.writeRecoveryAttempt({ recoveryAuthorizationSha256: "9".repeat(64), bytes }), /already exists/);
+  assert.equal(s3.calls.filter((args) => args[1] === "put-object").every((args) => args.includes("--if-none-match") && args.includes("*")), true);
+});

@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
 import { createStageAProductionArtifactsReconciliationAuthorization as createCoreAuthorization, createTerraformStageAAdapter, runStageAProductionArtifactsStateReconciliation } from "./production-stage-a-control-plane.mjs";
 import { STAGE_A_TERRAFORM_BACKEND } from "./production-stage-a-root-drop-orphan-recovery.mjs";
@@ -53,7 +53,8 @@ export async function runStageAProductionArtifactsReconciliationCli(argv = proce
   if (!path.isAbsolute(terraformDataDir) || terraformDataDir.startsWith(`${root}${path.sep}`) || !path.isAbsolute(refreshPlanPath) || refreshPlanPath.startsWith(`${root}${path.sep}`)) throw new Error("Stage A reconciliation private Terraform paths must be external and absolute.");
   fs.mkdirSync(terraformDataDir, { recursive: true, mode: 0o700 }); fs.chmodSync(terraformDataDir, 0o700);
   const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: "eu-west-2" });
-  const terraformRun = async (args) => execFileSync(args[0], args.slice(1), { cwd: root, env: { ...process.env, AWS_PROFILE: "mscqr-production-release-deployer", AWS_REGION: "eu-west-2", TF_DATA_DIR: terraformDataDir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const terraformEnvironment = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: "eu-west-2" }), TF_DATA_DIR: terraformDataDir };
+  const terraformRun = async (args) => execFileSync(args[0], args.slice(1), { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const adapter = createTerraformStageAAdapter({ root: "infra/aws/terraform/production-green-stage-a", planPath: path.join(terraformDataDir, "unused.tfplan"), refreshOnlyPlanPath, backendArgs: Object.entries(STAGE_A_TERRAFORM_BACKEND).filter(([key]) => key !== "type").map(([key, value]) => `-backend-config=${key}=${value}`), run: terraformRun, describeIngress: async () => ({ present: false }), readProductionArtifactsPolicy: async () => readPolicy(releaseRun), sourceSha });
   const result = await runStageAProductionArtifactsReconciliation({ sourceSha, recoveryWorkflowRunId: required(argv, "--recovery-authorization-workflow-run-id"), recoveryWorkflowRunAttempt: required(argv, "--recovery-authorization-workflow-run-attempt"), reconciliationWorkflowRunId: required(argv, "--reconciliation-authorization-workflow-run-id"), reconciliationWorkflowRunAttempt: required(argv, "--reconciliation-authorization-workflow-run-attempt"), releaseRun, adapter, journal: createStageAProductionArtifactsJournal({ run: releaseRun }), verifySignature: createRootAttestationKmsVerifier({ run: releaseRun }), ...deps });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`); return result;

@@ -29,6 +29,11 @@ export function stageAProductionArtifactsRecoveryCompletionKey({ recoveryAuthori
   return `${STAGE_A_PRODUCTION_ARTIFACTS_JOURNAL_PREFIX}recovery/${recoveryAuthorizationSha256}/completion.json`;
 }
 
+export function stageAProductionArtifactsRecoveryAttemptKey({ recoveryAuthorizationSha256 } = {}) {
+  if (!SHA256.test(recoveryAuthorizationSha256 || "")) throw new Error("Stage A recovery attempt key is invalid.");
+  return `${STAGE_A_PRODUCTION_ARTIFACTS_JOURNAL_PREFIX}recovery/${recoveryAuthorizationSha256}/attempt.json`;
+}
+
 function assertIdentity(value, label) {
   if (value.operation !== STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION || !SHA40.test(value.sourceSha || "") || value.account !== STAGE_B.account || value.region !== STAGE_B.region || value.executionPrincipal !== PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn || ![value.authorizationSha256, value.recoveryCompletionSha256, value.savedPlanSha256, value.preStateSha256, value.desiredPolicySha256].every((field) => SHA256.test(field || "")) || !LINEAGE.test(value.preStateLineage || "") || !Number.isSafeInteger(value.preStateSerial) || value.preStateSerial < 1) throw new Error(`${label} identity is invalid.`);
 }
@@ -94,7 +99,7 @@ function conditionalCreate({ run, key, bytes }) {
 }
 
 export function createStageAProductionArtifactsJournal({ run } = {}) {
-  if (typeof run !== "function") throw new Error("Stage A reconciliation journal requires an explicit release-deployer AWS runner.");
+  if (typeof run !== "function") throw new Error("Stage A reconciliation journal requires an explicit governed AWS runner.");
   const load = (authorizationSha256, record) => {
     const bytes = readObject({ run, key: stageAProductionArtifactsJournalKey({ authorizationSha256, record }) });
     if (!bytes) return null;
@@ -120,6 +125,16 @@ export function createStageAProductionArtifactsJournal({ run } = {}) {
       const key = stageAProductionArtifactsRecoveryCompletionKey({ recoveryAuthorizationSha256 });
       if (!conditionalCreate({ run, key, bytes })) throw new Error("Stage A recovery completion already exists; no overwrite is permitted.");
       return Object.freeze({ key, sha256: sha256(bytes) });
+    },
+    writeRecoveryAttempt({ recoveryAuthorizationSha256, bytes } = {}) {
+      if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw new Error("Stage A recovery attempt bytes are invalid.");
+      const key = stageAProductionArtifactsRecoveryAttemptKey({ recoveryAuthorizationSha256 });
+      if (!conditionalCreate({ run, key, bytes })) throw new Error("Stage A recovery attempt already exists; no overwrite is permitted.");
+      return Object.freeze({ key, sha256: sha256(bytes) });
+    },
+    readRecoveryAttempt(recoveryAuthorizationSha256) {
+      const key = stageAProductionArtifactsRecoveryAttemptKey({ recoveryAuthorizationSha256 }); const bytes = readObject({ run, key });
+      return bytes && Object.freeze({ key, bytes, sha256: sha256(bytes) });
     },
     readRecoveryCompletion(recoveryAuthorizationSha256) {
       const key = stageAProductionArtifactsRecoveryCompletionKey({ recoveryAuthorizationSha256 }); const bytes = readObject({ run, key });
