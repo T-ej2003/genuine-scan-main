@@ -21,10 +21,29 @@ The operator sequence is: complete the separately governed bucket-policy
 recovery; authenticate its completion; run prepare; obtain the independent
 protected-environment authorization; run execute with the exact prepared plan
 and evidence; verify state/live convergence; then run a fresh ordinary
-Stage-A plan. If protected main advances after recovery, pass the historical
-recovery source SHA as `--recovery-source-sha`; the reconciliation authorization
-then records and verifies the authenticated descendant relationship without
-replaying recovery. If the recovery policy write succeeded but completion
+Stage-A plan. If current protected main differs from the historical recovery
+source SHA, first dispatch
+`.github/workflows/authorize-production-stage-a-production-artifacts-continuation-rebind.yml`
+for that exact protected-main SHA, with the exact governed manifest SHA from
+that checkout:
+
+```sh
+MANIFEST_SHA256="$(node --input-type=module -e 'import { stageAProductionArtifactsGovernedExecutableManifestSha256 as digest } from "./scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs"; process.stdout.write(digest(process.env.SOURCE_SHA));')"
+gh workflow run authorize-production-stage-a-production-artifacts-continuation-rebind.yml --ref main -f source_sha="$SOURCE_SHA" -f recovery_source_sha="$RECOVERY_SOURCE_SHA" -f recovery_authorization_workflow_run_id="$RECOVERY_RUN_ID" -f recovery_authorization_workflow_run_attempt="$RECOVERY_RUN_ATTEMPT" -f reviewed_governed_executable_manifest_sha256="$MANIFEST_SHA256" -f verification_ref="$VERIFICATION_REF"
+```
+
+Record its completed workflow run ID and `run_attempt` (for
+example, with `gh api repos/T-ej2003/genuine-scan-main/actions/runs/<run-id>`),
+then use those coordinates in both commands:
+
+```sh
+npm run stage-a:production-artifacts:prepare -- --production --source-sha "$SOURCE_SHA" --recovery-source-sha "$RECOVERY_SOURCE_SHA" --continuation-rebind-workflow-run-id "$REBIND_RUN_ID" --continuation-rebind-workflow-run-attempt "$REBIND_RUN_ATTEMPT" --recovery-authorization-workflow-run-id "$RECOVERY_RUN_ID" --recovery-authorization-workflow-run-attempt "$RECOVERY_RUN_ATTEMPT" --terraform-data-dir "$PRIVATE_TF_DIR" --refresh-only-plan "$REFRESH_PLAN" --prepare-evidence "$PREPARE_EVIDENCE"
+npm run stage-a:production-artifacts:reconcile -- --production --source-sha "$SOURCE_SHA" --recovery-source-sha "$RECOVERY_SOURCE_SHA" --continuation-rebind-workflow-run-id "$REBIND_RUN_ID" --continuation-rebind-workflow-run-attempt "$REBIND_RUN_ATTEMPT" --recovery-authorization-workflow-run-id "$RECOVERY_RUN_ID" --recovery-authorization-workflow-run-attempt "$RECOVERY_RUN_ATTEMPT" --reconciliation-authorization-workflow-run-id "$RECONCILIATION_RUN_ID" --reconciliation-authorization-workflow-run-attempt "$RECONCILIATION_RUN_ATTEMPT" --terraform-data-dir "$PRIVATE_TF_DIR" --refresh-only-plan "$REFRESH_PLAN" --prepare-evidence "$PREPARE_EVIDENCE"
+```
+
+The rebind authorizes zero `PutBucketPolicy` writes, Terraform applies, or
+infrastructure writes; each later source SHA requires its own exact-source
+rebind. If the recovery policy write succeeded but completion
 publication failed before main advanced, retry recovery with the same
 authorization and `--recovery-source-sha`; the authenticated attempt and exact
 P2 policy permit completion-only resume with no second policy write. Prepare

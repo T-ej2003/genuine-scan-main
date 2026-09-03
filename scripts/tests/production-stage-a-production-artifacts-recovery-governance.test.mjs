@@ -162,6 +162,7 @@ test("descendant continuation binds the complete governed Git-object manifest", 
   const requiredFamilies = [
     "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
     "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+    "scripts/aws/authorize-production-stage-a-production-artifacts-continuation-rebind.mjs",
     "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs",
     "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
     "scripts/aws/production-stage-a-control-plane.mjs",
@@ -179,6 +180,19 @@ test("descendant continuation binds the complete governed Git-object manifest", 
     const files = manifest.files.map((entry) => entry.path === file ? { ...entry, sha256: "f".repeat(64) } : entry);
     return digest(files);
   };
+  const rebindAuthorizer = "scripts/aws/authorize-production-stage-a-production-artifacts-continuation-rebind.mjs";
+  const rebindAuthorizerObject = execFileSync("git", ["rev-parse", `${head}:${rebindAuthorizer}`], { encoding: "utf8" }).trim();
+  const rebindAuthorizerMutation = stageAProductionArtifactsGovernedExecutableManifestSha256(head, {
+    git: (args) => {
+      const bytes = Buffer.from(execFileSync("git", args, { encoding: null }));
+      return args[0] === "cat-file" && args[2] === rebindAuthorizerObject ? Buffer.concat([bytes, Buffer.from("\n// test mutation\n")]) : bytes;
+    },
+  });
+  assert.notEqual(rebindAuthorizerMutation, historical, "changing the continuation-rebind authorizer must change the governed manifest");
+  const recovery = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF), verificationRef: "manifest-bound-authorizer" });
+  const completion = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization: recovery, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicy(), sign });
+  const rebind = createStageAProductionArtifactsContinuationRebindAuthorization({ historicalRecoveryAuthorization: recovery, recoveryCompletion: completion, reviewedContinuationSourceSha: head, reviewedGovernedExecutableManifestSha256: historical, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_WORKFLOW_REF, head), verificationRef: "manifest-bound-authorizer" });
+  assert.throws(() => assertStageAProductionArtifactsContinuationRebindAuthorization(rebind, { historicalRecoveryAuthorization: recovery, recoveryCompletion: completion, sourceSha: head, readGovernedExecutableManifestSha256: () => rebindAuthorizerMutation }), /binding/);
   const proveDescendant = () => true;
   for (const { path: file } of manifest.files) {
     assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: "b".repeat(40), recoverySourceSha: "a".repeat(40), proveDescendant, readGovernedExecutableManifestSha256: (sha) => sha.startsWith("a") ? historical : changedDigest(file) }), /governed executable source/, file);

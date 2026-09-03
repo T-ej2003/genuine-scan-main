@@ -990,6 +990,26 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "stage-a-production-artifacts-continuation-rebind-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-stage-a-production-artifacts-continuation-rebind.yml",
+      "consumers": [
+        "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs",
+        "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "stage-a-production-artifacts-continuation-rebind-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "stage-a-production-artifacts-reconciliation-refresh-only-plan",
       "kind": "file",
       "producer": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs:runStageAProductionArtifactsReconciliationCli --prepare",

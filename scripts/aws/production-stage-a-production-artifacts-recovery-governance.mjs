@@ -31,6 +31,7 @@ const governedEntrypoints = Object.freeze([
   "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
   "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
 ]);
+const continuationRebindGovernedEntrypoint = "scripts/aws/authorize-production-stage-a-production-artifacts-continuation-rebind.mjs";
 const terraformRoot = "infra/aws/terraform/production-green-stage-a/";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const policySha256 = stageAProductionArtifactsPolicySha256;
@@ -76,7 +77,10 @@ export function stageAProductionArtifactsGovernedExecutableManifest(sourceSha, {
     if (!match) throw new Error("Stage A production-artifacts governed source tree is malformed.");
     tree.set(match[4], { mode: match[1], type: match[2], object: match[3] });
   }
-  const selected = new Set(governedEntrypoints); const pending = [...governedEntrypoints]; const bytesByPath = new Map();
+  // The historical recovery source predates the rebind authorizer. Once present,
+  // it is an exact governed entrypoint rather than an optional dependency.
+  const entrypoints = tree.has(continuationRebindGovernedEntrypoint) ? [...governedEntrypoints, continuationRebindGovernedEntrypoint] : governedEntrypoints;
+  const selected = new Set(entrypoints); const pending = [...entrypoints]; const bytesByPath = new Map();
   while (pending.length) {
     const file = pending.pop(); const object = tree.get(file);
     if (!object || object.type !== "blob" || !["100644", "100755"].includes(object.mode)) throw new Error(`Stage A production-artifacts governed source file is missing or unsafe: ${file}`);
