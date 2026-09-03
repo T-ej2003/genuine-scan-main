@@ -33,13 +33,14 @@ const CALLS = Object.freeze([
   ["scripts/aws/production-root-attestation-signer.mjs", "kms:Sign", "stage-a-artifacts-recovery-root-sign", [ROOT_ATTESTATION_KEY], "ROOT_OPERATOR"],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-reconciliation-release-read-policy", [PRODUCTION_ARTIFACTS_BUCKET]],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-release-read-raw-state", [STAGE_A_TERRAFORM_STATE_ARN], "RELEASE_DEPLOYER", "stage-a-artifacts-reconciliation-release-read-raw-state"],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketLocation", "stage-a-artifacts-reconciliation-terraform-read-bucket-location", [STAGE_B_TERRAFORM_BACKEND.bucketArn]],
   ["scripts/aws/production-stage-a-control-plane.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-terraform-read-state", [STAGE_A_TERRAFORM_STATE_ARN]],
   ["scripts/aws/production-stage-a-control-plane.mjs", "s3:PutObject", "stage-a-artifacts-reconciliation-terraform-write-state", [STAGE_A_TERRAFORM_STATE_ARN]],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-terraform-read-lock", [STAGE_A_TERRAFORM_LOCK_ARN]],
   ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketLifecycleConfiguration", "stage-a-artifacts-recovery-root-read-lifecycle", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
   ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-recovery-release-read-policy", [PRODUCTION_ARTIFACTS_BUCKET]],
-  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetObject", "stage-a-artifacts-recovery-release-read-raw-state", [STAGE_A_TERRAFORM_STATE_ARN]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetObject", "stage-a-artifacts-recovery-release-read-raw-state", [STAGE_A_TERRAFORM_STATE_ARN], "RELEASE_DEPLOYER", "stage-a-artifacts-recovery-release-read-raw-state"],
   ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketVersioning", "stage-a-artifacts-recovery-root-read-versioning", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
   ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:PutBucketPolicy", "stage-a-artifacts-recovery-root-put-policy", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
   ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketLocation", "stage-a-artifacts-reconciliation-terraform-read-bucket-location", [STAGE_B_TERRAFORM_BACKEND.bucketArn]],
@@ -89,7 +90,7 @@ const CALLS = Object.freeze([
   ["scripts/aws/production-root-attestation-key.mjs", "kms:ListResourceTags", "release-root-attestation-read-key-tags", [ROOT_ATTESTATION_KEY]],
   ["scripts/aws/recover-production-backend-health.mjs", "kms:DescribeKey", "manifest-refresh-stage-a-storage-approval-key-describe", [RUNTIME_KMS_KEY]],
   ["scripts/aws/recover-production-backend-health.mjs", "kms:GetKeyPolicy", "manifest-refresh-stage-a-storage-approval-key-policy", [RUNTIME_KMS_KEY]],
-].map(([sourceFile, action, capabilityId, resources, identity = "RELEASE_DEPLOYER"]) => Object.freeze({ sourceFile, action, capabilityId, identity, resources: Object.freeze(resources) })));
+].map(([sourceFile, action, capabilityId, resources, identity = "RELEASE_DEPLOYER", sourceFunction]) => Object.freeze({ sourceFile, action, capabilityId, identity, resources: Object.freeze(resources), ...(sourceFunction ? { sourceFunction } : {}) })));
 const stageARootVerifierCapability = (capabilityId) => ["release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"].includes(capabilityId);
 
 const STAGE_A_RECOVERY_MODE = "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY";
@@ -111,6 +112,7 @@ const STAGE_A_CAPABILITY_MODES = Object.freeze({
   "stage-a-artifacts-journal-conditional-create": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
   "stage-a-artifacts-reconciliation-release-identify": [STAGE_A_RECONCILIATION_MODE],
   "stage-a-artifacts-reconciliation-release-read-policy": [STAGE_A_RECONCILIATION_MODE],
+  "stage-a-artifacts-reconciliation-release-read-raw-state": [STAGE_A_RECONCILIATION_MODE],
   "stage-a-artifacts-reconciliation-terraform-read-bucket-location": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
   "stage-a-artifacts-reconciliation-terraform-read-state": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
   "stage-a-artifacts-reconciliation-terraform-write-state": [STAGE_A_RECONCILIATION_MODE],
@@ -253,9 +255,12 @@ export function buildProductionDependencyClosure() {
 
 export function assertChangedAwsCallClosure(scanned, graph) {
   const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"].includes(sourceFile);
-  const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER" }) => `${sourceFile}\t${action}\t${identityBound(sourceFile) ? identity : ""}`;
+  const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER", sourceFunction = "", capabilityId = "" }) => `${sourceFile}\t${action}\t${identityBound(sourceFile) ? identity : ""}\t${capabilityId.endsWith("-read-raw-state") ? sourceFunction : ""}`;
   const callKeys = new Set(CALLS.map(key));
-  const normalized = scanned.map(({ sourceFile, action, identity }) => identityBound(sourceFile) ? { sourceFile, action, identity } : { sourceFile, action });
+  const normalized = scanned.map(({ sourceFile, action, identity, sourceFunction, capabilityId }) => {
+    const rawStateSource = capabilityId?.endsWith("-read-raw-state");
+    return identityBound(sourceFile) ? { sourceFile, action, identity, ...(rawStateSource ? { sourceFunction, capabilityId } : {}) } : { sourceFile, action, ...(rawStateSource ? { sourceFunction, capabilityId } : {}) };
+  });
   const additions = normalized.filter((call) => callKeys.has(key(call)));
   if (additions.length !== CALLS.length || new Set(additions.map(key)).size !== CALLS.length) throw new Error("Changed production AWS calls differ from the reviewed closure contract.");
   const baseline = normalized.filter((call) => !callKeys.has(key(call))).sort((a, b) => `${a.sourceFile}:${a.action}`.localeCompare(`${b.sourceFile}:${b.action}`));

@@ -95,6 +95,19 @@ test("Stage-A raw backend-state read has one exact release-deployer capability",
   assert.deepEqual(rawRead && [rawRead.identity, rawRead.action, rawRead.resources, rawRead.mutation], ["RELEASE_DEPLOYER", "s3:GetObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"], false]);
 });
 
+test("reconciliation raw backend-state CAS is an exact AWS CLI capability", () => {
+  const graph = buildStageBDeploymentCapabilityGraph();
+  const capability = graph.capabilities.find(({ id }) => id === "stage-a-artifacts-reconciliation-release-read-raw-state");
+  const call = graph.sourceScan.find(({ capabilityId }) => capabilityId === "stage-a-artifacts-reconciliation-release-read-raw-state");
+  assert.deepEqual(capability && [capability.phase, capability.identity, capability.executor, capability.action, capability.resources, capability.mutation], ["stage-a-production-artifacts-state-reconciliation", "RELEASE_DEPLOYER", "aws-cli", "s3:GetObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"], false]);
+  assert.doesNotThrow(() => assertStageBAwsCallCoverage(graph, [call]));
+  assert.throws(() => assertStageBAwsCallCoverage({ ...graph, capabilities: graph.capabilities.filter(({ id }) => id !== capability.id) }, [call]), /exact capability coverage/);
+  for (const mutation of [{ executor: "terraform" }, { identity: "ROOT_OPERATOR" }, { resources: ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/*"] }]) {
+    const changed = structuredClone(graph); Object.assign(changed.capabilities.find(({ id }) => id === capability.id), mutation);
+    assert.throws(() => assertStageBDeploymentCapabilityGraph(changed), /stale or incomplete/);
+  }
+});
+
 test("release preflight routes every S3 and Lambda probe through the credential-bound AWS runner", () => {
   const calls = [];
   const run = createProductionCommandRunner({
@@ -144,7 +157,7 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 45, capabilities: 364, uniqueActions: 133, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 45, capabilities: 365, uniqueActions: 133, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));

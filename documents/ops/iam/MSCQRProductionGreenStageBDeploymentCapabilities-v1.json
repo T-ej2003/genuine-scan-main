@@ -11533,6 +11533,37 @@
       "mutation": false
     },
     {
+      "id": "stage-a-artifacts-reconciliation-release-read-raw-state",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "sourceFunction": "stage-a-artifacts-reconciliation-release-read-raw-state",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-production-terraform-state-368992683803-eu-west-2"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-reconciliation-release-read-raw-state-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAStateForHandoff",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "stage-a-artifacts-reconciliation-terraform-read-bucket-location",
       "phase": "stage-a-production-artifacts-state-reconciliation",
       "identity": "RELEASE_DEPLOYER",
@@ -12810,6 +12841,17 @@
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
       "action": "s3:GetObject"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "sourceFunction": "stage-a-artifacts-reconciliation-release-read-raw-state",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ],
+      "capabilityId": "stage-a-artifacts-reconciliation-release-read-raw-state"
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
