@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { PRODUCTION_ACTIVATION_LIFECYCLE, STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageAProductionArtifactsJournalResult, assertStageAProductionArtifactsPostApplyEvidence, assertStageAProductionArtifactsReservation, STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "./production-stage-a-production-artifacts-journal.mjs";
 const REQUIRED_LOGICAL_ADDRESS = "aws_vpc_security_group_ingress_rule.runtime_endpoints_https";
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -277,6 +278,20 @@ export function assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { s
   return Object.freeze({ valid: true, stateReconciliationRequired: true, address: entry.address, actions: change.actions, resourceDriftCount: plan.resource_drift.length, rdsLatestRestorableTimeRefreshed: rdsDrift.length === 1 });
 }
 
+function assertStageAProductionArtifactsAuthorizedPostState(state, plan) {
+  if (!state || typeof state !== "object" || Array.isArray(state) || !Array.isArray(state.resources)) throw new Error("Stage A reconciliation post-state content is malformed.");
+  for (const entry of plan.resource_drift) {
+    const expected = entry.change.after;
+    const resources = state.resources.filter((resource) => resource?.module === undefined && resource?.mode === entry.mode && resource.type === entry.type && resource.name === entry.name && resource.provider === `provider[\"${entry.provider_name}\"]`);
+    if (resources.length !== 1 || !Array.isArray(resources[0].instances) || resources[0].instances.length !== 1 || resources[0].instances[0]?.schema_version !== 0 || resources[0].instances[0]?.index_key !== undefined) throw new Error("Stage A reconciliation post-state resource identity is not exact.");
+    const actual = resources[0].instances[0].attributes;
+    if (entry.address === STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address) assertStageAProductionArtifactsPolicyResource(actual, "post-apply", buildStageAProductionArtifactsBucketPolicy());
+    else if (entry.address === "aws_db_instance.green") { if (!isDeepStrictEqual(actual, expected)) throw new Error("Stage A reconciliation post-state RDS values are not the authorized refresh result."); }
+    else throw new Error("Stage A reconciliation post-state contains an uncontracted resource.");
+  }
+  return true;
+}
+
 const STAGE_A_PREPARE_EVIDENCE_FIELDS = Object.freeze([
   "schemaVersion", "kind", "operation", "sourceSha", "account", "region", "executionPrincipal", "bucket",
   "recoveryAuthorizationSha256", "recoveryCompletionSha256", "desiredPolicySha256", "preStateLineage", "preStateSerial",
@@ -517,6 +532,12 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
   };
   const exactPreState = (state) => state?.lineage === before.lineage && state.serial === before.serial && state.stateSha256 === before.stateSha256;
   const exactPostState = (state) => state?.lineage === before.lineage && state.serial === before.serial + 1 && SHA256.test(state?.stateSha256 || "");
+  const readPostStateSnapshot = async (identity) => {
+    if (typeof adapter.readStateSnapshot !== "function") throw new Error("Stage A reconciliation post-state authentication requires an authoritative state snapshot.");
+    const snapshot = await adapter.readStateSnapshot();
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot) || snapshot.lineage !== identity.lineage || snapshot.serial !== identity.serial || snapshot.stateSha256 !== identity.stateSha256 || snapshot.state?.lineage !== identity.lineage || snapshot.state?.serial !== identity.serial) throw new Error("Stage A reconciliation post-state snapshot does not match the authenticated state identity.");
+    return snapshot;
+  };
   const assertPostEvidence = (evidence, reservation, state) => {
     assertStageAProductionArtifactsPostApplyEvidence(evidence, { reservation });
     if (evidence.postStateLineage !== state.lineage || evidence.postStateSerial !== state.serial || evidence.postStateSha256 !== state.stateSha256 || evidence.postLivePolicySha256 !== recoveryCompletion.desiredPolicySha256) throw new Error("Stage A reconciliation post-apply evidence does not match the authenticated post-state.");
@@ -530,8 +551,10 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
     if (!durable || typeof durable !== "object" || Array.isArray(durable)) throw new Error("Stage A reconciliation durable consumption evidence is invalid.");
     return durable;
   };
-  const completeExactPostState = async ({ state, reservation: candidate, durable } = {}) => {
+  const completeExactPostState = async ({ state, snapshot, reservation: candidate, durable } = {}) => {
     if (!exactPostState(state)) throw new Error("Stage A reconciliation state serial did not advance exactly once.");
+    if (!snapshot?.state) throw new Error("Stage A reconciliation post-state snapshot is missing.");
+    assertStageAProductionArtifactsAuthorizedPostState(snapshot.state, saved.plan);
     const reservation = durable ? assertReservationIdentity(durable.reservation) : reservationValue(candidate);
     if (!reservation) throw new Error("Stage A reconciliation post-state lacks its immutable reservation.");
     const livePolicy = await adapter.readProductionArtifactsPolicy();
@@ -550,7 +573,7 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
     if (assertSourceIntegrity !== undefined) { if (typeof assertSourceIntegrity !== "function") throw new Error("Stage A reconciliation source-integrity check is invalid."); assertSourceIntegrity(); }
     const durable = { reservation, postApplyEvidence, result: resumeResult };
     if (exactPostState(currentState)) {
-      const completed = await completeExactPostState({ state: currentState, reservation, durable });
+      const completed = await completeExactPostState({ state: currentState, snapshot: await readPostStateSnapshot(currentState), reservation, durable });
       return Object.freeze({ valid: true, applied: false, resumed: true, alreadyCompleted: completed.alreadyCompleted, refreshOnly: true, savedPlanSha256: saved.savedPlanSha256, preState: before, postState: currentState, livePolicySha256: stablePolicySha256(completed.livePolicy), awsResourceMutations: 0, terraformStateMutations: 0 });
     }
     const livePolicy = await adapter.readProductionArtifactsPolicy(); assertLivePolicyCas(livePolicy);
@@ -579,7 +602,7 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
     const after = await adapter.readStateIdentity();
     if (exactPostState(after)) {
       const durable = applyError ? await readDurableConsumption() : undefined;
-      const completed = await completeExactPostState({ state: after, reservation, durable });
+      const completed = await completeExactPostState({ state: after, snapshot: await readPostStateSnapshot(after), reservation, durable });
       finalized = true;
       return Object.freeze({ valid: true, applied: true, applyProcessExitSuccess: !applyError, refreshOnly: true, savedPlanSha256: saved.savedPlanSha256, preState: before, postState: after, livePolicySha256: stablePolicySha256(completed.livePolicy), awsResourceMutations: 0, terraformStateMutations: 1 });
     }
@@ -687,6 +710,12 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
   let refreshOnlyApplyAttempted = false;
   let backendInitialization;
   let terraformVersionVerification;
+  const readStateSnapshot = async () => {
+    await ensureBackendInitialized();
+    const bytes = Buffer.from(await run([terraform, `-chdir=${root}`, "state", "pull"]));
+    const state = parseAuthenticatedStateBytes(bytes);
+    return { state, lineage: state.lineage, serial: state.serial, stateSha256: createHash("sha256").update(bytes).digest("hex") };
+  };
   const ensureTerraformRuntimeVersion = () => terraformVersionVerification ||= Promise.resolve(run([terraform, "version", "-json"])).then((output) => {
     let parsed; try { parsed = JSON.parse(output); } catch { throw new Error("Stage A Terraform runtime version output is malformed."); }
     if (parsed?.terraform_version !== STAGE_A_TERRAFORM_VERSION) throw new Error(`Stage A requires Terraform ${STAGE_A_TERRAFORM_VERSION}; observed ${parsed?.terraform_version || "unknown"}.`);
@@ -741,11 +770,10 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
       return JSON.parse(await run([terraform, `-chdir=${root}`, "show", "-json", planPath]));
     },
     async readStateIdentity() {
-      await ensureBackendInitialized();
-      const bytes = Buffer.from(await run([terraform, `-chdir=${root}`, "state", "pull"]));
-      const state = JSON.parse(bytes);
-      return { lineage: state.lineage, serial: state.serial, stateSha256: createHash("sha256").update(bytes).digest("hex") };
+      const { state, ...identity } = await readStateSnapshot();
+      return identity;
     },
+    readStateSnapshot,
     ...(typeof readProductionArtifactsPolicy === "function" ? { readProductionArtifactsPolicy } : {}),
     describeIngress,
   };

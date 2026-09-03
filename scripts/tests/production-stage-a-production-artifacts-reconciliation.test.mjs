@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -35,8 +36,9 @@ const reconciliationAuthorization = (serial = 35, savedPlanSha256 = "b".repeat(6
 const verifyReconciliationAuthorization = (value) => ({ authorizationSha256: value.authorizationSha256, approved: true, independent: true });
 const verifier = (value) => ({ authorizationSha256: value.recoveryAuthorizationSha256, livePolicySha256: value.livePolicySha256, completed: true });
 const refreshPlan = ({ before = predecessor, after = desired, drift = [] } = {}) => ({ complete: true, errored: false, applyable: true, resource_changes: [], resource_drift: [{ address: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address, mode: "managed", type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type, name: "production_artifacts", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: resource(before), after: resource(after), replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } }, ...drift] });
+const stateSnapshot = (identity, policy = identity.serial === 35 ? predecessor : desired, resources = []) => ({ ...identity, state: { version: 4, lineage: identity.lineage, serial: identity.serial, resources: [{ mode: "managed", type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type, name: "production_artifacts", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: resource(policy) }] }, ...resources] } });
 const consumption = (overrides = {}) => ({ reserveConsumption: async () => ({ reservation: "exact" }), finalizeConsumption: async () => {}, abortConsumption: async () => {}, recordPostApply: async () => {}, readConsumptionEvidence: async () => ({}), ...overrides });
-const execute = async ({ adapter, ...options }) => { const preparedAdapter = { ...adapter, createSavedRefreshOnlyPlan: async () => ({ ...(await adapter.createSavedRefreshOnlyPlan()), terraformVersion: STAGE_A_TERRAFORM_VERSION }) }; const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter: preparedAdapter, sourceSha, recoveryCompletion: options.recoveryCompletion || completion(), verifyRecoveryCompletion: verifier }); return runStageAProductionArtifactsStateReconciliation({ ...options, adapter: preparedAdapter, saved: prepared.saved, preparedState: prepared.preState }); };
+const execute = async ({ adapter, ...options }) => { const preparedAdapter = { ...adapter, readStateSnapshot: adapter.readStateSnapshot || (async () => stateSnapshot(await adapter.readStateIdentity())), createSavedRefreshOnlyPlan: async () => ({ ...(await adapter.createSavedRefreshOnlyPlan()), terraformVersion: STAGE_A_TERRAFORM_VERSION }) }; const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter: preparedAdapter, sourceSha, recoveryCompletion: options.recoveryCompletion || completion(), verifyRecoveryCompletion: verifier }); return runStageAProductionArtifactsStateReconciliation({ ...options, adapter: preparedAdapter, saved: prepared.saved, preparedState: prepared.preState }); };
 
 test("refresh-only prepare authenticates the exact Terraform executable version before init or plan", async () => {
   const versions = [
@@ -65,6 +67,16 @@ test("refresh-only prepare authenticates the exact Terraform executable version 
 test("prepare evidence cannot be caller-stamped without an authenticated runtime version", () => {
   assert.throws(() => createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, recoveryCompletion: completion(), preState: { lineage, serial: 35, stateSha256 }, saved: { refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/plan" } }), /inputs are invalid/);
   assert.throws(() => createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, recoveryCompletion: completion(), preState: { lineage, serial: 35, stateSha256 }, saved: { refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/plan", terraformVersion: "1.15.7" } }), /inputs are invalid/);
+});
+
+test("the production adapter binds a post-state snapshot to one raw Terraform state pull", async () => {
+  const directory = fs.mkdtempSync(path.join("/tmp", "stage-a-post-state-")); const planPath = path.join(directory, "plan.tfplan");
+  const raw = Buffer.from(JSON.stringify(stateSnapshot({ lineage, serial: 36, stateSha256: "ignored" }).state)); const calls = [];
+  const adapter = createTerraformStageAAdapter({ planPath, refreshOnlyPlanPath: `${planPath}.refresh-only`, run: async (args) => { calls.push(args); if (args[1] === "version") return JSON.stringify({ terraform_version: STAGE_A_TERRAFORM_VERSION }); if (args.includes("init")) return ""; if (args.includes("state")) return raw; throw new Error(`unexpected Terraform call: ${args.join(" ")}`); }, describeIngress: async () => ({ present: true }) });
+  try {
+    const snapshot = await adapter.readStateSnapshot();
+    assert.equal(snapshot.lineage, lineage); assert.equal(snapshot.serial, 36); assert.equal(snapshot.stateSha256, createHash("sha256").update(raw).digest("hex")); assert.deepEqual(snapshot.state.resources, JSON.parse(raw).resources); assert.equal(calls.filter((args) => args.includes("state")).length, 1);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("exact recovery drift is accepted only with independently authenticated completion", () => {
@@ -244,10 +256,47 @@ test("a nonzero refresh-only apply completes when durable state proves the exact
   assert.equal(result.applyProcessExitSuccess, false); assert.equal(result.applied, true); assert.equal(applies, 1); assert.equal(recorded, 1); assert.equal(finalized, "COMPLETED");
 });
 
-test("indeterminate refresh-only apply leaves an unexpected durable state non-terminal", async () => {
+test("completion-only recovery authenticates the authorized plan's post-state content", async () => {
+  let state = { lineage, serial: 35, stateSha256 }; let snapshot = stateSnapshot(state); let applies = 0; let finalized = 0;
+  const adapter = { readStateIdentity: async () => ({ ...state }), readStateSnapshot: async () => structuredClone(snapshot), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, terraformVersion: STAGE_A_TERRAFORM_VERSION, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; }, readProductionArtifactsPolicy: async () => desired };
+  const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier });
+  const authorization = reconciliationAuthorization();
+  const reservation = createStageAProductionArtifactsReservation({ operation: "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", sourceSha, account: "368992683803", region: "eu-west-2", executionPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", authorizationSha256: authorization.authorizationSha256, recoveryCompletionSha256: completion().completionSha256, savedPlanSha256: prepared.saved.savedPlanSha256, preStateLineage: lineage, preStateSerial: 35, preStateSha256: stateSha256, desiredPolicySha256: completion().desiredPolicySha256 });
+  const resume = () => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, saved: prepared.saved, preparedState: prepared.preState, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: authorization, verifyReconciliationAuthorization, resumeReservation: reservation, ...consumption({ finalizeConsumption: async ({ status }) => { if (status === "COMPLETED") finalized += 1; } }) });
+  const metadataOnlyPostState = (value) => value?.lineage === lineage && value.serial === 36 && /^[a-f0-9]{64}$/.test(value?.stateSha256 || "");
+  state = { lineage, serial: 36, stateSha256: "d".repeat(64) }; snapshot = stateSnapshot(state, predecessor);
+  assert.equal(metadataOnlyPostState(state), true);
+  await assert.rejects(resume(), /post-state|post-apply/i);
+  for (const candidate of [
+    stateSnapshot(state, { Version: "2012-10-17", Statement: [] }),
+    { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [] } },
+    { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [{ ...stateSnapshot(state).state.resources[0], name: "wrong" }] } },
+    { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [{ ...stateSnapshot(state).state.resources[0], type: "aws_s3_bucket_policy_other" }] } },
+    { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [{ ...stateSnapshot(state).state.resources[0], provider: 'provider["registry.terraform.io/hashicorp/other"]' }] } },
+    { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [{ ...stateSnapshot(state).state.resources[0], instances: [{ ...stateSnapshot(state).state.resources[0].instances[0], attributes: { ...resource(desired), bucket: "other", id: "other" } }] }] } },
+    { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [{ ...stateSnapshot(state).state.resources[0], module: "module.other" }] } },
+    { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [{ ...stateSnapshot(state).state.resources.map((resource) => ({ ...resource, instances: [{ ...resource.instances[0], index_key: "other" }] }))[0] }] } },
+    { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [...stateSnapshot(state).state.resources, structuredClone(stateSnapshot(state).state.resources[0])] } },
+  ]) { snapshot = candidate; await assert.rejects(resume(), /post-(?:state|apply)|resource identity/i); }
+  for (const identity of [{ lineage: "other", serial: 36, stateSha256: "d".repeat(64) }, { lineage, serial: 37, stateSha256: "d".repeat(64) }]) { state = identity; snapshot = stateSnapshot(state); await assert.rejects(resume(), /neither the exact pre-state nor authenticated post-state/); }
+  state = { lineage, serial: 36, stateSha256: "d".repeat(64) };
+  const rds = { address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: { identifier: "green", latest_restorable_time: "2026-08-19T20:01:16Z" }, after: { identifier: "green", latest_restorable_time: "2026-08-20T20:01:16Z" }, replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: structuredClone(rdsSensitivity), after_sensitive: structuredClone(rdsSensitivity) } };
+  const rdsSaved = { ...prepared.saved, savedPlanSha256: "f".repeat(64), plan: refreshPlan({ drift: [rds] }) };
+  const rdsAuthorization = reconciliationAuthorization(35, rdsSaved.savedPlanSha256);
+  const rdsReservation = createStageAProductionArtifactsReservation({ operation: "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", sourceSha, account: "368992683803", region: "eu-west-2", executionPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", authorizationSha256: rdsAuthorization.authorizationSha256, recoveryCompletionSha256: completion().completionSha256, savedPlanSha256: rdsSaved.savedPlanSha256, preStateLineage: lineage, preStateSerial: 35, preStateSha256: stateSha256, desiredPolicySha256: completion().desiredPolicySha256 });
+  snapshot = stateSnapshot(state, desired, [{ mode: "managed", type: "aws_db_instance", name: "green", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: { ...rds.change.after, latest_restorable_time: rds.change.before.latest_restorable_time } }] }]);
+  await assert.rejects(runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, saved: rdsSaved, preparedState: prepared.preState, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: rdsAuthorization, verifyReconciliationAuthorization, resumeReservation: rdsReservation, ...consumption() }), /post-state RDS/i);
+  snapshot = stateSnapshot(state, desired, [{ mode: "managed", type: "aws_db_instance", name: "green", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: rds.change.after }] }]);
+  assert.equal((await runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, saved: rdsSaved, preparedState: prepared.preState, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: rdsAuthorization, verifyReconciliationAuthorization, resumeReservation: rdsReservation, ...consumption() })).resumed, true);
+  snapshot = stateSnapshot(state, { ...desired, Statement: [...desired.Statement].reverse() });
+  const completed = await resume();
+  assert.equal(completed.resumed, true); assert.equal(finalized, 1); assert.equal(applies, 0);
+});
+
+test("a nonzero refresh-only apply with a competing N+1 state remains non-terminal", async () => {
   let state = { lineage, serial: 35, stateSha256 }; let finalized = 0; let aborted = 0; let applies = 0; let reservation;
-  const adapter = { readStateIdentity: async () => ({ ...state }), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; state = { ...state, serial: 37, stateSha256: "d".repeat(64) }; throw new Error("apply exited after an unexpected state mutation"); }, readProductionArtifactsPolicy: async () => desired };
-  await assert.rejects(() => execute({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption({ reserveConsumption: async (identity) => ({ reservation: reservation = createStageAProductionArtifactsReservation({ operation: "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", sourceSha, account: "368992683803", region: "eu-west-2", executionPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", authorizationSha256: reconciliationAuthorization().authorizationSha256, recoveryCompletionSha256: completion().completionSha256, savedPlanSha256: identity.savedPlanSha256, preStateLineage: lineage, preStateSerial: 35, preStateSha256: stateSha256, desiredPolicySha256: completion().desiredPolicySha256 }) }), readConsumptionEvidence: async () => ({ reservation }), finalizeConsumption: async () => { finalized += 1; }, abortConsumption: async () => { aborted += 1; } }) }), /neither the exact pre-state nor authenticated post-state/);
+  const adapter = { readStateIdentity: async () => ({ ...state }), readStateSnapshot: async () => stateSnapshot(state, predecessor), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; state = { ...state, serial: 36, stateSha256: "d".repeat(64) }; throw new Error("apply exited after an unrelated state mutation"); }, readProductionArtifactsPolicy: async () => desired };
+  await assert.rejects(() => execute({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: reconciliationAuthorization(), verifyReconciliationAuthorization, ...consumption({ reserveConsumption: async (identity) => ({ reservation: reservation = createStageAProductionArtifactsReservation({ operation: "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", sourceSha, account: "368992683803", region: "eu-west-2", executionPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", authorizationSha256: reconciliationAuthorization().authorizationSha256, recoveryCompletionSha256: completion().completionSha256, savedPlanSha256: identity.savedPlanSha256, preStateLineage: lineage, preStateSerial: 35, preStateSha256: stateSha256, desiredPolicySha256: completion().desiredPolicySha256 }) }), readConsumptionEvidence: async () => ({ reservation }), finalizeConsumption: async () => { finalized += 1; }, abortConsumption: async () => { aborted += 1; } }) }), /post-(?:state|apply)/);
   assert.equal(applies, 1); assert.equal(finalized, 0); assert.equal(aborted, 0);
 });
 
