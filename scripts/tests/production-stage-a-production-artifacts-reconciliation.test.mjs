@@ -117,12 +117,18 @@ test("locked-provider bucket-policy envelope permits only the unset owner repres
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan(), { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }));
   for (const [label, mutate] of [
     ["owner value", (plan) => { plan.resource_drift[0].change.after.expected_bucket_owner = "368992683803"; }],
-    ["missing owner", (plan) => { delete plan.resource_drift[0].change.after.expected_bucket_owner; }],
     ["provider key", (plan) => { plan.resource_drift[0].change.after.unreviewed_provider_key = null; }],
   ]) {
     const plan = structuredClone(refreshPlan()); mutate(plan);
     assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }), /not exact/, label);
   }
+});
+
+test("desired policy accepts only Terraform's omitted optional owner representation", () => {
+  const omitted = refreshPlan(); omitted.resource_drift[0].change.after = resource(desired, { omitExpectedBucketOwner: true });
+  assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(omitted, { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }));
+  const nonNull = refreshPlan(); nonNull.resource_drift[0].change.after.expected_bucket_owner = "368992683803";
+  assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(nonNull, { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }), /not exact/);
 });
 
 test("historical predecessor accepts only the Terraform-omitted optional owner representation", () => {
