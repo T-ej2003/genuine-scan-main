@@ -18,9 +18,10 @@ const text = (value, label) => { if (typeof value !== "string" || !value) throw 
 const identity = (value) => ({ operation: value.operation, sourceSha: value.sourceSha, account: value.account, region: value.region, executionPrincipal: value.executionPrincipal, authorizationSha256: value.authorizationSha256, recoveryCompletionSha256: value.recoveryCompletionSha256, savedPlanSha256: value.savedPlanSha256, preStateLineage: value.preStateLineage, preStateSerial: value.preStateSerial, preStateSha256: value.preStateSha256, desiredPolicySha256: value.desiredPolicySha256 });
 const reservationFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "account", "region", "executionPrincipal", "authorizationSha256", "recoveryCompletionSha256", "savedPlanSha256", "preStateLineage", "preStateSerial", "preStateSha256", "desiredPolicySha256", "reservationSha256"]);
 const resultFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "account", "region", "executionPrincipal", "authorizationSha256", "recoveryCompletionSha256", "savedPlanSha256", "preStateLineage", "preStateSerial", "preStateSha256", "desiredPolicySha256", "reservationSha256", "status", "postStateLineage", "postStateSerial", "postStateSha256", "postLivePolicySha256", "refreshOnlyApplyCount", "awsInfrastructureMutationCount", "resultSha256"]);
+const postApplyFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "account", "region", "executionPrincipal", "authorizationSha256", "recoveryCompletionSha256", "savedPlanSha256", "preStateLineage", "preStateSerial", "preStateSha256", "desiredPolicySha256", "reservationSha256", "postStateLineage", "postStateSerial", "postStateSha256", "postLivePolicySha256", "refreshOnlyApplyCount", "awsInfrastructureMutationCount", "postApplyEvidenceSha256"]);
 
 export function stageAProductionArtifactsJournalKey({ authorizationSha256, record } = {}) {
-  if (!SHA256.test(authorizationSha256 || "") || !["reservation.json", "result.json"].includes(record)) throw new Error("Stage A reconciliation journal key is invalid.");
+  if (!SHA256.test(authorizationSha256 || "") || !["reservation.json", "post-apply.json", "result.json"].includes(record)) throw new Error("Stage A reconciliation journal key is invalid.");
   return `${STAGE_A_PRODUCTION_ARTIFACTS_JOURNAL_PREFIX}${authorizationSha256}/${record}`;
 }
 
@@ -50,6 +51,23 @@ export function assertStageAProductionArtifactsReservation(value, expected = {})
   const { reservationSha256, ...body } = value;
   if (!SHA256.test(reservationSha256 || "") || reservationSha256 !== sha256(canonicalBytes(body))) throw new Error("Stage A reconciliation reservation hash is invalid.");
   for (const [key, expectedValue] of Object.entries(expected)) if (expectedValue !== undefined && value[key] !== expectedValue) throw new Error("Stage A reconciliation reservation does not match the authorized operation.");
+  return Object.freeze(value);
+}
+
+export function createStageAProductionArtifactsPostApplyEvidence({ reservation, postState, postLivePolicySha256 } = {}) {
+  assertStageAProductionArtifactsReservation(reservation);
+  if (!postState || postState.lineage !== reservation.preStateLineage || !Number.isSafeInteger(postState.serial) || postState.serial !== reservation.preStateSerial + 1 || !SHA256.test(postState.stateSha256 || "") || postLivePolicySha256 !== reservation.desiredPolicySha256) throw new Error("Stage A reconciliation post-apply evidence is invalid.");
+  const body = { schemaVersion: 1, kind: "STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_POST_APPLY", ...identity(reservation), reservationSha256: reservation.reservationSha256, postStateLineage: postState.lineage, postStateSerial: postState.serial, postStateSha256: postState.stateSha256, postLivePolicySha256, refreshOnlyApplyCount: 1, awsInfrastructureMutationCount: 0 };
+  return Object.freeze({ ...body, postApplyEvidenceSha256: sha256(canonicalBytes(body)) });
+}
+
+export function assertStageAProductionArtifactsPostApplyEvidence(value, { reservation } = {}) {
+  exactKeys(value, postApplyFields, "Stage A reconciliation post-apply evidence");
+  assertIdentity(value, "Stage A reconciliation post-apply evidence");
+  assertStageAProductionArtifactsReservation(reservation);
+  if (value.reservationSha256 !== reservation.reservationSha256 || canonicalJson(identity(value)) !== canonicalJson(identity(reservation)) || value.kind !== "STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_POST_APPLY" || value.postStateLineage !== reservation.preStateLineage || value.postStateSerial !== reservation.preStateSerial + 1 || !SHA256.test(value.postStateSha256 || "") || value.postLivePolicySha256 !== reservation.desiredPolicySha256 || value.refreshOnlyApplyCount !== 1 || value.awsInfrastructureMutationCount !== 0 || !SHA256.test(value.postApplyEvidenceSha256 || "")) throw new Error("Stage A reconciliation post-apply evidence binding is invalid.");
+  const { postApplyEvidenceSha256, ...body } = value;
+  if (postApplyEvidenceSha256 !== sha256(canonicalBytes(body))) throw new Error("Stage A reconciliation post-apply evidence hash is invalid.");
   return Object.freeze(value);
 }
 
@@ -113,12 +131,18 @@ export function createStageAProductionArtifactsJournal({ run } = {}) {
       if (!conditionalCreate({ run, key, bytes })) throw new Error("Stage A reconciliation authorization is already reserved; no replay is permitted.");
       return Object.freeze({ reservation, key, sha256: sha256(bytes) });
     },
+    writePostApplyEvidence({ reservation, postState, postLivePolicySha256 } = {}) {
+      const evidence = createStageAProductionArtifactsPostApplyEvidence({ reservation: reservation?.reservation || reservation, postState, postLivePolicySha256 }); const key = stageAProductionArtifactsJournalKey({ authorizationSha256: evidence.authorizationSha256, record: "post-apply.json" }); const bytes = canonicalBytes(evidence);
+      if (!conditionalCreate({ run, key, bytes })) throw new Error("Stage A reconciliation post-apply evidence already exists; no overwrite is permitted.");
+      return Object.freeze({ evidence, key, sha256: sha256(bytes) });
+    },
     finalize({ reservation, status, postState, postLivePolicySha256 } = {}) {
       assertStageAProductionArtifactsReservation(reservation); const result = createStageAProductionArtifactsJournalResult({ reservation, status, postState, postLivePolicySha256 }); const key = stageAProductionArtifactsJournalKey({ authorizationSha256: reservation.authorizationSha256, record: "result.json" }); const bytes = canonicalBytes(result);
       if (!conditionalCreate({ run, key, bytes })) throw new Error("Stage A reconciliation already has a terminal journal result; no replay is permitted.");
       return Object.freeze({ result, key, sha256: sha256(bytes) });
     },
     readReservation(authorizationSha256) { const record = load(authorizationSha256, "reservation.json"); return record && { ...record, reservation: assertStageAProductionArtifactsReservation(record.value) }; },
+    readPostApplyEvidence(authorizationSha256) { const record = load(authorizationSha256, "post-apply.json"); if (!record) return null; const reservation = load(authorizationSha256, "reservation.json"); if (!reservation) throw new Error("Stage A reconciliation post-apply evidence is missing its reservation."); return { ...record, evidence: assertStageAProductionArtifactsPostApplyEvidence(record.value, { reservation: reservation.value }) }; },
     readResult(authorizationSha256) { const record = load(authorizationSha256, "result.json"); if (!record) return null; const reservation = load(authorizationSha256, "reservation.json"); if (!reservation) throw new Error("Stage A reconciliation journal result is missing its reservation."); return { ...record, result: assertStageAProductionArtifactsJournalResult(record.value, { reservation: reservation.value }) }; },
     writeRecoveryCompletion({ recoveryAuthorizationSha256, bytes } = {}) {
       if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw new Error("Stage A recovery completion bytes are invalid.");

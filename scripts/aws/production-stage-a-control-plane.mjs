@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { PRODUCTION_ACTIVATION_LIFECYCLE, STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { assertStageAProductionArtifactsJournalResult, assertStageAProductionArtifactsPostApplyEvidence, assertStageAProductionArtifactsReservation, STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "./production-stage-a-production-artifacts-journal.mjs";
 const REQUIRED_LOGICAL_ADDRESS = "aws_vpc_security_group_ingress_rule.runtime_endpoints_https";
 const SHA256 = /^[a-f0-9]{64}$/;
 const RDS_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
@@ -487,12 +488,14 @@ function readAndVerifyPlanSha256(planPath, expectedSha256) {
   return actualSha256;
 }
 
-export async function runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoverySourceSha, recoveryCompletion, verifyRecoveryCompletion, reconciliationAuthorization, verifyReconciliationAuthorization, authorizationIdentity, reserveConsumption, finalizeConsumption, abortConsumption, saved, preparedState, assertSourceIntegrity } = {}) {
+export async function runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoverySourceSha, recoveryCompletion, verifyRecoveryCompletion, reconciliationAuthorization, verifyReconciliationAuthorization, authorizationIdentity, recoveryCompletionSha256, reserveConsumption, finalizeConsumption, abortConsumption, recordPostApply, saved, preparedState, resumeReservation, resumeResult, postApplyEvidence, assertSourceIntegrity } = {}) {
   recoverySourceSha ||= recoveryCompletion?.sourceSha;
-  if (!adapter || typeof adapter.applySavedRefreshOnlyPlan !== "function" || typeof adapter.readStateIdentity !== "function" || typeof adapter.readProductionArtifactsPolicy !== "function" || typeof reserveConsumption !== "function" || typeof finalizeConsumption !== "function" || typeof abortConsumption !== "function" || !saved) throw new Error("Stage A production-artifacts reconciliation requires a prepared saved plan.");
-  const before = await adapter.readStateIdentity();
+  if (!adapter || typeof adapter.applySavedRefreshOnlyPlan !== "function" || typeof adapter.readStateIdentity !== "function" || typeof adapter.readProductionArtifactsPolicy !== "function" || typeof reserveConsumption !== "function" || typeof finalizeConsumption !== "function" || typeof abortConsumption !== "function" || typeof recordPostApply !== "function" || !saved) throw new Error("Stage A production-artifacts reconciliation requires a prepared saved plan.");
+  const currentState = await adapter.readStateIdentity();
+  const before = preparedState || saved.preState || currentState;
   if (before?.lineage !== STAGE_A_STATE_LINEAGE || !Number.isSafeInteger(before.serial) || before.serial < 1 || !SHA256.test(before.stateSha256 || "")) throw new Error("Stage A reconciliation state identity is invalid.");
-  if (preparedState && (preparedState.lineage !== before.lineage || preparedState.serial !== before.serial || preparedState.stateSha256 !== before.stateSha256)) throw new Error("Stage A prepared state identity changed before execution.");
+  if (!resumeReservation && (currentState.lineage !== before.lineage || currentState.serial !== before.serial || currentState.stateSha256 !== before.stateSha256)) throw new Error("Stage A prepared state identity changed before execution.");
+  if (resumeResult && !resumeReservation) throw new Error("Stage A reconciliation completion result is missing its reservation.");
   const assertStateCas = (state, label) => {
     if (state?.lineage !== before.lineage || state.serial !== before.serial || state.stateSha256 !== before.stateSha256) throw new Error(`Stage A reconciliation state changed ${label}.`);
   };
@@ -501,18 +504,38 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
   assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(saved.plan, { sourceSha, recoverySourceSha, recoveryCompletion, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion });
   assertStageAProductionArtifactsReconciliationAuthorization(reconciliationAuthorization, { sourceSha, recoverySourceSha, recoveryCompletion, savedPlanSha256: saved.savedPlanSha256, preStateSerial: before.serial, preStateSha256: before.stateSha256, verifyRecoveryCompletion, verifyReconciliationAuthorization });
   if (authorizationIdentity !== undefined && !SHA256.test(authorizationIdentity || "")) throw new Error("Stage A reconciliation governance authorization identity is invalid.");
-  const consumption = { authorizationSha256: authorizationIdentity || reconciliationAuthorization.authorizationSha256, completionSha256: recoveryCompletion.completionSha256, savedPlanSha256: saved.savedPlanSha256, preStateSha256: before.stateSha256 };
+  const consumption = { authorizationSha256: authorizationIdentity || reconciliationAuthorization.authorizationSha256, completionSha256: recoveryCompletionSha256 || recoveryCompletion.completionSha256, savedPlanSha256: saved.savedPlanSha256, preStateSha256: before.stateSha256 };
   const assertLivePolicyCas = (policy) => {
     const policySha256 = stablePolicySha256(policy);
     if (policySha256 !== recoveryCompletion.livePolicySha256 || policySha256 !== recoveryCompletion.desiredPolicySha256 || stablePolicyJson(policy) !== stablePolicyJson(buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A production-artifacts live policy changed before refresh-only apply.");
   };
+  const assertReservationIdentity = () => {
+    const reservation = resumeReservation?.reservation || resumeReservation;
+    assertStageAProductionArtifactsReservation(reservation, { operation: STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION, sourceSha, account: STAGE_B.account, region: STAGE_B.region, executionPrincipal: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn, authorizationSha256: consumption.authorizationSha256, recoveryCompletionSha256: consumption.completionSha256, savedPlanSha256: consumption.savedPlanSha256, preStateLineage: before.lineage, preStateSerial: before.serial, preStateSha256: before.stateSha256, desiredPolicySha256: recoveryCompletion.desiredPolicySha256 });
+    if (resumeResult) {
+      assertStageAProductionArtifactsJournalResult(resumeResult, { reservation });
+      if (resumeResult.status !== "COMPLETED" || resumeResult.postStateLineage !== currentState.lineage || resumeResult.postStateSerial !== currentState.serial || resumeResult.postStateSha256 !== currentState.stateSha256 || resumeResult.postLivePolicySha256 !== recoveryCompletion.desiredPolicySha256) throw new Error("Stage A reconciliation completion result does not match the authenticated post-apply state.");
+    }
+    if (postApplyEvidence) assertStageAProductionArtifactsPostApplyEvidence(postApplyEvidence, { reservation });
+    return reservation;
+  };
+  if (resumeReservation) {
+    const reservation = assertReservationIdentity();
+    if (currentState.lineage !== before.lineage || currentState.serial !== before.serial + 1 || !SHA256.test(currentState.stateSha256 || "")) throw new Error("Stage A reconciliation completion-only resume state is not the exact authorized post-state.");
+    if (!postApplyEvidence || postApplyEvidence.postStateSha256 !== currentState.stateSha256 || postApplyEvidence.postStateSerial !== currentState.serial) throw new Error("Stage A reconciliation completion-only resume lacks authenticated post-apply evidence.");
+    if (assertSourceIntegrity !== undefined) { if (typeof assertSourceIntegrity !== "function") throw new Error("Stage A reconciliation source-integrity check is invalid."); assertSourceIntegrity(); }
+    const livePolicy = await adapter.readProductionArtifactsPolicy(); assertLivePolicyCas(livePolicy);
+    if (resumeResult) return Object.freeze({ valid: true, applied: false, resumed: true, alreadyCompleted: true, refreshOnly: true, savedPlanSha256: saved.savedPlanSha256, preState: before, postState: currentState, livePolicySha256: stablePolicySha256(livePolicy), awsResourceMutations: 0, terraformStateMutations: 0 });
+    await finalizeConsumption({ ...consumption, reservation: { reservation }, status: "COMPLETED", postState: currentState, postLivePolicySha256: stablePolicySha256(livePolicy) });
+    return Object.freeze({ valid: true, applied: false, resumed: true, refreshOnly: true, savedPlanSha256: saved.savedPlanSha256, preState: before, postState: currentState, livePolicySha256: stablePolicySha256(livePolicy), awsResourceMutations: 0, terraformStateMutations: 0 });
+  }
   const beforeReservation = await adapter.readStateIdentity();
   assertStateCas(beforeReservation, "after the refresh-only plan was saved");
   assertLivePolicyCas(await adapter.readProductionArtifactsPolicy());
   let reservation;
   let applyInvoked = false;
+  let applySucceeded = false;
   let finalized = false;
-  let finalizationAttempted = false;
   try {
     reservation = await reserveConsumption(consumption);
     if (!reservation || typeof reservation !== "object" || Array.isArray(reservation)) throw new Error("Stage A reconciliation consumption reservation is invalid.");
@@ -524,19 +547,19 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
     assertLivePolicyCas(await adapter.readProductionArtifactsPolicy());
     applyInvoked = true;
     await adapter.applySavedRefreshOnlyPlan(saved);
+    applySucceeded = true;
     const after = await adapter.readStateIdentity();
     if (after?.lineage !== before.lineage || after.serial !== before.serial + 1) throw new Error("Stage A reconciliation state serial did not advance exactly once.");
     const livePolicy = await adapter.readProductionArtifactsPolicy();
     if (stablePolicySha256(livePolicy) !== recoveryCompletion.livePolicySha256) throw new Error("Stage A reconciled production-artifacts policy does not match the authenticated desired policy.");
-    finalizationAttempted = true;
+    await recordPostApply({ ...consumption, reservation, postState: after, postLivePolicySha256: stablePolicySha256(livePolicy) });
     await finalizeConsumption({ ...consumption, reservation, status: "COMPLETED", postState: after, postLivePolicySha256: stablePolicySha256(livePolicy) });
     finalized = true;
     return Object.freeze({ valid: true, applied: true, refreshOnly: true, savedPlanSha256: saved.savedPlanSha256, preState: before, postState: after, livePolicySha256: stablePolicySha256(livePolicy), awsResourceMutations: 0, terraformStateMutations: 1 });
   } catch (error) {
     if (reservation && !finalized) {
-      if (applyInvoked) {
-        if (!finalizationAttempted) { finalizationAttempted = true; await finalizeConsumption({ ...consumption, reservation, status: "FAILED_OR_INDETERMINATE" }); finalized = true; }
-      }
+      if (applySucceeded) { /* Leave the immutable reservation available for completion-only retry. */ }
+      else if (applyInvoked) { await finalizeConsumption({ ...consumption, reservation, status: "FAILED_OR_INDETERMINATE" }); finalized = true; }
       else await abortConsumption({ ...consumption, reservation, status: "ABORTED" });
     }
     throw error;

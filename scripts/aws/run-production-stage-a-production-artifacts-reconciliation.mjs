@@ -41,13 +41,15 @@ const protectedSource = (readProtectedSource, sourceSha) => {
   if (head !== sourceSha) throw new Error("Stage A production-artifacts reconciliation source SHA is not authenticated.");
   return { fresh, head };
 };
-const authenticateRecovery = async ({ sourceSha, recoverySourceSha = sourceSha, releaseRun, adapter, journal, verifySignature, recoveryWorkflowRunId, recoveryWorkflowRunAttempt, resolveAuthorization, readProtectedSource, proveDescendant }) => {
+const authenticateRecovery = async ({ sourceSha, recoverySourceSha = sourceSha, releaseRun, adapter, journal, verifySignature, recoveryWorkflowRunId, recoveryWorkflowRunAttempt, resolveAuthorization, readProtectedSource, proveDescendant, allowAdvancedState = false }) => {
   const source = protectedSource(readProtectedSource, sourceSha);
   assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: source.head, recoverySourceSha, proveDescendant });
   if (!exactRelease(awsJson(releaseRun, ["sts", "get-caller-identity"]))) throw new Error("Stage A production-artifacts reconciliation requires the exact release-deployer session.");
   const recovery = resolveAuthorization({ workflowRunId: recoveryWorkflowRunId, workflowRunAttempt: recoveryWorkflowRunAttempt, sourceSha: recoverySourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION });
-  const preState = await adapter.readStateIdentity();
+  const currentState = await adapter.readStateIdentity();
+  const preState = { lineage: recovery.authorization.preStateLineage, serial: recovery.authorization.preStateSerial, stateSha256: recovery.authorization.preStateSha256 };
   assertStageAProductionArtifactsRecoveryAuthorization(recovery.authorization, { sourceSha: recoverySourceSha, preState });
+  if (!allowAdvancedState && (currentState?.lineage !== preState.lineage || currentState?.serial !== preState.serial || currentState?.stateSha256 !== preState.stateSha256)) throw new Error("Stage A production-artifacts reconciliation state changed before preparation.");
   const completionEvidence = readCompletion(journal, recovery.authorization, verifySignature);
   const livePolicy = await adapter.readProductionArtifactsPolicy();
   if (stageAProductionArtifactsPolicySha256(livePolicy) !== completionEvidence.desiredPolicySha256 || stageAProductionArtifactsPolicySha256(livePolicy) !== stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A production-artifacts reconciliation requires the exact live desired policy.");
@@ -56,7 +58,7 @@ const authenticateRecovery = async ({ sourceSha, recoverySourceSha = sourceSha, 
     assertStageAProductionArtifactsRecoveryCompletionEvidence(completionEvidence, { authorization: recovery.authorization, verify: verifySignature });
     return { authorizationSha256: recovery.authorization.authorizationSha256, livePolicySha256: completionEvidence.postRecoveryLivePolicySha256, completed: true };
   };
-  return Object.freeze({ ...source, recoverySourceSha, recovery, preState, completionEvidence, verifyRecoveryCompletion });
+  return Object.freeze({ ...source, recoverySourceSha, recovery, preState, currentState, completionEvidence, verifyRecoveryCompletion });
 };
 
 export async function prepareStageAProductionArtifactsReconciliation({ sourceSha, recoverySourceSha = sourceSha, recoveryWorkflowRunId, recoveryWorkflowRunAttempt, releaseRun, adapter, resolveAuthorization = resolveStageAProductionArtifactsAuthorizationArtifact, journal, verifySignature, readProtectedSource = readStageBProtectedMainCheckout, proveDescendant = proveProtectedMainDescendant } = {}) {
@@ -67,7 +69,7 @@ export async function prepareStageAProductionArtifactsReconciliation({ sourceSha
 
 export async function runStageAProductionArtifactsReconciliation({ sourceSha, recoverySourceSha = sourceSha, recoveryWorkflowRunId, recoveryWorkflowRunAttempt, reconciliationWorkflowRunId, reconciliationWorkflowRunAttempt, releaseRun, adapter, resolveAuthorization = resolveStageAProductionArtifactsAuthorizationArtifact, journal, verifySignature, readProtectedSource = readStageBProtectedMainCheckout, proveDescendant = proveProtectedMainDescendant, preparedEvidence, saved: suppliedSaved, savedPlanPath, prepareEvidencePath } = {}) {
   if (typeof releaseRun !== "function" || !adapter || typeof resolveAuthorization !== "function" || !journal || typeof journal.readRecoveryCompletion !== "function" || typeof verifySignature !== "function") throw new Error("Stage A production-artifacts reconciliation composition is incomplete.");
-  const context = await authenticateRecovery({ sourceSha, recoverySourceSha, releaseRun, adapter, journal, verifySignature, recoveryWorkflowRunId, recoveryWorkflowRunAttempt, resolveAuthorization, readProtectedSource, proveDescendant });
+  const context = await authenticateRecovery({ sourceSha, recoverySourceSha, releaseRun, adapter, journal, verifySignature, recoveryWorkflowRunId, recoveryWorkflowRunAttempt, resolveAuthorization, readProtectedSource, proveDescendant, allowAdvancedState: true });
   if (!preparedEvidence && !prepareEvidencePath) throw new Error("Stage A reconciliation execution requires the prepared evidence path.");
   const evidence = preparedEvidence || JSON.parse(fs.readFileSync(path.resolve(prepareEvidencePath), "utf8"));
   let saved = suppliedSaved;
@@ -83,14 +85,27 @@ export async function runStageAProductionArtifactsReconciliation({ sourceSha, re
   assertStageAProductionArtifactsReconciliationGovernanceAuthorization(reconciliation.authorization, { sourceSha: context.head, recoverySourceSha: context.recoverySourceSha, preState: context.preState, recoveryAuthorization: context.recovery.authorization, recoveryCompletion: context.completionEvidence, prepareEvidence: evidence, savedPlanSha256: saved.savedPlanSha256, verifyRecoveryCompletionEvidence: verifySignature, proveDescendant });
   const coreAuthorization = createCoreAuthorization({ sourceSha: context.head, recoverySourceSha: context.recoverySourceSha, recoveryCompletion: context.completionEvidence.completion, savedPlanSha256: saved.savedPlanSha256, stateLineage: context.preState.lineage, preStateSerial: context.preState.serial, preStateSha256: context.preState.stateSha256, verifyRecoveryCompletion: context.verifyRecoveryCompletion });
   const identity = { operation: STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION, sourceSha: context.head, account: "368992683803", region: "eu-west-2", executionPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", authorizationSha256: reconciliation.authorization.authorizationSha256, recoveryCompletionSha256: context.completionEvidence.completionEvidenceSha256, savedPlanSha256: saved.savedPlanSha256, preStateLineage: context.preState.lineage, preStateSerial: context.preState.serial, preStateSha256: context.preState.stateSha256, desiredPolicySha256: context.completionEvidence.desiredPolicySha256 };
-  const result = await runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha: context.head, recoverySourceSha: context.recoverySourceSha, recoveryCompletion: context.completionEvidence.completion, verifyRecoveryCompletion: context.verifyRecoveryCompletion, reconciliationAuthorization: coreAuthorization, saved, preparedState: context.preState, assertSourceIntegrity: () => protectedSource(readProtectedSource, context.head), verifyReconciliationAuthorization: (authorization) => {
+  if (typeof journal.readReservation !== "function" || typeof journal.readResult !== "function" || typeof journal.readPostApplyEvidence !== "function" || typeof journal.writePostApplyEvidence !== "function") throw new Error("Stage A reconciliation journal cannot resume or authenticate terminal consumption.");
+  const existingReservation = journal.readReservation(identity.authorizationSha256);
+  const existingPostApplyEvidence = journal.readPostApplyEvidence(identity.authorizationSha256);
+  const existingResult = journal.readResult(identity.authorizationSha256);
+  const sameCompletedResult = (result, { reservation, status, postState, postLivePolicySha256 }) => result?.status === status && result.reservationSha256 === reservation?.reservation?.reservationSha256 && result.postStateLineage === postState?.lineage && result.postStateSerial === postState?.serial && result.postStateSha256 === postState?.stateSha256 && result.postLivePolicySha256 === postLivePolicySha256;
+  const finalizeConsumption = async ({ reservation, status, postState, postLivePolicySha256 }) => {
+    try { return journal.finalize({ reservation: reservation?.reservation, status, postState, postLivePolicySha256 }); }
+    catch (error) {
+      const persisted = journal.readResult(identity.authorizationSha256);
+      if (!persisted || !sameCompletedResult(persisted.result, { reservation, status, postState, postLivePolicySha256 })) throw error;
+      return persisted;
+    }
+  };
+  const result = await runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha: context.head, recoverySourceSha: context.recoverySourceSha, recoveryCompletion: context.completionEvidence.completion, recoveryCompletionSha256: identity.recoveryCompletionSha256, verifyRecoveryCompletion: context.verifyRecoveryCompletion, reconciliationAuthorization: coreAuthorization, saved, preparedState: context.preState, assertSourceIntegrity: () => protectedSource(readProtectedSource, context.head), verifyReconciliationAuthorization: (authorization) => {
     if (authorization?.authorizationSha256 !== coreAuthorization.authorizationSha256) return false;
     assertStageAProductionArtifactsReconciliationGovernanceAuthorization(reconciliation.authorization, { sourceSha: context.head, recoverySourceSha: context.recoverySourceSha, preState: context.preState, recoveryAuthorization: context.recovery.authorization, recoveryCompletion: context.completionEvidence, prepareEvidence: evidence, savedPlanSha256: saved.savedPlanSha256, verifyRecoveryCompletionEvidence: verifySignature, proveDescendant });
     return { authorizationSha256: coreAuthorization.authorizationSha256, approved: true, independent: true };
-  }, authorizationIdentity: reconciliation.authorization.authorizationSha256, reserveConsumption: async (consumption) => {
-    if (consumption.authorizationSha256 !== identity.authorizationSha256 || consumption.completionSha256 !== context.completionEvidence.completion.completionSha256 || consumption.savedPlanSha256 !== identity.savedPlanSha256 || consumption.preStateSha256 !== identity.preStateSha256) throw new Error("Stage A reconciliation consumption identity is substituted.");
+  }, authorizationIdentity: reconciliation.authorization.authorizationSha256, recoveryCompletionSha256: identity.recoveryCompletionSha256, resumeReservation: existingReservation?.reservation, resumeResult: existingResult?.result, postApplyEvidence: existingPostApplyEvidence?.evidence, reserveConsumption: async (consumption) => {
+    if (consumption.authorizationSha256 !== identity.authorizationSha256 || consumption.completionSha256 !== identity.recoveryCompletionSha256 || consumption.savedPlanSha256 !== identity.savedPlanSha256 || consumption.preStateSha256 !== identity.preStateSha256) throw new Error("Stage A reconciliation consumption identity is substituted.");
     return journal.reserve(identity);
-  }, finalizeConsumption: async ({ reservation, status, postState, postLivePolicySha256 }) => journal.finalize({ reservation: reservation?.reservation, status, postState, postLivePolicySha256 }), abortConsumption: async ({ reservation }) => journal.finalize({ reservation: reservation?.reservation, status: "ABORTED_BEFORE_APPLY" }) });
+  }, recordPostApply: async ({ reservation, postState, postLivePolicySha256 }) => journal.writePostApplyEvidence({ reservation, postState, postLivePolicySha256 }), finalizeConsumption, abortConsumption: async ({ reservation }) => journal.finalize({ reservation: reservation?.reservation, status: "ABORTED_BEFORE_APPLY" }) });
   return Object.freeze({ ...result, prepareEvidenceSha256: evidence.prepareEvidenceSha256, recoveryAuthorizationSha256: context.recovery.authorization.authorizationSha256, recoveryCompletionSha256: context.completionEvidence.completionEvidenceSha256, reconciliationAuthorizationSha256: reconciliation.authorization.authorizationSha256 });
 }
 
