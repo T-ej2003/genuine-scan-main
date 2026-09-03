@@ -86,12 +86,13 @@ export async function runStageAProductionArtifactsReconciliation({ sourceSha, re
   const coreAuthorization = createCoreAuthorization({ sourceSha: context.head, recoverySourceSha: context.recoverySourceSha, recoveryCompletion: context.completionEvidence.completion, savedPlanSha256: saved.savedPlanSha256, stateLineage: context.preState.lineage, preStateSerial: context.preState.serial, preStateSha256: context.preState.stateSha256, verifyRecoveryCompletion: context.verifyRecoveryCompletion });
   const identity = { operation: STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION, sourceSha: context.head, account: "368992683803", region: "eu-west-2", executionPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", authorizationSha256: reconciliation.authorization.authorizationSha256, recoveryCompletionSha256: context.completionEvidence.completionEvidenceSha256, savedPlanSha256: saved.savedPlanSha256, preStateLineage: context.preState.lineage, preStateSerial: context.preState.serial, preStateSha256: context.preState.stateSha256, desiredPolicySha256: context.completionEvidence.desiredPolicySha256 };
   if (typeof journal.readReservation !== "function" || typeof journal.readResult !== "function" || typeof journal.readPostApplyEvidence !== "function" || typeof journal.writePostApplyEvidence !== "function") throw new Error("Stage A reconciliation journal cannot resume or authenticate terminal consumption.");
-  const existingReservation = journal.readReservation(identity.authorizationSha256);
-  const existingPostApplyEvidence = journal.readPostApplyEvidence(identity.authorizationSha256);
-  const existingResult = journal.readResult(identity.authorizationSha256);
-  const sameCompletedResult = (result, { reservation, status, postState, postLivePolicySha256 }) => result?.status === status && result.reservationSha256 === reservation?.reservation?.reservationSha256 && result.postStateLineage === postState?.lineage && result.postStateSerial === postState?.serial && result.postStateSha256 === postState?.stateSha256 && result.postLivePolicySha256 === postLivePolicySha256;
+  const reservationValue = (value) => value?.reservation || value;
+  const readConsumptionEvidence = () => Object.freeze({ reservation: journal.readReservation(identity.authorizationSha256)?.reservation || null, postApplyEvidence: journal.readPostApplyEvidence(identity.authorizationSha256)?.evidence || null, result: journal.readResult(identity.authorizationSha256)?.result || null });
+  const existingConsumption = readConsumptionEvidence();
+  const sameCompletedResult = (result, { reservation, status, postState, postLivePolicySha256 }) => result?.status === status && result.reservationSha256 === reservationValue(reservation)?.reservationSha256 && result.postStateLineage === (postState?.lineage || null) && result.postStateSerial === (postState?.serial || null) && result.postStateSha256 === (postState?.stateSha256 || null) && result.postLivePolicySha256 === (postLivePolicySha256 || null);
+  const samePostApplyEvidence = (evidence, { reservation, postState, postLivePolicySha256 }) => evidence?.reservationSha256 === reservationValue(reservation)?.reservationSha256 && evidence.postStateLineage === postState?.lineage && evidence.postStateSerial === postState?.serial && evidence.postStateSha256 === postState?.stateSha256 && evidence.postLivePolicySha256 === postLivePolicySha256;
   const finalizeConsumption = async ({ reservation, status, postState, postLivePolicySha256 }) => {
-    try { return journal.finalize({ reservation: reservation?.reservation, status, postState, postLivePolicySha256 }); }
+    try { return journal.finalize({ reservation: reservationValue(reservation), status, postState, postLivePolicySha256 }); }
     catch (error) {
       const persisted = journal.readResult(identity.authorizationSha256);
       if (!persisted || !sameCompletedResult(persisted.result, { reservation, status, postState, postLivePolicySha256 })) throw error;
@@ -102,10 +103,17 @@ export async function runStageAProductionArtifactsReconciliation({ sourceSha, re
     if (authorization?.authorizationSha256 !== coreAuthorization.authorizationSha256) return false;
     assertStageAProductionArtifactsReconciliationGovernanceAuthorization(reconciliation.authorization, { sourceSha: context.head, recoverySourceSha: context.recoverySourceSha, preState: context.preState, recoveryAuthorization: context.recovery.authorization, recoveryCompletion: context.completionEvidence, prepareEvidence: evidence, savedPlanSha256: saved.savedPlanSha256, verifyRecoveryCompletionEvidence: verifySignature, proveDescendant });
     return { authorizationSha256: coreAuthorization.authorizationSha256, approved: true, independent: true };
-  }, authorizationIdentity: reconciliation.authorization.authorizationSha256, recoveryCompletionSha256: identity.recoveryCompletionSha256, resumeReservation: existingReservation?.reservation, resumeResult: existingResult?.result, postApplyEvidence: existingPostApplyEvidence?.evidence, reserveConsumption: async (consumption) => {
+  }, authorizationIdentity: reconciliation.authorization.authorizationSha256, recoveryCompletionSha256: identity.recoveryCompletionSha256, resumeReservation: existingConsumption.reservation, resumeResult: existingConsumption.result, postApplyEvidence: existingConsumption.postApplyEvidence, readConsumptionEvidence, reserveConsumption: async (consumption) => {
     if (consumption.authorizationSha256 !== identity.authorizationSha256 || consumption.completionSha256 !== identity.recoveryCompletionSha256 || consumption.savedPlanSha256 !== identity.savedPlanSha256 || consumption.preStateSha256 !== identity.preStateSha256) throw new Error("Stage A reconciliation consumption identity is substituted.");
     return journal.reserve(identity);
-  }, recordPostApply: async ({ reservation, postState, postLivePolicySha256 }) => journal.writePostApplyEvidence({ reservation, postState, postLivePolicySha256 }), finalizeConsumption, abortConsumption: async ({ reservation }) => journal.finalize({ reservation: reservation?.reservation, status: "ABORTED_BEFORE_APPLY" }) });
+  }, recordPostApply: async ({ reservation, postState, postLivePolicySha256 }) => {
+    try { return journal.writePostApplyEvidence({ reservation: reservationValue(reservation), postState, postLivePolicySha256 }); }
+    catch (error) {
+      const persisted = journal.readPostApplyEvidence(identity.authorizationSha256);
+      if (!persisted || !samePostApplyEvidence(persisted.evidence, { reservation, postState, postLivePolicySha256 })) throw error;
+      return persisted;
+    }
+  }, finalizeConsumption, abortConsumption: async ({ reservation }) => finalizeConsumption({ reservation, status: "ABORTED_BEFORE_APPLY" }) });
   return Object.freeze({ ...result, prepareEvidenceSha256: evidence.prepareEvidenceSha256, recoveryAuthorizationSha256: context.recovery.authorization.authorizationSha256, recoveryCompletionSha256: context.completionEvidence.completionEvidenceSha256, reconciliationAuthorizationSha256: reconciliation.authorization.authorizationSha256 });
 }
 

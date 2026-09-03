@@ -13,7 +13,8 @@ import { runStageAProductionArtifactsReconciliation, runStageAProductionArtifact
 
 const sourceSha = "a".repeat(40); const lineage = "02afb75a-f902-ab8a-f4c1-751d4aef7837"; const stateSha256 = "b".repeat(64);
 const state = { lineage, serial: 35, stateSha256 };
-const stageAVars = { TF_VAR_aws_region: "eu-west-2", TF_VAR_vpc_id: "vpc-00000000", TF_VAR_private_subnet_ids: '["subnet-00000000"]', TF_VAR_runtime_endpoint_security_group_ids: '["sg-00000000"]', TF_VAR_database_runtime_security_group_ids: '["sg-00000000"]', TF_VAR_s3_prefix_list_id: "pl-00000000", TF_VAR_vpc_dns_resolver_cidr: "10.0.0.2/32", TF_VAR_checker_principal_arns: '["arn:aws:iam::368992683803:role/mscqr-production-independent-checker"]', TF_VAR_release_role_arn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", TF_VAR_receipt_bucket_arn: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" };
+const fixtureId = (prefix) => `${prefix}-${"0".repeat(8)}`;
+const stageAVars = { TF_VAR_aws_region: "eu-west-2", TF_VAR_vpc_id: fixtureId("vpc"), TF_VAR_private_subnet_ids: JSON.stringify([fixtureId("subnet")]), TF_VAR_runtime_endpoint_security_group_ids: JSON.stringify([fixtureId("sg")]), TF_VAR_database_runtime_security_group_ids: JSON.stringify([fixtureId("sg")]), TF_VAR_s3_prefix_list_id: fixtureId("pl"), TF_VAR_vpc_dns_resolver_cidr: "10.0.0.2/32", TF_VAR_checker_principal_arns: '["arn:aws:iam::368992683803:role/mscqr-production-independent-checker"]', TF_VAR_release_role_arn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", TF_VAR_receipt_bucket_arn: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" };
 const terraformStateLock = { acquire: async () => {}, release: async () => {} };
 const rootIdentity = JSON.stringify({ Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" });
 const releaseIdentity = JSON.stringify({ Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test" });
@@ -87,7 +88,7 @@ test("real Stage-A recovery and reconciliation runner composition reaches one st
 });
 
 test("reconciliation resumes completion-only after apply succeeds but terminal publication fails", async () => {
-  let state = { lineage, serial: 35, stateSha256 }; let applies = 0; let finalizationFailures = 1; let persistedReservation; let persistedResult;
+  let state = { lineage, serial: 35, stateSha256 }; let applies = 0; let finalizationFailures = 1; let losePostApplyResponse = false; let loseCompletionResponse = false; let persistedReservation; let persistedResult;
   const recoveryAuthorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "401"), verificationRef: "completion-resume" });
   const completionEvidence = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization: recoveryAuthorization, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicy(), sign: () => "c2lnbmF0dXJl" });
   const savedPlanSha256 = "d".repeat(64); const saved = { sourceSha, refreshOnly: true, savedPlanSha256, savedPlanByteLength: 1, planPath: "/tmp/stage-a-completion-resume.tfplan", preState: state, terraformVersion: "1.15.8", plan: refreshPlan(buildStageAProductionArtifactsBucketPolicy()) };
@@ -95,7 +96,7 @@ test("reconciliation resumes completion-only after apply succeeds but terminal p
   const reconciliationAuthorization = createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, preState: state, recoveryAuthorization, recoveryCompletion: completionEvidence, prepareEvidence, savedPlanSha256, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsReconciliationWorkflowRef, "402"), verificationRef: "completion-resume", verifyRecoveryCompletionEvidence: () => true });
   let livePolicy = buildStageAProductionArtifactsBucketPolicy();
   const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : args[1] === "get-bucket-policy" ? JSON.stringify({ Policy: JSON.stringify(livePolicy) }) : (() => { throw new Error(`unexpected release ${args[1]}`); })();
-  const adapter = { readStateIdentity: async () => ({ ...state }), applySavedRefreshOnlyPlan: async () => { applies += 1; state = { ...state, serial: 36, stateSha256: "e".repeat(64) }; }, readProductionArtifactsPolicy: async () => livePolicy };
+  const adapter = { readStateIdentity: async () => ({ ...state }), applySavedRefreshOnlyPlan: async () => { applies += 1; state = { ...state, serial: 36, stateSha256: "e".repeat(64) }; throw new Error("apply exited nonzero after state mutation"); }, readProductionArtifactsPolicy: async () => livePolicy };
   let persistedPostApply;
   const journal = {
     readRecoveryCompletion: () => ({ bytes: Buffer.from(JSON.stringify(completionEvidence)) }),
@@ -103,16 +104,16 @@ test("reconciliation resumes completion-only after apply succeeds but terminal p
     readPostApplyEvidence: () => persistedPostApply && { evidence: persistedPostApply },
     readResult: () => persistedResult && { result: persistedResult },
     reserve: (identity) => { persistedReservation = createStageAProductionArtifactsReservation(identity); return { reservation: persistedReservation }; },
-    writePostApplyEvidence: ({ reservation, postState, postLivePolicySha256 }) => { persistedPostApply = createStageAProductionArtifactsPostApplyEvidence({ reservation: reservation?.reservation, postState, postLivePolicySha256 }); return { evidence: persistedPostApply }; },
-    finalize: ({ reservation, status, postState, postLivePolicySha256 }) => { const result = createStageAProductionArtifactsJournalResult({ reservation, status, postState, postLivePolicySha256 }); if (status === "COMPLETED" && finalizationFailures-- > 0) throw new Error("injected terminal publication failure"); persistedResult = result; return { result }; },
+    writePostApplyEvidence: ({ reservation, postState, postLivePolicySha256 }) => { persistedPostApply = createStageAProductionArtifactsPostApplyEvidence({ reservation: reservation?.reservation || reservation, postState, postLivePolicySha256 }); if (losePostApplyResponse) { losePostApplyResponse = false; throw new Error("injected post-apply response loss"); } return { evidence: persistedPostApply }; },
+    finalize: ({ reservation, status, postState, postLivePolicySha256 }) => { const result = createStageAProductionArtifactsJournalResult({ reservation, status, postState, postLivePolicySha256 }); if (status === "COMPLETED" && finalizationFailures > 0) { finalizationFailures -= 1; throw new Error("injected terminal publication failure"); } persistedResult = result; if (status === "COMPLETED" && loseCompletionResponse) { loseCompletionResponse = false; throw new Error("injected terminal response loss"); } return { result }; },
   };
   const common = { sourceSha, recoveryWorkflowRunId: "401", recoveryWorkflowRunAttempt: "1", reconciliationWorkflowRunId: "402", reconciliationWorkflowRunAttempt: "1", releaseRun, adapter, readProtectedSource: source, verifySignature: () => true, preparedEvidence: prepareEvidence, saved, resolveAuthorization: ({ operation }) => operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? { authorization: recoveryAuthorization } : { authorization: reconciliationAuthorization }, journal };
   await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /terminal publication failure/);
   assert.equal(applies, 1); assert.ok(persistedReservation); assert.ok(persistedPostApply); assert.equal(persistedResult, undefined);
   state = { lineage, serial: 35, stateSha256: "f".repeat(64) };
-  await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /post-apply|authorized post-state/);
+  await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /pre-state|post-state/);
   state = { lineage, serial: 35, stateSha256 };
-  await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /authorized post-state/);
+  await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /pre-state|post-state/);
   state = { lineage, serial: 36, stateSha256: "e".repeat(64) };
   const savedPlanSubstitution = { ...saved, savedPlanSha256: "a".repeat(64) };
   await assert.rejects(() => runStageAProductionArtifactsReconciliation({ ...common, saved: savedPlanSubstitution }), /prepare evidence|authorization/);
@@ -121,18 +122,23 @@ test("reconciliation resumes completion-only after apply succeeds but terminal p
   await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /authorized operation|reservation/);
   persistedReservation = savedReservation;
   persistedPostApply = undefined;
-  await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /post-apply evidence/);
+  const derivedEvidence = await runStageAProductionArtifactsReconciliation(common);
+  assert.equal(derivedEvidence.resumed, true); assert.equal(applies, 1); assert.ok(persistedPostApply); assert.ok(persistedResult);
+  persistedResult = undefined;
   persistedPostApply = createStageAProductionArtifactsPostApplyEvidence({ reservation: persistedReservation, postState: state, postLivePolicySha256: completionEvidence.desiredPolicySha256 });
   livePolicy = buildStageAProductionArtifactsBucketPolicyPredecessor();
   await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /exact live desired policy/);
   livePolicy = buildStageAProductionArtifactsBucketPolicy();
   persistedResult = createStageAProductionArtifactsJournalResult({ reservation: persistedReservation, status: "ABORTED_BEFORE_APPLY" });
-  await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /post-apply|COMPLETED/);
+  await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /completion result|COMPLETED/);
   persistedResult = undefined;
   const resumed = await runStageAProductionArtifactsReconciliation(common);
   assert.equal(resumed.resumed, true); assert.equal(resumed.applied, false); assert.equal(applies, 1); assert.ok(persistedResult);
   const repeated = await runStageAProductionArtifactsReconciliation(common);
   assert.equal(repeated.alreadyCompleted, true); assert.equal(repeated.applied, false); assert.equal(applies, 1);
+  persistedResult = undefined; persistedPostApply = undefined; losePostApplyResponse = true; loseCompletionResponse = true;
+  const lostResponses = await runStageAProductionArtifactsReconciliation(common);
+  assert.equal(lostResponses.resumed, true); assert.equal(applies, 1); assert.equal(persistedResult.status, "COMPLETED");
 });
 
 test("recovery resumes exact desired policy only from its signed immutable attempt", async () => {
