@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { canonicalJson, PRODUCTION_ACTIVATION_LIFECYCLE, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertProductionEnvironmentApprovalIdentity, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
 import { ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
@@ -20,6 +21,14 @@ export const STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_AUTHORIZATION_ARTIFACT 
 const SHA256 = /^[a-f0-9]{64}$/;
 const SHA40 = /^[a-f0-9]{40}$/;
 const LINEAGE = /^[0-9a-f-]{36}$/;
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const governedEntrypoints = Object.freeze([
+  "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs",
+  "scripts/aws/authorize-production-stage-a-production-artifacts-recovery.mjs",
+  "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+  "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+]);
+const terraformRoot = "infra/aws/terraform/production-green-stage-a/";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const policySha256 = stageAProductionArtifactsPolicySha256;
 const exactKeys = (value, fields, label) => {
@@ -34,7 +43,7 @@ const approval = (value, { sourceSha, workflowRef }) => {
   if (value.schemaVersion !== 3 || value.workflowRef !== workflowRef || value.actualApproval?.userLogin?.toLowerCase() === value.executionActor.toLowerCase()) throw new Error("Stage A production-artifacts authorization requires actual independent protected-environment approval.");
   return value;
 };
-const recoverFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "account", "region", "bucket", "executionPrincipal", "predecessorPolicySha256", "desiredPolicySha256", "expectedLivePolicySha256", "preStateLineage", "preStateSerial", "preStateSha256", "continuationCompatibilitySha256", "maxPutBucketPolicy", "maxDeleteBucketPolicy", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "verificationRef", "authorizationSha256"]);
+const recoverFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "account", "region", "bucket", "executionPrincipal", "predecessorPolicySha256", "desiredPolicySha256", "expectedLivePolicySha256", "preStateLineage", "preStateSerial", "preStateSha256", "governedExecutableManifestSha256", "continuationCompatibilitySha256", "maxPutBucketPolicy", "maxDeleteBucketPolicy", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "verificationRef", "authorizationSha256"]);
 const reconcileFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "recoverySourceSha", "account", "region", "bucket", "executionPrincipal", "recoveryAuthorizationSha256", "recoveryCompletionSha256", "desiredPolicySha256", "preStateLineage", "preStateSerial", "preStateSha256", "savedPlanSha256", "savedPlanByteLength", "prepareEvidenceSha256", "maxRefreshOnlyApplies", "maxInfrastructureWrites", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "verificationRef", "authorizationSha256"]);
 const completionFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "account", "region", "bucket", "executionPrincipal", "recoveryAuthorizationSha256", "predecessorPolicySha256", "desiredPolicySha256", "preRecoveryLivePolicySha256", "postRecoveryLivePolicySha256", "preStateLineage", "preStateSerial", "preStateSha256", "maxPutBucketPolicy", "putBucketPolicyCount", "deleteBucketPolicyCount", "protectedEnvironmentApprovalEvidenceSha256", "workflowRunId", "workflowRunAttempt", "independentReviewer", "completion", "signature", "completionEvidenceSha256"]);
 const attemptFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "account", "region", "bucket", "executionPrincipal", "recoveryAuthorizationSha256", "predecessorPolicySha256", "desiredPolicySha256", "preStateLineage", "preStateSerial", "preStateSha256", "protectedEnvironmentApprovalEvidenceSha256", "workflowRunId", "workflowRunAttempt", "independentReviewer", "signature", "attemptEvidenceSha256"]);
@@ -45,14 +54,61 @@ function common({ sourceSha, preState, protectedEnvironmentApprovalEvidence, wor
   return { sourceSha, account: STAGE_B.account, region: STAGE_B.region, bucket: PRODUCTION_ACTIVATION_LIFECYCLE.bucket, preStateLineage: preState.lineage, preStateSerial: preState.serial, preStateSha256: preState.stateSha256, protectedEnvironmentApprovalEvidence, protectedEnvironmentApprovalEvidenceSha256: protectedEnvironmentApprovalEvidence.evidenceSha256, verificationRef: verificationRef.trim() };
 }
 
-export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant } = {}) {
+const relativeImports = (bytes) => {
+  const source = bytes.toString("utf8"); const imports = new Set();
+  for (const expression of [/\bimport\s*["'](\.[^"']+)["']/g, /\b(?:import|export)\s+[^;]*?\sfrom\s*["'](\.[^"']+)["']/g, /\bimport\s*\(\s*["'](\.[^"']+)["']\s*\)/g]) {
+    for (const match of source.matchAll(expression)) imports.add(match[1]);
+  }
+  return [...imports];
+};
+
+export function stageAProductionArtifactsGovernedExecutableManifest(sourceSha, { git = (args, options = {}) => execFileSync("git", args, { cwd: repositoryRoot, ...options }) } = {}) {
+  if (!SHA40.test(sourceSha || "") || typeof git !== "function") throw new Error("Stage A production-artifacts governed source coordinate is invalid.");
+  const tree = new Map();
+  for (const entry of Buffer.from(git(["ls-tree", "-r", "-z", "--full-tree", sourceSha])).toString("utf8").split("\0").filter(Boolean)) {
+    const match = /^(\d+) (\w+) ([a-f0-9]+)\t(.+)$/.exec(entry);
+    if (!match) throw new Error("Stage A production-artifacts governed source tree is malformed.");
+    tree.set(match[4], { mode: match[1], type: match[2], object: match[3] });
+  }
+  const selected = new Set(governedEntrypoints); const pending = [...governedEntrypoints]; const bytesByPath = new Map();
+  while (pending.length) {
+    const file = pending.pop(); const object = tree.get(file);
+    if (!object || object.type !== "blob" || !["100644", "100755"].includes(object.mode)) throw new Error(`Stage A production-artifacts governed source file is missing or unsafe: ${file}`);
+    const bytes = Buffer.from(git(["cat-file", "blob", object.object])); bytesByPath.set(file, bytes);
+    for (const specifier of relativeImports(bytes)) {
+      let dependency = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
+      if (!path.posix.extname(dependency)) dependency += ".mjs";
+      if (dependency.startsWith("../") || dependency.startsWith("/") || !tree.has(dependency)) throw new Error(`Stage A production-artifacts governed source import is invalid: ${file} -> ${specifier}`);
+      if (!selected.has(dependency)) { selected.add(dependency); pending.push(dependency); }
+    }
+  }
+  for (const file of tree.keys()) if ((file.startsWith(terraformRoot) && file.endsWith(".tf")) || file === `${terraformRoot}.terraform.lock.hcl`) selected.add(file);
+  const files = [...selected].sort().map((file) => {
+    const object = tree.get(file);
+    if (!object || object.type !== "blob" || !["100644", "100755"].includes(object.mode)) throw new Error(`Stage A production-artifacts governed source file is missing or unsafe: ${file}`);
+    const bytes = bytesByPath.get(file) || Buffer.from(git(["cat-file", "blob", object.object]));
+    return Object.freeze({ path: file, sha256: sha256(bytes) });
+  });
+  return Object.freeze({ schemaVersion: 1, sourceSha, files: Object.freeze(files) });
+}
+
+export const stageAProductionArtifactsGovernedExecutableManifestSha256 = (sourceSha, options) => {
+  const { schemaVersion, files } = stageAProductionArtifactsGovernedExecutableManifest(sourceSha, options);
+  return sha256(canonicalJson({ schemaVersion, files }));
+};
+
+export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256, readGovernedExecutableManifestSha256 = stageAProductionArtifactsGovernedExecutableManifestSha256 } = {}) {
   if (!SHA40.test(sourceSha || "") || !SHA40.test(recoverySourceSha || "")) throw new Error("Stage A production-artifacts recovery source compatibility is invalid.");
   if (sourceSha === recoverySourceSha) return true;
   if (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: recoverySourceSha, descendantSha: sourceSha }) !== true) throw new Error("Stage A production-artifacts current source is not an authenticated descendant of the recovery source.");
+  const historical = typeof readGovernedExecutableManifestSha256 === "function" && readGovernedExecutableManifestSha256(recoverySourceSha);
+  if (!SHA256.test(historical || "") || (historicalGovernedExecutableManifestSha256 !== undefined && historical !== historicalGovernedExecutableManifestSha256) || historical !== readGovernedExecutableManifestSha256(sourceSha)) throw new Error("Stage A production-artifacts descendant changed the governed executable source.");
   return true;
 }
 
-export const stageAProductionArtifactsContinuationCompatibilitySha256 = () => sha256(canonicalJson({
+export const stageAProductionArtifactsContinuationCompatibilitySha256 = ({ governedExecutableManifestSha256 } = {}) => {
+  if (!SHA256.test(governedExecutableManifestSha256 || "")) throw new Error("Stage A production-artifacts governed executable manifest identity is invalid.");
+  return sha256(canonicalJson({
   schemaVersion: 1,
   recoveryOperation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION,
   reconciliationOperation: STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION,
@@ -71,16 +127,19 @@ export const stageAProductionArtifactsContinuationCompatibilitySha256 = () => sh
   stateSchemaVersions: STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS,
   rootAttestationKey: ROOT_ATTESTATION_KEY_ALIAS_ARN,
   rootAttestationSigningAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM,
-}));
+  governedExecutableManifestSha256,
+  }));
+};
 
-export function createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence, verificationRef } = {}) {
-  const body = { schemaVersion: 1, kind: "STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_AUTHORIZATION", operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, ...common({ sourceSha, preState, protectedEnvironmentApprovalEvidence, workflowRef: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF, verificationRef }), executionPrincipal: STAGE_A_PRODUCTION_ARTIFACTS_ROOT_PRINCIPAL, predecessorPolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()), desiredPolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicy()), expectedLivePolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()), continuationCompatibilitySha256: stageAProductionArtifactsContinuationCompatibilitySha256(), maxPutBucketPolicy: 1, maxDeleteBucketPolicy: 0 };
+export function createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence, verificationRef, governedExecutableManifestSha256 = stageAProductionArtifactsGovernedExecutableManifestSha256(sourceSha) } = {}) {
+  const body = { schemaVersion: 1, kind: "STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_AUTHORIZATION", operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, ...common({ sourceSha, preState, protectedEnvironmentApprovalEvidence, workflowRef: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF, verificationRef }), executionPrincipal: STAGE_A_PRODUCTION_ARTIFACTS_ROOT_PRINCIPAL, predecessorPolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()), desiredPolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicy()), expectedLivePolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()), governedExecutableManifestSha256, continuationCompatibilitySha256: stageAProductionArtifactsContinuationCompatibilitySha256({ governedExecutableManifestSha256 }), maxPutBucketPolicy: 1, maxDeleteBucketPolicy: 0 };
   return Object.freeze({ ...body, authorizationSha256: sha256(canonicalJson(body)) });
 }
 
-export function assertStageAProductionArtifactsRecoveryAuthorization(value, { sourceSha, preState, expectedContinuationCompatibilitySha256 = stageAProductionArtifactsContinuationCompatibilitySha256() } = {}) {
+export function assertStageAProductionArtifactsRecoveryAuthorization(value, { sourceSha, preState, expectedContinuationCompatibilitySha256 } = {}) {
   exactKeys(value, recoverFields, "Stage A production-artifacts recovery authorization"); state(preState, "Stage A production-artifacts recovery authorization");
-  if (value.schemaVersion !== 1 || value.kind !== "STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_AUTHORIZATION" || value.operation !== STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION || value.sourceSha !== sourceSha || value.account !== STAGE_B.account || value.region !== STAGE_B.region || value.bucket !== PRODUCTION_ACTIVATION_LIFECYCLE.bucket || value.executionPrincipal !== STAGE_A_PRODUCTION_ARTIFACTS_ROOT_PRINCIPAL || value.predecessorPolicySha256 !== policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()) || value.desiredPolicySha256 !== policySha256(buildStageAProductionArtifactsBucketPolicy()) || value.expectedLivePolicySha256 !== value.predecessorPolicySha256 || value.preStateLineage !== preState.lineage || value.preStateSerial !== preState.serial || value.preStateSha256 !== preState.stateSha256 || value.continuationCompatibilitySha256 !== expectedContinuationCompatibilitySha256 || !SHA256.test(value.continuationCompatibilitySha256 || "") || value.maxPutBucketPolicy !== 1 || value.maxDeleteBucketPolicy !== 0 || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence?.evidenceSha256 || !SHA256.test(value.authorizationSha256 || "")) throw new Error("Stage A production-artifacts recovery authorization binding is invalid.");
+  const compatibilitySha256 = stageAProductionArtifactsContinuationCompatibilitySha256({ governedExecutableManifestSha256: value.governedExecutableManifestSha256 });
+  if (value.schemaVersion !== 1 || value.kind !== "STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_AUTHORIZATION" || value.operation !== STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION || value.sourceSha !== sourceSha || value.account !== STAGE_B.account || value.region !== STAGE_B.region || value.bucket !== PRODUCTION_ACTIVATION_LIFECYCLE.bucket || value.executionPrincipal !== STAGE_A_PRODUCTION_ARTIFACTS_ROOT_PRINCIPAL || value.predecessorPolicySha256 !== policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()) || value.desiredPolicySha256 !== policySha256(buildStageAProductionArtifactsBucketPolicy()) || value.expectedLivePolicySha256 !== value.predecessorPolicySha256 || value.preStateLineage !== preState.lineage || value.preStateSerial !== preState.serial || value.preStateSha256 !== preState.stateSha256 || value.continuationCompatibilitySha256 !== compatibilitySha256 || (expectedContinuationCompatibilitySha256 !== undefined && value.continuationCompatibilitySha256 !== expectedContinuationCompatibilitySha256) || value.maxPutBucketPolicy !== 1 || value.maxDeleteBucketPolicy !== 0 || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence?.evidenceSha256 || !SHA256.test(value.authorizationSha256 || "")) throw new Error("Stage A production-artifacts recovery authorization binding is invalid.");
   approval(value.protectedEnvironmentApprovalEvidence, { sourceSha, workflowRef: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF }); const { authorizationSha256, ...body } = value;
   if (authorizationSha256 !== sha256(canonicalJson(body))) throw new Error("Stage A production-artifacts recovery authorization hash is invalid.");
   return Object.freeze(value);
@@ -125,9 +184,9 @@ export function assertStageAProductionArtifactsRecoveryCompletionEvidence(value,
   return Object.freeze(value);
 }
 
-export function createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, recoverySourceSha, preState, recoveryAuthorization, recoveryCompletion, prepareEvidence, savedPlanSha256, protectedEnvironmentApprovalEvidence, verificationRef, verifyRecoveryCompletionEvidence, proveDescendant } = {}) {
+export function createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, recoverySourceSha, preState, recoveryAuthorization, recoveryCompletion, prepareEvidence, savedPlanSha256, protectedEnvironmentApprovalEvidence, verificationRef, verifyRecoveryCompletionEvidence, proveDescendant, readGovernedExecutableManifestSha256 } = {}) {
   recoverySourceSha ||= recoveryAuthorization?.sourceSha;
-  assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant });
+  assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256: recoveryAuthorization?.governedExecutableManifestSha256, readGovernedExecutableManifestSha256 });
   assertStageAProductionArtifactsRecoveryAuthorization(recoveryAuthorization, { sourceSha: recoverySourceSha, preState });
   assertStageAProductionArtifactsRecoveryCompletionEvidence(recoveryCompletion, { authorization: recoveryAuthorization, verify: verifyRecoveryCompletionEvidence });
   if (!SHA256.test(savedPlanSha256 || "") || !recoveryCompletion || recoveryCompletion.recoveryAuthorizationSha256 !== recoveryAuthorization.authorizationSha256 || recoveryCompletion.completion?.completionSha256 === undefined || !prepareEvidence || prepareEvidence.savedPlanSha256 !== savedPlanSha256 || !Number.isSafeInteger(prepareEvidence.savedPlanByteLength) || prepareEvidence.savedPlanByteLength < 1) throw new Error("Stage A production-artifacts reconciliation authorization inputs are invalid.");
@@ -136,9 +195,9 @@ export function createStageAProductionArtifactsReconciliationAuthorization({ sou
   return Object.freeze({ ...body, authorizationSha256: sha256(canonicalJson(body)) });
 }
 
-export function assertStageAProductionArtifactsReconciliationGovernanceAuthorization(value, { sourceSha, recoverySourceSha, preState, recoveryAuthorization, recoveryCompletion, prepareEvidence, savedPlanSha256, verifyRecoveryCompletionEvidence, proveDescendant } = {}) {
+export function assertStageAProductionArtifactsReconciliationGovernanceAuthorization(value, { sourceSha, recoverySourceSha, preState, recoveryAuthorization, recoveryCompletion, prepareEvidence, savedPlanSha256, verifyRecoveryCompletionEvidence, proveDescendant, readGovernedExecutableManifestSha256 } = {}) {
   recoverySourceSha ||= value?.recoverySourceSha || recoveryAuthorization?.sourceSha;
-  exactKeys(value, reconcileFields, "Stage A production-artifacts reconciliation authorization"); assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant }); assertStageAProductionArtifactsRecoveryAuthorization(recoveryAuthorization, { sourceSha: recoverySourceSha, preState });
+  exactKeys(value, reconcileFields, "Stage A production-artifacts reconciliation authorization"); assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256: recoveryAuthorization?.governedExecutableManifestSha256, readGovernedExecutableManifestSha256 }); assertStageAProductionArtifactsRecoveryAuthorization(recoveryAuthorization, { sourceSha: recoverySourceSha, preState });
   assertStageAProductionArtifactsRecoveryCompletionEvidence(recoveryCompletion, { authorization: recoveryAuthorization, verify: verifyRecoveryCompletionEvidence });
   if (value.schemaVersion !== 1 || value.kind !== "STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_AUTHORIZATION" || value.operation !== STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION || value.sourceSha !== sourceSha || value.recoverySourceSha !== recoverySourceSha || value.account !== STAGE_B.account || value.region !== STAGE_B.region || value.bucket !== PRODUCTION_ACTIVATION_LIFECYCLE.bucket || value.executionPrincipal !== PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn || value.recoveryAuthorizationSha256 !== recoveryAuthorization.authorizationSha256 || value.recoveryCompletionSha256 !== recoveryCompletion?.completionEvidenceSha256 || value.desiredPolicySha256 !== recoveryAuthorization.desiredPolicySha256 || value.preStateLineage !== preState?.lineage || value.preStateSerial !== preState?.serial || value.preStateSha256 !== preState?.stateSha256 || value.savedPlanSha256 !== savedPlanSha256 || !SHA256.test(value.savedPlanSha256 || "") || !Number.isSafeInteger(value.savedPlanByteLength) || value.savedPlanByteLength < 1 || value.prepareEvidenceSha256 !== prepareEvidence?.prepareEvidenceSha256 || value.maxRefreshOnlyApplies !== 1 || value.maxInfrastructureWrites !== 0 || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence?.evidenceSha256 || !SHA256.test(value.authorizationSha256 || "")) throw new Error("Stage A production-artifacts reconciliation authorization binding is invalid.");
   assertStageAProductionArtifactsReconciliationPrepareEvidence(prepareEvidence, { sourceSha, recoveryCompletion: recoveryCompletion.completion, preState, savedPlanSha256, savedPlanByteLength: value.savedPlanByteLength });
@@ -147,7 +206,7 @@ export function assertStageAProductionArtifactsReconciliationGovernanceAuthoriza
   return Object.freeze(value);
 }
 
-export function resolveStageAProductionArtifactsAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, operation, githubRun = createProductionGithubCommandRunner() } = {}) {
+export function resolveStageAProductionArtifactsAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, operation, githubRun = createProductionGithubCommandRunner(), readGovernedExecutableManifestSha256 = stageAProductionArtifactsGovernedExecutableManifestSha256 } = {}) {
   if (!/^[1-9][0-9]*$/.test(String(workflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(workflowRunAttempt || "")) || !SHA40.test(sourceSha || "") || ![STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION].includes(operation) || typeof githubRun !== "function") throw new Error("Stage A production-artifacts authorization artifact coordinates are invalid.");
   const recovery = operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION;
   const workflowPath = recovery ? ".github/workflows/authorize-production-stage-a-production-artifacts-recovery.yml" : ".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml";
@@ -164,7 +223,7 @@ export function resolveStageAProductionArtifactsAuthorizationArtifact({ workflow
     fs.writeFileSync(archive, archiveBytes, { mode: 0o600, flag: "wx" }); const entries = String(githubRun("unzip", ["-Z1", archive])).trim().split("\n").filter(Boolean);
     if (JSON.stringify(entries) !== JSON.stringify(["authorization.json"])) throw new Error("Stage A production-artifacts authorization archive contents are invalid.");
     const authorization = JSON.parse(Buffer.from(githubRun("unzip", ["-p", archive, "authorization.json"])).toString("utf8"));
-    if (recovery) assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha, preState: { lineage: authorization.preStateLineage, serial: authorization.preStateSerial, stateSha256: authorization.preStateSha256 } });
+    if (recovery) assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha, preState: { lineage: authorization.preStateLineage, serial: authorization.preStateSerial, stateSha256: authorization.preStateSha256 }, expectedContinuationCompatibilitySha256: stageAProductionArtifactsContinuationCompatibilitySha256({ governedExecutableManifestSha256: readGovernedExecutableManifestSha256(sourceSha) }) });
     const approvalEvidence = authorization.protectedEnvironmentApprovalEvidence;
     const workflowRunId = String(approvalEvidence?.workflowRunId || ""); const workflowRunAttempt = String(approvalEvidence?.workflowRunAttempt || "");
     if (!/^[1-9][0-9]*$/.test(workflowRunId) || !/^[1-9][0-9]*$/.test(workflowRunAttempt) || workflowRunId !== String(workflow.id || "") || workflowRunAttempt !== String(workflow.run_attempt || "") || approvalEvidence?.executionActor !== workflow.actor?.login) throw new Error("Stage A production-artifacts authorization approval evidence does not belong to its workflow.");

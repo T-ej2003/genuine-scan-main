@@ -159,4 +159,11 @@ address-bound: `aws_s3_bucket_policy.production_artifacts` is schema version
 `0`, while `aws_db_instance.green` is schema version `2`. A continuation from
 a historical recovery is admitted only when this complete immutable contract
 (policy, journal, backend, provider/state schemas, principals, and signing
-identity) remains identical under the authenticated descendant source.
+identity) remains identical under the authenticated descendant source. That
+comparison also hashes an ordered Git-object manifest from both authenticated
+commits: the recovery/reconciliation production entrypoints, every transitive
+repository-local module they load, every tracked Stage-A `.tf` file, and
+`.terraform.lock.hcl`. Tests, documentation, generated reports, and unrelated
+application or Stage-B-only source are excluded, so unrelated main advancement
+remains admissible while any governed executable or Terraform byte change
+requires a new independent recovery authorization.
