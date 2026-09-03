@@ -128,17 +128,37 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
   assertStageAProductionArtifactsRecoveryAttemptEvidence(attempt, { authorization, verify });
   const classification = classifyStageAProductionArtifactsRecovery({ livePolicy: before, attempt });
   if ([STAGE_A_RECOVERY_CLASSIFICATION.LIVE_POLICY_CONFLICT, STAGE_A_RECOVERY_CLASSIFICATION.P2_WITHOUT_ATTEMPT].includes(classification)) throw new Error(`Stage A recovery classification is not executable: ${classification}.`);
+  const postWriteContinuation = classification === STAGE_A_RECOVERY_CLASSIFICATION.POST_WRITE_COMPLETION_PENDING;
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-production-artifacts-recovery-")); const policyPath = path.join(directory, "policy.json");
   let lockHeld = false;
   try {
     fs.writeFileSync(policyPath, JSON.stringify(buildStageAProductionArtifactsBucketPolicy()), { mode: 0o600, flag: "wx" });
+    let after;
     await terraformStateLock.acquire(); lockHeld = true;
-    const finalState = await readStateIdentity();
-    assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha: recoverySourceSha, preState: finalState });
-    const finalPolicy = readPolicy(releaseRun);
-    if (!samePolicy(finalPolicy, before)) throw new Error("Stage A recovery live policy changed before the policy write.");
-    if (predecessorLive) await rootRun(["s3api", "put-bucket-policy", "--bucket", authorization.bucket, "--policy", `file://${policyPath}`]);
-    const after = readPolicy(releaseRun); if (!stageAProductionArtifactsPolicySemanticallyEqual(after, buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A production-artifacts recovery readback is not the exact desired policy.");
+    if (postWriteContinuation) {
+      const finalSource = readProtectedSource({ cwd: root, requireCanonicalRepository: true, run: (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), expectedSourceSha: sourceSha }); const finalSourceSha = finalSource.toolingSha || finalSource.headSha;
+      assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: finalSourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256: authorization.governedExecutableManifestSha256, readGovernedExecutableManifestSha256, ...(readProtectedSource === readStageBProtectedMainCheckout ? { readContinuationChangedFiles } : {}) });
+      const finalAuthenticated = resolveAuthorization({ workflowRunId, workflowRunAttempt, sourceSha: recoverySourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, readGovernedExecutableManifestSha256 });
+      if (finalAuthenticated?.authorization?.authorizationSha256 !== authorization.authorizationSha256) throw new Error("Stage A recovery authorization changed before completion continuation.");
+      const finalAttempt = decode(recoveryJournal.readRecoveryAttempt(authorization.authorizationSha256), "Stage A recovery attempt");
+      assertStageAProductionArtifactsRecoveryAttemptEvidence(finalAttempt, { authorization, verify });
+      const finalState = await readStateIdentity();
+      assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha: recoverySourceSha, preState: finalState });
+      after = readPolicy(releaseRun);
+      if (!samePolicy(after, before) || !stageAProductionArtifactsPolicySemanticallyEqual(after, buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A recovery live policy changed before completion continuation.");
+      const concurrentCompletion = decode(journal.readRecoveryCompletion(authorization.authorizationSha256), "Stage A recovery completion");
+      if (concurrentCompletion) {
+        assertStageAProductionArtifactsRecoveryCompletionEvidence(concurrentCompletion, { authorization, verify });
+        return Object.freeze({ recovered: true, resumed: true, alreadyComplete: true, classification: STAGE_A_RECOVERY_CLASSIFICATION.COMPLETED, putBucketPolicyCount: 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: concurrentCompletion.completionEvidenceSha256 });
+      }
+    } else {
+      const finalState = await readStateIdentity();
+      assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha: recoverySourceSha, preState: finalState });
+      const finalPolicy = readPolicy(releaseRun);
+      if (!samePolicy(finalPolicy, before)) throw new Error("Stage A recovery live policy changed before the policy write.");
+      if (predecessorLive) await rootRun(["s3api", "put-bucket-policy", "--bucket", authorization.bucket, "--policy", `file://${policyPath}`]);
+      after = readPolicy(releaseRun); if (!stageAProductionArtifactsPolicySemanticallyEqual(after, buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A production-artifacts recovery readback is not the exact desired policy.");
+    }
     const completion = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: after, sign }); const bytes = Buffer.from(`${JSON.stringify(completion)}\n`);
     let persisted;
     try { persisted = journal.writeRecoveryCompletion({ recoveryAuthorizationSha256: authorization.authorizationSha256, bytes }); }
