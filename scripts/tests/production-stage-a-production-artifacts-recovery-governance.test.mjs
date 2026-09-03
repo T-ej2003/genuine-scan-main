@@ -29,11 +29,21 @@ const sourceSha = "a".repeat(40);
 const preState = { lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 35, stateSha256: "b".repeat(64) };
 const environment = Object.freeze({ id: 1, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 2, login: "reviewer" } }] }] });
 const approval = (workflowRef, approvedSourceSha = sourceSha) => createProductionEnvironmentApprovalEvidence({ environmentConfig: environment, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: "production", sourceSha: approvedSourceSha, workflowRef, eventName: "workflow_dispatch", workflowRunId: "123", workflowRunAttempt: "1", executionActor: "operator", observedAt: "2026-09-02T00:00:00.000Z", actualApproval: { state: "approved", environmentId: 1, environmentName: "production", userId: 2, userLogin: "reviewer" } });
+const policyApproval = ({ preventSelfReview, executionActor = "operator", actualReviewer = "reviewer", configuredReviewer = actualReviewer, actual = true } = {}) => createProductionEnvironmentApprovalEvidence({
+  environmentConfig: { id: 1, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: preventSelfReview, reviewers: [{ type: "User", reviewer: { id: 2, login: configuredReviewer } }] }] },
+  repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: "production", sourceSha, workflowRef: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF, eventName: "workflow_dispatch", workflowRunId: "123", workflowRunAttempt: "1", executionActor, observedAt: "2026-09-02T00:00:00.000Z",
+  ...(actual ? { actualApproval: { state: "approved", environmentId: 1, environmentName: "production", userId: 2, userLogin: actualReviewer } } : {}),
+});
 const sign = () => Buffer.from("signature").toString("base64");
 const verify = () => true;
 const governedExecutableManifestSha256 = "9".repeat(64);
 const createStageAProductionArtifactsRecoveryAuthorization = (input) => createRecoveryAuthorization({ ...input, governedExecutableManifestSha256 });
 const unchangedGovernedSource = () => governedExecutableManifestSha256;
+const rebindApproval = (authorization, protectedEnvironmentApprovalEvidence) => {
+  const { authorizationSha256, ...existing } = authorization;
+  const body = { ...existing, protectedEnvironmentApprovalEvidence, protectedEnvironmentApprovalEvidenceSha256: protectedEnvironmentApprovalEvidence.evidenceSha256 };
+  return { ...body, authorizationSha256: createHash("sha256").update(canonicalJson(body)).digest("hex") };
+};
 
 const githubRun = ({ operation, authorization, id = 123, attempt = 1, actor = "operator", headSha = sourceSha, workflowPath } = {}) => {
   const archiveBytes = Buffer.from(`authorization-${operation}`);
@@ -57,6 +67,40 @@ function reconciliationAuthorization() {
   const prepareEvidence = createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, preState, recoveryCompletion: completion.completion, saved });
   return createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, preState, recoveryAuthorization: recovery, recoveryCompletion: completion, prepareEvidence, savedPlanSha256: saved.savedPlanSha256, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_WORKFLOW_REF), verificationRef: "manual", verifyRecoveryCompletionEvidence: verify });
 }
+
+test("Stage A recovery approval follows the authenticated GitHub self-review policy", () => {
+  for (const protectedEnvironmentApprovalEvidence of [
+    policyApproval({ preventSelfReview: false, executionActor: "T-ej2003", actualReviewer: "T-ej2003" }),
+    policyApproval({ preventSelfReview: false }),
+    policyApproval({ preventSelfReview: true }),
+  ]) {
+    const authorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence, verificationRef: "policy-matrix" });
+    assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha, preState }));
+  }
+
+  const selfReviewBlocked = policyApproval({ preventSelfReview: true, executionActor: "T-ej2003", actualReviewer: "T-ej2003" });
+  assert.throws(() => createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: selfReviewBlocked, verificationRef: "policy-matrix" }), /self-approved|prevents self-review/);
+  const soloAuthorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: policyApproval({ preventSelfReview: false, executionActor: "T-ej2003", actualReviewer: "T-ej2003" }), verificationRef: "policy-matrix" });
+  assert.throws(() => assertStageAProductionArtifactsRecoveryAuthorization(rebindApproval(soloAuthorization, selfReviewBlocked), { sourceSha, preState }), /self-approved|prevents self-review/);
+  const resolved = resolveStageAProductionArtifactsAuthorizationArtifact({ workflowRunId: "123", workflowRunAttempt: "1", sourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, githubRun: githubRun({ operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, authorization: soloAuthorization, actor: "T-ej2003" }), readGovernedExecutableManifestSha256: unchangedGovernedSource });
+  assert.equal(resolved.authorization.authorizationSha256, soloAuthorization.authorizationSha256);
+});
+
+test("Stage A recovery approval keeps reviewer, evidence, provenance, and hash checks fail closed", () => {
+  assert.throws(() => createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: policyApproval({ preventSelfReview: false, actualReviewer: "outsider", configuredReviewer: "reviewer" }), verificationRef: "policy-negative" }), /configured production environment reviewer/);
+  assert.throws(() => createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: policyApproval({ preventSelfReview: false, actual: false }), verificationRef: "policy-negative" }), /actual protected-environment approval/);
+  const valid = policyApproval({ preventSelfReview: false });
+  for (const changed of [
+    { ...valid, actualApproval: { ...valid.actualApproval, userLogin: "tampered" } },
+    { ...valid, environment: "staging" },
+    { ...valid, sourceSha: "f".repeat(40) },
+    { ...valid, workflowRef: STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_WORKFLOW_REF },
+  ]) assert.throws(() => createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: changed, verificationRef: "policy-negative" }), /schema|hash|identity|workflow|approval/);
+  const authorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: valid, verificationRef: "policy-negative" });
+  assert.throws(() => assertStageAProductionArtifactsRecoveryAuthorization({ ...authorization, preStateSerial: authorization.preStateSerial + 1 }, { sourceSha, preState }), /binding|hash/);
+  assert.throws(() => policyApproval({ preventSelfReview: undefined }), /policy/);
+  assert.throws(() => createProductionEnvironmentApprovalEvidence({ environmentConfig: { ...environment, can_admins_bypass: true }, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: "production", sourceSha, workflowRef: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF, eventName: "workflow_dispatch", workflowRunId: "123", workflowRunAttempt: "1", executionActor: "operator", observedAt: "2026-09-02T00:00:00.000Z" }), /administrator bypass/);
+});
 
 test("authorization resolvers accept numeric GitHub workflow identities with canonical string evidence", () => {
   const recovery = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF), verificationRef: "manual" });
