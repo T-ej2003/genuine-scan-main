@@ -9,7 +9,7 @@ const graph = () => JSON.parse(fs.readFileSync(CAPABILITY_GRAPH_PATH, "utf8"));
 test("complete production dependency closure is exact across modes and failure paths", () => {
   const report = buildProductionDependencyClosure();
   assert.equal(report.status, "PASS");
-  const stageAAdditions = report.newAwsCalls.filter(({ sourceFile, capabilityId }) => sourceFile.includes("stage-a-production-artifacts") || capabilityId === "stage-a-artifacts-recovery-root-sign" || capabilityId?.startsWith("stage-a-artifacts-recovery-release-lock-")).map(({ sourceFile, action, capabilityId }) => [sourceFile, action, capabilityId]);
+  const stageAAdditions = report.newAwsCalls.filter(({ sourceFile, capabilityId }) => sourceFile.includes("stage-a-production-artifacts") || capabilityId === "stage-a-artifacts-recovery-root-sign" || capabilityId?.startsWith("stage-a-artifacts-recovery-release-lock-") || capabilityId?.startsWith("stage-a-artifacts-reconciliation-terraform-")).map(({ sourceFile, action, capabilityId }) => [sourceFile, action, capabilityId]);
   assert.deepEqual(stageAAdditions, [
     ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify"],
     ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:GetObject", "stage-a-artifacts-journal-read"],
@@ -19,6 +19,10 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-root-attestation-signer.mjs", "kms:Sign", "stage-a-artifacts-recovery-root-sign"],
     ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-reconciliation-release-read-policy"],
     ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify"],
+    ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketLocation", "stage-a-artifacts-reconciliation-terraform-read-bucket-location"],
+    ["scripts/aws/production-stage-a-control-plane.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-terraform-read-state"],
+    ["scripts/aws/production-stage-a-control-plane.mjs", "s3:PutObject", "stage-a-artifacts-reconciliation-terraform-write-state"],
+    ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-terraform-read-lock"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketLifecycleConfiguration", "stage-a-artifacts-recovery-root-read-lifecycle"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-recovery-release-read-policy"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketVersioning", "stage-a-artifacts-recovery-root-read-versioning"],
@@ -36,6 +40,27 @@ test("complete production dependency closure is exact across modes and failure p
     ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"],
     ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"],
   ]);
+  const reconciliationBackend = report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("stage-a-artifacts-reconciliation-terraform-"));
+  assert.deepEqual(reconciliationBackend.map(({ action, resources, identity, reachableMode }) => [action, resources, identity, reachableMode]), [
+    ["s3:GetBucketLocation", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"], "RELEASE_DEPLOYER", ["STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]],
+    ["s3:GetObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"], "RELEASE_DEPLOYER", ["STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]],
+    ["s3:PutObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"], "RELEASE_DEPLOYER", ["STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]],
+    ["s3:GetObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"], "RELEASE_DEPLOYER", ["STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]],
+  ]);
+  assert.equal(graph().capabilities.find(({ id }) => id === "stage-a-artifacts-reconciliation-terraform-write-state")?.mutation, true);
+  const stageAStateReads = graph().capabilities.filter(({ action, resources }) => action === "s3:GetObject" && resources.includes("arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"));
+  assert.deepEqual(stageAStateReads.map(({ id, phase }) => [id, phase]), [
+    ["manifest-collect-stage-a-prerequisite-state", "release-direct-read-preflight"],
+    ["stage-a-artifacts-reconciliation-terraform-read-state", "stage-a-production-artifacts-state-reconciliation"],
+  ]);
+  const reconciliationMode = report.newAwsCalls.filter(({ reachableMode }) => reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"));
+  const backendResources = new Set(["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2", "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate", "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"]);
+  assert.equal(reconciliationMode.filter(({ resources }) => resources.some((resource) => backendResources.has(resource))).length, 6);
+  assert.equal(reconciliationMode.some(({ action }) => action === "s3:ListBucket"), false);
+  assert.equal(graph().capabilities.some(({ id }) => /^stage-a-artifacts-reconciliation-terraform-(?:acquire|release)-lock$/.test(id)), false);
+  const controlPlaneSource = fs.readFileSync("scripts/aws/production-stage-a-control-plane.mjs", "utf8");
+  assert.match(controlPlaneSource, /"plan", "-refresh-only", "-input=false", "-lock=true"/);
+  assert.match(controlPlaneSource, /backendLockHeld \? \["-lock=false"\] : \[\]/);
   assert.deepEqual(report.newAwsCalls.filter(({ sourceFile }) => sourceFile.endsWith("production-stage-a-production-artifacts-journal.mjs")).map(({ action, capabilityId, identity }) => [action, capabilityId, identity]), [
     ["s3:GetObject", "stage-a-artifacts-journal-read", "RELEASE_DEPLOYER"],
     ["s3:PutObject", "stage-a-artifacts-journal-conditional-create", "RELEASE_DEPLOYER"],

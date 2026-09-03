@@ -156,6 +156,82 @@
       "negativeTestPresent": true
     },
     {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "action": "s3:GetBucketLocation",
+      "capabilityId": "stage-a-artifacts-reconciliation-terraform-read-bucket-location",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"
+      ],
+      "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-control-plane.mjs",
+      "action": "s3:GetObject",
+      "capabilityId": "stage-a-artifacts-reconciliation-terraform-read-state",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ],
+      "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-control-plane.mjs",
+      "action": "s3:PutObject",
+      "capabilityId": "stage-a-artifacts-reconciliation-terraform-write-state",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ],
+      "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "action": "s3:GetObject",
+      "capabilityId": "stage-a-artifacts-reconciliation-terraform-read-lock",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+      ],
+      "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
       "action": "s3:GetBucketLifecycleConfiguration",
       "capabilityId": "stage-a-artifacts-recovery-root-read-lifecycle",
@@ -1181,7 +1257,7 @@
     "NORMAL": "Terraform-rendered final candidates and exact execution policies are jointly authenticated by Stage-B plan/closure before apply; normal activation registers nothing",
     "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME": "signed candidate-derived closure is re-read before RegisterTaskDefinition and before UpdateService",
     "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY": "the governed P0-to-P2 production-artifacts recovery uses its exact root/release journal, policy, lock, and attestation boundaries",
-    "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION": "the independently authorized exact refresh-only plan uses its exact release journal and live-policy read boundary",
+    "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION": "the independently authorized exact refresh-only plan uses its exact release journal, live-policy read, Stage-A state object, and canonical outer lock boundary",
     "ROTATION_OVERLAP": "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
     "ROTATION_CLEANUP": "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
     "ROLLBACK_RECONCILIATION": "rollback viability uses immutable image/resource identity and performs no candidate registration",

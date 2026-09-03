@@ -11533,6 +11533,130 @@
       "mutation": false
     },
     {
+      "id": "stage-a-artifacts-reconciliation-terraform-read-bucket-location",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "sourceFunction": "stage-a-artifacts-reconciliation-terraform-read-bucket-location",
+      "action": "s3:GetBucketLocation",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-production-terraform-state-368992683803-eu-west-2"
+      },
+      "classification": "TERRAFORM_BACKEND_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-reconciliation-terraform-read-bucket-location-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageABackendBucketLocation",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-a-artifacts-reconciliation-terraform-read-lock",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "sourceFunction": "stage-a-artifacts-reconciliation-terraform-read-lock",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-production-terraform-state-368992683803-eu-west-2"
+      },
+      "classification": "TERRAFORM_BACKEND_LOCK_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-reconciliation-terraform-read-lock-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageALock",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-a-artifacts-reconciliation-terraform-read-state",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/production-stage-a-control-plane.mjs",
+      "sourceFunction": "stage-a-artifacts-reconciliation-terraform-read-state",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-production-terraform-state-368992683803-eu-west-2"
+      },
+      "classification": "TERRAFORM_BACKEND_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-reconciliation-terraform-read-state-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAStateForHandoff",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-a-artifacts-reconciliation-terraform-write-state",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/production-stage-a-control-plane.mjs",
+      "sourceFunction": "stage-a-artifacts-reconciliation-terraform-write-state",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-production-terraform-state-368992683803-eu-west-2"
+      },
+      "classification": "TERRAFORM_STATE_MUTATION",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-reconciliation-terraform-write-state-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "WriteExactStageAState",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "stage-a-artifacts-recovery-release-identify",
       "phase": "stage-a-production-artifacts-policy-recovery",
       "identity": "RELEASE_DEPLOYER",
@@ -11577,7 +11701,7 @@
       "context": {
         "account": "368992683803",
         "region": "eu-west-2",
-        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+        "bucket": "mscqr-production-terraform-state-368992683803-eu-west-2"
       },
       "classification": "TERRAFORM_BACKEND_LOCK_ACQUIRE",
       "probe": "direct",
@@ -11608,7 +11732,7 @@
       "context": {
         "account": "368992683803",
         "region": "eu-west-2",
-        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+        "bucket": "mscqr-production-terraform-state-368992683803-eu-west-2"
       },
       "classification": "TERRAFORM_BACKEND_LOCK_RELEASE",
       "probe": "direct",
@@ -12541,6 +12665,14 @@
       "action": "kms:GetPublicKey"
     },
     {
+      "sourceFile": "scripts/aws/production-stage-a-control-plane.mjs",
+      "action": "s3:GetObject"
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-control-plane.mjs",
+      "action": "s3:PutObject"
+    },
+    {
       "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
       "action": "s3:GetObject",
       "identity": "RELEASE_DEPLOYER"
@@ -12638,7 +12770,15 @@
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "action": "s3:GetBucketLocation"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
       "action": "s3:GetBucketPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "action": "s3:GetObject"
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
