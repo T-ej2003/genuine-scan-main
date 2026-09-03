@@ -501,8 +501,8 @@ test("Stage A execute loads the prepared refresh-only bytes and never replans", 
   try {
     const adapter = createTerraformStageAAdapter({ planPath, refreshOnlyPlanPath: refreshPath, sourceSha: "a".repeat(40), run: async (args) => { calls.push(args); if (args[1] === "version") return JSON.stringify({ terraform_version: "1.15.8" }); if (args.includes("show")) return JSON.stringify(stageAPlan({ actions: ["no-op"] })); if (args.includes("init")) return ""; if (args.includes("apply")) { applies += 1; return ""; } throw new Error(`unexpected Terraform call: ${args.join(" ")}`); }, describeIngress: async () => ({ present: true }) });
     const plan = await adapter.readSavedRefreshOnlyPlan(refreshPath);
-    await adapter.applySavedRefreshOnlyPlan({ planPath: refreshPath, savedPlanSha256, refreshOnly: true });
-    assert.equal(plan.resource_changes[0].change.actions[0], "no-op"); assert.equal(applies, 1); assert.equal(calls.some((args) => args.includes("plan")), false);
+    await adapter.applySavedRefreshOnlyPlan({ planPath: refreshPath, savedPlanSha256, refreshOnly: true }, { backendLockHeld: true });
+    assert.equal(plan.resource_changes[0].change.actions[0], "no-op"); assert.equal(applies, 1); assert.equal(calls.some((args) => args.includes("plan")), false); assert.equal(calls.find((args) => args.includes("apply")).includes("-lock=false"), true);
     writeFileSync(refreshPath, "tampered", { mode: 0o600 });
     await assert.rejects(() => adapter.applySavedRefreshOnlyPlan({ planPath: refreshPath, savedPlanSha256, refreshOnly: true }), /saved plan changed|already been attempted/);
     assert.equal(applies, 1);

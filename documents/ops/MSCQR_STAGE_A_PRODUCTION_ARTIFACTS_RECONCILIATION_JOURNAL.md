@@ -60,9 +60,11 @@ record and cannot be replayed automatically.
 
 Before any recovery execution, the root-operated runner must authenticate
 bucket versioning and lifecycle configuration. It fails closed unless
-versioning is enabled and no lifecycle expiration rule can remove this exact
-journal prefix during the governed recovery window. Explicit delete denial is
-required even when versioning is enabled.
+versioning is enabled and no enabled lifecycle expiration or current-version
+transition can overlap this exact journal prefix. Journal records use immutable
+unique keys, so noncurrent-only lifecycle actions do not affect the current
+evidence read by recovery. Explicit delete denial is required even when
+versioning is enabled.
 
 ## Runnable governed path
 
@@ -92,6 +94,13 @@ an authenticated ancestor of current protected main, and preserves the
 historical completion without replaying policy recovery. A subsequent ordinary
 Stage-A plan is permitted only after that runner records `COMPLETED` and
 produces a no-op plan.
+
+Execute owns the canonical Stage-A S3 backend `.tflock` from its final pre-state
+checks through exact post-state authentication and durable post-apply evidence.
+The exact saved plan runs with nested Terraform locking disabled only inside
+that exclusion. A reserved execution that cannot establish durable outcome
+evidence retains the lock for explicit operator investigation; no automatic
+force-unlock is permitted.
 
 If recovery has written `P2` but completion publication failed, recovery itself
 may be retried with the current protected source and the historical recovery

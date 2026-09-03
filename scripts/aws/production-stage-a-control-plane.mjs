@@ -509,7 +509,7 @@ function readAndVerifyPlanSha256(planPath, expectedSha256) {
   return actualSha256;
 }
 
-export async function runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoverySourceSha, recoveryCompletion, verifyRecoveryCompletion, reconciliationAuthorization, verifyReconciliationAuthorization, authorizationIdentity, recoveryCompletionSha256, reserveConsumption, finalizeConsumption, abortConsumption, recordPostApply, readConsumptionEvidence, saved, preparedState, resumeReservation, resumeResult, postApplyEvidence, assertSourceIntegrity } = {}) {
+export async function runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoverySourceSha, recoveryCompletion, verifyRecoveryCompletion, reconciliationAuthorization, verifyReconciliationAuthorization, authorizationIdentity, recoveryCompletionSha256, reserveConsumption, finalizeConsumption, abortConsumption, recordPostApply, readConsumptionEvidence, saved, preparedState, resumeReservation, resumeResult, postApplyEvidence, assertSourceIntegrity, backendLockHeld = false } = {}) {
   recoverySourceSha ||= recoveryCompletion?.sourceSha;
   if (!adapter || typeof adapter.applySavedRefreshOnlyPlan !== "function" || typeof adapter.readStateIdentity !== "function" || typeof adapter.readProductionArtifactsPolicy !== "function" || typeof reserveConsumption !== "function" || typeof finalizeConsumption !== "function" || typeof abortConsumption !== "function" || typeof recordPostApply !== "function" || typeof readConsumptionEvidence !== "function" || !saved) throw new Error("Stage A production-artifacts reconciliation requires a prepared saved plan.");
   const currentState = await adapter.readStateIdentity();
@@ -604,7 +604,7 @@ export async function runStageAProductionArtifactsStateReconciliation({ adapter,
     assertLivePolicyCas(await adapter.readProductionArtifactsPolicy());
     applyInvoked = true;
     let applyError;
-    try { await adapter.applySavedRefreshOnlyPlan(saved); } catch (error) { applyError = error; }
+    try { await adapter.applySavedRefreshOnlyPlan(saved, { backendLockHeld }); } catch (error) { applyError = error; }
     const after = await adapter.readStateIdentity();
     if (exactPostState(after)) {
       const durable = applyError ? await readDurableConsumption() : undefined;
@@ -760,13 +760,13 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
       savedRefreshOnlyPlanSha256 = createHash("sha256").update(bytes).digest("hex");
       return { plan, planPath: refreshOnlyPlanPath, savedPlanSha256: savedRefreshOnlyPlanSha256, savedPlanByteLength: bytes.length, sourceSha, region, terraformRoot: root, terraformVersion, refreshOnly: true, preState, evidenceRef: `terraform-refresh-only:${refreshOnlyPlanPath}`, evidenceSha256: savedRefreshOnlyPlanSha256 };
     },
-    async applySavedRefreshOnlyPlan(saved) {
+    async applySavedRefreshOnlyPlan(saved, { backendLockHeld = false } = {}) {
       if (refreshOnlyApplyAttempted) throw new Error("Stage A refresh-only reconciliation has already been attempted.");
       if (!saved || saved.refreshOnly !== true || saved.planPath !== refreshOnlyPlanPath || saved.savedPlanSha256 !== savedRefreshOnlyPlanSha256) throw new Error("Stage A refresh-only saved plan changed after validation.");
       const currentSha256 = createHash("sha256").update(fs.readFileSync(refreshOnlyPlanPath)).digest("hex");
       if (currentSha256 !== savedRefreshOnlyPlanSha256) throw new Error("Stage A refresh-only saved plan changed after validation.");
       refreshOnlyApplyAttempted = true;
-      await run([terraform, `-chdir=${root}`, "apply", "-input=false", refreshOnlyPlanPath]);
+      await run([terraform, `-chdir=${root}`, "apply", "-input=false", ...(backendLockHeld ? ["-lock=false"] : []), refreshOnlyPlanPath]);
     },
     async readSavedRefreshOnlyPlan(planPath = refreshOnlyPlanPath) {
       if (planPath !== refreshOnlyPlanPath || !path.isAbsolute(planPath)) throw new Error("Stage A prepared refresh-only plan path is invalid.");

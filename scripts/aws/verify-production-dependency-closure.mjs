@@ -238,7 +238,9 @@ export function assertChangedAwsCallClosure(scanned, graph) {
       const rotation = capabilityById.get("manifest-backend-health-recovery-describe-images");
       if (!rotation || rotation.identity !== "RELEASE_DEPLOYER" || rotation.action !== contract.action || !same(rotation.resources, contract.resources) || !rotation.policy?.sourceFile) throw new Error("Rotation rollback-image read lacks exact IAM/capability closure.");
     }
-    const reachableMode = stageARecoveryCapability(contract.capabilityId) || contract.sourceFile === "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs"
+    const reachableMode = contract.sourceFile === "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs"
+      ? ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]
+      : stageARecoveryCapability(contract.capabilityId)
       ? ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"]
       : stageAReconciliationCapability(contract.capabilityId)
       ? ["STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]

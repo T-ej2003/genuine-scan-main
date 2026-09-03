@@ -31,7 +31,14 @@ P2 policy permit completion-only resume with no second policy write. Prepare
 authenticates the invoked Terraform executable with
 `terraform version -json` and records the exact verified 1.15.8 runtime in its
 evidence; a mismatched or malformed executable fails before init/plan. Execute
-never creates a replacement plan.
+never creates a replacement plan. Execute holds the canonical Stage-A S3
+backend `.tflock` continuously from its final pre-state checks through exact
+post-state authentication and durable post-apply evidence; Terraform applies
+the exact saved plan with nested locking disabled only inside that exclusion.
+If execution ends after reservation without durable outcome evidence, the lock
+is retained for explicit operator investigation; it is never force-unlocked.
+Recovery also rejects every enabled lifecycle expiration or current-version
+transition whose filter can overlap the immutable journal namespace.
 
 
 ## 1. What This System Is

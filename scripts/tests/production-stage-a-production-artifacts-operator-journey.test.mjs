@@ -9,7 +9,7 @@ import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifa
 import { createStageAProductionArtifactsRecoveryAuthorization as createRecoveryAuthorization, createStageAProductionArtifactsRecoveryCompletionEvidence, createStageAProductionArtifactsReconciliationAuthorization, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
 import { assertStageAProductionArtifactsJournalRetention, runStageAProductionArtifactsRecovery } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
 import { createStageAProductionArtifactsJournalResult, createStageAProductionArtifactsPostApplyEvidence, createStageAProductionArtifactsReservation } from "../aws/production-stage-a-production-artifacts-journal.mjs";
-import { runStageAProductionArtifactsReconciliation, runStageAProductionArtifactsReconciliationCli } from "../aws/run-production-stage-a-production-artifacts-reconciliation.mjs";
+import { runStageAProductionArtifactsReconciliation as runReconciliation, runStageAProductionArtifactsReconciliationCli } from "../aws/run-production-stage-a-production-artifacts-reconciliation.mjs";
 
 const sourceSha = "a".repeat(40); const lineage = "02afb75a-f902-ab8a-f4c1-751d4aef7837"; const stateSha256 = "b".repeat(64);
 const governedExecutableManifestSha256 = "9".repeat(64);
@@ -19,6 +19,7 @@ const state = { lineage, serial: 35, stateSha256 };
 const fixtureId = (prefix) => `${prefix}-${"0".repeat(8)}`;
 const stageAVars = { TF_VAR_aws_region: "eu-west-2", TF_VAR_vpc_id: fixtureId("vpc"), TF_VAR_private_subnet_ids: JSON.stringify([fixtureId("subnet")]), TF_VAR_runtime_endpoint_security_group_ids: JSON.stringify([fixtureId("sg")]), TF_VAR_database_runtime_security_group_ids: JSON.stringify([fixtureId("sg")]), TF_VAR_s3_prefix_list_id: fixtureId("pl"), TF_VAR_vpc_dns_resolver_cidr: "10.0.0.2/32", TF_VAR_checker_principal_arns: '["arn:aws:iam::368992683803:role/mscqr-production-independent-checker"]', TF_VAR_release_role_arn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", TF_VAR_receipt_bucket_arn: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" };
 const terraformStateLock = { acquire: async () => {}, release: async () => {} };
+const runStageAProductionArtifactsReconciliation = (input) => runReconciliation({ terraformStateLock, ...input });
 const rootIdentity = JSON.stringify({ Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" });
 const releaseIdentity = JSON.stringify({ Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test" });
 const environment = { id: 1, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 2, login: "reviewer" } }] }] };
@@ -40,7 +41,7 @@ test("the production CLI composes prepare then execute without re-planning", asy
   const journal = { readRecoveryCompletion: () => ({ bytes: Buffer.from(JSON.stringify(completionEvidence)) }), readReservation: () => null, readPostApplyEvidence: () => null, readResult: () => null, reserve: (identity) => ({ reservation: identity }), writePostApplyEvidence: () => ({}), finalize: ({ status }) => { terminal = status; } };
   let reconciliationAuthorization;
   const resolveAuthorization = ({ operation }) => operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? { authorization: recoveryAuthorization } : { authorization: reconciliationAuthorization };
-  const common = { releaseRun, adapter, journal, verifySignature: () => true, readProtectedSource: source, resolveAuthorization };
+  const common = { releaseRun, adapter, terraformStateLock, journal, verifySignature: () => true, readProtectedSource: source, resolveAuthorization };
   try {
     await runStageAProductionArtifactsReconciliationCli(["--production", "--prepare", "--source-sha", sourceSha, "--terraform-data-dir", terraformDataDir, "--refresh-only-plan", refreshOnlyPlanPath, "--prepare-evidence", prepareEvidencePath, "--recovery-authorization-workflow-run-id", "201", "--recovery-authorization-workflow-run-attempt", "1"], { ...common, terraformInputEnvironment: stageAVars });
     const prepareEvidence = JSON.parse(fs.readFileSync(prepareEvidencePath, "utf8"));
@@ -51,7 +52,9 @@ test("the production CLI composes prepare then execute without re-planning", asy
 });
 
 test("compatible protected-main descendant consumes historical recovery completion without replaying recovery", async () => {
-  const successorSourceSha = "b".repeat(40); let stateValue = { ...state, serial: 35 }; let applies = 0;
+  const successorSourceSha = "b".repeat(40); let stateValue = { ...state, serial: 35 }; let applies = 0; let lockOwner = false; const lockWaiters = [];
+  const exclusiveLock = { acquire: async () => { if (lockOwner) await new Promise((resolve) => lockWaiters.push(resolve)); lockOwner = true; }, release: async () => { lockOwner = false; lockWaiters.shift()?.(); } };
+  let evidenceStartedResolve; const evidenceStarted = new Promise((resolve) => { evidenceStartedResolve = resolve; }); let publishEvidenceResolve; const publishEvidence = new Promise((resolve) => { publishEvidenceResolve = resolve; }); let q1Authenticated = false; let evidenceDurable = false;
   const recoveryAuthorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState: stateValue, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "203"), verificationRef: "historical" });
   const completionEvidence = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization: recoveryAuthorization, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicy(), sign: () => "c2lnbmF0dXJl" });
   const savedPlanSha256 = "c".repeat(64); const saved = { sourceSha: successorSourceSha, refreshOnly: true, savedPlanSha256, savedPlanByteLength: 1, planPath: "/tmp/stage-a-successor.tfplan", preState: stateValue, terraformVersion: "1.15.8", plan: refreshPlan(buildStageAProductionArtifactsBucketPolicy()) };
@@ -60,10 +63,14 @@ test("compatible protected-main descendant consumes historical recovery completi
   const reconciliationAuthorization = createStageAProductionArtifactsReconciliationAuthorization({ sourceSha: successorSourceSha, recoverySourceSha: sourceSha, preState: stateValue, recoveryAuthorization, recoveryCompletion: completionEvidence, prepareEvidence, savedPlanSha256, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsReconciliationWorkflowRef, "204", successorSourceSha), verificationRef: "successor", verifyRecoveryCompletionEvidence: () => true, proveDescendant, readGovernedExecutableManifestSha256: unchangedGovernedSource });
   const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : args[1] === "get-bucket-policy" ? JSON.stringify({ Policy: JSON.stringify(buildStageAProductionArtifactsBucketPolicy()) }) : (() => { throw new Error(`unexpected release ${args[1]}`); })();
   const adapter = { readStateIdentity: async () => ({ ...stateValue }), readStateSnapshot: async () => stateSnapshot(stateValue), applySavedRefreshOnlyPlan: async () => { applies += 1; stateValue = { ...stateValue, serial: 36, stateSha256: "e".repeat(64) }; }, readProductionArtifactsPolicy: async () => buildStageAProductionArtifactsBucketPolicy() };
-  const input = { sourceSha: successorSourceSha, recoverySourceSha: sourceSha, recoveryWorkflowRunId: "203", recoveryWorkflowRunAttempt: "1", reconciliationWorkflowRunId: "204", reconciliationWorkflowRunAttempt: "1", releaseRun, adapter, readProtectedSource: () => ({ headSha: successorSourceSha }), proveDescendant, readGovernedExecutableManifestSha256: unchangedGovernedSource, verifySignature: () => true, preparedEvidence: prepareEvidence, saved, resolveAuthorization: ({ operation, sourceSha: resolvedSourceSha }) => { assert.equal(resolvedSourceSha, operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? sourceSha : successorSourceSha); return { authorization: operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? recoveryAuthorization : reconciliationAuthorization }; }, journal: { readRecoveryCompletion: () => ({ bytes: Buffer.from(JSON.stringify(completionEvidence)) }), readReservation: () => null, readPostApplyEvidence: () => null, readResult: () => null, reserve: (identity) => ({ reservation: identity }), writePostApplyEvidence: () => ({}), finalize: () => {} } };
+  const input = { sourceSha: successorSourceSha, recoverySourceSha: sourceSha, recoveryWorkflowRunId: "203", recoveryWorkflowRunAttempt: "1", reconciliationWorkflowRunId: "204", reconciliationWorkflowRunAttempt: "1", releaseRun, adapter, terraformStateLock: exclusiveLock, readProtectedSource: () => ({ headSha: successorSourceSha }), proveDescendant, readGovernedExecutableManifestSha256: unchangedGovernedSource, verifySignature: () => true, preparedEvidence: prepareEvidence, saved, resolveAuthorization: ({ operation, sourceSha: resolvedSourceSha }) => { assert.equal(resolvedSourceSha, operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? sourceSha : successorSourceSha); return { authorization: operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? recoveryAuthorization : reconciliationAuthorization }; }, journal: { readRecoveryCompletion: () => ({ bytes: Buffer.from(JSON.stringify(completionEvidence)) }), readReservation: () => null, readPostApplyEvidence: () => null, readResult: () => null, reserve: (identity) => ({ reservation: identity }), writePostApplyEvidence: async () => { q1Authenticated = true; evidenceStartedResolve(); await publishEvidence; evidenceDurable = true; return {}; }, finalize: () => {} } };
   await assert.rejects(() => runStageAProductionArtifactsReconciliation({ ...input, readGovernedExecutableManifestSha256: (sha) => sha === sourceSha ? governedExecutableManifestSha256 : "8".repeat(64) }), /governed executable source/); assert.equal(applies, 0);
-  const result = await runStageAProductionArtifactsReconciliation(input);
-  assert.equal(result.applied, true); assert.equal(applies, 1);
+  const execution = runStageAProductionArtifactsReconciliation(input); await evidenceStarted;
+  let competingWriterAcquired = false;
+  const competingWriter = exclusiveLock.acquire().then(() => { competingWriterAcquired = true; stateValue = { ...stateValue, serial: 37, stateSha256: "f".repeat(64) }; });
+  await Promise.resolve(); assert.equal(competingWriterAcquired, false); assert.equal(q1Authenticated, true); assert.equal(evidenceDurable, false);
+  publishEvidenceResolve(); const result = await execution; await competingWriter;
+  assert.equal(result.applied, true); assert.equal(applies, 1); assert.equal(evidenceDurable, true); assert.equal(competingWriterAcquired, true); await exclusiveLock.release();
 });
 
 test("real Stage-A recovery and reconciliation runner composition reaches one state-only apply", async () => {
@@ -94,7 +101,9 @@ test("real Stage-A recovery and reconciliation runner composition reaches one st
 });
 
 test("reconciliation resumes completion-only after apply succeeds but terminal publication fails", async () => {
-  let state = { lineage, serial: 35, stateSha256 }; let applies = 0; let finalizationFailures = 1; let losePostApplyResponse = false; let loseCompletionResponse = false; let persistedReservation; let persistedResult;
+  let state = { lineage, serial: 35, stateSha256 }; let applies = 0; let postApplyStateReadFailures = 1; let finalizationFailures = 1; let losePostApplyResponse = false; let loseCompletionResponse = false; let persistedReservation; let persistedResult;
+  let lockHeld = false; let lockReleases = 0;
+  const stateLock = { acquire: async () => { if (lockHeld) throw new Error("canonical backend lock is held"); lockHeld = true; }, release: async () => { lockHeld = false; lockReleases += 1; }, operatorResolve: () => { lockHeld = false; } };
   const recoveryAuthorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "401"), verificationRef: "completion-resume" });
   const completionEvidence = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization: recoveryAuthorization, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicy(), sign: () => "c2lnbmF0dXJl" });
   const savedPlanSha256 = "d".repeat(64); const saved = { sourceSha, refreshOnly: true, savedPlanSha256, savedPlanByteLength: 1, planPath: "/tmp/stage-a-completion-resume.tfplan", preState: state, terraformVersion: "1.15.8", plan: refreshPlan(buildStageAProductionArtifactsBucketPolicy()) };
@@ -102,7 +111,7 @@ test("reconciliation resumes completion-only after apply succeeds but terminal p
   const reconciliationAuthorization = createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, preState: state, recoveryAuthorization, recoveryCompletion: completionEvidence, prepareEvidence, savedPlanSha256, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsReconciliationWorkflowRef, "402"), verificationRef: "completion-resume", verifyRecoveryCompletionEvidence: () => true });
   let livePolicy = buildStageAProductionArtifactsBucketPolicy();
   const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : args[1] === "get-bucket-policy" ? JSON.stringify({ Policy: JSON.stringify(livePolicy) }) : (() => { throw new Error(`unexpected release ${args[1]}`); })();
-  const adapter = { readStateIdentity: async () => ({ ...state }), readStateSnapshot: async () => stateSnapshot(state), applySavedRefreshOnlyPlan: async () => { applies += 1; state = { ...state, serial: 36, stateSha256: "e".repeat(64) }; throw new Error("apply exited nonzero after state mutation"); }, readProductionArtifactsPolicy: async () => livePolicy };
+  const adapter = { readStateIdentity: async () => { if (applies && postApplyStateReadFailures) { postApplyStateReadFailures -= 1; throw new Error("injected post-apply state read failure"); } return { ...state }; }, readStateSnapshot: async () => stateSnapshot(state), applySavedRefreshOnlyPlan: async () => { applies += 1; state = { ...state, serial: 36, stateSha256: "e".repeat(64) }; throw new Error("apply exited nonzero after state mutation"); }, readProductionArtifactsPolicy: async () => livePolicy };
   let persistedPostApply;
   const journal = {
     readRecoveryCompletion: () => ({ bytes: Buffer.from(JSON.stringify(completionEvidence)) }),
@@ -113,9 +122,12 @@ test("reconciliation resumes completion-only after apply succeeds but terminal p
     writePostApplyEvidence: ({ reservation, postState, postLivePolicySha256 }) => { persistedPostApply = createStageAProductionArtifactsPostApplyEvidence({ reservation: reservation?.reservation || reservation, postState, postLivePolicySha256 }); if (losePostApplyResponse) { losePostApplyResponse = false; throw new Error("injected post-apply response loss"); } return { evidence: persistedPostApply }; },
     finalize: ({ reservation, status, postState, postLivePolicySha256 }) => { const result = createStageAProductionArtifactsJournalResult({ reservation, status, postState, postLivePolicySha256 }); if (status === "COMPLETED" && finalizationFailures > 0) { finalizationFailures -= 1; throw new Error("injected terminal publication failure"); } persistedResult = result; if (status === "COMPLETED" && loseCompletionResponse) { loseCompletionResponse = false; throw new Error("injected terminal response loss"); } return { result }; },
   };
-  const common = { sourceSha, recoveryWorkflowRunId: "401", recoveryWorkflowRunAttempt: "1", reconciliationWorkflowRunId: "402", reconciliationWorkflowRunAttempt: "1", releaseRun, adapter, readProtectedSource: source, verifySignature: () => true, preparedEvidence: prepareEvidence, saved, resolveAuthorization: ({ operation }) => operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? { authorization: recoveryAuthorization } : { authorization: reconciliationAuthorization }, journal };
+  const common = { sourceSha, recoveryWorkflowRunId: "401", recoveryWorkflowRunAttempt: "1", reconciliationWorkflowRunId: "402", reconciliationWorkflowRunAttempt: "1", releaseRun, adapter, terraformStateLock: stateLock, readProtectedSource: source, verifySignature: () => true, preparedEvidence: prepareEvidence, saved, resolveAuthorization: ({ operation }) => operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? { authorization: recoveryAuthorization } : { authorization: reconciliationAuthorization }, journal };
+  await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /retained the canonical backend lock/);
+  assert.equal(applies, 1); assert.ok(persistedReservation); assert.equal(persistedPostApply, undefined); assert.equal(persistedResult, undefined); assert.equal(lockHeld, true); assert.equal(lockReleases, 0);
+  stateLock.operatorResolve();
   await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /terminal publication failure/);
-  assert.equal(applies, 1); assert.ok(persistedReservation); assert.ok(persistedPostApply); assert.equal(persistedResult, undefined);
+  assert.ok(persistedPostApply); assert.equal(lockHeld, false); assert.equal(lockReleases, 1);
   state = { lineage, serial: 35, stateSha256: "f".repeat(64) };
   await assert.rejects(() => runStageAProductionArtifactsReconciliation(common), /pre-state|post-state/);
   state = { lineage, serial: 35, stateSha256 };
@@ -253,7 +265,7 @@ test("root recovery rejects an intervening live policy before PutBucketPolicy", 
   }
 });
 
-test("recovery journal retention rejects every overlapping destructive lifecycle filter", () => {
+test("recovery journal retention rejects overlapping current-object expiration and transitions", () => {
   const destructive = (rule) => ({ Status: "Enabled", Expiration: { Days: 1 }, ...rule });
   for (const rule of [
     { Prefix: "" },
@@ -263,9 +275,15 @@ test("recovery journal retention rejects every overlapping destructive lifecycle
     { Filter: { And: { Prefix: "production-stage-a-production-artifacts-reconciliation/recovery/abc/" } } },
     { Filter: { Tag: { Key: "retention", Value: "short" } } },
     { Filter: { ObjectSizeGreaterThan: 1 } },
-  ]) assert.throws(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive(rule)] }), /expire its immutable records/);
-  assert.throws(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive({ Filter: { And: { Prefix: "production-stage-a-production-artifacts-reconciliation/recovery/", Tag: { Key: "retention", Value: "short" } } } })] }), /expire its immutable records/);
+  ]) assert.throws(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive(rule)] }), /current records unavailable/);
+  assert.throws(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive({ Filter: { And: { Prefix: "production-stage-a-production-artifacts-reconciliation/recovery/", Tag: { Key: "retention", Value: "short" } } } })] }), /current records unavailable/);
   assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive({ Prefix: "some-other-prefix/" })] }));
   assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive({ Filter: { And: { Prefix: "some-other-prefix/", Tag: { Key: "retention", Value: "short" } } } })] }));
   assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Disabled", Prefix: "", Expiration: { Days: 1 } }] }));
+  for (const transition of [{ Transition: { Days: 1, StorageClass: "GLACIER" } }, { Transitions: [{ Days: 1, StorageClass: "STANDARD_IA" }] }]) {
+    assert.throws(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Enabled", Prefix: "production-stage-a-production-artifacts-reconciliation/recovery/", ...transition }] }), /current records unavailable/);
+    assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Disabled", Prefix: "", ...transition }] }));
+    assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Enabled", Prefix: "some-other-prefix/", ...transition }] }));
+  }
+  assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Enabled", Prefix: "", NoncurrentVersionExpiration: { NoncurrentDays: 1 }, NoncurrentVersionTransitions: [{ NoncurrentDays: 1, StorageClass: "GLACIER" }] }] }));
 });

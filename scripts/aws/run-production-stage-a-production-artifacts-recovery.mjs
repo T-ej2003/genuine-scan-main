@@ -42,9 +42,9 @@ export function assertStageAProductionArtifactsJournalRetention(lifecycle, journ
     const prefix = prefixFor(rule);
     return prefix !== null && !journalPrefix.startsWith(prefix) && !prefix.startsWith(journalPrefix);
   };
-  const deletesEvidence = (rule) => Boolean(rule?.Expiration || rule?.NoncurrentVersionExpiration);
+  const makesCurrentEvidenceUnavailable = (rule) => Boolean(rule?.Expiration || rule?.Transition || rule?.Transitions?.length);
   for (const rule of lifecycle.Rules) {
-    if (rule?.Status === "Enabled" && deletesEvidence(rule) && !canProveDisjoint(rule)) throw new Error("Stage A recovery journal lifecycle would expire its immutable records.");
+    if (rule?.Status === "Enabled" && makesCurrentEvidenceUnavailable(rule) && !canProveDisjoint(rule)) throw new Error("Stage A recovery journal lifecycle would make its immutable current records unavailable.");
   }
   return true;
 }

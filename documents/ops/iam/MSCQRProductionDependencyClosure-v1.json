@@ -259,7 +259,8 @@
         "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
       ],
       "reachableMode": [
-        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY",
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",
       "sourcePolicyPresent": true,
@@ -278,7 +279,8 @@
         "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
       ],
       "reachableMode": [
-        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY",
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",
       "sourcePolicyPresent": true,

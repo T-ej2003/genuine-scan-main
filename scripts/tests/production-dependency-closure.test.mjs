@@ -32,6 +32,10 @@ test("complete production dependency closure is exact across modes and failure p
     ["s3:PutObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"], "RELEASE_DEPLOYER"],
     ["s3:DeleteObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"], "RELEASE_DEPLOYER"],
   ]);
+  assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("stage-a-artifacts-recovery-release-lock-")).map(({ reachableMode }) => reachableMode), [
+    ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"],
+    ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"],
+  ]);
   assert.deepEqual(report.newAwsCalls.filter(({ sourceFile }) => sourceFile.endsWith("production-stage-a-production-artifacts-journal.mjs")).map(({ action, capabilityId, identity }) => [action, capabilityId, identity]), [
     ["s3:GetObject", "stage-a-artifacts-journal-read", "RELEASE_DEPLOYER"],
     ["s3:PutObject", "stage-a-artifacts-journal-conditional-create", "RELEASE_DEPLOYER"],
