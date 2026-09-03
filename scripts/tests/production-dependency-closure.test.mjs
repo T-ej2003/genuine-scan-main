@@ -25,6 +25,7 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-terraform-read-lock"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketLifecycleConfiguration", "stage-a-artifacts-recovery-root-read-lifecycle"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-recovery-release-read-policy"],
+    ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetObject", "stage-a-artifacts-recovery-release-read-raw-state"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketVersioning", "stage-a-artifacts-recovery-root-read-versioning"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:PutBucketPolicy", "stage-a-artifacts-recovery-root-put-policy"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketLocation", "stage-a-artifacts-reconciliation-terraform-read-bucket-location"],
@@ -55,6 +56,7 @@ test("complete production dependency closure is exact across modes and failure p
   assert.deepEqual(stageAStateReads.map(({ id, phase }) => [id, phase]), [
     ["manifest-collect-stage-a-prerequisite-state", "release-direct-read-preflight"],
     ["stage-a-artifacts-reconciliation-terraform-read-state", "stage-a-production-artifacts-state-reconciliation"],
+    ["stage-a-artifacts-recovery-release-read-raw-state", "stage-a-production-artifacts-policy-recovery"],
   ]);
   const reconciliationMode = report.newAwsCalls.filter(({ reachableMode }) => reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"));
   const backendResources = new Set(["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2", "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate", "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"]);
@@ -110,7 +112,7 @@ test("Stage A production-artifacts mode closure is tuple-exact and omission-proo
     assert.throws(() => assertStageAProductionArtifactsCapabilityClosure(report.newAwsCalls, changed), /capability tuple is incomplete/);
   }
   const recoverySource = fs.readFileSync("scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "utf8");
-  assert.match(recoverySource, /recoveryJournal : journal\)\.readRecoveryCompletion/);
+  assert.match(recoverySource, /existingCompletionReader = predecessorLive \? recoveryJournal : journal/);
   assert.match(recoverySource, /journal\.writeRecoveryCompletion/);
 });
 

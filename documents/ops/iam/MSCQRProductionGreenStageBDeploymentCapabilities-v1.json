@@ -11781,6 +11781,37 @@
       "mutation": false
     },
     {
+      "id": "stage-a-artifacts-recovery-release-read-raw-state",
+      "phase": "stage-a-production-artifacts-policy-recovery",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "sourceFunction": "stage-a-artifacts-recovery-release-read-raw-state",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-production-terraform-state-368992683803-eu-west-2"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-recovery-release-read-raw-state-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAStateForHandoff",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "stage-a-artifacts-recovery-root-identify",
       "phase": "stage-a-production-artifacts-policy-recovery",
       "identity": "ROOT_OPERATOR",
@@ -12803,6 +12834,17 @@
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
       "action": "s3:GetBucketVersioning",
       "identity": "ROOT_OPERATOR"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "action": "s3:GetObject",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityId": "stage-a-artifacts-recovery-release-read-raw-state",
+      "sourceFunction": "stage-a-artifacts-recovery-release-read-raw-state",
+      "phase": "stage-a-production-artifacts-policy-recovery",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ]
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",

@@ -189,6 +189,7 @@ test("recovery resumes exact desired policy only from its signed immutable attem
   await assert.rejects(() => runStageAProductionArtifactsRecovery({ ...input, sign: () => { signCalls += 1; if (signCalls === 2) throw new Error("injected after policy write"); return Buffer.from("signature").toString("base64"); } }), /injected after policy write/);
   assert.equal(puts, 1); assert.ok(attemptBytes); assert.equal(completionBytes, undefined);
   assert.equal(rootCompletionReads, 1); assert.equal(releaseCompletionReads, 0);
+  for (const entry of livePolicy.Statement) if (Array.isArray(entry.Resource) && entry.Resource.length === 1) entry.Resource = entry.Resource[0];
   const successorSourceSha = "b".repeat(40);
   const successorInput = { ...input, sourceSha: successorSourceSha, recoverySourceSha: sourceSha, readProtectedSource: () => ({ headSha: successorSourceSha }), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === successorSourceSha, readGovernedExecutableManifestSha256: unchangedGovernedSource, resolveAuthorization: ({ sourceSha: resolvedSourceSha }) => { assert.equal(resolvedSourceSha, sourceSha); return { authorization }; } };
   await assert.rejects(() => runStageAProductionArtifactsRecovery({ ...successorInput, readGovernedExecutableManifestSha256: (sha) => sha === sourceSha ? governedExecutableManifestSha256 : "8".repeat(64), sign: () => { throw new Error("must not sign"); } }), /governed executable source/); assert.equal(puts, 1);

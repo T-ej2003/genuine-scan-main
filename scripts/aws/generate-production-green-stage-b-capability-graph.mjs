@@ -26,6 +26,7 @@ const terraformPath = "infra/aws/terraform/production-green-stage-b/main.tf";
 const checkerPolicyPath = "infra/aws/terraform/production-green-stage-a/main.tf";
 const stageAReleaseS3ContractPath = "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json";
 const stageATerraformStateArn = `${STAGE_B_TERRAFORM_BACKEND.bucketArn}/${STAGE_A_TERRAFORM_BACKEND.key}`;
+const STAGE_A_RECOVERY_RAW_STATE_READ_COMMAND = '["s3api", "get-object", "--bucket", STAGE_A_TERRAFORM_BACKEND.bucket, "--key", STAGE_A_TERRAFORM_BACKEND.key, "--expected-bucket-owner", "368992683803", output]';
 const rootAttestationPolicyPath = "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf";
 const awsCliSourceFiles = [
   "scripts/plan-production-green-stage-b.mjs", "scripts/apply-production-green-stage-b.mjs",
@@ -142,6 +143,7 @@ const STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES = Object.freeze([
   ["stage-a-artifacts-recovery-root-put-policy", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:PutBucketPolicy", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], true, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
   ["stage-a-artifacts-recovery-release-identify", "stage-a-production-artifacts-policy-recovery", "RELEASE_DEPLOYER", "sts:GetCallerIdentity", ["*"], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
   ["stage-a-artifacts-recovery-release-read-policy", "stage-a-production-artifacts-policy-recovery", "RELEASE_DEPLOYER", "s3:GetBucketPolicy", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
+  ["stage-a-artifacts-recovery-release-read-raw-state", "stage-a-production-artifacts-policy-recovery", "RELEASE_DEPLOYER", "s3:GetObject", [stageATerraformStateArn], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
   ["stage-a-artifacts-recovery-root-journal-read", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], false, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
   ["stage-a-artifacts-recovery-root-journal-conditional-create", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], true, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
   ["stage-a-artifacts-recovery-root-sign", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "kms:Sign", [ROOT_ATTESTATION_KEY_ALIAS_ARN], true, "scripts/aws/production-root-attestation-signer.mjs"],
@@ -336,6 +338,15 @@ function terraformRuntimeActions() {
     .sort();
 }
 
+export function classifyStageARecoveryAwsCliAction({ action, source, offset } = {}) {
+  if (action === "sts:GetCallerIdentity") return [{ identity: "RELEASE_DEPLOYER" }, { identity: "ROOT_OPERATOR" }];
+  if (action === "s3:GetBucketPolicy") return [{ identity: "RELEASE_DEPLOYER" }];
+  if (action === "s3:GetObject" && source.startsWith(STAGE_A_RECOVERY_RAW_STATE_READ_COMMAND, offset)) {
+    return [{ identity: "RELEASE_DEPLOYER", capabilityId: "stage-a-artifacts-recovery-release-read-raw-state", sourceFunction: "stage-a-artifacts-recovery-release-read-raw-state", phase: "stage-a-production-artifacts-policy-recovery", resources: [stageATerraformStateArn] }];
+  }
+  return [{ identity: "ROOT_OPERATOR" }];
+}
+
 export function discoverAwsCliActions() {
   const serviceNames = "sts|iam|kms|ecr|ec2|ecs|rds|lambda|logs|cloudtrail|secretsmanager|dynamodb|s3api";
   const calls = [];
@@ -352,8 +363,7 @@ export function discoverAwsCliActions() {
       if (sourceFile === "scripts/aws/production-stage-a-production-artifacts-journal.mjs" && ["s3:GetObject", "s3:PutObject"].includes(action)) {
         calls.push({ sourceFile, action, identity: "RELEASE_DEPLOYER" }, { sourceFile, action, identity: "ROOT_OPERATOR" });
       } else if (sourceFile === "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs") {
-        const identities = action === "sts:GetCallerIdentity" ? ["RELEASE_DEPLOYER", "ROOT_OPERATOR"] : [action === "s3:GetBucketPolicy" ? "RELEASE_DEPLOYER" : "ROOT_OPERATOR"];
-        calls.push(...identities.map((identity) => ({ sourceFile, action, identity })));
+        calls.push(...classifyStageARecoveryAwsCliAction({ action, source, offset: match.index }).map((entry) => ({ sourceFile, action, ...entry })));
       } else if (sourceFile === "scripts/aws/production-root-attestation-signer.mjs" && action === "kms:Sign") {
         calls.push({ sourceFile, action, identity: "ADMINISTRATOR" }, { sourceFile, action, identity: "ROOT_OPERATOR" });
       } else {
@@ -448,6 +458,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   const stageABackendPolicySid = Object.freeze({
     "stage-a-artifacts-reconciliation-terraform-read-bucket-location": "ReadExactStageABackendBucketLocation",
     "stage-a-artifacts-reconciliation-terraform-read-state": "ReadExactStageAStateForHandoff",
+    "stage-a-artifacts-recovery-release-read-raw-state": "ReadExactStageAStateForHandoff",
     "stage-a-artifacts-reconciliation-terraform-write-state": "WriteExactStageAState",
     "stage-a-artifacts-reconciliation-terraform-read-lock": "ReadExactStageALock",
     "stage-a-artifacts-recovery-release-lock-acquire": "WriteExactStageALock",
@@ -530,6 +541,8 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   }
   const rootSigning = graph.capabilities.find(({ id }) => id === "stage-a-artifacts-recovery-root-sign");
   if (!rootSigning || rootSigning.phase !== "stage-a-production-artifacts-policy-recovery" || rootSigning.identity !== "ROOT_OPERATOR" || rootSigning.sourceFile !== "scripts/aws/production-root-attestation-signer.mjs" || rootSigning.action !== "kms:Sign" || rootSigning.mutation !== true || JSON.stringify(rootSigning.resources) !== JSON.stringify([ROOT_ATTESTATION_KEY_ALIAS_ARN])) throw new Error("Stage-A root signing capability boundary is not exact.");
+  const rawStateRead = graph.capabilities.find(({ id }) => id === "stage-a-artifacts-recovery-release-read-raw-state");
+  if (!rawStateRead || rawStateRead.phase !== "stage-a-production-artifacts-policy-recovery" || rawStateRead.identity !== "RELEASE_DEPLOYER" || rawStateRead.executor !== "aws-cli" || rawStateRead.sourceFile !== "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs" || rawStateRead.action !== "s3:GetObject" || JSON.stringify(rawStateRead.resources) !== JSON.stringify([stageATerraformStateArn]) || rawStateRead.mutation !== false || rawStateRead.policy?.sourceFile !== stageAReleaseS3ContractPath || rawStateRead.policy?.sid !== "ReadExactStageAStateForHandoff") throw new Error("Stage-A recovery raw-state read capability boundary is not exact.");
   for (const [id, action] of [["stage-a-artifacts-recovery-release-lock-acquire", "s3:PutObject"], ["stage-a-artifacts-recovery-release-lock-release", "s3:DeleteObject"]]) {
     const capability = graph.capabilities.find(({ id: candidate }) => candidate === id);
     if (!capability || capability.phase !== "stage-a-production-artifacts-policy-recovery" || capability.identity !== "RELEASE_DEPLOYER" || capability.sourceFile !== "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs" || capability.action !== action || JSON.stringify(capability.resources) !== JSON.stringify([STAGE_A_TERRAFORM_LOCK_ARN]) || capability.mutation !== true) throw new Error("Stage-A recovery lock capability boundary is not exact.");
