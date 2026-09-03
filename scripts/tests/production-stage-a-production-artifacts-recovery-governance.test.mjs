@@ -80,10 +80,10 @@ test("Stage A recovery approval follows the authenticated GitHub self-review pol
 
   const selfReviewBlocked = policyApproval({ preventSelfReview: true, executionActor: "T-ej2003", actualReviewer: "T-ej2003" });
   assert.throws(() => createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: selfReviewBlocked, verificationRef: "policy-matrix" }), /self-approved|prevents self-review/);
-  const soloAuthorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: policyApproval({ preventSelfReview: false, executionActor: "T-ej2003", actualReviewer: "T-ej2003" }), verificationRef: "policy-matrix" });
-  assert.throws(() => assertStageAProductionArtifactsRecoveryAuthorization(rebindApproval(soloAuthorization, selfReviewBlocked), { sourceSha, preState }), /self-approved|prevents self-review/);
-  const resolved = resolveStageAProductionArtifactsAuthorizationArtifact({ workflowRunId: "123", workflowRunAttempt: "1", sourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, githubRun: githubRun({ operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, authorization: soloAuthorization, actor: "T-ej2003" }), readGovernedExecutableManifestSha256: unchangedGovernedSource });
-  assert.equal(resolved.authorization.authorizationSha256, soloAuthorization.authorizationSha256);
+  const selfReviewAllowedAuthorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: policyApproval({ preventSelfReview: false, executionActor: "T-ej2003", actualReviewer: "T-ej2003" }), verificationRef: "policy-matrix" });
+  assert.throws(() => assertStageAProductionArtifactsRecoveryAuthorization(rebindApproval(selfReviewAllowedAuthorization, selfReviewBlocked), { sourceSha, preState }), /self-approved|prevents self-review/);
+  const resolved = resolveStageAProductionArtifactsAuthorizationArtifact({ workflowRunId: "123", workflowRunAttempt: "1", sourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, githubRun: githubRun({ operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, authorization: selfReviewAllowedAuthorization, actor: "T-ej2003" }), readGovernedExecutableManifestSha256: unchangedGovernedSource });
+  assert.equal(resolved.authorization.authorizationSha256, selfReviewAllowedAuthorization.authorizationSha256);
 });
 
 test("Stage A recovery approval keeps reviewer, evidence, provenance, and hash checks fail closed", () => {
