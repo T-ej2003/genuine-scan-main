@@ -1,0 +1,59 @@
+name: Authorize Stage-A recovery continuation rebind
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { required: true, type: string }
+      recovery_source_sha: { required: true, type: string }
+      recovery_authorization_workflow_run_id: { required: true, type: string }
+      recovery_authorization_workflow_run_attempt: { required: true, type: string }
+      reviewed_governed_executable_manifest_sha256: { required: true, type: string }
+      verification_ref: { required: true, type: string }
+
+permissions: { actions: read, contents: read, id-token: write }
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.source_sha }}", fetch-depth: 0, persist-credentials: false }
+      - name: Authenticate exact protected source
+        env: { GITHUB_TOKEN: "${{ github.token }}", SOURCE_SHA: "${{ inputs.source_sha }}" }
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = T-ej2003/genuine-scan-main
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+          aws-region: eu-west-2
+          role-session-name: mscqr-stage-a-continuation-rebind-authorization
+      - name: Produce exact independently approved authorization
+        env:
+          GITHUB_TOKEN: "${{ github.token }}"
+          SOURCE_SHA: "${{ inputs.source_sha }}"
+          RECOVERY_SOURCE_SHA: "${{ inputs.recovery_source_sha }}"
+          RECOVERY_RUN_ID: "${{ inputs.recovery_authorization_workflow_run_id }}"
+          RECOVERY_RUN_ATTEMPT: "${{ inputs.recovery_authorization_workflow_run_attempt }}"
+          MANIFEST_SHA256: "${{ inputs.reviewed_governed_executable_manifest_sha256 }}"
+          VERIFICATION_REF: "${{ inputs.verification_ref }}"
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/stage-a-continuation-rebind"; install -d -m 700 "$d"
+          actual_manifest_sha="$(node --input-type=module -e 'import { stageAProductionArtifactsGovernedExecutableManifestSha256 } from "./scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs"; process.stdout.write(stageAProductionArtifactsGovernedExecutableManifestSha256(process.env.SOURCE_SHA));')"
+          test "$MANIFEST_SHA256" = "$actual_manifest_sha"
+          node scripts/aws/production-github-environment-approval.mjs --output "$d/environment-approval.json" --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+          node scripts/aws/authorize-production-stage-a-production-artifacts-continuation-rebind.mjs --source-sha "$SOURCE_SHA" --recovery-source-sha "$RECOVERY_SOURCE_SHA" --recovery-authorization-workflow-run-id "$RECOVERY_RUN_ID" --recovery-authorization-workflow-run-attempt "$RECOVERY_RUN_ATTEMPT" --reviewed-governed-executable-manifest-sha256 "$MANIFEST_SHA256" --verification-ref "$VERIFICATION_REF" --environment-approval "$d/environment-approval.json" --output "$d/authorization.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-a-production-artifacts-continuation-rebind-authorization
+          path: "${{ runner.temp }}/stage-a-continuation-rebind/authorization.json"
+          if-no-files-found: error
+          retention-days: 90

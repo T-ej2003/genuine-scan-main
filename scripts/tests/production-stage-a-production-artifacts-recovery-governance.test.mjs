@@ -7,14 +7,17 @@ import {
   assertStageAProductionArtifactsRecoveryAttemptEvidence,
   assertStageAProductionArtifactsRecoveryAuthorization,
   assertStageAProductionArtifactsRecoveryCompletionEvidence,
+  assertStageAProductionArtifactsContinuationRebindAuthorization,
   createStageAProductionArtifactsRecoveryAttemptEvidence,
   createStageAProductionArtifactsRecoveryAuthorization as createRecoveryAuthorization,
   createStageAProductionArtifactsRecoveryCompletionEvidence,
+  createStageAProductionArtifactsContinuationRebindAuthorization,
   createStageAProductionArtifactsReconciliationAuthorization,
   assertStageAProductionArtifactsRecoverySourceCompatibility,
   resolveStageAProductionArtifactsAuthorizationArtifact,
   STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_AUTHORIZATION_ARTIFACT,
   STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION,
+  STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_WORKFLOW_REF,
   STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_AUTHORIZATION_ARTIFACT,
   STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF,
   STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_WORKFLOW_REF,
@@ -67,6 +70,19 @@ function reconciliationAuthorization() {
   const prepareEvidence = createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, preState, recoveryCompletion: completion.completion, saved });
   return createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, preState, recoveryAuthorization: recovery, recoveryCompletion: completion, prepareEvidence, savedPlanSha256: saved.savedPlanSha256, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_WORKFLOW_REF), verificationRef: "manual", verifyRecoveryCompletionEvidence: verify });
 }
+
+test("continuation rebind pins one externally approved source and governed manifest", () => {
+  const recovery = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF), verificationRef: "historical" });
+  const completion = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization: recovery, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicy(), sign });
+  const reviewedSourceSha = "c".repeat(40); const manifest = "d".repeat(64);
+  const rebind = createStageAProductionArtifactsContinuationRebindAuthorization({ historicalRecoveryAuthorization: recovery, recoveryCompletion: completion, reviewedContinuationSourceSha: reviewedSourceSha, reviewedGovernedExecutableManifestSha256: manifest, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_WORKFLOW_REF, reviewedSourceSha), verificationRef: "reviewed-chain" });
+  const check = (value = rebind, source = reviewedSourceSha, completionValue = completion, manifestValue = () => manifest) => assertStageAProductionArtifactsContinuationRebindAuthorization(value, { historicalRecoveryAuthorization: recovery, recoveryCompletion: completionValue, sourceSha: source, readGovernedExecutableManifestSha256: manifestValue });
+  assert.doesNotThrow(() => check());
+  assert.throws(() => check(rebind, "e".repeat(40)), /binding/);
+  assert.throws(() => check(rebind, reviewedSourceSha, completion, () => "e".repeat(64)), /binding/);
+  assert.throws(() => check({ ...rebind, recoveryCompletionSha256: "e".repeat(64) }), /binding|hash/);
+  assert.throws(() => check({ ...rebind, operation: "OTHER" }), /binding|hash/);
+});
 
 test("Stage A recovery approval follows the authenticated GitHub self-review policy", () => {
   for (const protectedEnvironmentApprovalEvidence of [
