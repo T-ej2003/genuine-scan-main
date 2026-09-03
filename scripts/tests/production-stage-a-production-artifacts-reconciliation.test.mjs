@@ -31,7 +31,7 @@ const predecessor = buildStageAProductionArtifactsBucketPolicyPredecessor();
 const desired = buildStageAProductionArtifactsBucketPolicy();
 const providerEnvelope = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures/production-stage-a-terraform-1.15.8-aws-6.56.0-envelope.json"), "utf8"));
 const rdsSensitivity = providerEnvelope.greenRdsSensitivity;
-const resource = (policy) => ({ bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, expected_bucket_owner: null, id: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(policy), region: "eu-west-2" });
+const resource = (policy, { omitExpectedBucketOwner = false } = {}) => ({ bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, ...(omitExpectedBucketOwner ? {} : { expected_bucket_owner: null }), id: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(policy), region: "eu-west-2" });
 const completion = (serial = 35, preStateSha256 = stateSha256) => createStageAProductionArtifactsRecoveryCompletion({ sourceSha, recoveryAuthorizationSha256: authSha, livePolicy: desired, stateLineage: lineage, preStateSerial: serial, preStateSha256 });
 const reconciliationAuthorization = (serial = 35, savedPlanSha256 = "b".repeat(64), preStateSha256 = stateSha256) => createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, recoveryCompletion: completion(serial, preStateSha256), savedPlanSha256, stateLineage: lineage, preStateSerial: serial, preStateSha256, verifyRecoveryCompletion: verifier });
 const verifyReconciliationAuthorization = (value) => ({ authorizationSha256: value.authorizationSha256, approved: true, independent: true });
@@ -123,6 +123,26 @@ test("locked-provider bucket-policy envelope permits only the unset owner repres
     const plan = structuredClone(refreshPlan()); mutate(plan);
     assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }), /not exact/, label);
   }
+});
+
+test("historical predecessor accepts only the Terraform-omitted optional owner representation", () => {
+  const accept = (plan) => assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }));
+  accept(refreshPlan());
+  const omitted = refreshPlan(); omitted.resource_drift[0].change.before = resource(predecessor, { omitExpectedBucketOwner: true }); accept(omitted);
+  for (const [label, mutate] of [
+    ["non-null owner", (before) => { before.expected_bucket_owner = "368992683803"; }],
+    ["wrong bucket", (before) => { before.bucket = "wrong"; }],
+    ["wrong id", (before) => { before.id = "wrong"; }],
+    ["wrong region", (before) => { before.region = "us-east-1"; }],
+    ["wrong predecessor policy", (before) => { before.policy = JSON.stringify(desired); }],
+    ["missing required field", (before) => { delete before.id; }],
+    ["unknown field", (before) => { before.unreviewed_provider_key = null; }],
+  ]) {
+    const plan = refreshPlan(); plan.resource_drift[0].change.before = resource(predecessor, { omitExpectedBucketOwner: true }); mutate(plan.resource_drift[0].change.before);
+    assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }), /not exact/, label);
+  }
+  const mutating = refreshPlan(); mutating.resource_changes = [{ change: { actions: ["update"] } }];
+  assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(mutating, { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }), /not exact/);
 });
 
 test("RDS timestamp drift remains the only additional refresh allowance", () => {
