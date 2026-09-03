@@ -28,7 +28,7 @@ for that exact protected-main SHA, with the exact governed manifest SHA from
 that checkout:
 
 ```sh
-MANIFEST_SHA256="$(node --input-type=module -e 'import { stageAProductionArtifactsGovernedExecutableManifestSha256 as digest } from "./scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs"; process.stdout.write(digest(process.env.SOURCE_SHA));')"
+MANIFEST_SHA256="$(SOURCE_SHA="$SOURCE_SHA" node --input-type=module -e 'import { stageAProductionArtifactsGovernedExecutableManifestSha256 as digest } from "./scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs"; process.stdout.write(digest(process.env.SOURCE_SHA));')"
 gh workflow run authorize-production-stage-a-production-artifacts-continuation-rebind.yml --ref main -f source_sha="$SOURCE_SHA" -f recovery_source_sha="$RECOVERY_SOURCE_SHA" -f recovery_authorization_workflow_run_id="$RECOVERY_RUN_ID" -f recovery_authorization_workflow_run_attempt="$RECOVERY_RUN_ATTEMPT" -f reviewed_governed_executable_manifest_sha256="$MANIFEST_SHA256" -f verification_ref="$VERIFICATION_REF"
 ```
 
