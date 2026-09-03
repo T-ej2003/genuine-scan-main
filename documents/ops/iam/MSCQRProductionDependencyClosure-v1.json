@@ -704,6 +704,8 @@
         "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY",
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION",
         "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",
@@ -1016,6 +1018,8 @@
         "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY",
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION",
         "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",
@@ -1035,6 +1039,8 @@
         "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY",
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION",
         "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",
@@ -1054,6 +1060,8 @@
         "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY",
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION",
         "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
       ],
       "executionPrincipal": "RELEASE_DEPLOYER",

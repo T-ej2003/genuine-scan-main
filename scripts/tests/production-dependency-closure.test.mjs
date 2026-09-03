@@ -43,6 +43,11 @@ test("complete production dependency closure is exact across modes and failure p
   assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(["NORMAL", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", "ROTATION_OVERLAP", "ROTATION_CLEANUP", "ROLLBACK_RECONCILIATION", "POST_DEPLOY_VERIFY"]));
   assert.equal(report.newAwsCalls.filter(({ capabilityId, reachableMode }) => capabilityId?.startsWith("stage-a-artifacts-recovery-") && !reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY")).length, 0);
   assert.equal(report.newAwsCalls.filter(({ capabilityId, reachableMode }) => (capabilityId?.startsWith("stage-a-artifacts-journal-") || capabilityId?.startsWith("stage-a-artifacts-reconciliation-")) && !reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION")).length, 0);
+  const rootVerifierModes = report.newAwsCalls.filter(({ capabilityId }) => ["release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"].includes(capabilityId));
+  assert.equal(rootVerifierModes.length, 4);
+  for (const { reachableMode } of rootVerifierModes) assert.deepEqual(reachableMode, ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"]);
+  for (const sourceFile of ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs"]) assert.match(fs.readFileSync(sourceFile, "utf8"), /createRootAttestationKmsVerifier/);
+  assert.deepEqual(report.newAwsCalls.find(({ capabilityId }) => capabilityId === "manifest-backend-health-recovery-describe-images")?.reachableMode, ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"]);
   assert.deepEqual(report.pathClosure, { forward: "PASS", rollback: "PASS", reconciliation: "PASS" });
   assert.deepEqual(new Set(Object.values(report.counters)), new Set([0]));
 });

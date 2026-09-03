@@ -83,6 +83,7 @@ const CALLS = Object.freeze([
 ].map(([sourceFile, action, capabilityId, resources, identity = "RELEASE_DEPLOYER"]) => Object.freeze({ sourceFile, action, capabilityId, identity, resources: Object.freeze(resources) })));
 const stageARecoveryCapability = (capabilityId) => capabilityId?.startsWith("stage-a-artifacts-recovery-");
 const stageAReconciliationCapability = (capabilityId) => capabilityId?.startsWith("stage-a-artifacts-journal-") || capabilityId?.startsWith("stage-a-artifacts-reconciliation-");
+const stageARootVerifierCapability = (capabilityId) => ["release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"].includes(capabilityId);
 
 
 
@@ -236,6 +237,8 @@ export function assertChangedAwsCallClosure(scanned, graph) {
       ? ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"]
       : stageAReconciliationCapability(contract.capabilityId)
       ? ["STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]
+      : stageARootVerifierCapability(contract.capabilityId)
+      ? ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"]
       : contract.sourceFile.endsWith("deploy-ecs-service.sh")
       ? ["NORMAL", "ROTATION_OVERLAP", "ROTATION_CLEANUP"]
       : contract.sourceFile.endsWith("production-normal-backend-activation.mjs") ? ["NORMAL"] : ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"];
