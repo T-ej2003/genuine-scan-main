@@ -12786,23 +12786,38 @@
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
-      "action": "s3:GetBucketLifecycleConfiguration"
+      "action": "s3:GetBucketLifecycleConfiguration",
+      "identity": "ROOT_OPERATOR"
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
-      "action": "s3:GetBucketPolicy"
+      "action": "s3:GetBucketLocation",
+      "identity": "RELEASE_DEPLOYER"
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
-      "action": "s3:GetBucketVersioning"
+      "action": "s3:GetBucketPolicy",
+      "identity": "RELEASE_DEPLOYER"
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
-      "action": "s3:PutBucketPolicy"
+      "action": "s3:GetBucketVersioning",
+      "identity": "ROOT_OPERATOR"
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
-      "action": "sts:GetCallerIdentity"
+      "action": "s3:PutBucketPolicy",
+      "identity": "ROOT_OPERATOR"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "action": "sts:GetCallerIdentity",
+      "identity": "RELEASE_DEPLOYER"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+      "action": "sts:GetCallerIdentity",
+      "identity": "ROOT_OPERATOR"
     },
     {
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",

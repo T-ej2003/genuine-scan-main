@@ -351,6 +351,9 @@ export function discoverAwsCliActions() {
         : `${service}:${service === "lambda" && operation === "Invoke" ? "InvokeFunction" : operation}`;
       if (sourceFile === "scripts/aws/production-stage-a-production-artifacts-journal.mjs" && ["s3:GetObject", "s3:PutObject"].includes(action)) {
         calls.push({ sourceFile, action, identity: "RELEASE_DEPLOYER" }, { sourceFile, action, identity: "ROOT_OPERATOR" });
+      } else if (sourceFile === "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs") {
+        const identities = action === "sts:GetCallerIdentity" ? ["RELEASE_DEPLOYER", "ROOT_OPERATOR"] : [action === "s3:GetBucketPolicy" ? "RELEASE_DEPLOYER" : "ROOT_OPERATOR"];
+        calls.push(...identities.map((identity) => ({ sourceFile, action, identity })));
       } else if (sourceFile === "scripts/aws/production-root-attestation-signer.mjs" && action === "kms:Sign") {
         calls.push({ sourceFile, action, identity: "ADMINISTRATOR" }, { sourceFile, action, identity: "ROOT_OPERATOR" });
       } else {
@@ -365,6 +368,7 @@ export function discoverAwsCliActions() {
     { sourceFile: "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", action: "s3:DeleteObject" },
     { sourceFile: "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", action: "s3:GetBucketLocation" },
     { sourceFile: "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", action: "s3:GetObject" },
+    { sourceFile: "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", action: "s3:GetBucketLocation", identity: "RELEASE_DEPLOYER" },
     { sourceFile: "scripts/aws/production-stage-a-control-plane.mjs", action: "s3:GetObject" },
     { sourceFile: "scripts/aws/production-stage-a-control-plane.mjs", action: "s3:PutObject" },
   );

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { CAPABILITY_GRAPH_PATH, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
-import { assertChangedAwsCallClosure, assertNoUnknownRollbackDependency, assertRollbackSemanticBoundary, buildProductionDependencyClosure } from "../aws/verify-production-dependency-closure.mjs";
+import { assertChangedAwsCallClosure, assertNoUnknownRollbackDependency, assertRollbackSemanticBoundary, assertStageAProductionArtifactsCapabilityClosure, buildProductionDependencyClosure } from "../aws/verify-production-dependency-closure.mjs";
 
 const graph = () => JSON.parse(fs.readFileSync(CAPABILITY_GRAPH_PATH, "utf8"));
 
@@ -27,6 +27,8 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-recovery-release-read-policy"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketVersioning", "stage-a-artifacts-recovery-root-read-versioning"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:PutBucketPolicy", "stage-a-artifacts-recovery-root-put-policy"],
+    ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketLocation", "stage-a-artifacts-reconciliation-terraform-read-bucket-location"],
+    ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-recovery-release-identify"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-recovery-root-identify"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
@@ -42,10 +44,11 @@ test("complete production dependency closure is exact across modes and failure p
   ]);
   const reconciliationBackend = report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("stage-a-artifacts-reconciliation-terraform-"));
   assert.deepEqual(reconciliationBackend.map(({ action, resources, identity, reachableMode }) => [action, resources, identity, reachableMode]), [
-    ["s3:GetBucketLocation", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"], "RELEASE_DEPLOYER", ["STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]],
-    ["s3:GetObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"], "RELEASE_DEPLOYER", ["STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]],
+    ["s3:GetBucketLocation", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"], "RELEASE_DEPLOYER", ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]],
+    ["s3:GetObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"], "RELEASE_DEPLOYER", ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]],
     ["s3:PutObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"], "RELEASE_DEPLOYER", ["STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]],
     ["s3:GetObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"], "RELEASE_DEPLOYER", ["STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]],
+    ["s3:GetBucketLocation", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"], "RELEASE_DEPLOYER", ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]],
   ]);
   assert.equal(graph().capabilities.find(({ id }) => id === "stage-a-artifacts-reconciliation-terraform-write-state")?.mutation, true);
   const stageAStateReads = graph().capabilities.filter(({ action, resources }) => action === "s3:GetObject" && resources.includes("arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"));
@@ -55,7 +58,7 @@ test("complete production dependency closure is exact across modes and failure p
   ]);
   const reconciliationMode = report.newAwsCalls.filter(({ reachableMode }) => reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"));
   const backendResources = new Set(["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2", "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate", "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"]);
-  assert.equal(reconciliationMode.filter(({ resources }) => resources.some((resource) => backendResources.has(resource))).length, 6);
+  assert.equal(new Set(reconciliationMode.filter(({ resources }) => resources.some((resource) => backendResources.has(resource))).map(({ identity, action, resources, mutation }) => JSON.stringify([identity, action, resources, mutation]))).size, 6);
   assert.equal(reconciliationMode.some(({ action }) => action === "s3:ListBucket"), false);
   assert.equal(graph().capabilities.some(({ id }) => /^stage-a-artifacts-reconciliation-terraform-(?:acquire|release)-lock$/.test(id)), false);
   const controlPlaneSource = fs.readFileSync("scripts/aws/production-stage-a-control-plane.mjs", "utf8");
@@ -67,6 +70,7 @@ test("complete production dependency closure is exact across modes and failure p
     ["s3:GetObject", "stage-a-artifacts-recovery-root-journal-read", "ROOT_OPERATOR"],
     ["s3:PutObject", "stage-a-artifacts-recovery-root-journal-conditional-create", "ROOT_OPERATOR"],
   ]);
+  for (const id of ["stage-a-artifacts-journal-read", "stage-a-artifacts-journal-conditional-create"]) assert.deepEqual(report.newAwsCalls.find(({ capabilityId }) => capabilityId === id)?.reachableMode, ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"]);
   assert.deepEqual(new Set(Object.values(report.modes)), new Set(["PASS"]));
   assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(Object.keys(report.modes)));
   for (const { capabilityId, reachableMode } of report.newAwsCalls) for (const mode of reachableMode) assert.notEqual(report.modes[mode], undefined, `${capabilityId} is reachable from undeclared ${mode}`);
@@ -81,6 +85,33 @@ test("complete production dependency closure is exact across modes and failure p
   assert.deepEqual(report.newAwsCalls.find(({ capabilityId }) => capabilityId === "manifest-backend-health-recovery-describe-images")?.reachableMode, ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"]);
   assert.deepEqual(report.pathClosure, { forward: "PASS", rollback: "PASS", reconciliation: "PASS" });
   assert.deepEqual(new Set(Object.values(report.counters)), new Set([0]));
+});
+
+test("Stage A production-artifacts mode closure is tuple-exact and omission-proof", () => {
+  const report = buildProductionDependencyClosure(); const current = graph();
+  assert.equal(assertStageAProductionArtifactsCapabilityClosure(report.newAwsCalls, current), true);
+  const modesFor = (id) => report.newAwsCalls.find(({ capabilityId }) => capabilityId === id)?.reachableMode;
+  const recovery = "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"; const reconciliation = "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION";
+  for (const id of ["stage-a-artifacts-journal-read", "stage-a-artifacts-journal-conditional-create", "stage-a-artifacts-recovery-release-lock-acquire", "stage-a-artifacts-recovery-release-lock-release", "stage-a-artifacts-reconciliation-terraform-read-bucket-location", "stage-a-artifacts-reconciliation-terraform-read-state", "release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"]) {
+    assert.deepEqual(modesFor(id)?.slice(0, 2), [recovery, reconciliation], id);
+  }
+  for (const id of ["stage-a-artifacts-recovery-root-journal-read", "stage-a-artifacts-recovery-root-journal-conditional-create", "stage-a-artifacts-recovery-root-sign"]) assert.deepEqual(modesFor(id), [recovery], id);
+  for (const id of ["stage-a-artifacts-reconciliation-terraform-write-state", "stage-a-artifacts-reconciliation-terraform-read-lock"]) assert.deepEqual(modesFor(id), [reconciliation], id);
+  assert.equal(current.capabilities.find(({ id }) => id === "stage-a-artifacts-journal-read")?.mutation, false);
+  assert.equal(current.capabilities.find(({ id }) => id === "stage-a-artifacts-journal-conditional-create")?.mutation, true);
+  assert.equal(current.capabilities.find(({ id }) => id === "stage-a-artifacts-reconciliation-terraform-write-state")?.mutation, true);
+  const changedCalls = (id, change) => report.newAwsCalls.map((call) => call.capabilityId === id ? change(structuredClone(call)) : structuredClone(call));
+  for (const id of ["stage-a-artifacts-journal-read", "stage-a-artifacts-journal-conditional-create", "release-root-attestation-verify"]) {
+    assert.throws(() => assertStageAProductionArtifactsCapabilityClosure(changedCalls(id, (call) => ({ ...call, reachableMode: call.reachableMode.filter((mode) => mode !== "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY") })), current), /capability tuple is incomplete/);
+  }
+  assert.throws(() => assertStageAProductionArtifactsCapabilityClosure(report.newAwsCalls.filter(({ capabilityId }) => capabilityId !== "stage-a-artifacts-reconciliation-terraform-write-state"), current), /inventory is incomplete/);
+  for (const [field, value] of [["identity", "ADMINISTRATOR"], ["resources", ["*"]], ["mutation", false]]) {
+    const changed = structuredClone(current); changed.capabilities.find(({ id }) => id === "stage-a-artifacts-journal-conditional-create")[field] = value;
+    assert.throws(() => assertStageAProductionArtifactsCapabilityClosure(report.newAwsCalls, changed), /capability tuple is incomplete/);
+  }
+  const recoverySource = fs.readFileSync("scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "utf8");
+  assert.match(recoverySource, /recoveryJournal : journal\)\.readRecoveryCompletion/);
+  assert.match(recoverySource, /journal\.writeRecoveryCompletion/);
 });
 
 test("unknown AWS calls and incomplete exact call classifications fail CI", () => {
