@@ -13,7 +13,7 @@ import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-
 import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
 import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
 import { createStageAProductionArtifactsJournal } from "./production-stage-a-production-artifacts-journal.mjs";
-import { createStageAProductionArtifactsRecoveryAttemptEvidence, assertStageAProductionArtifactsRecoveryAttemptEvidence, createStageAProductionArtifactsRecoveryCompletionEvidence, assertStageAProductionArtifactsRecoveryAuthorization, assertStageAProductionArtifactsRecoveryCompletionEvidence, assertStageAProductionArtifactsRecoverySourceCompatibility, resolveStageAProductionArtifactsAuthorizationArtifact, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION } from "./production-stage-a-production-artifacts-recovery-governance.mjs";
+import { createStageAProductionArtifactsRecoveryAttemptEvidence, assertStageAProductionArtifactsRecoveryAttemptEvidence, createStageAProductionArtifactsRecoveryCompletionEvidence, assertStageAProductionArtifactsRecoveryAuthorization, assertStageAProductionArtifactsRecoveryCompletionEvidence, assertStageAProductionArtifactsRecoverySourceCompatibility, resolveStageAProductionArtifactsAuthorizationArtifact, stageAProductionArtifactsGovernedExecutableManifest, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION } from "./production-stage-a-production-artifacts-recovery-governance.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -21,7 +21,11 @@ const required = (argv, name) => { const i = argv.indexOf(name); const value = i
 const awsJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 const exactRoot = (value) => value?.Account === "368992683803" && value?.Arn === "arn:aws:iam::368992683803:root";
 const exactRelease = (value) => value?.Account === "368992683803" && /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/.test(value?.Arn || "");
-const readContinuationChangedFiles = ({ ancestorSha, descendantSha }) => execFileSync("git", ["diff", "--name-only", `${ancestorSha}..${descendantSha}`], { cwd: root, encoding: "utf8" }).trim().split("\n").filter(Boolean).filter((file) => !file.startsWith("scripts/tests/") && !file.startsWith("documents/"));
+const readContinuationChangedFiles = ({ ancestorSha, descendantSha }) => {
+  const changed = (sourceSha) => new Map(stageAProductionArtifactsGovernedExecutableManifest(sourceSha).files.map(({ path, sha256 }) => [path, sha256]));
+  const ancestor = changed(ancestorSha); const descendant = changed(descendantSha);
+  return [...new Set([...ancestor.keys(), ...descendant.keys()])].filter((file) => ancestor.get(file) !== descendant.get(file)).sort();
+};
 
 function readPolicy(run) {
   const encoded = awsJson(run, ["s3api", "get-bucket-policy", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket]);

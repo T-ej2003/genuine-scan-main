@@ -10,7 +10,7 @@ import {
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
+import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { assertStageBAdministratorEvidenceIdentity, buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
@@ -81,6 +81,20 @@ const allowed = (args) => {
   return "{}";
 };
 
+test("Stage-A raw backend-state read has one exact release-deployer capability", () => {
+  const rawStateCommand = '["s3api", "get-object", "--bucket", STAGE_A_TERRAFORM_BACKEND.bucket, "--key", STAGE_A_TERRAFORM_BACKEND.key, "--expected-bucket-owner", "368992683803", output]';
+  assert.deepEqual(classifyStageARecoveryAwsCliAction({ action: "s3:GetObject", source: rawStateCommand, offset: 0 }), [{ identity: "RELEASE_DEPLOYER", capabilityId: "stage-a-artifacts-recovery-release-read-raw-state", sourceFunction: "stage-a-artifacts-recovery-release-read-raw-state", phase: "stage-a-production-artifacts-policy-recovery", resources: ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"] }]);
+  assert.deepEqual(classifyStageARecoveryAwsCliAction({ action: "s3:GetBucketPolicy", source: "", offset: 0 }), [{ identity: "RELEASE_DEPLOYER" }]);
+  for (const action of ["s3:PutBucketPolicy", "s3:PutObject", "s3:DeleteObject"]) assert.deepEqual(classifyStageARecoveryAwsCliAction({ action, source: rawStateCommand, offset: 0 }), [{ identity: "ROOT_OPERATOR" }]);
+  for (const source of [
+    rawStateCommand.replace("STAGE_A_TERRAFORM_BACKEND.bucket", '"wrong-bucket"'),
+    rawStateCommand.replace("STAGE_A_TERRAFORM_BACKEND.key", '"wrong-key"'),
+    '["s3api", "get-object", "--bucket", bucket, "--key", key, output]',
+  ]) assert.deepEqual(classifyStageARecoveryAwsCliAction({ action: "s3:GetObject", source, offset: 0 }), [{ identity: "ROOT_OPERATOR" }]);
+  const rawRead = buildStageBDeploymentCapabilityGraph().capabilities.find(({ id }) => id === "stage-a-artifacts-recovery-release-read-raw-state");
+  assert.deepEqual(rawRead && [rawRead.identity, rawRead.action, rawRead.resources, rawRead.mutation], ["RELEASE_DEPLOYER", "s3:GetObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"], false]);
+});
+
 test("release preflight routes every S3 and Lambda probe through the credential-bound AWS runner", () => {
   const calls = [];
   const run = createProductionCommandRunner({
@@ -130,7 +144,7 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 45, capabilities: 363, uniqueActions: 133, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 45, capabilities: 364, uniqueActions: 133, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));

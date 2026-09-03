@@ -67,8 +67,21 @@ test("recovery classifier distinguishes write-free completion from writable P0",
 
 test("historical recovery continuation accepts only the bounded canonicalization source delta", () => {
   const args = { sourceSha: "b".repeat(40), recoverySourceSha: "a".repeat(40), proveDescendant: () => true, historicalGovernedExecutableManifestSha256: "1".repeat(64), readGovernedExecutableManifestSha256: (sha) => sha === "a".repeat(40) ? "1".repeat(64) : "2".repeat(64) };
-  assert.doesNotThrow(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ ...args, readContinuationChangedFiles: () => [...STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES] }));
-  assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ ...args, readContinuationChangedFiles: () => ["scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs"] }), /unsafe governed/);
+  const exactRepairDelta = [
+    "scripts/aws/production-stage-a-control-plane.mjs",
+    "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs",
+    "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+  ];
+  assert.deepEqual(STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES, exactRepairDelta);
+  assert.doesNotThrow(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ ...args, readContinuationChangedFiles: () => exactRepairDelta }));
+  assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ ...args, readContinuationChangedFiles: () => exactRepairDelta.filter((file) => !file.endsWith("recovery-governance.mjs")) }), /unsafe governed/);
+  for (const file of [
+    "scripts/aws/run-production-green-stage-b-preflight.mjs",
+    "scripts/aws/production-dual-slot-rebaseline-contract.mjs",
+    "infra/aws/terraform/production-green-stage-a/main.tf",
+    "scripts/aws/dispatch-production-green-stage-b-images.mjs",
+    "scripts/aws/production-github-environment-approval.mjs",
+  ]) assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ ...args, readContinuationChangedFiles: () => [...exactRepairDelta, file] }), /unsafe governed/);
   assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility(args), /changed the governed/);
 });
 

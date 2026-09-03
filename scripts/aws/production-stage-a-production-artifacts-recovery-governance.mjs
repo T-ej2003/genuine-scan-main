@@ -101,6 +101,7 @@ export const stageAProductionArtifactsGovernedExecutableManifestSha256 = (source
 
 export const STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES = Object.freeze([
   "scripts/aws/production-stage-a-control-plane.mjs",
+  "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs",
   "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
 ]);
 
@@ -114,7 +115,7 @@ export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sou
   if (historical === current) return true;
   if (typeof readContinuationChangedFiles !== "function") throw new Error("Stage A production-artifacts descendant changed the governed executable source.");
   const changed = readContinuationChangedFiles({ ancestorSha: recoverySourceSha, descendantSha: sourceSha });
-  if (!Array.isArray(changed) || changed.length === 0 || changed.some((file) => !STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES.includes(file))) throw new Error("Stage A production-artifacts descendant changed an unsafe governed executable source.");
+  if (!Array.isArray(changed) || JSON.stringify([...changed].sort()) !== JSON.stringify(STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES)) throw new Error("Stage A production-artifacts descendant changed an unsafe governed executable source.");
   return true;
 }
 
