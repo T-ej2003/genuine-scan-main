@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalJson, PRODUCTION_ACTIVATION_LIFECYCLE, STAGE_B } from "./production-green-stage-b-contract.mjs";
-import { assertProductionEnvironmentApprovalIdentity, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
+import { assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalIdentity, assertProductionEnvironmentReviewer, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
 import { ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
 import { assertStageAProductionArtifactsRecoveryCompletion, assertStageAProductionArtifactsReconciliationPrepareEvidence, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, createStageAProductionArtifactsRecoveryCompletion, STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS, STAGE_A_TERRAFORM_VERSION, stageAProductionArtifactsPolicySha256 } from "./production-stage-a-control-plane.mjs";
 import { STAGE_A_PRODUCTION_ARTIFACTS_JOURNAL_PREFIX, STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "./production-stage-a-production-artifacts-journal.mjs";
@@ -40,7 +40,9 @@ const state = (value, label) => {
 };
 const approval = (value, { sourceSha, workflowRef }) => {
   assertProductionEnvironmentApprovalIdentity(value, { sourceSha, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository });
-  if (value.schemaVersion !== 3 || value.workflowRef !== workflowRef || value.actualApproval?.userLogin?.toLowerCase() === value.executionActor.toLowerCase()) throw new Error("Stage A production-artifacts authorization requires actual independent protected-environment approval.");
+  if (value.schemaVersion !== 3 || value.workflowRef !== workflowRef) throw new Error("Stage A production-artifacts authorization requires actual protected-environment approval.");
+  const reviewer = assertProductionEnvironmentActualReviewer(value, { sourceSha, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, executionActor: value.executionActor });
+  assertProductionEnvironmentReviewer(value, { approvedBy: reviewer, executionActor: value.executionActor });
   return value;
 };
 const recoverFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "account", "region", "bucket", "executionPrincipal", "predecessorPolicySha256", "desiredPolicySha256", "expectedLivePolicySha256", "preStateLineage", "preStateSerial", "preStateSha256", "governedExecutableManifestSha256", "continuationCompatibilitySha256", "maxPutBucketPolicy", "maxDeleteBucketPolicy", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "verificationRef", "authorizationSha256"]);
