@@ -233,6 +233,7 @@ test("governed CLI composes approved artifact, temporary capability, one saved-p
   const releaseRun = (command, args) => {
     calls.push({ command, args });
     if (command !== "terraform") throw new Error("only Terraform may use release runner");
+    if (args.includes("init")) return "";
     if (args.includes("show")) return JSON.stringify(rendered);
     if (args.includes("state")) return JSON.stringify(state);
     if (args.includes("apply")) { state = afterState; policy = afterPolicy; return ""; }
@@ -241,6 +242,7 @@ test("governed CLI composes approved artifact, temporary capability, one saved-p
   try {
     const result = await authorizationCli(["--execute", "--source-sha", sourceSha, "--workflow-run-id", "17", "--workflow-run-attempt", "2", "--saved-plan", planPath, "--admin-profile", "root", "--release-profile", "release"], { run, adminRun, releaseAws, releaseRun, sleep: () => {}, readProtectedCheckout: () => ({ toolingSha: sourceSha }) });
     assert.equal(result.applied, true); assert.equal(result.temporaryCapabilityRemoved, true); assert.equal(defaultVersion, "v1"); assert.equal(versions.has("v2"), false);
+    assert(calls.findIndex(({ command, args }) => command === "terraform" && args.includes("init")) < calls.findIndex(({ command, args }) => command === "terraform" && args.includes("show")));
     const zip = calls.find(({ command, args }) => command === "gh" && args[1].endsWith("/zip")); assert.equal(zip.options.encoding, null); assert.equal(calls.some(({ command, args }) => command === "terraform" && args.includes("apply") && args.includes(planPath)), false);
   } finally { process.env.HOME = oldHome; fs.rmSync(directory, { recursive: true, force: true }); }
 });

@@ -29,7 +29,7 @@ import { assertStageAStateContract, parseAuthenticatedStateBytes } from "./gener
 import { assertAuthenticatedCurrentStageBState, readAuthenticatedStageARecoverySources } from "./production-stage-a-recovery-evidence.mjs";
 import { assertPreCutoverTemporaryCapabilityAbsent } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
-import { canonicalJson } from "./production-green-stage-b-contract.mjs";
+import { canonicalJson, PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence, createReleasePreflightCheckerTrustSignatureVerifier } from "./production-release-preflight-checker-attestation.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
@@ -333,6 +333,11 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     region: REGION,
     run: async (args) => commandRun(args),
     describeIngress: async ({ endpointSecurityGroupId, runtimeSecurityGroupId }) => describeStageAIngress({ run: commandRun, endpointSecurityGroupId, runtimeSecurityGroupId }),
+    readProductionArtifactsPolicy: async () => {
+      const encoded = parseJson(commandRun, ["s3api", "get-bucket-policy", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket]).Policy;
+      if (typeof encoded !== "string") throw new Error("Production-artifacts bucket policy response is malformed.");
+      try { return JSON.parse(decodeURIComponent(encoded)); } catch { throw new Error("Production-artifacts bucket policy is not valid JSON."); }
+    },
   });
   const checkerChain = createLiveCheckerChainAssertionAdapter({ run: commandRun });
   const overlapRegistration = createAwsOverlapTaskRegistrationAdapter({ run: async (args) => commandRun(args) });

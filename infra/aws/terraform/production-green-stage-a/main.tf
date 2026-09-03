@@ -18,7 +18,8 @@ locals {
     "${var.receipt_bucket_arn}/production-activation-lifecycle/claim.json",
     "${var.receipt_bucket_arn}/production-activation-lifecycle/completion.json",
   ]
-  rebaseline_evidence_object_arns = ["${var.receipt_bucket_arn}/production-dual-slot-rebaseline-evidence/*"]
+  rebaseline_evidence_object_arns                         = ["${var.receipt_bucket_arn}/production-dual-slot-rebaseline-evidence/*"]
+  stage_a_production_artifacts_reconciliation_object_arns = ["${var.receipt_bucket_arn}/production-stage-a-production-artifacts-reconciliation/*"]
 }
 
 resource "aws_s3_bucket_policy" "production_artifacts" {
@@ -34,6 +35,11 @@ resource "aws_s3_bucket_policy" "production_artifacts" {
     { Sid = "DenyNonConditionalRebaselineEvidenceWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.rebaseline_evidence_object_arns, Condition = { StringNotEquals = { "s3:if-none-match" = "*" } } },
     { Sid = "DenyOtherPrincipalsRebaselineEvidenceWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.rebaseline_evidence_object_arns, Condition = { StringNotEquals = { "aws:PrincipalArn" = var.release_role_arn } } },
     { Sid = "DenyRebaselineEvidenceDeletion", Effect = "Deny", Principal = "*", Action = ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource = local.rebaseline_evidence_object_arns },
+    { Sid = "AllowReleaseDeployerReadStageAProductionArtifactsReconciliation", Effect = "Allow", Principal = { AWS = var.release_role_arn }, Action = "s3:GetObject", Resource = local.stage_a_production_artifacts_reconciliation_object_arns },
+    { Sid = "AllowReleaseDeployerConditionalStageAProductionArtifactsReconciliationCreate", Effect = "Allow", Principal = { AWS = var.release_role_arn }, Action = "s3:PutObject", Resource = local.stage_a_production_artifacts_reconciliation_object_arns, Condition = { StringEquals = { "s3:if-none-match" = "*" } } },
+    { Sid = "DenyNonConditionalStageAProductionArtifactsReconciliationWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.stage_a_production_artifacts_reconciliation_object_arns, Condition = { StringNotEquals = { "s3:if-none-match" = "*" } } },
+    { Sid = "DenyOtherPrincipalsStageAProductionArtifactsReconciliationWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.stage_a_production_artifacts_reconciliation_object_arns, Condition = { StringNotEquals = { "aws:PrincipalArn" = var.release_role_arn } } },
+    { Sid = "DenyStageAProductionArtifactsReconciliationDeletion", Effect = "Deny", Principal = "*", Action = ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource = local.stage_a_production_artifacts_reconciliation_object_arns },
     { Sid = "DenyProductionArtifactsBucketPolicyMutation", Effect = "Deny", Principal = "*", Action = ["s3:PutBucketPolicy", "s3:DeleteBucketPolicy"], Resource = var.receipt_bucket_arn },
   ] })
 }

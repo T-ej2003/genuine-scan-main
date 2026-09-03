@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { ARTIFACT_SIGNING_BINDINGS } from "./production-artifact-signing-domain.mjs";
 import { CAPABILITY_GRAPH_PATH, assertStageBDeploymentCapabilityGraph, discoverAwsCliActions } from "./generate-production-green-stage-b-capability-graph.mjs";
 import { canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
+import { STAGE_A_TERRAFORM_BACKEND, STAGE_A_TERRAFORM_LOCK_ARN } from "./production-stage-a-root-drop-orphan-recovery.mjs";
+import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const PRODUCTION_DEPENDENCY_CLOSURE_PATH = "documents/ops/iam/MSCQRProductionDependencyClosure-v1.json";
@@ -18,8 +20,32 @@ const RUNTIME_REPOSITORIES = [REPOSITORY, "arn:aws:ecr:eu-west-2:368992683803:re
 const TASKS = "*";
 const RUNTIME_KMS_KEY = "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478";
 const ROOT_ATTESTATION_KEY = "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation";
+const PRODUCTION_ARTIFACTS_BUCKET = "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an";
+const STAGE_A_RECONCILIATION_JOURNAL = `${PRODUCTION_ARTIFACTS_BUCKET}/production-stage-a-production-artifacts-reconciliation/*`;
+const STAGE_A_TERRAFORM_STATE_ARN = `${STAGE_B_TERRAFORM_BACKEND.bucketArn}/${STAGE_A_TERRAFORM_BACKEND.key}`;
 
 const CALLS = Object.freeze([
+  ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
+  ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:GetObject", "stage-a-artifacts-journal-read", [STAGE_A_RECONCILIATION_JOURNAL]],
+  ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:PutObject", "stage-a-artifacts-journal-conditional-create", [STAGE_A_RECONCILIATION_JOURNAL]],
+  ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:GetObject", "stage-a-artifacts-recovery-root-journal-read", [STAGE_A_RECONCILIATION_JOURNAL], "ROOT_OPERATOR"],
+  ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:PutObject", "stage-a-artifacts-recovery-root-journal-conditional-create", [STAGE_A_RECONCILIATION_JOURNAL], "ROOT_OPERATOR"],
+  ["scripts/aws/production-root-attestation-signer.mjs", "kms:Sign", "stage-a-artifacts-recovery-root-sign", [ROOT_ATTESTATION_KEY], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-reconciliation-release-read-policy", [PRODUCTION_ARTIFACTS_BUCKET]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketLocation", "stage-a-artifacts-reconciliation-terraform-read-bucket-location", [STAGE_B_TERRAFORM_BACKEND.bucketArn]],
+  ["scripts/aws/production-stage-a-control-plane.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-terraform-read-state", [STAGE_A_TERRAFORM_STATE_ARN]],
+  ["scripts/aws/production-stage-a-control-plane.mjs", "s3:PutObject", "stage-a-artifacts-reconciliation-terraform-write-state", [STAGE_A_TERRAFORM_STATE_ARN]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-terraform-read-lock", [STAGE_A_TERRAFORM_LOCK_ARN]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketLifecycleConfiguration", "stage-a-artifacts-recovery-root-read-lifecycle", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-recovery-release-read-policy", [PRODUCTION_ARTIFACTS_BUCKET]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketVersioning", "stage-a-artifacts-recovery-root-read-versioning", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:PutBucketPolicy", "stage-a-artifacts-recovery-root-put-policy", [PRODUCTION_ARTIFACTS_BUCKET], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "s3:GetBucketLocation", "stage-a-artifacts-reconciliation-terraform-read-bucket-location", [STAGE_B_TERRAFORM_BACKEND.bucketArn]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-recovery-release-identify", ["*"]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-recovery-root-identify", ["*"], "ROOT_OPERATOR"],
+  ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire", [STAGE_A_TERRAFORM_LOCK_ARN]],
+  ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release", [STAGE_A_TERRAFORM_LOCK_ARN]],
   ["scripts/aws/production-release-preflight-checker-attestation.mjs", "sts:GetCallerIdentity", "administrator-release-preflight-trust-attestation-identify", ["*"], "ADMINISTRATOR"],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecr:DescribeImages", "manifest-backend-health-recovery-describe-images", [REPOSITORY]],
   ["scripts/aws/production-ecs-rollback-viability.mjs", "ecs:DescribeServiceDeployments", "manifest-backend-health-recovery-describe-service-deployments", [SERVICE, "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/*"]],
@@ -63,10 +89,43 @@ const CALLS = Object.freeze([
   ["scripts/aws/recover-production-backend-health.mjs", "kms:DescribeKey", "manifest-refresh-stage-a-storage-approval-key-describe", [RUNTIME_KMS_KEY]],
   ["scripts/aws/recover-production-backend-health.mjs", "kms:GetKeyPolicy", "manifest-refresh-stage-a-storage-approval-key-policy", [RUNTIME_KMS_KEY]],
 ].map(([sourceFile, action, capabilityId, resources, identity = "RELEASE_DEPLOYER"]) => Object.freeze({ sourceFile, action, capabilityId, identity, resources: Object.freeze(resources) })));
+const stageARootVerifierCapability = (capabilityId) => ["release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"].includes(capabilityId);
+
+const STAGE_A_RECOVERY_MODE = "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY";
+const STAGE_A_RECONCILIATION_MODE = "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION";
+const STAGE_A_CAPABILITY_MODES = Object.freeze({
+  "stage-a-artifacts-recovery-root-identify": [STAGE_A_RECOVERY_MODE],
+  "stage-a-artifacts-recovery-root-read-versioning": [STAGE_A_RECOVERY_MODE],
+  "stage-a-artifacts-recovery-root-read-lifecycle": [STAGE_A_RECOVERY_MODE],
+  "stage-a-artifacts-recovery-root-put-policy": [STAGE_A_RECOVERY_MODE],
+  "stage-a-artifacts-recovery-release-identify": [STAGE_A_RECOVERY_MODE],
+  "stage-a-artifacts-recovery-release-read-policy": [STAGE_A_RECOVERY_MODE],
+  "stage-a-artifacts-recovery-root-journal-read": [STAGE_A_RECOVERY_MODE],
+  "stage-a-artifacts-recovery-root-journal-conditional-create": [STAGE_A_RECOVERY_MODE],
+  "stage-a-artifacts-recovery-root-sign": [STAGE_A_RECOVERY_MODE],
+  "stage-a-artifacts-recovery-release-lock-acquire": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
+  "stage-a-artifacts-recovery-release-lock-release": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
+  "stage-a-artifacts-journal-read": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
+  "stage-a-artifacts-journal-conditional-create": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
+  "stage-a-artifacts-reconciliation-release-identify": [STAGE_A_RECONCILIATION_MODE],
+  "stage-a-artifacts-reconciliation-release-read-policy": [STAGE_A_RECONCILIATION_MODE],
+  "stage-a-artifacts-reconciliation-terraform-read-bucket-location": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
+  "stage-a-artifacts-reconciliation-terraform-read-state": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
+  "stage-a-artifacts-reconciliation-terraform-write-state": [STAGE_A_RECONCILIATION_MODE],
+  "stage-a-artifacts-reconciliation-terraform-read-lock": [STAGE_A_RECONCILIATION_MODE],
+  "release-root-attestation-verify": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
+  "release-root-attestation-describe-key": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
+  "release-root-attestation-read-key-policy": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
+  "release-root-attestation-read-key-tags": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
+});
+const STAGE_A_MUTATING_CAPABILITIES = new Set(["stage-a-artifacts-recovery-root-put-policy", "stage-a-artifacts-recovery-root-journal-conditional-create", "stage-a-artifacts-recovery-root-sign", "stage-a-artifacts-recovery-release-lock-acquire", "stage-a-artifacts-recovery-release-lock-release", "stage-a-artifacts-journal-conditional-create", "stage-a-artifacts-reconciliation-terraform-write-state"]);
+const stageACapabilitiesFor = (mode) => Object.entries(STAGE_A_CAPABILITY_MODES).filter(([, modes]) => modes.includes(mode)).map(([id]) => id);
 
 const MODE_CAPABILITIES = Object.freeze({
   NORMAL: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-runtime-repository-policy", "normal-activation-release-describe-candidate", "normal-activation-release-describe-service", "normal-activation-release-list-tasks", "normal-activation-release-describe-tasks", "normal-activation-release-update-service"],
-  BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-describe-repositories", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-backend-health-recovery-list-service-deployments", "manifest-backend-health-recovery-describe-service-deployments", "manifest-backend-health-recovery-describe-service-revisions", "manifest-artifact-signing-bootstrap-describe-secret", "manifest-artifact-signing-bootstrap-get-secret-value", "manifest-backend-health-recovery-runtime-get-role", "manifest-backend-health-recovery-runtime-list-inline", "manifest-backend-health-recovery-runtime-get-inline", "manifest-backend-health-recovery-runtime-list-attached", "manifest-backend-health-recovery-runtime-get-managed", "manifest-backend-health-recovery-runtime-get-managed-version", "manifest-backend-health-recovery-runtime-describe-secrets", "manifest-backend-health-recovery-runtime-get-secret-values", "manifest-backend-health-recovery-runtime-list-secret-versions", "manifest-backend-health-recovery-runtime-secret-resource-policy", "manifest-backend-health-recovery-runtime-repository-policy", "manifest-refresh-stage-a-provider-log-groups", "manifest-refresh-stage-a-storage-approval-key-describe", "manifest-refresh-stage-a-storage-approval-key-policy", "release-verify-signature", "manifest-backend-health-recovery-register-legacy-task-definition", "manifest-backend-health-recovery-update-service"],
+  BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-describe-repositories", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-backend-health-recovery-list-service-deployments", "manifest-backend-health-recovery-describe-service-deployments", "manifest-backend-health-recovery-describe-service-revisions", "manifest-artifact-signing-bootstrap-describe-secret", "manifest-artifact-signing-bootstrap-get-secret-value", "manifest-backend-health-recovery-runtime-get-role", "manifest-backend-health-recovery-runtime-list-inline", "manifest-backend-health-recovery-runtime-get-inline", "manifest-backend-health-recovery-runtime-list-attached", "manifest-backend-health-recovery-runtime-get-managed", "manifest-backend-health-recovery-runtime-get-managed-version", "manifest-backend-health-recovery-runtime-describe-secrets", "manifest-backend-health-recovery-runtime-get-secret-values", "manifest-backend-health-recovery-runtime-list-secret-versions", "manifest-backend-health-recovery-runtime-secret-resource-policy", "manifest-backend-health-recovery-runtime-repository-policy", "manifest-refresh-stage-a-provider-log-groups", "manifest-refresh-stage-a-storage-approval-key-describe", "manifest-refresh-stage-a-storage-approval-key-policy", "release-verify-signature", "manifest-backend-health-recovery-register-legacy-task-definition", "manifest-backend-health-recovery-update-service", "release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"],
+  [STAGE_A_RECOVERY_MODE]: stageACapabilitiesFor(STAGE_A_RECOVERY_MODE),
+  [STAGE_A_RECONCILIATION_MODE]: stageACapabilitiesFor(STAGE_A_RECONCILIATION_MODE),
   ROTATION_OVERLAP: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-runtime-repository-policy", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-activate-exact-ecs-service", "manifest-rollback-exact-ecs-service"],
   ROTATION_CLEANUP: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-runtime-repository-policy", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-activate-exact-ecs-service", "manifest-rollback-exact-ecs-service"],
   ROLLBACK_RECONCILIATION: ["manifest-backend-health-recovery-list-service-deployments", "manifest-backend-health-recovery-describe-service-deployments", "manifest-backend-health-recovery-describe-service-revisions", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-backend-health-recovery-describe-images"],
@@ -108,11 +167,15 @@ export function buildProductionDependencyClosure() {
   const graph = JSON.parse(read(CAPABILITY_GRAPH_PATH));
   assertStageBDeploymentCapabilityGraph(graph);
   const newAwsCalls = assertChangedAwsCallClosure(discoverAwsCliActions(), graph);
+  assertStageAProductionArtifactsCapabilityClosure(newAwsCalls, graph);
 
   const capabilityById = new Map(graph.capabilities.map((capability) => [capability.id, capability]));
   for (const [mode, ids] of Object.entries(MODE_CAPABILITIES)) for (const id of ids) {
     const capability = capabilityById.get(id);
     if (!capability || !capability.identity || !capability.action || !capability.resources?.length || !capability.policy?.sourceFile) throw new Error(`Production mode ${mode} lacks exact capability ${id}.`);
+  }
+  for (const { reachableMode } of newAwsCalls) for (const mode of reachableMode) {
+    if (!Object.hasOwn(MODE_CAPABILITIES, mode)) throw new Error(`Reachable production mode ${mode} is undeclared.`);
   }
   const workflow = read(".github/workflows/release-gate.yml");
   const workflowDispatchInputCount = [...workflow.matchAll(/^      [a-z0-9_]+:$/gm)].length;
@@ -175,6 +238,8 @@ export function buildProductionDependencyClosure() {
     runtimeModeClosure: {
       NORMAL: "Terraform-rendered final candidates and exact execution policies are jointly authenticated by Stage-B plan/closure before apply; normal activation registers nothing",
       BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: "signed candidate-derived closure is re-read before RegisterTaskDefinition and before UpdateService",
+      STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY: "the governed P0-to-P2 production-artifacts recovery uses its exact root/release journal, policy, lock, and attestation boundaries",
+      STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION: "the independently authorized exact refresh-only plan uses its exact release journal, live-policy read, Stage-A state object, and canonical outer lock boundary",
       ROTATION_OVERLAP: "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
       ROTATION_CLEANUP: "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
       ROLLBACK_RECONCILIATION: "rollback viability uses immutable image/resource identity and performs no candidate registration",
@@ -185,32 +250,57 @@ export function buildProductionDependencyClosure() {
 }
 
 export function assertChangedAwsCallClosure(scanned, graph) {
-  const callKeys = new Set(CALLS.map(({ sourceFile, action }) => `${sourceFile}\t${action}`));
-  const normalized = scanned.map(({ sourceFile, action }) => ({ sourceFile, action }));
-  const additions = normalized.filter(({ sourceFile, action }) => callKeys.has(`${sourceFile}\t${action}`));
-  if (additions.length !== CALLS.length || new Set(additions.map(({ sourceFile, action }) => `${sourceFile}\t${action}`)).size !== CALLS.length) throw new Error("Changed production AWS calls differ from the reviewed closure contract.");
-  const baseline = normalized.filter(({ sourceFile, action }) => !callKeys.has(`${sourceFile}\t${action}`)).sort((a, b) => `${a.sourceFile}:${a.action}`.localeCompare(`${b.sourceFile}:${b.action}`));
+  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"].includes(sourceFile);
+  const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER" }) => `${sourceFile}\t${action}\t${identityBound(sourceFile) ? identity : ""}`;
+  const callKeys = new Set(CALLS.map(key));
+  const normalized = scanned.map(({ sourceFile, action, identity }) => identityBound(sourceFile) ? { sourceFile, action, identity } : { sourceFile, action });
+  const additions = normalized.filter((call) => callKeys.has(key(call)));
+  if (additions.length !== CALLS.length || new Set(additions.map(key)).size !== CALLS.length) throw new Error("Changed production AWS calls differ from the reviewed closure contract.");
+  const baseline = normalized.filter((call) => !callKeys.has(key(call))).sort((a, b) => `${a.sourceFile}:${a.action}`.localeCompare(`${b.sourceFile}:${b.action}`));
   if (baseline.length !== BASE_CALL_COUNT || sha256(JSON.stringify(baseline)) !== BASE_CALL_SHA256) throw new Error("Unknown production AWS call requires capability classification.");
 
   const capabilityById = new Map(graph.capabilities.map((capability) => [capability.id, capability]));
   return CALLS.map((contract) => {
     const capability = capabilityById.get(contract.capabilityId);
-    const resourcesCompatible = contract.resources.every((resource) => capability?.resources?.includes(resource)
+    const stageAModes = STAGE_A_CAPABILITY_MODES[contract.capabilityId];
+    const resourcesCompatible = stageAModes ? same(capability?.resources, contract.resources) : contract.resources.every((resource) => capability?.resources?.includes(resource)
       || (resource === SERVICE && capability?.resources?.includes("arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/*")));
     const releaseProbe = contract.identity !== "RELEASE_DEPLOYER" || ["direct", "direct-live-read"].includes(capability?.probe) && capability?.probeIds?.length;
     if (!capability || capability.action !== contract.action || capability.identity !== contract.identity || !resourcesCompatible
-      || !capability.policy?.sourceFile || !releaseProbe) {
+      || !capability.policy?.sourceFile || !releaseProbe || stageAModes && capability.mutation !== STAGE_A_MUTATING_CAPABILITIES.has(contract.capabilityId)) {
       throw new Error(`Production AWS call lacks exact IAM/capability/preflight closure: ${contract.sourceFile} ${contract.action}.`);
     }
     if (contract.sourceFile.endsWith("deploy-ecs-service.sh")) {
       const rotation = capabilityById.get("manifest-backend-health-recovery-describe-images");
       if (!rotation || rotation.identity !== "RELEASE_DEPLOYER" || rotation.action !== contract.action || !same(rotation.resources, contract.resources) || !rotation.policy?.sourceFile) throw new Error("Rotation rollback-image read lacks exact IAM/capability closure.");
     }
-    const reachableMode = contract.sourceFile.endsWith("deploy-ecs-service.sh")
+    const reachableMode = stageAModes
+      ? [...stageAModes, ...(stageARootVerifierCapability(contract.capabilityId) ? ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"] : [])]
+      : contract.sourceFile.endsWith("deploy-ecs-service.sh")
       ? ["NORMAL", "ROTATION_OVERLAP", "ROTATION_CLEANUP"]
       : contract.sourceFile.endsWith("production-normal-backend-activation.mjs") ? ["NORMAL"] : ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"];
     return { ...contract, reachableMode, executionPrincipal: contract.identity, sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true, administratorPreflightPresent: true, runtimePreflightPresent: true, negativeTestPresent: true };
   });
+}
+
+export function assertStageAProductionArtifactsCapabilityClosure(calls, graph) {
+  const capabilityById = new Map(graph.capabilities.map((capability) => [capability.id, capability]));
+  const stageACalls = calls.filter(({ capabilityId }) => STAGE_A_CAPABILITY_MODES[capabilityId]);
+  if (new Set(stageACalls.map(({ capabilityId }) => capabilityId)).size !== Object.keys(STAGE_A_CAPABILITY_MODES).length) throw new Error("Stage A production-artifacts capability inventory is incomplete.");
+  for (const call of stageACalls) {
+    const capability = capabilityById.get(call.capabilityId); const modes = STAGE_A_CAPABILITY_MODES[call.capabilityId];
+    const expectedModes = [...modes, ...(stageARootVerifierCapability(call.capabilityId) ? ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"] : [])];
+    if (!capability || !same(call.reachableMode, expectedModes) || call.identity !== capability.identity || call.action !== capability.action
+      || !same(call.resources, capability.resources) || capability.mutation !== STAGE_A_MUTATING_CAPABILITIES.has(call.capabilityId)) throw new Error(`Stage A production-artifacts capability tuple is incomplete: ${call.capabilityId}.`);
+  }
+  for (const [id, modes] of Object.entries(STAGE_A_CAPABILITY_MODES)) {
+    if (!stageACalls.some(({ capabilityId }) => capabilityId === id) || !modes.length) throw new Error(`Stage A production-artifacts capability is unreachable: ${id}.`);
+  }
+  for (const [mode, ids] of Object.entries(MODE_CAPABILITIES)) {
+    const expected = Object.entries(STAGE_A_CAPABILITY_MODES).filter(([, modes]) => modes.includes(mode)).map(([id]) => id);
+    if (expected.length && !same(ids.filter((id) => STAGE_A_CAPABILITY_MODES[id]), expected)) throw new Error(`Stage A production-artifacts mode attribution is incomplete: ${mode}.`);
+  }
+  return true;
 }
 
 export function assertProductionDependencyClosure(report = JSON.parse(read(PRODUCTION_DEPENDENCY_CLOSURE_PATH))) {

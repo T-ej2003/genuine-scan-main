@@ -48,7 +48,20 @@ const STAGE_A_FIXED_TERRAFORM_VARIABLES = Object.freeze({
   TF_VAR_release_role_arn: `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-release-deployer`,
   TF_VAR_receipt_bucket_arn: `arn:aws:s3:::mscqr-prod-euw2-artifacts-${STAGE_B.account}-${STAGE_B.region}-an`,
 });
-const assertStageATerraformVariables = (baseEnv = process.env) => {
+const parseTerraformJsonValue = (baseEnv, key) => {
+  try { return JSON.parse(baseEnv[key]); } catch { throw new Error(`${key} must be valid JSON Terraform input`); }
+};
+const assertTerraformIdList = (baseEnv, key, prefix, { reject = () => false } = {}) => {
+  const value = parseTerraformJsonValue(baseEnv, key);
+  if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== "string" || !new RegExp(`^${prefix}-(?:[a-f0-9]{8}|[a-f0-9]{17})$`).test(item) || reject(item))) throw new Error(`${key} is outside the protected production Stage-A variable contract`);
+  return value;
+};
+const assertExactTerraformList = (baseEnv, key, expected) => {
+  const value = parseTerraformJsonValue(baseEnv, key);
+  if (JSON.stringify(value) !== JSON.stringify(expected)) throw new Error(`${key} is outside the protected production Stage-A variable contract`);
+  return value;
+};
+export const assertStageATerraformVariables = (baseEnv = process.env) => {
   const allowed = new Set(STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS);
   const unexpected = Object.keys(baseEnv).filter((key) => key.startsWith("TF_VAR_") && !allowed.has(key));
   if (unexpected.length) throw new Error(`Stage-A recovery received unreviewed Terraform variables: ${unexpected.sort().join(", ")}`);
@@ -56,6 +69,14 @@ const assertStageATerraformVariables = (baseEnv = process.env) => {
     if (typeof baseEnv[key] !== "string" || !baseEnv[key].trim()) throw new Error(`Stage-A recovery requires ${key} from the canonical production variable-input contract`);
   }
   for (const [key, expected] of Object.entries(STAGE_A_FIXED_TERRAFORM_VARIABLES)) if (baseEnv[key] !== expected) throw new Error(`${key} is outside the protected production Stage-A variable contract`);
+  if (!/^vpc-(?:[a-f0-9]{8}|[a-f0-9]{17})$/.test(baseEnv.TF_VAR_vpc_id)) throw new Error("TF_VAR_vpc_id is outside the protected production Stage-A variable contract");
+  assertTerraformIdList(baseEnv, "TF_VAR_private_subnet_ids", "subnet");
+  assertTerraformIdList(baseEnv, "TF_VAR_runtime_endpoint_security_group_ids", "sg");
+  assertTerraformIdList(baseEnv, "TF_VAR_database_runtime_security_group_ids", "sg", { reject: (id) => id === STAGE_B.databaseSecurityGroupId });
+  if (!/^pl-[a-f0-9]{8,17}$/.test(baseEnv.TF_VAR_s3_prefix_list_id)) throw new Error("TF_VAR_s3_prefix_list_id is outside the protected production Stage-A variable contract");
+  const [address, prefix] = baseEnv.TF_VAR_vpc_dns_resolver_cidr.split("/");
+  if (prefix !== "32" || address.split(".").length !== 4 || address.split(".").some((octet) => !/^\d+$/.test(octet) || Number(octet) > 255)) throw new Error("TF_VAR_vpc_dns_resolver_cidr is outside the protected production Stage-A variable contract");
+  assertExactTerraformList(baseEnv, "TF_VAR_checker_principal_arns", JSON.parse(STAGE_A_FIXED_TERRAFORM_VARIABLES.TF_VAR_checker_principal_arns));
   return true;
 };
 const option = (argv, name, required = true) => {
@@ -224,6 +245,7 @@ async function runAdoptionInternal({ argv = process.argv.slice(2), runTerraform,
   const tf = runTerraform
     ? (args) => runTerraform(args, env)
     : (args) => execFile("terraform", [`-chdir=${terraformRoot}`, ...args], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  tf(["init", "-upgrade=false", "-input=false", "-lockfile=readonly", "-no-color"]);
   if (tf(["workspace", "show"]).trim() !== "default") throw new Error("Stage-A root-drop adoption requires the canonical default Terraform workspace");
   const readStateSnapshot = async () => { const stateBytes = Buffer.from(tf(["state", "pull"])); return { state: parseAuthenticatedStateBytes(stateBytes), stateBytes }; };
   const readState = async () => (await readStateSnapshot()).state;

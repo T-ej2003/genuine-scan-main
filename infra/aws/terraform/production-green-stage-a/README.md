@@ -28,6 +28,13 @@ GitHub deploy, and application/runtime roles cannot assume the release role.
 No GitHub OIDC trust is added here; that later migration requires separate
 review. The checker must be distinct from the release deployer.
 
+The governed production-artifacts recovery uses the same Stage-A backend
+lockfile, `mscqr/production/rls-green/stage-a/terraform.tfstate.tflock`, as
+ordinary Terraform state writers. The release-deployer acquires it with a
+conditional create and releases it conditionally after the root-only policy
+transition and readback; recovery never grants the release-deployer
+`PutBucketPolicy` and never runs Terraform as root.
+
 ## Root-drop orphan recovery boundary
 
 The canonical orphan-recovery command is bound to this Terraform root, the
@@ -99,3 +106,64 @@ Stage A exclusively owns the green database and executor security groups, the ex
 The executor security group has no default egress. Stage A permits only PostgreSQL to the green database security group, HTTPS to its private ECR API, ECR Docker, CloudWatch Logs, Secrets Manager, and KMS interface endpoints and the regional S3 prefix list, and TCP/UDP DNS to the exact VPC resolver `/32`. Stage B must consume this group and must not recreate or mutate its network rules.
 
 The five interface endpoints share one Stage A-owned security group that accepts TCP/443 only from the executor security group and the exact `runtime_endpoint_security_group_ids` set. PostgreSQL ingress is governed independently by `database_runtime_security_group_ids`; endpoint membership never grants database connectivity. Runtime endpoint ingress is required for ECS execution-role secret retrieval; it adds no endpoint egress or internet access. The S3 gateway prefix list and VPC resolver remain separate exact inputs.
+
+The production-artifacts policy denies every principal `s3:PutBucketPolicy`
+and `s3:DeleteBucketPolicy` after its initial creation. The exact
+predecessor-to-current-policy transition is therefore classified as
+`RECOVERY_REQUIRED` and is not executable through ordinary release-deployer
+Terraform. After a separately governed bucket-policy recovery, the normal
+Stage-A plan must converge to `NO_OP`; root must not run Terraform and no
+release-deployer exception is implied.
+
+### Production-artifacts post-recovery state reconciliation
+
+The canonical post-recovery state path is
+`runStageAProductionArtifactsStateReconciliation()` in
+`scripts/aws/production-stage-a-control-plane.mjs`, using the existing Stage-A
+Terraform adapter. It is a separate refresh-only state boundary, not a normal
+bucket-policy apply and not a root Terraform path. Its completion evidence must
+be independently authenticated and bind the exact protected source, bucket,
+six-statement predecessor, PR435 desired policy, recovery authorization,
+Stage-A state lineage, and pre-reconciliation serial. The live policy readback
+must hash to the exact desired policy both as recovery completion evidence and
+immediately before the state transition is reserved/consumed.
+
+The adapter initializes the canonical backend once before any state read. The
+operation captures one exact `terraform plan -refresh-only`, validates that
+the only resource drift is the exact production-artifacts predecessor-to-desired
+policy transition (plus the existing forward RDS computed timestamp refresh),
+revalidates the saved plan and state CAS, acquires a reversible exclusive
+reservation, then revalidates state and the canonical live-policy hash
+immediately adjacent to applying it. A failed final CAS releases the
+reservation; an attempted apply is finalized as completed or failed and is
+never released for replay. The refresh-only apply changes
+Terraform state only; AWS resource mutation count is zero. The next fresh
+ordinary Stage-A plan
+must contain no bucket-policy drift and the bucket-policy action must be
+`NO_OP`. Missing, stale, replayed, or mismatched completion/source/lineage/
+serial evidence fails closed. A separate reconciliation authorization must also
+bind the exact saved refresh-only plan SHA and be independently authenticated
+before the one state apply is consumed. Arbitrary resource or policy drift is
+never accepted.
+
+All Stage-A refresh validators use the locked Terraform `1.15.8` and AWS
+provider `6.56.0` envelope contract. The green RDS computed-time refresh uses
+one shared closed-world validator across ordinary Stage A, production-artifacts
+reconciliation, and root-drop recovery; its provider sensitivity mask must be
+unchanged. Provider-owned fields and sensitivity metadata are validated at
+their exact supported shape, rather than ignored or accepted as arbitrary
+extra plan data.
+
+For post-apply reconciliation, the locked provider state schemas are also
+address-bound: `aws_s3_bucket_policy.production_artifacts` is schema version
+`0`, while `aws_db_instance.green` is schema version `2`. A continuation from
+a historical recovery is admitted only when this complete immutable contract
+(policy, journal, backend, provider/state schemas, principals, and signing
+identity) remains identical under the authenticated descendant source. That
+comparison also hashes an ordered Git-object manifest from both authenticated
+commits: the recovery/reconciliation production entrypoints, every transitive
+repository-local module they load, every tracked Stage-A `.tf` file, and
+`.terraform.lock.hcl`. Tests, documentation, generated reports, and unrelated
+application or Stage-B-only source are excluded, so unrelated main advancement
+remains admissible while any governed executable or Terraform byte change
+requires a new independent recovery authorization.

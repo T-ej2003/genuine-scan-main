@@ -1145,7 +1145,8 @@ export const productionDualSlotRebaselineDurableEvidenceKey = ({ rotationId, exe
   return `${PRODUCTION_ACTIVATION_LIFECYCLE.rebaselineEvidencePrefix}${rotationId}/${executionSourceSha}/${authorizationSha256}/${evidenceSha256}.json`;
 };
 
-export function resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ publisherSourceSha, evidenceSha256, authorization, recoveryEnvelope, imageAuthorization, proveDescendant, run = (command, args, options = {}) => execFileSync(command, args, { encoding: options.encoding === null ? null : "utf8", maxBuffer: options.maxBuffer }) } = {}) {
+export function resolveProductionDualSlotRebaselineDurableEvidenceArtifact({ publisherSourceSha, evidenceSha256, authorization, recoveryEnvelope, imageAuthorization, proveDescendant, run } = {}) {
+  if (typeof run !== "function") fail("Durable rebaseline evidence resolution requires an explicit credential-bound AWS runner.");
   if (!SHA40.test(publisherSourceSha || "") || !SHA256.test(evidenceSha256 || "")) fail("Durable rebaseline evidence coordinates are invalid.");
   const recovery = authorization?.kind === PARTIAL_REBASELINE_RECOVERY_AUTHORIZATION_KIND;
   const executionSourceSha = recovery ? assertAuthenticatedPartialRebaselineRecovery(recoveryEnvelope).originalSourceSha : publisherSourceSha;

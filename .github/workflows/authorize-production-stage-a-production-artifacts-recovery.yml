@@ -1,0 +1,55 @@
+name: Authorize production Stage-A production-artifacts recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected main SHA, required: true, type: string }
+      state_lineage: { description: Exact pre-recovery Stage-A state lineage, required: true, type: string }
+      state_serial: { description: Exact pre-recovery Stage-A state serial, required: true, type: string }
+      state_sha256: { description: Exact pre-recovery Stage-A raw-state SHA256, required: true, type: string }
+      verification_ref: { description: Human-controlled recovery verification reference, required: true, type: string }
+
+permissions: { actions: read, contents: read }
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: "${{ inputs.source_sha }}"
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate protected source
+        env:
+          GITHUB_TOKEN: "${{ github.token }}"
+          SOURCE_SHA: "${{ inputs.source_sha }}"
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = T-ej2003/genuine-scan-main
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Produce exact independently approved authorization
+        env:
+          GITHUB_TOKEN: "${{ github.token }}"
+          SOURCE_SHA: "${{ inputs.source_sha }}"
+          STATE_LINEAGE: "${{ inputs.state_lineage }}"
+          STATE_SERIAL: "${{ inputs.state_serial }}"
+          STATE_SHA256: "${{ inputs.state_sha256 }}"
+          VERIFICATION_REF: "${{ inputs.verification_ref }}"
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/stage-a-production-artifacts-recovery"; install -d -m 700 "$d"
+          node scripts/aws/production-github-environment-approval.mjs --output "$d/environment-approval.json" --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+          node scripts/aws/authorize-production-stage-a-production-artifacts-recovery.mjs --source-sha "$SOURCE_SHA" --state-lineage "$STATE_LINEAGE" --state-serial "$STATE_SERIAL" --state-sha256 "$STATE_SHA256" --verification-ref "$VERIFICATION_REF" --environment-approval "$d/environment-approval.json" --output "$d/authorization.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-a-production-artifacts-recovery-authorization
+          path: "${{ runner.temp }}/stage-a-production-artifacts-recovery/authorization.json"
+          if-no-files-found: error
+          retention-days: 90

@@ -5,6 +5,41 @@ Production-grade, multi-tenant QR issuance, controlled-print, verification, anom
 Zebra ZT410 raw TCP validation and DB-backed print lifecycle notes are documented in
 [`documents/ZEBRA_ZT410_DB_BACKED_PRINTING.md`](documents/ZEBRA_ZT410_DB_BACKED_PRINTING.md).
 
+## Stage-A production-artifacts reconciliation
+
+The canonical production path is the two-phase command pair
+`npm run stage-a:production-artifacts:prepare -- --production ...` followed by
+`npm run stage-a:production-artifacts:reconcile -- --production ...`. Prepare
+creates one external, private refresh-only plan and its exact evidence; the
+protected workflow
+`.github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml`
+independently authorizes those identities. Execute consumes that same plan and
+evidence, performs the state-CAS reconciliation once, and requires a fresh
+ordinary Stage-A plan to be `NO_OP`.
+
+The operator sequence is: complete the separately governed bucket-policy
+recovery; authenticate its completion; run prepare; obtain the independent
+protected-environment authorization; run execute with the exact prepared plan
+and evidence; verify state/live convergence; then run a fresh ordinary
+Stage-A plan. If protected main advances after recovery, pass the historical
+recovery source SHA as `--recovery-source-sha`; the reconciliation authorization
+then records and verifies the authenticated descendant relationship without
+replaying recovery. If the recovery policy write succeeded but completion
+publication failed before main advanced, retry recovery with the same
+authorization and `--recovery-source-sha`; the authenticated attempt and exact
+P2 policy permit completion-only resume with no second policy write. Prepare
+authenticates the invoked Terraform executable with
+`terraform version -json` and records the exact verified 1.15.8 runtime in its
+evidence; a mismatched or malformed executable fails before init/plan. Execute
+never creates a replacement plan. Execute holds the canonical Stage-A S3
+backend `.tflock` continuously from its final pre-state checks through exact
+post-state authentication and durable post-apply evidence; Terraform applies
+the exact saved plan with nested locking disabled only inside that exclusion.
+If execution ends after reservation without durable outcome evidence, the lock
+is retained for explicit operator investigation; it is never force-unlocked.
+Recovery also rejects every enabled lifecycle expiration or current-version
+transition whose filter can overlap the immutable journal namespace.
+
 
 ## 1. What This System Is
 
@@ -46,4 +81,3 @@ High-level flow:
 3. Manufacturer creates direct-print jobs and issues one-time render tokens via authenticated print agent.
 4. Customer scans signed token (`/scan?t=...`) or verifies by code (`/verify/:code`).
 5. System logs events, computes risk/SLA metrics, applies policy controls, and supports immutable audit export.
-

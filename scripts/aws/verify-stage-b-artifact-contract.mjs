@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { STAGE_B_ARTIFACT_CONTRACT_SCHEMA_VERSION, canonicalStageBArtifactContracts } from "./stage-b-artifact-contract.mjs";
+import { assertStageAProductionArtifactsReconciliationArtifactContract, STAGE_B_ARTIFACT_CONTRACT_SCHEMA_VERSION, canonicalStageBArtifactContracts } from "./stage-b-artifact-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const outputPath = path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBArtifactContracts-v1.json");
@@ -20,6 +20,7 @@ export function verifyStageBArtifactContract({ write = false } = {}) {
   }
   const parsed = JSON.parse(document);
   assert.equal(parsed.schemaVersion, STAGE_B_ARTIFACT_CONTRACT_SCHEMA_VERSION);
+  assertStageAProductionArtifactsReconciliationArtifactContract(parsed.artifacts);
   assert.equal(new Set(parsed.artifacts.map((artifact) => artifact.id)).size, parsed.artifacts.length);
   const generated = new Set(); const consumed = new Set();
   for (const artifact of parsed.artifacts) {

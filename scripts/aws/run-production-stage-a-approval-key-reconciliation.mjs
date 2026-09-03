@@ -379,6 +379,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
   ensureStageBPrivateDirectory({ directory: privateDirectory, repositoryRoot: root, create: true, label: "Stage-A approval-key reconciliation directory" });
   const executorSavedPlanPath = path.join(privateDirectory, `${authorization.authorizationSha256}.tfplan`);
   const executorPlan = materializeStageAReconciliationPlan({ savedPlanBytes, expectedSha256: authorization.savedPlanSha256, applyPlanPath: executorSavedPlanPath, repositoryRoot: root });
+  releaseRun("terraform", [`-chdir=${STAGE_A_RECONCILIATION_AUTHORIZATION.terraformRoot}`, "init", "-upgrade=false", "-input=false", "-lockfile=readonly", "-no-color"]);
   const renderedPlanBytes = Buffer.from(releaseRun("terraform", [`-chdir=${STAGE_A_RECONCILIATION_AUTHORIZATION.terraformRoot}`, "show", "-json", executorPlan.path]));
   if (crypto.createHash("sha256").update(renderedPlanBytes).digest("hex") !== authorization.renderedPlanSha256) throw new Error("Stage-A approval-key rendered plan changed after authorization.");
   assertStageAApprovalKeyReconciliationPlan(JSON.parse(renderedPlanBytes), authorization);

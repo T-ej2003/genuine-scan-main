@@ -1,0 +1,38 @@
+{
+  "terraformVersion": "1.15.8",
+  "awsProviderVersion": "6.56.0",
+  "stateSchemaVersions": {
+    "aws_s3_bucket_policy.production_artifacts": 0,
+    "aws_db_instance.green": 2
+  },
+  "productionArtifactsBucketPolicy": {
+    "keys": ["bucket", "expected_bucket_owner", "id", "policy", "region"],
+    "expectedBucketOwner": null
+  },
+  "greenRdsSensitivity": {
+    "blue_green_update": [],
+    "domain_dns_ips": [],
+    "enabled_cloudwatch_logs_exports": [],
+    "listener_endpoint": [],
+    "master_user_secret": [{}],
+    "password": true,
+    "password_wo": true,
+    "replicas": [],
+    "restore_to_point_in_time": [],
+    "s3_import": [],
+    "tags": {},
+    "tags_all": {},
+    "vpc_security_group_ids": [false]
+  },
+  "endpointSecurityGroupSensitivity": {
+    "egress": [],
+    "ingressEntry": {
+      "cidr_blocks": [],
+      "ipv6_cidr_blocks": [],
+      "prefix_list_ids": [],
+      "security_groups": [false]
+    },
+    "tags": {},
+    "tags_all": {}
+  }
+}

@@ -1,8 +1,10 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 import { assertStageAStateIdentityBinding, buildStageAStateIdentity, normalizeStageAStateForIdentity, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
-import { assertStageARdsLatestRestorableTimeRefresh, assertStageAResourceDrift, buildStageARootDropKeyPolicy } from "./production-stage-a-control-plane.mjs";
+import { assertStageARdsLatestRestorableTimeDrift, assertStageARdsLatestRestorableTimeRefresh, assertStageAResourceDrift, buildStageARootDropKeyPolicy } from "./production-stage-a-control-plane.mjs";
 import { TEMPORARY_KMS_CAPABILITY } from "./production-stage-a-temporary-kms-capability.mjs";
 
 export const ROOT_DROP_KEY_ADDRESS = "aws_kms_key.root_drop";
@@ -15,6 +17,31 @@ export const ROOT_DROP_EXPECTED_SIGNING_ALGORITHM = "RSASSA_PSS_SHA_256";
 export const ROOT_DROP_CENSUS_MAX_AGE_MS = 5 * 60 * 1000;
 export const ROOT_DROP_CENSUS_ACTOR_BINDINGS = Object.freeze({ discovery: "ADMINISTRATOR", resourceReads: "RELEASE_DEPLOYER", provenance: "ADMINISTRATOR" });
 export const STAGE_A_TERRAFORM_BACKEND = Object.freeze({ type: "s3", bucket: STAGE_B_TERRAFORM_BACKEND.bucketName, key: STAGE_A_STATE_OBJECT, region: STAGE_B.region, encrypt: true, use_lockfile: true });
+export const STAGE_A_TERRAFORM_LOCK_KEY = `${STAGE_A_TERRAFORM_BACKEND.key}.tflock`;
+export const STAGE_A_TERRAFORM_LOCK_ARN = `${STAGE_B_TERRAFORM_BACKEND.bucketArn}/${STAGE_A_TERRAFORM_LOCK_KEY}`;
+
+export function createStageATerraformBackendLock({ run, lockFilePath, operation = "Stage-A production-artifacts policy recovery" } = {}) {
+  if (typeof run !== "function" || !path.isAbsolute(lockFilePath || "")) throw new Error("Stage-A Terraform backend lock requires an explicit runner and private lock file.");
+  let acquired = false;
+  let etag;
+  return Object.freeze({
+    async acquire() {
+      if (acquired) throw new Error("Stage-A Terraform backend lock is already held by this execution.");
+      const lock = JSON.stringify({ ID: crypto.randomUUID(), Operation: operation, Info: operation, Who: "mscqr-production-release-deployer", Version: "1.15.8", Created: new Date().toISOString(), Path: `s3://${STAGE_A_TERRAFORM_BACKEND.bucket}/${STAGE_A_TERRAFORM_BACKEND.key}` });
+      fs.writeFileSync(lockFilePath, `${lock}\n`, { mode: 0o600, flag: "wx" });
+      try {
+        const result = JSON.parse(await run(["s3api", "put-object", "--bucket", STAGE_A_TERRAFORM_BACKEND.bucket, "--key", STAGE_A_TERRAFORM_LOCK_KEY, "--body", lockFilePath, "--if-none-match", "*", "--expected-bucket-owner", STAGE_B.account, "--server-side-encryption", "AES256", "--output", "json", "--no-cli-pager"]));
+        if (typeof result?.ETag !== "string" || !result.ETag) throw new Error("Stage-A Terraform backend lock create did not return its object identity.");
+        etag = result.ETag; acquired = true; return Object.freeze({ key: STAGE_A_TERRAFORM_LOCK_KEY, etag });
+      } catch (error) { fs.rmSync(lockFilePath, { force: true }); throw error; }
+    },
+    async release() {
+      if (!acquired) return false;
+      try { await run(["s3api", "delete-object", "--bucket", STAGE_A_TERRAFORM_BACKEND.bucket, "--key", STAGE_A_TERRAFORM_LOCK_KEY, "--if-match", etag, "--expected-bucket-owner", STAGE_B.account, "--output", "json", "--no-cli-pager"]); acquired = false; return true; }
+      finally { fs.rmSync(lockFilePath, { force: true }); }
+    },
+  });
+}
 export const ROOT_DROP_LEGACY_POLICY_BINDING = Object.freeze({
   sourceSha: "e75520d1656920cdee503fbb055d5a1f72b9e3cc",
   transitionId: "stage-a-root-drop-20260818224752-39a2e8e518aa",
@@ -366,7 +393,7 @@ function assertRdsLatestRestorableTimeRefresh(before, after) {
 }
 
 function assertRdsLatestRestorableTimeDrift(entry) {
-  try { return assertStageAResourceDrift({ resource_drift: [entry] }); } catch { fail("refresh-only root-drop plan contains uncontracted RDS drift"); }
+  try { return assertStageARdsLatestRestorableTimeDrift(entry); } catch { fail("refresh-only root-drop plan contains uncontracted RDS drift"); }
 }
 
 const sortedSet = (value) => Array.isArray(value) ? [...value].sort((left, right) => canonical(left) < canonical(right) ? -1 : canonical(left) > canonical(right) ? 1 : 0) : value;
@@ -427,10 +454,12 @@ function assertEndpointParentIngressRefresh(before, after, { endpointSecurityGro
 function assertEndpointParentIngressDrift(entry, options) {
   const change = entry?.change;
   const emptyObject = (value) => value === undefined || value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
+  const sensitivity = (count) => ({ egress: [], ingress: Array.from({ length: count }, () => ({ cidr_blocks: [], ipv6_cidr_blocks: [], prefix_list_ids: [], security_groups: [false] })), tags: {}, tags_all: {} });
   if (entry?.address !== ENDPOINT_PARENT_ADDRESS || entry.mode !== "managed" || entry.type !== "aws_security_group" || entry.name !== "executor_endpoints"
     || entry.provider_name !== "registry.terraform.io/hashicorp/aws" || !change || !same(change.actions, ["update"])
     || change.replace_paths !== undefined && (!Array.isArray(change.replace_paths) || change.replace_paths.length)
     || !emptyObject(change.before_unknown) || !emptyObject(change.after_unknown)) fail("refresh-only root-drop plan contains uncontracted endpoint security-group drift");
+  if (!same(change.before_sensitive, sensitivity(change.before?.ingress?.length)) || !same(change.after_sensitive, sensitivity(change.after?.ingress?.length))) fail("refresh-only root-drop plan contains uncontracted endpoint security-group sensitivity metadata");
   const { parent } = assertEndpointIngressOwnership(options.terraformState, options);
   if (!same({ ...parent.attributes, ingress: sortedSet(parent.attributes?.ingress) }, { ...change.before, ingress: sortedSet(change.before?.ingress) })) fail("endpoint parent security-group drift is not based on the authenticated Stage-A state");
   assertEndpointParentIngressRefresh(change.before, change.after, options);
@@ -461,7 +490,7 @@ export function assertRootDropRefreshOnlyPlan(plan, { keyId, stateAlreadyConverg
   const root = rootChanges[0];
   if (root.mode !== "managed" || root.type !== "aws_kms_key" || root.name !== "root_drop") fail("refresh-only root-drop plan contains an invalid root-drop resource identity");
   const change = root.change || {};
-  if (!same(change.actions, ["update"]) || change.replace_paths?.length || Object.keys(change.before_unknown || {}).length || Object.keys(change.after_unknown || {}).length) fail("refresh-only root-drop plan contains an unexpected action, replacement, or unknown value");
+  if (!same(change.actions, ["update"]) || change.replace_paths?.length || Object.keys(change.before_unknown || {}).length || Object.keys(change.after_unknown || {}).length || Object.keys(change.before_sensitive || {}).length || Object.keys(change.after_sensitive || {}).length) fail("refresh-only root-drop plan contains an unexpected action, replacement, unknown, or sensitive value");
   const before = change.before;
   const after = change.after;
   if (!before || typeof before !== "object" || Array.isArray(before) || !after || typeof after !== "object" || Array.isArray(after)) fail("refresh-only root-drop plan contains malformed before/after state");

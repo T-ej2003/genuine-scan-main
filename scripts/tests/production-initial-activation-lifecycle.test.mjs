@@ -196,6 +196,11 @@ test("source policy and bucket policy enforce only exact conditional lifecycle o
     "DenyNonConditionalRebaselineEvidenceWrites",
     "DenyOtherPrincipalsRebaselineEvidenceWrites",
     "DenyRebaselineEvidenceDeletion",
+    "AllowReleaseDeployerReadStageAProductionArtifactsReconciliation",
+    "AllowReleaseDeployerConditionalStageAProductionArtifactsReconciliationCreate",
+    "DenyNonConditionalStageAProductionArtifactsReconciliationWrites",
+    "DenyOtherPrincipalsStageAProductionArtifactsReconciliationWrites",
+    "DenyStageAProductionArtifactsReconciliationDeletion",
     "DenyProductionArtifactsBucketPolicyMutation",
   ]);
   const evidence = policy.Statement.filter(({ Sid }) => ["ReadExactRebaselineEvidence", "CreateExactRebaselineEvidenceConditionally", "DenyNonConditionalRebaselineEvidenceWrites", "DenyRebaselineEvidenceDeletion"].includes(Sid));

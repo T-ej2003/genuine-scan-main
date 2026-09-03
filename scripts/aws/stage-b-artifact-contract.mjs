@@ -345,6 +345,12 @@ export const STAGE_B_ARTIFACT_CONTRACTS = Object.freeze([
   { id: "permission-signature", kind: "file", producer: "scripts/aws/validate-production-green-stage-b-permissions.mjs:runCli", consumers: ["scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
   { id: "production-environment-approval", kind: "file", producer: "scripts/aws/production-github-environment-approval.mjs:runCli", consumers: ["scripts/aws/recover-production-backend-health.mjs", "scripts/aws/production-stage-a-approval-key-reconciliation-authorization.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
   { id: "stage-a-approval-key-reconciliation-authorization", kind: "file", producer: ".github/workflows/authorize-production-stage-a-reconciliation.yml", consumers: ["scripts/aws/production-stage-a-approval-key-reconciliation-authorization.mjs", "scripts/aws/run-production-stage-a-approval-key-reconciliation.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true, externalProducer: true },
+  { id: "stage-a-production-artifacts-recovery-authorization", kind: "file", producer: ".github/workflows/authorize-production-stage-a-production-artifacts-recovery.yml", consumers: ["scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true, externalProducer: true },
+  { id: "stage-a-production-artifacts-recovery-completion", kind: "file", producer: "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", consumers: ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true, externalProducer: true },
+  { id: "stage-a-production-artifacts-reconciliation-authorization", kind: "file", producer: ".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml", consumers: ["scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true, externalProducer: true },
+  { id: "stage-a-production-artifacts-reconciliation-refresh-only-plan", kind: "file", producer: "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs:runStageAProductionArtifactsReconciliationCli --prepare", consumers: [".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml", "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: false, overwrite: false, hashBound: true },
+  { id: "stage-a-production-artifacts-reconciliation-prepare-evidence", kind: "file", producer: "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs:runStageAProductionArtifactsReconciliationCli --prepare", consumers: [".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml", "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
+  { id: "stage-a-production-artifacts-reconciliation-journal", kind: "file", producer: "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", consumers: ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true, externalProducer: true },
   { id: "backend-recovery-candidate", kind: "file", producer: "scripts/aws/prepare-production-backend-recovery-candidate.mjs:runCli", consumers: ["scripts/aws/prepare-production-ecs-runtime-consumability.mjs", "scripts/aws/converge-production-ecs-runtime-policy.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
   { id: "ecs-runtime-dependency-inventory", kind: "file", producer: "scripts/aws/prepare-production-ecs-runtime-consumability.mjs:prepareProductionEcsRuntimeInventory", consumers: ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "scripts/aws/prepare-production-ecs-runtime-consumability.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
   { id: "ecs-runtime-policy-convergence-authorization", kind: "file", producer: "external:governed operator authorization", consumers: ["scripts/aws/converge-production-ecs-runtime-policy.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true, externalProducer: true },
@@ -362,6 +368,35 @@ export const STAGE_B_ARTIFACT_CONTRACTS = Object.freeze([
   { id: "image-evidence", kind: "file", producer: "scripts/aws/production-green-stage-b-image-evidence.mjs:runCli", consumers: ["scripts/aws/production-image-authorization.mjs", "scripts/aws/generate-production-green-stage-b-tfvars.mjs", "scripts/plan-production-green-stage-b.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
   { id: "image-evidence-signature", kind: "file", producer: "scripts/aws/production-green-stage-b-image-evidence.mjs:runCli", consumers: ["scripts/aws/production-image-authorization.mjs", "scripts/aws/generate-production-green-stage-b-tfvars.mjs", "scripts/apply-production-green-stage-b.mjs"], directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true },
 ]);
+
+const STAGE_A_RECONCILIATION_ARTIFACT_IDS = Object.freeze([
+  "stage-a-production-artifacts-recovery-authorization",
+  "stage-a-production-artifacts-recovery-completion",
+  "stage-a-production-artifacts-reconciliation-authorization",
+  "stage-a-production-artifacts-reconciliation-journal",
+  "stage-a-production-artifacts-reconciliation-refresh-only-plan",
+  "stage-a-production-artifacts-reconciliation-prepare-evidence",
+]);
+
+export function assertStageAProductionArtifactsReconciliationArtifactContract(artifacts = STAGE_B_ARTIFACT_CONTRACTS) {
+  const selected = artifacts.filter(({ id }) => id?.startsWith("stage-a-production-artifacts-"));
+  if (JSON.stringify(selected.map(({ id }) => id).sort()) !== JSON.stringify([...STAGE_A_RECONCILIATION_ARTIFACT_IDS].sort())) throw new Error("Stage A production-artifacts cross-process artifact inventory is incomplete or contains an unknown artifact.");
+  const expected = {
+    "stage-a-production-artifacts-reconciliation-refresh-only-plan": {
+      producer: "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs:runStageAProductionArtifactsReconciliationCli --prepare",
+      consumers: [".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml", "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"], atomic: false,
+    },
+    "stage-a-production-artifacts-reconciliation-prepare-evidence": {
+      producer: "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs:runStageAProductionArtifactsReconciliationCli --prepare",
+      consumers: [".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml", "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"], atomic: true,
+    },
+  };
+  for (const [id, contract] of Object.entries(expected)) {
+    const artifact = selected.find((candidate) => candidate.id === id);
+    if (!artifact || artifact.kind !== "file" || artifact.producer !== contract.producer || JSON.stringify(artifact.consumers) !== JSON.stringify(contract.consumers) || artifact.directoryMode !== "0700" || artifact.fileMode !== "0600" || artifact.symlink !== "reject" || artifact.outsideRepository !== true || artifact.atomic !== contract.atomic || artifact.overwrite !== false || artifact.hashBound !== true) throw new Error(`Stage A reconciliation artifact contract is incomplete: ${id}.`);
+  }
+  return true;
+}
 
 const atomicGroup = Object.freeze({
   "administrator-capability-report": "administrator-capability",
