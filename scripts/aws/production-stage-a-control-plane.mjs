@@ -326,9 +326,9 @@ export function assertStageAProductionArtifactsReconciliationAuthorization(autho
 function assertStageAProductionArtifactsPolicyResource(value, label, expectedPolicy) {
   let policyMatches = false;
   try { policyMatches = stageAProductionArtifactsPolicySemanticallyEqual(decodePolicyDocument(value?.policy, `${label} policy`), expectedPolicy); } catch { policyMatches = false; }
-  const historicalUnsetOwner = label === "predecessor" && value && typeof value === "object" && !Array.isArray(value) && !Object.hasOwn(value, "expected_bucket_owner");
-  const expectedKeys = historicalUnsetOwner ? STAGE_A_POLICY_RESOURCE_KEYS.filter((key) => key !== "expected_bucket_owner") : STAGE_A_POLICY_RESOURCE_KEYS;
-  if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...expectedKeys].sort()) || value.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || (!historicalUnsetOwner && value.expected_bucket_owner !== null) || value.id !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || value.region !== STAGE_B.region || !policyMatches) throw new Error(`Stage A production-artifacts ${label} is not exact.`);
+  const optionalOwnerMayBeUnset = ["predecessor", "desired", "post-apply"].includes(label) && value && typeof value === "object" && !Array.isArray(value) && !Object.hasOwn(value, "expected_bucket_owner");
+  const expectedKeys = optionalOwnerMayBeUnset ? STAGE_A_POLICY_RESOURCE_KEYS.filter((key) => key !== "expected_bucket_owner") : STAGE_A_POLICY_RESOURCE_KEYS;
+  if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...expectedKeys].sort()) || value.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || (!optionalOwnerMayBeUnset && value.expected_bucket_owner !== null) || value.id !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || value.region !== STAGE_B.region || !policyMatches) throw new Error(`Stage A production-artifacts ${label} is not exact.`);
 }
 
 export function assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { sourceSha, recoverySourceSha, recoveryCompletion, stateLineage = STAGE_A_STATE_LINEAGE, preStateSerial, preStateSha256, verifyRecoveryCompletion } = {}) {
