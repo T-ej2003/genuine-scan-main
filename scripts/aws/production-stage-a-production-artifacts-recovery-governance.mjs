@@ -99,12 +99,22 @@ export const stageAProductionArtifactsGovernedExecutableManifestSha256 = (source
   return sha256(canonicalJson({ schemaVersion, files }));
 };
 
-export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256, readGovernedExecutableManifestSha256 = stageAProductionArtifactsGovernedExecutableManifestSha256 } = {}) {
+export const STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES = Object.freeze([
+  "scripts/aws/production-stage-a-control-plane.mjs",
+  "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+]);
+
+export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256, readGovernedExecutableManifestSha256 = stageAProductionArtifactsGovernedExecutableManifestSha256, readContinuationChangedFiles } = {}) {
   if (!SHA40.test(sourceSha || "") || !SHA40.test(recoverySourceSha || "")) throw new Error("Stage A production-artifacts recovery source compatibility is invalid.");
   if (sourceSha === recoverySourceSha) return true;
   if (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: recoverySourceSha, descendantSha: sourceSha }) !== true) throw new Error("Stage A production-artifacts current source is not an authenticated descendant of the recovery source.");
   const historical = typeof readGovernedExecutableManifestSha256 === "function" && readGovernedExecutableManifestSha256(recoverySourceSha);
-  if (!SHA256.test(historical || "") || (historicalGovernedExecutableManifestSha256 !== undefined && historical !== historicalGovernedExecutableManifestSha256) || historical !== readGovernedExecutableManifestSha256(sourceSha)) throw new Error("Stage A production-artifacts descendant changed the governed executable source.");
+  if (!SHA256.test(historical || "") || (historicalGovernedExecutableManifestSha256 !== undefined && historical !== historicalGovernedExecutableManifestSha256)) throw new Error("Stage A production-artifacts descendant changed the governed executable source.");
+  const current = readGovernedExecutableManifestSha256(sourceSha);
+  if (historical === current) return true;
+  if (typeof readContinuationChangedFiles !== "function") throw new Error("Stage A production-artifacts descendant changed the governed executable source.");
+  const changed = readContinuationChangedFiles({ ancestorSha: recoverySourceSha, descendantSha: sourceSha });
+  if (!Array.isArray(changed) || changed.length === 0 || changed.some((file) => !STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES.includes(file))) throw new Error("Stage A production-artifacts descendant changed an unsafe governed executable source.");
   return true;
 }
 
