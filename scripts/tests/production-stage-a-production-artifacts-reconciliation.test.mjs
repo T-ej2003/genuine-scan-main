@@ -291,12 +291,13 @@ test("a nonzero refresh-only apply completes when durable state proves the exact
   assert.equal(result.applyProcessExitSuccess, false); assert.equal(result.applied, true); assert.equal(applies, 1); assert.equal(recorded, 1); assert.equal(finalized, "COMPLETED");
 });
 
-test("post-apply state-read failure preserves the exact completion-only retry", async () => {
+test("post-apply state-read failure preserves completion-only retry with an omitted owner", async () => {
   let state = { lineage, serial: 35, stateSha256 }; let applied = false; let losePostApplyRead = true; let applies = 0; let finalized = 0; let reservation;
+  const plan = refreshPlan(); delete plan.resource_drift[0].change.after.expected_bucket_owner;
   const adapter = {
     readStateIdentity: async () => { if (applied && losePostApplyRead) { losePostApplyRead = false; throw new Error("injected post-apply state read failure"); } return { ...state }; },
-    readStateSnapshot: async () => stateSnapshot(state),
-    createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, terraformVersion: STAGE_A_TERRAFORM_VERSION, plan: refreshPlan() }),
+    readStateSnapshot: async () => { const snapshot = stateSnapshot(state); if (state.serial === 36) delete snapshot.state.resources[0].instances[0].attributes.expected_bucket_owner; return snapshot; },
+    createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, terraformVersion: STAGE_A_TERRAFORM_VERSION, plan }),
     applySavedRefreshOnlyPlan: async () => { applies += 1; applied = true; state = { ...state, serial: 36, stateSha256: "d".repeat(64) }; },
     readProductionArtifactsPolicy: async () => desired,
   };
@@ -322,6 +323,7 @@ test("completion-only recovery authenticates the authorized plan's post-state co
   for (const candidate of [
     { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [{ ...stateSnapshot(state).state.resources[0], instances: [{ ...stateSnapshot(state).state.resources[0].instances[0], schema_version: 1 }] }] } },
     stateSnapshot(state, { Version: "2012-10-17", Statement: [] }),
+    { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [{ ...stateSnapshot(state).state.resources[0], instances: [{ ...stateSnapshot(state).state.resources[0].instances[0], attributes: { ...resource(desired), expected_bucket_owner: "368992683803" } }] }] } },
     { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [] } },
     { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [{ ...stateSnapshot(state).state.resources[0], name: "wrong" }] } },
     { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [{ ...stateSnapshot(state).state.resources[0], type: "aws_s3_bucket_policy_other" }] } },
