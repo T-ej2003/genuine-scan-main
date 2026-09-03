@@ -134,6 +134,7 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
   try {
     fs.writeFileSync(policyPath, JSON.stringify(buildStageAProductionArtifactsBucketPolicy()), { mode: 0o600, flag: "wx" });
     let after;
+    await terraformStateLock.acquire(); lockHeld = true;
     if (postWriteContinuation) {
       const finalSource = readProtectedSource({ cwd: root, requireCanonicalRepository: true, run: (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), expectedSourceSha: sourceSha }); const finalSourceSha = finalSource.toolingSha || finalSource.headSha;
       assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: finalSourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256: authorization.governedExecutableManifestSha256, readGovernedExecutableManifestSha256, ...(readProtectedSource === readStageBProtectedMainCheckout ? { readContinuationChangedFiles } : {}) });
@@ -145,9 +146,12 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
       assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha: recoverySourceSha, preState: finalState });
       after = readPolicy(releaseRun);
       if (!samePolicy(after, before) || !stageAProductionArtifactsPolicySemanticallyEqual(after, buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A recovery live policy changed before completion continuation.");
-      if (decode(journal.readRecoveryCompletion(authorization.authorizationSha256), "Stage A recovery completion")) throw new Error("Stage A recovery completion appeared before continuation write.");
+      const concurrentCompletion = decode(journal.readRecoveryCompletion(authorization.authorizationSha256), "Stage A recovery completion");
+      if (concurrentCompletion) {
+        assertStageAProductionArtifactsRecoveryCompletionEvidence(concurrentCompletion, { authorization, verify });
+        return Object.freeze({ recovered: true, resumed: true, alreadyComplete: true, classification: STAGE_A_RECOVERY_CLASSIFICATION.COMPLETED, putBucketPolicyCount: 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: concurrentCompletion.completionEvidenceSha256 });
+      }
     } else {
-      await terraformStateLock.acquire(); lockHeld = true;
       const finalState = await readStateIdentity();
       assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha: recoverySourceSha, preState: finalState });
       const finalPolicy = readPolicy(releaseRun);
