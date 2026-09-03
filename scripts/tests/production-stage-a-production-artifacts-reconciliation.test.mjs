@@ -70,14 +70,21 @@ test("prepare evidence cannot be caller-stamped without an authenticated runtime
   assert.throws(() => createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, recoveryCompletion: completion(), preState: { lineage, serial: 35, stateSha256 }, saved: { refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/plan", terraformVersion: "1.15.7" } }), /inputs are invalid/);
 });
 
-test("the production adapter binds a post-state snapshot to one raw Terraform state pull", async () => {
+test("the production adapter binds reconciliation CAS to raw backend bytes while retaining Terraform operational state", async () => {
   const directory = fs.mkdtempSync(path.join("/tmp", "stage-a-post-state-")); const planPath = path.join(directory, "plan.tfplan");
-  const raw = Buffer.from(JSON.stringify(stateSnapshot({ lineage, serial: 36, stateSha256: "ignored" }).state)); const calls = [];
-  const adapter = createTerraformStageAAdapter({ planPath, refreshOnlyPlanPath: `${planPath}.refresh-only`, run: async (args) => { calls.push(args); if (args[1] === "version") return JSON.stringify({ terraform_version: STAGE_A_TERRAFORM_VERSION }); if (args.includes("init")) return ""; if (args.includes("state")) return raw; throw new Error(`unexpected Terraform call: ${args.join(" ")}`); }, describeIngress: async () => ({ present: true }) });
+  const pulled = Buffer.from(JSON.stringify({ ...stateSnapshot({ lineage, serial: 36, stateSha256: "ignored" }).state, check_results: [{ object_kind: "b" }, { object_kind: "a" }] })); const rawBackendStateSha256 = "d".repeat(64); const calls = []; let rawReads = 0;
+  const adapter = createTerraformStageAAdapter({ planPath, refreshOnlyPlanPath: `${planPath}.refresh-only`, run: async (args) => { calls.push(args); if (args[1] === "version") return JSON.stringify({ terraform_version: STAGE_A_TERRAFORM_VERSION }); if (args.includes("init")) return ""; if (args.includes("state")) return pulled; throw new Error(`unexpected Terraform call: ${args.join(" ")}`); }, readRawBackendStateIdentity: async () => { rawReads += 1; return { lineage, serial: 36, stateSha256: rawBackendStateSha256 }; }, describeIngress: async () => ({ present: true }) });
   try {
     const snapshot = await adapter.readStateSnapshot();
-    assert.equal(snapshot.lineage, lineage); assert.equal(snapshot.serial, 36); assert.equal(snapshot.stateSha256, createHash("sha256").update(raw).digest("hex")); assert.deepEqual(snapshot.state.resources, JSON.parse(raw).resources); assert.equal(calls.filter((args) => args.includes("state")).length, 1);
+    assert.equal(snapshot.lineage, lineage); assert.equal(snapshot.serial, 36); assert.equal(snapshot.stateSha256, rawBackendStateSha256); assert.notEqual(snapshot.stateSha256, createHash("sha256").update(pulled).digest("hex")); assert.deepEqual(snapshot.state.resources, JSON.parse(pulled).resources); assert.equal(calls.filter((args) => args.includes("state")).length, 1); assert.equal(rawReads, 1);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("the production adapter rejects a raw backend identity from another state even when Terraform pull succeeds", async () => {
+  const directory = fs.mkdtempSync(path.join("/tmp", "stage-a-raw-cas-mismatch-")); const planPath = path.join(directory, "plan.tfplan");
+  const pulled = JSON.stringify(stateSnapshot({ lineage, serial: 35, stateSha256: "ignored" }).state);
+  const adapter = createTerraformStageAAdapter({ planPath, refreshOnlyPlanPath: `${planPath}.refresh-only`, run: async (args) => args[1] === "version" ? JSON.stringify({ terraform_version: STAGE_A_TERRAFORM_VERSION }) : args.includes("state") ? pulled : "", readRawBackendStateIdentity: async () => ({ lineage, serial: 36, stateSha256: "d".repeat(64) }), describeIngress: async () => ({ present: true }) });
+  try { await assert.rejects(() => adapter.readStateIdentity(), /raw backend state identity/); } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("exact recovery drift is accepted only with independently authenticated completion", () => {

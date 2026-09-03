@@ -769,8 +769,9 @@ export async function runStageAControlPlane({ adapter, endpointSecurityGroupId, 
   return { valid: true, ...validation, appliedExactSavedPlan: !validation.alreadyConverged, postconditionVerified: true, evidenceRef: saved.evidenceRef, evidenceSha256: saved.evidenceSha256, mutationCount: validation.changes };
 }
 
-export function createTerraformStageAAdapter({ terraform = "terraform", root = "infra/aws/terraform/production-green-stage-a", backendArgs = [], planPath, refreshOnlyPlanPath = `${planPath || ""}.refresh-only.tfplan`, stageAPlanSha256, run, describeIngress, readProductionArtifactsPolicy, sourceSha, region = "eu-west-2" } = {}) {
+export function createTerraformStageAAdapter({ terraform = "terraform", root = "infra/aws/terraform/production-green-stage-a", backendArgs = [], planPath, refreshOnlyPlanPath = `${planPath || ""}.refresh-only.tfplan`, stageAPlanSha256, run, describeIngress, readProductionArtifactsPolicy, readRawBackendStateIdentity, sourceSha, region = "eu-west-2" } = {}) {
   if (typeof run !== "function" || typeof describeIngress !== "function" || !path.isAbsolute(planPath || "")) throw new Error("Stage A Terraform adapter is incomplete.");
+  if (readRawBackendStateIdentity !== undefined && typeof readRawBackendStateIdentity !== "function") throw new Error("Stage A raw backend state identity reader is invalid.");
   if (sourceSha && !/^[a-f0-9]{40}$/.test(sourceSha)) throw new Error("Stage A source SHA is invalid.");
   if (!/^[a-z]{2}-[a-z]+-[0-9]$/.test(region)) throw new Error("Stage A region is invalid.");
   if (!path.isAbsolute(refreshOnlyPlanPath) || path.resolve(refreshOnlyPlanPath) === path.resolve(planPath)) throw new Error("Stage A refresh-only plan path is incomplete or collides with the deployable plan.");
@@ -783,7 +784,11 @@ export function createTerraformStageAAdapter({ terraform = "terraform", root = "
     await ensureBackendInitialized();
     const bytes = Buffer.from(await run([terraform, `-chdir=${root}`, "state", "pull"]));
     const state = parseAuthenticatedStateBytes(bytes);
-    return { state, lineage: state.lineage, serial: state.serial, stateSha256: createHash("sha256").update(bytes).digest("hex") };
+    const terraformStateIdentity = { lineage: state.lineage, serial: state.serial, stateSha256: createHash("sha256").update(bytes).digest("hex") };
+    if (!readRawBackendStateIdentity) return { state, ...terraformStateIdentity };
+    const rawBackendStateIdentity = await readRawBackendStateIdentity();
+    if (!rawBackendStateIdentity || rawBackendStateIdentity.lineage !== state.lineage || rawBackendStateIdentity.serial !== state.serial || !SHA256.test(rawBackendStateIdentity.stateSha256 || "")) throw new Error("Stage A raw backend state identity does not match Terraform operational state.");
+    return { state, ...rawBackendStateIdentity };
   };
   const ensureTerraformRuntimeVersion = () => terraformVersionVerification ||= Promise.resolve(run([terraform, "version", "-json"])).then((output) => {
     let parsed; try { parsed = JSON.parse(output); } catch { throw new Error("Stage A Terraform runtime version output is malformed."); }

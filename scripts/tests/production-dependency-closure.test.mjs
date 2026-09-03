@@ -19,6 +19,7 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-root-attestation-signer.mjs", "kms:Sign", "stage-a-artifacts-recovery-root-sign"],
     ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-reconciliation-release-read-policy"],
     ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify"],
+    ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-release-read-raw-state"],
     ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketLocation", "stage-a-artifacts-reconciliation-terraform-read-bucket-location"],
     ["scripts/aws/production-stage-a-control-plane.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-terraform-read-state"],
     ["scripts/aws/production-stage-a-control-plane.mjs", "s3:PutObject", "stage-a-artifacts-reconciliation-terraform-write-state"],
@@ -55,6 +56,7 @@ test("complete production dependency closure is exact across modes and failure p
   const stageAStateReads = graph().capabilities.filter(({ action, resources }) => action === "s3:GetObject" && resources.includes("arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"));
   assert.deepEqual(stageAStateReads.map(({ id, phase }) => [id, phase]), [
     ["manifest-collect-stage-a-prerequisite-state", "release-direct-read-preflight"],
+    ["stage-a-artifacts-reconciliation-release-read-raw-state", "stage-a-production-artifacts-state-reconciliation"],
     ["stage-a-artifacts-reconciliation-terraform-read-state", "stage-a-production-artifacts-state-reconciliation"],
     ["stage-a-artifacts-recovery-release-read-raw-state", "stage-a-production-artifacts-policy-recovery"],
   ]);

@@ -159,6 +159,26 @@
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "action": "s3:GetObject",
+      "capabilityId": "stage-a-artifacts-reconciliation-release-read-raw-state",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ],
+      "sourceFunction": "stage-a-artifacts-reconciliation-release-read-raw-state",
+      "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
       "action": "s3:GetBucketLocation",
       "capabilityId": "stage-a-artifacts-reconciliation-terraform-read-bucket-location",
       "identity": "RELEASE_DEPLOYER",
@@ -281,6 +301,7 @@
       "resources": [
         "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
       ],
+      "sourceFunction": "stage-a-artifacts-recovery-release-read-raw-state",
       "reachableMode": [
         "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
       ],
