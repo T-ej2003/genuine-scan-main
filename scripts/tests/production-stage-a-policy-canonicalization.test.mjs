@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
@@ -73,9 +74,12 @@ test("historical recovery continuation accepts only the bounded canonicalization
     "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
   ];
   assert.deepEqual(STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES, exactRepairDelta);
+  const protectedSource = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  assert.doesNotThrow(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: protectedSource, recoverySourceSha: "d4d8ef5cf23bfff6be425d957bf7fb4dc74b2a39", proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "d4d8ef5cf23bfff6be425d957bf7fb4dc74b2a39" && descendantSha === protectedSource }));
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ ...args, readContinuationChangedFiles: () => exactRepairDelta }));
   assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ ...args, readContinuationChangedFiles: () => exactRepairDelta.filter((file) => !file.endsWith("recovery-governance.mjs")) }), /unsafe governed/);
   for (const file of [
+    "scripts/aws/authorize-production-stage-a-production-artifacts-recovery.mjs",
     "scripts/aws/run-production-green-stage-b-preflight.mjs",
     "scripts/aws/production-dual-slot-rebaseline-contract.mjs",
     "infra/aws/terraform/production-green-stage-a/main.tf",

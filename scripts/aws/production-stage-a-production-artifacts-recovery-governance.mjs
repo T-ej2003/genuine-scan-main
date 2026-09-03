@@ -105,7 +105,16 @@ export const STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES = Object.freeze([
   "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
 ]);
 
-export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256, readGovernedExecutableManifestSha256 = stageAProductionArtifactsGovernedExecutableManifestSha256, readContinuationChangedFiles } = {}) {
+export const readStageAProductionArtifactsContinuationChangedFiles = ({ ancestorSha, descendantSha } = {}) => {
+  try {
+    const git = (args) => execFileSync("git", args, { cwd: repositoryRoot, encoding: "buffer", stdio: ["ignore", "pipe", "pipe"] });
+    const files = (sourceSha) => new Map(stageAProductionArtifactsGovernedExecutableManifest(sourceSha, { git }).files.map(({ path: file, sha256: digest }) => [file, digest]));
+    const ancestor = files(ancestorSha); const descendant = files(descendantSha);
+    return [...new Set([...ancestor.keys(), ...descendant.keys()])].filter((file) => ancestor.get(file) !== descendant.get(file)).sort();
+  } catch { return null; }
+};
+
+export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256, readGovernedExecutableManifestSha256 = stageAProductionArtifactsGovernedExecutableManifestSha256, readContinuationChangedFiles = readStageAProductionArtifactsContinuationChangedFiles } = {}) {
   if (!SHA40.test(sourceSha || "") || !SHA40.test(recoverySourceSha || "")) throw new Error("Stage A production-artifacts recovery source compatibility is invalid.");
   if (sourceSha === recoverySourceSha) return true;
   if (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: recoverySourceSha, descendantSha: sourceSha }) !== true) throw new Error("Stage A production-artifacts current source is not an authenticated descendant of the recovery source.");
@@ -115,7 +124,7 @@ export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sou
   if (historical === current) return true;
   if (typeof readContinuationChangedFiles !== "function") throw new Error("Stage A production-artifacts descendant changed the governed executable source.");
   const changed = readContinuationChangedFiles({ ancestorSha: recoverySourceSha, descendantSha: sourceSha });
-  if (!Array.isArray(changed) || JSON.stringify([...changed].sort()) !== JSON.stringify(STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES)) throw new Error("Stage A production-artifacts descendant changed an unsafe governed executable source.");
+  if (!Array.isArray(changed) || JSON.stringify([...changed].sort()) !== JSON.stringify(STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES)) throw new Error("Stage A production-artifacts descendant changed the governed executable source with an unsafe governed delta.");
   return true;
 }
 
