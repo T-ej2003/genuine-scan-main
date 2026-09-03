@@ -227,6 +227,21 @@ test("post-write continuation locks only after authenticated P2 evidence", async
   const input = { sourceSha, workflowRunId: "220", workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => state, terraformStateLock: lock, readProtectedSource: () => { sourceReads += 1; return source(); }, resolveAuthorization: () => ({ authorization }), recoveryJournal, journal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true };
   const result = await runStageAProductionArtifactsRecovery(input);
   assert.equal(result.classification, "POST_WRITE_COMPLETION_PENDING"); assert.equal(sourceReads, 2); assert.equal(lockAcquires, 1); assert.equal(lockReleases, 1); assert.equal(policyWrites, 0); assert.equal(completionWrites, 1);
+  const validCompletion = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicy(), sign: () => Buffer.from("signature").toString("base64") });
+  const denied = () => { const error = new Error("AccessDenied"); error.stderr = "403"; throw error; };
+  for (const [label, rootCompletion, expected] of [
+    ["authenticated absent completion", null, { locks: 1, writes: 1 }],
+    ["existing completion via root fallback", { bytes: Buffer.from(JSON.stringify(validCompletion)) }, { locks: 0, writes: 0, complete: true }],
+    ["malformed root fallback completion", { bytes: Buffer.from("{}") }, { locks: 0, writes: 0, reject: /completion/i }],
+    ["unverifiable release access denial", new Error("AccessDenied"), { locks: 0, writes: 0, reject: /AccessDenied/i }],
+  ]) {
+    lockAcquires = 0; lockReleases = 0; completionWrites = 0; let releaseReads = 0; let rootReads = 0;
+    const fallbackJournal = { ...journal, readRecoveryCompletion: (sha) => { assert.equal(sha, authorization.authorizationSha256); releaseReads += 1; return denied(); } };
+    const fallbackRecoveryJournal = { ...recoveryJournal, readRecoveryCompletion: (sha) => { assert.equal(sha, authorization.authorizationSha256); rootReads += 1; if (rootCompletion instanceof Error) throw rootCompletion; return rootCompletion; } };
+    if (expected.reject) await assert.rejects(() => runStageAProductionArtifactsRecovery({ ...input, journal: fallbackJournal, recoveryJournal: fallbackRecoveryJournal }), expected.reject, label);
+    else { const fallback = await runStageAProductionArtifactsRecovery({ ...input, journal: fallbackJournal, recoveryJournal: fallbackRecoveryJournal }); assert.equal(fallback.alreadyComplete === true, expected.complete === true, label); }
+    assert.equal(releaseReads, expected.complete ? 1 : expected.reject ? 1 : 2, label); assert.equal(rootReads, releaseReads, label); assert.equal(lockAcquires, expected.locks, label); assert.equal(lockReleases, expected.locks, label); assert.equal(completionWrites, expected.writes, label); assert.equal(policyWrites, 0, label);
+  }
   for (const [label, override, expectedLocks] of [
     ["missing attempt", { recoveryJournal: { ...recoveryJournal, readRecoveryAttempt: () => null } }, 0],
     ["invalid attempt", { recoveryJournal: { ...recoveryJournal, readRecoveryAttempt: () => ({ bytes: Buffer.from("{}") }) } }, 0],

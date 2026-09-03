@@ -106,12 +106,12 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
   const before = readPolicy(releaseRun); const predecessorLive = samePolicy(before, buildStageAProductionArtifactsBucketPolicyPredecessor()); const desiredLive = samePolicy(before, buildStageAProductionArtifactsBucketPolicy());
   if (!predecessorLive && !desiredLive) throw new Error("Stage A production-artifacts live policy is neither the exact predecessor nor desired policy.");
   const decode = (record, label) => { if (!record) return null; try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(record.bytes)); } catch { throw new Error(`${label} is malformed.`); } };
+  const readCompletion = (reader) => { try { return reader.readRecoveryCompletion(authorization.authorizationSha256); } catch (error) {
+    if (!desiredLive || reader !== journal || !/AccessDenied|403/i.test(`${error.message || ""}\n${error.stderr || ""}`)) throw error;
+    return recoveryJournal.readRecoveryCompletion(authorization.authorizationSha256);
+  } };
   const existingCompletionReader = predecessorLive ? recoveryJournal : journal;
-  let existingCompletionRecord;
-  try { existingCompletionRecord = existingCompletionReader.readRecoveryCompletion(authorization.authorizationSha256); } catch (error) {
-    if (!desiredLive || existingCompletionReader !== journal || !/AccessDenied|403/i.test(`${error.message || ""}\n${error.stderr || ""}`)) throw error;
-    existingCompletionRecord = recoveryJournal.readRecoveryCompletion(authorization.authorizationSha256);
-  }
+  const existingCompletionRecord = readCompletion(existingCompletionReader);
   const existingCompletion = decode(existingCompletionRecord, "Stage A recovery completion");
   if (existingCompletion) {
     assertStageAProductionArtifactsRecoveryCompletionEvidence(existingCompletion, { authorization, verify });
@@ -146,7 +146,7 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
       assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha: recoverySourceSha, preState: finalState });
       after = readPolicy(releaseRun);
       if (!samePolicy(after, before) || !stageAProductionArtifactsPolicySemanticallyEqual(after, buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A recovery live policy changed before completion continuation.");
-      const concurrentCompletion = decode(journal.readRecoveryCompletion(authorization.authorizationSha256), "Stage A recovery completion");
+      const concurrentCompletion = decode(readCompletion(journal), "Stage A recovery completion");
       if (concurrentCompletion) {
         assertStageAProductionArtifactsRecoveryCompletionEvidence(concurrentCompletion, { authorization, verify });
         return Object.freeze({ recovered: true, resumed: true, alreadyComplete: true, classification: STAGE_A_RECOVERY_CLASSIFICATION.COMPLETED, putBucketPolicyCount: 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: concurrentCompletion.completionEvidenceSha256 });
@@ -162,7 +162,7 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
     const completion = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: after, sign }); const bytes = Buffer.from(`${JSON.stringify(completion)}\n`);
     let persisted;
     try { persisted = journal.writeRecoveryCompletion({ recoveryAuthorizationSha256: authorization.authorizationSha256, bytes }); }
-    catch (error) { const existing = decode(journal.readRecoveryCompletion(authorization.authorizationSha256), "Stage A recovery completion"); if (!existing) throw error; assertStageAProductionArtifactsRecoveryCompletionEvidence(existing, { authorization, verify }); return Object.freeze({ recovered: true, resumed: true, alreadyComplete: true, classification: STAGE_A_RECOVERY_CLASSIFICATION.COMPLETED, putBucketPolicyCount: predecessorLive ? 1 : 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: existing.completionEvidenceSha256 }); }
+    catch (error) { const existing = decode(readCompletion(journal), "Stage A recovery completion"); if (!existing) throw error; assertStageAProductionArtifactsRecoveryCompletionEvidence(existing, { authorization, verify }); return Object.freeze({ recovered: true, resumed: true, alreadyComplete: true, classification: STAGE_A_RECOVERY_CLASSIFICATION.COMPLETED, putBucketPolicyCount: predecessorLive ? 1 : 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: existing.completionEvidenceSha256 }); }
     return Object.freeze({ recovered: true, resumed: desiredLive, classification, putBucketPolicyCount: predecessorLive ? 1 : 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: completion.completionEvidenceSha256, completionObjectSha256: persisted.sha256, completionKey: persisted.key });
   } finally { try { if (lockHeld) await terraformStateLock.release(); } finally { fs.rmSync(directory, { recursive: true, force: true }); } }
 }
