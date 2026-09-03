@@ -9,7 +9,7 @@ import { generateStageBTerraformBackendConfig } from "../aws/generate-production
 import { ensureStageBTerraformBackendMetadataPrivate } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { STAGE_B_EXPECTED_CHECK_ADDRESSES, STAGE_B_EXPECTED_RESOURCE_PRECONDITION_ADDRESSES, STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES } from "../aws/stage-b-refresh-contract.mjs";
 import { runRefreshOnly } from "../refresh-production-green-stage-b.mjs";
-import { STAGE_B_ARTIFACT_CONTRACTS, STAGE_B_PRIVATE_FILE_MODE, STAGE_B_PRIVATE_DIRECTORY_MODE, canonicalStageBArtifactContracts, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, writeStageBPrivateFilesAtomic } from "../aws/stage-b-artifact-contract.mjs";
+import { assertStageAProductionArtifactsReconciliationArtifactContract, STAGE_B_ARTIFACT_CONTRACTS, STAGE_B_PRIVATE_FILE_MODE, STAGE_B_PRIVATE_DIRECTORY_MODE, canonicalStageBArtifactContracts, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, writeStageBPrivateFilesAtomic } from "../aws/stage-b-artifact-contract.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 
@@ -104,6 +104,23 @@ test("Stage-A production-artifacts recovery artifacts have closed producer-consu
     assert.equal(artifact?.externalProducer, true);
     assert.deepEqual(canonicalStageBArtifactContracts().artifacts.find((candidate) => candidate.id === id)?.consumers, consumers);
   }
+});
+
+test("Stage-A reconciliation approval artifacts are complete and privacy-bound", () => {
+  assert.equal(assertStageAProductionArtifactsReconciliationArtifactContract(), true);
+  const expectedConsumers = [".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml", "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"];
+  for (const [id, atomic] of [["stage-a-production-artifacts-reconciliation-refresh-only-plan", false], ["stage-a-production-artifacts-reconciliation-prepare-evidence", true]]) {
+    const artifact = STAGE_B_ARTIFACT_CONTRACTS.find((candidate) => candidate.id === id);
+    assert.deepEqual(artifact?.consumers, expectedConsumers); assert.equal(artifact?.producer, "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs:runStageAProductionArtifactsReconciliationCli --prepare"); assert.equal(artifact?.atomic, atomic); assert.equal(artifact?.directoryMode, "0700"); assert.equal(artifact?.fileMode, "0600"); assert.equal(artifact?.symlink, "reject"); assert.equal(artifact?.outsideRepository, true); assert.equal(artifact?.overwrite, false); assert.equal(artifact?.hashBound, true);
+  }
+  for (const mutation of [
+    (artifacts) => artifacts.filter(({ id }) => id !== "stage-a-production-artifacts-reconciliation-refresh-only-plan"),
+    (artifacts) => artifacts.map((artifact) => artifact.id === "stage-a-production-artifacts-reconciliation-prepare-evidence" ? { ...artifact, directoryMode: "0755" } : artifact),
+    (artifacts) => artifacts.map((artifact) => artifact.id === "stage-a-production-artifacts-reconciliation-refresh-only-plan" ? { ...artifact, fileMode: "0644" } : artifact),
+    (artifacts) => artifacts.map((artifact) => artifact.id === "stage-a-production-artifacts-reconciliation-prepare-evidence" ? { ...artifact, symlink: "allow" } : artifact),
+    (artifacts) => artifacts.map((artifact) => artifact.id === "stage-a-production-artifacts-reconciliation-refresh-only-plan" ? { ...artifact, outsideRepository: false } : artifact),
+    (artifacts) => artifacts.map((artifact) => artifact.id === "stage-a-production-artifacts-reconciliation-prepare-evidence" ? { ...artifact, hashBound: false } : artifact),
+  ]) assert.throws(() => assertStageAProductionArtifactsReconciliationArtifactContract(mutation(STAGE_B_ARTIFACT_CONTRACTS.map((artifact) => ({ ...artifact, consumers: [...artifact.consumers] })))), /artifact contract is incomplete|inventory is incomplete/);
 });
 
 test("reference-audit contract registers every production consumer", () => {

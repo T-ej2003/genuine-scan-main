@@ -990,6 +990,46 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "stage-a-production-artifacts-reconciliation-refresh-only-plan",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs:runStageAProductionArtifactsReconciliationCli --prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml",
+        "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs",
+        "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "stage-a-production-artifacts-reconciliation-prepare-evidence",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs:runStageAProductionArtifactsReconciliationCli --prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml",
+        "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs",
+        "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "stage-a-production-artifacts-reconciliation-prepare-evidence",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "stage-a-production-artifacts-reconciliation-journal",
       "kind": "file",
       "producer": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",

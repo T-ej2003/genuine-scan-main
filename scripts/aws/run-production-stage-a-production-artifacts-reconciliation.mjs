@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
 import { assertStageAProductionArtifactsReconciliationPrepareEvidence, buildStageAProductionArtifactsBucketPolicy, createStageAProductionArtifactsReconciliationAuthorization as createCoreAuthorization, createTerraformStageAAdapter, prepareStageAProductionArtifactsStateReconciliation, runStageAProductionArtifactsStateReconciliation, stageAProductionArtifactsPolicySha256 } from "./production-stage-a-control-plane.mjs";
 import { createStageATerraformBackendLock, STAGE_A_TERRAFORM_BACKEND } from "./production-stage-a-root-drop-orphan-recovery.mjs";
@@ -41,6 +42,16 @@ const protectedSource = (readProtectedSource, sourceSha) => {
   if (head !== sourceSha) throw new Error("Stage A production-artifacts reconciliation source SHA is not authenticated.");
   return { fresh, head };
 };
+export function assertStageAProductionArtifactsReconciliationPrivateArtifactPath(filePath, { terraformDataDir, allowExisting = true, label = "Stage A reconciliation artifact" } = {}) {
+  const directory = ensureStageBPrivateDirectory({ directory: terraformDataDir, repositoryRoot: root, label: "Stage A reconciliation private Terraform directory" });
+  if (!path.isAbsolute(filePath || "")) throw new Error(`${label} must be an absolute path.`);
+  const resolved = path.resolve(filePath); const relative = path.relative(directory, resolved);
+  if (!relative || relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative) || relative.includes(path.sep)) throw new Error(`${label} must be a direct child of the private Terraform directory.`);
+  const stat = fs.lstatSync(resolved, { throwIfNoEntry: false });
+  if (stat?.isSymbolicLink()) throw new Error(`${label} must not be a symlink.`);
+  if (!allowExisting && stat) throw new Error(`${label} must not already exist.`);
+  return resolved;
+}
 const authenticateRecovery = async ({ sourceSha, recoverySourceSha = sourceSha, releaseRun, adapter, journal, verifySignature, recoveryWorkflowRunId, recoveryWorkflowRunAttempt, resolveAuthorization, readProtectedSource, proveDescendant, readGovernedExecutableManifestSha256, allowAdvancedState = false }) => {
   const source = protectedSource(readProtectedSource, sourceSha);
   assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: source.head, recoverySourceSha, proveDescendant, readGovernedExecutableManifestSha256 });
@@ -72,13 +83,13 @@ export async function runStageAProductionArtifactsReconciliation({ sourceSha, re
   if (typeof releaseRun !== "function" || !adapter || !terraformStateLock || typeof terraformStateLock.acquire !== "function" || typeof terraformStateLock.release !== "function" || typeof resolveAuthorization !== "function" || !journal || typeof journal.readRecoveryCompletion !== "function" || typeof verifySignature !== "function") throw new Error("Stage A production-artifacts reconciliation composition is incomplete.");
   const context = await authenticateRecovery({ sourceSha, recoverySourceSha, releaseRun, adapter, journal, verifySignature, recoveryWorkflowRunId, recoveryWorkflowRunAttempt, resolveAuthorization, readProtectedSource, proveDescendant, readGovernedExecutableManifestSha256, allowAdvancedState: true });
   if (!preparedEvidence && !prepareEvidencePath) throw new Error("Stage A reconciliation execution requires the prepared evidence path.");
-  const evidence = preparedEvidence || JSON.parse(fs.readFileSync(path.resolve(prepareEvidencePath), "utf8"));
+  const evidence = preparedEvidence || JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(readStageBPrivateFileBytes({ filePath: prepareEvidencePath, repositoryRoot: root, label: "Stage A reconciliation prepare evidence" }).bytes));
   let saved = suppliedSaved;
   if (!saved) {
     const planPath = path.resolve(savedPlanPath || "");
-    if (!path.isAbsolute(savedPlanPath || "") || !fs.existsSync(planPath) || planPath.startsWith(`${root}${path.sep}`)) throw new Error("Stage A reconciliation execution requires an external prepared plan path.");
+    if (!path.isAbsolute(savedPlanPath || "") || planPath.startsWith(`${root}${path.sep}`)) throw new Error("Stage A reconciliation execution requires an external prepared plan path.");
     if (typeof adapter.readSavedRefreshOnlyPlan !== "function") throw new Error("Stage A reconciliation adapter cannot inspect the prepared saved plan.");
-    const savedBytes = fs.readFileSync(planPath);
+    const savedBytes = readStageBPrivateFileBytes({ filePath: planPath, repositoryRoot: root, label: "Stage A refresh-only plan" }).bytes;
     saved = { planPath, plan: await adapter.readSavedRefreshOnlyPlan(planPath), sourceSha: context.head, refreshOnly: true, preState: context.preState, savedPlanSha256: createHash("sha256").update(savedBytes).digest("hex"), savedPlanByteLength: savedBytes.length };
   }
   assertStageAProductionArtifactsReconciliationPrepareEvidence(evidence, { sourceSha: context.head, recoveryCompletion: context.completionEvidence.completion, preState: context.preState, savedPlanSha256: saved.savedPlanSha256, savedPlanByteLength: saved.savedPlanByteLength });
@@ -133,10 +144,13 @@ export async function runStageAProductionArtifactsReconciliationCli(argv = proce
   if (!argv.includes("--production")) throw new Error("Stage A production-artifacts reconciliation requires --production.");
   const preparing = argv.includes("--prepare"); const executing = argv.includes("--execute");
   if (preparing === executing) throw new Error("Stage A reconciliation requires exactly one of --prepare or --execute.");
-  const sourceSha = required(argv, "--source-sha"); const recoverySourceSha = argv.includes("--recovery-source-sha") ? required(argv, "--recovery-source-sha") : sourceSha; const terraformDataDir = path.resolve(required(argv, "--terraform-data-dir")); const refreshPlanPath = path.resolve(required(argv, "--refresh-only-plan"));
-  const prepareEvidencePath = path.resolve(required(argv, "--prepare-evidence"));
-  if (!path.isAbsolute(terraformDataDir) || terraformDataDir.startsWith(`${root}${path.sep}`) || !path.isAbsolute(refreshPlanPath) || refreshPlanPath.startsWith(`${root}${path.sep}`) || !path.isAbsolute(prepareEvidencePath) || prepareEvidencePath.startsWith(`${root}${path.sep}`)) throw new Error("Stage A reconciliation private Terraform paths/evidence must be external and absolute.");
-  fs.mkdirSync(terraformDataDir, { recursive: true, mode: 0o700 }); fs.chmodSync(terraformDataDir, 0o700);
+  const sourceSha = required(argv, "--source-sha"); const recoverySourceSha = argv.includes("--recovery-source-sha") ? required(argv, "--recovery-source-sha") : sourceSha; const terraformDataDirInput = required(argv, "--terraform-data-dir"); const refreshPlanPathInput = required(argv, "--refresh-only-plan"); const prepareEvidencePathInput = required(argv, "--prepare-evidence");
+  if (!path.isAbsolute(terraformDataDirInput)) throw new Error("Stage A reconciliation private Terraform directory must be absolute.");
+  const terraformDataDir = ensureStageBPrivateDirectory({ directory: terraformDataDirInput, repositoryRoot: root, create: true, label: "Stage A reconciliation private Terraform directory" });
+  if (!path.isAbsolute(refreshPlanPathInput) || !path.isAbsolute(prepareEvidencePathInput)) throw new Error("Stage A reconciliation artifact paths must be absolute.");
+  const refreshPlanPath = assertStageAProductionArtifactsReconciliationPrivateArtifactPath(refreshPlanPathInput, { terraformDataDir, allowExisting: !preparing, label: "Stage A refresh-only plan" });
+  const prepareEvidencePath = assertStageAProductionArtifactsReconciliationPrivateArtifactPath(prepareEvidencePathInput, { terraformDataDir, allowExisting: !preparing, label: "Stage A reconciliation prepare evidence" });
+  if (refreshPlanPath === prepareEvidencePath) throw new Error("Stage A reconciliation plan and prepare evidence must use distinct paths.");
   const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: "eu-west-2" });
   const terraformInputEnvironment = deps.terraformInputEnvironment || process.env;
   assertStageATerraformVariables(terraformInputEnvironment);
@@ -149,7 +163,9 @@ export async function runStageAProductionArtifactsReconciliationCli(argv = proce
     ? await prepareStageAProductionArtifactsReconciliation(common)
     : await runStageAProductionArtifactsReconciliation({ ...common, reconciliationWorkflowRunId: required(argv, "--reconciliation-authorization-workflow-run-id"), reconciliationWorkflowRunAttempt: required(argv, "--reconciliation-authorization-workflow-run-attempt"), prepareEvidencePath, savedPlanPath: refreshPlanPath });
   if (preparing) {
-    fs.writeFileSync(prepareEvidencePath, `${JSON.stringify(result.prepared.prepareEvidence, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    const capturedPlan = readStageBPrivateFileBytes({ filePath: result.prepared.saved.planPath, repositoryRoot: root, label: "Stage A refresh-only plan" });
+    if (capturedPlan.path !== refreshPlanPath || capturedPlan.sha256 !== result.prepared.saved.savedPlanSha256 || capturedPlan.bytes.length !== result.prepared.saved.savedPlanByteLength) throw new Error("Stage A refresh-only plan privacy or hash binding is invalid.");
+    writeStageBPrivateFileAtomic({ filePath: prepareEvidencePath, bytes: Buffer.from(`${JSON.stringify(result.prepared.prepareEvidence, null, 2)}\n`), repositoryRoot: root, label: "Stage A reconciliation prepare evidence" });
     return process.stdout.write(`${JSON.stringify({ prepareEvidenceSha256: result.prepared.prepareEvidence.prepareEvidenceSha256, savedPlanSha256: result.prepared.saved.savedPlanSha256, savedPlanByteLength: result.prepared.saved.savedPlanByteLength, preState: result.prepared.preState, planPath: result.prepared.saved.planPath }, null, 2)}\n`);
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`); return result;
