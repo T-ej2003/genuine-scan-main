@@ -6,8 +6,9 @@ import path from "node:path";
 import { canonicalJson, PRODUCTION_ACTIVATION_LIFECYCLE, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertProductionEnvironmentApprovalIdentity, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
 import { ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
-import { assertStageAProductionArtifactsRecoveryCompletion, assertStageAProductionArtifactsReconciliationPrepareEvidence, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, createStageAProductionArtifactsRecoveryCompletion, stageAProductionArtifactsPolicySha256 } from "./production-stage-a-control-plane.mjs";
-import { STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "./production-stage-a-production-artifacts-journal.mjs";
+import { assertStageAProductionArtifactsRecoveryCompletion, assertStageAProductionArtifactsReconciliationPrepareEvidence, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, createStageAProductionArtifactsRecoveryCompletion, STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS, STAGE_A_TERRAFORM_VERSION, stageAProductionArtifactsPolicySha256 } from "./production-stage-a-control-plane.mjs";
+import { STAGE_A_PRODUCTION_ARTIFACTS_JOURNAL_PREFIX, STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "./production-stage-a-production-artifacts-journal.mjs";
+import { STAGE_A_TERRAFORM_BACKEND } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 
 export const STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION = "STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY_RECOVERY";
@@ -33,7 +34,7 @@ const approval = (value, { sourceSha, workflowRef }) => {
   if (value.schemaVersion !== 3 || value.workflowRef !== workflowRef || value.actualApproval?.userLogin?.toLowerCase() === value.executionActor.toLowerCase()) throw new Error("Stage A production-artifacts authorization requires actual independent protected-environment approval.");
   return value;
 };
-const recoverFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "account", "region", "bucket", "executionPrincipal", "predecessorPolicySha256", "desiredPolicySha256", "expectedLivePolicySha256", "preStateLineage", "preStateSerial", "preStateSha256", "maxPutBucketPolicy", "maxDeleteBucketPolicy", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "verificationRef", "authorizationSha256"]);
+const recoverFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "account", "region", "bucket", "executionPrincipal", "predecessorPolicySha256", "desiredPolicySha256", "expectedLivePolicySha256", "preStateLineage", "preStateSerial", "preStateSha256", "continuationCompatibilitySha256", "maxPutBucketPolicy", "maxDeleteBucketPolicy", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "verificationRef", "authorizationSha256"]);
 const reconcileFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "recoverySourceSha", "account", "region", "bucket", "executionPrincipal", "recoveryAuthorizationSha256", "recoveryCompletionSha256", "desiredPolicySha256", "preStateLineage", "preStateSerial", "preStateSha256", "savedPlanSha256", "savedPlanByteLength", "prepareEvidenceSha256", "maxRefreshOnlyApplies", "maxInfrastructureWrites", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "verificationRef", "authorizationSha256"]);
 const completionFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "account", "region", "bucket", "executionPrincipal", "recoveryAuthorizationSha256", "predecessorPolicySha256", "desiredPolicySha256", "preRecoveryLivePolicySha256", "postRecoveryLivePolicySha256", "preStateLineage", "preStateSerial", "preStateSha256", "maxPutBucketPolicy", "putBucketPolicyCount", "deleteBucketPolicyCount", "protectedEnvironmentApprovalEvidenceSha256", "workflowRunId", "workflowRunAttempt", "independentReviewer", "completion", "signature", "completionEvidenceSha256"]);
 const attemptFields = Object.freeze(["schemaVersion", "kind", "operation", "sourceSha", "account", "region", "bucket", "executionPrincipal", "recoveryAuthorizationSha256", "predecessorPolicySha256", "desiredPolicySha256", "preStateLineage", "preStateSerial", "preStateSha256", "protectedEnvironmentApprovalEvidenceSha256", "workflowRunId", "workflowRunAttempt", "independentReviewer", "signature", "attemptEvidenceSha256"]);
@@ -51,14 +52,35 @@ export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sou
   return true;
 }
 
+export const stageAProductionArtifactsContinuationCompatibilitySha256 = () => sha256(canonicalJson({
+  schemaVersion: 1,
+  recoveryOperation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION,
+  reconciliationOperation: STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION,
+  account: STAGE_B.account,
+  region: STAGE_B.region,
+  bucket: PRODUCTION_ACTIVATION_LIFECYCLE.bucket,
+  rootPrincipal: STAGE_A_PRODUCTION_ARTIFACTS_ROOT_PRINCIPAL,
+  releasePrincipal: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn,
+  predecessorPolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()),
+  desiredPolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicy()),
+  journalPrefix: STAGE_A_PRODUCTION_ARTIFACTS_JOURNAL_PREFIX,
+  terraformVersion: STAGE_A_TERRAFORM_VERSION,
+  awsProviderVersion: "6.56.0",
+  terraformRoot: "infra/aws/terraform/production-green-stage-a",
+  terraformBackend: STAGE_A_TERRAFORM_BACKEND,
+  stateSchemaVersions: STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS,
+  rootAttestationKey: ROOT_ATTESTATION_KEY_ALIAS_ARN,
+  rootAttestationSigningAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM,
+}));
+
 export function createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence, verificationRef } = {}) {
-  const body = { schemaVersion: 1, kind: "STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_AUTHORIZATION", operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, ...common({ sourceSha, preState, protectedEnvironmentApprovalEvidence, workflowRef: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF, verificationRef }), executionPrincipal: STAGE_A_PRODUCTION_ARTIFACTS_ROOT_PRINCIPAL, predecessorPolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()), desiredPolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicy()), expectedLivePolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()), maxPutBucketPolicy: 1, maxDeleteBucketPolicy: 0 };
+  const body = { schemaVersion: 1, kind: "STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_AUTHORIZATION", operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, ...common({ sourceSha, preState, protectedEnvironmentApprovalEvidence, workflowRef: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF, verificationRef }), executionPrincipal: STAGE_A_PRODUCTION_ARTIFACTS_ROOT_PRINCIPAL, predecessorPolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()), desiredPolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicy()), expectedLivePolicySha256: policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()), continuationCompatibilitySha256: stageAProductionArtifactsContinuationCompatibilitySha256(), maxPutBucketPolicy: 1, maxDeleteBucketPolicy: 0 };
   return Object.freeze({ ...body, authorizationSha256: sha256(canonicalJson(body)) });
 }
 
-export function assertStageAProductionArtifactsRecoveryAuthorization(value, { sourceSha, preState } = {}) {
+export function assertStageAProductionArtifactsRecoveryAuthorization(value, { sourceSha, preState, expectedContinuationCompatibilitySha256 = stageAProductionArtifactsContinuationCompatibilitySha256() } = {}) {
   exactKeys(value, recoverFields, "Stage A production-artifacts recovery authorization"); state(preState, "Stage A production-artifacts recovery authorization");
-  if (value.schemaVersion !== 1 || value.kind !== "STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_AUTHORIZATION" || value.operation !== STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION || value.sourceSha !== sourceSha || value.account !== STAGE_B.account || value.region !== STAGE_B.region || value.bucket !== PRODUCTION_ACTIVATION_LIFECYCLE.bucket || value.executionPrincipal !== STAGE_A_PRODUCTION_ARTIFACTS_ROOT_PRINCIPAL || value.predecessorPolicySha256 !== policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()) || value.desiredPolicySha256 !== policySha256(buildStageAProductionArtifactsBucketPolicy()) || value.expectedLivePolicySha256 !== value.predecessorPolicySha256 || value.preStateLineage !== preState.lineage || value.preStateSerial !== preState.serial || value.preStateSha256 !== preState.stateSha256 || value.maxPutBucketPolicy !== 1 || value.maxDeleteBucketPolicy !== 0 || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence?.evidenceSha256 || !SHA256.test(value.authorizationSha256 || "")) throw new Error("Stage A production-artifacts recovery authorization binding is invalid.");
+  if (value.schemaVersion !== 1 || value.kind !== "STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_AUTHORIZATION" || value.operation !== STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION || value.sourceSha !== sourceSha || value.account !== STAGE_B.account || value.region !== STAGE_B.region || value.bucket !== PRODUCTION_ACTIVATION_LIFECYCLE.bucket || value.executionPrincipal !== STAGE_A_PRODUCTION_ARTIFACTS_ROOT_PRINCIPAL || value.predecessorPolicySha256 !== policySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()) || value.desiredPolicySha256 !== policySha256(buildStageAProductionArtifactsBucketPolicy()) || value.expectedLivePolicySha256 !== value.predecessorPolicySha256 || value.preStateLineage !== preState.lineage || value.preStateSerial !== preState.serial || value.preStateSha256 !== preState.stateSha256 || value.continuationCompatibilitySha256 !== expectedContinuationCompatibilitySha256 || !SHA256.test(value.continuationCompatibilitySha256 || "") || value.maxPutBucketPolicy !== 1 || value.maxDeleteBucketPolicy !== 0 || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence?.evidenceSha256 || !SHA256.test(value.authorizationSha256 || "")) throw new Error("Stage A production-artifacts recovery authorization binding is invalid.");
   approval(value.protectedEnvironmentApprovalEvidence, { sourceSha, workflowRef: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF }); const { authorizationSha256, ...body } = value;
   if (authorizationSha256 !== sha256(canonicalJson(body))) throw new Error("Stage A production-artifacts recovery authorization hash is invalid.");
   return Object.freeze(value);

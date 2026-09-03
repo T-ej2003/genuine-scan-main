@@ -80,6 +80,11 @@ export const STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY = Object.freeze({
   type: "aws_s3_bucket_policy",
   bucket: PRODUCTION_ACTIVATION_LIFECYCLE.bucket,
 });
+// `terraform providers schema -json` from the locked Terraform 1.15.8 / AWS 6.56.0 envelope.
+export const STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS = Object.freeze({
+  [STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address]: 0,
+  "aws_db_instance.green": 2,
+});
 export function buildStageAProductionArtifactsBucketPolicyPredecessor() {
   const objects = [PRODUCTION_ACTIVATION_LIFECYCLE.claimArn, PRODUCTION_ACTIVATION_LIFECYCLE.completionArn];
   return {
@@ -282,8 +287,9 @@ function assertStageAProductionArtifactsAuthorizedPostState(state, plan) {
   if (!state || typeof state !== "object" || Array.isArray(state) || !Array.isArray(state.resources)) throw new Error("Stage A reconciliation post-state content is malformed.");
   for (const entry of plan.resource_drift) {
     const expected = entry.change.after;
+    const expectedSchemaVersion = STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS[entry.address];
     const resources = state.resources.filter((resource) => resource?.module === undefined && resource?.mode === entry.mode && resource.type === entry.type && resource.name === entry.name && resource.provider === `provider[\"${entry.provider_name}\"]`);
-    if (resources.length !== 1 || !Array.isArray(resources[0].instances) || resources[0].instances.length !== 1 || resources[0].instances[0]?.schema_version !== 0 || resources[0].instances[0]?.index_key !== undefined) throw new Error("Stage A reconciliation post-state resource identity is not exact.");
+    if (!Number.isSafeInteger(expectedSchemaVersion) || resources.length !== 1 || !Array.isArray(resources[0].instances) || resources[0].instances.length !== 1 || resources[0].instances[0]?.schema_version !== expectedSchemaVersion || resources[0].instances[0]?.index_key !== undefined) throw new Error("Stage A reconciliation post-state resource identity is not exact.");
     const actual = resources[0].instances[0].attributes;
     if (entry.address === STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address) assertStageAProductionArtifactsPolicyResource(actual, "post-apply", buildStageAProductionArtifactsBucketPolicy());
     else if (entry.address === "aws_db_instance.green") { if (!isDeepStrictEqual(actual, expected)) throw new Error("Stage A reconciliation post-state RDS values are not the authorized refresh result."); }

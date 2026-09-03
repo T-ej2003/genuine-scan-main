@@ -39,6 +39,8 @@ test("complete production dependency closure is exact across modes and failure p
     ["s3:PutObject", "stage-a-artifacts-recovery-root-journal-conditional-create", "ROOT_OPERATOR"],
   ]);
   assert.deepEqual(new Set(Object.values(report.modes)), new Set(["PASS"]));
+  assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(Object.keys(report.modes)));
+  for (const { capabilityId, reachableMode } of report.newAwsCalls) for (const mode of reachableMode) assert.notEqual(report.modes[mode], undefined, `${capabilityId} is reachable from undeclared ${mode}`);
   assert.equal(report.runtimeDependencies.some(({ id }) => id === "ecs-final-candidate-runtime-consumability"), true);
   assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(["NORMAL", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", "ROTATION_OVERLAP", "ROTATION_CLEANUP", "ROLLBACK_RECONCILIATION", "POST_DEPLOY_VERIFY"]));
   assert.equal(report.newAwsCalls.filter(({ capabilityId, reachableMode }) => capabilityId?.startsWith("stage-a-artifacts-recovery-") && !reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY")).length, 0);

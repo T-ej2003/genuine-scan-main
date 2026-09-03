@@ -1,6 +1,10 @@
 {
   "terraformVersion": "1.15.8",
   "awsProviderVersion": "6.56.0",
+  "stateSchemaVersions": {
+    "aws_s3_bucket_policy.production_artifacts": 0,
+    "aws_db_instance.green": 2
+  },
   "productionArtifactsBucketPolicy": {
     "keys": ["bucket", "expected_bucket_owner", "id", "policy", "region"],
     "expectedBucketOwner": null

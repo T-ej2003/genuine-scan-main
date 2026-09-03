@@ -4,6 +4,7 @@ import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import {
   assertStageAProductionArtifactsRecoveryAttemptEvidence,
+  assertStageAProductionArtifactsRecoveryAuthorization,
   assertStageAProductionArtifactsRecoveryCompletionEvidence,
   createStageAProductionArtifactsRecoveryAttemptEvidence,
   createStageAProductionArtifactsRecoveryAuthorization,
@@ -80,6 +81,11 @@ test("recovery completion and reconciliation authorization are independently bou
   const reconciliation = createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, preState, recoveryAuthorization: recovery, recoveryCompletion: completion, prepareEvidence, savedPlanSha256: "c".repeat(64), protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsReconciliationWorkflowRef), verificationRef: "manual", verifyRecoveryCompletionEvidence: verify });
   assert.equal(reconciliation.recoveryCompletionSha256, completion.completionEvidenceSha256);
   assert.throws(() => createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, preState, recoveryAuthorization: recovery, recoveryCompletion: { ...completion, signature: { ...completion.signature, signatureBase64: "forged" } }, prepareEvidence, savedPlanSha256: "c".repeat(64), protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsReconciliationWorkflowRef), verificationRef: "manual", verifyRecoveryCompletionEvidence: () => false }), /hash|signature/);
+});
+
+test("descendant continuation rejects a changed closed-world recovery contract", () => {
+  const recovery = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF), verificationRef: "compatibility" });
+  assert.throws(() => assertStageAProductionArtifactsRecoveryAuthorization(recovery, { sourceSha, preState, expectedContinuationCompatibilitySha256: "f".repeat(64) }), /binding/);
 });
 
 test("descendant reconciliation preserves the historical recovery source and completion", () => {

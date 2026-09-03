@@ -153,3 +153,10 @@ reconciliation, and root-drop recovery; its provider sensitivity mask must be
 unchanged. Provider-owned fields and sensitivity metadata are validated at
 their exact supported shape, rather than ignored or accepted as arbitrary
 extra plan data.
+
+For post-apply reconciliation, the locked provider state schemas are also
+address-bound: `aws_s3_bucket_policy.production_artifacts` is schema version
+`0`, while `aws_db_instance.green` is schema version `2`. A continuation from
+a historical recovery is admitted only when this complete immutable contract
+(policy, journal, backend, provider/state schemas, principals, and signing
+identity) remains identical under the authenticated descendant source.

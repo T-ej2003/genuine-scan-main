@@ -17,6 +17,7 @@ import {
   createTerraformStageAAdapter,
   prepareStageAProductionArtifactsStateReconciliation,
   runStageAProductionArtifactsStateReconciliation,
+  STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS,
   STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY,
   STAGE_A_TERRAFORM_VERSION,
 } from "../aws/production-stage-a-control-plane.mjs";
@@ -36,7 +37,7 @@ const reconciliationAuthorization = (serial = 35, savedPlanSha256 = "b".repeat(6
 const verifyReconciliationAuthorization = (value) => ({ authorizationSha256: value.authorizationSha256, approved: true, independent: true });
 const verifier = (value) => ({ authorizationSha256: value.recoveryAuthorizationSha256, livePolicySha256: value.livePolicySha256, completed: true });
 const refreshPlan = ({ before = predecessor, after = desired, drift = [] } = {}) => ({ complete: true, errored: false, applyable: true, resource_changes: [], resource_drift: [{ address: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address, mode: "managed", type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type, name: "production_artifacts", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: resource(before), after: resource(after), replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } }, ...drift] });
-const stateSnapshot = (identity, policy = identity.serial === 35 ? predecessor : desired, resources = []) => ({ ...identity, state: { version: 4, lineage: identity.lineage, serial: identity.serial, resources: [{ mode: "managed", type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type, name: "production_artifacts", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: resource(policy) }] }, ...resources] } });
+const stateSnapshot = (identity, policy = identity.serial === 35 ? predecessor : desired, resources = []) => ({ ...identity, state: { version: 4, lineage: identity.lineage, serial: identity.serial, resources: [{ mode: "managed", type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type, name: "production_artifacts", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS[STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address], attributes: resource(policy) }] }, ...resources] } });
 const consumption = (overrides = {}) => ({ reserveConsumption: async () => ({ reservation: "exact" }), finalizeConsumption: async () => {}, abortConsumption: async () => {}, recordPostApply: async () => {}, readConsumptionEvidence: async () => ({}), ...overrides });
 const execute = async ({ adapter, ...options }) => { const preparedAdapter = { ...adapter, readStateSnapshot: adapter.readStateSnapshot || (async () => stateSnapshot(await adapter.readStateIdentity())), createSavedRefreshOnlyPlan: async () => ({ ...(await adapter.createSavedRefreshOnlyPlan()), terraformVersion: STAGE_A_TERRAFORM_VERSION }) }; const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter: preparedAdapter, sourceSha, recoveryCompletion: options.recoveryCompletion || completion(), verifyRecoveryCompletion: verifier }); return runStageAProductionArtifactsStateReconciliation({ ...options, adapter: preparedAdapter, saved: prepared.saved, preparedState: prepared.preState }); };
 
@@ -103,6 +104,7 @@ test("recovery refresh validator is closed-world for policy and resource drift",
 });
 
 test("locked-provider bucket-policy envelope permits only the unset owner representation", () => {
+  assert.deepEqual(STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS, providerEnvelope.stateSchemaVersions);
   assert.deepEqual(Object.keys(resource(desired)).sort(), providerEnvelope.productionArtifactsBucketPolicy.keys);
   assert.equal(resource(desired).expected_bucket_owner, providerEnvelope.productionArtifactsBucketPolicy.expectedBucketOwner);
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan(), { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }));
@@ -256,6 +258,23 @@ test("a nonzero refresh-only apply completes when durable state proves the exact
   assert.equal(result.applyProcessExitSuccess, false); assert.equal(result.applied, true); assert.equal(applies, 1); assert.equal(recorded, 1); assert.equal(finalized, "COMPLETED");
 });
 
+test("post-apply state-read failure preserves the exact completion-only retry", async () => {
+  let state = { lineage, serial: 35, stateSha256 }; let applied = false; let losePostApplyRead = true; let applies = 0; let finalized = 0; let reservation;
+  const adapter = {
+    readStateIdentity: async () => { if (applied && losePostApplyRead) { losePostApplyRead = false; throw new Error("injected post-apply state read failure"); } return { ...state }; },
+    readStateSnapshot: async () => stateSnapshot(state),
+    createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, terraformVersion: STAGE_A_TERRAFORM_VERSION, plan: refreshPlan() }),
+    applySavedRefreshOnlyPlan: async () => { applies += 1; applied = true; state = { ...state, serial: 36, stateSha256: "d".repeat(64) }; },
+    readProductionArtifactsPolicy: async () => desired,
+  };
+  const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier });
+  const authorization = reconciliationAuthorization(35, prepared.saved.savedPlanSha256);
+  const common = { adapter, sourceSha, saved: prepared.saved, preparedState: prepared.preState, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: authorization, verifyReconciliationAuthorization, readConsumptionEvidence: async () => ({ reservation }), recordPostApply: async () => {}, abortConsumption: async () => {}, finalizeConsumption: async ({ status }) => { if (status === "COMPLETED") finalized += 1; } };
+  await assert.rejects(runStageAProductionArtifactsStateReconciliation({ ...common, reserveConsumption: async (identity) => ({ reservation: reservation = createStageAProductionArtifactsReservation({ operation: "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", sourceSha, account: "368992683803", region: "eu-west-2", executionPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", authorizationSha256: authorization.authorizationSha256, recoveryCompletionSha256: completion().completionSha256, savedPlanSha256: identity.savedPlanSha256, preStateLineage: lineage, preStateSerial: 35, preStateSha256: stateSha256, desiredPolicySha256: completion().desiredPolicySha256 }) }) }), /post-apply state read failure/);
+  const resumed = await runStageAProductionArtifactsStateReconciliation({ ...common, reserveConsumption: async () => { throw new Error("must not reserve"); }, resumeReservation: reservation });
+  assert.equal(resumed.resumed, true); assert.equal(applies, 1); assert.equal(finalized, 1);
+});
+
 test("completion-only recovery authenticates the authorized plan's post-state content", async () => {
   let state = { lineage, serial: 35, stateSha256 }; let snapshot = stateSnapshot(state); let applies = 0; let finalized = 0;
   const adapter = { readStateIdentity: async () => ({ ...state }), readStateSnapshot: async () => structuredClone(snapshot), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, terraformVersion: STAGE_A_TERRAFORM_VERSION, plan: refreshPlan() }), applySavedRefreshOnlyPlan: async () => { applies += 1; }, readProductionArtifactsPolicy: async () => desired };
@@ -268,6 +287,7 @@ test("completion-only recovery authenticates the authorized plan's post-state co
   assert.equal(metadataOnlyPostState(state), true);
   await assert.rejects(resume(), /post-state|post-apply/i);
   for (const candidate of [
+    { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [{ ...stateSnapshot(state).state.resources[0], instances: [{ ...stateSnapshot(state).state.resources[0].instances[0], schema_version: 1 }] }] } },
     stateSnapshot(state, { Version: "2012-10-17", Statement: [] }),
     { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [] } },
     { ...stateSnapshot(state), state: { ...stateSnapshot(state).state, resources: [{ ...stateSnapshot(state).state.resources[0], name: "wrong" }] } },
@@ -284,9 +304,11 @@ test("completion-only recovery authenticates the authorized plan's post-state co
   const rdsSaved = { ...prepared.saved, savedPlanSha256: "f".repeat(64), plan: refreshPlan({ drift: [rds] }) };
   const rdsAuthorization = reconciliationAuthorization(35, rdsSaved.savedPlanSha256);
   const rdsReservation = createStageAProductionArtifactsReservation({ operation: "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", sourceSha, account: "368992683803", region: "eu-west-2", executionPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", authorizationSha256: rdsAuthorization.authorizationSha256, recoveryCompletionSha256: completion().completionSha256, savedPlanSha256: rdsSaved.savedPlanSha256, preStateLineage: lineage, preStateSerial: 35, preStateSha256: stateSha256, desiredPolicySha256: completion().desiredPolicySha256 });
-  snapshot = stateSnapshot(state, desired, [{ mode: "managed", type: "aws_db_instance", name: "green", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: { ...rds.change.after, latest_restorable_time: rds.change.before.latest_restorable_time } }] }]);
+  const rdsState = (schemaVersion, attributes) => stateSnapshot(state, desired, [{ mode: "managed", type: "aws_db_instance", name: "green", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: schemaVersion, attributes }] }]);
+  snapshot = rdsState(STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS["aws_db_instance.green"], { ...rds.change.after, latest_restorable_time: rds.change.before.latest_restorable_time });
   await assert.rejects(runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, saved: rdsSaved, preparedState: prepared.preState, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: rdsAuthorization, verifyReconciliationAuthorization, resumeReservation: rdsReservation, ...consumption() }), /post-state RDS/i);
-  snapshot = stateSnapshot(state, desired, [{ mode: "managed", type: "aws_db_instance", name: "green", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: rds.change.after }] }]);
+  for (const schemaVersion of [0, 99]) { snapshot = rdsState(schemaVersion, rds.change.after); await assert.rejects(runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, saved: rdsSaved, preparedState: prepared.preState, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: rdsAuthorization, verifyReconciliationAuthorization, resumeReservation: rdsReservation, ...consumption() }), /resource identity/); }
+  snapshot = rdsState(STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS["aws_db_instance.green"], rds.change.after);
   assert.equal((await runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, saved: rdsSaved, preparedState: prepared.preState, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: rdsAuthorization, verifyReconciliationAuthorization, resumeReservation: rdsReservation, ...consumption() })).resumed, true);
   snapshot = stateSnapshot(state, { ...desired, Statement: [...desired.Statement].reverse() });
   const completed = await resume();
