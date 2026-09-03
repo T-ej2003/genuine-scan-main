@@ -34,7 +34,10 @@ gh workflow run authorize-production-stage-a-production-artifacts-continuation-r
 
 Record its completed workflow run ID and `run_attempt` (for
 example, with `gh api repos/T-ej2003/genuine-scan-main/actions/runs/<run-id>`),
-then use those coordinates in both commands:
+then use those coordinates in both commands and as
+`continuation_rebind_workflow_run_id` and
+`continuation_rebind_workflow_run_attempt` when dispatching the reconciliation
+authorization workflow:
 
 ```sh
 npm run stage-a:production-artifacts:prepare -- --production --source-sha "$SOURCE_SHA" --recovery-source-sha "$RECOVERY_SOURCE_SHA" --continuation-rebind-workflow-run-id "$REBIND_RUN_ID" --continuation-rebind-workflow-run-attempt "$REBIND_RUN_ATTEMPT" --recovery-authorization-workflow-run-id "$RECOVERY_RUN_ID" --recovery-authorization-workflow-run-attempt "$RECOVERY_RUN_ATTEMPT" --terraform-data-dir "$PRIVATE_TF_DIR" --refresh-only-plan "$REFRESH_PLAN" --prepare-evidence "$PREPARE_EVIDENCE"

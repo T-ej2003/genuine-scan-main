@@ -994,6 +994,7 @@
       "kind": "file",
       "producer": ".github/workflows/authorize-production-stage-a-production-artifacts-continuation-rebind.yml",
       "consumers": [
+        "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs",
         "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs",
         "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"
       ],

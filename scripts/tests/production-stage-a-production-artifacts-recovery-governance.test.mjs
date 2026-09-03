@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import {
@@ -15,6 +18,8 @@ import {
   createStageAProductionArtifactsReconciliationAuthorization,
   assertStageAProductionArtifactsRecoverySourceCompatibility,
   resolveStageAProductionArtifactsAuthorizationArtifact,
+  STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_AUTHORIZATION_ARTIFACT,
+  STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_OPERATION,
   STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_AUTHORIZATION_ARTIFACT,
   STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION,
   STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_WORKFLOW_REF,
@@ -27,6 +32,7 @@ import {
 import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, createStageAProductionArtifactsReconciliationPrepareEvidence } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "../aws/production-stage-a-production-artifacts-journal.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
+import { authorizeStageAProductionArtifactsReconciliation } from "../aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs";
 
 const sourceSha = "a".repeat(40);
 const preState = { lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 35, stateSha256: "b".repeat(64) };
@@ -50,8 +56,9 @@ const rebindApproval = (authorization, protectedEnvironmentApprovalEvidence) => 
 
 const githubRun = ({ operation, authorization, id = 123, attempt = 1, actor = "operator", headSha = sourceSha, workflowPath } = {}) => {
   const archiveBytes = Buffer.from(`authorization-${operation}`);
-  const artifactName = operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_AUTHORIZATION_ARTIFACT : STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_AUTHORIZATION_ARTIFACT;
-  const workflow = { id, run_attempt: attempt, repository: { full_name: "T-ej2003/genuine-scan-main", id: 9001 }, head_repository: { full_name: "T-ej2003/genuine-scan-main" }, path: workflowPath || (operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? ".github/workflows/authorize-production-stage-a-production-artifacts-recovery.yml" : ".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml"), event: "workflow_dispatch", head_sha: headSha, status: "completed", conclusion: "success", actor: { login: actor } };
+  const rebind = operation === STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_OPERATION;
+  const artifactName = operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_AUTHORIZATION_ARTIFACT : rebind ? STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_AUTHORIZATION_ARTIFACT : STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_AUTHORIZATION_ARTIFACT;
+  const workflow = { id, run_attempt: attempt, repository: { full_name: "T-ej2003/genuine-scan-main", id: 9001 }, head_repository: { full_name: "T-ej2003/genuine-scan-main" }, path: workflowPath || (operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? ".github/workflows/authorize-production-stage-a-production-artifacts-recovery.yml" : rebind ? ".github/workflows/authorize-production-stage-a-production-artifacts-continuation-rebind.yml" : ".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml"), event: "workflow_dispatch", head_sha: headSha, status: "completed", conclusion: "success", actor: { login: actor } };
   const digest = `sha256:${createHash("sha256").update(archiveBytes).digest("hex")}`;
   return (command, args) => {
     if (command === "gh" && /\/actions\/runs\/[0-9]+$/.test(args[1] || "")) return JSON.stringify(workflow);
@@ -82,6 +89,28 @@ test("continuation rebind pins one externally approved source and governed manif
   assert.throws(() => check(rebind, reviewedSourceSha, completion, () => "e".repeat(64)), /binding/);
   assert.throws(() => check({ ...rebind, recoveryCompletionSha256: "e".repeat(64) }), /binding|hash/);
   assert.throws(() => check({ ...rebind, operation: "OTHER" }), /binding|hash/);
+});
+
+test("advanced reconciliation authorization consumes and binds the exact continuation rebind", () => {
+  const reviewedSourceSha = "c".repeat(40); const recovery = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF), verificationRef: "historical" });
+  const completion = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization: recovery, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicy(), sign });
+  const saved = { refreshOnly: true, savedPlanSha256: "d".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/plan", terraformVersion: "1.15.8" };
+  const prepareEvidence = createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha: reviewedSourceSha, preState, recoveryCompletion: completion.completion, saved });
+  const rebind = createStageAProductionArtifactsContinuationRebindAuthorization({ historicalRecoveryAuthorization: recovery, recoveryCompletion: completion, reviewedContinuationSourceSha: reviewedSourceSha, reviewedGovernedExecutableManifestSha256: governedExecutableManifestSha256, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_WORKFLOW_REF, reviewedSourceSha), verificationRef: "reviewed" });
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-a-rebind-authorizer-"));
+  const preparePath = path.join(directory, "prepare.json"); const approvalPath = path.join(directory, "approval.json"); const outputPath = path.join(directory, "authorization.json");
+  fs.writeFileSync(preparePath, JSON.stringify(prepareEvidence)); fs.writeFileSync(approvalPath, JSON.stringify(approval(STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_WORKFLOW_REF, reviewedSourceSha)));
+  const resolveAuthorization = ({ operation, workflowRunId, workflowRunAttempt, sourceSha: resolvedSourceSha }) => {
+    if (operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION) { assert.equal(workflowRunId, "201"); assert.equal(workflowRunAttempt, "1"); assert.equal(resolvedSourceSha, sourceSha); return { authorization: recovery }; }
+    assert.equal(operation, "STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_CONTINUATION_REBIND"); assert.equal(workflowRunId, "202"); assert.equal(workflowRunAttempt, "1"); assert.equal(resolvedSourceSha, reviewedSourceSha); return { authorization: rebind };
+  };
+  const args = ["--source-sha", reviewedSourceSha, "--recovery-source-sha", sourceSha, "--state-lineage", preState.lineage, "--state-serial", String(preState.serial), "--state-sha256", preState.stateSha256, "--saved-plan-sha256", saved.savedPlanSha256, "--prepare-evidence", preparePath, "--verification-ref", "reviewed", "--recovery-authorization-workflow-run-id", "201", "--recovery-authorization-workflow-run-attempt", "1", "--continuation-rebind-workflow-run-id", "202", "--continuation-rebind-workflow-run-attempt", "1", "--environment-approval", approvalPath, "--output", outputPath];
+  try {
+    authorizeStageAProductionArtifactsReconciliation(args, { verifyRecoveryCompletionEvidence: verify, resolveAuthorization, journal: { readRecoveryCompletion: () => ({ bytes: Buffer.from(JSON.stringify(completion)) }) }, proveSourceDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === reviewedSourceSha, readGovernedExecutableManifestSha256: unchangedGovernedSource });
+    assert.equal(JSON.parse(fs.readFileSync(outputPath, "utf8")).continuationRebindAuthorizationSha256, rebind.authorizationSha256);
+    fs.rmSync(outputPath);
+    assert.throws(() => authorizeStageAProductionArtifactsReconciliation(args.filter((value) => value !== "--continuation-rebind-workflow-run-id" && value !== "202"), { verifyRecoveryCompletionEvidence: verify, resolveAuthorization, journal: { readRecoveryCompletion: () => ({ bytes: Buffer.from(JSON.stringify(completion)) }) }, proveSourceDescendant: () => true, readGovernedExecutableManifestSha256: unchangedGovernedSource }), /continuation-rebind-workflow-run-id/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("Stage A recovery approval follows the authenticated GitHub self-review policy", () => {
@@ -125,6 +154,11 @@ test("authorization resolvers accept numeric GitHub workflow identities with can
   const reconciliation = reconciliationAuthorization();
   const resolvedReconciliation = resolveStageAProductionArtifactsAuthorizationArtifact({ workflowRunId: "123", workflowRunAttempt: "1", sourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION, githubRun: githubRun({ operation: STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION, authorization: reconciliation }) });
   assert.equal(resolvedReconciliation.authorization.authorizationSha256, reconciliation.authorizationSha256);
+  const rebind = createStageAProductionArtifactsContinuationRebindAuthorization({ historicalRecoveryAuthorization: recovery, recoveryCompletion: createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization: recovery, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicy(), sign }), reviewedContinuationSourceSha: sourceSha, reviewedGovernedExecutableManifestSha256: governedExecutableManifestSha256, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_WORKFLOW_REF), verificationRef: "manual" });
+  const rebindRunner = githubRun({ operation: STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_OPERATION, authorization: rebind });
+  assert.equal(resolveStageAProductionArtifactsAuthorizationArtifact({ workflowRunId: "123", workflowRunAttempt: "1", sourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_OPERATION, githubRun: rebindRunner, readGovernedExecutableManifestSha256: unchangedGovernedSource }).authorization.authorizationSha256, rebind.authorizationSha256);
+  assert.throws(() => resolveStageAProductionArtifactsAuthorizationArtifact({ workflowRunId: "124", workflowRunAttempt: "1", sourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_OPERATION, githubRun: rebindRunner }), /provenance/);
+  assert.throws(() => resolveStageAProductionArtifactsAuthorizationArtifact({ workflowRunId: "123", workflowRunAttempt: "2", sourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_OPERATION, githubRun: rebindRunner }), /provenance/);
 });
 
 test("authorization resolvers reject mismatched workflow identity and provenance", () => {
@@ -211,8 +245,10 @@ test("descendant reconciliation preserves the historical recovery source and com
   const saved = { refreshOnly: true, savedPlanSha256: "c".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/plan", terraformVersion: "1.15.8" };
   const prepareEvidence = createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha: successorSourceSha, preState, recoveryCompletion: completion.completion, saved });
   const proveDescendant = ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === successorSourceSha;
-  const reconciliation = createStageAProductionArtifactsReconciliationAuthorization({ sourceSha: successorSourceSha, recoverySourceSha: sourceSha, preState, recoveryAuthorization: recovery, recoveryCompletion: completion, prepareEvidence, savedPlanSha256: saved.savedPlanSha256, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_WORKFLOW_REF, successorSourceSha), verificationRef: "successor", verifyRecoveryCompletionEvidence: verify, proveDescendant, readGovernedExecutableManifestSha256: unchangedGovernedSource });
+  const continuationRebind = createStageAProductionArtifactsContinuationRebindAuthorization({ historicalRecoveryAuthorization: recovery, recoveryCompletion: completion, reviewedContinuationSourceSha: successorSourceSha, reviewedGovernedExecutableManifestSha256: governedExecutableManifestSha256, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_WORKFLOW_REF, successorSourceSha), verificationRef: "successor" });
+  const reconciliation = createStageAProductionArtifactsReconciliationAuthorization({ sourceSha: successorSourceSha, recoverySourceSha: sourceSha, preState, recoveryAuthorization: recovery, recoveryCompletion: completion, continuationRebindAuthorization: continuationRebind, prepareEvidence, savedPlanSha256: saved.savedPlanSha256, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_WORKFLOW_REF, successorSourceSha), verificationRef: "successor", verifyRecoveryCompletionEvidence: verify, proveDescendant, readGovernedExecutableManifestSha256: unchangedGovernedSource });
   assert.equal(reconciliation.recoverySourceSha, sourceSha);
+  assert.equal(reconciliation.continuationRebindAuthorizationSha256, continuationRebind.authorizationSha256);
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: successorSourceSha, recoverySourceSha: sourceSha, proveDescendant, readGovernedExecutableManifestSha256: unchangedGovernedSource }));
   assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: "f".repeat(40), recoverySourceSha: sourceSha, proveDescendant }), /descendant/);
 });

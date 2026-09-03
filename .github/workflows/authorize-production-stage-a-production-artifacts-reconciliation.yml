@@ -12,6 +12,8 @@ on:
       prepare_evidence_base64: { description: Exact prepared reconciliation evidence JSON encoded as base64, required: true, type: string }
       recovery_authorization_workflow_run_id: { description: Exact completed recovery-authorization workflow run ID, required: true, type: string }
       recovery_authorization_workflow_run_attempt: { description: Exact completed recovery-authorization workflow run attempt, required: true, type: string }
+      continuation_rebind_workflow_run_id: { description: Required when source_sha differs from recovery_source_sha, type: string }
+      continuation_rebind_workflow_run_attempt: { description: Required when source_sha differs from recovery_source_sha, type: string }
       verification_ref: { description: Human-controlled reconciliation verification reference, required: true, type: string }
 
 permissions: { actions: read, contents: read, id-token: write }
@@ -57,14 +59,21 @@ jobs:
           SAVED_PLAN_SHA256: "${{ inputs.saved_plan_sha256 }}"
           RECOVERY_RUN_ID: "${{ inputs.recovery_authorization_workflow_run_id }}"
           RECOVERY_RUN_ATTEMPT: "${{ inputs.recovery_authorization_workflow_run_attempt }}"
+          CONTINUATION_REBIND_RUN_ID: "${{ inputs.continuation_rebind_workflow_run_id }}"
+          CONTINUATION_REBIND_RUN_ATTEMPT: "${{ inputs.continuation_rebind_workflow_run_attempt }}"
           VERIFICATION_REF: "${{ inputs.verification_ref }}"
           PREPARE_EVIDENCE_BASE64: "${{ inputs.prepare_evidence_base64 }}"
         run: |
           set -euo pipefail
           d="$RUNNER_TEMP/stage-a-production-artifacts-reconciliation"; install -d -m 700 "$d"
           printf '%s' "$PREPARE_EVIDENCE_BASE64" | base64 --decode > "$d/prepare-evidence.json"
+          rebind_args=()
+          if [ "$SOURCE_SHA" != "$RECOVERY_SOURCE_SHA" ]; then
+            test -n "$CONTINUATION_REBIND_RUN_ID"; test -n "$CONTINUATION_REBIND_RUN_ATTEMPT"
+            rebind_args=(--continuation-rebind-workflow-run-id "$CONTINUATION_REBIND_RUN_ID" --continuation-rebind-workflow-run-attempt "$CONTINUATION_REBIND_RUN_ATTEMPT")
+          fi
           node scripts/aws/production-github-environment-approval.mjs --output "$d/environment-approval.json" --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
-          node scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs --source-sha "$SOURCE_SHA" --recovery-source-sha "$RECOVERY_SOURCE_SHA" --state-lineage "$STATE_LINEAGE" --state-serial "$STATE_SERIAL" --state-sha256 "$STATE_SHA256" --saved-plan-sha256 "$SAVED_PLAN_SHA256" --prepare-evidence "$d/prepare-evidence.json" --verification-ref "$VERIFICATION_REF" --recovery-authorization-workflow-run-id "$RECOVERY_RUN_ID" --recovery-authorization-workflow-run-attempt "$RECOVERY_RUN_ATTEMPT" --environment-approval "$d/environment-approval.json" --output "$d/authorization.json"
+          node scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs --source-sha "$SOURCE_SHA" --recovery-source-sha "$RECOVERY_SOURCE_SHA" --state-lineage "$STATE_LINEAGE" --state-serial "$STATE_SERIAL" --state-sha256 "$STATE_SHA256" --saved-plan-sha256 "$SAVED_PLAN_SHA256" --prepare-evidence "$d/prepare-evidence.json" --verification-ref "$VERIFICATION_REF" --recovery-authorization-workflow-run-id "$RECOVERY_RUN_ID" --recovery-authorization-workflow-run-attempt "$RECOVERY_RUN_ATTEMPT" "${rebind_args[@]}" --environment-approval "$d/environment-approval.json" --output "$d/authorization.json"
       - uses: actions/upload-artifact@v4
         with:
           name: stage-a-production-artifacts-reconciliation-authorization

@@ -96,7 +96,7 @@ test("Stage-A production-artifacts recovery artifacts have closed producer-consu
     "stage-a-production-artifacts-recovery-authorization": ["scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
     "stage-a-production-artifacts-recovery-completion": ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
     "stage-a-production-artifacts-reconciliation-authorization": ["scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
-    "stage-a-production-artifacts-continuation-rebind-authorization": ["scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
+    "stage-a-production-artifacts-continuation-rebind-authorization": ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
     "stage-a-production-artifacts-reconciliation-journal": ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
   };
   for (const [id, consumers] of Object.entries(expected)) {
