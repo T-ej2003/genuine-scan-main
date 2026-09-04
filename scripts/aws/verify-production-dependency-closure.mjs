@@ -33,6 +33,8 @@ const CALLS = Object.freeze([
   ["scripts/aws/production-root-attestation-signer.mjs", "kms:Sign", "stage-a-artifacts-recovery-root-sign", [ROOT_ATTESTATION_KEY], "ROOT_OPERATOR"],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-reconciliation-release-read-policy", [PRODUCTION_ARTIFACTS_BUCKET]],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
+  ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-root-identify", ["*"], "ROOT_OPERATOR", "stage-a-artifacts-reconciliation-root-identify"],
+  ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-root-journal-read", [STAGE_A_RECONCILIATION_JOURNAL], "ROOT_OPERATOR", "stage-a-artifacts-reconciliation-root-journal-read"],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-release-read-raw-state", [STAGE_A_TERRAFORM_STATE_ARN], "RELEASE_DEPLOYER", "stage-a-artifacts-reconciliation-release-read-raw-state"],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketLocation", "stage-a-artifacts-reconciliation-terraform-read-bucket-location", [STAGE_B_TERRAFORM_BACKEND.bucketArn]],
   ["scripts/aws/production-stage-a-control-plane.mjs", "s3:GetObject", "stage-a-artifacts-reconciliation-terraform-read-state", [STAGE_A_TERRAFORM_STATE_ARN]],
@@ -111,6 +113,8 @@ const STAGE_A_CAPABILITY_MODES = Object.freeze({
   "stage-a-artifacts-journal-read": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
   "stage-a-artifacts-journal-conditional-create": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
   "stage-a-artifacts-reconciliation-release-identify": [STAGE_A_RECONCILIATION_MODE],
+  "stage-a-artifacts-reconciliation-root-identify": [STAGE_A_RECONCILIATION_MODE],
+  "stage-a-artifacts-reconciliation-root-journal-read": [STAGE_A_RECONCILIATION_MODE],
   "stage-a-artifacts-reconciliation-release-read-policy": [STAGE_A_RECONCILIATION_MODE],
   "stage-a-artifacts-reconciliation-release-read-raw-state": [STAGE_A_RECONCILIATION_MODE],
   "stage-a-artifacts-reconciliation-terraform-read-bucket-location": [STAGE_A_RECOVERY_MODE, STAGE_A_RECONCILIATION_MODE],
@@ -254,7 +258,7 @@ export function buildProductionDependencyClosure() {
 }
 
 export function assertChangedAwsCallClosure(scanned, graph) {
-  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"].includes(sourceFile);
+  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"].includes(sourceFile);
   const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER", sourceFunction = "", capabilityId = "" }) => `${sourceFile}\t${action}\t${identityBound(sourceFile) ? identity : ""}\t${capabilityId.endsWith("-read-raw-state") ? sourceFunction : ""}`;
   const callKeys = new Set(CALLS.map(key));
   const normalized = scanned.map(({ sourceFile, action, identity, sourceFunction, capabilityId }) => {
