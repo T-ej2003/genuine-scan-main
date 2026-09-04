@@ -98,14 +98,15 @@ export function assertInitialActivationLifecyclePolicyReconciliationAuthorizatio
   return value;
 }
 
-export function executeInitialActivationLifecyclePolicyReconciliation({ authorization, sourceSha, readLiveState, createPolicyVersion, desired = readInitialActivationLifecycleDesiredPolicy(), now = new Date() } = {}) {
-  assertInitialActivationLifecyclePolicyReconciliationAuthorization(authorization, { sourceSha, now });
+export function executeInitialActivationLifecyclePolicyReconciliation({ authorization, sourceSha, readLiveState, createPolicyVersion, desired = readInitialActivationLifecycleDesiredPolicy(), now = () => new Date() } = {}) {
+  const readClock = typeof now === "function" ? now : () => now;
+  assertInitialActivationLifecyclePolicyReconciliationAuthorization(authorization, { sourceSha, now: readClock() });
   if (typeof readLiveState !== "function" || typeof createPolicyVersion !== "function") throw new Error("Initial activation lifecycle policy reconciliation requires authenticated AWS readers and writer.");
   const before = assertInitialActivationLifecyclePolicyState(readLiveState(), { desired });
   if (before.releaseRolePolicySetSha256 !== authorization.releaseRolePolicySetSha256 || before.targetPolicyEntityBoundarySha256 !== authorization.targetPolicyEntityBoundarySha256) throw new Error("Initial activation lifecycle policy attachment state changed since authorization.");
   if (before.status === "ALREADY_RECONCILED") return Object.freeze({ status: "ALREADY_RECONCILED", createPolicyVersionCount: 0, postState: before });
   if (before.defaultVersionId !== authorization.predecessorDefaultVersionId || before.policySha256 !== authorization.predecessorPolicySha256 || before.policyVersionCount !== authorization.policyVersionCount || before.policyVersionCount > 4) throw new Error("Initial activation lifecycle policy predecessor CAS changed since authorization.");
-  assertProductionEnvironmentApprovalFreshness(authorization.protectedEnvironmentApprovalEvidence, { now });
+  assertProductionEnvironmentApprovalFreshness(authorization.protectedEnvironmentApprovalEvidence, { now: readClock() });
   let response;
   try { response = createPolicyVersion({ PolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, PolicyDocument: desired.document, SetAsDefault: true }); }
   catch (error) {

@@ -63,14 +63,32 @@ test("policy-centric entity discovery consumes every page and fails closed on in
   assert.throws(() => readInitialActivationLifecyclePolicyLiveState(incomplete), /incomplete/);
 });
 
-test("approval freshness is enforced at artifact validation and immediately before the only write", () => {
+test("approval freshness uses a fresh write-boundary clock after live reads", () => {
+  const observedAt = "2026-09-04T12:00:00.000Z";
+  const entryTime = new Date(new Date(observedAt).getTime() + PRODUCTION_ENVIRONMENT_APPROVAL.maxAgeMs - 1);
+  const writeTime = new Date(entryTime.getTime() + 2);
+  const value = createInitialActivationLifecyclePolicyReconciliationAuthorization({ sourceSha, liveState: state(), protectedEnvironmentApprovalEvidence: approval(observedAt), desired, now: entryTime });
+  assert.doesNotThrow(() => assertInitialActivationLifecyclePolicyReconciliationAuthorization(value, { sourceSha, now: entryTime }));
+  let clockReads = 0; let liveReads = 0; let creates = 0;
+  assert.throws(() => executeInitialActivationLifecyclePolicyReconciliation({ authorization: value, sourceSha, desired, now: () => { assert.equal(liveReads, clockReads, "clock must be read after the preceding live-state read"); return [entryTime, writeTime][clockReads++]; }, readLiveState: () => { liveReads += 1; return state(); }, createPolicyVersion: () => { creates += 1; } }), /stale/);
+  assert.equal(clockReads, 2); assert.equal(liveReads, 1); assert.equal(creates, 0);
+});
+
+test("approval valid at the write boundary permits exactly one transition", () => {
+  const observedAt = "2026-09-04T12:00:00.000Z";
+  const entryTime = new Date(new Date(observedAt).getTime() + PRODUCTION_ENVIRONMENT_APPROVAL.maxAgeMs - 1);
+  const writeTime = new Date(new Date(observedAt).getTime() + PRODUCTION_ENVIRONMENT_APPROVAL.maxAgeMs);
+  const value = createInitialActivationLifecyclePolicyReconciliationAuthorization({ sourceSha, liveState: state(), protectedEnvironmentApprovalEvidence: approval(observedAt), desired, now: entryTime });
+  let live = state(); let clockReads = 0; let creates = 0;
+  const result = executeInitialActivationLifecyclePolicyReconciliation({ authorization: value, sourceSha, desired, now: () => [entryTime, writeTime][clockReads++], readLiveState: () => live, createPolicyVersion: () => { creates += 1; live = state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 }); return { PolicyVersion: { VersionId: "v2" } }; } });
+  assert.equal(result.status, "RECONCILED"); assert.equal(clockReads, 2); assert.equal(creates, 1);
+});
+
+test("approval freshness remains exact at the configured maximum age", () => {
   const observedAt = "2026-09-04T12:00:00.000Z";
   const boundary = new Date(new Date(observedAt).getTime() + PRODUCTION_ENVIRONMENT_APPROVAL.maxAgeMs);
   const value = createInitialActivationLifecyclePolicyReconciliationAuthorization({ sourceSha, liveState: state(), protectedEnvironmentApprovalEvidence: approval(observedAt), desired, now: boundary });
   assert.doesNotThrow(() => assertInitialActivationLifecyclePolicyReconciliationAuthorization(value, { sourceSha, now: boundary }));
-  let creates = 0;
-  assert.throws(() => executeInitialActivationLifecyclePolicyReconciliation({ authorization: value, sourceSha, desired, now: new Date(boundary.getTime() + 1), readLiveState: () => state(), createPolicyVersion: () => { creates += 1; } }), /stale/);
-  assert.equal(creates, 0);
 });
 
 test("result destination is fully preflighted before entering the mutation executor", () => {
