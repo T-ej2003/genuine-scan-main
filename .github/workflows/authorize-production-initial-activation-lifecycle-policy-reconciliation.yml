@@ -1,0 +1,45 @@
+name: Authorize production initial-activation lifecycle policy reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { required: true, type: string }
+      live_state_base64: { required: true, type: string }
+
+permissions: { actions: read, contents: read }
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.source_sha }}", fetch-depth: 0, persist-credentials: false }
+      - name: Authenticate exact protected source
+        env: { GITHUB_TOKEN: "${{ github.token }}", SOURCE_SHA: "${{ inputs.source_sha }}" }
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = T-ej2003/genuine-scan-main
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Produce exact independently approved authorization
+        env:
+          GITHUB_TOKEN: "${{ github.token }}"
+          SOURCE_SHA: "${{ inputs.source_sha }}"
+          LIVE_STATE_BASE64: "${{ inputs.live_state_base64 }}"
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/initial-activation-policy-reconciliation"; install -d -m 700 "$d"
+          printf '%s' "$LIVE_STATE_BASE64" | base64 --decode > "$d/live-state.json"; chmod 600 "$d/live-state.json"
+          node scripts/aws/production-github-environment-approval.mjs --output "$d/environment-approval.json" --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+          node scripts/aws/authorize-production-initial-activation-lifecycle-policy-reconciliation.mjs --source-sha "$SOURCE_SHA" --live-state "$d/live-state.json" --environment-approval "$d/environment-approval.json" --output "$d/authorization.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-initial-activation-lifecycle-policy-reconciliation-authorization
+          path: "${{ runner.temp }}/initial-activation-policy-reconciliation/authorization.json"
+          if-no-files-found: error
+          retention-days: 90

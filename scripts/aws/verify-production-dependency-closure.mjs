@@ -92,11 +92,19 @@ const CALLS = Object.freeze([
   ["scripts/aws/production-root-attestation-key.mjs", "kms:ListResourceTags", "release-root-attestation-read-key-tags", [ROOT_ATTESTATION_KEY]],
   ["scripts/aws/recover-production-backend-health.mjs", "kms:DescribeKey", "manifest-refresh-stage-a-storage-approval-key-describe", [RUNTIME_KMS_KEY]],
   ["scripts/aws/recover-production-backend-health.mjs", "kms:GetKeyPolicy", "manifest-refresh-stage-a-storage-approval-key-policy", [RUNTIME_KMS_KEY]],
+  ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "sts:GetCallerIdentity", "initial-activation-policy-reconciliation-root-identify", ["*"], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "iam:GetPolicy", "initial-activation-policy-reconciliation-root-read-policy", ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "iam:GetPolicyVersion", "initial-activation-policy-reconciliation-root-read-policy-version", ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "iam:ListPolicyVersions", "initial-activation-policy-reconciliation-root-list-policy-versions", ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "iam:GetRole", "initial-activation-policy-reconciliation-root-read-release-role", ["arn:aws:iam::368992683803:role/mscqr-production-release-deployer"], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "iam:ListAttachedRolePolicies", "initial-activation-policy-reconciliation-root-read-policy-attachment", ["arn:aws:iam::368992683803:role/mscqr-production-release-deployer"], "ROOT_OPERATOR"],
+  ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "iam:CreatePolicyVersion", "initial-activation-policy-reconciliation-root-create-policy-version", ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"], "ROOT_OPERATOR"],
 ].map(([sourceFile, action, capabilityId, resources, identity = "RELEASE_DEPLOYER", sourceFunction]) => Object.freeze({ sourceFile, action, capabilityId, identity, resources: Object.freeze(resources), ...(sourceFunction ? { sourceFunction } : {}) })));
 const stageARootVerifierCapability = (capabilityId) => ["release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"].includes(capabilityId);
 
 const STAGE_A_RECOVERY_MODE = "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY";
 const STAGE_A_RECONCILIATION_MODE = "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION";
+const INITIAL_ACTIVATION_POLICY_RECONCILIATION_MODE = "INITIAL_ACTIVATION_POLICY_RECONCILIATION";
 const STAGE_A_CAPABILITY_MODES = Object.freeze({
   "stage-a-artifacts-recovery-root-identify": [STAGE_A_RECOVERY_MODE],
   "stage-a-artifacts-recovery-root-read-versioning": [STAGE_A_RECOVERY_MODE],
@@ -130,6 +138,7 @@ const STAGE_A_MUTATING_CAPABILITIES = new Set(["stage-a-artifacts-recovery-root-
 const stageACapabilitiesFor = (mode) => Object.entries(STAGE_A_CAPABILITY_MODES).filter(([, modes]) => modes.includes(mode)).map(([id]) => id);
 
 const MODE_CAPABILITIES = Object.freeze({
+  [INITIAL_ACTIVATION_POLICY_RECONCILIATION_MODE]: ["initial-activation-policy-reconciliation-root-identify", "initial-activation-policy-reconciliation-root-read-policy", "initial-activation-policy-reconciliation-root-read-policy-version", "initial-activation-policy-reconciliation-root-list-policy-versions", "initial-activation-policy-reconciliation-root-read-release-role", "initial-activation-policy-reconciliation-root-read-policy-attachment", "initial-activation-policy-reconciliation-root-create-policy-version"],
   NORMAL: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-runtime-repository-policy", "normal-activation-release-describe-candidate", "normal-activation-release-describe-service", "normal-activation-release-list-tasks", "normal-activation-release-describe-tasks", "normal-activation-release-update-service"],
   BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-describe-repositories", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-backend-health-recovery-list-service-deployments", "manifest-backend-health-recovery-describe-service-deployments", "manifest-backend-health-recovery-describe-service-revisions", "manifest-artifact-signing-bootstrap-describe-secret", "manifest-artifact-signing-bootstrap-get-secret-value", "manifest-backend-health-recovery-runtime-get-role", "manifest-backend-health-recovery-runtime-list-inline", "manifest-backend-health-recovery-runtime-get-inline", "manifest-backend-health-recovery-runtime-list-attached", "manifest-backend-health-recovery-runtime-get-managed", "manifest-backend-health-recovery-runtime-get-managed-version", "manifest-backend-health-recovery-runtime-describe-secrets", "manifest-backend-health-recovery-runtime-get-secret-values", "manifest-backend-health-recovery-runtime-list-secret-versions", "manifest-backend-health-recovery-runtime-secret-resource-policy", "manifest-backend-health-recovery-runtime-repository-policy", "manifest-refresh-stage-a-provider-log-groups", "manifest-refresh-stage-a-storage-approval-key-describe", "manifest-refresh-stage-a-storage-approval-key-policy", "release-verify-signature", "manifest-backend-health-recovery-register-legacy-task-definition", "manifest-backend-health-recovery-update-service", "release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"],
   [STAGE_A_RECOVERY_MODE]: stageACapabilitiesFor(STAGE_A_RECOVERY_MODE),
@@ -248,6 +257,7 @@ export function buildProductionDependencyClosure() {
       BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: "signed candidate-derived closure is re-read before RegisterTaskDefinition and before UpdateService",
       STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY: "the governed P0-to-P2 production-artifacts recovery uses its exact root/release journal, policy, lock, and attestation boundaries",
       STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION: "the independently authorized exact refresh-only plan uses its exact release journal, live-policy read, Stage-A state object, and canonical outer lock boundary",
+      INITIAL_ACTIVATION_POLICY_RECONCILIATION: "the independently approved root-operator reconciliation reads and atomically publishes only the exact InitialActivationLifecycle managed-policy version",
       ROTATION_OVERLAP: "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
       ROTATION_CLEANUP: "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
       ROLLBACK_RECONCILIATION: "rollback viability uses immutable image/resource identity and performs no candidate registration",
@@ -289,7 +299,8 @@ export function assertChangedAwsCallClosure(scanned, graph) {
       ? [...stageAModes, ...(stageARootVerifierCapability(contract.capabilityId) ? ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"] : [])]
       : contract.sourceFile.endsWith("deploy-ecs-service.sh")
       ? ["NORMAL", "ROTATION_OVERLAP", "ROTATION_CLEANUP"]
-      : contract.sourceFile.endsWith("production-normal-backend-activation.mjs") ? ["NORMAL"] : ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"];
+      : contract.sourceFile.endsWith("production-normal-backend-activation.mjs") ? ["NORMAL"]
+        : contract.sourceFile.endsWith("run-production-initial-activation-lifecycle-policy-reconciliation.mjs") ? [INITIAL_ACTIVATION_POLICY_RECONCILIATION_MODE] : ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"];
     return { ...contract, reachableMode, executionPrincipal: contract.identity, sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true, administratorPreflightPresent: true, runtimePreflightPresent: true, negativeTestPresent: true };
   });
 }

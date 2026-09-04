@@ -37,7 +37,7 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length); // 42 reviewed baseline calls plus the exact Stage-A recovery graph above
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 7); // reviewed baseline calls plus exact Stage-A and target-scoped IAM reconciliation calls
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("stage-a-artifacts-recovery-release-lock-")).map(({ action, resources, identity }) => [action, resources, identity]), [
     ["s3:PutObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"], "RELEASE_DEPLOYER"],
     ["s3:DeleteObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"], "RELEASE_DEPLOYER"],
@@ -81,7 +81,7 @@ test("complete production dependency closure is exact across modes and failure p
   assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(Object.keys(report.modes)));
   for (const { capabilityId, reachableMode } of report.newAwsCalls) for (const mode of reachableMode) assert.notEqual(report.modes[mode], undefined, `${capabilityId} is reachable from undeclared ${mode}`);
   assert.equal(report.runtimeDependencies.some(({ id }) => id === "ecs-final-candidate-runtime-consumability"), true);
-  assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(["NORMAL", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", "ROTATION_OVERLAP", "ROTATION_CLEANUP", "ROLLBACK_RECONCILIATION", "POST_DEPLOY_VERIFY"]));
+  assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(["NORMAL", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", "INITIAL_ACTIVATION_POLICY_RECONCILIATION", "ROTATION_OVERLAP", "ROTATION_CLEANUP", "ROLLBACK_RECONCILIATION", "POST_DEPLOY_VERIFY"]));
   assert.equal(report.newAwsCalls.filter(({ capabilityId, reachableMode }) => capabilityId?.startsWith("stage-a-artifacts-recovery-") && !reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY")).length, 0);
   assert.equal(report.newAwsCalls.filter(({ capabilityId, reachableMode }) => (capabilityId?.startsWith("stage-a-artifacts-journal-") || capabilityId?.startsWith("stage-a-artifacts-reconciliation-")) && !reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION")).length, 0);
   const rootVerifierModes = report.newAwsCalls.filter(({ capabilityId }) => ["release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"].includes(capabilityId));

@@ -1310,6 +1310,139 @@
       "administratorPreflightPresent": true,
       "runtimePreflightPresent": true,
       "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "initial-activation-policy-reconciliation-root-identify",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "INITIAL_ACTIVATION_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "action": "iam:GetPolicy",
+      "capabilityId": "initial-activation-policy-reconciliation-root-read-policy",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "reachableMode": [
+        "INITIAL_ACTIVATION_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "action": "iam:GetPolicyVersion",
+      "capabilityId": "initial-activation-policy-reconciliation-root-read-policy-version",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "reachableMode": [
+        "INITIAL_ACTIVATION_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "action": "iam:ListPolicyVersions",
+      "capabilityId": "initial-activation-policy-reconciliation-root-list-policy-versions",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "reachableMode": [
+        "INITIAL_ACTIVATION_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "action": "iam:GetRole",
+      "capabilityId": "initial-activation-policy-reconciliation-root-read-release-role",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "reachableMode": [
+        "INITIAL_ACTIVATION_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "action": "iam:ListAttachedRolePolicies",
+      "capabilityId": "initial-activation-policy-reconciliation-root-read-policy-attachment",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "reachableMode": [
+        "INITIAL_ACTIVATION_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "action": "iam:CreatePolicyVersion",
+      "capabilityId": "initial-activation-policy-reconciliation-root-create-policy-version",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "reachableMode": [
+        "INITIAL_ACTIVATION_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
     }
   ],
   "counters": {
@@ -1367,6 +1500,7 @@
     }
   ],
   "modes": {
+    "INITIAL_ACTIVATION_POLICY_RECONCILIATION": "PASS",
     "NORMAL": "PASS",
     "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME": "PASS",
     "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY": "PASS",
@@ -1381,6 +1515,7 @@
     "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME": "signed candidate-derived closure is re-read before RegisterTaskDefinition and before UpdateService",
     "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY": "the governed P0-to-P2 production-artifacts recovery uses its exact root/release journal, policy, lock, and attestation boundaries",
     "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION": "the independently authorized exact refresh-only plan uses its exact release journal, live-policy read, Stage-A state object, and canonical outer lock boundary",
+    "INITIAL_ACTIVATION_POLICY_RECONCILIATION": "the independently approved root-operator reconciliation reads and atomically publishes only the exact InitialActivationLifecycle managed-policy version",
     "ROTATION_OVERLAP": "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
     "ROTATION_CLEANUP": "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
     "ROLLBACK_RECONCILIATION": "rollback viability uses immutable image/resource identity and performs no candidate registration",
