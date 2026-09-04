@@ -214,6 +214,7 @@ test("source policy and bucket policy enforce only exact conditional lifecycle o
     "DenyOtherPrincipalsStageAProductionArtifactsReconciliationWrites",
     "DenyStageAProductionArtifactsReconciliationDeletion",
     "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
+    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationReads",
     "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
     "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
@@ -235,10 +236,13 @@ test("initial-activation policy reconciliation reservation is exact, conditional
   const prefixArn = PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn;
   const exactObjectArn = prefixArn.replace("*", `${"a".repeat(64)}.json`);
   assert.deepEqual(desired.Statement.slice(0, current.Statement.length), current.Statement);
-  assert.equal(desired.Statement.length, current.Statement.length + 5);
+  assert.equal(desired.Statement.length, current.Statement.length + 6);
   assert.equal(PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationPrefix, "production-initial-activation-lifecycle-policy-reconciliation/reservations/");
   assert.equal(prefixArn, `arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationPrefix}*`);
   assert.equal(policyDecision(desired, { action: "s3:GetObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }), "allowed");
+  for (const principalArn of [PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-rls-candidate-task"]) {
+    assert.equal(policyDecision(desired, { action: "s3:GetObject", resource: exactObjectArn, principalArn }), "explicitDeny");
+  }
   assert.equal(policyDecision(desired, { action: "s3:PutObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn, ifNoneMatch: "*" }), "allowed");
   assert.equal(policyDecision(desired, { action: "s3:PutObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }), "explicitDeny");
   assert.equal(policyDecision(desired, { action: "s3:PutObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn, ifNoneMatch: "*" }), "explicitDeny");

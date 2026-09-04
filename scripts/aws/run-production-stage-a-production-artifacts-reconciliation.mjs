@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
-import { assertStageAProductionArtifactsReconciliationPrepareEvidence, buildStageAProductionArtifactsBucketPolicy, createStageAProductionArtifactsReconciliationAuthorization as createCoreAuthorization, createTerraformStageAAdapter, prepareStageAProductionArtifactsStateReconciliation, runStageAProductionArtifactsStateReconciliation, stageAProductionArtifactsPolicySha256 } from "./production-stage-a-control-plane.mjs";
+import { assertStageAProductionArtifactsReconciliationPrepareEvidence, createStageAProductionArtifactsReconciliationAuthorization as createCoreAuthorization, createTerraformStageAAdapter, prepareStageAProductionArtifactsStateReconciliation, resolveStageAProductionArtifactsBucketPolicyTransition, runStageAProductionArtifactsStateReconciliation, stageAProductionArtifactsPolicySha256 } from "./production-stage-a-control-plane.mjs";
 import { createStageATerraformBackendLock, STAGE_A_TERRAFORM_BACKEND } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 import { assertStageATerraformVariables, STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS } from "./recover-production-green-stage-a-root-drop-orphan.mjs";
 import { buildRecoveryTerraformEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
@@ -72,7 +72,8 @@ const authenticateRecovery = async ({ sourceSha, recoverySourceSha = sourceSha, 
   }
   assertStageAProductionArtifactsReconciliationSourceCompatibility({ sourceSha: source.head, recoverySourceSha, recoveryAuthorization: recovery.authorization, recoveryCompletion: completionEvidence, continuationRebindAuthorization, proveDescendant, readGovernedExecutableManifestSha256 });
   const livePolicy = await adapter.readProductionArtifactsPolicy();
-  if (stageAProductionArtifactsPolicySha256(livePolicy) !== completionEvidence.desiredPolicySha256 || stageAProductionArtifactsPolicySha256(livePolicy) !== stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A production-artifacts reconciliation requires the exact live desired policy.");
+  const desiredPolicy = resolveStageAProductionArtifactsBucketPolicyTransition(completionEvidence).desired;
+  if (stageAProductionArtifactsPolicySha256(livePolicy) !== completionEvidence.desiredPolicySha256 || stageAProductionArtifactsPolicySha256(livePolicy) !== stageAProductionArtifactsPolicySha256(desiredPolicy)) throw new Error("Stage A production-artifacts reconciliation requires the exact live desired policy.");
   const verifyRecoveryCompletion = (completion) => {
     if (completion?.completionSha256 !== completionEvidence.completion.completionSha256) return false;
     assertStageAProductionArtifactsRecoveryCompletionEvidence(completionEvidence, { authorization: recovery.authorization, verify: verifySignature });

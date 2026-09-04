@@ -240,8 +240,8 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
   assert.equal(exactUpdateValidation.recoveryRequired, true);
   assert.equal(exactUpdateValidation.executionDisposition, "RECOVERY_REQUIRED");
   const intentionalReservationUpdate = assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicy() }) }), inputs);
-  assert.equal(intentionalReservationUpdate.recoveryRequired, false);
-  assert.equal(intentionalReservationUpdate.executionDisposition, "ORDINARY_STAGE_A");
+  assert.equal(intentionalReservationUpdate.recoveryRequired, true);
+  assert.equal(intentionalReservationUpdate.executionDisposition, "RECOVERY_REQUIRED");
   assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: { ...exactUpdate, address: "aws_s3_bucket_policy.unrelated" } }), inputs));
   for (const actions of [["update", "create"], ["replace"], ["delete"]]) {
     assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions, beforePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor() }) }), inputs));
@@ -299,6 +299,7 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
   }
   for (const sid of [
     "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
+    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationReads",
     "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
     "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
@@ -332,14 +333,16 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
 
 test("Stage A refuses to apply the self-denied bucket-policy transition through the release deployer", async () => {
   const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
-  const saved = { sourceSha: "a".repeat(40), savedPlanSha256: "b".repeat(64), evidenceRef: "terraform-plan:test", evidenceSha256: "b".repeat(64), plan: stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor() }) }) };
-  let applyCalls = 0;
-  await assert.rejects(() => runStageAControlPlane({
-    adapter: { createSavedPlan: async () => saved, applySavedPlan: async () => { applyCalls += 1; }, describeIngress: async () => ({ present: true }) },
-    ...inputs,
-    sourceSha: saved.sourceSha,
-  }), /separately governed recovery transition/);
-  assert.equal(applyCalls, 0);
+  for (const beforePolicy of [buildStageAProductionArtifactsBucketPolicyPredecessor(), buildStageAProductionArtifactsBucketPolicy()]) {
+    const saved = { sourceSha: "a".repeat(40), savedPlanSha256: "b".repeat(64), evidenceRef: "terraform-plan:test", evidenceSha256: "b".repeat(64), plan: stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy }) }) };
+    let applyCalls = 0;
+    await assert.rejects(() => runStageAControlPlane({
+      adapter: { createSavedPlan: async () => saved, applySavedPlan: async () => { applyCalls += 1; }, describeIngress: async () => ({ present: true }) },
+      ...inputs,
+      sourceSha: saved.sourceSha,
+    }), /separately governed recovery transition/);
+    assert.equal(applyCalls, 0);
+  }
 });
 
 test("Stage A rejects destructive security-group transitions", () => {

@@ -954,7 +954,7 @@
         "sid": "PublishExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "d2fdc2f002ad5b9bdd064317d8d891a7e3eeee52bd3fa0d7d5a06bc4ec97392b"
+        "expectedPolicySha256": "30db7e27c6b58a1bba7357a78ea8ebc85733518aa2c132eea2e79843e3d2c2aa"
       },
       "required": true,
       "mutation": true
