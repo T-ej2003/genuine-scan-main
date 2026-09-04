@@ -479,7 +479,8 @@ test("recovery journal retention rejects overlapping current-object expiration a
     assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Disabled", Prefix: "", ...transition }] }));
     assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Enabled", Prefix: "some-other-prefix/", ...transition }] }));
   }
-  assert.throws(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Enabled", Prefix: "", NoncurrentVersionExpiration: { NoncurrentDays: 1 }, NoncurrentVersionTransitions: [{ NoncurrentDays: 1, StorageClass: "GLACIER" }] }] }), /protected immutable record unavailable/);
+  assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Enabled", Prefix: "", NoncurrentVersionExpiration: { NoncurrentDays: 1 }, NoncurrentVersionTransitions: [{ NoncurrentDays: 1, StorageClass: "GLACIER" }] }] }));
+  assert.throws(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Enabled", Prefix: "", Expiration: { Days: 1 }, NoncurrentVersionExpiration: { NoncurrentDays: 1 } }] }), /protected immutable record unavailable/);
 });
 
 test("reservation-affecting lifecycle fails before the governed bucket-policy write", async () => {
