@@ -101,17 +101,17 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
   const authenticated = resolveAuthorization({ workflowRunId, workflowRunAttempt, sourceSha: recoverySourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, readGovernedExecutableManifestSha256 }); const authorization = authenticated.authorization;
   const transition = resolveStageAProductionArtifactsBucketPolicyTransition(authorization);
   assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: authenticatedSourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256: authorization?.governedExecutableManifestSha256, readGovernedExecutableManifestSha256, ...(readProtectedSource === readStageBProtectedMainCheckout ? { readContinuationChangedFiles } : {}) });
+  const historicalTransition = (() => { try { return stageAProductionArtifactsPolicySemanticallyEqual(transition.predecessor, buildStageAProductionArtifactsBucketPolicyPredecessor()) && stageAProductionArtifactsPolicySemanticallyEqual(transition.desired, buildStageAProductionArtifactsBucketPolicy()); } catch { return false; } })();
+  if (historicalResume && historicalTransition) throw new Error("Stage A historical A-to-B recovery is not supported from a descendant source; use the authenticated completion path.");
   if (!exactRoot(awsJson(rootRun, ["sts", "get-caller-identity"])) || !exactRelease(awsJson(releaseRun, ["sts", "get-caller-identity"]))) throw new Error("Stage A production-artifacts recovery caller identity is outside the exact root/release split.");
   assertJournalRetention(rootRun);
   const samePolicy = (left, right) => { try { return stageAProductionArtifactsPolicySemanticallyEqual(left, right); } catch { return false; } };
   const before = readPolicy(releaseRun); const predecessorLive = samePolicy(before, transition.predecessor); const desiredLive = samePolicy(before, transition.desired);
   if (!predecessorLive && !desiredLive) throw new Error("Stage A production-artifacts live policy is neither the exact predecessor nor desired policy.");
-  const historicalTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyPredecessor()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicy());
   const reservationTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicy()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation());
   if (!historicalTransition && !reservationTransition) throw new Error("Stage A production-artifacts recovery transition is unsupported.");
-  if (historicalTransition && typeof rootRecoveryJournal.writeRecoveryCompletion !== "function") throw new Error("Stage A historical recovery requires the root-backed journal writer.");
   const attemptJournal = historicalTransition ? rootRecoveryJournal : recoveryJournal;
-  const completionJournal = historicalTransition ? rootRecoveryJournal : journal;
+  const completionJournal = journal;
   const decode = (record, label) => { if (!record) return null; try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(record.bytes)); } catch { throw new Error(`${label} is malformed.`); } };
   const readCompletion = (reader) => { try { return reader.readRecoveryCompletion(authorization.authorizationSha256); } catch (error) {
     if (!desiredLive || reader !== journal || !/AccessDenied|403/i.test(`${error.message || ""}\n${error.stderr || ""}`)) throw error;

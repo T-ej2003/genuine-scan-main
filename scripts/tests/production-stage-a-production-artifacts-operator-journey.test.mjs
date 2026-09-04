@@ -162,7 +162,7 @@ test("real Stage-A recovery and reconciliation runner composition reaches one st
   await assert.rejects(() => runStageAProductionArtifactsReconciliation({ sourceSha, recoveryWorkflowRunId: "101", recoveryWorkflowRunAttempt: "1", reconciliationWorkflowRunId: "102", reconciliationWorkflowRunAttempt: "1", releaseRun, adapter, readProtectedSource: source, verifySignature: () => false, resolveAuthorization: ({ operation }) => operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? recoveryArtifact : { authorization: reconciliationAuthorization }, journal: { readRecoveryCompletion: () => ({ bytes: persistedCompletion }), readReservation: () => null, readPostApplyEvidence: () => null, readResult: () => null, reserve: () => { throw new Error("must not reserve"); }, writePostApplyEvidence: () => ({}), finalize: () => {} } }), /authorization|signature/);
 });
 
-test("historical A-to-B recovery selects the root-backed journal", async () => {
+test("historical A-to-B recovery selects root attempt and release completion journals", async () => {
   let livePolicy = buildStageAProductionArtifactsBucketPolicyPredecessor(); let policyWrites = 0; let rootAttemptWrites = 0; let releaseAttemptWrites = 0; let rootCompletionWrites = 0; let releaseCompletionWrites = 0; let attemptBytes; let completionBytes;
   const authorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "103"), verificationRef: "historical-root-writer" });
   const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : args[1] === "get-bucket-policy" ? JSON.stringify({ Policy: JSON.stringify(livePolicy) }) : (() => { throw new Error(`unexpected release ${args[1]}`); })();
@@ -173,10 +173,17 @@ test("historical A-to-B recovery selects the root-backed journal", async () => {
     if (args[1] === "put-bucket-policy") { policyWrites += 1; livePolicy = buildStageAProductionArtifactsBucketPolicy(); return ""; }
     throw new Error(`unexpected root ${args[1]}`);
   };
-  const releaseJournal = { readRecoveryAttempt: () => { releaseAttemptWrites += 1; throw new Error("release journal is not permitted for A-to-B"); }, readRecoveryCompletion: () => null, writeRecoveryAttempt: () => { releaseAttemptWrites += 1; throw new Error("release journal is not permitted for A-to-B"); }, writeRecoveryCompletion: () => { releaseCompletionWrites += 1; throw new Error("release journal is not permitted for A-to-B"); } };
-  const rootJournal = { readRecoveryAttempt: () => attemptBytes && { bytes: attemptBytes }, readRecoveryCompletion: () => completionBytes && { bytes: completionBytes }, writeRecoveryAttempt: ({ bytes }) => { rootAttemptWrites += 1; attemptBytes = bytes; return { key: "attempt" }; }, writeRecoveryCompletion: ({ bytes }) => { rootCompletionWrites += 1; completionBytes = bytes; return { key: "completion" }; } };
+  const releaseJournal = { readRecoveryAttempt: () => { releaseAttemptWrites += 1; throw new Error("release journal is not permitted for A-to-B attempt"); }, readRecoveryCompletion: () => completionBytes && { bytes: completionBytes }, writeRecoveryAttempt: () => { releaseAttemptWrites += 1; throw new Error("release journal is not permitted for A-to-B attempt"); }, writeRecoveryCompletion: ({ bytes }) => { releaseCompletionWrites += 1; completionBytes = bytes; return { key: "completion" }; } };
+  const rootJournal = { readRecoveryAttempt: () => attemptBytes && { bytes: attemptBytes }, readRecoveryCompletion: () => null, writeRecoveryAttempt: ({ bytes }) => { rootAttemptWrites += 1; attemptBytes = bytes; return { key: "attempt" }; }, writeRecoveryCompletion: () => { rootCompletionWrites += 1; throw new Error("root journal is not permitted for A-to-B completion"); } };
   const result = await runStageAProductionArtifactsRecovery({ sourceSha, workflowRunId: "103", workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => state, terraformStateLock, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal: releaseJournal, recoveryJournal: releaseJournal, rootRecoveryJournal: rootJournal, sign: () => Buffer.from("root-signature").toString("base64"), verify: () => true });
-  assert.equal(result.putBucketPolicyCount, 1); assert.equal(policyWrites, 1); assert.equal(rootAttemptWrites, 1); assert.equal(rootCompletionWrites, 1); assert.equal(releaseAttemptWrites, 0); assert.equal(releaseCompletionWrites, 0);
+  assert.equal(result.putBucketPolicyCount, 1); assert.equal(policyWrites, 1); assert.equal(rootAttemptWrites, 1); assert.equal(rootCompletionWrites, 0); assert.equal(releaseAttemptWrites, 0); assert.equal(releaseCompletionWrites, 1);
+});
+
+test("historical A-to-B descendant execution is rejected after source compatibility", async () => {
+  const recoverySourceSha = "a".repeat(40); const descendantSourceSha = "b".repeat(40);
+  const authorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha: recoverySourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "104", recoverySourceSha), verificationRef: "historical-descendant" });
+  const rejectAws = () => { throw new Error("AWS must not be reached"); };
+  await assert.rejects(() => runStageAProductionArtifactsRecovery({ sourceSha: descendantSourceSha, recoverySourceSha, workflowRunId: "104", workflowRunAttempt: "1", rootRun: rejectAws, releaseRun: rejectAws, readStateIdentity: async () => state, terraformStateLock, readProtectedSource: () => ({ headSha: descendantSourceSha }), proveDescendant: () => true, readGovernedExecutableManifestSha256: () => governedExecutableManifestSha256, resolveAuthorization: () => ({ authorization }), journal: { readRecoveryCompletion: () => null, writeRecoveryCompletion: () => {} }, recoveryJournal: { readRecoveryAttempt: () => null, writeRecoveryAttempt: () => {} }, rootRecoveryJournal: { readRecoveryCompletion: () => null }, sign: () => "signature", verify: () => true }), /not supported from a descendant source/);
 });
 
 test("reconciliation resumes completion-only after apply succeeds but terminal publication fails", async () => {
@@ -249,7 +256,7 @@ test("recovery resumes exact desired policy only from its signed immutable attem
     if (args[1] === "put-bucket-policy") { livePolicy = buildStageAProductionArtifactsBucketPolicy(); puts += 1; return ""; }
     throw new Error(`unexpected root ${args[1]}`);
   };
-  const recoveryJournal = { readRecoveryAttempt: () => attemptBytes && { bytes: attemptBytes }, readRecoveryCompletion: () => { rootCompletionReads += 1; return completionBytes && { bytes: completionBytes }; }, writeRecoveryAttempt: ({ bytes }) => { attemptBytes = bytes; return { key: "attempt" }; }, writeRecoveryCompletion: ({ bytes }) => { completionBytes = bytes; if (loseCompletionResponse) { loseCompletionResponse = false; throw new Error("injected after completion write"); } return { key: "completion", sha256: "c".repeat(64) }; } };
+  const recoveryJournal = { readRecoveryAttempt: () => attemptBytes && { bytes: attemptBytes }, readRecoveryCompletion: () => { rootCompletionReads += 1; return null; }, writeRecoveryAttempt: ({ bytes }) => { attemptBytes = bytes; return { key: "attempt" }; }, writeRecoveryCompletion: () => { throw new Error("root journal must not write A-to-B completion"); } };
   const journal = { readRecoveryCompletion: () => { releaseCompletionReads += 1; return completionBytes && { bytes: completionBytes }; }, writeRecoveryCompletion: ({ bytes }) => { completionBytes = bytes; if (loseCompletionResponse) { loseCompletionResponse = false; throw new Error("injected after completion write"); } return { key: "completion", sha256: "c".repeat(64) }; } };
   const countedLock = { acquire: async () => { lockAcquires += 1; }, release: async () => { lockReleases += 1; } };
   const input = { sourceSha, workflowRunId: "201", workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => state, terraformStateLock: countedLock, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal, recoveryJournal, verify: () => true };
@@ -258,18 +265,12 @@ test("recovery resumes exact desired policy only from its signed immutable attem
   assert.equal(lockAcquires, 1); assert.equal(lockReleases, 1);
   assert.equal(rootCompletionReads, 1); assert.equal(releaseCompletionReads, 0);
   for (const entry of livePolicy.Statement) if (Array.isArray(entry.Resource) && entry.Resource.length === 1) entry.Resource = entry.Resource[0];
-  const successorSourceSha = "b".repeat(40);
-  const successorInput = { ...input, sourceSha: successorSourceSha, recoverySourceSha: sourceSha, readProtectedSource: () => ({ headSha: successorSourceSha }), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === successorSourceSha, readGovernedExecutableManifestSha256: unchangedGovernedSource, resolveAuthorization: ({ sourceSha: resolvedSourceSha }) => { assert.equal(resolvedSourceSha, sourceSha); return { authorization }; } };
-  await assert.rejects(() => runStageAProductionArtifactsRecovery({ ...successorInput, readGovernedExecutableManifestSha256: (sha) => sha === sourceSha ? governedExecutableManifestSha256 : "8".repeat(64), sign: () => { throw new Error("must not sign"); } }), /governed executable source/); assert.equal(puts, 1);
-  await assert.rejects(() => runStageAProductionArtifactsRecovery({ ...successorInput, proveDescendant: () => false, sign: () => Buffer.from("signature").toString("base64") }), /descendant/);
-  await assert.rejects(() => runStageAProductionArtifactsRecovery({ ...successorInput, verify: () => false, sign: () => Buffer.from("signature").toString("base64") }), /signature/);
-  await assert.rejects(() => runStageAProductionArtifactsRecovery({ ...successorInput, readStateIdentity: async () => ({ ...state, serial: state.serial + 1 }), sign: () => Buffer.from("signature").toString("base64") }), /state identity|authorization binding/);
-  const resumed = await runStageAProductionArtifactsRecovery({ ...successorInput, sign: () => Buffer.from("signature").toString("base64") });
+  const resumed = await runStageAProductionArtifactsRecovery({ ...input, sign: () => Buffer.from("signature").toString("base64") });
   assert.equal(resumed.resumed, true); assert.equal(resumed.putBucketPolicyCount, 0); assert.equal(puts, 1);
-  assert.equal(lockAcquires, 3); assert.equal(lockReleases, 3);
+  assert.equal(lockAcquires, 2); assert.equal(lockReleases, 2);
   const complete = await runStageAProductionArtifactsRecovery({ ...input, sign: () => { throw new Error("must not sign"); } });
   assert.equal(complete.alreadyComplete, true); assert.equal(complete.putBucketPolicyCount, 0); assert.equal(puts, 1);
-  assert.equal(lockAcquires, 3); assert.equal(lockReleases, 3);
+  assert.equal(lockAcquires, 2); assert.equal(lockReleases, 2);
   completionBytes = undefined; attemptBytes = undefined;
   await assert.rejects(() => runStageAProductionArtifactsRecovery({ ...input, sign: () => Buffer.from("signature").toString("base64") }), /lacks the immutable signed pre-write attempt/);
   assert.equal(puts, 1);
@@ -363,8 +364,9 @@ test("post-write continuation holds the existing lock through state CAS and conc
   const concurrent = await runStageAProductionArtifactsRecovery({ ...base, journal: concurrentJournal, readStateIdentity: async () => { assert.equal(locked, true); assert.equal(tryStateMutation(), false); stateValue = { ...state }; completionBytes = Buffer.from(JSON.stringify(completion)); return { ...stateValue }; } });
   assert.equal(concurrent.alreadyComplete, true); assert.equal(lockAcquires, 1); assert.equal(lockReleases, 1); assert.equal(completionWrites, 0);
   completionBytes = undefined; lockAcquires = 0; lockReleases = 0; completionWrites = 0;
-  const collision = await runStageAProductionArtifactsRecovery({ ...base, journal, rootRecoveryJournal: { ...recoveryJournal, writeRecoveryCompletion: () => { completionBytes = Buffer.from(JSON.stringify(completion)); throw new Error("conditional collision"); } }, readStateIdentity: async () => ({ ...state }) });
-  assert.equal(collision.alreadyComplete, true); assert.equal(lockAcquires, 1); assert.equal(lockReleases, 1); assert.equal(completionWrites, 0);
+  const collisionJournal = { ...journal, writeRecoveryCompletion: () => { completionWrites += 1; completionBytes = Buffer.from(JSON.stringify(completion)); throw new Error("conditional collision"); } };
+  const collision = await runStageAProductionArtifactsRecovery({ ...base, journal: collisionJournal, readStateIdentity: async () => ({ ...state }) });
+  assert.equal(collision.alreadyComplete, true); assert.equal(lockAcquires, 1); assert.equal(lockReleases, 1); assert.equal(completionWrites, 1);
   const wrongAuthorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState: { ...state, serial: 36, stateSha256: "e".repeat(64) }, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "222"), verificationRef: "wrong-completion" });
   const wrongAuthorizationCompletion = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization: wrongAuthorization, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicy(), sign: () => Buffer.from("signature").toString("base64") });
   for (const [label, concurrentBytes] of [["malformed", Buffer.from("{}")], ["wrong authorization", Buffer.from(JSON.stringify(wrongAuthorizationCompletion))], ["wrong state", Buffer.from(JSON.stringify(wrongAuthorizationCompletion))]]) {

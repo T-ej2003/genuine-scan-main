@@ -117,7 +117,7 @@ test("Stage A production-artifacts mode closure is tuple-exact and omission-proo
   }
   const recoverySource = fs.readFileSync("scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "utf8");
   assert.match(recoverySource, /const attemptJournal = historicalTransition \? rootRecoveryJournal : recoveryJournal/);
-  assert.match(recoverySource, /const completionJournal = historicalTransition \? rootRecoveryJournal : journal/);
+  assert.match(recoverySource, /const completionJournal = journal/);
   assert.match(recoverySource, /existingCompletionReader = predecessorLive \? rootRecoveryJournal : completionJournal/);
   assert.match(recoverySource, /recoveryJournal: createStageAProductionArtifactsJournal\(\{ run: releaseRun \}\)/);
   assert.match(recoverySource, /rootRecoveryJournal: createStageAProductionArtifactsJournal\(\{ run: rootRun \}\)/);
