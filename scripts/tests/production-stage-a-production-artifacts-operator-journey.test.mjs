@@ -8,7 +8,7 @@ import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APP
 import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, createStageAProductionArtifactsReconciliationPrepareEvidence, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
 import { createStageAProductionArtifactsRecoveryAuthorization as createRecoveryAuthorization, createStageAProductionArtifactsRecoveryAttemptEvidence, createStageAProductionArtifactsRecoveryCompletionEvidence, createStageAProductionArtifactsContinuationRebindAuthorization, createStageAProductionArtifactsReconciliationAuthorization, STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_OPERATION, STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_WORKFLOW_REF, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
 import { assertStageAProductionArtifactsJournalRetention, runStageAProductionArtifactsRecovery } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
-import { createStageAProductionArtifactsJournalResult, createStageAProductionArtifactsPostApplyEvidence, createStageAProductionArtifactsReservation } from "../aws/production-stage-a-production-artifacts-journal.mjs";
+import { createStageAProductionArtifactsJournalResult, createStageAProductionArtifactsPostApplyEvidence, createStageAProductionArtifactsReservation, STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "../aws/production-stage-a-production-artifacts-journal.mjs";
 import { assertStageAProductionArtifactsReconciliationPrivateArtifactPath, runStageAProductionArtifactsReconciliation as runReconciliation, runStageAProductionArtifactsReconciliationCli } from "../aws/run-production-stage-a-production-artifacts-reconciliation.mjs";
 
 const sourceSha = "a".repeat(40); const lineage = "02afb75a-f902-ab8a-f4c1-751d4aef7837"; const stateSha256 = "b".repeat(64);
@@ -49,19 +49,62 @@ test("the production CLI composes prepare then execute without re-planning", asy
   const completionEvidence = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization: recoveryAuthorization, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicy(), sign: () => "c2lnbmF0dXJl" });
   const planBytes = Buffer.from("prepared-refresh-only-plan"); const savedPlanSha256 = createHash("sha256").update(planBytes).digest("hex"); const saved = { sourceSha, refreshOnly: true, savedPlanSha256, savedPlanByteLength: planBytes.length, planPath: refreshOnlyPlanPath, preState: state, terraformVersion: "1.15.8", plan: refreshPlan(buildStageAProductionArtifactsBucketPolicy()) };
   const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : args[1] === "get-bucket-policy" ? JSON.stringify({ Policy: JSON.stringify(buildStageAProductionArtifactsBucketPolicy()) }) : (() => { throw new Error(`unexpected release ${args[1]}`); })();
+  const rootRun = (args) => args[1] === "get-caller-identity" ? rootIdentity : (() => { throw new Error(`unexpected root ${args[1]}`); })();
   const adapter = { readStateIdentity: async () => ({ ...state }), readStateSnapshot: async () => stateSnapshot(state), createSavedRefreshOnlyPlan: async () => { createPlans += 1; fs.writeFileSync(refreshOnlyPlanPath, planBytes, { mode: 0o600 }); return saved; }, readSavedRefreshOnlyPlan: async () => { readPlans += 1; return saved.plan; }, applySavedRefreshOnlyPlan: async () => { applies += 1; state = { ...state, serial: 36, stateSha256: "e".repeat(64) }; }, readProductionArtifactsPolicy: async () => buildStageAProductionArtifactsBucketPolicy() };
   const journal = { readRecoveryCompletion: () => ({ bytes: Buffer.from(JSON.stringify(completionEvidence)) }), readReservation: () => null, readPostApplyEvidence: () => null, readResult: () => null, reserve: (identity) => ({ reservation: identity }), writePostApplyEvidence: () => ({}), finalize: ({ status }) => { terminal = status; } };
   let reconciliationAuthorization;
   const resolveAuthorization = ({ operation }) => operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? { authorization: recoveryAuthorization } : { authorization: reconciliationAuthorization };
-  const common = { releaseRun, adapter, terraformStateLock, journal, verifySignature: () => true, readProtectedSource: source, resolveAuthorization };
+  const common = { releaseRun, rootRun, adapter, terraformStateLock, journal, rootJournal: journal, verifySignature: () => true, readProtectedSource: source, resolveAuthorization };
   try {
     await runStageAProductionArtifactsReconciliationCli(["--production", "--prepare", "--source-sha", sourceSha, "--terraform-data-dir", terraformDataDir, "--refresh-only-plan", refreshOnlyPlanPath, "--prepare-evidence", prepareEvidencePath, "--recovery-authorization-workflow-run-id", "201", "--recovery-authorization-workflow-run-attempt", "1"], { ...common, terraformInputEnvironment: stageAVars });
     assert.equal(fs.statSync(terraformDataDir).mode & 0o777, 0o700); assert.equal(fs.statSync(refreshOnlyPlanPath).mode & 0o777, 0o600); assert.equal(fs.statSync(prepareEvidencePath).mode & 0o777, 0o600);
     const prepareEvidence = JSON.parse(fs.readFileSync(prepareEvidencePath, "utf8"));
     reconciliationAuthorization = createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, preState: state, recoveryAuthorization, recoveryCompletion: completionEvidence, prepareEvidence, savedPlanSha256, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsReconciliationWorkflowRef, "202"), verificationRef: "cli", verifyRecoveryCompletionEvidence: () => true });
-    const result = await runStageAProductionArtifactsReconciliationCli(["--production", "--execute", "--source-sha", sourceSha, "--terraform-data-dir", terraformDataDir, "--refresh-only-plan", refreshOnlyPlanPath, "--prepare-evidence", prepareEvidencePath, "--recovery-authorization-workflow-run-id", "201", "--recovery-authorization-workflow-run-attempt", "1", "--reconciliation-authorization-workflow-run-id", "202", "--reconciliation-authorization-workflow-run-attempt", "1"], { ...common, terraformInputEnvironment: stageAVars });
+    const result = await runStageAProductionArtifactsReconciliationCli(["--production", "--execute", "--source-sha", sourceSha, "--root-profile", "root", "--terraform-data-dir", terraformDataDir, "--refresh-only-plan", refreshOnlyPlanPath, "--prepare-evidence", prepareEvidencePath, "--recovery-authorization-workflow-run-id", "201", "--recovery-authorization-workflow-run-attempt", "1", "--reconciliation-authorization-workflow-run-id", "202", "--reconciliation-authorization-workflow-run-attempt", "1"], { ...common, terraformInputEnvironment: stageAVars });
     assert.equal(result.applied, true); assert.equal(createPlans, 1); assert.equal(readPlans, 1); assert.equal(applies, 1); assert.equal(terminal, "COMPLETED");
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("reconciliation uses the authenticated root exact-key reader only for release journal access denial", async () => {
+  const before = { ...state }; const after = { ...state, serial: 36, stateSha256: "e".repeat(64) }; let currentState = { ...before }; let applies = 0;
+  const recoveryAuthorization = createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState: before, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "611"), verificationRef: "root-journal" });
+  const completionEvidence = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization: recoveryAuthorization, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicy(), sign: () => "c2lnbmF0dXJl" });
+  const savedPlanSha256 = "d".repeat(64); const saved = { sourceSha, refreshOnly: true, savedPlanSha256, savedPlanByteLength: 1, planPath: "/tmp/root-journal.tfplan", preState: before, terraformVersion: "1.15.8", plan: refreshPlan(buildStageAProductionArtifactsBucketPolicy()) };
+  const prepareEvidence = createStageAProductionArtifactsReconciliationPrepareEvidence({ sourceSha, preState: before, recoveryCompletion: completionEvidence.completion, saved });
+  const reconciliationAuthorization = createStageAProductionArtifactsReconciliationAuthorization({ sourceSha, preState: before, recoveryAuthorization, recoveryCompletion: completionEvidence, prepareEvidence, savedPlanSha256, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsReconciliationWorkflowRef, "612"), verificationRef: "root-journal", verifyRecoveryCompletionEvidence: () => true });
+  const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : args[1] === "get-bucket-policy" ? JSON.stringify({ Policy: JSON.stringify(buildStageAProductionArtifactsBucketPolicy()) }) : (() => { throw new Error(`unexpected release ${args[1]}`); })();
+  const rootRun = (args) => args[1] === "get-caller-identity" ? rootIdentity : (() => { throw new Error(`unexpected root ${args[1]}`); })();
+  const identity = { operation: STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION, sourceSha, account: "368992683803", region: "eu-west-2", executionPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", authorizationSha256: reconciliationAuthorization.authorizationSha256, recoveryCompletionSha256: completionEvidence.completionEvidenceSha256, savedPlanSha256, preStateLineage: before.lineage, preStateSerial: before.serial, preStateSha256: before.stateSha256, desiredPolicySha256: completionEvidence.desiredPolicySha256 };
+  const reservation = createStageAProductionArtifactsReservation(identity);
+  const base = ({ journal, rootJournal, root = rootRun } = {}) => ({ sourceSha, recoveryWorkflowRunId: "611", recoveryWorkflowRunAttempt: "1", reconciliationWorkflowRunId: "612", reconciliationWorkflowRunAttempt: "1", releaseRun, rootRun: root, adapter: { readStateIdentity: async () => ({ ...currentState }), readStateSnapshot: async () => stateSnapshot(currentState), applySavedRefreshOnlyPlan: async () => { applies += 1; currentState = { ...after }; }, readProductionArtifactsPolicy: async () => buildStageAProductionArtifactsBucketPolicy() }, readProtectedSource: source, verifySignature: () => true, preparedEvidence: prepareEvidence, saved, resolveAuthorization: ({ operation }) => ({ authorization: operation === STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION ? recoveryAuthorization : reconciliationAuthorization }), journal, rootJournal });
+  const absent = () => null; const denied = () => { const error = new Error("AccessDenied"); error.stderr = "403"; throw error; };
+  const journal = (read) => ({ readRecoveryCompletion: () => ({ bytes: Buffer.from(JSON.stringify(completionEvidence)) }), readReservation: read.reservation, readPostApplyEvidence: read.postApplyEvidence, readResult: read.result, reserve: () => ({ reservation }), writePostApplyEvidence: () => ({}), finalize: () => ({}) });
+  for (const mode of ["reservation", "postApplyEvidence", "result"]) {
+    currentState = { ...before }; applies = 0; let rootReads = 0; let rootIdentityReads = 0;
+    const release = journal({ reservation: mode === "reservation" ? denied : absent, postApplyEvidence: mode === "postApplyEvidence" ? denied : absent, result: mode === "result" ? denied : absent });
+    const root = journal({ reservation: () => { rootReads += 1; return mode === "reservation" ? { reservation } : null; }, postApplyEvidence: () => { rootReads += 1; if (mode === "postApplyEvidence") throw new Error("Stage A reconciliation post-apply evidence is missing its reservation."); return null; }, result: () => { rootReads += 1; if (mode === "result") throw new Error("Stage A reconciliation journal result is missing its reservation."); return null; } });
+    const authenticatedRoot = (args) => { rootIdentityReads += 1; return rootRun(args); };
+    await assert.rejects(() => runStageAProductionArtifactsReconciliation(base({ journal: release, rootJournal: root, root: authenticatedRoot })), /retained|reserved execution|completion-only resume|missing its reservation/, mode);
+    assert.equal(rootIdentityReads, 1, mode); assert.ok(rootReads >= 1, mode); assert.equal(applies, 0, mode);
+  }
+  currentState = { ...before }; applies = 0; let rootReads = 0;
+  const releaseDenied = journal({ reservation: denied, postApplyEvidence: denied, result: denied });
+  const rootAbsent = journal({ reservation: () => { rootReads += 1; return null; }, postApplyEvidence: () => { rootReads += 1; return null; }, result: () => { rootReads += 1; return null; } });
+  const completed = await runStageAProductionArtifactsReconciliation(base({ journal: releaseDenied, rootJournal: rootAbsent }));
+  assert.equal(completed.applied, true); assert.equal(applies, 1); assert.ok(rootReads >= 3);
+  for (const method of ["reservation", "postApplyEvidence", "result"]) for (const error of [new Error("AccessDenied"), new Error("network unavailable")]) {
+    currentState = { ...before }; applies = 0;
+    const rootFailure = journal({ reservation: method === "reservation" ? () => { throw error; } : absent, postApplyEvidence: method === "postApplyEvidence" ? () => { throw error; } : absent, result: method === "result" ? () => { throw error; } : absent });
+    await assert.rejects(() => runStageAProductionArtifactsReconciliation(base({ journal: releaseDenied, rootJournal: rootFailure })), /AccessDenied|network unavailable/);
+    assert.equal(applies, 0, method);
+  }
+  currentState = { ...before }; let rootUsed = false;
+  const releaseAbsent = journal({ reservation: absent, postApplyEvidence: absent, result: absent });
+  await runStageAProductionArtifactsReconciliation(base({ journal: releaseAbsent, rootJournal: journal({ reservation: () => { rootUsed = true; return null; }, postApplyEvidence: () => { rootUsed = true; return null; }, result: () => { rootUsed = true; return null; } }) }));
+  assert.equal(rootUsed, false);
+  const wrongRoot = () => JSON.stringify({ Account: "368992683803", Arn: "arn:aws:iam::368992683803:role/not-root" });
+  currentState = { ...before };
+  await assert.rejects(() => runStageAProductionArtifactsReconciliation(base({ journal: releaseDenied, rootJournal: rootAbsent, root: wrongRoot })), /exact root identity/);
 });
 
 test("compatible protected-main descendant consumes historical recovery completion without replaying recovery", async () => {

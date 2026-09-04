@@ -66,3 +66,12 @@ test("Stage A recovery attempt is immutable and authorization-namespaced", () =>
   assert.throws(() => journal.writeRecoveryAttempt({ recoveryAuthorizationSha256: "9".repeat(64), bytes }), /already exists/);
   assert.equal(s3.calls.filter((args) => args[1] === "put-object").every((args) => args.includes("--if-none-match") && args.includes("*")), true);
 });
+
+test("Stage A reconciliation journal reads only the authorization-derived exact record key", () => {
+  const s3 = memoryS3(); const journal = createStageAProductionArtifactsJournal({ run: s3.run });
+  assert.equal(journal.readReservation(identity.authorizationSha256), null);
+  const read = s3.calls.at(-1); const key = read[read.indexOf("--key") + 1]; const bucket = read[read.indexOf("--bucket") + 1];
+  assert.equal(bucket, "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an");
+  assert.equal(key, `production-stage-a-production-artifacts-reconciliation/${identity.authorizationSha256}/reservation.json`);
+  for (const substituted of ["x".repeat(64), `${identity.authorizationSha256}0`]) assert.throws(() => journal.readReservation(substituted), /journal key/);
+});

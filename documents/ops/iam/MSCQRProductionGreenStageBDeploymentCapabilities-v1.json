@@ -11564,6 +11564,64 @@
       "mutation": false
     },
     {
+      "id": "stage-a-artifacts-reconciliation-root-identify",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "sourceFunction": "stage-a-artifacts-reconciliation-root-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "ROOT_GOVERNED_RECOVERY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-reconciliation-root-identify",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-a-artifacts-reconciliation-root-journal-read",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "sourceFunction": "stage-a-artifacts-reconciliation-root-journal-read",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-stage-a-production-artifacts-reconciliation/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "ROOT_GOVERNED_RECOVERY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-reconciliation-root-journal-read",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "stage-a-artifacts-reconciliation-terraform-read-bucket-location",
       "phase": "stage-a-production-artifacts-state-reconciliation",
       "identity": "RELEASE_DEPLOYER",
@@ -12844,6 +12902,17 @@
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "sourceFunction": "stage-a-artifacts-reconciliation-root-journal-read",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-stage-a-production-artifacts-reconciliation/*"
+      ],
+      "capabilityId": "stage-a-artifacts-reconciliation-root-journal-read"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
       "sourceFunction": "stage-a-artifacts-reconciliation-release-read-raw-state",
       "phase": "stage-a-production-artifacts-state-reconciliation",
       "identity": "RELEASE_DEPLOYER",
@@ -12856,6 +12925,17 @@
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
       "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "sourceFunction": "stage-a-artifacts-reconciliation-root-identify",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "stage-a-artifacts-reconciliation-root-identify"
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",

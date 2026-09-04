@@ -19,7 +19,9 @@ import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.m
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const i = argv.indexOf(name); const value = i < 0 ? undefined : argv[i + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const awsJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
+const exactRoot = (value) => value?.Account === "368992683803" && value?.Arn === "arn:aws:iam::368992683803:root";
 const exactRelease = (value) => value?.Account === "368992683803" && /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/.test(value?.Arn || "");
+const accessDenied = (error) => /AccessDenied|403/i.test(`${error?.message || ""}\n${error?.stderr || ""}`);
 const readPolicy = (run) => JSON.parse(awsJson(run, ["s3api", "get-bucket-policy", "--bucket", "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"]).Policy);
 
 const sourceHead = (value) => value?.headSha || value?.currentHead || value?.toolingSha;
@@ -85,7 +87,7 @@ export async function prepareStageAProductionArtifactsReconciliation({ sourceSha
   return Object.freeze({ ...context, prepared: await prepareStageAProductionArtifactsStateReconciliation({ adapter, sourceSha: context.head, recoverySourceSha: context.recoverySourceSha, recoveryCompletion: context.completionEvidence.completion, verifyRecoveryCompletion: context.verifyRecoveryCompletion, preState: context.preState, assertSourceIntegrity: () => protectedSource(readProtectedSource, context.head) }) });
 }
 
-export async function runStageAProductionArtifactsReconciliation({ sourceSha, recoverySourceSha = sourceSha, continuationRebindWorkflowRunId, continuationRebindWorkflowRunAttempt, recoveryWorkflowRunId, recoveryWorkflowRunAttempt, reconciliationWorkflowRunId, reconciliationWorkflowRunAttempt, releaseRun, adapter, terraformStateLock, resolveAuthorization = resolveStageAProductionArtifactsAuthorizationArtifact, journal, verifySignature, readProtectedSource = readStageBProtectedMainCheckout, proveDescendant = proveProtectedMainDescendant, readGovernedExecutableManifestSha256, preparedEvidence, saved: suppliedSaved, savedPlanPath, prepareEvidencePath } = {}) {
+export async function runStageAProductionArtifactsReconciliation({ sourceSha, recoverySourceSha = sourceSha, continuationRebindWorkflowRunId, continuationRebindWorkflowRunAttempt, recoveryWorkflowRunId, recoveryWorkflowRunAttempt, reconciliationWorkflowRunId, reconciliationWorkflowRunAttempt, releaseRun, rootRun, adapter, terraformStateLock, resolveAuthorization = resolveStageAProductionArtifactsAuthorizationArtifact, journal, rootJournal, verifySignature, readProtectedSource = readStageBProtectedMainCheckout, proveDescendant = proveProtectedMainDescendant, readGovernedExecutableManifestSha256, preparedEvidence, saved: suppliedSaved, savedPlanPath, prepareEvidencePath } = {}) {
   if (typeof releaseRun !== "function" || !adapter || !terraformStateLock || typeof terraformStateLock.acquire !== "function" || typeof terraformStateLock.release !== "function" || typeof resolveAuthorization !== "function" || !journal || typeof journal.readRecoveryCompletion !== "function" || typeof verifySignature !== "function") throw new Error("Stage A production-artifacts reconciliation composition is incomplete.");
   const context = await authenticateRecovery({ sourceSha, recoverySourceSha, continuationRebindWorkflowRunId, continuationRebindWorkflowRunAttempt, releaseRun, adapter, journal, verifySignature, recoveryWorkflowRunId, recoveryWorkflowRunAttempt, resolveAuthorization, readProtectedSource, proveDescendant, readGovernedExecutableManifestSha256, allowAdvancedState: true });
   if (!preparedEvidence && !prepareEvidencePath) throw new Error("Stage A reconciliation execution requires the prepared evidence path.");
@@ -105,14 +107,32 @@ export async function runStageAProductionArtifactsReconciliation({ sourceSha, re
   const identity = { operation: STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION, sourceSha: context.head, account: "368992683803", region: "eu-west-2", executionPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", authorizationSha256: reconciliation.authorization.authorizationSha256, recoveryCompletionSha256: context.completionEvidence.completionEvidenceSha256, savedPlanSha256: saved.savedPlanSha256, preStateLineage: context.preState.lineage, preStateSerial: context.preState.serial, preStateSha256: context.preState.stateSha256, desiredPolicySha256: context.completionEvidence.desiredPolicySha256 };
   if (typeof journal.readReservation !== "function" || typeof journal.readResult !== "function" || typeof journal.readPostApplyEvidence !== "function" || typeof journal.writePostApplyEvidence !== "function") throw new Error("Stage A reconciliation journal cannot resume or authenticate terminal consumption.");
   const reservationValue = (value) => value?.reservation || value;
-  const readConsumptionEvidence = () => Object.freeze({ reservation: journal.readReservation(identity.authorizationSha256)?.reservation || null, postApplyEvidence: journal.readPostApplyEvidence(identity.authorizationSha256)?.evidence || null, result: journal.readResult(identity.authorizationSha256)?.result || null });
+  let rootAuthenticated = false;
+  const rootReader = () => {
+    if (typeof rootRun !== "function" || !rootJournal) throw new Error("Stage A reconciliation journal access denial cannot authenticate absence without the root journal reader.");
+    if (!rootAuthenticated) {
+      if (!exactRoot(awsJson(rootRun, ["sts", "get-caller-identity"]))) throw new Error("Stage A reconciliation root journal reader is outside the exact root identity.");
+      rootAuthenticated = true;
+    }
+    return rootJournal;
+  };
+  const readConsumptionRecord = (method) => {
+    try { return journal[method](identity.authorizationSha256); }
+    catch (error) {
+      if (!accessDenied(error)) throw error;
+      const reader = rootReader();
+      if (typeof reader[method] !== "function") throw new Error("Stage A reconciliation root journal reader is incomplete.");
+      return reader[method](identity.authorizationSha256);
+    }
+  };
+  const readConsumptionEvidence = () => Object.freeze({ reservation: readConsumptionRecord("readReservation")?.reservation || null, postApplyEvidence: readConsumptionRecord("readPostApplyEvidence")?.evidence || null, result: readConsumptionRecord("readResult")?.result || null });
   const existingConsumption = readConsumptionEvidence();
   const sameCompletedResult = (result, { reservation, status, postState, postLivePolicySha256 }) => result?.status === status && result.reservationSha256 === reservationValue(reservation)?.reservationSha256 && result.postStateLineage === (postState?.lineage || null) && result.postStateSerial === (postState?.serial || null) && result.postStateSha256 === (postState?.stateSha256 || null) && result.postLivePolicySha256 === (postLivePolicySha256 || null);
   const samePostApplyEvidence = (evidence, { reservation, postState, postLivePolicySha256 }) => evidence?.reservationSha256 === reservationValue(reservation)?.reservationSha256 && evidence.postStateLineage === postState?.lineage && evidence.postStateSerial === postState?.serial && evidence.postStateSha256 === postState?.stateSha256 && evidence.postLivePolicySha256 === postLivePolicySha256;
   const finalizeConsumption = async ({ reservation, status, postState, postLivePolicySha256 }) => {
     try { return journal.finalize({ reservation: reservationValue(reservation), status, postState, postLivePolicySha256 }); }
     catch (error) {
-      const persisted = journal.readResult(identity.authorizationSha256);
+      const persisted = readConsumptionRecord("readResult");
       if (!persisted || !sameCompletedResult(persisted.result, { reservation, status, postState, postLivePolicySha256 })) throw error;
       return persisted;
     }
@@ -130,7 +150,7 @@ export async function runStageAProductionArtifactsReconciliation({ sourceSha, re
     }, recordPostApply: async ({ reservation, postState, postLivePolicySha256 }) => {
       try { return journal.writePostApplyEvidence({ reservation: reservationValue(reservation), postState, postLivePolicySha256 }); }
       catch (error) {
-        const persisted = journal.readPostApplyEvidence(identity.authorizationSha256);
+        const persisted = readConsumptionRecord("readPostApplyEvidence");
         if (!persisted || !samePostApplyEvidence(persisted.evidence, { reservation, postState, postLivePolicySha256 })) throw error;
         return persisted;
       }
@@ -158,13 +178,14 @@ export async function runStageAProductionArtifactsReconciliationCli(argv = proce
   const prepareEvidencePath = assertStageAProductionArtifactsReconciliationPrivateArtifactPath(prepareEvidencePathInput, { terraformDataDir, allowExisting: !preparing, label: "Stage A reconciliation prepare evidence" });
   if (refreshPlanPath === prepareEvidencePath) throw new Error("Stage A reconciliation plan and prepare evidence must use distinct paths.");
   const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: "eu-west-2" });
+  const rootRun = executing ? createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(argv, "--root-profile"), region: "eu-west-2" }) : undefined;
   const terraformInputEnvironment = deps.terraformInputEnvironment || process.env;
   assertStageATerraformVariables(terraformInputEnvironment);
   const terraformEnvironment = { ...buildRecoveryTerraformEnvironment("mscqr-production-release-deployer", terraformInputEnvironment, { allowedTerraformVariableKeys: STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS }), TF_DATA_DIR: terraformDataDir };
   const terraformRun = async (args) => execFileSync(args[0], args.slice(1), { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const adapter = createTerraformStageAAdapter({ root: "infra/aws/terraform/production-green-stage-a", planPath: path.join(terraformDataDir, "unused.tfplan"), refreshOnlyPlanPath: refreshPlanPath, backendArgs: Object.entries(STAGE_A_TERRAFORM_BACKEND).filter(([key]) => key !== "type").map(([key, value]) => `-backend-config=${key}=${value}`), run: terraformRun, describeIngress: async () => ({ present: false }), readProductionArtifactsPolicy: async () => readPolicy(releaseRun), readRawBackendStateIdentity: () => readRawTerraformStateIdentity(releaseRun), sourceSha });
   const terraformStateLock = deps.terraformStateLock || createStageATerraformBackendLock({ run: releaseRun, lockFilePath: path.join(terraformDataDir, `stage-a-reconciliation-${randomUUID()}.tflock`), operation: "Stage-A production-artifacts state reconciliation" });
-  const common = { sourceSha, recoverySourceSha, ...(sourceSha === recoverySourceSha ? {} : { continuationRebindWorkflowRunId: required(argv, "--continuation-rebind-workflow-run-id"), continuationRebindWorkflowRunAttempt: required(argv, "--continuation-rebind-workflow-run-attempt") }), recoveryWorkflowRunId: required(argv, "--recovery-authorization-workflow-run-id"), recoveryWorkflowRunAttempt: required(argv, "--recovery-authorization-workflow-run-attempt"), releaseRun, adapter, terraformStateLock, journal: createStageAProductionArtifactsJournal({ run: releaseRun }), verifySignature: createRootAttestationKmsVerifier({ run: releaseRun }), ...deps };
+  const common = { sourceSha, recoverySourceSha, ...(sourceSha === recoverySourceSha ? {} : { continuationRebindWorkflowRunId: required(argv, "--continuation-rebind-workflow-run-id"), continuationRebindWorkflowRunAttempt: required(argv, "--continuation-rebind-workflow-run-attempt") }), recoveryWorkflowRunId: required(argv, "--recovery-authorization-workflow-run-id"), recoveryWorkflowRunAttempt: required(argv, "--recovery-authorization-workflow-run-attempt"), releaseRun, rootRun, adapter, terraformStateLock, journal: createStageAProductionArtifactsJournal({ run: releaseRun }), rootJournal: rootRun && createStageAProductionArtifactsJournal({ run: rootRun }), verifySignature: createRootAttestationKmsVerifier({ run: releaseRun }), ...deps };
   const result = preparing
     ? await prepareStageAProductionArtifactsReconciliation(common)
     : await runStageAProductionArtifactsReconciliation({ ...common, reconciliationWorkflowRunId: required(argv, "--reconciliation-authorization-workflow-run-id"), reconciliationWorkflowRunAttempt: required(argv, "--reconciliation-authorization-workflow-run-attempt"), prepareEvidencePath, savedPlanPath: refreshPlanPath });

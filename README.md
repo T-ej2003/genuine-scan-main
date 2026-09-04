@@ -39,9 +39,13 @@ then use those coordinates in both commands and as
 `continuation_rebind_workflow_run_attempt` when dispatching the reconciliation
 authorization workflow:
 
+`ROOT_PROFILE` must name the existing canonical ROOT_OPERATOR profile; it is
+used only to independently authenticate an exact reconciliation-journal key
+when the release-deployer receives an ambiguous S3 access denial.
+
 ```sh
 npm run stage-a:production-artifacts:prepare -- --production --source-sha "$SOURCE_SHA" --recovery-source-sha "$RECOVERY_SOURCE_SHA" --continuation-rebind-workflow-run-id "$REBIND_RUN_ID" --continuation-rebind-workflow-run-attempt "$REBIND_RUN_ATTEMPT" --recovery-authorization-workflow-run-id "$RECOVERY_RUN_ID" --recovery-authorization-workflow-run-attempt "$RECOVERY_RUN_ATTEMPT" --terraform-data-dir "$PRIVATE_TF_DIR" --refresh-only-plan "$REFRESH_PLAN" --prepare-evidence "$PREPARE_EVIDENCE"
-npm run stage-a:production-artifacts:reconcile -- --production --source-sha "$SOURCE_SHA" --recovery-source-sha "$RECOVERY_SOURCE_SHA" --continuation-rebind-workflow-run-id "$REBIND_RUN_ID" --continuation-rebind-workflow-run-attempt "$REBIND_RUN_ATTEMPT" --recovery-authorization-workflow-run-id "$RECOVERY_RUN_ID" --recovery-authorization-workflow-run-attempt "$RECOVERY_RUN_ATTEMPT" --reconciliation-authorization-workflow-run-id "$RECONCILIATION_RUN_ID" --reconciliation-authorization-workflow-run-attempt "$RECONCILIATION_RUN_ATTEMPT" --terraform-data-dir "$PRIVATE_TF_DIR" --refresh-only-plan "$REFRESH_PLAN" --prepare-evidence "$PREPARE_EVIDENCE"
+npm run stage-a:production-artifacts:reconcile -- --production --source-sha "$SOURCE_SHA" --recovery-source-sha "$RECOVERY_SOURCE_SHA" --continuation-rebind-workflow-run-id "$REBIND_RUN_ID" --continuation-rebind-workflow-run-attempt "$REBIND_RUN_ATTEMPT" --recovery-authorization-workflow-run-id "$RECOVERY_RUN_ID" --recovery-authorization-workflow-run-attempt "$RECOVERY_RUN_ATTEMPT" --reconciliation-authorization-workflow-run-id "$RECONCILIATION_RUN_ID" --reconciliation-authorization-workflow-run-attempt "$RECONCILIATION_RUN_ATTEMPT" --root-profile "$ROOT_PROFILE" --terraform-data-dir "$PRIVATE_TF_DIR" --refresh-only-plan "$REFRESH_PLAN" --prepare-evidence "$PREPARE_EVIDENCE"
 ```
 
 The rebind authorizes zero `PutBucketPolicy` writes, Terraform applies, or

@@ -159,6 +159,46 @@
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "stage-a-artifacts-reconciliation-root-identify",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "*"
+      ],
+      "sourceFunction": "stage-a-artifacts-reconciliation-root-identify",
+      "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+      "action": "s3:GetObject",
+      "capabilityId": "stage-a-artifacts-reconciliation-root-journal-read",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-stage-a-production-artifacts-reconciliation/*"
+      ],
+      "sourceFunction": "stage-a-artifacts-reconciliation-root-journal-read",
+      "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
       "action": "s3:GetObject",
       "capabilityId": "stage-a-artifacts-reconciliation-release-read-raw-state",
       "identity": "RELEASE_DEPLOYER",
