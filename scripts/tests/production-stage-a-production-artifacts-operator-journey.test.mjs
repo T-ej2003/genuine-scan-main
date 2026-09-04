@@ -294,6 +294,52 @@ test("recovery attempt persistence uses the release writer and gates the root po
   assert.equal(policyWrites, 0); assert.equal(completionWrites, 0); assert.equal(rootAttemptWrites, 0);
 });
 
+test("B-to-C first run authenticates release 403 absence through the exact-key root fallback", async () => {
+  let livePolicy = buildStageAProductionArtifactsBucketPolicy(); let policyWrites = 0; let attemptWrites = 0; let completionWrites = 0; const events = [];
+  const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "204"), verificationRef: "release-403-root-absence", governedExecutableManifestSha256 });
+  const denied = () => { const error = new Error("AccessDenied"); error.stderr = "403"; throw error; };
+  const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : args[1] === "get-bucket-policy" ? JSON.stringify({ Policy: JSON.stringify(livePolicy) }) : (() => { throw new Error(`unexpected release ${args[1]}`); })();
+  const rootRun = (args) => {
+    if (args[1] === "get-caller-identity") return rootIdentity;
+    if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
+    if (args[1] === "get-bucket-lifecycle-configuration") throw new Error("NoSuchLifecycleConfiguration");
+    if (args[1] === "put-bucket-policy") { events.push("policy-write"); policyWrites += 1; livePolicy = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation(); return ""; }
+    throw new Error(`unexpected root ${args[1]}`);
+  };
+  const releaseJournal = {
+    readRecoveryAttempt: (sha) => { events.push(["release-read", sha]); throw denied(); },
+    writeRecoveryAttempt: ({ recoveryAuthorizationSha256: sha }) => { events.push(["release-write", sha]); attemptWrites += 1; return { key: "attempt" }; },
+    readRecoveryCompletion: () => null,
+    writeRecoveryCompletion: () => { events.push("release-completion"); completionWrites += 1; return { key: "completion" }; },
+  };
+  const rootJournal = {
+    readRecoveryAttempt: (sha) => { events.push(["root-read", sha]); return null; },
+    readRecoveryCompletion: () => null,
+    writeRecoveryAttempt: () => { throw new Error("root must not write B-to-C attempt"); },
+  };
+  const result = await runStageAProductionArtifactsRecovery({ sourceSha, workflowRunId: "204", workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => state, terraformStateLock, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal: releaseJournal, recoveryJournal: releaseJournal, rootRecoveryJournal: rootJournal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true });
+  assert.equal(result.putBucketPolicyCount, 1); assert.equal(policyWrites, 1); assert.equal(attemptWrites, 1); assert.equal(completionWrites, 1);
+  const releaseRead = events.find((event) => event[0] === "release-read"); const rootRead = events.find((event) => event[0] === "root-read"); const releaseWrite = events.find((event) => event[0] === "release-write");
+  assert.equal(releaseRead[1], authorization.authorizationSha256); assert.equal(rootRead[1], releaseRead[1]); assert.ok(events.indexOf(rootRead) < events.indexOf(releaseWrite)); assert.ok(events.indexOf(releaseWrite) < events.indexOf("policy-write"));
+});
+
+test("B-to-C release 403 with an unverifiable root fallback fails before any write", async () => {
+  let policyWrites = 0; let attemptWrites = 0;
+  const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "205"), verificationRef: "release-403-root-failure", governedExecutableManifestSha256 });
+  const denied = () => { const error = new Error("AccessDenied"); error.stderr = "403"; throw error; };
+  const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : args[1] === "get-bucket-policy" ? JSON.stringify({ Policy: JSON.stringify(buildStageAProductionArtifactsBucketPolicy()) }) : (() => { throw new Error(`unexpected release ${args[1]}`); })();
+  const rootRun = (args) => {
+    if (args[1] === "get-caller-identity") return rootIdentity;
+    if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
+    if (args[1] === "get-bucket-lifecycle-configuration") throw new Error("NoSuchLifecycleConfiguration");
+    throw new Error(`unexpected root ${args[1]}`);
+  };
+  const releaseJournal = { readRecoveryAttempt: () => { throw denied(); }, readRecoveryCompletion: () => null, writeRecoveryAttempt: () => { attemptWrites += 1; } };
+  const rootJournal = { readRecoveryAttempt: () => { throw denied(); }, readRecoveryCompletion: () => null, writeRecoveryAttempt: () => { attemptWrites += 1; } };
+  await assert.rejects(() => runStageAProductionArtifactsRecovery({ sourceSha, workflowRunId: "205", workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => state, terraformStateLock, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal: { readRecoveryCompletion: () => null, writeRecoveryCompletion: () => { policyWrites += 1; } }, recoveryJournal: releaseJournal, rootRecoveryJournal: rootJournal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true }), /AccessDenied/);
+  assert.equal(attemptWrites, 0); assert.equal(policyWrites, 0);
+});
+
 test("post-write continuation locks only after authenticated P2 evidence", async () => {
   const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "220"), verificationRef: "post-write-no-lock", governedExecutableManifestSha256 });
   const attempt = createStageAProductionArtifactsRecoveryAttemptEvidence({ authorization, sign: () => Buffer.from("signature").toString("base64") });

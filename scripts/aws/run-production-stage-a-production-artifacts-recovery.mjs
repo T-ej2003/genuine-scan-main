@@ -127,7 +127,18 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
     return Object.freeze({ recovered: true, resumed: true, alreadyComplete: true, classification: STAGE_A_RECOVERY_CLASSIFICATION.COMPLETED, putBucketPolicyCount: 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: existingCompletion.completionEvidenceSha256 });
   }
   if (historicalResume && predecessorLive) throw new Error("Stage A descendant recovery continuation cannot start a new P0 policy execution under the descendant source.");
-  let attempt = decode(attemptJournal.readRecoveryAttempt(authorization.authorizationSha256), "Stage A recovery attempt");
+  const readAttempt = () => {
+    try { return attemptJournal.readRecoveryAttempt(authorization.authorizationSha256); }
+    catch (error) {
+      if (!reservationTransition || attemptJournal !== recoveryJournal || !/AccessDenied|403/i.test(`${error.message || ""}\n${error.stderr || ""}`)) throw error;
+      try { return rootRecoveryJournal.readRecoveryAttempt(authorization.authorizationSha256); }
+      catch (rootError) {
+        if (/NoSuchKey|NotFound|404/i.test(`${rootError.message || ""}\n${rootError.stderr || ""}`)) return null;
+        throw rootError;
+      }
+    }
+  };
+  let attempt = decode(readAttempt(), "Stage A recovery attempt");
   if (!attempt) {
     if (!predecessorLive) throw new Error("Stage A recovery desired-policy resume lacks the immutable signed pre-write attempt.");
     attempt = createStageAProductionArtifactsRecoveryAttemptEvidence({ authorization, sign });
