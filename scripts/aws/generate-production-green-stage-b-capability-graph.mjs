@@ -146,6 +146,7 @@ const INITIAL_ACTIVATION_POLICY_RECONCILIATION_CAPABILITIES = Object.freeze([
   ["initial-activation-policy-reconciliation-root-list-policy-versions", "iam:ListPolicyVersions", [INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn], false],
   ["initial-activation-policy-reconciliation-root-read-release-role", "iam:GetRole", [INITIAL_ACTIVATION_POLICY_RECONCILIATION.releaseRoleArn], false],
   ["initial-activation-policy-reconciliation-root-read-policy-attachment", "iam:ListAttachedRolePolicies", [INITIAL_ACTIVATION_POLICY_RECONCILIATION.releaseRoleArn], false],
+  ["initial-activation-policy-reconciliation-root-list-policy-entities", "iam:ListEntitiesForPolicy", [INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn], false],
   ["initial-activation-policy-reconciliation-root-create-policy-version", "iam:CreatePolicyVersion", [INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn], true],
 ]);
 
@@ -385,7 +386,7 @@ export function discoverAwsCliActions() {
       } else if (sourceFile === "scripts/aws/production-root-attestation-signer.mjs" && action === "kms:Sign") {
         calls.push({ sourceFile, action, identity: "ADMINISTRATOR" }, { sourceFile, action, identity: "ROOT_OPERATOR" });
       } else if (sourceFile === "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs") {
-        const id = ({ "sts:GetCallerIdentity": "initial-activation-policy-reconciliation-root-identify", "iam:GetPolicy": "initial-activation-policy-reconciliation-root-read-policy", "iam:GetPolicyVersion": "initial-activation-policy-reconciliation-root-read-policy-version", "iam:ListPolicyVersions": "initial-activation-policy-reconciliation-root-list-policy-versions", "iam:GetRole": "initial-activation-policy-reconciliation-root-read-release-role", "iam:ListAttachedRolePolicies": "initial-activation-policy-reconciliation-root-read-policy-attachment", "iam:CreatePolicyVersion": "initial-activation-policy-reconciliation-root-create-policy-version" })[action];
+        const id = ({ "sts:GetCallerIdentity": "initial-activation-policy-reconciliation-root-identify", "iam:GetPolicy": "initial-activation-policy-reconciliation-root-read-policy", "iam:GetPolicyVersion": "initial-activation-policy-reconciliation-root-read-policy-version", "iam:ListPolicyVersions": "initial-activation-policy-reconciliation-root-list-policy-versions", "iam:GetRole": "initial-activation-policy-reconciliation-root-read-release-role", "iam:ListAttachedRolePolicies": "initial-activation-policy-reconciliation-root-read-policy-attachment", "iam:ListEntitiesForPolicy": "initial-activation-policy-reconciliation-root-list-policy-entities", "iam:CreatePolicyVersion": "initial-activation-policy-reconciliation-root-create-policy-version" })[action];
         if (!id) throw new Error("Initial activation lifecycle policy reconciliation uses an unreviewed AWS action.");
         calls.push({ sourceFile, sourceFunction: id, phase: "initial-activation-lifecycle-policy-reconciliation", identity: "ROOT_OPERATOR", action, resources: INITIAL_ACTIVATION_POLICY_RECONCILIATION_CAPABILITIES.find(([candidate]) => candidate === id)[2], capabilityId: id });
       } else {

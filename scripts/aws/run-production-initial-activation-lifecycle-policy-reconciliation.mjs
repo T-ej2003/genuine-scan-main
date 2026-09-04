@@ -10,6 +10,17 @@ import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPriv
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const json = (run, args) => JSON.parse(run(args));
+const paged = (run, command, collection) => {
+  const values = []; const markers = new Set(); let marker;
+  for (;;) {
+    const page = json(run, [...command, "--no-paginate", ...(marker ? ["--marker", marker] : [])]);
+    if (!Array.isArray(page?.[collection]) || typeof page.IsTruncated !== "boolean") throw new Error("Initial activation lifecycle policy pagination evidence is malformed.");
+    values.push(...page[collection]);
+    if (!page.IsTruncated) return values;
+    if (typeof page.Marker !== "string" || !page.Marker || markers.has(page.Marker)) throw new Error("Initial activation lifecycle policy pagination evidence is incomplete.");
+    markers.add(page.Marker); marker = page.Marker;
+  }
+};
 
 export function readInitialActivationLifecyclePolicyLiveState(run) {
   const policy = json(run, ["iam", "get-policy", "--policy-arn", INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn]).Policy;
@@ -17,9 +28,18 @@ export function readInitialActivationLifecyclePolicyLiveState(run) {
   const version = json(run, ["iam", "get-policy-version", "--policy-arn", INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, "--version-id", defaultVersionId]).PolicyVersion;
   const versions = json(run, ["iam", "list-policy-versions", "--policy-arn", INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn]).Versions;
   const role = json(run, ["iam", "get-role", "--role-name", "mscqr-production-release-deployer"]).Role;
-  const attached = json(run, ["iam", "list-attached-role-policies", "--role-name", "mscqr-production-release-deployer"]).AttachedPolicies;
-  if (policy?.Arn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || role?.Arn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.releaseRoleArn || !Array.isArray(versions) || !Array.isArray(attached)) throw new Error("Initial activation lifecycle policy live read is malformed.");
-  return { policyArn: policy.Arn, defaultVersionId, document: version?.Document, policyVersionCount: versions.length, attachedPolicyArns: attached.map(({ PolicyArn }) => PolicyArn).sort(), permissionsBoundaryArn: role.PermissionsBoundary?.PermissionsBoundaryArn ?? null };
+  const attached = paged(run, ["iam", "list-attached-role-policies", "--role-name", "mscqr-production-release-deployer"], "AttachedPolicies");
+  const entityPages = []; let marker;
+  for (;;) {
+    const page = json(run, ["iam", "list-entities-for-policy", "--policy-arn", INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, "--no-paginate", ...(marker ? ["--marker", marker] : [])]);
+    if (!Array.isArray(page?.PolicyRoles) || !Array.isArray(page?.PolicyUsers) || !Array.isArray(page?.PolicyGroups) || typeof page.IsTruncated !== "boolean") throw new Error("Initial activation lifecycle policy entity pagination evidence is malformed.");
+    entityPages.push(page);
+    if (!page.IsTruncated) break;
+    if (typeof page.Marker !== "string" || !page.Marker || entityPages.slice(0, -1).some(({ Marker }) => Marker === page.Marker)) throw new Error("Initial activation lifecycle policy entity pagination evidence is incomplete.");
+    marker = page.Marker;
+  }
+  if (policy?.Arn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || role?.Arn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.releaseRoleArn || !Array.isArray(versions)) throw new Error("Initial activation lifecycle policy live read is malformed.");
+  return { policyArn: policy.Arn, defaultVersionId, document: version?.Document, policyVersionCount: versions.length, releaseRolePolicyArns: attached.map(({ PolicyArn }) => PolicyArn).sort(), targetPolicyRoles: entityPages.flatMap(({ PolicyRoles }) => PolicyRoles.map(({ RoleName }) => RoleName)).sort(), targetPolicyUsers: entityPages.flatMap(({ PolicyUsers }) => PolicyUsers.map(({ UserName }) => UserName)).sort(), targetPolicyGroups: entityPages.flatMap(({ PolicyGroups }) => PolicyGroups.map(({ GroupName }) => GroupName)).sort(), permissionsBoundaryUsageCount: policy.PermissionsBoundaryUsageCount };
 }
 
 export function runInitialActivationLifecyclePolicyReconciliation(argv = process.argv.slice(2), deps = {}) {

@@ -1427,6 +1427,25 @@
     },
     {
       "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "action": "iam:ListEntitiesForPolicy",
+      "capabilityId": "initial-activation-policy-reconciliation-root-list-policy-entities",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "reachableMode": [
+        "INITIAL_ACTIVATION_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
       "action": "iam:CreatePolicyVersion",
       "capabilityId": "initial-activation-policy-reconciliation-root-create-policy-version",
       "identity": "ROOT_OPERATOR",

@@ -1335,6 +1335,35 @@
       "mutation": false
     },
     {
+      "id": "initial-activation-policy-reconciliation-root-list-policy-entities",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-list-policy-entities",
+      "action": "iam:ListEntitiesForPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      },
+      "classification": "ROOT_GOVERNED_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "initial-activation-policy-reconciliation-root-list-policy-entities",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "exact-authorized-predecessor-or-desired",
+        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "initial-activation-policy-reconciliation-root-list-policy-versions",
       "phase": "initial-activation-lifecycle-policy-reconciliation",
       "identity": "ROOT_OPERATOR",
@@ -13150,6 +13179,17 @@
         "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
       ],
       "capabilityId": "initial-activation-policy-reconciliation-root-read-policy-attachment"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-list-policy-entities",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListEntitiesForPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-root-list-policy-entities"
     },
     {
       "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
