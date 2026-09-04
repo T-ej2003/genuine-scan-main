@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
@@ -10,7 +11,11 @@ import {
   stageAProductionArtifactsPolicySha256,
 } from "../aws/production-stage-a-control-plane.mjs";
 import { classifyStageAProductionArtifactsRecovery, readRawTerraformStateIdentity, STAGE_A_RECOVERY_CLASSIFICATION } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
-import { assertStageAProductionArtifactsRecoverySourceCompatibility, STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
+import {
+  assertStageAProductionArtifactsRecoverySourceCompatibility,
+  STAGE_A_RECOVERY_CONTINUATION_REVIEWED_DIGESTS,
+  STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES,
+} from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
 
 const desired = buildStageAProductionArtifactsBucketPolicy();
 const clone = () => structuredClone(desired);
@@ -73,9 +78,29 @@ test("historical recovery continuation accepts only the bounded canonicalization
     "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
   ];
   assert.deepEqual(STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES, exactRepairDelta);
-  assert.doesNotThrow(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ ...args, readContinuationChangedFiles: () => exactRepairDelta }));
+  const protectedSource = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  assert.doesNotThrow(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: protectedSource, recoverySourceSha: "d4d8ef5cf23bfff6be425d957bf7fb4dc74b2a39", proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === "d4d8ef5cf23bfff6be425d957bf7fb4dc74b2a39" && descendantSha === protectedSource }));
+  assert.doesNotThrow(() => assertStageAProductionArtifactsRecoverySourceCompatibility({
+    ...args,
+    readContinuationChangedFiles: () => exactRepairDelta,
+    readContinuationReviewedDigests: () => STAGE_A_RECOVERY_CONTINUATION_REVIEWED_DIGESTS,
+  }));
+  for (const file of exactRepairDelta) {
+    const changedContents = { ...STAGE_A_RECOVERY_CONTINUATION_REVIEWED_DIGESTS, [file]: "f".repeat(64) };
+    assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({
+      ...args,
+      readContinuationChangedFiles: () => exactRepairDelta,
+      readContinuationReviewedDigests: () => changedContents,
+    }), /reviewed governed executable contents/);
+  }
+  assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({
+    ...args,
+    readContinuationChangedFiles: () => exactRepairDelta,
+    readContinuationReviewedDigests: () => Object.fromEntries(exactRepairDelta.slice(1).map((file) => [file, STAGE_A_RECOVERY_CONTINUATION_REVIEWED_DIGESTS[file]])),
+  }), /reviewed governed executable contents/);
   assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ ...args, readContinuationChangedFiles: () => exactRepairDelta.filter((file) => !file.endsWith("recovery-governance.mjs")) }), /unsafe governed/);
   for (const file of [
+    "scripts/aws/authorize-production-stage-a-production-artifacts-recovery.mjs",
     "scripts/aws/run-production-green-stage-b-preflight.mjs",
     "scripts/aws/production-dual-slot-rebaseline-contract.mjs",
     "infra/aws/terraform/production-green-stage-a/main.tf",

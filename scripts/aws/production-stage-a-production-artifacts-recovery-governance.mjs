@@ -112,8 +112,45 @@ export const STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES = Object.freeze([
   "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs",
   "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
 ]);
+const STAGE_A_RECOVERY_REVIEWED_GOVERNANCE_DIGEST = "6d4a72e74fa2d219c7438ac4071325cf6fd17f16af3ea0e6eb74b84bfc608a0f";
+export const STAGE_A_RECOVERY_CONTINUATION_REVIEWED_DIGESTS = Object.freeze({
+  "scripts/aws/production-stage-a-control-plane.mjs": "4c8e7520cb102a28233953dad98180382a05308633bad684ea1a36ae89b43711",
+  "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs": STAGE_A_RECOVERY_REVIEWED_GOVERNANCE_DIGEST,
+  "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs": "0862647485d3a5fee205e7e870c25e14ca0766cef2a8eefdc2e40ca3fe0851ee",
+});
+const continuationGit = (args) => execFileSync("git", args, {
+  cwd: repositoryRoot,
+  encoding: "buffer",
+  stdio: ["ignore", "pipe", "pipe"],
+});
+const normalizedGovernanceDigest = (bytes) => {
+  const source = Buffer.from(bytes).toString("utf8");
+  const normalized = source.replace(/(const STAGE_A_RECOVERY_REVIEWED_GOVERNANCE_DIGEST = ")[a-f0-9]{64}(")/, "$1<SELF>$2");
+  if (normalized === source) throw new Error("Stage A production-artifacts reviewed governance projection is invalid.");
+  return sha256(Buffer.from(normalized));
+};
 
-export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256, readGovernedExecutableManifestSha256 = stageAProductionArtifactsGovernedExecutableManifestSha256, readContinuationChangedFiles } = {}) {
+export const readStageAProductionArtifactsContinuationChangedFiles = ({ ancestorSha, descendantSha } = {}) => {
+  try {
+    const files = (sourceSha) => new Map(stageAProductionArtifactsGovernedExecutableManifest(sourceSha, { git: continuationGit }).files.map(({ path: file, sha256: digest }) => [file, digest]));
+    const ancestor = files(ancestorSha); const descendant = files(descendantSha);
+    return [...new Set([...ancestor.keys(), ...descendant.keys()])].filter((file) => ancestor.get(file) !== descendant.get(file)).sort();
+  } catch { return null; }
+};
+
+export const readStageAProductionArtifactsContinuationReviewedDigests = ({ sourceSha } = {}) => {
+  try {
+    const files = new Map(stageAProductionArtifactsGovernedExecutableManifest(sourceSha, { git: continuationGit }).files.map(({ path: file, sha256: digest }) => [file, digest]));
+    return Object.freeze(Object.fromEntries(STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES.map((file) => [
+      file,
+      file.endsWith("production-stage-a-production-artifacts-recovery-governance.mjs")
+        ? normalizedGovernanceDigest(continuationGit(["show", `${sourceSha}:${file}`]))
+        : files.get(file),
+    ])));
+  } catch { return null; }
+};
+
+export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256, readGovernedExecutableManifestSha256 = stageAProductionArtifactsGovernedExecutableManifestSha256, readContinuationChangedFiles = readStageAProductionArtifactsContinuationChangedFiles, readContinuationReviewedDigests = readStageAProductionArtifactsContinuationReviewedDigests } = {}) {
   if (!SHA40.test(sourceSha || "") || !SHA40.test(recoverySourceSha || "")) throw new Error("Stage A production-artifacts recovery source compatibility is invalid.");
   if (sourceSha === recoverySourceSha) return true;
   if (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: recoverySourceSha, descendantSha: sourceSha }) !== true) throw new Error("Stage A production-artifacts current source is not an authenticated descendant of the recovery source.");
@@ -123,7 +160,13 @@ export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sou
   if (historical === current) return true;
   if (typeof readContinuationChangedFiles !== "function") throw new Error("Stage A production-artifacts descendant changed the governed executable source.");
   const changed = readContinuationChangedFiles({ ancestorSha: recoverySourceSha, descendantSha: sourceSha });
-  if (!Array.isArray(changed) || JSON.stringify([...changed].sort()) !== JSON.stringify(STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES)) throw new Error("Stage A production-artifacts descendant changed an unsafe governed executable source.");
+  if (!Array.isArray(changed) || JSON.stringify([...changed].sort()) !== JSON.stringify(STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES)) throw new Error("Stage A production-artifacts descendant changed the governed executable source with an unsafe governed delta.");
+  const reviewed = readContinuationReviewedDigests({ sourceSha });
+  if (!reviewed
+    || JSON.stringify(Object.keys(reviewed).sort()) !== JSON.stringify(STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES)
+    || STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES.some((file) => reviewed[file] !== STAGE_A_RECOVERY_CONTINUATION_REVIEWED_DIGESTS[file])) {
+    throw new Error("Stage A production-artifacts descendant changed the reviewed governed executable contents.");
+  }
   return true;
 }
 
