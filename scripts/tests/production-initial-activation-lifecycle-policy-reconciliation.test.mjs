@@ -7,7 +7,8 @@ import { execFileSync } from "node:child_process";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { INITIAL_ACTIVATION_POLICY_RECONCILIATION as CONTRACT, assertInitialActivationLifecyclePolicyReconciliationAuthorization, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, createInitialActivationLifecyclePolicyReconciliationAuthorization, executeInitialActivationLifecyclePolicyReconciliation, readInitialActivationLifecycleDesiredPolicy, resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact } from "../aws/production-initial-activation-policy-reconciliation.mjs";
-import { readInitialActivationLifecyclePolicyLiveState } from "../aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs";
+import { readInitialActivationLifecyclePolicyLiveState, runInitialActivationLifecyclePolicyReconciliation } from "../aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs";
+import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 
@@ -70,6 +71,32 @@ test("approval freshness is enforced at artifact validation and immediately befo
   let creates = 0;
   assert.throws(() => executeInitialActivationLifecyclePolicyReconciliation({ authorization: value, sourceSha, desired, now: new Date(boundary.getTime() + 1), readLiveState: () => state(), createPolicyVersion: () => { creates += 1; } }), /stale/);
   assert.equal(creates, 0);
+});
+
+test("result destination is fully preflighted before entering the mutation executor", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "initial-activation-result-preflight-")); fs.chmodSync(directory, 0o700);
+  const auth = authorization(); let executorCalls = 0;
+  const deps = { readProtectedCheckout: () => ({ toolingSha: sourceSha }), run: () => JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" }), resolveAuthorizationArtifact: () => ({ authorization: auth }), executeReconciliation: () => { executorCalls += 1; return { status: "ALREADY_RECONCILED", createPolicyVersionCount: 0, postState: assertInitialActivationLifecyclePolicyState(state({ document: desired.document, defaultVersionId: "v2" }), { desired }) }; } };
+  const baseArgs = (resultOut) => ["--execute", "--source-sha", sourceSha, "--admin-profile", "root", "--workflow-run-id", "1", "--workflow-run-attempt", "1", ...(resultOut === undefined ? [] : ["--result-out", resultOut])];
+  const invoke = (args) => runInitialActivationLifecyclePolicyReconciliation(args, deps);
+  for (const [index, args] of [baseArgs(undefined), baseArgs(""), baseArgs(path.join(directory, "missing", "result.json")), baseArgs(process.cwd()), baseArgs(path.join(directory, "insecure", "result.json")), baseArgs(path.join(directory, "existing.json")), baseArgs(path.join(directory, "result-link.json")), baseArgs(path.join(process.cwd(), "..", path.basename(process.cwd()), "escaped.json")), baseArgs(path.join(directory, "unwritable", "result.json"))].entries()) {
+    if (args.some((arg) => arg.endsWith("/insecure/result.json"))) { fs.mkdirSync(path.join(directory, "insecure")); fs.chmodSync(path.join(directory, "insecure"), 0o755); }
+    if (args.some((arg) => arg.endsWith("/existing.json"))) fs.writeFileSync(path.join(directory, "existing.json"), "existing");
+    if (args.some((arg) => arg.endsWith("/result-link.json"))) fs.symlinkSync(path.join(directory, "other.json"), path.join(directory, "result-link.json"));
+    if (args.some((arg) => arg.endsWith("/unwritable/result.json"))) { fs.mkdirSync(path.join(directory, "unwritable")); fs.chmodSync(path.join(directory, "unwritable"), 0o500); }
+    assert.throws(() => invoke(args), undefined, `invalid result destination case ${index}`);
+  }
+  assert.equal(executorCalls, 0);
+  const valid = path.join(directory, "valid", "result.json"); fs.mkdirSync(path.dirname(valid)); fs.chmodSync(path.dirname(valid), 0o700);
+  assert.doesNotThrow(() => invoke(baseArgs(valid))); assert.equal(executorCalls, 1); assert.equal(fs.existsSync(valid), true);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("the final exclusive result writer still rejects a target created after preflight", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "initial-activation-result-race-")); fs.chmodSync(directory, 0o700);
+  const result = path.join(directory, "result.json"); fs.writeFileSync(result, "race", { mode: 0o600 });
+  assert.throws(() => writeStageBPrivateFileExclusive({ filePath: result, bytes: Buffer.from("new"), repositoryRoot: process.cwd(), label: "Initial activation lifecycle policy result" }));
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
 test("one atomic CreatePolicyVersion transitions the exact predecessor and preserves both attachment boundaries", () => {

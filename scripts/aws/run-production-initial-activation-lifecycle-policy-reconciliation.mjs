@@ -21,6 +21,12 @@ const paged = (run, command, collection) => {
     markers.add(page.Marker); marker = page.Marker;
   }
 };
+const resolveResultOutput = (argv) => {
+  const resultOut = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--result-out")), repositoryRoot: root, label: "Initial activation lifecycle policy result", allowExisting: false });
+  ensureStageBPrivateDirectory({ directory: path.dirname(resultOut), repositoryRoot: root, create: false, label: "Initial activation lifecycle policy result directory" });
+  fs.accessSync(path.dirname(resultOut), fs.constants.W_OK);
+  return resultOut;
+};
 
 export function readInitialActivationLifecyclePolicyLiveState(run) {
   const policy = json(run, ["iam", "get-policy", "--policy-arn", INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn]).Policy;
@@ -63,10 +69,9 @@ export function runInitialActivationLifecyclePolicyReconciliation(argv = process
   }
   const resolved = (deps.resolveAuthorizationArtifact || resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact)({ workflowRunId: required(argv, "--workflow-run-id"), workflowRunAttempt: required(argv, "--workflow-run-attempt"), sourceSha });
   const authorization = resolved.authorization;
-  const outcome = executeInitialActivationLifecyclePolicyReconciliation({ authorization, sourceSha, desired, readLiveState: () => readInitialActivationLifecyclePolicyLiveState(run), createPolicyVersion: ({ PolicyArn, PolicyDocument, SetAsDefault }) => json(run, ["iam", "create-policy-version", "--policy-arn", PolicyArn, "--policy-document", JSON.stringify(PolicyDocument), "--set-as-default"]) });
+  const resultOut = resolveResultOutput(argv);
+  const outcome = (deps.executeReconciliation || executeInitialActivationLifecyclePolicyReconciliation)({ authorization, sourceSha, desired, readLiveState: () => readInitialActivationLifecyclePolicyLiveState(run), createPolicyVersion: ({ PolicyArn, PolicyDocument, SetAsDefault }) => json(run, ["iam", "create-policy-version", "--policy-arn", PolicyArn, "--policy-document", JSON.stringify(PolicyDocument), "--set-as-default"]) });
   const result = buildInitialActivationLifecyclePolicyReconciliationResult({ authorization, outcome });
-  const resultOut = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--result-out")), repositoryRoot: root, label: "Initial activation lifecycle policy result", allowExisting: false });
-  ensureStageBPrivateDirectory({ directory: path.dirname(resultOut), repositoryRoot: root, label: "Initial activation lifecycle policy result directory" });
   writeStageBPrivateFileExclusive({ filePath: resultOut, bytes: Buffer.from(`${JSON.stringify(result, null, 2)}\n`), repositoryRoot: root, label: "Initial activation lifecycle policy result" });
   return result;
 }
