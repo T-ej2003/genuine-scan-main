@@ -35,7 +35,7 @@ export function assertStageARdsLatestRestorableTimeDrift(entry) {
   const change = entry?.change;
   if (entry?.address !== "aws_db_instance.green" || entry.mode !== "managed" || entry.type !== "aws_db_instance" || entry.name !== "green"
     || entry.provider_name !== "registry.terraform.io/hashicorp/aws" || !change || !isDeepStrictEqual(change.actions, ["update"])
-    || !Array.isArray(change.replace_paths) || change.replace_paths.length
+    || (change.replace_paths !== undefined && (!Array.isArray(change.replace_paths) || change.replace_paths.length))
     || !emptyObject(change.before_unknown) || !emptyObject(change.after_unknown)
     || !isDeepStrictEqual(change.before_sensitive, STAGE_A_RDS_SENSITIVITY_MASK)
     || !isDeepStrictEqual(change.after_sensitive, STAGE_A_RDS_SENSITIVITY_MASK)) throw new Error("Stage A plan contains uncontracted RDS drift.");

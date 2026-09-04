@@ -157,10 +157,10 @@ test("RDS timestamp drift remains the only additional refresh allowance", () => 
   assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan({ drift: [{ ...rds, address: "aws_vpc_security_group_ingress_rule.other" }] }), { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }), /uncontracted/);
   const invalid = [
     ["mode", (value) => { value.mode = "data"; }], ["type", (value) => { value.type = "aws_db_instance_replica"; }], ["name", (value) => { value.name = "other"; }],
-    ["provider", (value) => { value.provider_name = "registry.terraform.io/hashicorp/other"; }], ["action", (value) => { value.change.actions = ["read"]; }],
+    ["provider", (value) => { value.provider_name = "registry.terraform.io/hashicorp/other"; }], ["action", (value) => { value.change.actions = ["read"]; }], ["replacement action", (value) => { value.change.actions = ["delete", "create"]; }],
     ["replacement", (value) => { value.change.replace_paths = ["latest_restorable_time"]; }], ["before unknown", (value) => { value.change.before_unknown = { id: true }; }],
     ["after unknown", (value) => { value.change.after_unknown = { id: true }; }], ["before sensitive", (value) => { value.change.before_sensitive = { id: true }; }],
-    ["after sensitive", (value) => { value.change.after_sensitive = { id: true }; }], ["extra attribute", (value) => { value.change.after.extra = true; }],
+    ["after sensitive", (value) => { value.change.after_sensitive = { id: true }; }], ["additional changed field", (value) => { value.change.after.identifier = "other"; }], ["extra attribute", (value) => { value.change.after.extra = true; }],
     ["backward timestamp", (value) => { value.change.after.latest_restorable_time = "2026-08-18T20:01:16Z"; }], ["malformed timestamp", (value) => { value.change.after.latest_restorable_time = "invalid"; }],
   ];
   for (const [label, mutate] of invalid) { const candidate = structuredClone(rds); mutate(candidate); assert.throws(() => assertStageARdsLatestRestorableTimeDrift(candidate), /RDS|restorable|uncontracted/i, label); }
@@ -168,6 +168,20 @@ test("RDS timestamp drift remains the only additional refresh allowance", () => 
     const candidate = structuredClone(rds); mutate(candidate); assert.throws(() => assertStageARdsLatestRestorableTimeDrift(candidate), /uncontracted/, label);
   }
   assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan({ drift: [rds, structuredClone(rds)] }), { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }), /uncontracted|exact/i);
+});
+
+test("the observed Terraform refresh envelope permits only omitted empty RDS replacement paths", () => {
+  const rds = { address: "aws_db_instance.green", mode: "managed", type: "aws_db_instance", name: "green", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: { identifier: "green", latest_restorable_time: "2026-08-19T20:01:16Z" }, after: { identifier: "green", latest_restorable_time: "2026-08-20T20:01:16Z" }, after_unknown: {}, before_sensitive: structuredClone(rdsSensitivity), after_sensitive: structuredClone(rdsSensitivity) } };
+  const actual = refreshPlan({ drift: [rds] });
+  actual.resource_drift[0].change.before = resource(predecessor, { omitExpectedBucketOwner: true });
+  actual.resource_drift[0].change.after = resource(desired, { omitExpectedBucketOwner: true });
+  delete actual.resource_drift[0].change.before_unknown;
+  delete actual.resource_drift[0].change.replace_paths;
+  assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(actual, { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }));
+  for (const replacementPaths of [["latest_restorable_time"], null, "replacement"]) {
+    const candidate = structuredClone(actual); candidate.resource_drift[1].change.replace_paths = replacementPaths;
+    assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(candidate, { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }), /RDS|uncontracted|exact/i);
+  }
 });
 
 test("one exact refresh-only apply persists state and leaves AWS policy unchanged", async () => {
