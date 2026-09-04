@@ -29,7 +29,7 @@ import {
   stageAProductionArtifactsGovernedExecutableManifest,
   stageAProductionArtifactsGovernedExecutableManifestSha256,
 } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
-import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, createStageAProductionArtifactsReconciliationPrepareEvidence } from "../aws/production-stage-a-control-plane.mjs";
+import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, createStageAProductionArtifactsReconciliationPrepareEvidence, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "../aws/production-stage-a-production-artifacts-journal.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { authorizeStageAProductionArtifactsReconciliation } from "../aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs";
@@ -46,13 +46,22 @@ const policyApproval = ({ preventSelfReview, executionActor = "operator", actual
 const sign = () => Buffer.from("signature").toString("base64");
 const verify = () => true;
 const governedExecutableManifestSha256 = "9".repeat(64);
-const createStageAProductionArtifactsRecoveryAuthorization = (input) => createRecoveryAuthorization({ ...input, governedExecutableManifestSha256 });
+const historicalTransition = Object.freeze({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy()) });
+const createStageAProductionArtifactsRecoveryAuthorization = (input) => createRecoveryAuthorization({ ...input, governedExecutableManifestSha256, transition: historicalTransition });
 const unchangedGovernedSource = () => governedExecutableManifestSha256;
 const rebindApproval = (authorization, protectedEnvironmentApprovalEvidence) => {
   const { authorizationSha256, ...existing } = authorization;
   const body = { ...existing, protectedEnvironmentApprovalEvidence, protectedEnvironmentApprovalEvidenceSha256: protectedEnvironmentApprovalEvidence.evidenceSha256 };
   return { ...body, authorizationSha256: createHash("sha256").update(canonicalJson(body)).digest("hex") };
 };
+
+test("fresh recovery authorization binds the exact deployed-to-reservation policy transition", () => {
+  const authorization = createRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF), verificationRef: "reservation-transition", governedExecutableManifestSha256 });
+  assert.equal(authorization.predecessorPolicySha256, stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy()));
+  assert.equal(authorization.desiredPolicySha256, stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()));
+  assert.equal(authorization.expectedLivePolicySha256, authorization.predecessorPolicySha256);
+  assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha, preState }));
+});
 
 const githubRun = ({ operation, authorization, id = 123, attempt = 1, actor = "operator", headSha = sourceSha, workflowPath } = {}) => {
   const archiveBytes = Buffer.from(`authorization-${operation}`);

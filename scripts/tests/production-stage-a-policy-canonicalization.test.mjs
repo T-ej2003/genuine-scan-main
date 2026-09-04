@@ -10,7 +10,7 @@ import {
   stageAProductionArtifactsPolicySha256,
 } from "../aws/production-stage-a-control-plane.mjs";
 import { classifyStageAProductionArtifactsRecovery, readRawTerraformStateIdentity, STAGE_A_RECOVERY_CLASSIFICATION } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
-import { assertStageAProductionArtifactsRecoverySourceCompatibility, STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
+import { assertStageAProductionArtifactsRecoverySourceCompatibility, stageAProductionArtifactsGovernedExecutableManifest, stageAProductionArtifactsGovernedExecutableManifestSha256, STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
 
 const desired = buildStageAProductionArtifactsBucketPolicy();
 const clone = () => structuredClone(desired);
@@ -83,6 +83,24 @@ test("historical recovery continuation accepts only the bounded canonicalization
     "scripts/aws/production-github-environment-approval.mjs",
   ]) assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ ...args, readContinuationChangedFiles: () => [...exactRepairDelta, file] }), /unsafe governed/);
   assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility(args), /changed the governed/);
+});
+
+test("the reviewed reservation descendant does not advertise historical A-to-B continuation", () => {
+  const recoverySourceSha = "5ae231bee520442dc6c66365b74c7b0b1b61ec3a";
+  const sourceSha = "9d271df29fb4ec01763d6987e8d2d6a2ea1b4a5b";
+  const manifest = (sha) => stageAProductionArtifactsGovernedExecutableManifest(sha);
+  const ancestor = new Map(manifest(recoverySourceSha).files.map(({ path, sha256 }) => [path, sha256]));
+  const descendant = new Map(manifest(sourceSha).files.map(({ path, sha256 }) => [path, sha256]));
+  const changed = [...new Set([...ancestor.keys(), ...descendant.keys()])].filter((file) => ancestor.get(file) !== descendant.get(file)).sort();
+  assert.deepEqual(changed, [
+    "infra/aws/terraform/production-green-stage-a/main.tf",
+    "scripts/aws/production-green-stage-b-contract.mjs",
+    "scripts/aws/production-stage-a-control-plane.mjs",
+    "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs",
+    "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+    "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+  ]);
+  assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant: () => true, historicalGovernedExecutableManifestSha256: stageAProductionArtifactsGovernedExecutableManifestSha256(recoverySourceSha), readGovernedExecutableManifestSha256: stageAProductionArtifactsGovernedExecutableManifestSha256, readContinuationChangedFiles: () => changed }), /unsafe governed/);
 });
 
 test("recovery CAS reads the exact raw Terraform backend bytes", () => {

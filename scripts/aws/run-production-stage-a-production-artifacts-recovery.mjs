@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { createTerraformStageAAdapter, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, stageAProductionArtifactsPolicySemanticallyEqual } from "./production-stage-a-control-plane.mjs";
+import { createTerraformStageAAdapter, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, resolveStageAProductionArtifactsBucketPolicyTransition, stageAProductionArtifactsPolicySemanticallyEqual } from "./production-stage-a-control-plane.mjs";
 import { PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
 import { createStageATerraformBackendLock, STAGE_A_TERRAFORM_BACKEND } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
@@ -51,13 +51,11 @@ export const STAGE_A_RECOVERY_CLASSIFICATION = Object.freeze({
   P2_WITHOUT_ATTEMPT: "P2_WITHOUT_ATTEMPT",
   COMPLETED: "COMPLETED",
 });
-export function classifyStageAProductionArtifactsRecovery({ livePolicy, attempt, completion } = {}) {
+export function classifyStageAProductionArtifactsRecovery({ livePolicy, attempt, completion, transition = { predecessor: buildStageAProductionArtifactsBucketPolicyPredecessor(), desired: buildStageAProductionArtifactsBucketPolicy() } } = {}) {
   if (completion) return STAGE_A_RECOVERY_CLASSIFICATION.COMPLETED;
-  const desired = buildStageAProductionArtifactsBucketPolicy();
-  const predecessor = buildStageAProductionArtifactsBucketPolicyPredecessor();
   const equal = (left, right) => { try { return stageAProductionArtifactsPolicySemanticallyEqual(left, right); } catch { return false; } };
-  if (equal(livePolicy, desired)) return attempt ? STAGE_A_RECOVERY_CLASSIFICATION.POST_WRITE_COMPLETION_PENDING : STAGE_A_RECOVERY_CLASSIFICATION.P2_WITHOUT_ATTEMPT;
-  if (equal(livePolicy, predecessor)) return attempt ? STAGE_A_RECOVERY_CLASSIFICATION.ATTEMPT_PENDING_BEFORE_WRITE : STAGE_A_RECOVERY_CLASSIFICATION.READY_FOR_WRITE;
+  if (equal(livePolicy, transition.desired)) return attempt ? STAGE_A_RECOVERY_CLASSIFICATION.POST_WRITE_COMPLETION_PENDING : STAGE_A_RECOVERY_CLASSIFICATION.P2_WITHOUT_ATTEMPT;
+  if (equal(livePolicy, transition.predecessor)) return attempt ? STAGE_A_RECOVERY_CLASSIFICATION.ATTEMPT_PENDING_BEFORE_WRITE : STAGE_A_RECOVERY_CLASSIFICATION.READY_FOR_WRITE;
   return STAGE_A_RECOVERY_CLASSIFICATION.LIVE_POLICY_CONFLICT;
 }
 
@@ -65,8 +63,10 @@ const proveProtectedMainDescendant = ({ ancestorSha, descendantSha }) => {
   try { execFileSync("git", ["cat-file", "-e", `${ancestorSha}^{commit}`], { cwd: root, stdio: "ignore" }); execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
 };
 
-export function assertStageAProductionArtifactsJournalRetention(lifecycle, journalPrefix = "production-stage-a-production-artifacts-reconciliation/") {
+export function assertStageAProductionArtifactsJournalRetention(lifecycle, journalPrefixes = ["production-stage-a-production-artifacts-reconciliation/", PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationPrefix]) {
   if (!lifecycle || !Array.isArray(lifecycle.Rules)) throw new Error("Stage A recovery journal lifecycle response is malformed.");
+  const protectedPrefixes = (Array.isArray(journalPrefixes) ? journalPrefixes : [journalPrefixes]).filter((prefix) => typeof prefix === "string" && prefix.length > 0);
+  if (!protectedPrefixes.length) throw new Error("Stage A recovery journal protected prefixes are invalid.");
   const prefixFor = (rule) => {
     if (typeof rule?.Prefix === "string") return rule.Prefix;
     if (typeof rule?.Filter?.Prefix === "string") return rule.Filter.Prefix;
@@ -75,11 +75,12 @@ export function assertStageAProductionArtifactsJournalRetention(lifecycle, journ
   };
   const canProveDisjoint = (rule) => {
     const prefix = prefixFor(rule);
-    return prefix !== null && !journalPrefix.startsWith(prefix) && !prefix.startsWith(journalPrefix);
+    return prefix !== null && protectedPrefixes.every((protectedPrefix) => !protectedPrefix.startsWith(prefix) && !prefix.startsWith(protectedPrefix));
   };
-  const makesCurrentEvidenceUnavailable = (rule) => Boolean(rule?.Expiration || rule?.Transition || rule?.Transitions?.length);
-  for (const rule of lifecycle.Rules) {
-    if (rule?.Status === "Enabled" && makesCurrentEvidenceUnavailable(rule) && !canProveDisjoint(rule)) throw new Error("Stage A recovery journal lifecycle would make its immutable current records unavailable.");
+  const hasCurrentVersionExpiration = (expiration) => Boolean(expiration && (Number.isInteger(expiration.Days) || typeof expiration.Date === "string"));
+  const makesEvidenceUnavailable = (rule) => Boolean(hasCurrentVersionExpiration(rule?.Expiration) || rule?.Transition || rule?.Transitions?.length);
+  for (const [index, rule] of lifecycle.Rules.entries()) {
+    if (rule?.Status === "Enabled" && makesEvidenceUnavailable(rule) && !canProveDisjoint(rule)) throw new Error(`Stage A recovery journal lifecycle rule ${rule?.ID || index} would make a protected immutable record unavailable (current records unavailable).`);
   }
   return true;
 }
@@ -93,24 +94,31 @@ function assertJournalRetention(run) {
   } catch (error) { if (!/NoSuchLifecycleConfiguration/i.test(`${error.message || ""}\n${error.stderr || ""}`)) throw error; }
 }
 
-export async function runStageAProductionArtifactsRecovery({ sourceSha, recoverySourceSha = sourceSha, workflowRunId, workflowRunAttempt, rootRun, releaseRun, readStateIdentity, terraformStateLock, resolveAuthorization = resolveStageAProductionArtifactsAuthorizationArtifact, journal, recoveryJournal = journal, sign, verify, readProtectedSource = readStageBProtectedMainCheckout, proveDescendant = proveProtectedMainDescendant, readGovernedExecutableManifestSha256 } = {}) {
-  if (typeof rootRun !== "function" || typeof releaseRun !== "function" || typeof readStateIdentity !== "function" || !terraformStateLock || typeof terraformStateLock.acquire !== "function" || typeof terraformStateLock.release !== "function" || typeof resolveAuthorization !== "function" || !journal || typeof journal.writeRecoveryCompletion !== "function" || typeof journal.readRecoveryCompletion !== "function" || !recoveryJournal || typeof recoveryJournal.writeRecoveryAttempt !== "function" || typeof recoveryJournal.readRecoveryAttempt !== "function" || typeof recoveryJournal.readRecoveryCompletion !== "function" || typeof sign !== "function" || typeof verify !== "function") throw new Error("Stage A production-artifacts recovery composition is incomplete.");
+export async function runStageAProductionArtifactsRecovery({ sourceSha, recoverySourceSha = sourceSha, workflowRunId, workflowRunAttempt, rootRun, releaseRun, readStateIdentity, terraformStateLock, resolveAuthorization = resolveStageAProductionArtifactsAuthorizationArtifact, journal, recoveryJournal = journal, rootRecoveryJournal = recoveryJournal, sign, verify, readProtectedSource = readStageBProtectedMainCheckout, proveDescendant = proveProtectedMainDescendant, readGovernedExecutableManifestSha256 } = {}) {
+  if (typeof rootRun !== "function" || typeof releaseRun !== "function" || typeof readStateIdentity !== "function" || !terraformStateLock || typeof terraformStateLock.acquire !== "function" || typeof terraformStateLock.release !== "function" || typeof resolveAuthorization !== "function" || !journal || typeof journal.writeRecoveryCompletion !== "function" || typeof journal.readRecoveryCompletion !== "function" || !recoveryJournal || typeof recoveryJournal.writeRecoveryAttempt !== "function" || typeof recoveryJournal.readRecoveryAttempt !== "function" || !rootRecoveryJournal || typeof rootRecoveryJournal.readRecoveryCompletion !== "function" || typeof sign !== "function" || typeof verify !== "function") throw new Error("Stage A production-artifacts recovery composition is incomplete.");
   const fresh = readProtectedSource({ cwd: root, requireCanonicalRepository: true, run: (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), expectedSourceSha: sourceSha }); const authenticatedSourceSha = fresh.toolingSha || fresh.headSha;
   assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: authenticatedSourceSha, recoverySourceSha, proveDescendant, readGovernedExecutableManifestSha256, ...(readProtectedSource === readStageBProtectedMainCheckout ? { readContinuationChangedFiles } : {}) });
   const historicalResume = authenticatedSourceSha !== recoverySourceSha;
   const authenticated = resolveAuthorization({ workflowRunId, workflowRunAttempt, sourceSha: recoverySourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, readGovernedExecutableManifestSha256 }); const authorization = authenticated.authorization;
+  const transition = resolveStageAProductionArtifactsBucketPolicyTransition(authorization);
   assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: authenticatedSourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256: authorization?.governedExecutableManifestSha256, readGovernedExecutableManifestSha256, ...(readProtectedSource === readStageBProtectedMainCheckout ? { readContinuationChangedFiles } : {}) });
+  const historicalTransition = (() => { try { return stageAProductionArtifactsPolicySemanticallyEqual(transition.predecessor, buildStageAProductionArtifactsBucketPolicyPredecessor()) && stageAProductionArtifactsPolicySemanticallyEqual(transition.desired, buildStageAProductionArtifactsBucketPolicy()); } catch { return false; } })();
+  if (historicalResume && historicalTransition) throw new Error("Stage A historical A-to-B recovery is not supported from a descendant source; use the authenticated completion path.");
   if (!exactRoot(awsJson(rootRun, ["sts", "get-caller-identity"])) || !exactRelease(awsJson(releaseRun, ["sts", "get-caller-identity"]))) throw new Error("Stage A production-artifacts recovery caller identity is outside the exact root/release split.");
   assertJournalRetention(rootRun);
   const samePolicy = (left, right) => { try { return stageAProductionArtifactsPolicySemanticallyEqual(left, right); } catch { return false; } };
-  const before = readPolicy(releaseRun); const predecessorLive = samePolicy(before, buildStageAProductionArtifactsBucketPolicyPredecessor()); const desiredLive = samePolicy(before, buildStageAProductionArtifactsBucketPolicy());
+  const before = readPolicy(releaseRun); const predecessorLive = samePolicy(before, transition.predecessor); const desiredLive = samePolicy(before, transition.desired);
   if (!predecessorLive && !desiredLive) throw new Error("Stage A production-artifacts live policy is neither the exact predecessor nor desired policy.");
+  const reservationTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicy()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation());
+  if (!historicalTransition && !reservationTransition) throw new Error("Stage A production-artifacts recovery transition is unsupported.");
+  const attemptJournal = historicalTransition ? rootRecoveryJournal : recoveryJournal;
+  const completionJournal = journal;
   const decode = (record, label) => { if (!record) return null; try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(record.bytes)); } catch { throw new Error(`${label} is malformed.`); } };
   const readCompletion = (reader) => { try { return reader.readRecoveryCompletion(authorization.authorizationSha256); } catch (error) {
     if (!desiredLive || reader !== journal || !/AccessDenied|403/i.test(`${error.message || ""}\n${error.stderr || ""}`)) throw error;
-    return recoveryJournal.readRecoveryCompletion(authorization.authorizationSha256);
+    return rootRecoveryJournal.readRecoveryCompletion(authorization.authorizationSha256);
   } };
-  const existingCompletionReader = predecessorLive ? recoveryJournal : journal;
+  const existingCompletionReader = predecessorLive ? rootRecoveryJournal : completionJournal;
   const existingCompletionRecord = readCompletion(existingCompletionReader);
   const existingCompletion = decode(existingCompletionRecord, "Stage A recovery completion");
   if (existingCompletion) {
@@ -119,20 +127,20 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
     return Object.freeze({ recovered: true, resumed: true, alreadyComplete: true, classification: STAGE_A_RECOVERY_CLASSIFICATION.COMPLETED, putBucketPolicyCount: 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: existingCompletion.completionEvidenceSha256 });
   }
   if (historicalResume && predecessorLive) throw new Error("Stage A descendant recovery continuation cannot start a new P0 policy execution under the descendant source.");
-  let attempt = decode(recoveryJournal.readRecoveryAttempt(authorization.authorizationSha256), "Stage A recovery attempt");
+  let attempt = decode(attemptJournal.readRecoveryAttempt(authorization.authorizationSha256), "Stage A recovery attempt");
   if (!attempt) {
     if (!predecessorLive) throw new Error("Stage A recovery desired-policy resume lacks the immutable signed pre-write attempt.");
     attempt = createStageAProductionArtifactsRecoveryAttemptEvidence({ authorization, sign });
-    recoveryJournal.writeRecoveryAttempt({ recoveryAuthorizationSha256: authorization.authorizationSha256, bytes: Buffer.from(`${JSON.stringify(attempt)}\n`) });
+    attemptJournal.writeRecoveryAttempt({ recoveryAuthorizationSha256: authorization.authorizationSha256, bytes: Buffer.from(`${JSON.stringify(attempt)}\n`) });
   }
   assertStageAProductionArtifactsRecoveryAttemptEvidence(attempt, { authorization, verify });
-  const classification = classifyStageAProductionArtifactsRecovery({ livePolicy: before, attempt });
+  const classification = classifyStageAProductionArtifactsRecovery({ livePolicy: before, attempt, transition });
   if ([STAGE_A_RECOVERY_CLASSIFICATION.LIVE_POLICY_CONFLICT, STAGE_A_RECOVERY_CLASSIFICATION.P2_WITHOUT_ATTEMPT].includes(classification)) throw new Error(`Stage A recovery classification is not executable: ${classification}.`);
   const postWriteContinuation = classification === STAGE_A_RECOVERY_CLASSIFICATION.POST_WRITE_COMPLETION_PENDING;
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-production-artifacts-recovery-")); const policyPath = path.join(directory, "policy.json");
   let lockHeld = false;
   try {
-    fs.writeFileSync(policyPath, JSON.stringify(buildStageAProductionArtifactsBucketPolicy()), { mode: 0o600, flag: "wx" });
+    fs.writeFileSync(policyPath, JSON.stringify(transition.desired), { mode: 0o600, flag: "wx" });
     let after;
     await terraformStateLock.acquire(); lockHeld = true;
     if (postWriteContinuation) {
@@ -140,13 +148,13 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
       assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: finalSourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256: authorization.governedExecutableManifestSha256, readGovernedExecutableManifestSha256, ...(readProtectedSource === readStageBProtectedMainCheckout ? { readContinuationChangedFiles } : {}) });
       const finalAuthenticated = resolveAuthorization({ workflowRunId, workflowRunAttempt, sourceSha: recoverySourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, readGovernedExecutableManifestSha256 });
       if (finalAuthenticated?.authorization?.authorizationSha256 !== authorization.authorizationSha256) throw new Error("Stage A recovery authorization changed before completion continuation.");
-      const finalAttempt = decode(recoveryJournal.readRecoveryAttempt(authorization.authorizationSha256), "Stage A recovery attempt");
+      const finalAttempt = decode(attemptJournal.readRecoveryAttempt(authorization.authorizationSha256), "Stage A recovery attempt");
       assertStageAProductionArtifactsRecoveryAttemptEvidence(finalAttempt, { authorization, verify });
       const finalState = await readStateIdentity();
       assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha: recoverySourceSha, preState: finalState });
       after = readPolicy(releaseRun);
-      if (!samePolicy(after, before) || !stageAProductionArtifactsPolicySemanticallyEqual(after, buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A recovery live policy changed before completion continuation.");
-      const concurrentCompletion = decode(readCompletion(journal), "Stage A recovery completion");
+      if (!samePolicy(after, before) || !stageAProductionArtifactsPolicySemanticallyEqual(after, transition.desired)) throw new Error("Stage A recovery live policy changed before completion continuation.");
+      const concurrentCompletion = decode(readCompletion(completionJournal), "Stage A recovery completion");
       if (concurrentCompletion) {
         assertStageAProductionArtifactsRecoveryCompletionEvidence(concurrentCompletion, { authorization, verify });
         return Object.freeze({ recovered: true, resumed: true, alreadyComplete: true, classification: STAGE_A_RECOVERY_CLASSIFICATION.COMPLETED, putBucketPolicyCount: 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: concurrentCompletion.completionEvidenceSha256 });
@@ -157,12 +165,12 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
       const finalPolicy = readPolicy(releaseRun);
       if (!samePolicy(finalPolicy, before)) throw new Error("Stage A recovery live policy changed before the policy write.");
       if (predecessorLive) await rootRun(["s3api", "put-bucket-policy", "--bucket", authorization.bucket, "--policy", `file://${policyPath}`]);
-      after = readPolicy(releaseRun); if (!stageAProductionArtifactsPolicySemanticallyEqual(after, buildStageAProductionArtifactsBucketPolicy())) throw new Error("Stage A production-artifacts recovery readback is not the exact desired policy.");
+      after = readPolicy(releaseRun); if (!stageAProductionArtifactsPolicySemanticallyEqual(after, transition.desired)) throw new Error("Stage A production-artifacts recovery readback is not the exact desired policy.");
     }
-    const completion = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization, preRecoveryLivePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor(), postRecoveryLivePolicy: after, sign }); const bytes = Buffer.from(`${JSON.stringify(completion)}\n`);
+    const completion = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization, preRecoveryLivePolicy: transition.predecessor, postRecoveryLivePolicy: after, sign }); const bytes = Buffer.from(`${JSON.stringify(completion)}\n`);
     let persisted;
-    try { persisted = journal.writeRecoveryCompletion({ recoveryAuthorizationSha256: authorization.authorizationSha256, bytes }); }
-    catch (error) { const existing = decode(readCompletion(journal), "Stage A recovery completion"); if (!existing) throw error; assertStageAProductionArtifactsRecoveryCompletionEvidence(existing, { authorization, verify }); return Object.freeze({ recovered: true, resumed: true, alreadyComplete: true, classification: STAGE_A_RECOVERY_CLASSIFICATION.COMPLETED, putBucketPolicyCount: predecessorLive ? 1 : 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: existing.completionEvidenceSha256 }); }
+    try { persisted = completionJournal.writeRecoveryCompletion({ recoveryAuthorizationSha256: authorization.authorizationSha256, bytes }); }
+    catch (error) { const existing = decode(readCompletion(completionJournal), "Stage A recovery completion"); if (!existing) throw error; assertStageAProductionArtifactsRecoveryCompletionEvidence(existing, { authorization, verify }); return Object.freeze({ recovered: true, resumed: true, alreadyComplete: true, classification: STAGE_A_RECOVERY_CLASSIFICATION.COMPLETED, putBucketPolicyCount: predecessorLive ? 1 : 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: existing.completionEvidenceSha256 }); }
     return Object.freeze({ recovered: true, resumed: desiredLive, classification, putBucketPolicyCount: predecessorLive ? 1 : 0, deleteBucketPolicyCount: 0, authorizationSha256: authorization.authorizationSha256, completionEvidenceSha256: completion.completionEvidenceSha256, completionObjectSha256: persisted.sha256, completionKey: persisted.key });
   } finally { try { if (lockHeld) await terraformStateLock.release(); } finally { fs.rmSync(directory, { recursive: true, force: true }); } }
 }
@@ -176,7 +184,7 @@ export async function runStageAProductionArtifactsRecoveryCli(argv = process.arg
   const terraformEnvironment = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: "eu-west-2" }), TF_DATA_DIR: terraformDataDir };
   const terraformRun = async (args) => execFileSync(args[0], args.slice(1), { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const adapter = createTerraformStageAAdapter({ root: "infra/aws/terraform/production-green-stage-a", planPath: path.join(terraformDataDir, "unused.tfplan"), backendArgs: Object.entries(STAGE_A_TERRAFORM_BACKEND).filter(([key]) => key !== "type").map(([key, value]) => `-backend-config=${key}=${value}`), run: terraformRun, describeIngress: async () => ({ present: false }), readProductionArtifactsPolicy: async () => readPolicy(releaseRun), sourceSha });
-  const result = await runStageAProductionArtifactsRecovery({ sourceSha, recoverySourceSha, workflowRunId: required(argv, "--authorization-workflow-run-id"), workflowRunAttempt: required(argv, "--authorization-workflow-run-attempt"), rootRun, releaseRun, readStateIdentity: () => readRawTerraformStateIdentity(releaseRun), terraformStateLock: createStageATerraformBackendLock({ run: releaseRun, lockFilePath: path.join(terraformDataDir, `stage-a-recovery-${crypto.randomUUID()}.tflock`) }), journal: createStageAProductionArtifactsJournal({ run: releaseRun }), recoveryJournal: createStageAProductionArtifactsJournal({ run: rootRun }), sign: createRootAttestationKmsSigner({ run: rootRun }), verify: createRootAttestationKmsVerifier({ run: releaseRun }), proveDescendant: proveProtectedMainDescendant, ...deps });
+  const result = await runStageAProductionArtifactsRecovery({ sourceSha, recoverySourceSha, workflowRunId: required(argv, "--authorization-workflow-run-id"), workflowRunAttempt: required(argv, "--authorization-workflow-run-attempt"), rootRun, releaseRun, readStateIdentity: () => readRawTerraformStateIdentity(releaseRun), terraformStateLock: createStageATerraformBackendLock({ run: releaseRun, lockFilePath: path.join(terraformDataDir, `stage-a-recovery-${crypto.randomUUID()}.tflock`) }), journal: createStageAProductionArtifactsJournal({ run: releaseRun }), recoveryJournal: createStageAProductionArtifactsJournal({ run: releaseRun }), rootRecoveryJournal: createStageAProductionArtifactsJournal({ run: rootRun }), sign: createRootAttestationKmsSigner({ run: rootRun }), verify: createRootAttestationKmsVerifier({ run: releaseRun }), proveDescendant: proveProtectedMainDescendant, ...deps });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`); return result;
 }
 
