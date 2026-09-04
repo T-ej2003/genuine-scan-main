@@ -59,6 +59,9 @@ export const PRODUCTION_ACTIVATION_LIFECYCLE = Object.freeze({
   rebaselineEvidenceArn: `arn:aws:s3:::${STAGE_B.receiptBucket}/production-dual-slot-rebaseline-evidence/*`,
   stageAProductionArtifactsReconciliationPrefix: "production-stage-a-production-artifacts-reconciliation/",
   stageAProductionArtifactsReconciliationArn: `arn:aws:s3:::${STAGE_B.receiptBucket}/production-stage-a-production-artifacts-reconciliation/*`,
+  initialActivationPolicyReconciliationReservationPrefix: "production-initial-activation-lifecycle-policy-reconciliation/reservations/",
+  initialActivationPolicyReconciliationReservationArn: `arn:aws:s3:::${STAGE_B.receiptBucket}/production-initial-activation-lifecycle-policy-reconciliation/reservations/*`,
+  rootOperatorArn: "arn:aws:iam::368992683803:root",
   releaseRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
 });
 

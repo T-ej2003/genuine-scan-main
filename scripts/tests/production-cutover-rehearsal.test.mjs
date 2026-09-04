@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assertStageAPlan, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
+import { assertStageAPlan, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, PRODUCTION_CUTOVER_MODE, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { persistOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
@@ -64,12 +64,12 @@ const checkerRoleChange = ({ actions = ["no-op"], before = {}, after = {} } = {}
     after: { name: STAGE_A_CHECKER_ROLE_TRUST.name, assume_role_policy: checkerRoleTrustDocument(), ...after },
   },
 });
-const artifactsBucketPolicyChange = ({ actions = ["create"], before = null, beforePolicy, after = {}, policy = buildStageAProductionArtifactsBucketPolicy() } = {}) => ({
+const artifactsBucketPolicyChange = ({ actions = ["create"], before = null, beforePolicy, after = {}, policy = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation() } = {}) => ({
   address: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address,
   type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type,
   change: {
     actions,
-    before: actions[0] === "no-op" ? { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(buildStageAProductionArtifactsBucketPolicy()), ...before } : beforePolicy ? { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(beforePolicy), ...before } : before,
+    before: actions[0] === "no-op" ? { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()), ...before } : beforePolicy ? { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(beforePolicy), ...before } : before,
     after: { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(policy), ...after },
   },
 });
@@ -239,12 +239,15 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
   assert.equal(exactUpdateValidation.changes, 3);
   assert.equal(exactUpdateValidation.recoveryRequired, true);
   assert.equal(exactUpdateValidation.executionDisposition, "RECOVERY_REQUIRED");
+  const intentionalReservationUpdate = assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicy() }) }), inputs);
+  assert.equal(intentionalReservationUpdate.recoveryRequired, false);
+  assert.equal(intentionalReservationUpdate.executionDisposition, "ORDINARY_STAGE_A");
   assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: { ...exactUpdate, address: "aws_s3_bucket_policy.unrelated" } }), inputs));
   for (const actions of [["update", "create"], ["replace"], ["delete"]]) {
     assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions, beforePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor() }) }), inputs));
   }
   const predecessor = buildStageAProductionArtifactsBucketPolicyPredecessor();
-  const desired = buildStageAProductionArtifactsBucketPolicy();
+  const desired = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   const predecessorMutation = structuredClone(predecessor);
   predecessorMutation.Statement[0].Action = "s3:PutObject";
   const predecessorRemoved = structuredClone(predecessor);
@@ -254,26 +257,34 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
   for (const beforePolicy of [predecessorMutation, predecessorRemoved, predecessorExtra, desired]) {
     assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy }) }), inputs));
   }
-  const broadened = buildStageAProductionArtifactsBucketPolicy();
+  const broadened = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   broadened.Statement[0].Resource = [`arn:aws:s3:::${STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket}/*`];
-  const missingSelfProtection = buildStageAProductionArtifactsBucketPolicy();
+  const missingSelfProtection = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   missingSelfProtection.Statement.pop();
-  const durableEvidenceMissing = buildStageAProductionArtifactsBucketPolicy();
+  const durableEvidenceMissing = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   durableEvidenceMissing.Statement = durableEvidenceMissing.Statement.filter(({ Sid }) => Sid !== "DenyRebaselineEvidenceDeletion");
-  const durableEvidenceModified = buildStageAProductionArtifactsBucketPolicy();
+  const durableEvidenceModified = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   durableEvidenceModified.Statement.find(({ Sid }) => Sid === "AllowReleaseDeployerConditionalRebaselineEvidenceCreate").Condition = {};
-  const durableEvidenceExtra = buildStageAProductionArtifactsBucketPolicy();
+  const durableEvidenceExtra = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   durableEvidenceExtra.Statement.push({ Sid: "Unexpected", Effect: "Allow", Action: "s3:GetObject", Resource: "*" });
-  const principalBroadened = buildStageAProductionArtifactsBucketPolicy();
+  const principalBroadened = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   principalBroadened.Statement.find(({ Sid }) => Sid === "AllowReleaseDeployerReadRebaselineEvidence").Principal = "*";
-  const actionBroadened = buildStageAProductionArtifactsBucketPolicy();
+  const actionBroadened = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   actionBroadened.Statement.find(({ Sid }) => Sid === "AllowReleaseDeployerReadRebaselineEvidence").Action = "s3:*";
-  const conditionRemoved = buildStageAProductionArtifactsBucketPolicy();
+  const conditionRemoved = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   delete conditionRemoved.Statement.find(({ Sid }) => Sid === "AllowReleaseDeployerConditionalRebaselineEvidenceCreate").Condition;
-  const denyChangedToAllow = buildStageAProductionArtifactsBucketPolicy();
+  const denyChangedToAllow = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   denyChangedToAllow.Statement.find(({ Sid }) => Sid === "DenyRebaselineEvidenceDeletion").Effect = "Allow";
-  const nonConditionalDenyWeakened = buildStageAProductionArtifactsBucketPolicy();
+  const nonConditionalDenyWeakened = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   nonConditionalDenyWeakened.Statement.find(({ Sid }) => Sid === "DenyNonConditionalRebaselineEvidenceWrites").Condition = { StringEquals: { "s3:if-none-match": "*" } };
+  const reservationPrincipalBroadened = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  reservationPrincipalBroadened.Statement.find(({ Sid }) => Sid === "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations").Principal = "*";
+  const reservationResourceBroadened = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  reservationResourceBroadened.Statement.find(({ Sid }) => Sid === "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations").Resource = [`arn:aws:s3:::${STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket}/*`];
+  const reservationConditionRemoved = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  delete reservationConditionRemoved.Statement.find(({ Sid }) => Sid === "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate").Condition;
+  const reservationDeletionAllowed = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  reservationDeletionAllowed.Statement.find(({ Sid }) => Sid === "DenyInitialActivationPolicyReconciliationReservationDeletion").Effect = "Allow";
   const durableEvidenceSids = [
     "AllowReleaseDeployerReadRebaselineEvidence",
     "AllowReleaseDeployerConditionalRebaselineEvidenceCreate",
@@ -282,9 +293,20 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
     "DenyRebaselineEvidenceDeletion",
   ];
   for (const sid of durableEvidenceSids) {
-    const missing = buildStageAProductionArtifactsBucketPolicy();
+    const missing = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
     missing.Statement = missing.Statement.filter((statement) => statement.Sid !== sid);
     assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: missing }) }), inputs));
+  }
+  for (const sid of [
+    "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
+    "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
+    "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
+    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
+    "DenyInitialActivationPolicyReconciliationReservationDeletion",
+  ]) {
+    const missing = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+    missing.Statement = missing.Statement.filter((statement) => statement.Sid !== sid);
+    assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicy(), policy: missing }) }), inputs));
   }
   for (const artifactsBucketPolicy of [
     artifactsBucketPolicyChange({ before: {} }),
@@ -300,6 +322,10 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
     artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: conditionRemoved }),
     artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: denyChangedToAllow }),
     artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: predecessor, policy: nonConditionalDenyWeakened }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicy(), policy: reservationPrincipalBroadened }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicy(), policy: reservationResourceBroadened }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicy(), policy: reservationConditionRemoved }),
+    artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicy(), policy: reservationDeletionAllowed }),
   ]) assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy }), inputs));
   assert.equal(assertStageAPlan(stageAPlan({ actions: ["no-op"], checkerActions: ["no-op"] }), inputs).alreadyConverged, true);
 });

@@ -17,6 +17,7 @@ import {
 import { PRODUCTION_ACTIVATION_LIFECYCLE } from "../aws/production-green-stage-b-contract.mjs";
 import { runCli } from "../aws/manage-production-initial-activation-lifecycle.mjs";
 import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
+import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation } from "../aws/production-stage-a-control-plane.mjs";
 import { produceOnboardingEvidence } from "../security/produce-production-onboarding-evidence.mjs";
 
 const sourceSha = "a".repeat(40);
@@ -34,6 +35,17 @@ const terraformFiles = (directory) => readdirSync(directory, { withFileTypes: tr
   const target = path.join(directory, entry.name);
   return entry.isDirectory() ? terraformFiles(target) : entry.name.endsWith(".tf") ? [target] : [];
 });
+const asArray = (value) => Array.isArray(value) ? value : [value];
+const policyDecision = (policy, { action, resource, principalArn, ifNoneMatch } = {}) => {
+  const matches = (statement) => asArray(statement.Action).includes(action)
+    && asArray(statement.Resource).some((candidate) => candidate === resource || candidate.endsWith("*") && resource.startsWith(candidate.slice(0, -1)))
+    && (statement.Principal === "*" || asArray(statement.Principal?.AWS).includes(principalArn))
+    && (statement.Condition?.StringEquals?.["s3:if-none-match"] === undefined || statement.Condition.StringEquals["s3:if-none-match"] === ifNoneMatch)
+    && (statement.Condition?.StringNotEquals?.["s3:if-none-match"] === undefined || statement.Condition.StringNotEquals["s3:if-none-match"] !== ifNoneMatch)
+    && (statement.Condition?.StringNotEquals?.["aws:PrincipalArn"] === undefined || statement.Condition.StringNotEquals["aws:PrincipalArn"] !== principalArn);
+  if (policy.Statement.some((statement) => statement.Effect === "Deny" && matches(statement))) return "explicitDeny";
+  return policy.Statement.some((statement) => statement.Effect === "Allow" && matches(statement)) ? "allowed" : "implicitDeny";
+};
 
 const memoryS3 = ({ versionIds = {} } = {}) => {
   const objects = new Map();
@@ -201,6 +213,11 @@ test("source policy and bucket policy enforce only exact conditional lifecycle o
     "DenyNonConditionalStageAProductionArtifactsReconciliationWrites",
     "DenyOtherPrincipalsStageAProductionArtifactsReconciliationWrites",
     "DenyStageAProductionArtifactsReconciliationDeletion",
+    "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
+    "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
+    "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
+    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
+    "DenyInitialActivationPolicyReconciliationReservationDeletion",
     "DenyProductionArtifactsBucketPolicyMutation",
   ]);
   const evidence = policy.Statement.filter(({ Sid }) => ["ReadExactRebaselineEvidence", "CreateExactRebaselineEvidenceConditionally", "DenyNonConditionalRebaselineEvidenceWrites", "DenyRebaselineEvidenceDeletion"].includes(Sid));
@@ -210,6 +227,24 @@ test("source policy and bucket policy enforce only exact conditional lifecycle o
   assert.deepEqual(evidence.find(({ Sid }) => Sid === "DenyNonConditionalRebaselineEvidenceWrites").Condition, { StringNotEquals: { "s3:if-none-match": "*" } });
   assert.match(bucketPolicy, /DenyProductionArtifactsBucketPolicyMutation[\s\S]*s3:PutBucketPolicy[\s\S]*s3:DeleteBucketPolicy[\s\S]*var\.receipt_bucket_arn/);
   assert.doesNotMatch(bucketPolicy, /rls-(?:broker-)?receipts|ignore_changes|production-activation-lifecycle\/\*/);
+});
+
+test("initial-activation policy reconciliation reservation is exact, conditional, root-only, and immutable", () => {
+  const current = buildStageAProductionArtifactsBucketPolicy();
+  const desired = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const prefixArn = PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn;
+  const exactObjectArn = prefixArn.replace("*", `${"a".repeat(64)}.json`);
+  assert.deepEqual(desired.Statement.slice(0, current.Statement.length), current.Statement);
+  assert.equal(desired.Statement.length, current.Statement.length + 5);
+  assert.equal(PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationPrefix, "production-initial-activation-lifecycle-policy-reconciliation/reservations/");
+  assert.equal(prefixArn, `arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationPrefix}*`);
+  assert.equal(policyDecision(desired, { action: "s3:GetObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }), "allowed");
+  assert.equal(policyDecision(desired, { action: "s3:PutObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn, ifNoneMatch: "*" }), "allowed");
+  assert.equal(policyDecision(desired, { action: "s3:PutObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }), "explicitDeny");
+  assert.equal(policyDecision(desired, { action: "s3:PutObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn, ifNoneMatch: "*" }), "explicitDeny");
+  for (const action of ["s3:DeleteObject", "s3:DeleteObjectVersion"]) assert.equal(policyDecision(desired, { action, resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }), "explicitDeny");
+  assert.equal(policyDecision(desired, { action: "s3:PutObject", resource: `arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/unrelated/${"a".repeat(64)}.json`, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn, ifNoneMatch: "*" }), "implicitDeny");
+  assert.equal(desired.Statement.some(({ Action }) => asArray(Action).includes("s3:ListBucket")), false);
 });
 
 test("Stage A is the sole complete production artifacts bucket-policy owner", () => {
