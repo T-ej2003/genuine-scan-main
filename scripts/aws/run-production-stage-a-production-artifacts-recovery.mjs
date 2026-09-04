@@ -77,7 +77,8 @@ export function assertStageAProductionArtifactsJournalRetention(lifecycle, journ
     const prefix = prefixFor(rule);
     return prefix !== null && protectedPrefixes.every((protectedPrefix) => !protectedPrefix.startsWith(prefix) && !prefix.startsWith(protectedPrefix));
   };
-  const makesEvidenceUnavailable = (rule) => Boolean(rule?.Expiration || rule?.Transition || rule?.Transitions?.length || rule?.ExpiredObjectDeleteMarker);
+  const hasCurrentVersionExpiration = (expiration) => Boolean(expiration && (Number.isInteger(expiration.Days) || typeof expiration.Date === "string"));
+  const makesEvidenceUnavailable = (rule) => Boolean(hasCurrentVersionExpiration(rule?.Expiration) || rule?.Transition || rule?.Transitions?.length);
   for (const [index, rule] of lifecycle.Rules.entries()) {
     if (rule?.Status === "Enabled" && makesEvidenceUnavailable(rule) && !canProveDisjoint(rule)) throw new Error(`Stage A recovery journal lifecycle rule ${rule?.ID || index} would make a protected immutable record unavailable (current records unavailable).`);
   }
