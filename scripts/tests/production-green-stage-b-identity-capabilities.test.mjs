@@ -10,7 +10,7 @@ import {
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
+import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { assertStageBAdministratorEvidenceIdentity, buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
@@ -157,10 +157,14 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 46, capabilities: 377, uniqueActions: 134, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 46, capabilities: 379, uniqueActions: 134, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
+  for (const [id, action] of [["initial-activation-policy-reconciliation-root-read-reservation-exact", "s3:GetObject"], ["initial-activation-policy-reconciliation-root-conditional-create-reservation-exact", "s3:PutObject"]]) {
+    assert(first.sourceScan.some((call) => call.capabilityId === id && call.sourceFile === "scripts/aws/production-initial-activation-policy-reconciliation.mjs" && call.phase === "initial-activation-lifecycle-policy-reconciliation" && call.identity === "ROOT_OPERATOR" && call.action === action));
+    assert(first.capabilities.some((capability) => capability.id === id && capability.phase === "initial-activation-lifecycle-policy-reconciliation" && capability.action === action));
+  }
   assert.equal(first.capabilities.filter(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "ecs:ExecuteCommand").length, 0);
   assert.deepEqual(first.capabilities.filter(({ id }) => id === "initial-activation-policy-reconciliation-root-list-policy-entities").map(({ identity, action, resources }) => ({ identity, action, resources })), [{ identity: "ROOT_OPERATOR", action: "iam:ListEntitiesForPolicy", resources: ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"]}]);
   assert.equal(first.capabilities.find(({ id }) => id === "manifest-release-deployer-ecs-exec").identity, "ADMINISTRATOR");

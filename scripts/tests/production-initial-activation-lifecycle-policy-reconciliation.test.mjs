@@ -158,7 +158,7 @@ test("ambiguous successful create converges by exact desired readback without a 
 });
 
 function reservationMemoryS3() {
-  const objects = new Map(); const calls = []; let conflictNext = false; let conflictObject;
+  const objects = new Map(); const calls = []; let conflictNext = false; let conflictObject; let loseNext = false;
   const run = (args) => {
     calls.push([...args]); const operation = args[1]; const key = args[args.indexOf("--key") + 1];
     if (operation === "get-object") {
@@ -168,32 +168,50 @@ function reservationMemoryS3() {
     if (operation === "put-object") {
       assert.equal(args[args.indexOf("--if-none-match") + 1], "*");
       if (conflictNext || objects.has(key)) { if (conflictNext && conflictObject) objects.set(key, conflictObject); conflictNext = false; conflictObject = undefined; const error = new Error("PreconditionFailed"); error.stderr = "PreconditionFailed"; throw error; }
-      objects.set(key, fs.readFileSync(args[args.indexOf("--body") + 1])); return "{}";
+      objects.set(key, fs.readFileSync(args[args.indexOf("--body") + 1]));
+      if (loseNext) { loseNext = false; throw new Error("transport response lost"); }
+      return "{}";
     }
     throw new Error(`unexpected S3 operation ${operation}`);
   };
-  return { run, objects, calls, conflict(bytes) { conflictNext = true; conflictObject = bytes; } };
+  return { run, objects, calls, conflict(bytes) { conflictNext = true; conflictObject = bytes; }, lose() { loseNext = true; } };
 }
 
-const reservationInput = () => ({ sourceSha, authorizationSha256: authorization().authorizationSha256, predecessorDefaultVersionId: CONTRACT.predecessorVersionId, predecessorPolicySha256: CONTRACT.predecessorPolicySha256, desiredPolicySha256: CONTRACT.desiredPolicySha256 });
+const reservationAuthorizationSha256 = authorization().authorizationSha256;
+const reservationInput = (ownerNonce = "a".repeat(32)) => ({ sourceSha, authorizationSha256: reservationAuthorizationSha256, predecessorDefaultVersionId: CONTRACT.predecessorVersionId, predecessorPolicySha256: CONTRACT.predecessorPolicySha256, desiredPolicySha256: CONTRACT.desiredPolicySha256, ownerNonce });
 
-test("reservation is exact-key, conditional, immutable, and matching replay-safe", () => {
-  const s3 = reservationMemoryS3(); const store = createInitialActivationLifecyclePolicyReservationStore({ run: s3.run }); const identity = reservationInput();
+test("reservation uses unique ownership bytes while retaining one deterministic key", () => {
+  const s3 = reservationMemoryS3(); const store = createInitialActivationLifecyclePolicyReservationStore({ run: s3.run }); const identity = reservationInput("a".repeat(32));
   const first = store.reserve(identity); assert.equal(first.owned, true); assert.equal(first.created, true);
   const key = initialActivationLifecyclePolicyReservationKey(createInitialActivationLifecyclePolicyReservation(identity));
   assert.equal(first.key, key); assert.match(key, /production-initial-activation-lifecycle-policy-reconciliation\/reservations\/[a-f0-9]{64}\.json$/);
-  const replay = store.reserve(identity); assert.equal(replay.owned, true); assert.equal(replay.created, false); assert.deepEqual(replay.reservation, first.reservation);
+  const contender = store.reserve(reservationInput("b".repeat(32))); assert.equal(contender.owned, false); assert.equal(contender.created, false); assert.deepEqual(contender.reservation, first.reservation);
+  assert.notDeepEqual(createInitialActivationLifecyclePolicyReservation(identity), createInitialActivationLifecyclePolicyReservation(reservationInput("b".repeat(32))));
+  const sameOwnerRecovery = store.reserve(identity); assert.equal(sameOwnerRecovery.owned, true); assert.equal(sameOwnerRecovery.created, false);
   assert.equal(s3.calls.filter((args) => args[1] === "put-object").length, 1); assert.equal(s3.calls.filter((args) => args[1] === "put-object")[0].includes("--if-none-match"), true);
   assert.throws(() => store.reserve({ ...identity, desiredPolicySha256: "b".repeat(64) }), /reservation|desired/);
 });
 
 test("conditional reservation conflict authenticates the exact existing bytes and never overwrites", () => {
-  const s3 = reservationMemoryS3(); const store = createInitialActivationLifecyclePolicyReservationStore({ run: s3.run }); const identity = reservationInput();
+  const s3 = reservationMemoryS3(); const store = createInitialActivationLifecyclePolicyReservationStore({ run: s3.run }); const identity = reservationInput("a".repeat(32));
   const reservation = createInitialActivationLifecyclePolicyReservation(identity); const key = initialActivationLifecyclePolicyReservationKey(reservation); const bytes = Buffer.from(`${canonicalJson(reservation)}\n`);
   s3.conflict(bytes);
   const result = store.reserve(identity); assert.equal(result.created, false); assert.deepEqual(result.reservation, reservation);
   assert.equal(s3.calls.filter((args) => args[1] === "put-object").length, 1);
   assert.equal(bytes.equals(s3.objects.get(key)), true); assert.equal(s3.calls.filter((args) => args[1] === "get-object").at(-1).includes(key), true);
+});
+
+test("lost conditional reservation response recovers only the matching owner token", () => {
+  const s3 = reservationMemoryS3(); const store = createInitialActivationLifecyclePolicyReservationStore({ run: s3.run }); const identity = reservationInput("a".repeat(32));
+  const reservation = createInitialActivationLifecyclePolicyReservation(identity); const key = initialActivationLifecyclePolicyReservationKey(reservation);
+  s3.lose(); const winner = store.reserve(identity); assert.equal(winner.owned, true); assert.equal(winner.created, false);
+  const loser = store.reserve(reservationInput("b".repeat(32))); assert.equal(loser.owned, false); assert.equal(loser.reservation.ownerNonce, "a".repeat(32)); assert.equal(s3.objects.has(key), true);
+});
+
+test("executor generates a unique owner token before the conditional reservation", () => {
+  const seen = []; let creates = 0;
+  assert.throws(() => executeCore({ authorization: authorization(), sourceSha, desired, createReservationOwnerNonce: () => "b".repeat(32), reserve: (candidate) => { seen.push(candidate.ownerNonce); return { owned: false }; }, readLiveState: () => state(), createPolicyVersion: () => { creates += 1; } }), /ownership/);
+  assert.deepEqual(seen, ["b".repeat(32)]); assert.equal(creates, 0);
 });
 
 test("IAM convergence accepts temporary predecessor visibility, bounds polling, and rejects unexpected state", () => {

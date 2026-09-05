@@ -37,7 +37,11 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 8); // reviewed baseline calls plus exact Stage-A and target-scoped IAM reconciliation calls
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 10); // reviewed baseline calls plus exact Stage-A and target-scoped IAM/reconciliation-reservation calls
+  assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("initial-activation-policy-reconciliation-root-") && ["initial-activation-policy-reconciliation-root-read-reservation-exact", "initial-activation-policy-reconciliation-root-conditional-create-reservation-exact"].includes(capabilityId)).map(({ action, capabilityId, identity, reachableMode }) => [action, capabilityId, identity, reachableMode]), [
+    ["s3:GetObject", "initial-activation-policy-reconciliation-root-read-reservation-exact", "ROOT_OPERATOR", ["INITIAL_ACTIVATION_POLICY_RECONCILIATION"]],
+    ["s3:PutObject", "initial-activation-policy-reconciliation-root-conditional-create-reservation-exact", "ROOT_OPERATOR", ["INITIAL_ACTIVATION_POLICY_RECONCILIATION"]],
+  ]);
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("stage-a-artifacts-recovery-release-lock-")).map(({ action, resources, identity }) => [action, resources, identity]), [
     ["s3:PutObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"], "RELEASE_DEPLOYER"],
     ["s3:DeleteObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"], "RELEASE_DEPLOYER"],
@@ -91,6 +95,14 @@ test("complete production dependency closure is exact across modes and failure p
   assert.deepEqual(report.newAwsCalls.find(({ capabilityId }) => capabilityId === "manifest-backend-health-recovery-describe-images")?.reachableMode, ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"]);
   assert.deepEqual(report.pathClosure, { forward: "PASS", rollback: "PASS", reconciliation: "PASS" });
   assert.deepEqual(new Set(Object.values(report.counters)), new Set([0]));
+});
+
+test("initial-activation reservation calls are omission-proof in the dependency closure", () => {
+  const calls = discoverAwsCliActions(); const current = graph();
+  for (const capabilityId of ["initial-activation-policy-reconciliation-root-read-reservation-exact", "initial-activation-policy-reconciliation-root-conditional-create-reservation-exact"]) {
+    assert(calls.some((call) => call.capabilityId === capabilityId && call.sourceFile === "scripts/aws/production-initial-activation-policy-reconciliation.mjs"));
+    assert.throws(() => assertChangedAwsCallClosure(calls.filter((call) => call.capabilityId !== capabilityId), current), /closure contract/);
+  }
 });
 
 test("Stage A production-artifacts mode closure is tuple-exact and omission-proof", () => {

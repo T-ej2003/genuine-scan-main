@@ -22,6 +22,7 @@ const RUNTIME_KMS_KEY = "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4a
 const ROOT_ATTESTATION_KEY = "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation";
 const PRODUCTION_ARTIFACTS_BUCKET = "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an";
 const STAGE_A_RECONCILIATION_JOURNAL = `${PRODUCTION_ARTIFACTS_BUCKET}/production-stage-a-production-artifacts-reconciliation/*`;
+const INITIAL_ACTIVATION_RESERVATION = `${PRODUCTION_ARTIFACTS_BUCKET}/production-initial-activation-lifecycle-policy-reconciliation/reservations/*`;
 const STAGE_A_TERRAFORM_STATE_ARN = `${STAGE_B_TERRAFORM_BACKEND.bucketArn}/${STAGE_A_TERRAFORM_BACKEND.key}`;
 
 const CALLS = Object.freeze([
@@ -100,6 +101,8 @@ const CALLS = Object.freeze([
   ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "iam:ListAttachedRolePolicies", "initial-activation-policy-reconciliation-root-read-policy-attachment", ["arn:aws:iam::368992683803:role/mscqr-production-release-deployer"], "ROOT_OPERATOR"],
   ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "iam:ListEntitiesForPolicy", "initial-activation-policy-reconciliation-root-list-policy-entities", ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"], "ROOT_OPERATOR"],
   ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "iam:CreatePolicyVersion", "initial-activation-policy-reconciliation-root-create-policy-version", ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"], "ROOT_OPERATOR"],
+  ["scripts/aws/production-initial-activation-policy-reconciliation.mjs", "s3:GetObject", "initial-activation-policy-reconciliation-root-read-reservation-exact", [INITIAL_ACTIVATION_RESERVATION], "ROOT_OPERATOR", "initial-activation-policy-reconciliation-root-read-reservation-exact"],
+  ["scripts/aws/production-initial-activation-policy-reconciliation.mjs", "s3:PutObject", "initial-activation-policy-reconciliation-root-conditional-create-reservation-exact", [INITIAL_ACTIVATION_RESERVATION], "ROOT_OPERATOR", "initial-activation-policy-reconciliation-root-conditional-create-reservation-exact"],
 ].map(([sourceFile, action, capabilityId, resources, identity = "RELEASE_DEPLOYER", sourceFunction]) => Object.freeze({ sourceFile, action, capabilityId, identity, resources: Object.freeze(resources), ...(sourceFunction ? { sourceFunction } : {}) })));
 const stageARootVerifierCapability = (capabilityId) => ["release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"].includes(capabilityId);
 
@@ -269,7 +272,7 @@ export function buildProductionDependencyClosure() {
 }
 
 export function assertChangedAwsCallClosure(scanned, graph) {
-  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"].includes(sourceFile);
+  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-initial-activation-policy-reconciliation.mjs"].includes(sourceFile);
   const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER", sourceFunction = "", capabilityId = "" }) => `${sourceFile}\t${action}\t${identityBound(sourceFile) ? identity : ""}\t${capabilityId.endsWith("-read-raw-state") ? sourceFunction : ""}`;
   const callKeys = new Set(CALLS.map(key));
   const normalized = scanned.map(({ sourceFile, action, identity, sourceFunction, capabilityId }) => {
@@ -301,7 +304,7 @@ export function assertChangedAwsCallClosure(scanned, graph) {
       : contract.sourceFile.endsWith("deploy-ecs-service.sh")
       ? ["NORMAL", "ROTATION_OVERLAP", "ROTATION_CLEANUP"]
       : contract.sourceFile.endsWith("production-normal-backend-activation.mjs") ? ["NORMAL"]
-        : contract.sourceFile.endsWith("run-production-initial-activation-lifecycle-policy-reconciliation.mjs") ? [INITIAL_ACTIVATION_POLICY_RECONCILIATION_MODE] : ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"];
+      : contract.sourceFile.endsWith("run-production-initial-activation-lifecycle-policy-reconciliation.mjs") || contract.sourceFile.endsWith("production-initial-activation-policy-reconciliation.mjs") ? [INITIAL_ACTIVATION_POLICY_RECONCILIATION_MODE] : ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"];
     return { ...contract, reachableMode, executionPrincipal: contract.identity, sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true, administratorPreflightPresent: true, runtimePreflightPresent: true, negativeTestPresent: true };
   });
 }

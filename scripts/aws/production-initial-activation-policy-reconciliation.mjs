@@ -42,6 +42,8 @@ const requireSha40 = (value, label) => { if (!SHA40.test(value || "")) throw new
 const requireSha = (value, label) => { if (!SHA256.test(value || "")) throw new Error(`${label} is invalid.`); return value; };
 const canonicalBytes = (value) => Buffer.from(`${canonicalJson(value)}\n`);
 const INITIAL_ACTIVATION_RESERVATION_PREFIX = PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationPrefix;
+const OWNER_NONCE = /^[a-f0-9]{32}$/;
+const createReservationOwnerNonce = () => crypto.randomBytes(16).toString("hex");
 
 export function initialActivationLifecyclePolicyReservationIdentity({ sourceSha, authorizationSha256, predecessorDefaultVersionId, predecessorPolicySha256, desiredPolicySha256 } = {}) {
   requireSha40(sourceSha, "sourceSha"); requireSha(authorizationSha256, "authorizationSha256");
@@ -53,7 +55,8 @@ export function initialActivationLifecyclePolicyReservationIdentity({ sourceSha,
 
 export function createInitialActivationLifecyclePolicyReservation(input = {}) {
   const identity = initialActivationLifecyclePolicyReservationIdentity(input);
-  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_LIFECYCLE_POLICY_RECONCILIATION_RESERVATION", ...identity };
+  if (!OWNER_NONCE.test(input.ownerNonce || "")) throw new Error("ownerNonce is invalid.");
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_LIFECYCLE_POLICY_RECONCILIATION_RESERVATION", ...identity, ownerNonce: input.ownerNonce };
   return Object.freeze({ ...body, reservationSha256: canonicalSha256(body) });
 }
 
@@ -63,10 +66,10 @@ export function initialActivationLifecyclePolicyReservationKey(reservation) {
 }
 
 export function assertInitialActivationLifecyclePolicyReservation(value, expected = {}) {
-  const fields = ["schemaVersion", "kind", "operation", "environment", "repository", "sourceSha", "targetPolicyArn", "authorizationSha256", "predecessorDefaultVersionId", "predecessorPolicySha256", "desiredPolicySha256", "reservationSha256"];
+  const fields = ["schemaVersion", "kind", "operation", "environment", "repository", "sourceSha", "targetPolicyArn", "authorizationSha256", "predecessorDefaultVersionId", "predecessorPolicySha256", "desiredPolicySha256", "ownerNonce", "reservationSha256"];
   exact(value, fields, "Initial activation lifecycle policy reservation");
   const { reservationSha256, ...body } = value;
-  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_LIFECYCLE_POLICY_RECONCILIATION_RESERVATION" || value.targetPolicyArn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || reservationSha256 !== canonicalSha256(body)) throw new Error("Initial activation lifecycle policy reservation identity is invalid.");
+  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_LIFECYCLE_POLICY_RECONCILIATION_RESERVATION" || value.targetPolicyArn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || !OWNER_NONCE.test(value.ownerNonce || "") || reservationSha256 !== canonicalSha256(body)) throw new Error("Initial activation lifecycle policy reservation identity is invalid.");
   initialActivationLifecyclePolicyReservationIdentity(value);
   for (const [key, expectedValue] of Object.entries(expected)) if (expectedValue !== undefined && value[key] !== expectedValue) throw new Error("Initial activation lifecycle policy reservation does not match the authorized transition.");
   return Object.freeze(value);
@@ -75,7 +78,7 @@ export function assertInitialActivationLifecyclePolicyReservation(value, expecte
 export function createInitialActivationLifecyclePolicyReservationStore({ run } = {}) {
   if (typeof run !== "function") throw new Error("Initial activation lifecycle policy reservation requires an explicit AWS runner.");
   const read = (reservation) => {
-    const key = initialActivationLifecyclePolicyReservationKey(reservation);
+      const key = initialActivationLifecyclePolicyReservationKey(reservation);
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-initial-activation-reservation-")); const output = path.join(directory, "reservation.json");
     try {
       try { run(["s3api", "get-object", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket, "--key", key, "--expected-bucket-owner", "368992683803", "--output", "json", "--no-cli-pager", output]); }
@@ -83,22 +86,29 @@ export function createInitialActivationLifecyclePolicyReservationStore({ run } =
       const bytes = fs.readFileSync(output); let value;
       try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { throw new Error("Initial activation lifecycle policy reservation is not canonical UTF-8 JSON."); }
       if (!bytes.equals(canonicalBytes(value))) throw new Error("Initial activation lifecycle policy reservation bytes are not canonical.");
-      return Object.freeze({ key, bytes, reservation: assertInitialActivationLifecyclePolicyReservation(value, reservation) });
+      return Object.freeze({ key, bytes, reservation: assertInitialActivationLifecyclePolicyReservation(value, initialActivationLifecyclePolicyReservationIdentity(reservation)) });
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   };
   return Object.freeze({
     read,
     reserve(input) {
       const reservation = createInitialActivationLifecyclePolicyReservation(input); const key = initialActivationLifecyclePolicyReservationKey(reservation); const bytes = canonicalBytes(reservation);
-      const existing = read(reservation); if (existing) return Object.freeze({ owned: true, created: false, ...existing });
+      const existing = read(reservation);
+      if (existing) return Object.freeze({ owned: existing.reservation.ownerNonce === reservation.ownerNonce, created: false, ...existing });
       const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-initial-activation-reservation-")); const body = path.join(directory, "reservation.json");
       try {
         fs.writeFileSync(body, bytes, { mode: 0o600, flag: "wx" });
         try { run(["s3api", "put-object", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket, "--key", key, "--body", body, "--content-type", "application/json", "--server-side-encryption", "AES256", "--if-none-match", "*", "--expected-bucket-owner", "368992683803", "--output", "json", "--no-cli-pager"]); }
         catch (error) {
-          if (!/PreconditionFailed|ConditionalRequestConflict|412|409/i.test(`${error.message || ""}\n${error.stderr || ""}`)) throw error;
+          const errorText = `${error.message || ""}\n${error.stderr || ""}`;
+          if (!/PreconditionFailed|ConditionalRequestConflict|412|409/i.test(errorText)) {
+            if (!/ambiguous|response lost|timed? ?out|network|socket|ECONNRESET/i.test(errorText)) throw error;
+            const recovered = read(reservation);
+            if (!recovered) throw error;
+            return Object.freeze({ owned: recovered.reservation.ownerNonce === reservation.ownerNonce, created: false, ...recovered });
+          }
           const raced = read(reservation); if (!raced) throw new Error("Initial activation lifecycle policy reservation conflict could not be authenticated.");
-          return Object.freeze({ owned: true, created: false, ...raced });
+          return Object.freeze({ owned: raced.reservation.ownerNonce === reservation.ownerNonce, created: false, ...raced });
         }
         const persisted = read(reservation); if (!persisted || !persisted.bytes.equals(bytes)) throw new Error("Initial activation lifecycle policy reservation create did not persist exact bytes.");
         return Object.freeze({ owned: true, created: true, ...persisted });
@@ -185,7 +195,7 @@ export function waitForInitialActivationLifecyclePolicyConvergence({ readLiveSta
   throw new Error(`Initial activation lifecycle policy did not converge within ${CONVERGENCE_ATTEMPTS} observations.`);
 }
 
-export function executeInitialActivationLifecyclePolicyReconciliation({ authorization, sourceSha, readLiveState, createPolicyVersion, reserve, desired = readInitialActivationLifecycleDesiredPolicy(), now = () => new Date(), sleep = defaultSleep } = {}) {
+export function executeInitialActivationLifecyclePolicyReconciliation({ authorization, sourceSha, readLiveState, createPolicyVersion, reserve, desired = readInitialActivationLifecycleDesiredPolicy(), now = () => new Date(), sleep = defaultSleep, createReservationOwnerNonce: ownerNonceFactory = createReservationOwnerNonce } = {}) {
   const readClock = typeof now === "function" ? now : () => now;
   assertInitialActivationLifecyclePolicyReconciliationAuthorization(authorization, { sourceSha, now: readClock() });
   if (typeof readLiveState !== "function" || typeof createPolicyVersion !== "function" || typeof reserve !== "function") throw new Error("Initial activation lifecycle policy reconciliation requires authenticated readers, writer, and reservation.");
@@ -193,7 +203,9 @@ export function executeInitialActivationLifecyclePolicyReconciliation({ authoriz
   if (before.releaseRolePolicySetSha256 !== authorization.releaseRolePolicySetSha256 || before.targetPolicyEntityBoundarySha256 !== authorization.targetPolicyEntityBoundarySha256) throw new Error("Initial activation lifecycle policy attachment state changed since authorization.");
   if (before.status === "ALREADY_RECONCILED") return Object.freeze({ status: "ALREADY_RECONCILED", createPolicyVersionCount: 0, postState: before });
   if (before.defaultVersionId !== authorization.predecessorDefaultVersionId || before.policySha256 !== authorization.predecessorPolicySha256 || before.policyVersionCount !== authorization.policyVersionCount || before.policyVersionCount > 4) throw new Error("Initial activation lifecycle policy predecessor CAS changed since authorization.");
-  const reservation = reserve(initialActivationLifecyclePolicyReservationIdentity({ sourceSha, authorizationSha256: authorization.authorizationSha256, predecessorDefaultVersionId: before.defaultVersionId, predecessorPolicySha256: before.policySha256, desiredPolicySha256: desired.policySha256 }));
+  const ownerNonce = ownerNonceFactory();
+  if (!OWNER_NONCE.test(ownerNonce || "")) throw new Error("Initial activation lifecycle policy reservation owner nonce is invalid.");
+  const reservation = reserve({ ...initialActivationLifecyclePolicyReservationIdentity({ sourceSha, authorizationSha256: authorization.authorizationSha256, predecessorDefaultVersionId: before.defaultVersionId, predecessorPolicySha256: before.policySha256, desiredPolicySha256: desired.policySha256 }), ownerNonce });
   if (!reservation || reservation.owned !== true) throw new Error("Initial activation lifecycle policy reservation ownership was not authenticated.");
   const latest = assertInitialActivationLifecyclePolicyState(readLiveState(), { desired });
   if (latest.releaseRolePolicySetSha256 !== authorization.releaseRolePolicySetSha256 || latest.targetPolicyEntityBoundarySha256 !== authorization.targetPolicyEntityBoundarySha256) throw new Error("Initial activation lifecycle policy topology changed after reservation.");
