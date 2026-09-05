@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14,6 +15,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
+const installationConsumptionDirectory = () => path.join(os.userInfo().homedir, ".local", "state", "mscqr", "production-initial-activation-reconciler-installation", "consumptions");
 
 function consumeOnce({ authorizationArtifactSha256, directory, fsOps = fs } = {}) {
   ensureStageBPrivateDirectory({ directory, repositoryRoot: root, create: true, fsOps, label: "Installation consumption directory" });
@@ -70,8 +72,6 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   return Object.freeze(result);
 }
 
-const osTmp = () => process.env.TMPDIR || "/tmp";
-
 export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   if (!argv.includes("--execute")) throw new Error("Installation requires --execute.");
   const sourceSha = required(argv, "--source-sha");
@@ -117,7 +117,7 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   };
   const verifyInstalled = () => verifyInitialActivationPolicyReconciler({ run });
   const readState = () => { try { return Buffer.from(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "state", "pull"], { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })); } catch (error) { return classifyInstallationStatePullError(error); } };
-  return executeInstallation({ sourceSha, preparation, authorization, planBytes: plan.bytes, planJson, administratorArn: identity.Arn, livePredecessor: livePredecessor.classification, livePredecessorAddresses: livePredecessor.existingAddresses, applySavedPlan, verifyInstalled, readState, resultPath, consumptionDirectory: path.join(path.dirname(resultPath), ".consumptions"), now: deps.now || new Date() });
+  return executeInstallation({ sourceSha, preparation, authorization, planBytes: plan.bytes, planJson, administratorArn: identity.Arn, livePredecessor: livePredecessor.classification, livePredecessorAddresses: livePredecessor.existingAddresses, applySavedPlan, verifyInstalled, readState, resultPath, consumptionDirectory: deps.consumptionDirectory || installationConsumptionDirectory(), now: deps.now || new Date() });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) process.stdout.write(`${JSON.stringify(runInstallCli(), null, 2)}\n`);

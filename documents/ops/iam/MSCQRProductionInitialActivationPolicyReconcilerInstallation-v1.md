@@ -44,6 +44,9 @@ as a create. Terraform's complete, possibly colored
 as first-install absence; every other backend failure remains fatal.
 Backend initialization uses only supported `terraform init` options; native
 state locking remains enabled on the saved-plan apply with a bounded timeout.
+Apply-capable executions consume authorization in one fixed, operator-home
+private directory keyed by authorization digest; caller-selected result paths
+cannot create independent replay namespaces.
 The authorization workflow passes dispatcher and prior-step values through
 step environment variables; no caller-controlled GitHub expression is
 interpolated directly into its shell program.

@@ -209,7 +209,7 @@ test("realistic absent first install reaches only the mocked exact saved-plan ap
   const args = ["--execute", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--preparation", preparationPath, "--preparation-file-sha256", crypto.createHash("sha256").update(preparationBytes).digest("hex"), "--authorization-workflow-run-id", "100", "--authorization-workflow-run-attempt", "1", "--plan", planPath, "--result", resultPath, "--terraform-data-dir", terraformDataDir];
   assert.throws(() => runInstallCli(args, { exec, run, githubRun: () => { throw new Error("forged local authorization has no GitHub provenance"); }, now }), /unavailable/);
   assert.equal(applies, 0);
-  const result = runInstallCli(args, { exec, run, githubRun: githubAuthorizationRunner(), now, env: { HOME: os.homedir(), PATH: process.env.PATH, AWS_ACCESS_KEY_ID: "attacker", AWS_SECRET_ACCESS_KEY: "attacker", AWS_ENDPOINT_URL: "https://attacker.invalid", AWS_PROFILE: "attacker" } });
+  const result = runInstallCli(args, { exec, run, githubRun: githubAuthorizationRunner(), consumptionDirectory: path.join(directory, "consumptions"), now, env: { HOME: os.homedir(), PATH: process.env.PATH, AWS_ACCESS_KEY_ID: "attacker", AWS_SECRET_ACCESS_KEY: "attacker", AWS_ENDPOINT_URL: "https://attacker.invalid", AWS_PROFILE: "attacker" } });
   assert.equal(applies, 1);
   assert.equal(pulls, 2);
   assert.equal(result.applyCount, 1);
@@ -298,6 +298,17 @@ test("ambiguous apply never retries when read-only verification fails", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-ambiguous-fail-"));
   let applies = 0;
   assert.throws(() => executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", livePredecessorAddresses: [], applySavedPlan: () => { applies += 1; throw new Error("transport lost"); }, verifyInstalled: () => { throw new Error("not complete"); }, readState: () => undefined, resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now }), /transport lost/);
+  assert.equal(applies, 1);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("one canonical consumption namespace rejects replay across result directories", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-consumption-"));
+  const consumptionDirectory = path.join(directory, "consumptions");
+  let applies = 0;
+  const execute = (resultDirectory) => executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", livePredecessorAddresses: [], applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: (() => { let reads = 0; return () => reads++ === 0 ? undefined : Buffer.from(installedState); })(), resultPath: path.join(directory, resultDirectory, "result.json"), consumptionDirectory, now });
+  execute("first");
+  assert.throws(() => execute("second"), /already been consumed/);
   assert.equal(applies, 1);
   fs.rmSync(directory, { recursive: true, force: true });
 });
