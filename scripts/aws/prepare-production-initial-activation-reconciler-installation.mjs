@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
@@ -48,7 +49,7 @@ export function assertProtectedCheckout({ exec = execFileSync, sourceSha, reposi
   return Object.freeze({ head, originMain: main });
 }
 
-export function discoverInstallationPredecessor({ run } = {}) {
+export function discoverInstallationPredecessor({ run, expectedCallerArn } = {}) {
   if (typeof run !== "function") throw new Error("An explicit administrator AWS runner is required.");
   const provider = runJson(run, ["iam", "get-open-id-connect-provider", "--open-id-connect-provider-arn", INITIAL_ACTIVATION_RECONCILER.oidcProviderArn]);
   if (provider?.Url !== "token.actions.githubusercontent.com" || !Array.isArray(provider.ClientIDList) || !provider.ClientIDList.some((clientId) => clientId === "sts.amazonaws.com")) throw new Error("GitHub Actions OIDC provider is not exact.");
@@ -84,7 +85,7 @@ export function discoverInstallationPredecessor({ run } = {}) {
     return predecessor("EXACT_PARTIAL", existingAddresses);
   }
   try {
-    verifyInitialActivationPolicyReconciler({ run });
+    verifyInitialActivationPolicyReconciler({ run, ...(expectedCallerArn ? { expectedCallerArn } : {}) });
     return predecessor("EXACT_COMPLETE", INSTALLATION.expectedAddresses);
   } catch {
     const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).AttachedPolicies;
@@ -118,11 +119,16 @@ function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSy
   exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "plan", "-input=false", "-lock=false", "-out", planPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   ensureStageBPrivateFile({ filePath: planPath, repositoryRoot: root, normalize: true, label: "Installation saved Terraform plan" });
   const planBytes = readStageBPrivateFileBytes({ filePath: planPath, repositoryRoot: root, label: "Installation saved Terraform plan" }).bytes;
-  const renderPath = path.join(outputDir, "installation-render.tfplan");
-  fs.writeFileSync(renderPath, planBytes, { flag: "wx", mode: 0o600 });
-  const rendered = exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "show", "-json", renderPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  fs.unlinkSync(renderPath);
-  fs.writeFileSync(planJsonPath, rendered, { flag: "wx", mode: 0o600 });
+  const renderPath = path.join(outputDir, `.installation-render.${crypto.randomUUID()}.tfplan`);
+  let staged = false;
+  try {
+    fs.writeFileSync(renderPath, planBytes, { flag: "wx", mode: 0o600 });
+    staged = true;
+    const rendered = exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "show", "-json", renderPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    fs.writeFileSync(planJsonPath, rendered, { flag: "wx", mode: 0o600 });
+  } finally {
+    if (staged) fs.unlinkSync(renderPath);
+  }
   const stateAfter = pullState();
   if (JSON.stringify(stateIdentity(stateBefore)) !== JSON.stringify(stateIdentity(stateAfter))) throw new Error("Terraform state changed during read-only installation preparation.");
   return { planPath, planJsonPath, stateBytes: stateAfter };
@@ -130,7 +136,7 @@ function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSy
 
 function renderExactPlanJson({ planPath, planBytes, terraformDataDir, profile, exec = execFileSync, outputPath, parentEnvironment = process.env } = {}) {
   const directory = path.dirname(planPath);
-  const renderPath = path.join(directory, `.${path.basename(planPath)}.render.tfplan`);
+  const renderPath = path.join(directory, `.${path.basename(planPath)}.${crypto.randomUUID()}.render.tfplan`);
   const env = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, env: parentEnvironment }), TF_DATA_DIR: terraformDataDir };
   fs.writeFileSync(renderPath, planBytes, { flag: "wx", mode: 0o600 });
   try {

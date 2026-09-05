@@ -2,8 +2,11 @@
   "schemaVersion": 1,
   "kind": "MSCQR_PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION",
   "operation": "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION",
-  "sourceOnly": true,
-  "administrator": "arn:aws:iam::368992683803:root",
+  "sourceOnly": false,
+  "executor": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap",
+  "workflow": ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
+  "concurrencyGroup": "production-deploy",
+  "terraformVersion": "1.15.8",
   "terraformRoot": "infra/aws/terraform/production-initial-activation-policy-reconciler",
   "resources": [
     "aws_iam_role.reconciler",

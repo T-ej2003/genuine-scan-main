@@ -21,11 +21,35 @@
     { "action": "iam:CreatePolicyVersion", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle", "mutation": true }
   ],
   "installation": {
-    "authority": "existing independently authorized administrator/root boundary",
+    "authority": "GitHub production-environment OIDC bootstrap role",
+    "executorRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap",
+    "workflow": ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
+    "concurrencyGroup": "production-deploy",
+    "sourceFiles": [
+      "scripts/aws/install-production-initial-activation-reconciler.mjs",
+      "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs",
+      "scripts/aws/verify-production-initial-activation-policy-reconciler.mjs"
+    ],
     "maxCreateRole": 1,
     "maxCreatePolicy": 1,
     "maxAttachRolePolicy": 1,
     "runtimeSelfInstallation": false,
-    "executionPerformedInThisSource": false
+    "executionPerformedInThisSource": true,
+    "terraformApplyMaxCount": 1,
+    "targetPolicyCreatePolicyVersionMaxCount": 0
+  },
+  "bootstrap": {
+    "depth": 1,
+    "administratorArn": "arn:aws:iam::368992683803:root",
+    "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap",
+    "trustPolicySource": "documents/ops/iam/MSCQRProductionInitialActivationPolicyReconcilerBootstrapTrust-v1.json",
+    "permissionsPolicySource": "documents/ops/iam/MSCQRProductionInitialActivationPolicyReconcilerBootstrapPermissions-v1.json",
+    "sourceFile": "scripts/aws/production-initial-activation-reconciler-bootstrap.mjs",
+    "maxAwsMutations": {
+      "iam:CreateRole": 1,
+      "iam:PutRolePolicy": 1
+    },
+    "administratorAccess": false,
+    "runtimeSelfInstallation": false
   }
 }

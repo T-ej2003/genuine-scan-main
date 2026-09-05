@@ -1,7 +1,9 @@
 {
   "schemaVersion": 1,
   "terraformRoot": "infra/aws/terraform/production-initial-activation-policy-reconciler",
-  "administratorBoundary": "existing independently authorized mscqr-production-root administrator session",
+  "terraformVersion": "1.15.8",
+  "administratorBoundary": "GitHub production-environment OIDC session for mscqr-production-initial-activation-policy-reconciler-bootstrap",
+  "concurrencyGroup": "production-deploy",
   "sourceShaRequired": true,
   "maxAwsMutations": {
     "iam:CreateRole": 1,
@@ -15,6 +17,6 @@
     "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
     "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler"
   ],
-  "verificationCommand": "npm run production:verify-initial-activation-reconciler -- --admin-profile mscqr-production-root",
-  "executionPerformedInThisSource": false
+  "verificationCommand": "canonical workflow invokes verify-production-initial-activation-policy-reconciler.mjs with the authenticated bootstrap session",
+  "executionPerformedInThisSource": true
 }

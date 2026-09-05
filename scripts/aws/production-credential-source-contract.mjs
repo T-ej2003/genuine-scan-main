@@ -6,6 +6,7 @@ const REGION = "eu-west-2";
 export const PRODUCTION_AWS_CREDENTIAL_SOURCE = Object.freeze({
   NAMED_PROFILE: "named-profile",
   GITHUB_OIDC_RELEASE_DEPLOYER: "github-oidc-release-deployer",
+  GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP: "github-oidc-initial-activation-bootstrap",
   GITHUB_ACCESS_KEYS: "github-access-keys",
   INHERITED_CHECKER_SESSION: "inherited-checker-session",
   INHERITED_ECS_EXEC_VERIFIER_SESSION: "inherited-ecs-exec-verifier-session",
@@ -44,7 +45,7 @@ export function createProductionAwsCredentialEnvironment({ credentialSource, pro
     const session = Object.fromEntries(SESSION_KEYS.slice(0, 2).map((key) => [key, required(env, key)]));
     return Object.freeze({ ...copy(env, SAFE_PROCESS_KEYS), ...session, ...copy(env, ["AWS_SESSION_TOKEN"]), AWS_REGION: region, AWS_DEFAULT_REGION: region, AWS_EC2_METADATA_DISABLED: "true" });
   }
-  if ([PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION, PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION].includes(credentialSource)) {
+  if ([PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP, PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION, PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION].includes(credentialSource)) {
     if (profile !== undefined) throw new Error("Session-backed production AWS execution cannot select a local profile.");
     const session = Object.fromEntries(SESSION_KEYS.slice(0, 3).map((key) => [key, required(env, key)]));
     return Object.freeze({ ...copy(env, SAFE_PROCESS_KEYS), ...session, AWS_REGION: region, AWS_DEFAULT_REGION: region, AWS_EC2_METADATA_DISABLED: "true" });
@@ -97,7 +98,7 @@ export function createProductionGithubCommandRunner({ env = process.env, exec = 
     if (command === "unzip") {
       const archive = args?.[0] === "-Z" ? args?.[2] : args?.[1];
       const archivePathValid = typeof archive === "string" && path.isAbsolute(archive) && path.basename(archive) === "authorization.zip";
-      const allowed = Array.isArray(args) && archivePathValid && ((args.length === 2 && args[0] === "-Z1") || (args.length === 3 && args[0] === "-Z" && args[1] === "-l") || (args.length === 3 && args[0] === "-p" && new Set(["authorization.json", "recovery-authorization.json"]).has(args[2])));
+      const allowed = Array.isArray(args) && archivePathValid && ((args.length === 2 && args[0] === "-Z1") || (args.length === 3 && args[0] === "-Z" && args[1] === "-l") || (args.length === 3 && args[0] === "-p" && new Set(["authorization.json", "bootstrap-authorization.json", "recovery-authorization.json"]).has(args[2])));
       if (!allowed) throw new Error("Production GitHub runner permits only the reviewed local authorization archive reads.");
       return exec("unzip", args, { cwd: process.cwd(), env: localEnvironment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });
     }

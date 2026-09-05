@@ -13,13 +13,14 @@ reviewed InitialActivationLifecycle target and one
 `SetDefaultPolicyVersion`, version deletion, attachment, trust, role, or policy
 creation actions. PR #448 is not migrated by this source package.
 
-This PR defines source and verification contracts only. A separately approved
-administrator must perform the future Terraform installation from a clean
-protected-main checkout using the exact backend coordinates in
-`state-backend-contract.json` and `installation-contract.json`, then run the read-only verifier
+Installation is performed only by the protected production-environment workflow
+using the exact OIDC bootstrap role documented in
+`documents/ops/iam/MSCQR_PRODUCTION_INITIAL_ACTIVATION_RECONCILER_BOOTSTRAP.md`.
+The workflow applies one saved, source-bound plan under the shared
+`production-deploy` queue and then runs
 `scripts/aws/verify-production-initial-activation-policy-reconciler.mjs`.
-No installation, role creation, policy creation, attachment, or production
-reconciliation is performed by this package.
+The bootstrap role itself is installed once by an independently authorized
+local root transition; root never enters GitHub Actions.
 
 The source contract intentionally does not own the external release-deployer,
 Stage-A or Stage-B roots, the image-publisher roots, or any generic production

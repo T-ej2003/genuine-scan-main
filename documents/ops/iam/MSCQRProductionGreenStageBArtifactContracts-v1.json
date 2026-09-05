@@ -1070,10 +1070,48 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "initial-activation-reconciler-bootstrap-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml",
+      "consumers": [
+        "scripts/aws/production-initial-activation-reconciler-bootstrap.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "initial-activation-reconciler-bootstrap-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-reconciler-bootstrap-result",
+      "kind": "file",
+      "producer": "scripts/aws/production-initial-activation-reconciler-bootstrap.mjs:runBootstrapCli --execute",
+      "consumers": [
+        "documents/ops/iam/MSCQR_PRODUCTION_INITIAL_ACTIVATION_RECONCILER_BOOTSTRAP.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-reconciler-bootstrap-result",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "initial-activation-reconciler-installation-saved-plan",
       "kind": "file",
       "producer": "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs:terraformPlan",
       "consumers": [
+        ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
         "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs",
         "scripts/aws/install-production-initial-activation-reconciler.mjs"
       ],
@@ -1093,8 +1131,7 @@
       "kind": "file",
       "producer": "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs:terraformPlan",
       "consumers": [
-        "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs",
-        "scripts/aws/install-production-initial-activation-reconciler.mjs"
+        "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -1151,6 +1188,7 @@
       "kind": "file",
       "producer": "scripts/aws/install-production-initial-activation-reconciler.mjs:executeInstallation",
       "consumers": [
+        ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
         "scripts/aws/install-production-initial-activation-reconciler.mjs"
       ],
       "directoryMode": "0700",

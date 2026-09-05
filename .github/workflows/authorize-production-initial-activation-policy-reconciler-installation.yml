@@ -1,4 +1,4 @@
-name: Authorize production initial-activation reconciler installation
+name: Install production initial-activation reconciler
 
 on:
   workflow_dispatch:
@@ -6,18 +6,21 @@ on:
       source_sha: { description: Protected main source SHA, required: true, type: string }
       preparation_artifact_base64: { description: Exact preparation artifact bytes, required: true, type: string }
       preparation_artifact_sha256: { description: SHA256 of the preparation artifact, required: true, type: string }
+      saved_plan_base64: { description: Exact saved Terraform plan bytes, required: true, type: string }
+      saved_plan_sha256: { description: SHA256 of the saved Terraform plan, required: true, type: string }
 
 permissions:
   actions: read
   contents: read
+  id-token: write
 
 concurrency:
   group: production-deploy
   cancel-in-progress: false
 
 jobs:
-  authorize-installation:
-    name: Authorize exact initial-activation reconciler installation
+  install:
+    name: Install exact initial-activation reconciler principal
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -70,6 +73,7 @@ jobs:
             --require-actual-approval
           echo "sha256=$(sha256sum "$workdir/environment-approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
       - name: Produce exact installation authorization
+        id: authorization
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           PREPARATION_ARTIFACT_BASE64: ${{ inputs.preparation_artifact_base64 }}
@@ -88,9 +92,42 @@ jobs:
             --environment-approval "$workdir/environment-approval.json" \
             --environment-approval-sha256 "$ENVIRONMENT_APPROVAL_SHA256" \
             --output "$workdir/authorization.json"
+          echo "sha256=$(sha256sum "$workdir/authorization.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Configure exact bootstrap role credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Apply the exact authorized saved plan once
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_SHA256: ${{ inputs.preparation_artifact_sha256 }}
+          AUTHORIZATION_SHA256: ${{ steps.authorization.outputs.sha256 }}
+          SAVED_PLAN_BASE64: ${{ inputs.saved_plan_base64 }}
+          SAVED_PLAN_SHA256: ${{ inputs.saved_plan_sha256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          workdir="$RUNNER_TEMP/initial-activation-installation"
+          printf '%s' "$SAVED_PLAN_BASE64" | base64 --decode > "$workdir/installation.tfplan"
+          test "$(sha256sum "$workdir/installation.tfplan" | awk '{print $1}')" = "$SAVED_PLAN_SHA256"
+          install -d -m 700 "$workdir/terraform-data"
+          node scripts/aws/install-production-initial-activation-reconciler.mjs --execute \
+            --source-sha "$SOURCE_SHA" \
+            --preparation "$workdir/preparation.json" --preparation-file-sha256 "$PREPARATION_SHA256" \
+            --authorization "$workdir/authorization.json" --authorization-file-sha256 "$AUTHORIZATION_SHA256" \
+            --plan "$workdir/installation.tfplan" --plan-file-sha256 "$SAVED_PLAN_SHA256" \
+            --terraform-data-dir "$workdir/terraform-data" \
+            --result "$workdir/result.json"
       - uses: actions/upload-artifact@v4
         with:
-          name: production-initial-activation-policy-reconciler-installation-authorization
-          path: ${{ runner.temp }}/initial-activation-installation/authorization.json
+          name: production-initial-activation-policy-reconciler-installation-result
+          path: |
+            ${{ runner.temp }}/initial-activation-installation/authorization.json
+            ${{ runner.temp }}/initial-activation-installation/result.json
           if-no-files-found: error
           retention-days: 90

@@ -1,11 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { INITIAL_ACTIVATION_RECONCILER } from "./verify-production-initial-activation-policy-reconciler.mjs";
-import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
-import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmentApprovalFreshness, assertProductionEnvironmentApprovalIdentity, createProductionEnvironmentApprovalEvidence } from "./production-github-environment-approval.mjs";
+import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmentApprovalIdentity } from "./production-github-environment-approval.mjs";
 
 export const INSTALLATION = Object.freeze({
   schemaVersion: 1,
@@ -14,7 +12,8 @@ export const INSTALLATION = Object.freeze({
   repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository,
   environment: "production",
   region: "eu-west-2",
-  administratorArn: "arn:aws:iam::368992683803:root",
+  terraformVersion: "1.15.8",
+  executionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap",
   terraformRoot: "infra/aws/terraform/production-initial-activation-policy-reconciler",
   backend: Object.freeze({ bucket: "mscqr-production-terraform-state-368992683803-eu-west-2", key: "mscqr/production/initial-activation-policy-reconciler/terraform.tfstate", lockKey: "mscqr/production/initial-activation-policy-reconciler/terraform.tfstate.tflock", region: "eu-west-2", encrypt: true, useLockfile: true, workspace: "default" }),
   roleArn: INITIAL_ACTIVATION_RECONCILER.roleArn,
@@ -141,6 +140,7 @@ export function classifyInstallationStatePullError(error) {
 
 export function assertInstallationPlan(plan) {
   if (!plan || typeof plan !== "object" || !Array.isArray(plan.resource_changes)) throw new Error("Installation Terraform plan JSON is malformed.");
+  if (plan.format_version !== "1.2" || plan.terraform_version !== INSTALLATION.terraformVersion || plan.errored !== false || plan.complete !== true || plan.applyable !== true || plan.resource_drift !== undefined && plan.resource_drift !== null && (!Array.isArray(plan.resource_drift) || plan.resource_drift.length !== 0)) throw new Error("Installation Terraform plan envelope is not exact.");
   if (!plan.configuration || Object.keys(plan.configuration).sort().join(",") !== "provider_config,root_module") throw new Error("Installation Terraform configuration boundary is not exact.");
   if (canonicalJson(plan.configuration?.provider_config) !== canonicalJson(EXPECTED_PROVIDER_CONFIGURATION)) throw new Error("Installation plan provider configuration is not exact.");
   const rootModule = plan.configuration?.root_module;
@@ -226,7 +226,7 @@ export function createInstallationPreparation({ sourceSha, state, livePredecesso
   const body = {
     schemaVersion: INSTALLATION.schemaVersion, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_PREPARATION", operation: INSTALLATION.operation,
     repository: INSTALLATION.repository, environment: INSTALLATION.environment, sourceSha, terraformRoot: INSTALLATION.terraformRoot, backend: INSTALLATION.backend,
-    administratorArn: INSTALLATION.administratorArn, roleArn: INSTALLATION.roleArn, policyArn: INSTALLATION.policyArn, sourceContractHashes: sourceHashes(),
+    executionRoleArn: INSTALLATION.executionRoleArn, roleArn: INSTALLATION.roleArn, policyArn: INSTALLATION.policyArn, sourceContractHashes: sourceHashes(),
     predecessorState: state, livePredecessor, livePredecessorAddresses, savedPlanSha256: sha256(planBytes), savedPlanByteLength: planBytes.length, planSemantics: semantics,
     maxAwsMutations: INSTALLATION.maxAwsMutations, preparedAt,
   };
@@ -234,12 +234,12 @@ export function createInstallationPreparation({ sourceSha, state, livePredecesso
   return Object.freeze({ ...body, preparationArtifactSha256: canonicalSha256(body) });
 }
 
-const PREPARATION_FIELDS = new Set(["schemaVersion", "kind", "operation", "repository", "environment", "sourceSha", "terraformRoot", "backend", "administratorArn", "roleArn", "policyArn", "sourceContractHashes", "predecessorState", "livePredecessor", "livePredecessorAddresses", "savedPlanSha256", "savedPlanByteLength", "planSemantics", "maxAwsMutations", "preparedAt", "preparationArtifactSha256"]);
+const PREPARATION_FIELDS = new Set(["schemaVersion", "kind", "operation", "repository", "environment", "sourceSha", "terraformRoot", "backend", "executionRoleArn", "roleArn", "policyArn", "sourceContractHashes", "predecessorState", "livePredecessor", "livePredecessorAddresses", "savedPlanSha256", "savedPlanByteLength", "planSemantics", "maxAwsMutations", "preparedAt", "preparationArtifactSha256"]);
 export function assertInstallationPreparation(value, { sourceSha, planBytes } = {}) {
   exactFields(value, PREPARATION_FIELDS, "Installation preparation");
   const { preparationArtifactSha256, ...body } = value;
   if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_PREPARATION" || value.operation !== INSTALLATION.operation || value.repository !== INSTALLATION.repository || value.environment !== INSTALLATION.environment || value.sourceSha !== sourceSha || value.terraformRoot !== INSTALLATION.terraformRoot || canonicalSha256(body) !== preparationArtifactSha256) throw new Error("Installation preparation identity or hash is invalid.");
-  if (JSON.stringify(value.backend) !== JSON.stringify(INSTALLATION.backend) || JSON.stringify(value.sourceContractHashes) !== JSON.stringify(sourceHashes()) || JSON.stringify(value.maxAwsMutations) !== JSON.stringify(INSTALLATION.maxAwsMutations) || value.administratorArn !== INSTALLATION.administratorArn || value.roleArn !== INSTALLATION.roleArn || value.policyArn !== INSTALLATION.policyArn || value.livePredecessor === "UNEXPECTED" || !SHA256.test(value.savedPlanSha256 || "") || !Number.isSafeInteger(value.savedPlanByteLength) || value.savedPlanByteLength < 1 || !SHA40.test(value.sourceSha || "") || !value.predecessorState || typeof value.predecessorState.stateExists !== "boolean" || value.predecessorState.stateExists && (!SHA256.test(value.predecessorState.stateSha256 || "") || !Number.isSafeInteger(value.predecessorState.serial) || typeof value.predecessorState.lineage !== "string") || !value.predecessorState.stateExists && Object.keys(value.predecessorState).length !== 1) throw new Error("Installation preparation binding is invalid.");
+  if (JSON.stringify(value.backend) !== JSON.stringify(INSTALLATION.backend) || JSON.stringify(value.sourceContractHashes) !== JSON.stringify(sourceHashes()) || JSON.stringify(value.maxAwsMutations) !== JSON.stringify(INSTALLATION.maxAwsMutations) || value.executionRoleArn !== INSTALLATION.executionRoleArn || value.roleArn !== INSTALLATION.roleArn || value.policyArn !== INSTALLATION.policyArn || value.livePredecessor === "UNEXPECTED" || !SHA256.test(value.savedPlanSha256 || "") || !Number.isSafeInteger(value.savedPlanByteLength) || value.savedPlanByteLength < 1 || !SHA40.test(value.sourceSha || "") || !value.predecessorState || typeof value.predecessorState.stateExists !== "boolean" || value.predecessorState.stateExists && (!SHA256.test(value.predecessorState.stateSha256 || "") || !Number.isSafeInteger(value.predecessorState.serial) || typeof value.predecessorState.lineage !== "string") || !value.predecessorState.stateExists && Object.keys(value.predecessorState).length !== 1) throw new Error("Installation preparation binding is invalid.");
   if (planBytes !== undefined && (sha256(planBytes) !== value.savedPlanSha256 || planBytes.length !== value.savedPlanByteLength)) throw new Error("Installation saved plan bytes changed after preparation.");
   if (value.livePredecessor === "EXACT_PARTIAL" && !value.predecessorState.stateExists) throw new Error("Partial installation requires an authenticated Terraform state predecessor.");
   if (!value.planSemantics || !Array.isArray(value.planSemantics.changedAddresses) || !Array.isArray(value.planSemantics.noOpAddresses)
@@ -262,17 +262,17 @@ export function createInstallationAuthorization({ preparation, preparationArtifa
   if (preparation.preparationArtifactSha256 !== preparationArtifactSha256) throw new Error("Installation preparation artifact digest is invalid.");
   assertProductionEnvironmentApprovalIdentity(protectedEnvironmentApprovalEvidence, { sourceSha, repository: INSTALLATION.repository });
   if (protectedEnvironmentApprovalEvidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef) throw new Error("Installation approval workflow binding is invalid.");
-  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_AUTHORIZATION", operation: INSTALLATION.operation, repository: INSTALLATION.repository, environment: INSTALLATION.environment, sourceSha, preparationArtifactSha256, terraformRoot: INSTALLATION.terraformRoot, backend: INSTALLATION.backend, predecessorState: preparation.predecessorState, livePredecessor: preparation.livePredecessor, livePredecessorAddresses: preparation.livePredecessorAddresses, administratorArn: INSTALLATION.administratorArn, roleArn: INSTALLATION.roleArn, policyArn: INSTALLATION.policyArn, savedPlanSha256: preparation.savedPlanSha256, sourceContractHashes: preparation.sourceContractHashes, maxAwsMutations: INSTALLATION.maxAwsMutations, protectedEnvironmentApprovalEvidence, protectedEnvironmentApprovalEvidenceSha256: protectedEnvironmentApprovalEvidence.evidenceSha256, authorizedAt: now };
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_AUTHORIZATION", operation: INSTALLATION.operation, repository: INSTALLATION.repository, environment: INSTALLATION.environment, sourceSha, preparationArtifactSha256, terraformRoot: INSTALLATION.terraformRoot, backend: INSTALLATION.backend, predecessorState: preparation.predecessorState, livePredecessor: preparation.livePredecessor, livePredecessorAddresses: preparation.livePredecessorAddresses, executionRoleArn: INSTALLATION.executionRoleArn, roleArn: INSTALLATION.roleArn, policyArn: INSTALLATION.policyArn, savedPlanSha256: preparation.savedPlanSha256, sourceContractHashes: preparation.sourceContractHashes, maxAwsMutations: INSTALLATION.maxAwsMutations, protectedEnvironmentApprovalEvidence, protectedEnvironmentApprovalEvidenceSha256: protectedEnvironmentApprovalEvidence.evidenceSha256, authorizedAt: now };
   return Object.freeze({ ...body, authorizationArtifactSha256: canonicalSha256(body) });
 }
 
-const AUTH_FIELDS = new Set(["schemaVersion", "kind", "operation", "repository", "environment", "sourceSha", "preparationArtifactSha256", "terraformRoot", "backend", "predecessorState", "livePredecessor", "livePredecessorAddresses", "administratorArn", "roleArn", "policyArn", "savedPlanSha256", "sourceContractHashes", "maxAwsMutations", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "authorizedAt", "authorizationArtifactSha256"]);
+const AUTH_FIELDS = new Set(["schemaVersion", "kind", "operation", "repository", "environment", "sourceSha", "preparationArtifactSha256", "terraformRoot", "backend", "predecessorState", "livePredecessor", "livePredecessorAddresses", "executionRoleArn", "roleArn", "policyArn", "savedPlanSha256", "sourceContractHashes", "maxAwsMutations", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "authorizedAt", "authorizationArtifactSha256"]);
 export function assertInstallationAuthorization(value, { sourceSha, preparation } = {}) {
   exactFields(value, AUTH_FIELDS, "Installation authorization");
   const { authorizationArtifactSha256, ...body } = value;
   if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_AUTHORIZATION" || value.operation !== INSTALLATION.operation || value.repository !== INSTALLATION.repository || value.environment !== INSTALLATION.environment || value.sourceSha !== sourceSha || value.preparationArtifactSha256 !== preparation.preparationArtifactSha256 || value.savedPlanSha256 !== preparation.savedPlanSha256 || JSON.stringify(value.livePredecessorAddresses) !== JSON.stringify(preparation.livePredecessorAddresses) || canonicalSha256(body) !== authorizationArtifactSha256) throw new Error("Installation authorization binding or hash is invalid.");
   assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: INSTALLATION.repository });
-  if (value.protectedEnvironmentApprovalEvidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256 || JSON.stringify(value.sourceContractHashes) !== JSON.stringify(sourceHashes()) || JSON.stringify(value.maxAwsMutations) !== JSON.stringify(INSTALLATION.maxAwsMutations) || value.terraformRoot !== INSTALLATION.terraformRoot || JSON.stringify(value.backend) !== JSON.stringify(INSTALLATION.backend) || value.administratorArn !== INSTALLATION.administratorArn || value.roleArn !== INSTALLATION.roleArn || value.policyArn !== INSTALLATION.policyArn) throw new Error("Installation authorization is not bound to the exact operation.");
+  if (value.protectedEnvironmentApprovalEvidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256 || JSON.stringify(value.sourceContractHashes) !== JSON.stringify(sourceHashes()) || JSON.stringify(value.maxAwsMutations) !== JSON.stringify(INSTALLATION.maxAwsMutations) || value.terraformRoot !== INSTALLATION.terraformRoot || JSON.stringify(value.backend) !== JSON.stringify(INSTALLATION.backend) || value.executionRoleArn !== INSTALLATION.executionRoleArn || value.roleArn !== INSTALLATION.roleArn || value.policyArn !== INSTALLATION.policyArn) throw new Error("Installation authorization is not bound to the exact operation.");
   return value;
 }
 
@@ -280,51 +280,6 @@ export function assertFreshInstallationAuthorization(value, { sourceSha, prepara
   assertInstallationAuthorization(value, { sourceSha, preparation });
   assertProductionEnvironmentApprovalEvidence(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: INSTALLATION.repository, environment: INSTALLATION.environment, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: value.protectedEnvironmentApprovalEvidence.workflowRunId, workflowRunAttempt: value.protectedEnvironmentApprovalEvidence.workflowRunAttempt, executionActor: value.protectedEnvironmentApprovalEvidence.executionActor, githubActions: "true", now });
   return value;
-}
-
-const parseGithubJson = (githubRun, args, label) => {
-  try { return JSON.parse(githubRun("gh", args)); } catch { throw new Error(`${label} is malformed or unavailable.`); }
-};
-
-function assertInstallationApprovalProvenance({ workflow, evidence, githubRun, now }) {
-  assertProductionEnvironmentApprovalIdentity(evidence, { sourceSha: workflow.head_sha, repository: INSTALLATION.repository });
-  assertProductionEnvironmentApprovalFreshness(evidence, { now });
-  if (evidence.workflowRunId !== String(workflow.id) || evidence.workflowRunAttempt !== String(workflow.run_attempt) || evidence.executionActor !== workflow.actor?.login || evidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef || evidence.eventName !== PRODUCTION_ENVIRONMENT_APPROVAL.eventName) throw new Error("Installation authorization approval evidence does not belong to the authenticated workflow.");
-  const environmentConfig = parseGithubJson(githubRun, ["api", `repos/${INSTALLATION.repository}/environments/${INSTALLATION.environment}`], "GitHub production environment");
-  const approvals = parseGithubJson(githubRun, ["api", `repos/${INSTALLATION.repository}/actions/runs/${workflow.id}/approvals`], "GitHub production approval events");
-  if (!Array.isArray(approvals)) throw new Error("GitHub production approval events are malformed.");
-  const matches = approvals.flatMap((approval) => approval?.state === "approved" ? (approval.environments || []).filter((environment) => environment?.id === environmentConfig.id && environment?.name === INSTALLATION.environment).map(() => ({ state: "approved", environmentId: environmentConfig.id, environmentName: INSTALLATION.environment, userId: approval.user?.id, userLogin: approval.user?.login })) : []);
-  if (matches.length !== 1) throw new Error("Exactly one authenticated production approval event is required.");
-  const independentlyObserved = createProductionEnvironmentApprovalEvidence({ environmentConfig, repository: INSTALLATION.repository, environment: INSTALLATION.environment, sourceSha: workflow.head_sha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, eventName: PRODUCTION_ENVIRONMENT_APPROVAL.eventName, workflowRunId: String(workflow.id), workflowRunAttempt: String(workflow.run_attempt), executionActor: workflow.actor?.login, observedAt: evidence.observedAt, actualApproval: matches[0] });
-  if (canonicalJson(independentlyObserved) !== canonicalJson(evidence)) throw new Error("Installation authorization approval evidence differs from GitHub provenance.");
-  return independentlyObserved;
-}
-
-export function resolveInstallationAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, githubRun = createProductionGithubCommandRunner(), now = new Date() } = {}) {
-  if (!/^[1-9][0-9]*$/.test(String(workflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(workflowRunAttempt || "")) || !SHA40.test(sourceSha || "") || typeof githubRun !== "function") throw new Error("Installation authorization workflow coordinates are invalid.");
-  const workflow = parseGithubJson(githubRun, ["api", `repos/${INSTALLATION.repository}/actions/runs/${workflowRunId}`], "Installation authorization workflow");
-  if (String(workflow.id) !== String(workflowRunId) || workflow.repository?.full_name !== INSTALLATION.repository || workflow.head_repository?.full_name !== INSTALLATION.repository || workflow.path !== INSTALLATION.authorizationWorkflowPath || workflow.event !== PRODUCTION_ENVIRONMENT_APPROVAL.eventName || workflow.head_sha !== sourceSha || workflow.status !== "completed" || workflow.conclusion !== "success" || String(workflow.run_attempt) !== String(workflowRunAttempt)) throw new Error("Installation authorization workflow provenance is not authentic.");
-  const pages = parseGithubJson(githubRun, ["api", `repos/${INSTALLATION.repository}/actions/runs/${workflowRunId}/artifacts`, "--paginate", "--slurp"], "Installation authorization artifact listing");
-  const artifacts = Array.isArray(pages) ? pages.flatMap((page) => page?.artifacts || []) : [];
-  const matches = artifacts.filter((artifact) => artifact?.name === INSTALLATION.authorizationArtifactName && artifact.expired === false && String(artifact.workflow_run?.id) === String(workflowRunId) && artifact.workflow_run?.head_sha === sourceSha && artifact.workflow_run?.repository_id === workflow.repository.id && /^sha256:[a-f0-9]{64}$/.test(artifact.digest || ""));
-  if (matches.length !== 1 || !Number.isSafeInteger(matches[0]?.id) || matches[0].id < 1) throw new Error("Installation authorization artifact identity is not exact.");
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-initial-activation-installation-auth-"));
-  const archive = path.join(directory, "authorization.zip");
-  try {
-    const archiveBytes = Buffer.from(githubRun("gh", ["api", `repos/${INSTALLATION.repository}/actions/artifacts/${matches[0].id}/zip`], { encoding: null, maxBuffer: 64 * 1024 * 1024 }));
-    if (`sha256:${sha256(archiveBytes)}` !== matches[0].digest) throw new Error("Installation authorization artifact archive digest is invalid.");
-    fs.writeFileSync(archive, archiveBytes, { mode: 0o600, flag: "wx" });
-    const entries = String(githubRun("unzip", ["-Z1", archive])).trim().split("\n").filter(Boolean);
-    if (JSON.stringify(entries) !== JSON.stringify(["authorization.json"])) throw new Error("Installation authorization archive contents are not exact.");
-    const listing = String(githubRun("unzip", ["-Z", "-l", archive])).split("\n").filter((line) => line.trim().endsWith(" authorization.json"));
-    if (listing.length !== 1 || !listing[0].trim().startsWith("-")) throw new Error("Installation authorization archive authorization.json must be a regular file.");
-    const authorizationBytes = Buffer.from(githubRun("unzip", ["-p", archive, "authorization.json"]));
-    let authorization;
-    try { authorization = JSON.parse(authorizationBytes.toString("utf8")); } catch { throw new Error("Installation authorization artifact body is malformed."); }
-    const approvalEvidence = authorization?.protectedEnvironmentApprovalEvidence;
-    const independentlyObservedApproval = assertInstallationApprovalProvenance({ workflow, evidence: approvalEvidence, githubRun, now });
-    return Object.freeze({ workflow, artifact: matches[0], authorization, authorizationBytes, authorizationFileSha256: sha256(authorizationBytes), independentlyObservedApproval });
-  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 
 export function assertInstallationResult(value, { sourceSha, authorization } = {}) {

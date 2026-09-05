@@ -65,11 +65,13 @@ test("Terraform root owns only the purpose-bound role, policy, and attachment", 
   assert.match(terraform, /aws_iam_role_policy_attachment" "reconciler/);
   for (const forbidden of ["release-deployer", "production-green-stage-a", "production-green-stage-b", "image-publisher", "aws_s3_", "aws_ecs_", "aws_rds_", "aws_secretsmanager_"]) assert.doesNotMatch(terraform, new RegExp(forbidden, "i"), forbidden);
   assert.equal(backend.roleArn, INITIAL_ACTIVATION_RECONCILER.roleArn);
-  assert.equal(backend.productionExecutionEnabled, false);
-  assert.equal(backend.rootApplyRequired, true);
-  assert.equal(installation.administratorBoundary, "existing independently authorized mscqr-production-root administrator session");
+  assert.equal(backend.productionExecutionEnabled, true);
+  assert.equal(backend.rootApplyRequired, false);
+  assert.equal(installation.administratorBoundary, "GitHub production-environment OIDC session for mscqr-production-initial-activation-policy-reconciler-bootstrap");
   assert.deepEqual(installation.maxAwsMutations, { "iam:CreateRole": 1, "iam:CreatePolicy": 1, "iam:AttachRolePolicy": 1, "iam:UpdateAssumeRolePolicy": 0, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 0 });
-  assert.equal(installation.executionPerformedInThisSource, false);
+  assert.equal(installation.executionPerformedInThisSource, true);
+  assert.equal(installation.terraformVersion, "1.15.8");
+  assert.equal(installation.concurrencyGroup, "production-deploy");
 });
 
 test("exact installed topology verifies read-only and fails closed on drift", () => {
@@ -135,5 +137,13 @@ test("capability contract defines the role without claiming PR #448 migration", 
   assert.equal(capability.oidcSubject, "repo:T-ej2003/genuine-scan-main:environment:production");
   assert.deepEqual(capability.capabilities.filter(({ mutation }) => mutation), [{ action: "iam:CreatePolicyVersion", resource: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, mutation: true }]);
   assert.equal(capability.installation.runtimeSelfInstallation, false);
-  assert.equal(capability.installation.executionPerformedInThisSource, false);
+  assert.equal(capability.installation.executionPerformedInThisSource, true);
+  assert.equal(capability.installation.executorRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap");
+  assert.equal(capability.installation.concurrencyGroup, "production-deploy");
+  assert.equal(capability.installation.terraformApplyMaxCount, 1);
+  assert.equal(capability.installation.targetPolicyCreatePolicyVersionMaxCount, 0);
+  assert.deepEqual(capability.bootstrap.maxAwsMutations, { "iam:CreateRole": 1, "iam:PutRolePolicy": 1 });
+  assert.equal(capability.bootstrap.depth, 1);
+  assert.equal(capability.bootstrap.administratorAccess, false);
+  for (const sourceFile of [...capability.installation.sourceFiles, capability.bootstrap.sourceFile]) assert.equal(fs.existsSync(sourceFile), true);
 });
