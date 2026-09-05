@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import { INITIAL_ACTIVATION_RECONCILER, verifyInitialActivationPolicyReconciler } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
@@ -88,6 +89,13 @@ test("normalizes parsed and encoded AWS documents and authenticates paginated po
   assert.equal(encodedResult.permissionsBoundaryUsageCount, 0);
   const parsedResult = verifyInitialActivationPolicyReconciler(commands({ encodeRole: false, encodeVersion: false }));
   assert.equal(parsedResult.roleArn, INITIAL_ACTIVATION_RECONCILER.roleArn);
+});
+
+test("readback hashes match Terraform's exact source-byte contract", () => {
+  const result = verifyInitialActivationPolicyReconciler(commands());
+  const digest = (file) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  assert.equal(result.trustPolicySha256, digest(`${root}/trust-policy.json`));
+  assert.equal(result.permissionsPolicySha256, digest(`${root}/permissions-policy.json`));
 });
 
 test("rejects malformed, primitive, extra-entity, truncated, and boundary-used policy shapes", () => {

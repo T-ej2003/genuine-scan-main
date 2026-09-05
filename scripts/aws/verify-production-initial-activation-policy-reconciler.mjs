@@ -21,6 +21,7 @@ export const INITIAL_ACTIVATION_RECONCILER = Object.freeze({
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const readJson = (relativePath) => JSON.parse(fs.readFileSync(path.join(root, relativePath), "utf8"));
+const readBytes = (relativePath) => fs.readFileSync(path.join(root, relativePath));
 const decodeAwsDocument = (value, label) => normalizeIamPolicyDocument(value, label);
 const exactJson = (actual, expected, label) => {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label} differs from the protected source contract.`);
@@ -67,7 +68,7 @@ export function verifyInitialActivationPolicyReconciler({ run, expectedCallerArn
   if (!Array.isArray(inline) || inline.length !== 0) throw new Error("Initial-activation reconciler must not have inline policies.");
   const entities = readPolicyEntities(run);
   if (entities.roles.length !== 1 || entities.roles[0]?.RoleName !== INITIAL_ACTIVATION_RECONCILER.roleName || entities.users.length !== 0 || entities.groups.length !== 0) throw new Error("Initial-activation reconciler policy entity topology is not exact.");
-  return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId, trustPolicySha256: sha256(Buffer.from(JSON.stringify(trust))), permissionsPolicySha256: sha256(Buffer.from(JSON.stringify(permissions))), targetPolicyArn: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, releaseRoleArn: INITIAL_ACTIVATION_RECONCILER.releaseRoleArn, policyRoleCount: entities.roles.length, policyUserCount: entities.users.length, policyGroupCount: entities.groups.length, permissionsBoundaryUsageCount: policy.PermissionsBoundaryUsageCount, roleDefinedInSource: true, pr448RuntimeMigrated: false });
+  return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId, trustPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.trustPath)), permissionsPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.permissionsPath)), targetPolicyArn: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, releaseRoleArn: INITIAL_ACTIVATION_RECONCILER.releaseRoleArn, policyRoleCount: entities.roles.length, policyUserCount: entities.users.length, policyGroupCount: entities.groups.length, permissionsBoundaryUsageCount: policy.PermissionsBoundaryUsageCount, roleDefinedInSource: true, pr448RuntimeMigrated: false });
 }
 
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
