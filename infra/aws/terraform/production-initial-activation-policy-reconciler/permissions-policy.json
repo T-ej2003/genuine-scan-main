@@ -1,0 +1,37 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadExactInitialActivationLifecyclePolicy",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicyVersions",
+        "iam:ListEntitiesForPolicy"
+      ],
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+    },
+    {
+      "Sid": "ReadExactInitialActivationReleaseRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:ListAttachedRolePolicies"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+    },
+    {
+      "Sid": "IdentifyCurrentSession",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    },
+    {
+      "Sid": "CreateExactInitialActivationLifecyclePolicyVersion",
+      "Effect": "Allow",
+      "Action": "iam:CreatePolicyVersion",
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+    }
+  ]
+}

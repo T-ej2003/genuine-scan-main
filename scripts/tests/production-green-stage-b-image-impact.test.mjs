@@ -176,6 +176,7 @@ test("Terraform classification stays bounded and runtime image behavior remains 
     "infra/aws/terraform/production-green-stage-b/main.tf",
     "infra/aws/terraform/production-green-stage-b-image-publisher/main.tf",
     "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf",
+    "infra/aws/terraform/production-initial-activation-policy-reconciler/main.tf",
   ]) assert.equal(classifyStageBImageReusePath(file).category, "terraformOnly");
   assert.equal(classifyStageBImageReusePath("infra/aws/terraform/unrelated/main.tf").category, "unknown");
 
