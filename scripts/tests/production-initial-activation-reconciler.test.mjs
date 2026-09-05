@@ -78,7 +78,7 @@ test("exact installed topology verifies read-only and fails closed on drift", ()
   const exact = commands();
   const result = verifyInitialActivationPolicyReconciler(exact);
   assert.equal(result.roleDefinedInSource, true);
-  assert.equal(result.pr448RuntimeMigrated, false);
+  assert.equal(result.pr448RuntimeMigrated, true);
   assert.equal(exact.calls.some((args) => args[0] === "iam" && ["create-role", "create-policy", "attach-role-policy", "update-assume-role-policy"].includes(args[1])), false);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ attached: [{ PolicyArn: "arn:aws:iam::368992683803:policy/unrelated" }] })), /attachment topology/);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ inline: ["unexpected"] })), /inline policies/);
