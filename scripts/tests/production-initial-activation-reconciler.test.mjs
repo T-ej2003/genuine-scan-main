@@ -93,6 +93,12 @@ test("normalizes parsed and encoded AWS documents and authenticates paginated po
 test("rejects malformed, primitive, extra-entity, truncated, and boundary-used policy shapes", () => {
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ role: { AssumeRolePolicyDocument: "%7B" } })), /trust policy/);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ version: 7 })), /permissions policy/);
+  for (const PermissionsBoundary of [
+    { PermissionsBoundaryType: "PermissionsBoundaryPolicy", PermissionsBoundaryArn: "arn:aws:iam::368992683803:policy/unrelated" },
+    { PermissionsBoundaryType: "PermissionsBoundaryPolicy", PermissionsBoundaryArn: INITIAL_ACTIVATION_RECONCILER.policyArn },
+    {},
+    null,
+  ]) assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ role: { PermissionsBoundary } })), /permissions boundary/);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ entities: [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }, { RoleName: "other" }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] })), /entity topology/);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ entities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: true }] })), /pagination/);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ policyMetadata: { PermissionsBoundaryUsageCount: 1 } })), /permissions-boundary/);
