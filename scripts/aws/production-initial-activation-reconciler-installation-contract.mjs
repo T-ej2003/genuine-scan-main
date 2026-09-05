@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { INITIAL_ACTIVATION_RECONCILER } from "./verify-production-initial-activation-policy-reconciler.mjs";
-import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmentApprovalIdentity } from "./production-github-environment-approval.mjs";
+import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
+import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmentApprovalFreshness, assertProductionEnvironmentApprovalIdentity, createProductionEnvironmentApprovalEvidence } from "./production-github-environment-approval.mjs";
 
 export const INSTALLATION = Object.freeze({
   schemaVersion: 1,
@@ -14,14 +16,16 @@ export const INSTALLATION = Object.freeze({
   region: "eu-west-2",
   administratorArn: "arn:aws:iam::368992683803:root",
   terraformRoot: "infra/aws/terraform/production-initial-activation-policy-reconciler",
-  backend: Object.freeze({ bucket: "mscqr-production-terraform-state-368992683803-eu-west-2", key: "mscqr/production/initial-activation-policy-reconciler/terraform.tfstate", lockKey: "mscqr/production/initial-activation-policy-reconciler/terraform.tfstate.tflock" }),
+  backend: Object.freeze({ bucket: "mscqr-production-terraform-state-368992683803-eu-west-2", key: "mscqr/production/initial-activation-policy-reconciler/terraform.tfstate", lockKey: "mscqr/production/initial-activation-policy-reconciler/terraform.tfstate.tflock", region: "eu-west-2", encrypt: true, useLockfile: true, workspace: "default" }),
   roleArn: INITIAL_ACTIVATION_RECONCILER.roleArn,
   policyArn: INITIAL_ACTIVATION_RECONCILER.policyArn,
+  authorizationWorkflowPath: ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
+  authorizationArtifactName: "production-initial-activation-policy-reconciler-installation-authorization",
   expectedAddresses: Object.freeze(["aws_iam_role.reconciler", "aws_iam_policy.reconciler", "aws_iam_role_policy_attachment.reconciler"]),
   maxAwsMutations: Object.freeze({ "iam:CreateRole": 1, "iam:CreatePolicy": 1, "iam:AttachRolePolicy": 1, "iam:UpdateAssumeRolePolicy": 0, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 0 }),
 });
 
-export const INSTALLATION_BACKEND = Object.freeze({ type: "s3", bucket: INSTALLATION.backend.bucket, key: INSTALLATION.backend.key, region: INSTALLATION.region, use_lockfile: true, workspace: "default" });
+export const INSTALLATION_BACKEND = Object.freeze({ type: "s3", bucket: INSTALLATION.backend.bucket, key: INSTALLATION.backend.key, region: INSTALLATION.backend.region, encrypt: INSTALLATION.backend.encrypt, use_lockfile: INSTALLATION.backend.useLockfile, workspace: INSTALLATION.backend.workspace });
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -51,18 +55,22 @@ const policyValue = (value, label) => {
   } catch { throw new Error(`${label} is not a valid IAM policy document.`); }
 };
 
+const INITIALIZED_BACKEND_REQUIRED_KEYS = Object.freeze(["bucket", "key", "region", "encrypt", "use_lockfile"]);
+const INITIALIZED_BACKEND_OPTIONAL_KEYS = Object.freeze([
+  "access_key", "acl", "allowed_account_ids", "assume_role", "assume_role_with_web_identity", "custom_ca_bundle", "dynamodb_endpoint", "dynamodb_table", "ec2_metadata_service_endpoint", "ec2_metadata_service_endpoint_mode", "endpoint", "endpoints", "forbidden_account_ids", "force_path_style", "http_proxy", "https_proxy", "iam_endpoint", "insecure", "kms_key_id", "max_retries", "no_proxy", "profile", "retry_mode", "secret_key", "shared_config_files", "shared_credentials_file", "shared_credentials_files", "skip_credentials_validation", "skip_metadata_api_check", "skip_region_validation", "skip_requesting_account_id", "skip_s3_checksum", "sse_customer_key", "sts_endpoint", "sts_region", "token", "use_dualstack_endpoint", "use_fips_endpoint", "use_path_style", "workspace_key_prefix",
+]);
+const assertKnownKeys = (value, allowed, label) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Installation initialized backend ${label} is malformed.`);
+  const unknown = Object.keys(value).find((key) => !allowed.includes(key));
+  if (unknown) throw new Error(`Installation initialized backend ${label} has unreviewed key: ${unknown}.`);
+};
+
 export function assertInstallationInitializedBackendMetadata(metadata) {
-  const backend = metadata?.backend || metadata;
-  if (!backend || typeof backend !== "object" || Array.isArray(backend) || backend.type !== INSTALLATION_BACKEND.type || !backend.config || typeof backend.config !== "object" || Array.isArray(backend.config)) throw new Error("Installation initialized backend metadata is malformed.");
-  const config = backend.config;
-  const allowed = new Set(["access_key", "acl", "allowed_account_ids", "assume_role", "assume_role_with_web_identity", "bucket", "custom_ca_bundle", "dynamodb_endpoint", "dynamodb_table", "ec2_metadata_service_endpoint", "ec2_metadata_service_endpoint_mode", "encrypt", "endpoint", "endpoints", "forbidden_account_ids", "force_path_style", "http_proxy", "https_proxy", "iam_endpoint", "insecure", "key", "kms_key_id", "max_retries", "no_proxy", "profile", "region", "retry_mode", "secret_key", "shared_config_files", "shared_credentials_file", "shared_credentials_files", "skip_credentials_validation", "skip_metadata_api_check", "skip_region_validation", "skip_s3_checksum", "sse_customer_key", "sts_endpoint", "sts_region", "token", "use_dualstack_endpoint", "use_fips_endpoint", "use_lockfile", "use_path_style", "workspace_key_prefix"]);
-  const unknown = Object.keys(config).find((key) => !allowed.has(key));
-  if (unknown) throw new Error(`Installation initialized backend has unreviewed key: ${unknown}.`);
-  if (config.bucket !== INSTALLATION_BACKEND.bucket || config.key !== INSTALLATION_BACKEND.key || config.region !== INSTALLATION_BACKEND.region || config.use_lockfile !== true) throw new Error("Installation initialized backend is not exact.");
-  const defaultFalse = new Set(["encrypt", "force_path_style", "use_path_style"]);
-  for (const key of [...allowed].filter((candidate) => !["bucket", "key", "region", "use_lockfile"].includes(candidate))) {
-    if (config[key] !== undefined && config[key] !== null && config[key] !== "" && !(defaultFalse.has(key) && config[key] === false)) throw new Error(`Installation initialized backend ${key} must use the Terraform default.`);
-  }
+  assertKnownKeys(metadata, ["type", "hash", "config"], "metadata");
+  if (metadata.type !== INSTALLATION_BACKEND.type || !Number.isSafeInteger(metadata.hash)) throw new Error("Installation initialized backend metadata is not exact.");
+  assertKnownKeys(metadata.config, [...INITIALIZED_BACKEND_REQUIRED_KEYS, ...INITIALIZED_BACKEND_OPTIONAL_KEYS], "config");
+  for (const key of INITIALIZED_BACKEND_REQUIRED_KEYS) if (metadata.config[key] !== INSTALLATION_BACKEND[key]) throw new Error(`Installation initialized backend ${key} is not exact.`);
+  for (const key of INITIALIZED_BACKEND_OPTIONAL_KEYS) if (metadata.config[key] !== undefined && metadata.config[key] !== null && metadata.config[key] !== "") throw new Error(`Installation initialized backend ${key} must use the Terraform default.`);
   return true;
 }
 
@@ -74,6 +82,10 @@ export function classifyInstallationStatePullError(error) {
 
 export function assertInstallationPlan(plan, { expectedAddresses = INSTALLATION.expectedAddresses } = {}) {
   if (!plan || typeof plan !== "object" || !Array.isArray(plan.resource_changes)) throw new Error("Installation Terraform plan JSON is malformed.");
+  const configuration = plan.configuration?.root_module?.resources;
+  if (!Array.isArray(configuration)) throw new Error("Installation Terraform plan configuration is malformed.");
+  const configuredAttachment = configuration.filter((resource) => resource?.address === "aws_iam_role_policy_attachment.reconciler");
+  if (configuredAttachment.length !== 1 || configuredAttachment[0]?.mode !== "managed" || configuredAttachment[0]?.type !== "aws_iam_role_policy_attachment" || JSON.stringify(configuredAttachment[0]?.expressions?.role?.references) !== JSON.stringify(["aws_iam_role.reconciler.name"]) || JSON.stringify(configuredAttachment[0]?.expressions?.policy_arn?.references) !== JSON.stringify(["aws_iam_policy.reconciler.arn"])) throw new Error("Installation plan attachment configuration reference is not exact.");
   const changes = plan.resource_changes;
   if (changes.length > expectedAddresses.length) throw new Error("Installation plan resource count is not exact.");
   const addresses = changes.map((entry) => entry?.address);
@@ -88,7 +100,11 @@ export function assertInstallationPlan(plan, { expectedAddresses = INSTALLATION.
       if (after.name !== "mscqr-production-initial-activation-policy-reconciler" || after.max_session_duration !== 3600 || Object.hasOwn(after, "permissions_boundary") && after.permissions_boundary !== null || canonicalJson(policyValue(after.assume_role_policy, "Installation plan trust policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/trust-policy.json`))) throw new Error("Installation plan role contract is not exact.");
     } else if (entry.address === "aws_iam_policy.reconciler") {
       if (after.name !== "MSCQRProductionInitialActivationPolicyReconciler" || canonicalJson(policyValue(after.policy, "Installation plan permissions policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`))) throw new Error("Installation plan policy contract is not exact.");
-    } else if (entry.address === "aws_iam_role_policy_attachment.reconciler" && (after.role !== "mscqr-production-initial-activation-policy-reconciler" || after.policy_arn !== INSTALLATION.policyArn)) throw new Error("Installation plan attachment contract is not exact.");
+    } else if (entry.address === "aws_iam_role_policy_attachment.reconciler") {
+      const policyArnKnown = after.policy_arn === INSTALLATION.policyArn && (entry.change.after_unknown?.policy_arn === undefined || entry.change.after_unknown?.policy_arn === false || entry.change.after_unknown?.policy_arn === null);
+      const policyArnComputed = after.policy_arn === null && entry.change.after_unknown?.policy_arn === true;
+      if (after.role !== "mscqr-production-initial-activation-policy-reconciler" || !Object.hasOwn(after, "policy_arn") || !(policyArnKnown || policyArnComputed)) throw new Error("Installation plan attachment contract is not exact.");
+    }
   }
   return Object.freeze({ resourceChangeCount: changes.length, createCount: changes.length, updateCount: 0, deleteCount: 0, replaceCount: 0, changedAddresses: [...addresses].sort() });
 }
@@ -176,6 +192,51 @@ export function assertFreshInstallationAuthorization(value, { sourceSha, prepara
   assertInstallationAuthorization(value, { sourceSha, preparation });
   assertProductionEnvironmentApprovalEvidence(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: INSTALLATION.repository, environment: INSTALLATION.environment, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: value.protectedEnvironmentApprovalEvidence.workflowRunId, workflowRunAttempt: value.protectedEnvironmentApprovalEvidence.workflowRunAttempt, executionActor: value.protectedEnvironmentApprovalEvidence.executionActor, githubActions: "true", now });
   return value;
+}
+
+const parseGithubJson = (githubRun, args, label) => {
+  try { return JSON.parse(githubRun("gh", args)); } catch { throw new Error(`${label} is malformed or unavailable.`); }
+};
+
+function assertInstallationApprovalProvenance({ workflow, evidence, githubRun, now }) {
+  assertProductionEnvironmentApprovalIdentity(evidence, { sourceSha: workflow.head_sha, repository: INSTALLATION.repository });
+  assertProductionEnvironmentApprovalFreshness(evidence, { now });
+  if (evidence.workflowRunId !== String(workflow.id) || evidence.workflowRunAttempt !== String(workflow.run_attempt) || evidence.executionActor !== workflow.actor?.login || evidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef || evidence.eventName !== PRODUCTION_ENVIRONMENT_APPROVAL.eventName) throw new Error("Installation authorization approval evidence does not belong to the authenticated workflow.");
+  const environmentConfig = parseGithubJson(githubRun, ["api", `repos/${INSTALLATION.repository}/environments/${INSTALLATION.environment}`], "GitHub production environment");
+  const approvals = parseGithubJson(githubRun, ["api", `repos/${INSTALLATION.repository}/actions/runs/${workflow.id}/approvals`], "GitHub production approval events");
+  if (!Array.isArray(approvals)) throw new Error("GitHub production approval events are malformed.");
+  const matches = approvals.flatMap((approval) => approval?.state === "approved" ? (approval.environments || []).filter((environment) => environment?.id === environmentConfig.id && environment?.name === INSTALLATION.environment).map(() => ({ state: "approved", environmentId: environmentConfig.id, environmentName: INSTALLATION.environment, userId: approval.user?.id, userLogin: approval.user?.login })) : []);
+  if (matches.length !== 1) throw new Error("Exactly one authenticated production approval event is required.");
+  const independentlyObserved = createProductionEnvironmentApprovalEvidence({ environmentConfig, repository: INSTALLATION.repository, environment: INSTALLATION.environment, sourceSha: workflow.head_sha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, eventName: PRODUCTION_ENVIRONMENT_APPROVAL.eventName, workflowRunId: String(workflow.id), workflowRunAttempt: String(workflow.run_attempt), executionActor: workflow.actor?.login, observedAt: evidence.observedAt, actualApproval: matches[0] });
+  if (canonicalJson(independentlyObserved) !== canonicalJson(evidence)) throw new Error("Installation authorization approval evidence differs from GitHub provenance.");
+  return independentlyObserved;
+}
+
+export function resolveInstallationAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, githubRun = createProductionGithubCommandRunner(), now = new Date() } = {}) {
+  if (!/^[1-9][0-9]*$/.test(String(workflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(workflowRunAttempt || "")) || !SHA40.test(sourceSha || "") || typeof githubRun !== "function") throw new Error("Installation authorization workflow coordinates are invalid.");
+  const workflow = parseGithubJson(githubRun, ["api", `repos/${INSTALLATION.repository}/actions/runs/${workflowRunId}`], "Installation authorization workflow");
+  if (String(workflow.id) !== String(workflowRunId) || workflow.repository?.full_name !== INSTALLATION.repository || workflow.head_repository?.full_name !== INSTALLATION.repository || workflow.path !== INSTALLATION.authorizationWorkflowPath || workflow.event !== PRODUCTION_ENVIRONMENT_APPROVAL.eventName || workflow.head_sha !== sourceSha || workflow.status !== "completed" || workflow.conclusion !== "success" || String(workflow.run_attempt) !== String(workflowRunAttempt)) throw new Error("Installation authorization workflow provenance is not authentic.");
+  const pages = parseGithubJson(githubRun, ["api", `repos/${INSTALLATION.repository}/actions/runs/${workflowRunId}/artifacts`, "--paginate", "--slurp"], "Installation authorization artifact listing");
+  const artifacts = Array.isArray(pages) ? pages.flatMap((page) => page?.artifacts || []) : [];
+  const matches = artifacts.filter((artifact) => artifact?.name === INSTALLATION.authorizationArtifactName && artifact.expired === false && String(artifact.workflow_run?.id) === String(workflowRunId) && artifact.workflow_run?.head_sha === sourceSha && artifact.workflow_run?.repository_id === workflow.repository.id && /^sha256:[a-f0-9]{64}$/.test(artifact.digest || ""));
+  if (matches.length !== 1 || !Number.isSafeInteger(matches[0]?.id) || matches[0].id < 1) throw new Error("Installation authorization artifact identity is not exact.");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-initial-activation-installation-auth-"));
+  const archive = path.join(directory, "authorization.zip");
+  try {
+    const archiveBytes = Buffer.from(githubRun("gh", ["api", `repos/${INSTALLATION.repository}/actions/artifacts/${matches[0].id}/zip`], { encoding: null, maxBuffer: 64 * 1024 * 1024 }));
+    if (`sha256:${sha256(archiveBytes)}` !== matches[0].digest) throw new Error("Installation authorization artifact archive digest is invalid.");
+    fs.writeFileSync(archive, archiveBytes, { mode: 0o600, flag: "wx" });
+    const entries = String(githubRun("unzip", ["-Z1", archive])).trim().split("\n").filter(Boolean);
+    if (JSON.stringify(entries) !== JSON.stringify(["authorization.json"])) throw new Error("Installation authorization archive contents are not exact.");
+    const listing = String(githubRun("unzip", ["-Z", "-l", archive])).split("\n").filter((line) => line.trim().endsWith(" authorization.json"));
+    if (listing.length !== 1 || !listing[0].trim().startsWith("-")) throw new Error("Installation authorization archive authorization.json must be a regular file.");
+    const authorizationBytes = Buffer.from(githubRun("unzip", ["-p", archive, "authorization.json"]));
+    let authorization;
+    try { authorization = JSON.parse(authorizationBytes.toString("utf8")); } catch { throw new Error("Installation authorization artifact body is malformed."); }
+    const approvalEvidence = authorization?.protectedEnvironmentApprovalEvidence;
+    const independentlyObservedApproval = assertInstallationApprovalProvenance({ workflow, evidence: approvalEvidence, githubRun, now });
+    return Object.freeze({ workflow, artifact: matches[0], authorization, authorizationBytes, authorizationFileSha256: sha256(authorizationBytes), independentlyObservedApproval });
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 
 export function assertInstallationResult(value, { sourceSha, authorization } = {}) {

@@ -19,7 +19,7 @@ const noSuchEntity = (error) => /NoSuchEntity|does not exist|not found/i.test(`$
 
 function readInitializedBackend(terraformDataDir) {
   const metadata = JSON.parse(readStageBPrivateFileBytes({ filePath: path.join(terraformDataDir, "terraform.tfstate"), repositoryRoot: root, label: "Installation initialized Terraform backend metadata" }).bytes.toString("utf8"));
-  assertInstallationInitializedBackendMetadata(metadata);
+  assertInstallationInitializedBackendMetadata(metadata?.backend);
   return metadata;
 }
 
@@ -81,8 +81,8 @@ export function discoverInstallationPredecessor({ run } = {}) {
 function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSync } = {}) {
   ensureStageBPrivateDirectory({ directory: terraformDataDir, repositoryRoot: root, create: true, label: "Installation Terraform data directory" });
   const env = { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir };
-  const backendArgs = [`-backend-config=bucket=${INSTALLATION.backend.bucket}`, `-backend-config=key=${INSTALLATION.backend.key}`, `-backend-config=region=${INSTALLATION.region}`];
-  exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "init", "-input=false", "-lock=false", "-backend-config=use_lockfile=true", ...backendArgs], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const backendArgs = [`-backend-config=bucket=${INSTALLATION.backend.bucket}`, `-backend-config=key=${INSTALLATION.backend.key}`, `-backend-config=region=${INSTALLATION.backend.region}`, `-backend-config=encrypt=${INSTALLATION.backend.encrypt}`, `-backend-config=use_lockfile=${INSTALLATION.backend.useLockfile}`];
+  exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "init", "-input=false", "-lock=false", ...backendArgs], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   readInitializedBackend(terraformDataDir);
   const workspace = String(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "workspace", "show"], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
   if (workspace !== "default") throw new Error("Installation requires the canonical default Terraform workspace.");

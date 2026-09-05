@@ -8,8 +8,11 @@ plan containing the three reviewed role/policy/attachment addresses.
 
 Preparation is read-only. A separate GitHub `production` environment approval
 binds the source, preparation digest, state predecessor, backend, administrator
-identity, exact resources, and mutation limits. The local executor accepts only
-that immutable authorization, applies the exact saved plan once with the
+identity, exact resources, and mutation limits. The local executor resolves the
+authorization artifact from the exact successful GitHub workflow run and
+attempt, verifies its GitHub artifact digest and independently rechecks the
+production approval evidence; a caller-supplied local authorization file is not
+authorization provenance. It then applies the exact saved plan once with the
 existing `mscqr-production-root` administrator profile, and then requires the
 canonical read-only verifier to pass. Ambiguous apply outcomes are never
 retried blindly; exact-complete replay performs zero apply.

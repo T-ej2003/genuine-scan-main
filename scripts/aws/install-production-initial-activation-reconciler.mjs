@@ -4,9 +4,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCommandRunner, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { INSTALLATION, assertFreshInstallationAuthorization, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, stateIdentity, assertInstallationResult } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { INSTALLATION, assertFreshInstallationAuthorization, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, resolveInstallationAuthorizationArtifact, stateIdentity, assertInstallationResult } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { discoverInstallationPredecessor, assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
 import { verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
 
@@ -78,8 +78,8 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   const profile = required(argv, "--admin-profile");
   const preparationPath = path.resolve(required(argv, "--preparation"));
   const preparationFileSha256 = required(argv, "--preparation-file-sha256");
-  const authorizationPath = path.resolve(required(argv, "--authorization"));
-  const authorizationFileSha256 = required(argv, "--authorization-file-sha256");
+  const authorizationWorkflowRunId = required(argv, "--authorization-workflow-run-id");
+  const authorizationWorkflowRunAttempt = required(argv, "--authorization-workflow-run-attempt");
   const planPath = path.resolve(required(argv, "--plan"));
   const resultPath = path.resolve(required(argv, "--result"));
   const terraformDataDir = path.resolve(required(argv, "--terraform-data-dir"));
@@ -87,12 +87,13 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   assertProtectedCheckout({ sourceSha, repositoryRoot: root, exec });
   const preparation = readBoundStageBPrivateJson({ filePath: preparationPath, expectedSha256: preparationFileSha256, repositoryRoot: root, label: "Installation preparation artifact" });
   const planBeforeAuthorization = readStageBPrivateFileBytes({ filePath: planPath, repositoryRoot: root, label: "Installation saved Terraform plan" });
-  const authorization = readBoundStageBPrivateJson({ filePath: authorizationPath, expectedSha256: authorizationFileSha256, repositoryRoot: root, label: "Installation authorization artifact" });
+  const authenticatedAuthorization = (deps.resolveAuthorizationArtifact || resolveInstallationAuthorizationArtifact)({ workflowRunId: authorizationWorkflowRunId, workflowRunAttempt: authorizationWorkflowRunAttempt, sourceSha, githubRun: deps.githubRun || createProductionGithubCommandRunner(), now: deps.now || new Date() });
+  const authorization = authenticatedAuthorization.authorization;
   const run = deps.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile });
   const identity = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
   if (identity?.Arn !== INSTALLATION.administratorArn) throw new Error("Installation requires the exact root administrator identity.");
   const backendMetadata = JSON.parse(readStageBPrivateFileBytes({ filePath: path.join(terraformDataDir, "terraform.tfstate"), repositoryRoot: root, label: "Installation initialized Terraform backend metadata" }).bytes.toString("utf8"));
-  assertInstallationInitializedBackendMetadata(backendMetadata);
+  assertInstallationInitializedBackendMetadata(backendMetadata?.backend);
   const workspace = String(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "workspace", "show"], { cwd: root, env: { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
   if (workspace !== "default") throw new Error("Installation requires the canonical default Terraform workspace.");
   const livePredecessor = discoverInstallationPredecessor({ run });
@@ -116,7 +117,7 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   };
   const verifyInstalled = () => verifyInitialActivationPolicyReconciler({ run });
   const readState = () => { try { return Buffer.from(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "state", "pull"], { cwd: root, env: { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })); } catch (error) { return classifyInstallationStatePullError(error); } };
-  return executeInstallation({ sourceSha, preparation, authorization, planBytes: plan.bytes, planJson, administratorArn: identity.Arn, livePredecessor, applySavedPlan, verifyInstalled, readState, resultPath, consumptionDirectory: path.join(path.dirname(resultPath), ".consumptions") });
+  return executeInstallation({ sourceSha, preparation, authorization, planBytes: plan.bytes, planJson, administratorArn: identity.Arn, livePredecessor, applySavedPlan, verifyInstalled, readState, resultPath, consumptionDirectory: path.join(path.dirname(resultPath), ".consumptions"), now: deps.now || new Date() });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) process.stdout.write(`${JSON.stringify(runInstallCli(), null, 2)}\n`);

@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
-import { INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
-import { executeInstallation } from "../aws/install-production-initial-activation-reconciler.mjs";
+import { INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, resolveInstallationAuthorizationArtifact, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { INITIAL_ACTIVATION_RECONCILER } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
 
@@ -15,10 +15,15 @@ const now = new Date("2026-09-05T12:00:00.000Z");
 const trust = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/trust-policy.json", "utf8");
 const permissions = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json", "utf8");
 const capability = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationPolicyReconcilerInstallation-v1.json", "utf8"));
-const plan = { resource_changes: [
+const planConfiguration = { root_module: { resources: [
+  { address: "aws_iam_role.reconciler", mode: "managed", type: "aws_iam_role", expressions: {} },
+  { address: "aws_iam_policy.reconciler", mode: "managed", type: "aws_iam_policy", expressions: {} },
+  { address: "aws_iam_role_policy_attachment.reconciler", mode: "managed", type: "aws_iam_role_policy_attachment", expressions: { role: { references: ["aws_iam_role.reconciler.name"] }, policy_arn: { references: ["aws_iam_policy.reconciler.arn"] } } },
+] } };
+const plan = { configuration: planConfiguration, resource_changes: [
   { address: "aws_iam_role.reconciler", mode: "managed", type: "aws_iam_role", change: { actions: ["create"], before: null, after: { name: "mscqr-production-initial-activation-policy-reconciler", max_session_duration: 3600, assume_role_policy: trust } } },
   { address: "aws_iam_policy.reconciler", mode: "managed", type: "aws_iam_policy", change: { actions: ["create"], before: null, after: { name: "MSCQRProductionInitialActivationPolicyReconciler", policy: permissions } } },
-  { address: "aws_iam_role_policy_attachment.reconciler", mode: "managed", type: "aws_iam_role_policy_attachment", change: { actions: ["create"], before: null, after: { role: "mscqr-production-initial-activation-policy-reconciler", policy_arn: INSTALLATION.policyArn } } },
+  { address: "aws_iam_role_policy_attachment.reconciler", mode: "managed", type: "aws_iam_role_policy_attachment", change: { actions: ["create"], before: null, after: { role: "mscqr-production-initial-activation-policy-reconciler", policy_arn: null }, after_unknown: { policy_arn: true } } },
 ] };
 const planBytes = Buffer.from("exact-saved-plan");
 const state = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 0, lineage: "first-install-lineage", outputs: {}, resources: [] });
@@ -32,9 +37,9 @@ const approval = createProductionEnvironmentApprovalEvidence({
   repository: INSTALLATION.repository, environment: "production", sourceSha,
   workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "100", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 7, environmentName: "production", userId: 3, userLogin: "reviewer" },
 });
-const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(state)), livePredecessor: "ABSENT", planJson: plan, planBytes, preparedAt: now.toISOString() });
+const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "ABSENT", planJson: plan, planBytes, preparedAt: now.toISOString() });
 const authorization = createInstallationAuthorization({ preparation, preparationArtifactSha256: preparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
-const completePlan = { resource_changes: [] };
+const completePlan = { configuration: planConfiguration, resource_changes: [] };
 const completePlanBytes = Buffer.from("exact-saved-noop-plan");
 const completePreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(installedState)), livePredecessor: "EXACT_COMPLETE", planJson: completePlan, planBytes: completePlanBytes, preparedAt: now.toISOString() });
 const completeAuthorization = createInstallationAuthorization({ preparation: completePreparation, preparationArtifactSha256: completePreparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
@@ -51,15 +56,39 @@ const discoveryRun = ({ attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.p
   throw new Error(`unexpected discovery call: ${args.join(" ")}`);
 };
 
+const githubAuthorizationRunner = ({ artifactBody = authorization, mutateWorkflow, mutateArtifact, environmentConfig, approvals } = {}) => {
+  const archive = Buffer.from("fixture-authorization-zip");
+  const workflow = mutateWorkflow?.({ id: 100, repository: { id: 1, full_name: INSTALLATION.repository }, head_repository: { full_name: INSTALLATION.repository }, path: INSTALLATION.authorizationWorkflowPath, event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1, actor: { login: "operator" } }) || { id: 100, repository: { id: 1, full_name: INSTALLATION.repository }, head_repository: { full_name: INSTALLATION.repository }, path: INSTALLATION.authorizationWorkflowPath, event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1, actor: { login: "operator" } };
+  const artifact = mutateArtifact?.({ id: 9, name: INSTALLATION.authorizationArtifactName, expired: false, workflow_run: { id: 100, head_sha: sourceSha, repository_id: 1 }, digest: `sha256:${crypto.createHash("sha256").update(archive).digest("hex")}` }) || { id: 9, name: INSTALLATION.authorizationArtifactName, expired: false, workflow_run: { id: 100, head_sha: sourceSha, repository_id: 1 }, digest: `sha256:${crypto.createHash("sha256").update(archive).digest("hex")}` };
+  const env = environmentConfig || { id: 7, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] };
+  const approvalEvents = approvals || [{ state: "approved", environments: [{ id: 7, name: "production" }], user: { id: 3, login: "reviewer" } }];
+  return (command, args) => {
+    if (command === "unzip") {
+      if (args[0] === "-Z1") return "authorization.json\n";
+      if (args[0] === "-Z") return "-rw-------  authorization.json\n";
+      if (args[0] === "-p") return Buffer.from(JSON.stringify(artifactBody));
+      throw new Error(`unexpected unzip arguments: ${args.join(" ")}`);
+    }
+    assert.equal(command, "gh");
+    const endpoint = args[1];
+    if (endpoint.endsWith("/actions/runs/100")) return JSON.stringify(workflow);
+    if (endpoint.endsWith("/artifacts")) return JSON.stringify([{ artifacts: [artifact] }]);
+    if (endpoint.endsWith("/environments/production")) return JSON.stringify(env);
+    if (endpoint.endsWith("/approvals")) return JSON.stringify(approvalEvents);
+    if (endpoint.endsWith("/zip")) return archive;
+    throw new Error(`unexpected GitHub endpoint: ${endpoint}`);
+  };
+};
+
 test("first-install preparation binds absent state and exact plan addresses", () => {
-  assert.equal(preparation.predecessorState.stateExists, true);
+  assert.equal(preparation.predecessorState.stateExists, false);
   assert.equal(preparation.planSemantics.resourceChangeCount, 3);
   assert.doesNotThrow(() => assertInstallationPreparation(preparation, { sourceSha, planBytes }));
-  assert.throws(() => assertInstallationPlan({ resource_changes: [...plan.resource_changes, { address: "aws_s3_bucket.unrelated", mode: "managed", type: "aws_s3_bucket", change: { actions: ["create"], before: null } }] }), /resource count|unreviewed/);
+  assert.throws(() => assertInstallationPlan({ ...plan, resource_changes: [...plan.resource_changes, { address: "aws_s3_bucket.unrelated", mode: "managed", type: "aws_s3_bucket", change: { actions: ["create"], before: null } }] }), /resource count|unreviewed/);
 });
 
 test("exact partial installation accepts only the remaining reviewed creates", () => {
-  const partial = { resource_changes: [plan.resource_changes[1], plan.resource_changes[2]] };
+  const partial = { configuration: planConfiguration, resource_changes: [plan.resource_changes[1], plan.resource_changes[2]] };
   assert.equal(assertInstallationPlan(partial).resourceChangeCount, 2);
   const partialPreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(state)), livePredecessor: "EXACT_PARTIAL", planJson: partial, planBytes, preparedAt: now.toISOString() });
   assert.doesNotThrow(() => assertInstallationPreparation(partialPreparation, { sourceSha, planBytes }));
@@ -82,16 +111,83 @@ test("authorization is source, plan, root and environment bound", () => {
   assert.throws(() => assertInstallationAuthorization({ ...authorization, administratorArn: "arn:aws:iam::368992683803:role/other" }, { sourceSha, preparation }), /operation|hash/);
 });
 
+test("authorization is accepted only from the authenticated GitHub run artifact", () => {
+  const resolved = resolveInstallationAuthorizationArtifact({ workflowRunId: "100", workflowRunAttempt: "1", sourceSha, githubRun: githubAuthorizationRunner(), now });
+  assert.equal(resolved.authorizationFileSha256, crypto.createHash("sha256").update(Buffer.from(JSON.stringify(authorization))).digest("hex"));
+  assert.doesNotThrow(() => assertInstallationAuthorization(resolved.authorization, { sourceSha, preparation }));
+  for (const mutateWorkflow of [
+    (workflow) => ({ ...workflow, conclusion: "failure" }),
+    (workflow) => ({ ...workflow, repository: { ...workflow.repository, full_name: "other/repository" } }),
+    (workflow) => ({ ...workflow, path: ".github/workflows/other.yml" }),
+    (workflow) => ({ ...workflow, head_sha: "b".repeat(40) }),
+    (workflow) => ({ ...workflow, run_attempt: 2 }),
+  ]) assert.throws(() => resolveInstallationAuthorizationArtifact({ workflowRunId: "100", workflowRunAttempt: "1", sourceSha, githubRun: githubAuthorizationRunner({ mutateWorkflow }), now }), /provenance/);
+  assert.throws(() => resolveInstallationAuthorizationArtifact({ workflowRunId: "100", workflowRunAttempt: "1", sourceSha, githubRun: githubAuthorizationRunner({ mutateArtifact: (artifact) => ({ ...artifact, workflow_run: { ...artifact.workflow_run, id: 101 } }) }), now }), /artifact identity/);
+  assert.throws(() => resolveInstallationAuthorizationArtifact({ workflowRunId: "100", workflowRunAttempt: "1", sourceSha, githubRun: githubAuthorizationRunner({ mutateArtifact: (artifact) => ({ ...artifact, digest: `sha256:${"0".repeat(64)}` }) }), now }), /archive digest/);
+  assert.throws(() => resolveInstallationAuthorizationArtifact({ workflowRunId: "100", workflowRunAttempt: "1", sourceSha, githubRun: githubAuthorizationRunner({ approvals: [] }), now }), /approval event/);
+});
+
+test("locally self-consistent authorization has no provenance and cannot become authorization", () => {
+  const forged = createInstallationAuthorization({ preparation, preparationArtifactSha256: preparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+  assert.doesNotThrow(() => assertInstallationAuthorization(forged, { sourceSha, preparation }));
+  assert.throws(() => resolveInstallationAuthorizationArtifact({ workflowRunId: "100", workflowRunAttempt: "1", sourceSha, githubRun: () => { throw new Error("no authenticated GitHub run"); }, now }), /unavailable/);
+});
+
 test("executor applies one exact plan and requires canonical verifier", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-test-"));
   const resultPath = path.join(directory, "result.json");
   let applies = 0;
   let reads = 0;
-  const result = executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", applySavedPlan: ({ planBytes: bytes }) => { applies += 1; assert.deepEqual(bytes, planBytes); }, verifyInstalled: () => true, readState: () => Buffer.from(reads++ === 0 ? state : installedState), resultPath, consumptionDirectory: path.join(directory, "consumptions"), now });
+  const result = executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", applySavedPlan: ({ planBytes: bytes }) => { applies += 1; assert.deepEqual(bytes, planBytes); }, verifyInstalled: () => true, readState: () => reads++ === 0 ? undefined : Buffer.from(installedState), resultPath, consumptionDirectory: path.join(directory, "consumptions"), now });
   assert.equal(applies, 1);
   assert.equal(result.applyCount, 1);
   assert.equal(result.targetPolicyCreatePolicyVersionCount, 0);
   assert.equal(JSON.parse(fs.readFileSync(resultPath)).verifier, "PASS");
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("realistic absent first install reaches only the mocked exact saved-plan apply boundary", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-cli-"));
+  const terraformDataDir = path.join(directory, "terraform");
+  fs.mkdirSync(terraformDataDir, { mode: 0o700 });
+  const metadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8"));
+  metadata.backend.config.key = INSTALLATION.backend.key;
+  fs.writeFileSync(path.join(terraformDataDir, "terraform.tfstate"), JSON.stringify(metadata), { mode: 0o600 });
+  const planPath = path.join(directory, "installation.tfplan");
+  const preparationPath = path.join(directory, "preparation.json");
+  const resultPath = path.join(directory, "result.json");
+  fs.writeFileSync(planPath, planBytes, { mode: 0o600 });
+  const preparationBytes = Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`);
+  fs.writeFileSync(preparationPath, preparationBytes, { mode: 0o600 });
+  let applies = 0;
+  let applied = false;
+  let pulls = 0;
+  const exec = (command, args) => {
+    if (command === "git") return args[0] === "status" ? "" : sourceSha;
+    if (command !== "terraform") throw new Error(`unexpected executable: ${command}`);
+    if (args.includes("workspace")) return "default\n";
+    if (args.includes("show")) return JSON.stringify(plan);
+    if (args.includes("state") && args.includes("pull")) {
+      pulls += 1;
+      if (!applied) { const error = new Error("No state file was found!"); error.stderr = "No state file was found!"; throw error; }
+      return installedState;
+    }
+    if (args.includes("apply")) { applies += 1; applied = true; assert.ok(args.includes("-lock-timeout=60s")); assert.ok(!args.includes("-lock=false")); return ""; }
+    throw new Error(`unexpected Terraform command: ${args.join(" ")}`);
+  };
+  const run = (args) => {
+    if (args[0] === "sts") return JSON.stringify({ Arn: INSTALLATION.administratorArn });
+    if (args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"] });
+    if (!applied && (args[1] === "get-role" || args[1] === "get-policy")) { const error = new Error("NoSuchEntity"); error.stderr = "NoSuchEntity"; throw error; }
+    return discoveryRun()(args);
+  };
+  const args = ["--execute", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--preparation", preparationPath, "--preparation-file-sha256", crypto.createHash("sha256").update(preparationBytes).digest("hex"), "--authorization-workflow-run-id", "100", "--authorization-workflow-run-attempt", "1", "--plan", planPath, "--result", resultPath, "--terraform-data-dir", terraformDataDir];
+  assert.throws(() => runInstallCli(args, { exec, run, githubRun: () => { throw new Error("forged local authorization has no GitHub provenance"); }, now }), /unavailable/);
+  assert.equal(applies, 0);
+  const result = runInstallCli(args, { exec, run, githubRun: githubAuthorizationRunner(), now });
+  assert.equal(applies, 1);
+  assert.equal(pulls, 2);
+  assert.equal(result.applyCount, 1);
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
@@ -114,7 +210,7 @@ test("ambiguous apply recovers only through a successful read-only verifier", ()
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-ambiguous-"));
   let applies = 0;
   let reads = 0;
-  const result = executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", applySavedPlan: () => { applies += 1; throw new Error("transport lost after commit"); }, verifyInstalled: () => true, readState: () => Buffer.from(reads++ === 0 ? state : installedState), resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now });
+  const result = executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", applySavedPlan: () => { applies += 1; throw new Error("transport lost after commit"); }, verifyInstalled: () => true, readState: () => reads++ === 0 ? undefined : Buffer.from(installedState), resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now });
   assert.equal(applies, 1);
   assert.equal(result.recoveredFromAmbiguousApply, true);
   fs.rmSync(directory, { recursive: true, force: true });
@@ -123,7 +219,7 @@ test("ambiguous apply recovers only through a successful read-only verifier", ()
 test("ambiguous apply never retries when read-only verification fails", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-ambiguous-fail-"));
   let applies = 0;
-  assert.throws(() => executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", applySavedPlan: () => { applies += 1; throw new Error("transport lost"); }, verifyInstalled: () => { throw new Error("not complete"); }, readState: () => Buffer.from(state), resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now }), /transport lost/);
+  assert.throws(() => executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", applySavedPlan: () => { applies += 1; throw new Error("transport lost"); }, verifyInstalled: () => { throw new Error("not complete"); }, readState: () => undefined, resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now }), /transport lost/);
   assert.equal(applies, 1);
   fs.rmSync(directory, { recursive: true, force: true });
 });
@@ -159,11 +255,13 @@ test("installation capability is purpose-bound and cannot consume the runtime ta
 });
 
 test("initialized backend and state-pull contracts fail closed", () => {
-  const metadata = { backend: { type: "s3", config: { bucket: INSTALLATION_BACKEND.bucket, key: INSTALLATION_BACKEND.key, region: INSTALLATION_BACKEND.region, use_lockfile: true } } };
-  assert.doesNotThrow(() => assertInstallationInitializedBackendMetadata(metadata));
-  for (const [field, value] of [["bucket", "wrong"], ["key", "wrong.tfstate"], ["region", "us-east-1"], ["use_lockfile", false]]) assert.throws(() => assertInstallationInitializedBackendMetadata({ backend: { ...metadata.backend, config: { ...metadata.backend.config, [field]: value } } }), /backend/);
-  assert.throws(() => assertInstallationInitializedBackendMetadata({ backend: { type: "local", config: {} } }), /backend/);
-  assert.throws(() => assertInstallationInitializedBackendMetadata({ backend: { type: "s3", config: { ...metadata.backend.config, unreviewed: true } } }), /unreviewed/);
+  const metadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8"));
+  metadata.backend.config.key = INSTALLATION_BACKEND.key;
+  assert.doesNotThrow(() => assertInstallationInitializedBackendMetadata(metadata.backend));
+  assert.doesNotThrow(() => assertInstallationInitializedBackendMetadata({ ...metadata.backend, config: { ...metadata.backend.config, skip_requesting_account_id: null } }));
+  for (const [field, value] of [["bucket", "wrong"], ["key", "wrong.tfstate"], ["region", "us-east-1"], ["use_lockfile", false], ["skip_requesting_account_id", true]]) assert.throws(() => assertInstallationInitializedBackendMetadata({ ...metadata.backend, config: { ...metadata.backend.config, [field]: value } }), /backend/);
+  assert.throws(() => assertInstallationInitializedBackendMetadata({ type: "local", hash: 1, config: {} }), /backend/);
+  assert.throws(() => assertInstallationInitializedBackendMetadata({ ...metadata.backend, config: { ...metadata.backend.config, unreviewed: true } }), /unreviewed/);
   assert.deepEqual(classifyInstallationStatePullError({ stderr: "No state file was found!" }), undefined);
   assert.throws(() => classifyInstallationStatePullError({ stderr: "AccessDenied" }), (error) => error.stderr === "AccessDenied");
   assert.throws(() => classifyInstallationStatePullError({ stderr: "timeout" }), (error) => error.stderr === "timeout");
@@ -172,9 +270,26 @@ test("initialized backend and state-pull contracts fail closed", () => {
   assert.throws(() => assertInstallationStateResources(Buffer.from(state)), /state/);
 });
 
+test("first-install attachment permits only its exact computed policy reference", () => {
+  assert.doesNotThrow(() => assertInstallationPlan(plan));
+  const withoutReference = structuredClone(plan);
+  withoutReference.configuration.root_module.resources[2].expressions.policy_arn = {};
+  assert.throws(() => assertInstallationPlan(withoutReference), /configuration reference/);
+  const wrongReference = structuredClone(plan);
+  wrongReference.configuration.root_module.resources[2].expressions.policy_arn.references = ["aws_iam_policy.other.arn"];
+  assert.throws(() => assertInstallationPlan(wrongReference), /configuration reference/);
+  const literal = structuredClone(plan);
+  literal.resource_changes[2].change.after.policy_arn = INSTALLATION.policyArn;
+  literal.resource_changes[2].change.after_unknown = { policy_arn: false };
+  assert.doesNotThrow(() => assertInstallationPlan(literal));
+  const wrongRole = structuredClone(plan);
+  wrongRole.resource_changes[2].change.after.role = "other";
+  assert.throws(() => assertInstallationPlan(wrongRole), /attachment contract/);
+});
+
 test("production apply uses native Terraform state locking", () => {
   const source = fs.readFileSync("scripts/aws/install-production-initial-activation-reconciler.mjs", "utf8");
   assert.doesNotMatch(source, /"apply",[^\n]*"-lock=false"/);
   assert.match(source, /"apply",[^\n]*"-lock-timeout=60s"/);
-  assert.match(fs.readFileSync("scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs", "utf8"), /-backend-config=use_lockfile=true/);
+  assert.match(fs.readFileSync("scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs", "utf8"), /-backend-config=use_lockfile=\$\{INSTALLATION\.backend\.useLockfile\}/);
 });
