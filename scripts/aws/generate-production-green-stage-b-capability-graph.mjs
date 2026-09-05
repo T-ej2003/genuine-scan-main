@@ -149,8 +149,6 @@ const INITIAL_ACTIVATION_POLICY_RECONCILIATION_CAPABILITIES = Object.freeze([
   ["initial-activation-policy-reconciliation-root-read-policy-attachment", "iam:ListAttachedRolePolicies", [INITIAL_ACTIVATION_POLICY_RECONCILIATION.releaseRoleArn], false],
   ["initial-activation-policy-reconciliation-root-list-policy-entities", "iam:ListEntitiesForPolicy", [INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn], false],
   ["initial-activation-policy-reconciliation-root-create-policy-version", "iam:CreatePolicyVersion", [INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn], true],
-  ["initial-activation-policy-reconciliation-root-read-reservation-exact", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn], false, "scripts/aws/production-initial-activation-policy-reconciliation.mjs"],
-  ["initial-activation-policy-reconciliation-root-conditional-create-reservation-exact", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn], true, "scripts/aws/production-initial-activation-policy-reconciliation.mjs"],
 ]);
 
 const STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES = Object.freeze([
@@ -389,14 +387,11 @@ export function discoverAwsCliActions() {
       } else if (sourceFile === "scripts/aws/production-root-attestation-signer.mjs" && action === "kms:Sign") {
         calls.push({ sourceFile, action, identity: "ADMINISTRATOR" }, { sourceFile, action, identity: "ROOT_OPERATOR" });
       } else if (sourceFile === "scripts/aws/production-initial-activation-policy-reconciliation.mjs") {
-        const id = ({ "s3:GetObject": "initial-activation-policy-reconciliation-root-read-reservation-exact", "s3:PutObject": "initial-activation-policy-reconciliation-root-conditional-create-reservation-exact" })[action];
-        if (!id) throw new Error("Initial activation lifecycle policy reconciliation implementation uses an unreviewed AWS action.");
-        const capability = INITIAL_ACTIVATION_POLICY_RECONCILIATION_CAPABILITIES.find(([candidate]) => candidate === id);
-        calls.push({ sourceFile, sourceFunction: id, phase: "initial-activation-lifecycle-policy-reconciliation", identity: "ROOT_OPERATOR", action, resources: capability[2], capabilityId: id });
+        throw new Error("Initial activation lifecycle policy reconciliation core must not issue AWS commands outside the workflow runner.");
       } else if (sourceFile === "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs") {
         const id = ({ "sts:GetCallerIdentity": "initial-activation-policy-reconciliation-root-identify", "iam:GetPolicy": "initial-activation-policy-reconciliation-root-read-policy", "iam:GetPolicyVersion": "initial-activation-policy-reconciliation-root-read-policy-version", "iam:ListPolicyVersions": "initial-activation-policy-reconciliation-root-list-policy-versions", "iam:GetRole": "initial-activation-policy-reconciliation-root-read-release-role", "iam:ListAttachedRolePolicies": "initial-activation-policy-reconciliation-root-read-policy-attachment", "iam:ListEntitiesForPolicy": "initial-activation-policy-reconciliation-root-list-policy-entities", "iam:CreatePolicyVersion": "initial-activation-policy-reconciliation-root-create-policy-version" })[action];
         if (!id) throw new Error("Initial activation lifecycle policy reconciliation uses an unreviewed AWS action.");
-        calls.push({ sourceFile, sourceFunction: id, phase: "initial-activation-lifecycle-policy-reconciliation", identity: "ROOT_OPERATOR", action, resources: INITIAL_ACTIVATION_POLICY_RECONCILIATION_CAPABILITIES.find(([candidate]) => candidate === id)[2], capabilityId: id });
+        calls.push({ sourceFile, sourceFunction: id, phase: "initial-activation-lifecycle-policy-reconciliation", identity: "INITIAL_ACTIVATION_RECONCILER", action, resources: INITIAL_ACTIVATION_POLICY_RECONCILIATION_CAPABILITIES.find(([candidate]) => candidate === id)[2], capabilityId: id });
       } else {
         calls.push(sourceFile === "scripts/aws/produce-production-root-drop-evidence.mjs" && action === "kms:Sign"
           ? { sourceFile, sourceFunction: "produce-production-root-drop-evidence", phase: "root-drop-evidence-signing", identity: "ROOT_OPERATOR", action, resources: [ROOT_DROP_SIGNING_KEY_ARN], capabilityId: "root-drop-sign-evidence" }
@@ -493,9 +488,9 @@ export function buildStageBDeploymentCapabilityGraph() {
     return { id, phase, identity, executor: "aws-cli", sourceFile: "scripts/aws/production-normal-backend-activation.mjs", sourceFunction: id, action, resources, context: { account: NORMAL_ACTIVATION.account, region: NORMAL_ACTIVATION.region, releaseMode: "normal", targetBinding: "authenticated-stage-b-state-exact-revision" }, classification: mutation ? identity === "ADMINISTRATOR" ? "ADMIN_IAM_MUTATION" : "NORMAL_ACTIVATION_MUTATION" : identity === "ADMINISTRATOR" ? "ADMIN_DIRECT_READ" : "RELEASE_DIRECT_READ", probe: identity === "ADMINISTRATOR" ? "administrator-live-read-or-simulation" : "direct-live-read", probeIds: probesByAction.get(action) || [], policy, required: true, mutation };
   });
   const initialActivationPolicyReconciliation = INITIAL_ACTIVATION_POLICY_RECONCILIATION_CAPABILITIES.map(([id, action, resources, mutation, sourceFile = "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"]) => ({
-    id, phase: "initial-activation-lifecycle-policy-reconciliation", identity: "ROOT_OPERATOR", executor: "aws-cli", sourceFile, sourceFunction: id, action, resources,
-    context: { account: STAGE_B.account, region: STAGE_B.region, targetPolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn }, classification: action.startsWith("s3:") ? (mutation ? "ROOT_CONDITIONAL_JOURNAL_CREATE" : "ROOT_GOVERNED_RECOVERY_READ") : mutation ? "ROOT_GOVERNED_IAM_POLICY_RECONCILIATION" : "ROOT_GOVERNED_IAM_POLICY_READ", probe: "structural", probeIds: [],
-    policy: action.startsWith("s3:") ? { sourceFile: "infra/aws/terraform/production-green-stage-a/main.tf", sid: id === "initial-activation-policy-reconciliation-root-read-reservation-exact" ? "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations" : "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate", livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null } : { sourceFile: INITIAL_ACTIVATION_POLICY_RECONCILIATION.sourcePath, sid: id, livePolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, expectedVersion: "exact-authorized-predecessor-or-desired", expectedPolicySha256: INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredPolicySha256 }, required: true, mutation,
+    id, phase: "initial-activation-lifecycle-policy-reconciliation", identity: "INITIAL_ACTIVATION_RECONCILER", executor: "github-actions", sourceFile, sourceFunction: id, action, resources,
+    context: { account: STAGE_B.account, region: STAGE_B.region, targetPolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn }, classification: mutation ? "GITHUB_OIDC_IAM_POLICY_RECONCILIATION" : "GITHUB_OIDC_IAM_POLICY_READ", probe: "structural", probeIds: [],
+    policy: { sourceFile: INITIAL_ACTIVATION_POLICY_RECONCILIATION.sourcePath, sid: id, livePolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, expectedVersion: "exact-authorized-predecessor-or-desired", expectedPolicySha256: INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredPolicySha256 }, required: true, mutation,
   }));
   const stageABackendPolicySid = Object.freeze({
     "stage-a-artifacts-reconciliation-terraform-read-bucket-location": "ReadExactStageABackendBucketLocation",

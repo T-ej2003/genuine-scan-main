@@ -130,9 +130,9 @@ test("rejects malformed, primitive, extra-entity, truncated, and boundary-used p
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ role: { MaxSessionDuration: 7200 } })), /source metadata/);
 });
 
-test("capability contract defines the role without claiming PR #448 migration", () => {
+test("capability contract defines the role and records the PR #448 runtime migration", () => {
   assert.equal(capability.roleDefinedInSource, true);
-  assert.equal(capability.pr448RuntimeMigrated, false);
+  assert.equal(capability.pr448RuntimeMigrated, true);
   assert.equal(capability.roleArn, INITIAL_ACTIVATION_RECONCILER.roleArn);
   assert.equal(capability.oidcSubject, "repo:T-ej2003/genuine-scan-main:environment:production");
   assert.deepEqual(capability.capabilities.filter(({ mutation }) => mutation), [{ action: "iam:CreatePolicyVersion", resource: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, mutation: true }]);

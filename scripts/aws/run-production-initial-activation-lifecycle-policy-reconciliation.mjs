@@ -3,9 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { INITIAL_ACTIVATION_POLICY_RECONCILIATION, INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, createInitialActivationLifecyclePolicyReservationStore, executeInitialActivationLifecyclePolicyReconciliation, readInitialActivationLifecycleDesiredPolicy, resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact } from "./production-initial-activation-policy-reconciliation.mjs";
+import { INITIAL_ACTIVATION_POLICY_RECONCILIATION, INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ, assertInitialActivationLifecyclePolicyReconciliationAuthorization, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, executeInitialActivationLifecyclePolicyReconciliation, readInitialActivationLifecycleDesiredPolicy } from "./production-initial-activation-policy-reconciliation.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
-import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
+import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentApprovalEvidence } from "./production-github-environment-approval.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
@@ -56,12 +57,16 @@ export function readInitialActivationLifecyclePolicyLiveState(run) {
 export function runInitialActivationLifecyclePolicyReconciliation(argv = process.argv.slice(2), deps = {}) {
   const prepare = argv.includes("--prepare"); const executeMode = argv.includes("--execute");
   if (prepare === executeMode) throw new Error("Initial activation lifecycle policy reconciliation requires exactly one of --prepare or --execute.");
-  const sourceSha = required(argv, "--source-sha"); const adminProfile = required(argv, "--admin-profile");
+  const sourceSha = required(argv, "--source-sha");
+  const adminProfile = prepare ? required(argv, "--admin-profile") : undefined;
   const checkout = (deps.readProtectedCheckout || readStageBProtectedMainCheckout)({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true });
   if (checkout.toolingSha !== sourceSha) throw new Error("Initial activation lifecycle policy executor is not at the authorized protected source.");
-  const run = deps.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: adminProfile });
+  const workflowEnvironment = deps.env || process.env;
+  if (executeMode && (workflowEnvironment.GITHUB_ACTIONS !== "true" || workflowEnvironment.GITHUB_REPOSITORY !== "T-ej2003/genuine-scan-main" || workflowEnvironment.GITHUB_WORKFLOW_REF !== `${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/${INITIAL_ACTIVATION_POLICY_RECONCILIATION.workflowPath}@refs/heads/main` || workflowEnvironment.GITHUB_EVENT_NAME !== "workflow_dispatch")) throw new Error("Initial activation lifecycle policy mutation is reachable only inside its canonical protected GitHub workflow.");
+  const run = deps.run || createProductionAwsCommandRunner({ credentialSource: executeMode ? PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP : PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: adminProfile, env: workflowEnvironment });
   const identity = json(run, ["sts", "get-caller-identity"]);
-  if (identity?.Arn !== "arn:aws:iam::368992683803:root") throw new Error("Initial activation lifecycle policy reconciliation requires the independently authenticated root operator.");
+  if (prepare && identity?.Arn !== "arn:aws:iam::368992683803:root") throw new Error("Initial activation lifecycle policy preparation requires the independently authenticated root operator.");
+  if (executeMode && !new RegExp("^arn:aws:sts::368992683803:assumed-role/mscqr-production-initial-activation-policy-reconciler/[^/]+$").test(identity?.Arn || "")) throw new Error("Initial activation lifecycle policy mutation requires the exact OIDC reconciler role session.");
   const desired = readInitialActivationLifecycleDesiredPolicy({ repositoryRoot: root });
   if (prepare) {
     const liveState = readInitialActivationLifecyclePolicyLiveState(run);
@@ -72,11 +77,14 @@ export function runInitialActivationLifecyclePolicyReconciliation(argv = process
     writeStageBPrivateFileExclusive({ filePath: output, bytes: Buffer.from(`${JSON.stringify(liveState, null, 2)}\n`), repositoryRoot: root, label: "Initial activation lifecycle policy authorization request" });
     return Object.freeze({ sourceSha, targetPolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, desiredPolicySha256: desired.policySha256, livePolicySha256: authenticated.policySha256, liveDefaultVersionId: authenticated.defaultVersionId, policyVersionCount: authenticated.policyVersionCount, status: authenticated.status });
   }
-  const resolved = (deps.resolveAuthorizationArtifact || resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact)({ workflowRunId: required(argv, "--workflow-run-id"), workflowRunAttempt: required(argv, "--workflow-run-attempt"), sourceSha });
-  const authorization = resolved.authorization;
+  if (argv.includes("--admin-profile")) throw new Error("Workflow-only reconciliation does not accept a local administrator profile.");
+  const authorizationPath = path.resolve(required(argv, "--authorization"));
+  const authorizationFileSha256 = required(argv, "--authorization-file-sha256");
+  const authorization = readBoundStageBPrivateJson({ filePath: authorizationPath, expectedSha256: authorizationFileSha256, repositoryRoot: root, label: "Initial activation lifecycle policy authorization" });
+  assertInitialActivationLifecyclePolicyReconciliationAuthorization(authorization, { sourceSha });
+  assertProductionEnvironmentApprovalEvidence(authorization.protectedEnvironmentApprovalEvidence, { sourceSha, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: PRODUCTION_ENVIRONMENT_APPROVAL.environment, workflowRef: workflowEnvironment.GITHUB_WORKFLOW_REF, eventName: workflowEnvironment.GITHUB_EVENT_NAME, workflowRunId: workflowEnvironment.GITHUB_RUN_ID, workflowRunAttempt: workflowEnvironment.GITHUB_RUN_ATTEMPT, executionActor: workflowEnvironment.GITHUB_ACTOR, githubActions: workflowEnvironment.GITHUB_ACTIONS });
   const resultOut = resolveResultOutput(argv);
-  const reservationStore = deps.reservationStore || createInitialActivationLifecyclePolicyReservationStore({ run });
-  const outcome = (deps.executeReconciliation || executeInitialActivationLifecyclePolicyReconciliation)({ authorization, sourceSha, desired, reserve: (identity) => reservationStore.reserve(identity), readLiveState: () => readInitialActivationLifecyclePolicyLiveState(run), createPolicyVersion: ({ PolicyArn, PolicyDocument, SetAsDefault }) => json(run, ["iam", "create-policy-version", "--policy-arn", PolicyArn, "--policy-document", JSON.stringify(PolicyDocument), "--set-as-default"]) });
+  const outcome = (deps.executeReconciliation || executeInitialActivationLifecyclePolicyReconciliation)({ authorization, sourceSha, desired, readLiveState: () => readInitialActivationLifecyclePolicyLiveState(run), createPolicyVersion: ({ PolicyArn, PolicyDocument, SetAsDefault }) => json(run, ["iam", "create-policy-version", "--policy-arn", PolicyArn, "--policy-document", JSON.stringify(PolicyDocument), "--set-as-default"]) });
   const result = buildInitialActivationLifecyclePolicyReconciliationResult({ authorization, outcome });
   writeStageBPrivateFileExclusive({ filePath: resultOut, bytes: Buffer.from(`${JSON.stringify(result, null, 2)}\n`), repositoryRoot: root, label: "Initial activation lifecycle policy result" });
   return result;

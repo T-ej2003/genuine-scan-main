@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "kind": "MSCQR_PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_CAPABILITY",
   "roleDefinedInSource": true,
-  "pr448RuntimeMigrated": false,
+  "pr448RuntimeMigrated": true,
   "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
   "policyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
   "trustPolicySource": "infra/aws/terraform/production-initial-activation-policy-reconciler/trust-policy.json",

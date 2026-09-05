@@ -6,7 +6,11 @@ on:
       source_sha: { required: true, type: string }
       live_state_base64: { required: true, type: string }
 
-permissions: { actions: read, contents: read }
+permissions: { actions: read, contents: read, id-token: write }
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 jobs:
   authorize:
@@ -27,6 +31,7 @@ jobs:
         with: { node-version: 24, cache: npm }
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Produce exact independently approved authorization
+        id: authorization
         env:
           GITHUB_TOKEN: "${{ github.token }}"
           SOURCE_SHA: "${{ inputs.source_sha }}"
@@ -37,9 +42,32 @@ jobs:
           printf '%s' "$LIVE_STATE_BASE64" | base64 --decode > "$d/live-state.json"; chmod 600 "$d/live-state.json"
           node scripts/aws/production-github-environment-approval.mjs --output "$d/environment-approval.json" --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
           node scripts/aws/authorize-production-initial-activation-lifecycle-policy-reconciliation.mjs --source-sha "$SOURCE_SHA" --live-state "$d/live-state.json" --environment-approval "$d/environment-approval.json" --output "$d/authorization.json"
+          echo "sha256=$(sha256sum "$d/authorization.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Configure exact reconciler role credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler
+      - name: Execute exact target-policy reconciliation once
+        env:
+          SOURCE_SHA: "${{ inputs.source_sha }}"
+          AUTHORIZATION_SHA256: "${{ steps.authorization.outputs.sha256 }}"
+        run: |
+          set -euo pipefail
+          node scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs \
+            --execute --source-sha "$SOURCE_SHA" \
+            --authorization "$RUNNER_TEMP/initial-activation-policy-reconciliation/authorization.json" \
+            --authorization-file-sha256 "$AUTHORIZATION_SHA256" \
+            --result-out "$RUNNER_TEMP/initial-activation-policy-reconciliation/result.json"
       - uses: actions/upload-artifact@v4
         with:
           name: production-initial-activation-lifecycle-policy-reconciliation-authorization
           path: "${{ runner.temp }}/initial-activation-policy-reconciliation/authorization.json"
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-initial-activation-lifecycle-policy-reconciliation-result
+          path: "${{ runner.temp }}/initial-activation-policy-reconciliation/result.json"
           if-no-files-found: error
           retention-days: 90
