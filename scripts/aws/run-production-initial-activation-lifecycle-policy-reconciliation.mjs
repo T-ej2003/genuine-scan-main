@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
@@ -11,6 +12,14 @@ import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentApprovalEvi
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const json = (run, args) => JSON.parse(run(args));
+export function createInitialActivationReconciliationCommandRunner({ exec = execFileSync, ...options } = {}) {
+  return createProductionAwsCommandRunner({ ...options, exec: (file, args, execution) => exec(file, args, {
+    ...execution,
+    env: args[0] === "iam" && args[1] === "create-policy-version"
+      ? { ...execution.env, AWS_MAX_ATTEMPTS: "1" }
+      : execution.env,
+  }) });
+}
 const paged = (run, command, collection) => {
   const values = []; const markers = new Set(); let marker;
   for (;;) {
@@ -63,7 +72,7 @@ export function runInitialActivationLifecyclePolicyReconciliation(argv = process
   if (checkout.toolingSha !== sourceSha) throw new Error("Initial activation lifecycle policy executor is not at the authorized protected source.");
   const workflowEnvironment = deps.env || process.env;
   if (executeMode && (workflowEnvironment.GITHUB_ACTIONS !== "true" || workflowEnvironment.GITHUB_REPOSITORY !== "T-ej2003/genuine-scan-main" || workflowEnvironment.GITHUB_WORKFLOW_REF !== `${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/${INITIAL_ACTIVATION_POLICY_RECONCILIATION.workflowPath}@refs/heads/main` || workflowEnvironment.GITHUB_EVENT_NAME !== "workflow_dispatch")) throw new Error("Initial activation lifecycle policy mutation is reachable only inside its canonical protected GitHub workflow.");
-  const run = deps.run || createProductionAwsCommandRunner({ credentialSource: executeMode ? PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP : PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: adminProfile, env: workflowEnvironment });
+  const run = deps.run || createInitialActivationReconciliationCommandRunner({ credentialSource: executeMode ? PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP : PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: adminProfile, env: workflowEnvironment });
   const identity = json(run, ["sts", "get-caller-identity"]);
   if (prepare && identity?.Arn !== "arn:aws:iam::368992683803:root") throw new Error("Initial activation lifecycle policy preparation requires the independently authenticated root operator.");
   if (executeMode && !new RegExp("^arn:aws:sts::368992683803:assumed-role/mscqr-production-initial-activation-policy-reconciler/[^/]+$").test(identity?.Arn || "")) throw new Error("Initial activation lifecycle policy mutation requires the exact OIDC reconciler role session.");

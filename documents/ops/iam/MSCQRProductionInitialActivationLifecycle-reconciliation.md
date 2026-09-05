@@ -1,5 +1,7 @@
 # Production initial-activation lifecycle policy reconciliation
 
+The exact `iam create-policy-version` subprocess forces `AWS_MAX_ATTEMPTS=1` after credential-environment construction. One callback therefore permits only one CLI request attempt; ambiguous outcomes use authenticated readback. Read subprocesses retain the existing credential wrapper's retry configuration.
+
 IAM `ServiceFailure` is included in the exact post-mutation transient read-error allowlist. HTTP status 500 alone does not authorize retry; pre-mutation failures remain immediate failures.
 
 Post-mutation readback uses at most six snapshots. Exact AWS throttling and service-availability error codes from any snapshot read consume that existing retry budget, as does the reviewed policy-version propagation condition. Authorization, CAS, malformed responses, and unexpected topology remain fail-closed. Readback retries never repeat `CreatePolicyVersion`.

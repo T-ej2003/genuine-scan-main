@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { INITIAL_ACTIVATION_POLICY_RECONCILIATION as CONTRACT, INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ, assertInitialActivationLifecyclePolicyReconciliationAuthorization, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, createInitialActivationLifecyclePolicyReconciliationAuthorization, executeInitialActivationLifecyclePolicyReconciliation as executeCore, readInitialActivationLifecycleDesiredPolicy, waitForInitialActivationLifecyclePolicyConvergence } from "../aws/production-initial-activation-policy-reconciliation.mjs";
-import { readInitialActivationLifecyclePolicyLiveState, runInitialActivationLifecyclePolicyReconciliation } from "../aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs";
+import { createInitialActivationReconciliationCommandRunner, readInitialActivationLifecyclePolicyLiveState, runInitialActivationLifecyclePolicyReconciliation } from "../aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
@@ -24,6 +24,21 @@ const releaseRolePolicyArns = sourcePolicyEvidence().map(({ arn }) => arn).sort(
 const state = (overrides = {}) => ({ policyArn: CONTRACT.policyArn, defaultVersionId: "v1", document: predecessor, policyVersionCount: 1, releaseRolePolicyArns, targetPolicyRoles: ["mscqr-production-release-deployer"], targetPolicyUsers: [], targetPolicyGroups: [], permissionsBoundaryUsageCount: 0, ...overrides });
 const authorization = (live = state()) => createInitialActivationLifecyclePolicyReconciliationAuthorization({ sourceSha, liveState: live, protectedEnvironmentApprovalEvidence: approval(), desired });
 const executeInitialActivationLifecyclePolicyReconciliation = (input) => executeCore(input);
+
+test("production mutation subprocess forces one CLI attempt without contaminating reads", () => {
+  for (const inherited of [undefined, "2", "10"]) {
+    const env = { AWS_ACCESS_KEY_ID: "fixture", AWS_SECRET_ACCESS_KEY: "fixture", AWS_SESSION_TOKEN: "fixture", ...(inherited ? { AWS_MAX_ATTEMPTS: inherited } : {}) };
+    const calls = [];
+    const run = createInitialActivationReconciliationCommandRunner({ credentialSource: "github-oidc-initial-activation-bootstrap", env, exec: (file, args, options) => { calls.push({ file, args, env: options.env }); return "{}"; } });
+    run(["iam", "get-policy", "--policy-arn", CONTRACT.policyArn]);
+    run(["iam", "create-policy-version", "--policy-arn", CONTRACT.policyArn, "--policy-document", JSON.stringify(desired.document), "--set-as-default"]);
+    run(["iam", "get-policy-version", "--policy-arn", CONTRACT.policyArn, "--version-id", "v2"]);
+    assert.equal(calls.length, 3);
+    assert.equal(calls[1].file, "aws"); assert.equal(calls[1].env.AWS_MAX_ATTEMPTS, "1");
+    assert.equal(calls[0].env.AWS_MAX_ATTEMPTS, undefined); assert.deepEqual(calls[2].env, calls[0].env);
+    assert.equal(env.AWS_MAX_ATTEMPTS, inherited);
+  }
+});
 
 test("exact predecessor authorizes only the fixed target and exact tracked desired policy", () => {
   const value = authorization();
