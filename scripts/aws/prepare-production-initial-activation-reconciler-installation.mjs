@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { INSTALLATION, createInstallationPreparation, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationPreparation, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { INITIAL_ACTIVATION_RECONCILER, readPolicyEntities, verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
@@ -16,7 +16,12 @@ const required = (argv, name) => { const index = argv.indexOf(name); const value
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
 const runJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 const noSuchEntity = (error) => /NoSuchEntity|does not exist|not found/i.test(`${error?.stderr || ""} ${error?.message || ""}`);
-const noState = (error) => /No state file was found|NoSuchKey|NotFound|404/i.test(`${error?.stderr || ""} ${error?.message || ""}`);
+
+function readInitializedBackend(terraformDataDir) {
+  const metadata = JSON.parse(readStageBPrivateFileBytes({ filePath: path.join(terraformDataDir, "terraform.tfstate"), repositoryRoot: root, label: "Installation initialized Terraform backend metadata" }).bytes.toString("utf8"));
+  assertInstallationInitializedBackendMetadata(metadata);
+  return metadata;
+}
 
 export function assertProtectedCheckout({ exec = execFileSync, sourceSha, repositoryRoot = root } = {}) {
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "")) throw new Error("Protected source SHA is invalid.");
@@ -77,10 +82,13 @@ function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSy
   ensureStageBPrivateDirectory({ directory: terraformDataDir, repositoryRoot: root, create: true, label: "Installation Terraform data directory" });
   const env = { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir };
   const backendArgs = [`-backend-config=bucket=${INSTALLATION.backend.bucket}`, `-backend-config=key=${INSTALLATION.backend.key}`, `-backend-config=region=${INSTALLATION.region}`];
-  exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "init", "-input=false", "-lock=false", ...backendArgs], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "init", "-input=false", "-lock=false", "-backend-config=use_lockfile=true", ...backendArgs], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  readInitializedBackend(terraformDataDir);
+  const workspace = String(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "workspace", "show"], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
+  if (workspace !== "default") throw new Error("Installation requires the canonical default Terraform workspace.");
   const pullState = () => {
     try { return Buffer.from(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "state", "pull"], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })); }
-    catch (error) { if (noState(error)) return undefined; throw error; }
+    catch (error) { return classifyInstallationStatePullError(error); }
   };
   const stateBefore = pullState();
   const planPath = path.join(outputDir, "installation.tfplan");
@@ -110,6 +118,8 @@ function renderExactPlanJson({ planPath, planBytes, terraformDataDir, profile, e
 }
 
 export function prepareInstallation({ sourceSha, planBytes, planJson, stateBytes, livePredecessor, preparedAt, outputPath, repositoryRoot = root } = {}) {
+  const semantics = assertInstallationPlan(planJson);
+  if (livePredecessor === "EXACT_PARTIAL") assertInstallationStateResources(stateBytes, { requiredAddresses: INSTALLATION.expectedAddresses.filter((address) => !semantics.changedAddresses.includes(address)) });
   const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(stateBytes), livePredecessor, planJson, planBytes, preparedAt });
   const output = assertStageBArtifactPath({ artifactPath: outputPath, repositoryRoot, label: "Installation preparation artifact", allowExisting: false });
   writeStageBPrivateFilesAtomic({ repositoryRoot, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`), label: "Installation preparation artifact" }] });
@@ -129,9 +139,15 @@ export function runPrepareCli(argv = process.argv.slice(2), deps = {}) {
   const outputDir = path.dirname(outputPath);
   if (argv.includes("--plan-json")) throw new Error("Independent --plan-json input is not supported; plan JSON is always rendered from the saved plan.");
   const exec = deps.exec || execFileSync;
-  const generated = argv.includes("--plan") ? { planPath: path.resolve(required(argv, "--plan")), planJsonPath: path.join(outputDir, "installation.plan.json") } : terraformPlan({ terraformDataDir: path.resolve(required(argv, "--terraform-data-dir")), outputDir, profile, exec });
+  const terraformDataDir = path.resolve(required(argv, "--terraform-data-dir"));
+  const generated = argv.includes("--plan") ? { planPath: path.resolve(required(argv, "--plan")), planJsonPath: path.join(outputDir, "installation.plan.json") } : terraformPlan({ terraformDataDir, outputDir, profile, exec });
   const plan = readStageBPrivateFileBytes({ filePath: generated.planPath, repositoryRoot: root, label: "Installation saved Terraform plan" });
-  if (argv.includes("--plan")) renderExactPlanJson({ planPath: generated.planPath, planBytes: plan.bytes, terraformDataDir: path.resolve(required(argv, "--terraform-data-dir")), profile, exec, outputPath: generated.planJsonPath });
+  if (argv.includes("--plan")) {
+    readInitializedBackend(terraformDataDir);
+    const workspace = String(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "workspace", "show"], { cwd: root, env: { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
+    if (workspace !== "default") throw new Error("Installation requires the canonical default Terraform workspace.");
+    renderExactPlanJson({ planPath: generated.planPath, planBytes: plan.bytes, terraformDataDir, profile, exec, outputPath: generated.planJsonPath });
+  }
   const planJson = JSON.parse(readStageBPrivateFileBytes({ filePath: generated.planJsonPath, repositoryRoot: root, label: "Installation rendered Terraform plan" }).bytes.toString("utf8"));
   if (!argv.includes("--state-file") && !argv.includes("--state-absent")) throw new Error("Preparation must explicitly authenticate a state file or --state-absent.");
   const stateBytes = argv.includes("--state-file") ? readStageBPrivateFileBytes({ filePath: path.resolve(required(argv, "--state-file")), repositoryRoot: root, label: "Installation Terraform state" }).bytes : generated.stateBytes;
@@ -141,4 +157,4 @@ export function runPrepareCli(argv = process.argv.slice(2), deps = {}) {
   return preparation;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) runPrepareCli().then((value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`));
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) process.stdout.write(`${JSON.stringify(runPrepareCli(), null, 2)}\n`);

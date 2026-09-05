@@ -28,4 +28,4 @@ export function runAuthorizeCli(argv = process.argv.slice(2), deps = {}) {
   return authorization;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) runAuthorizeCli().then((value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`));
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) process.stdout.write(`${JSON.stringify(runAuthorizeCli(), null, 2)}\n`);
