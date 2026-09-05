@@ -30,7 +30,7 @@ export function assertProtectedCheckout({ exec = execFileSync, sourceSha, reposi
 export function discoverInstallationPredecessor({ run } = {}) {
   if (typeof run !== "function") throw new Error("An explicit administrator AWS runner is required.");
   const provider = runJson(run, ["iam", "get-open-id-connect-provider", "--open-id-connect-provider-arn", INITIAL_ACTIVATION_RECONCILER.oidcProviderArn]);
-  if (provider?.Url !== "token.actions.githubusercontent.com" || !Array.isArray(provider.ClientIDList) || !provider.ClientIDList.includes("sts.amazonaws.com")) throw new Error("GitHub Actions OIDC provider is not exact.");
+  if (provider?.Url !== "token.actions.githubusercontent.com" || !Array.isArray(provider.ClientIDList) || !provider.ClientIDList.some((clientId) => clientId === "sts.amazonaws.com")) throw new Error("GitHub Actions OIDC provider is not exact.");
   let role;
   let policy;
   try { role = runJson(run, ["iam", "get-role", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).Role; } catch (error) { if (!noSuchEntity(error)) throw error; }
