@@ -1,0 +1,128 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadExactBackendPrefix",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+      "Condition": {
+        "StringEquals": {
+          "s3:prefix": [
+            "mscqr/production/initial-activation-policy-reconciler/terraform.tfstate",
+            "mscqr/production/initial-activation-policy-reconciler/terraform.tfstate.tflock"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactBackendObjects",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/initial-activation-policy-reconciler/terraform.tfstate",
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/initial-activation-policy-reconciler/terraform.tfstate.tflock"
+      ]
+    },
+    {
+      "Sid": "WriteEncryptedExactBackendObjects",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/initial-activation-policy-reconciler/terraform.tfstate",
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/initial-activation-policy-reconciler/terraform.tfstate.tflock"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "s3:x-amz-server-side-encryption": "AES256"
+        }
+      }
+    },
+    {
+      "Sid": "DeleteExactNativeLockOnly",
+      "Effect": "Allow",
+      "Action": "s3:DeleteObject",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/initial-activation-policy-reconciler/terraform.tfstate.tflock"
+    },
+    {
+      "Sid": "ReadOidcProvider",
+      "Effect": "Allow",
+      "Action": "iam:GetOpenIDConnectProvider",
+      "Resource": "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com"
+    },
+    {
+      "Sid": "ReadExactReconcilerRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:ListRoleTags"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler"
+    },
+    {
+      "Sid": "ReadExactReconcilerPolicy",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListEntitiesForPolicy",
+        "iam:ListPolicyTags",
+        "iam:ListPolicyVersions"
+      ],
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler"
+    },
+    {
+      "Sid": "InventoryReservedPolicyName",
+      "Effect": "Allow",
+      "Action": "iam:ListPolicies",
+      "Resource": "*"
+    },
+    {
+      "Sid": "CreateExactReconcilerRole",
+      "Effect": "Allow",
+      "Action": ["iam:CreateRole", "iam:TagRole"],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/Component": "initial-activation-policy-reconciliation",
+          "aws:RequestTag/Stack": "production-initial-activation-policy-reconciler"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": ["ManagedBy", "Environment", "Component", "Stack"]
+        }
+      }
+    },
+    {
+      "Sid": "CreateExactReconcilerPolicy",
+      "Effect": "Allow",
+      "Action": ["iam:CreatePolicy", "iam:TagPolicy"],
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/Component": "initial-activation-policy-reconciliation",
+          "aws:RequestTag/Stack": "production-initial-activation-policy-reconciler"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": ["ManagedBy", "Environment", "Component", "Stack"]
+        }
+      }
+    },
+    {
+      "Sid": "AttachExactPolicyToExactRole",
+      "Effect": "Allow",
+      "Action": "iam:AttachRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PolicyARN": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler"
+        }
+      }
+    }
+  ]
+}

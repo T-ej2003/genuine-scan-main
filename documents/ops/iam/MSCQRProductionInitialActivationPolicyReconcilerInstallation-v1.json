@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "kind": "MSCQR_PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION",
+  "operation": "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION",
+  "sourceOnly": false,
+  "executor": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap",
+  "workflow": ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
+  "concurrencyGroup": "production-deploy",
+  "terraformVersion": "1.15.8",
+  "terraformRoot": "infra/aws/terraform/production-initial-activation-policy-reconciler",
+  "resources": [
+    "aws_iam_role.reconciler",
+    "aws_iam_policy.reconciler",
+    "aws_iam_role_policy_attachment.reconciler"
+  ],
+  "maxAwsMutations": {
+    "iam:CreateRole": 1,
+    "iam:CreatePolicy": 1,
+    "iam:AttachRolePolicy": 1,
+    "iam:UpdateAssumeRolePolicy": 0,
+    "iam:PutRolePolicy": 0,
+    "iam:CreatePolicyVersion": 0
+  },
+  "replay": "exact-complete-live-topology-is-zero-apply; unexpected-state-fails-closed",
+  "postcondition": "canonical-read-only-reconciler-verifier-pass"
+}

@@ -19,6 +19,10 @@ export const INITIAL_ACTIVATION_RECONCILER = Object.freeze({
   oidcProviderArn: "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com",
   trustPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/trust-policy.json",
   permissionsPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+  path: "/",
+  roleDescription: "GitHub OIDC-only writer for the exact InitialActivationLifecycle policy reconciliation.",
+  policyDescription: "Exact readback and CreatePolicyVersion capability for InitialActivationLifecycle reconciliation.",
+  tags: Object.freeze({ ManagedBy: "Terraform", Environment: "production", Component: "initial-activation-policy-reconciliation", Stack: "production-initial-activation-policy-reconciler" }),
 });
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -30,7 +34,33 @@ const exactJson = (actual, expected, label) => {
 };
 const json = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 
-function readPolicyEntities(run) {
+function assertTags(tags, label) {
+  if (!Array.isArray(tags)) throw new Error(`${label} tags are malformed.`);
+  const entries = tags.map((tag) => {
+    if (!tag || typeof tag.Key !== "string" || typeof tag.Value !== "string" || Object.keys(tag).sort().join(",") !== "Key,Value") throw new Error(`${label} tags are malformed.`);
+    return [tag.Key, tag.Value];
+  });
+  if (new Set(entries.map(([key]) => key)).size !== entries.length) throw new Error(`${label} tags are malformed.`);
+  exactJson(Object.fromEntries(entries), INITIAL_ACTIVATION_RECONCILER.tags, `${label} tags`);
+}
+
+export function assertInitialActivationReconcilerRoleMetadata(role) {
+  if (role?.Arn !== INITIAL_ACTIVATION_RECONCILER.roleArn || role?.RoleName !== INITIAL_ACTIVATION_RECONCILER.roleName || role?.Path !== INITIAL_ACTIVATION_RECONCILER.path || role?.Description !== INITIAL_ACTIVATION_RECONCILER.roleDescription || role?.MaxSessionDuration !== 3600) throw new Error("Initial-activation reconciler role source metadata is not exact.");
+  if (Object.hasOwn(role, "PermissionsBoundary")) throw new Error("Initial-activation reconciler role must not have a permissions boundary.");
+  exactJson(decodeAwsDocument(role.AssumeRolePolicyDocument, "reconciler trust policy"), readJson(INITIAL_ACTIVATION_RECONCILER.trustPath), "reconciler trust policy");
+  assertTags(role.Tags, "Initial-activation reconciler role");
+  return role;
+}
+
+export function assertInitialActivationReconcilerPolicyMetadata(policy, document) {
+  if (policy?.Arn !== INITIAL_ACTIVATION_RECONCILER.policyArn || policy?.PolicyName !== INITIAL_ACTIVATION_RECONCILER.policyName || policy?.Path !== INITIAL_ACTIVATION_RECONCILER.path || policy?.Description !== INITIAL_ACTIVATION_RECONCILER.policyDescription || !/^v[1-9][0-9]*$/.test(policy?.DefaultVersionId || "")) throw new Error("Initial-activation reconciler managed-policy source metadata is not exact.");
+  if (policy?.PermissionsBoundaryUsageCount !== 0) throw new Error("Initial-activation reconciler managed-policy permissions-boundary usage is not zero.");
+  exactJson(decodeAwsDocument(document, "reconciler permissions policy"), readJson(INITIAL_ACTIVATION_RECONCILER.permissionsPath), "reconciler permissions policy");
+  assertTags(policy.Tags, "Initial-activation reconciler managed policy");
+  return policy;
+}
+
+export function readPolicyEntities(run) {
   const roles = [];
   const users = [];
   const groups = [];
@@ -52,20 +82,15 @@ function readPolicyEntities(run) {
 
 export function verifyInitialActivationPolicyReconciler({ run, expectedCallerArn = "arn:aws:iam::368992683803:root" } = {}) {
   if (typeof run !== "function") throw new Error("An explicit AWS runner is required.");
-  const trust = readJson(INITIAL_ACTIVATION_RECONCILER.trustPath);
-  const permissions = readJson(INITIAL_ACTIVATION_RECONCILER.permissionsPath);
   const identity = json(run, ["sts", "get-caller-identity"]);
   if (identity?.Arn !== expectedCallerArn) throw new Error("Initial-activation reconciler verification requires the authorized administrator identity.");
   const provider = json(run, ["iam", "get-open-id-connect-provider", "--open-id-connect-provider-arn", INITIAL_ACTIVATION_RECONCILER.oidcProviderArn]);
   if (provider?.Url !== "token.actions.githubusercontent.com" || !Array.isArray(provider.ClientIDList) || !provider.ClientIDList.some((clientId) => clientId === "sts.amazonaws.com")) throw new Error("GitHub Actions OIDC provider URL or audience is not exact.");
   const role = json(run, ["iam", "get-role", "--role-name", INITIAL_ACTIVATION_RECONCILER.roleName]).Role;
-  if (role?.Arn !== INITIAL_ACTIVATION_RECONCILER.roleArn || role.MaxSessionDuration !== 3600) throw new Error("Initial-activation reconciler role ARN or session duration is not exact.");
-  if (Object.hasOwn(role, "PermissionsBoundary")) throw new Error("Initial-activation reconciler role must not have a permissions boundary.");
-  exactJson(decodeAwsDocument(role.AssumeRolePolicyDocument, "reconciler trust policy"), trust, "reconciler trust policy");
+  assertInitialActivationReconcilerRoleMetadata(role);
   const policy = json(run, ["iam", "get-policy", "--policy-arn", INITIAL_ACTIVATION_RECONCILER.policyArn]).Policy;
-  if (policy?.Arn !== INITIAL_ACTIVATION_RECONCILER.policyArn || policy?.PolicyName !== INITIAL_ACTIVATION_RECONCILER.policyName || !/^v[1-9][0-9]*$/.test(policy.DefaultVersionId || "") || policy.PermissionsBoundaryUsageCount !== 0) throw new Error("Initial-activation reconciler managed-policy identity or permissions-boundary usage is not exact.");
   const version = json(run, ["iam", "get-policy-version", "--policy-arn", INITIAL_ACTIVATION_RECONCILER.policyArn, "--version-id", policy.DefaultVersionId]).PolicyVersion;
-  exactJson(decodeAwsDocument(version?.Document, "reconciler permissions policy"), permissions, "reconciler permissions policy");
+  assertInitialActivationReconcilerPolicyMetadata(policy, version?.Document);
   const attached = json(run, ["iam", "list-attached-role-policies", "--role-name", INITIAL_ACTIVATION_RECONCILER.roleName]).AttachedPolicies;
   if (!Array.isArray(attached) || attached.length !== 1 || attached[0].PolicyArn !== INITIAL_ACTIVATION_RECONCILER.policyArn) throw new Error("Initial-activation reconciler policy attachment topology is not exact.");
   const inline = json(run, ["iam", "list-role-policies", "--role-name", INITIAL_ACTIVATION_RECONCILER.roleName]).PolicyNames;

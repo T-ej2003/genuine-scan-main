@@ -124,6 +124,24 @@ test("Stage-A reconciliation approval artifacts are complete and privacy-bound",
   ]) assert.throws(() => assertStageAProductionArtifactsReconciliationArtifactContract(mutation(STAGE_B_ARTIFACT_CONTRACTS.map((artifact) => ({ ...artifact, consumers: [...artifact.consumers] })))), /artifact contract is incomplete|inventory is incomplete/);
 });
 
+test("initial-activation reconciler installation artifacts form a closed private chain", () => {
+  const expected = {
+    "initial-activation-reconciler-bootstrap-authorization": ["scripts/aws/production-initial-activation-reconciler-bootstrap.mjs"],
+    "initial-activation-reconciler-bootstrap-result": ["documents/ops/iam/MSCQR_PRODUCTION_INITIAL_ACTIVATION_RECONCILER_BOOTSTRAP.md"],
+    "initial-activation-reconciler-installation-saved-plan": [".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml", "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs", "scripts/aws/install-production-initial-activation-reconciler.mjs"],
+    "initial-activation-reconciler-installation-plan-json": ["scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs"],
+    "initial-activation-reconciler-installation-preparation": [".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml", "scripts/aws/authorize-production-initial-activation-reconciler-installation.mjs", "scripts/aws/install-production-initial-activation-reconciler.mjs"],
+    "initial-activation-reconciler-installation-authorization": ["scripts/aws/install-production-initial-activation-reconciler.mjs"],
+    "initial-activation-reconciler-installation-result": [".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml", "scripts/aws/install-production-initial-activation-reconciler.mjs"],
+  };
+  for (const [id, consumers] of Object.entries(expected)) {
+    const artifact = STAGE_B_ARTIFACT_CONTRACTS.find((candidate) => candidate.id === id);
+    assert.deepEqual(artifact?.consumers, consumers);
+    assert.equal(artifact?.directoryMode, "0700"); assert.equal(artifact?.fileMode, "0600"); assert.equal(artifact?.outsideRepository, true); assert.equal(artifact?.symlink, "reject"); assert.equal(artifact?.hashBound, true);
+    assert.deepEqual(canonicalStageBArtifactContracts().artifacts.find((candidate) => candidate.id === id)?.consumers, consumers);
+  }
+});
+
 test("reference-audit contract registers every production consumer", () => {
   const referenceAudit = STAGE_B_ARTIFACT_CONTRACTS.find(({ id }) => id === "reference-audit");
   assert.deepEqual(referenceAudit?.consumers, [

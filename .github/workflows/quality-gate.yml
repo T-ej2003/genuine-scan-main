@@ -111,6 +111,9 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
+      - name: Verify initial-activation reconciler installation lifecycle
+        run: npm run test:production-initial-activation-reconciler
+
       - name: Validate complete Stage B deployment closure
         run: npm run stage-b:deployment-closure:pull-request
 

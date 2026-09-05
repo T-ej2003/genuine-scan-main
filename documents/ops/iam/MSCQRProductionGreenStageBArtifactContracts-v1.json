@@ -1070,6 +1070,139 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "initial-activation-reconciler-bootstrap-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml",
+      "consumers": [
+        "scripts/aws/production-initial-activation-reconciler-bootstrap.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "initial-activation-reconciler-bootstrap-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-reconciler-bootstrap-result",
+      "kind": "file",
+      "producer": "scripts/aws/production-initial-activation-reconciler-bootstrap.mjs:runBootstrapCli --execute",
+      "consumers": [
+        "documents/ops/iam/MSCQR_PRODUCTION_INITIAL_ACTIVATION_RECONCILER_BOOTSTRAP.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-reconciler-bootstrap-result",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-reconciler-installation-saved-plan",
+      "kind": "file",
+      "producer": "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs:terraformPlan",
+      "consumers": [
+        ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
+        "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs",
+        "scripts/aws/install-production-initial-activation-reconciler.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "initial-activation-reconciler-installation-plan-json",
+      "kind": "file",
+      "producer": "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs:terraformPlan",
+      "consumers": [
+        "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-reconciler-installation-plan-json",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-reconciler-installation-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs:prepareInstallation",
+      "consumers": [
+        ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
+        "scripts/aws/authorize-production-initial-activation-reconciler-installation.mjs",
+        "scripts/aws/install-production-initial-activation-reconciler.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-reconciler-installation-preparation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-reconciler-installation-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
+      "consumers": [
+        "scripts/aws/install-production-initial-activation-reconciler.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "initial-activation-reconciler-installation-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-reconciler-installation-result",
+      "kind": "file",
+      "producer": "scripts/aws/install-production-initial-activation-reconciler.mjs:executeInstallation",
+      "consumers": [
+        ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
+        "scripts/aws/install-production-initial-activation-reconciler.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-reconciler-installation-result",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "backend-recovery-candidate",
       "kind": "file",
       "producer": "scripts/aws/prepare-production-backend-recovery-candidate.mjs:runCli",

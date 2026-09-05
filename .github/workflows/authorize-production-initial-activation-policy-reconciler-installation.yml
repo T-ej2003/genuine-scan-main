@@ -1,0 +1,133 @@
+name: Install production initial-activation reconciler
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Protected main source SHA, required: true, type: string }
+      preparation_artifact_base64: { description: Exact preparation artifact bytes, required: true, type: string }
+      preparation_artifact_sha256: { description: SHA256 of the preparation artifact, required: true, type: string }
+      saved_plan_base64: { description: Exact saved Terraform plan bytes, required: true, type: string }
+      saved_plan_sha256: { description: SHA256 of the saved Terraform plan, required: true, type: string }
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  install:
+    name: Install exact initial-activation reconciler principal
+    runs-on: ubuntu-latest
+    environment: production-initial-activation-reconciler-bootstrap
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate protected source
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_REPOSITORY: T-ej2003/genuine-scan-main
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          test "$SOURCE_SHA" = "$(gh api "repos/$EXPECTED_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked authorization dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Re-authenticate protected source after dependency installation
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Capture production environment approval
+        id: environment-approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/initial-activation-installation"
+          install -d -m 700 "$workdir"
+          node scripts/aws/production-github-environment-approval.mjs \
+            --output "$workdir/environment-approval.json" \
+            --repository "$GITHUB_REPOSITORY" --environment production-initial-activation-reconciler-bootstrap \
+            --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" \
+            --require-actual-approval
+          echo "sha256=$(sha256sum "$workdir/environment-approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Produce exact installation authorization
+        id: authorization
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_ARTIFACT_BASE64: ${{ inputs.preparation_artifact_base64 }}
+          PREPARATION_SHA256: ${{ inputs.preparation_artifact_sha256 }}
+          ENVIRONMENT_APPROVAL_SHA256: ${{ steps.environment-approval.outputs.sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          workdir="$RUNNER_TEMP/initial-activation-installation"
+          printf '%s' "$PREPARATION_ARTIFACT_BASE64" | base64 --decode > "$workdir/preparation.json"
+          test "$(sha256sum "$workdir/preparation.json" | awk '{print $1}')" = "$PREPARATION_SHA256"
+          node scripts/aws/authorize-production-initial-activation-reconciler-installation.mjs --authorize \
+            --source-sha "$SOURCE_SHA" --preparation "$workdir/preparation.json" \
+            --preparation-file-sha256 "$PREPARATION_SHA256" \
+            --environment-approval "$workdir/environment-approval.json" \
+            --environment-approval-sha256 "$ENVIRONMENT_APPROVAL_SHA256" \
+            --output "$workdir/authorization.json"
+          echo "sha256=$(sha256sum "$workdir/authorization.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Configure exact bootstrap role credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Apply the exact authorized saved plan once
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_SHA256: ${{ inputs.preparation_artifact_sha256 }}
+          AUTHORIZATION_SHA256: ${{ steps.authorization.outputs.sha256 }}
+          SAVED_PLAN_BASE64: ${{ inputs.saved_plan_base64 }}
+          SAVED_PLAN_SHA256: ${{ inputs.saved_plan_sha256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          workdir="$RUNNER_TEMP/initial-activation-installation"
+          printf '%s' "$SAVED_PLAN_BASE64" | base64 --decode > "$workdir/installation.tfplan"
+          test "$(sha256sum "$workdir/installation.tfplan" | awk '{print $1}')" = "$SAVED_PLAN_SHA256"
+          install -d -m 700 "$workdir/terraform-data"
+          node scripts/aws/install-production-initial-activation-reconciler.mjs --execute \
+            --source-sha "$SOURCE_SHA" \
+            --preparation "$workdir/preparation.json" --preparation-file-sha256 "$PREPARATION_SHA256" \
+            --authorization "$workdir/authorization.json" --authorization-file-sha256 "$AUTHORIZATION_SHA256" \
+            --plan "$workdir/installation.tfplan" --plan-file-sha256 "$SAVED_PLAN_SHA256" \
+            --terraform-data-dir "$workdir/terraform-data" \
+            --result "$workdir/result.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-initial-activation-policy-reconciler-installation-result
+          path: |
+            ${{ runner.temp }}/initial-activation-installation/authorization.json
+            ${{ runner.temp }}/initial-activation-installation/result.json
+          if-no-files-found: error
+          retention-days: 90

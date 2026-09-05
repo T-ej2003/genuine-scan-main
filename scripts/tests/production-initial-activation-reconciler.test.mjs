@@ -13,6 +13,7 @@ const installation = JSON.parse(fs.readFileSync(`${root}/installation-contract.j
 const capability = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationPolicyReconciler-capability-v1.json", "utf8"));
 const encoded = (value) => encodeURIComponent(JSON.stringify(value));
 const reorder = (value) => Array.isArray(value) ? value.map(reorder) : (value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, nested]) => [key, reorder(nested)])) : value);
+const tags = Object.entries(INITIAL_ACTIVATION_RECONCILER.tags).map(([Key, Value]) => ({ Key, Value }));
 
 const commands = ({ provider = {}, role = {}, policyMetadata = {}, version = policy, encodeRole = true, encodeVersion = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) => {
   const calls = [];
@@ -20,8 +21,8 @@ const commands = ({ provider = {}, role = {}, policyMetadata = {}, version = pol
     calls.push(args);
     if (args[0] === "sts") return JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" });
     if (args[0] === "iam" && args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"], ...provider });
-    if (args[0] === "iam" && args[1] === "get-role") return JSON.stringify({ Role: { Arn: INITIAL_ACTIVATION_RECONCILER.roleArn, MaxSessionDuration: 3600, AssumeRolePolicyDocument: encodeRole ? encoded(trust) : trust, ...role } });
-    if (args[0] === "iam" && args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0, ...policyMetadata } });
+    if (args[0] === "iam" && args[1] === "get-role") return JSON.stringify({ Role: { Arn: INITIAL_ACTIVATION_RECONCILER.roleArn, RoleName: INITIAL_ACTIVATION_RECONCILER.roleName, Path: "/", Description: INITIAL_ACTIVATION_RECONCILER.roleDescription, Tags: tags, MaxSessionDuration: 3600, AssumeRolePolicyDocument: encodeRole ? encoded(trust) : trust, ...role } });
+    if (args[0] === "iam" && args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName, Path: "/", Description: INITIAL_ACTIVATION_RECONCILER.policyDescription, Tags: tags, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0, ...policyMetadata } });
     if (args[0] === "iam" && args[1] === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: encodeVersion ? encoded(version) : version } });
     if (args[0] === "iam" && args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: attached });
     if (args[0] === "iam" && args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: inline });
@@ -64,11 +65,13 @@ test("Terraform root owns only the purpose-bound role, policy, and attachment", 
   assert.match(terraform, /aws_iam_role_policy_attachment" "reconciler/);
   for (const forbidden of ["release-deployer", "production-green-stage-a", "production-green-stage-b", "image-publisher", "aws_s3_", "aws_ecs_", "aws_rds_", "aws_secretsmanager_"]) assert.doesNotMatch(terraform, new RegExp(forbidden, "i"), forbidden);
   assert.equal(backend.roleArn, INITIAL_ACTIVATION_RECONCILER.roleArn);
-  assert.equal(backend.productionExecutionEnabled, false);
-  assert.equal(backend.rootApplyRequired, true);
-  assert.equal(installation.administratorBoundary, "existing independently authorized mscqr-production-root administrator session");
+  assert.equal(backend.productionExecutionEnabled, true);
+  assert.equal(backend.rootApplyRequired, false);
+  assert.equal(installation.administratorBoundary, "GitHub production-environment OIDC session for mscqr-production-initial-activation-policy-reconciler-bootstrap");
   assert.deepEqual(installation.maxAwsMutations, { "iam:CreateRole": 1, "iam:CreatePolicy": 1, "iam:AttachRolePolicy": 1, "iam:UpdateAssumeRolePolicy": 0, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 0 });
-  assert.equal(installation.executionPerformedInThisSource, false);
+  assert.equal(installation.executionPerformedInThisSource, true);
+  assert.equal(installation.terraformVersion, "1.15.8");
+  assert.equal(installation.concurrencyGroup, "production-deploy");
 });
 
 test("exact installed topology verifies read-only and fails closed on drift", () => {
@@ -79,6 +82,8 @@ test("exact installed topology verifies read-only and fails closed on drift", ()
   assert.equal(exact.calls.some((args) => args[0] === "iam" && ["create-role", "create-policy", "attach-role-policy", "update-assume-role-policy"].includes(args[1])), false);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ attached: [{ PolicyArn: "arn:aws:iam::368992683803:policy/unrelated" }] })), /attachment topology/);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ inline: ["unexpected"] })), /inline policies/);
+  for (const role of [{ Description: "drift" }, { Tags: [] }, { Path: "/unexpected/" }]) assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ role })), /source metadata|tags/);
+  for (const policyMetadata of [{ Description: "drift" }, { Tags: [] }, { Path: "/unexpected/" }]) assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ policyMetadata })), /source metadata|tags/);
 });
 
 test("authenticates the exact GitHub OIDC provider and forces JSON AWS output", () => {
@@ -122,7 +127,7 @@ test("rejects malformed, primitive, extra-entity, truncated, and boundary-used p
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ entities: [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }, { RoleName: "other" }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] })), /entity topology/);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ entities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: true }] })), /pagination/);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ policyMetadata: { PermissionsBoundaryUsageCount: 1 } })), /permissions-boundary/);
-  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ role: { MaxSessionDuration: 7200 } })), /session duration/);
+  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ role: { MaxSessionDuration: 7200 } })), /source metadata/);
 });
 
 test("capability contract defines the role without claiming PR #448 migration", () => {
@@ -132,5 +137,13 @@ test("capability contract defines the role without claiming PR #448 migration", 
   assert.equal(capability.oidcSubject, "repo:T-ej2003/genuine-scan-main:environment:production");
   assert.deepEqual(capability.capabilities.filter(({ mutation }) => mutation), [{ action: "iam:CreatePolicyVersion", resource: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, mutation: true }]);
   assert.equal(capability.installation.runtimeSelfInstallation, false);
-  assert.equal(capability.installation.executionPerformedInThisSource, false);
+  assert.equal(capability.installation.executionPerformedInThisSource, true);
+  assert.equal(capability.installation.executorRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap");
+  assert.equal(capability.installation.concurrencyGroup, "production-deploy");
+  assert.equal(capability.installation.terraformApplyMaxCount, 1);
+  assert.equal(capability.installation.targetPolicyCreatePolicyVersionMaxCount, 0);
+  assert.deepEqual(capability.bootstrap.maxAwsMutations, { "iam:CreateRole": 1, "iam:PutRolePolicy": 1 });
+  assert.equal(capability.bootstrap.depth, 1);
+  assert.equal(capability.bootstrap.administratorAccess, false);
+  for (const sourceFile of [...capability.installation.sourceFiles, capability.bootstrap.sourceFile]) assert.equal(fs.existsSync(sourceFile), true);
 });

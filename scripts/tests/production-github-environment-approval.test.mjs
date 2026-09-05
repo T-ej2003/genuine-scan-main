@@ -51,6 +51,20 @@ test("configured solo and independent reviewers follow GitHub's authenticated se
   assert.throws(() => assertProductionEnvironmentReviewer(selfBlocked, { approvedBy: "alice", executionActor: "alice" }), /prevents self-review/);
 });
 
+test("initial-activation bootstrap uses the single-operator self-review contract", () => {
+  const bootstrap = {
+    ...context,
+    environment: "production-initial-activation-reconciler-bootstrap",
+    workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml@refs/heads/main",
+  };
+  const environmentConfig = config({ id: 8, name: bootstrap.environment, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 1, login: "alice" } }] }] });
+  const approval = createProductionEnvironmentApprovalEvidence({ ...bootstrap, environmentConfig, observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 8, environmentName: bootstrap.environment, userId: 1, userLogin: "alice" } });
+  assert.equal(approval.preventSelfReview, false);
+  assert.equal(assertProductionEnvironmentActualReviewer(approval, { sourceSha, repository: bootstrap.repository, executionActor: "alice" }), "alice");
+  assert.doesNotThrow(() => assertProductionEnvironmentApprovalEvidence(approval, bootstrap));
+  assert.throws(() => createProductionEnvironmentApprovalEvidence({ ...bootstrap, environmentConfig: { ...environmentConfig, protection_rules: [{ ...environmentConfig.protection_rules[0], prevent_self_review: true }] }, actualApproval: { state: "approved", environmentId: 8, environmentName: bootstrap.environment, userId: 1, userLogin: "alice" } }), /self-review/);
+});
+
 test("P2 regression: configured reviewer text is not actual approval evidence", () => {
   assert.throws(() => assertProductionEnvironmentActualReviewer(evidence(), { sourceSha, repository: context.repository, executionActor: "alice" }), /actual approval/i);
 });

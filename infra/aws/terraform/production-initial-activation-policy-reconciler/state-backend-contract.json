@@ -6,7 +6,7 @@
   "stateLockKey": "mscqr/production/initial-activation-policy-reconciler/terraform.tfstate.tflock",
   "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
   "policyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
-  "rootApplyRequired": true,
-  "productionExecutionEnabled": false,
-  "sourceOnlyUntilSeparatelyAuthorized": true
+  "rootApplyRequired": false,
+  "productionExecutionEnabled": true,
+  "sourceOnlyUntilSeparatelyAuthorized": false
 }
