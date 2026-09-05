@@ -141,6 +141,15 @@ test("unknown AWS calls and incomplete exact call classifications fail CI", () =
   }
 });
 
+test("initial-activation reconciliation runner identity is closure-bound", () => {
+  const calls = discoverAwsCliActions();
+  const current = graph();
+  const changed = calls.map((call) => call.sourceFile.endsWith("run-production-initial-activation-lifecycle-policy-reconciliation.mjs") && call.capabilityId === "initial-activation-policy-reconciliation-root-create-policy-version"
+    ? { ...call, identity: "RELEASE_DEPLOYER" }
+    : call);
+  assert.throws(() => assertChangedAwsCallClosure(changed, current), /Changed production AWS calls differ/);
+});
+
 test("documented ECS response shape is represented by the real service-revision boundary", () => {
   const source = fs.readFileSync("scripts/aws/production-ecs-rollback-viability.mjs", "utf8");
   assert.match(source, /targetServiceRevision\?\.arn/);

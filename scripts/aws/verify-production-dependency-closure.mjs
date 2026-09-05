@@ -269,7 +269,7 @@ export function buildProductionDependencyClosure() {
 }
 
 export function assertChangedAwsCallClosure(scanned, graph) {
-  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-initial-activation-policy-reconciliation.mjs"].includes(sourceFile);
+  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-initial-activation-policy-reconciliation.mjs", "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"].includes(sourceFile);
   const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER", sourceFunction = "", capabilityId = "" }) => `${sourceFile}\t${action}\t${identityBound(sourceFile) ? identity : ""}\t${capabilityId.endsWith("-read-raw-state") ? sourceFunction : ""}`;
   const callKeys = new Set(CALLS.map(key));
   const normalized = scanned.map(({ sourceFile, action, identity, sourceFunction, capabilityId }) => {
