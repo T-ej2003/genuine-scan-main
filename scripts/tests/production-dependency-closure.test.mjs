@@ -141,6 +141,20 @@ test("unknown AWS calls and incomplete exact call classifications fail CI", () =
   }
 });
 
+test("initial-activation reconciliation evidence identifies the OIDC publisher and read-only root preparation", () => {
+  const report = buildProductionDependencyClosure();
+  const description = report.runtimeModeClosure.INITIAL_ACTIVATION_POLICY_RECONCILIATION;
+  assert.match(description, /root performs read-only preparation;/);
+  assert.match(description, /INITIAL_ACTIVATION_RECONCILER GitHub Actions OIDC principal/);
+  assert.match(description, /arn:aws:iam::368992683803:role\/mscqr-production-initial-activation-policy-reconciler/);
+  const publication = description.split(";")[1];
+  assert.match(publication, /publishes/);
+  assert.doesNotMatch(publication, /root|RELEASE_DEPLOYER|release-deployer/i);
+  const mutation = report.newAwsCalls.find(({ action, reachableMode }) => action === "iam:CreatePolicyVersion" && reachableMode.includes("INITIAL_ACTIVATION_POLICY_RECONCILIATION"));
+  assert.equal(mutation.executionPrincipal, "INITIAL_ACTIVATION_RECONCILER");
+  assert.equal(mutation.identity, graph().capabilities.find(({ id }) => id === mutation.capabilityId).identity);
+});
+
 test("initial-activation reconciliation runner identity is closure-bound", () => {
   const calls = discoverAwsCliActions();
   const current = graph();

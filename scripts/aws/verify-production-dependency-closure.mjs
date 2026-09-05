@@ -258,7 +258,7 @@ export function buildProductionDependencyClosure() {
       BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: "signed candidate-derived closure is re-read before RegisterTaskDefinition and before UpdateService",
       STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY: "the governed P0-to-P2 production-artifacts recovery uses its exact root/release journal, policy, lock, and attestation boundaries",
       STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION: "the independently authorized exact refresh-only plan uses its exact release journal, live-policy read, Stage-A state object, and canonical outer lock boundary",
-      INITIAL_ACTIVATION_POLICY_RECONCILIATION: "the independently approved root-operator reconciliation reads and atomically publishes only the exact InitialActivationLifecycle managed-policy version",
+      INITIAL_ACTIVATION_POLICY_RECONCILIATION: "root performs read-only preparation; the purpose-bound INITIAL_ACTIVATION_RECONCILER GitHub Actions OIDC principal (arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler) publishes only the exact InitialActivationLifecycle managed-policy version after production environment approval",
       ROTATION_OVERLAP: "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
       ROTATION_CLEANUP: "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
       ROLLBACK_RECONCILIATION: "rollback viability uses immutable image/resource identity and performs no candidate registration",
