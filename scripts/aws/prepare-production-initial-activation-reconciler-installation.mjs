@@ -131,7 +131,7 @@ function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSy
   }
   const stateAfter = pullState();
   if (JSON.stringify(stateIdentity(stateBefore)) !== JSON.stringify(stateIdentity(stateAfter))) throw new Error("Terraform state changed during read-only installation preparation.");
-  return { planPath, planJsonPath, stateBytes: stateAfter };
+  return { planPath, planJsonPath, stateBytes: stateIdentity(stateAfter).stateExists ? stateAfter : undefined };
 }
 
 function renderExactPlanJson({ planPath, planBytes, terraformDataDir, profile, exec = execFileSync, outputPath, parentEnvironment = process.env } = {}) {

@@ -199,6 +199,9 @@ export function stateIdentity(rawBytes) {
   const bytes = Buffer.isBuffer(rawBytes) ? rawBytes : Buffer.from(rawBytes);
   let state;
   try { state = JSON.parse(bytes.toString("utf8")); } catch { throw new Error("Terraform state is not valid UTF-8 JSON."); }
+  // Terraform emits this exact empty state when the remote backend has no state object.
+  if (state && typeof state === "object" && !Array.isArray(state)
+    && canonicalJson(state) === canonicalJson({ version: 4, terraform_version: INSTALLATION.terraformVersion, serial: 0, lineage: "", outputs: {}, resources: [], check_results: null })) return Object.freeze({ stateExists: false });
   if (!state || typeof state !== "object" || Array.isArray(state) || typeof state.lineage !== "string" || !state.lineage || !Number.isSafeInteger(state.serial) || state.serial < 0) throw new Error("Terraform state identity is malformed.");
   return Object.freeze({ stateExists: true, lineage: state.lineage, serial: state.serial, stateSha256: sha256(bytes) });
 }
