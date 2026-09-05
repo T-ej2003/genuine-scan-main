@@ -26,6 +26,7 @@ const CREDENTIAL_REDIRECT_KEYS = Object.freeze([
 ]);
 const SAFE_PROCESS_KEYS = Object.freeze(["HOME", "PATH", "TMPDIR", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS"]);
 const GITHUB_AUTH_KEYS = Object.freeze(["GH_TOKEN", "GITHUB_TOKEN"]);
+const GITHUB_ENVIRONMENT_ENDPOINTS = Object.freeze(["production", "production-initial-activation-reconciler-bootstrap"]);
 
 const copy = (source, keys) => Object.fromEntries(keys.filter((key) => typeof source?.[key] === "string" && source[key]).map((key) => [key, source[key]]));
 const required = (env, key) => {
@@ -91,7 +92,7 @@ export function createProductionGithubCommandRunner({ env = process.env, exec = 
     if (command === "gh") {
       const endpoint = args?.[1];
       const allowedFlags = new Set(["--paginate", "--slurp"]);
-      const allowedEndpoint = /^repos\/T-ej2003\/genuine-scan-main\/(?:branches\/main|environments\/production|actions\/(?:runs\/[1-9][0-9]*(?:\/(?:approvals|artifacts))?|artifacts\/[1-9][0-9]*\/zip))$/.test(endpoint || "");
+      const allowedEndpoint = new RegExp(`^repos/T-ej2003/genuine-scan-main/(?:branches/main|environments/(?:${GITHUB_ENVIRONMENT_ENDPOINTS.join("|")})|actions/(?:runs/[1-9][0-9]*(?:/(?:approvals|artifacts))?|artifacts/[1-9][0-9]*/zip))$`).test(endpoint || "");
       if (!Array.isArray(args) || args[0] !== "api" || !allowedEndpoint || args.slice(2).some((value) => !allowedFlags.has(value))) throw new Error("Production GitHub runner permits only the reviewed read-only authorization API calls.");
       return exec("gh", args, { cwd: process.cwd(), env: githubEnvironment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });
     }

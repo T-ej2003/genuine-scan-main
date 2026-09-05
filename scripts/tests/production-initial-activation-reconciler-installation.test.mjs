@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
+import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
 import { INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
@@ -605,7 +606,8 @@ test("root bootstrap accepts only canonical GitHub run, approval, and artifact p
     if (endpoint.endsWith("/approvals")) return JSON.stringify([{ state: "approved", environments: [{ id: 8, name: INSTALLATION_BOOTSTRAP.environment }], user: { id: 3, login: "reviewer" } }]);
     throw new Error(`unexpected provenance call: ${command} ${args.join(" ")}`);
   };
-  assert.equal(resolveBootstrapAuthorization({ workflowRunId: "200", workflowRunAttempt: "1", sourceSha, githubRun, now }).authorizationSha256, authorization.authorizationSha256);
+  const hardenedGithubRun = createProductionGithubCommandRunner({ env: { GH_TOKEN: "fixture-token" }, exec: githubRun });
+  assert.equal(resolveBootstrapAuthorization({ workflowRunId: "200", workflowRunAttempt: "1", sourceSha, githubRun: hardenedGithubRun, now }).authorizationSha256, authorization.authorizationSha256);
   assert.throws(() => resolveBootstrapAuthorization({ workflowRunId: "200", workflowRunAttempt: "1", sourceSha, githubRun: () => { throw new Error("locally forged artifact has no GitHub provenance"); }, now }), /malformed or unavailable/);
   assert.throws(() => resolveBootstrapAuthorization({ workflowRunId: "200", workflowRunAttempt: "2", sourceSha, githubRun, now }), /provenance/);
 });
