@@ -1,5 +1,7 @@
 # Production initial-activation lifecycle policy reconciliation
 
+Authorization and result artifact uploads each run under `always()`, so a failed authorization upload cannot skip an existing result's publication attempt. Missing files and upload failures remain fatal; neither step ignores errors or fabricates evidence.
+
 Capability evidence models seven shared STS/IAM reads twice: `ROOT_OPERATOR` read-only preparation through `--prepare`, and `INITIAL_ACTIVATION_RECONCILER` workflow execution. Only the latter owns the `iam:CreatePolicyVersion` edge. Root preparation uses the existing authenticated-root/source-contract authority representation; the OIDC execution edges remain bound to the reconciler permissions policy.
 
 The exact `iam create-policy-version` subprocess forces `AWS_MAX_ATTEMPTS=1` after credential-environment construction. One callback therefore permits only one CLI request attempt; ambiguous outcomes use authenticated readback. Read subprocesses retain the existing credential wrapper's retry configuration.

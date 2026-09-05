@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import yaml from "js-yaml";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { INITIAL_ACTIVATION_POLICY_RECONCILIATION as CONTRACT, INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ, assertInitialActivationLifecyclePolicyReconciliationAuthorization, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, createInitialActivationLifecyclePolicyReconciliationAuthorization, executeInitialActivationLifecyclePolicyReconciliation as executeCore, readInitialActivationLifecycleDesiredPolicy, waitForInitialActivationLifecyclePolicyConvergence } from "../aws/production-initial-activation-policy-reconciliation.mjs";
 import { createInitialActivationReconciliationCommandRunner, readInitialActivationLifecyclePolicyLiveState, runInitialActivationLifecyclePolicyReconciliation } from "../aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs";
@@ -24,6 +25,20 @@ const releaseRolePolicyArns = sourcePolicyEvidence().map(({ arn }) => arn).sort(
 const state = (overrides = {}) => ({ policyArn: CONTRACT.policyArn, defaultVersionId: "v1", document: predecessor, policyVersionCount: 1, releaseRolePolicyArns, targetPolicyRoles: ["mscqr-production-release-deployer"], targetPolicyUsers: [], targetPolicyGroups: [], permissionsBoundaryUsageCount: 0, ...overrides });
 const authorization = (live = state()) => createInitialActivationLifecyclePolicyReconciliationAuthorization({ sourceSha, liveState: live, protectedEnvironmentApprovalEvidence: approval(), desired });
 const executeInitialActivationLifecyclePolicyReconciliation = (input) => executeCore(input);
+
+test("required reconciliation uploads run independently and publication failures remain fatal", () => {
+  const workflow = yaml.load(fs.readFileSync(".github/workflows/authorize-production-initial-activation-lifecycle-policy-reconciliation.yml", "utf8"));
+  const uploads = Object.values(workflow.jobs).flatMap(({ steps }) => steps || []).filter(({ uses }) => uses === "actions/upload-artifact@v4");
+  assert.equal(uploads.length, 2);
+  for (const [index, kind] of ["authorization", "result"].entries()) {
+    const upload = uploads[index];
+    assert.equal(upload.if, "always()");
+    assert.equal(upload["continue-on-error"], undefined);
+    assert.equal(upload.with["if-no-files-found"], "error");
+    assert.equal(upload.with.name, `production-initial-activation-lifecycle-policy-reconciliation-${kind}`);
+    assert.equal(upload.with.path, `\u0024{{ runner.temp }}/initial-activation-policy-reconciliation/${kind}.json`);
+  }
+});
 
 test("production mutation subprocess forces one CLI attempt without contaminating reads", () => {
   for (const inherited of [undefined, "2", "10"]) {

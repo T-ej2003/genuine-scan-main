@@ -72,3 +72,4 @@ jobs:
           path: "${{ runner.temp }}/initial-activation-policy-reconciliation/result.json"
           if-no-files-found: error
           retention-days: 90
+        if: always()
