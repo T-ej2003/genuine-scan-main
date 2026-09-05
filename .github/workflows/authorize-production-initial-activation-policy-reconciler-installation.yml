@@ -72,19 +72,21 @@ jobs:
       - name: Produce exact installation authorization
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_ARTIFACT_BASE64: ${{ inputs.preparation_artifact_base64 }}
           PREPARATION_SHA256: ${{ inputs.preparation_artifact_sha256 }}
+          ENVIRONMENT_APPROVAL_SHA256: ${{ steps.environment-approval.outputs.sha256 }}
         shell: bash
         run: |
           set -euo pipefail
           umask 077
           workdir="$RUNNER_TEMP/initial-activation-installation"
-          printf '%s' '${{ inputs.preparation_artifact_base64 }}' | base64 --decode > "$workdir/preparation.json"
+          printf '%s' "$PREPARATION_ARTIFACT_BASE64" | base64 --decode > "$workdir/preparation.json"
           test "$(sha256sum "$workdir/preparation.json" | awk '{print $1}')" = "$PREPARATION_SHA256"
           node scripts/aws/authorize-production-initial-activation-reconciler-installation.mjs --authorize \
             --source-sha "$SOURCE_SHA" --preparation "$workdir/preparation.json" \
             --preparation-file-sha256 "$PREPARATION_SHA256" \
             --environment-approval "$workdir/environment-approval.json" \
-            --environment-approval-sha256 "${{ steps.environment-approval.outputs.sha256 }}" \
+            --environment-approval-sha256 "$ENVIRONMENT_APPROVAL_SHA256" \
             --output "$workdir/authorization.json"
       - uses: actions/upload-artifact@v4
         with:

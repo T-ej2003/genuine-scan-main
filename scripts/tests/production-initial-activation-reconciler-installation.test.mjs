@@ -413,3 +413,14 @@ test("production apply uses native Terraform state locking", () => {
   assert.match(source, /"apply",[^\n]*"-lock-timeout=60s"/);
   assert.match(fs.readFileSync("scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs", "utf8"), /-backend-config=use_lockfile=\$\{INSTALLATION\.backend\.useLockfile\}/);
 });
+
+test("authorization workflow passes dynamic values through environment variables, never shell interpolation", () => {
+  const workflow = fs.readFileSync(".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml", "utf8");
+  const authorizationStep = workflow.match(/- name: Produce exact installation authorization[\s\S]*?(?=\n      - uses: actions\/upload-artifact@v4)/)?.[0];
+  assert.ok(authorizationStep);
+  const shell = authorizationStep.split("\n        run: |\n")[1];
+  assert.doesNotMatch(shell, /\$\{\{/);
+  assert.match(authorizationStep, /PREPARATION_ARTIFACT_BASE64: \$\{\{ inputs\.preparation_artifact_base64 \}\}/);
+  assert.match(shell, /printf '%s' "\$PREPARATION_ARTIFACT_BASE64"/);
+  assert.match(shell, /--environment-approval-sha256 "\$ENVIRONMENT_APPROVAL_SHA256"/);
+});

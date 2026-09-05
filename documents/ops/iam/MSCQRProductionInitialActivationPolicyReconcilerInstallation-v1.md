@@ -32,6 +32,9 @@ aliases, extra outputs, and additional configuration are rejected. Terraform
 commands receive the repository's sanitized named-profile environment, so
 ambient session credentials or endpoint redirects cannot override the
 authenticated administrator profile.
+The authorization workflow passes dispatcher and prior-step values through
+step environment variables; no caller-controlled GitHub expression is
+interpolated directly into its shell program.
 
 This contract does not install the live role in source development, grant the
 runtime role self-installation capability, mutate the InitialActivationLifecycle
