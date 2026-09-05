@@ -28,6 +28,7 @@ Review commands:
 npm run check:staging-terraform
 npm run check:staging-iam-policies
 npm run check:staging-private-inputs
+npm run check:staging-hardening-posture
 npm run test:staging-terraform-backend
 npm run check:staging-aws-identity
 MSCQR_STAGING_TERRAFORM_PLAN_ENABLED=true MSCQR_STAGING_TERRAFORM_PLAN_CONFIRM=MSCQR_GENERATE_STAGING_PLAN_ONLY npm run plan:staging-terraform
@@ -261,6 +262,29 @@ node scripts/sync-staging-runtime-secrets.mjs --force-ecs-redeploy
 
 Then run the staging health check against the reviewed staging ALB URL. Do not
 use `mscqr.com` or any production hostname for staging health evidence.
+
+## Staging Hardening Posture
+
+After the first healthy staging launch, run the read-only hardening posture
+checker before treating staging as shared or long-lived:
+
+```sh
+set +x
+AWS_PROFILE="<staging-provisioning-or-readonly-profile>" \
+AWS_REGION="eu-west-2" \
+npm run check:staging-hardening-posture -- --alb-health-url "http://mscqr-stg-alb-euw2-1729860344.eu-west-2.elb.amazonaws.com/health"
+```
+
+This checker does not mutate AWS and does not print secret values. It reports
+the current Redis AUTH/TLS posture, RDS storage encryption posture, temporary
+ECS outbound exposure, ALB HTTP-only listener state, target-health counts, and
+optional backend health status. The current expected staging risk level is
+`needs-hardening-before-shared-use` until Redis AUTH/TLS, RDS encryption, ECS
+egress tightening, and ALB HTTPS are implemented through separate reviewed
+plans. The roadmap is
+`documents/ops/MSCQR_STAGING_SECURITY_HARDENING_BACKLOG_2026-07-08.md`, and
+smoke evidence commands are in
+`documents/ops/MSCQR_STAGING_SMOKE_TEST_RUNBOOK_2026-07-08.md`.
 
 ## Required GitHub Checks
 
