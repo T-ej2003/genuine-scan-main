@@ -43,6 +43,7 @@ test("production reconciliation is workflow-only under the live purpose-bound OI
   assert.match(workflow, /environment: production/);
   assert.match(workflow, /role-to-assume:\s+arn:aws:iam::368992683803:role\/mscqr-production-initial-activation-policy-reconciler/);
   assert.match(workflow, /run-production-initial-activation-lifecycle-policy-reconciliation\.mjs[\s\S]*--execute/);
+  assert.match(workflow, /name: production-initial-activation-lifecycle-policy-reconciliation-authorization[\s\S]*if: always\(\)/);
   assert.doesNotMatch(workflow, /--admin-profile|reservation|ROOT_OPERATOR|release-deployer/);
   assert.doesNotMatch(fs.readFileSync("scripts/aws/production-initial-activation-policy-reconciliation.mjs", "utf8"), /s3api|reservation|ROOT_OPERATOR/);
 });

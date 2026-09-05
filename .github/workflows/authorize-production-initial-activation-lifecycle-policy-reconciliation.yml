@@ -65,6 +65,7 @@ jobs:
           path: "${{ runner.temp }}/initial-activation-policy-reconciliation/authorization.json"
           if-no-files-found: error
           retention-days: 90
+        if: always()
       - uses: actions/upload-artifact@v4
         with:
           name: production-initial-activation-lifecycle-policy-reconciliation-result
