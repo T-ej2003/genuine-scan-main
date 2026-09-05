@@ -183,6 +183,8 @@ test("realistic absent first install reaches only the mocked exact saved-plan ap
   fs.writeFileSync(preparationPath, preparationBytes, { mode: 0o600 });
   let applies = 0;
   let applied = false;
+  let failApply = true;
+  const appliedPaths = [];
   let pulls = 0;
   const terraformEnvironments = [];
   const exec = (command, args, options = {}) => {
@@ -196,7 +198,16 @@ test("realistic absent first install reaches only the mocked exact saved-plan ap
       if (!applied) { const error = new Error("No state file was found!"); error.stderr = "No state file was found!"; throw error; }
       return installedState;
     }
-    if (args.includes("apply")) { applies += 1; applied = true; assert.ok(args.includes("-lock-timeout=60s")); assert.ok(!args.includes("-lock=false")); return ""; }
+    if (args.includes("apply")) {
+      applies += 1;
+      appliedPaths.push(args.at(-1));
+      assert.equal(fs.existsSync(args.at(-1)), true);
+      assert.ok(args.includes("-lock-timeout=60s"));
+      assert.ok(!args.includes("-lock=false"));
+      if (failApply) throw new Error("lock timeout");
+      applied = true;
+      return "";
+    }
     throw new Error(`unexpected Terraform command: ${args.join(" ")}`);
   };
   const run = (args) => {
@@ -209,9 +220,14 @@ test("realistic absent first install reaches only the mocked exact saved-plan ap
   const args = ["--execute", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--preparation", preparationPath, "--preparation-file-sha256", crypto.createHash("sha256").update(preparationBytes).digest("hex"), "--authorization-workflow-run-id", "100", "--authorization-workflow-run-attempt", "1", "--plan", planPath, "--result", resultPath, "--terraform-data-dir", terraformDataDir];
   assert.throws(() => runInstallCli(args, { exec, run, githubRun: () => { throw new Error("forged local authorization has no GitHub provenance"); }, now }), /unavailable/);
   assert.equal(applies, 0);
+  assert.throws(() => runInstallCli(args, { exec, run, githubRun: githubAuthorizationRunner(), consumptionDirectory: path.join(directory, "failed-consumptions"), now }), /lock timeout/);
+  assert.equal(fs.existsSync(appliedPaths[0]), false);
+  failApply = false;
   const result = runInstallCli(args, { exec, run, githubRun: githubAuthorizationRunner(), consumptionDirectory: path.join(directory, "consumptions"), now, env: { HOME: os.homedir(), PATH: process.env.PATH, AWS_ACCESS_KEY_ID: "attacker", AWS_SECRET_ACCESS_KEY: "attacker", AWS_ENDPOINT_URL: "https://attacker.invalid", AWS_PROFILE: "attacker" } });
-  assert.equal(applies, 1);
-  assert.equal(pulls, 2);
+  assert.equal(applies, 2);
+  assert.notEqual(appliedPaths[0], appliedPaths[1]);
+  assert.equal(fs.existsSync(appliedPaths[1]), false);
+  assert.equal(pulls, 3);
   assert.equal(result.applyCount, 1);
   for (const environment of terraformEnvironments) {
     assert.equal(environment.AWS_PROFILE, "mscqr-production-root");

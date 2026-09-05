@@ -52,6 +52,9 @@ cannot create independent replay namespaces.
 Ambiguous-apply recovery records the same single post-apply state observation
 that passed the complete Terraform-state validator; it never performs a second
 unvalidated state read while finalizing evidence.
+Each apply stages authorized plan bytes under a unique private filename and
+removes that copy in `finally`, so a failed invocation cannot block a later
+freshly authorized recovery with a stale local staging file.
 The authorization workflow passes dispatcher and prior-step values through
 step environment variables; no caller-controlled GitHub expression is
 interpolated directly into its shell program.

@@ -112,9 +112,15 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
     fs.unlinkSync(renderPath);
   }
   const applySavedPlan = ({ planBytes }) => {
-    const appliedPath = path.join(path.dirname(planPath), "authorized-installation.tfplan");
-    fs.writeFileSync(appliedPath, planBytes, { flag: "wx", mode: 0o600 });
-    exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "apply", "-input=false", "-lock-timeout=60s", appliedPath], { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const appliedPath = path.join(path.dirname(planPath), `.authorized-installation.${crypto.randomUUID()}.tfplan`);
+    let staged = false;
+    try {
+      fs.writeFileSync(appliedPath, planBytes, { flag: "wx", mode: 0o600 });
+      staged = true;
+      exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "apply", "-input=false", "-lock-timeout=60s", appliedPath], { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    } finally {
+      if (staged) fs.unlinkSync(appliedPath);
+    }
   };
   const verifyInstalled = () => verifyInitialActivationPolicyReconciler({ run });
   const readState = () => { try { return Buffer.from(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "state", "pull"], { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })); } catch (error) { return classifyInstallationStatePullError(error); } };
