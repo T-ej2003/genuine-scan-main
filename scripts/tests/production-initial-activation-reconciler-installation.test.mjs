@@ -7,7 +7,7 @@ import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, resolveInstallationAuthorizationArtifact, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
-import { discoverInstallationPredecessor } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
+import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { INITIAL_ACTIVATION_RECONCILER } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
 
 const sourceSha = "a".repeat(40);
@@ -360,6 +360,35 @@ test("initialized backend and state-pull contracts fail closed", () => {
   assert.throws(() => classifyInstallationStatePullError({ stderr: "malformed state" }), (error) => error.stderr === "malformed state");
   assertInstallationStateResources(Buffer.from(installedState));
   assert.throws(() => assertInstallationStateResources(Buffer.from(state)), /state/);
+});
+
+test("generated preparation normalizes Terraform outputs before private reads", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-prepare-modes-"));
+  fs.chmodSync(directory, 0o700);
+  const terraformDataDir = path.join(directory, "terraform");
+  const outputPath = path.join(directory, "preparation.json");
+  const backendMetadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8"));
+  backendMetadata.backend.config.key = INSTALLATION.backend.key;
+  const exec = (command, args) => {
+    if (command === "git") return args[0] === "status" ? "" : sourceSha;
+    if (args.includes("init")) {
+      fs.writeFileSync(path.join(terraformDataDir, "terraform.tfstate"), JSON.stringify(backendMetadata), { mode: 0o644 });
+      return "";
+    }
+    if (args.includes("workspace")) return "default\n";
+    if (args.includes("state") && args.includes("pull")) throw Object.assign(new Error("No state file was found!"), { stderr: "No state file was found!\n\nState management commands require a state file.\n" });
+    if (args.includes("plan")) {
+      fs.writeFileSync(args[args.indexOf("-out") + 1], planBytes, { mode: 0o644 });
+      return "";
+    }
+    if (args.includes("show")) return JSON.stringify(plan);
+    throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
+  };
+  const prepared = runPrepareCli(["--prepare", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--output", outputPath, "--terraform-data-dir", terraformDataDir, "--state-absent"], { exec, run: discoveryRun({ role: false, policy: false }) });
+  assert.equal(prepared.livePredecessor, "ABSENT");
+  assert.equal(fs.statSync(path.join(terraformDataDir, "terraform.tfstate")).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(path.join(directory, "installation.tfplan")).mode & 0o777, 0o600);
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
 test("first-install attachment permits only its exact computed policy reference", () => {

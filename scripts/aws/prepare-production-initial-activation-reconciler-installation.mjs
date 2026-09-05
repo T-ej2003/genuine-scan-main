@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationPreparation, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { INITIAL_ACTIVATION_RECONCILER, readPolicyEntities, verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
@@ -108,6 +108,7 @@ function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSy
   const env = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, env: parentEnvironment }), TF_DATA_DIR: terraformDataDir };
   const backendArgs = [`-backend-config=bucket=${INSTALLATION.backend.bucket}`, `-backend-config=key=${INSTALLATION.backend.key}`, `-backend-config=region=${INSTALLATION.backend.region}`, `-backend-config=encrypt=${INSTALLATION.backend.encrypt}`, `-backend-config=use_lockfile=${INSTALLATION.backend.useLockfile}`];
   exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "init", "-input=false", ...backendArgs], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  ensureStageBPrivateFile({ filePath: path.join(terraformDataDir, "terraform.tfstate"), repositoryRoot: root, normalize: true, label: "Installation initialized Terraform backend metadata" });
   readInitializedBackend(terraformDataDir);
   const workspace = String(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "workspace", "show"], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
   if (workspace !== "default") throw new Error("Installation requires the canonical default Terraform workspace.");
@@ -119,6 +120,7 @@ function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSy
   const planPath = path.join(outputDir, "installation.tfplan");
   const planJsonPath = path.join(outputDir, "installation.plan.json");
   exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "plan", "-input=false", "-lock=false", "-out", planPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  ensureStageBPrivateFile({ filePath: planPath, repositoryRoot: root, normalize: true, label: "Installation saved Terraform plan" });
   const planBytes = readStageBPrivateFileBytes({ filePath: planPath, repositoryRoot: root, label: "Installation saved Terraform plan" }).bytes;
   const renderPath = path.join(outputDir, "installation-render.tfplan");
   fs.writeFileSync(renderPath, planBytes, { flag: "wx", mode: 0o600 });

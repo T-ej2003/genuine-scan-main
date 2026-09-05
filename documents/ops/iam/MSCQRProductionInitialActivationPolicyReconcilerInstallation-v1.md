@@ -44,6 +44,8 @@ as a create. Terraform's complete, possibly colored
 as first-install absence; every other backend failure remains fatal.
 Backend initialization uses only supported `terraform init` options; native
 state locking remains enabled on the saved-plan apply with a bounded timeout.
+Terraform-created backend metadata and saved-plan files are normalized to
+private mode `0600` before the hardened artifact reader authenticates them.
 Apply-capable executions consume authorization in one fixed, operator-home
 private directory keyed by authorization digest; caller-selected result paths
 cannot create independent replay namespaces.
