@@ -51,7 +51,7 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
     return Object.freeze(result);
   }
   if (typeof applySavedPlan !== "function") throw new Error("Installation saved-plan apply function is required.");
-  consumeOnce({ authorizationArtifactSha256: authorization.authorizationArtifactSha256, directory: consumptionDirectory || path.join(osTmp(), "mscqr-initial-activation-installation-consumptions") });
+  consumeOnce({ authorizationArtifactSha256: authorization.authorizationArtifactSha256, directory: consumptionDirectory || installationConsumptionDirectory() });
   if (typeof verifyInstalled !== "function") throw new Error("Canonical verifier is required after apply.");
   try {
     applySavedPlan({ planBytes });
@@ -59,8 +59,9 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
     // An apply process can exit after AWS/Terraform commits the resources but
     // before returning a success status. Recover only by read-only verifier;
     // never retry the saved plan blindly.
-    try { verifyInstalled(); const stateAfterBytes = readState?.(); assertInstallationStateResources(stateAfterBytes); } catch { throw error; }
-    const recovered = { kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_RESULT", schemaVersion: 1, operation: INSTALLATION.operation, sourceSha, authorizationArtifactSha256: authorization.authorizationArtifactSha256, status: "COMPLETE", applyCount: 1, targetPolicyCreatePolicyVersionCount: 0, verifier: "PASS", state: stateIdentity(readState?.()), completedAt: new Date().toISOString(), recoveredFromAmbiguousApply: true };
+    let recoveredState;
+    try { verifyInstalled(); recoveredState = assertInstallationStateResources(readState?.()); } catch { throw error; }
+    const recovered = { kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_RESULT", schemaVersion: 1, operation: INSTALLATION.operation, sourceSha, authorizationArtifactSha256: authorization.authorizationArtifactSha256, status: "COMPLETE", applyCount: 1, targetPolicyCreatePolicyVersionCount: 0, verifier: "PASS", state: recoveredState, completedAt: new Date().toISOString(), recoveredFromAmbiguousApply: true };
     writeStageBPrivateFilesAtomic({ repositoryRoot: root, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(recovered, null, 2)}\n`), label: "Installation result" }] });
     return Object.freeze(recovered);
   }

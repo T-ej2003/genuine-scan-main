@@ -49,6 +49,9 @@ private mode `0600` before the hardened artifact reader authenticates them.
 Apply-capable executions consume authorization in one fixed, operator-home
 private directory keyed by authorization digest; caller-selected result paths
 cannot create independent replay namespaces.
+Ambiguous-apply recovery records the same single post-apply state observation
+that passed the complete Terraform-state validator; it never performs a second
+unvalidated state read while finalizing evidence.
 The authorization workflow passes dispatcher and prior-step values through
 step environment variables; no caller-controlled GitHub expression is
 interpolated directly into its shell program.

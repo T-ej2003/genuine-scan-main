@@ -288,9 +288,11 @@ test("ambiguous apply recovers only through a successful read-only verifier", ()
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-ambiguous-"));
   let applies = 0;
   let reads = 0;
-  const result = executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", livePredecessorAddresses: [], applySavedPlan: () => { applies += 1; throw new Error("transport lost after commit"); }, verifyInstalled: () => true, readState: () => reads++ === 0 ? undefined : Buffer.from(installedState), resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now });
+  const result = executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", livePredecessorAddresses: [], applySavedPlan: () => { applies += 1; throw new Error("transport lost after commit"); }, verifyInstalled: () => true, readState: () => { if (reads++ === 0) return undefined; if (reads === 2) return Buffer.from(installedState); throw new Error("recovery state must be captured once"); }, resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now });
   assert.equal(applies, 1);
+  assert.equal(reads, 2);
   assert.equal(result.recoveredFromAmbiguousApply, true);
+  assert.deepEqual(result.state, stateIdentity(Buffer.from(installedState)));
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
