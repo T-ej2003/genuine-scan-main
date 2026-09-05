@@ -7,9 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationPreparation, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
-import { INITIAL_ACTIVATION_RECONCILER, readPolicyEntities, verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
-import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
-import { canonicalJson } from "./production-green-stage-b-contract.mjs";
+import { INITIAL_ACTIVATION_RECONCILER, assertInitialActivationReconcilerPolicyMetadata, assertInitialActivationReconcilerRoleMetadata, readPolicyEntities, verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
@@ -62,18 +60,16 @@ export function discoverInstallationPredecessor({ run } = {}) {
   const existingAddresses = [role && "aws_iam_role.reconciler", policy && "aws_iam_policy.reconciler"].filter(Boolean);
   if (reservedPolicies.length !== (policy ? 1 : 0) || policy && reservedPolicies[0]?.Arn !== INSTALLATION.policyArn) return predecessor("UNEXPECTED", existingAddresses);
   if (!role && !policy) return predecessor("ABSENT");
-  const trust = JSON.parse(fs.readFileSync(path.join(root, `${INSTALLATION.terraformRoot}/trust-policy.json`), "utf8"));
-  const roleExact = !role || (role.Arn === INSTALLATION.roleArn && role.MaxSessionDuration === 3600 && !Object.hasOwn(role, "PermissionsBoundary") && canonicalJson(normalizeIamPolicyDocument(role.AssumeRolePolicyDocument, "reconciler trust policy")) === canonicalJson(trust));
-  let policyDocumentExact = true;
+  let roleExact = !role;
+  if (role) try { assertInitialActivationReconcilerRoleMetadata(role); roleExact = true; } catch { roleExact = false; }
+  let policyExact = !policy;
   if (policy) {
-    if (!/^v[1-9][0-9]*$/.test(policy.DefaultVersionId || "")) policyDocumentExact = false;
-    else {
+    try {
       const version = runJson(run, ["iam", "get-policy-version", "--policy-arn", INSTALLATION.policyArn, "--version-id", policy.DefaultVersionId]).PolicyVersion;
-      const expected = JSON.parse(fs.readFileSync(path.join(root, `${INSTALLATION.terraformRoot}/permissions-policy.json`), "utf8"));
-      policyDocumentExact = canonicalJson(normalizeIamPolicyDocument(version?.Document, "reconciler permissions policy")) === canonicalJson(expected);
-    }
+      assertInitialActivationReconcilerPolicyMetadata(policy, version?.Document);
+      policyExact = true;
+    } catch { policyExact = false; }
   }
-  const policyExact = !policy || (policy.Arn === INSTALLATION.policyArn && policy.PolicyName === "MSCQRProductionInitialActivationPolicyReconciler" && policy.PermissionsBoundaryUsageCount === 0 && policyDocumentExact);
   if (!roleExact || !policyExact) return predecessor("UNEXPECTED", existingAddresses);
   if (!role || !policy) {
     if (role) {

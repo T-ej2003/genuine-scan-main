@@ -42,6 +42,9 @@ the plan's no-op entries, so an untracked live resource can never be authorized
 as a create. Terraform's complete, possibly colored
 `No state file was found!` diagnostic is the sole state-pull error classified
 as first-install absence; every other backend failure remains fatal.
+The shared live verifier also binds role and managed-policy names, root paths,
+descriptions, and exact tags, so refresh-disabled no-op plans cannot hide
+out-of-band metadata drift.
 Backend initialization uses only supported `terraform init` options; native
 state locking remains enabled on the saved-plan apply with a bounded timeout.
 Terraform-created backend metadata and saved-plan files are normalized to
