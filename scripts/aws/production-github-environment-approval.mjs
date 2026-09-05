@@ -17,6 +17,7 @@ export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
   dualSlotRebaselineWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-dual-slot-rebaseline.yml@refs/heads/main",
   dualSlotRebaselineRecoveryWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-dual-slot-rebaseline-recovery.yml@refs/heads/main",
   stageBApplyAttemptReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-green-stage-b-apply-attempt-reconciliation.yml@refs/heads/main",
+  installationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml@refs/heads/main",
   eventName: "workflow_dispatch",
   maxAgeMs: 30 * 60 * 1000,
 });
@@ -30,6 +31,7 @@ const approvedWorkflowRefs = new Set([
   PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineRecoveryWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.stageBApplyAttemptReconciliationWorkflowRef,
+  PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef,
 ]);
 
 const SHA = /^[a-f0-9]{40}$/;

@@ -1,0 +1,103 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { INSTALLATION, createInstallationPreparation, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { INITIAL_ACTIVATION_RECONCILER } from "./verify-production-initial-activation-policy-reconciler.mjs";
+import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
+import { canonicalJson } from "./production-green-stage-b-contract.mjs";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
+const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
+const runJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
+const noSuchEntity = (error) => /NoSuchEntity|does not exist|not found/i.test(`${error?.stderr || ""} ${error?.message || ""}`);
+const noState = (error) => /No state file was found|NoSuchKey|NotFound|404/i.test(`${error?.stderr || ""} ${error?.message || ""}`);
+
+export function assertProtectedCheckout({ exec = execFileSync, sourceSha, repositoryRoot = root } = {}) {
+  if (!/^[a-f0-9]{40}$/.test(sourceSha || "")) throw new Error("Protected source SHA is invalid.");
+  const head = String(exec("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot, encoding: "utf8" })).trim();
+  const main = String(exec("git", ["rev-parse", "origin/main"], { cwd: repositoryRoot, encoding: "utf8" })).trim();
+  const status = String(exec("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repositoryRoot, encoding: "utf8" }));
+  if (head !== sourceSha || main !== sourceSha || status) throw new Error("Preparation requires the exact clean protected-main checkout.");
+  return Object.freeze({ head, originMain: main });
+}
+
+export function discoverInstallationPredecessor({ run } = {}) {
+  if (typeof run !== "function") throw new Error("An explicit administrator AWS runner is required.");
+  const provider = runJson(run, ["iam", "get-open-id-connect-provider", "--open-id-connect-provider-arn", INITIAL_ACTIVATION_RECONCILER.oidcProviderArn]);
+  if (provider?.Url !== "token.actions.githubusercontent.com" || !Array.isArray(provider.ClientIDList) || !provider.ClientIDList.includes("sts.amazonaws.com")) throw new Error("GitHub Actions OIDC provider is not exact.");
+  let role;
+  let policy;
+  try { role = runJson(run, ["iam", "get-role", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).Role; } catch (error) { if (!noSuchEntity(error)) throw error; }
+  try { policy = runJson(run, ["iam", "get-policy", "--policy-arn", INSTALLATION.policyArn]).Policy; } catch (error) { if (!noSuchEntity(error)) throw error; }
+  if (!role && !policy) return "ABSENT";
+  const trust = JSON.parse(fs.readFileSync(path.join(root, `${INSTALLATION.terraformRoot}/trust-policy.json`), "utf8"));
+  const roleExact = !role || (role.Arn === INSTALLATION.roleArn && role.MaxSessionDuration === 3600 && !Object.hasOwn(role, "PermissionsBoundary") && canonicalJson(normalizeIamPolicyDocument(role.AssumeRolePolicyDocument, "reconciler trust policy")) === canonicalJson(trust));
+  let policyDocumentExact = true;
+  if (policy) {
+    if (!/^v[1-9][0-9]*$/.test(policy.DefaultVersionId || "")) policyDocumentExact = false;
+    else {
+      const version = runJson(run, ["iam", "get-policy-version", "--policy-arn", INSTALLATION.policyArn, "--version-id", policy.DefaultVersionId]).PolicyVersion;
+      const expected = JSON.parse(fs.readFileSync(path.join(root, `${INSTALLATION.terraformRoot}/permissions-policy.json`), "utf8"));
+      policyDocumentExact = canonicalJson(normalizeIamPolicyDocument(version?.Document, "reconciler permissions policy")) === canonicalJson(expected);
+    }
+  }
+  const policyExact = !policy || (policy.Arn === INSTALLATION.policyArn && policy.PolicyName === "MSCQRProductionInitialActivationPolicyReconciler" && policy.PermissionsBoundaryUsageCount === 0 && policyDocumentExact);
+  if (!roleExact || !policyExact) return "UNEXPECTED";
+  return "EXACT_PARTIAL";
+}
+
+function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSync } = {}) {
+  ensureStageBPrivateDirectory({ directory: terraformDataDir, repositoryRoot: root, create: true, label: "Installation Terraform data directory" });
+  const env = { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir };
+  const backendArgs = [`-backend-config=bucket=${INSTALLATION.backend.bucket}`, `-backend-config=key=${INSTALLATION.backend.key}`, `-backend-config=region=${INSTALLATION.region}`];
+  exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "init", "-input=false", "-lock=false", ...backendArgs], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  let stateBytes;
+  try {
+    stateBytes = Buffer.from(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "state", "pull"], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+  } catch (error) {
+    if (!noState(error)) throw error;
+  }
+  const planPath = path.join(outputDir, "installation.tfplan");
+  const planJsonPath = path.join(outputDir, "installation.plan.json");
+  exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "plan", "-input=false", "-lock=false", "-out", planPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const rendered = exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "show", "-json", planPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  fs.writeFileSync(planJsonPath, rendered, { flag: "wx", mode: 0o600 });
+  return { planPath, planJsonPath, stateBytes };
+}
+
+export function prepareInstallation({ sourceSha, planBytes, planJson, stateBytes, livePredecessor, preparedAt, outputPath, repositoryRoot = root } = {}) {
+  const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(stateBytes), livePredecessor, planJson, planBytes, preparedAt });
+  const output = assertStageBArtifactPath({ artifactPath: outputPath, repositoryRoot, label: "Installation preparation artifact", allowExisting: false });
+  writeStageBPrivateFilesAtomic({ repositoryRoot, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`), label: "Installation preparation artifact" }] });
+  return preparation;
+}
+
+export function runPrepareCli(argv = process.argv.slice(2), deps = {}) {
+  if (!argv.includes("--prepare")) throw new Error("Installation preparation requires --prepare.");
+  const sourceSha = required(argv, "--source-sha");
+  const profile = required(argv, "--admin-profile");
+  const outputPath = path.resolve(required(argv, "--output"));
+  assertProtectedCheckout({ sourceSha, repositoryRoot: root, exec: deps.exec || execFileSync });
+  ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: root, create: true, label: "Installation preparation directory" });
+  const run = deps.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile });
+  const livePredecessor = discoverInstallationPredecessor({ run });
+  if (livePredecessor === "UNEXPECTED") throw new Error("Live installation topology is unexpected.");
+  const outputDir = path.dirname(outputPath);
+  const generated = argv.includes("--plan") && argv.includes("--plan-json") ? { planPath: path.resolve(required(argv, "--plan")), planJsonPath: path.resolve(required(argv, "--plan-json")) } : terraformPlan({ terraformDataDir: path.resolve(required(argv, "--terraform-data-dir")), outputDir, profile, exec: deps.exec || execFileSync });
+  const plan = readStageBPrivateFileBytes({ filePath: generated.planPath, repositoryRoot: root, label: "Installation saved Terraform plan" });
+  const planJson = JSON.parse(readStageBPrivateFileBytes({ filePath: generated.planJsonPath, repositoryRoot: root, label: "Installation rendered Terraform plan" }).bytes.toString("utf8"));
+  if (!argv.includes("--state-file") && !argv.includes("--state-absent")) throw new Error("Preparation must explicitly authenticate a state file or --state-absent.");
+  const stateBytes = argv.includes("--state-file") ? readStageBPrivateFileBytes({ filePath: path.resolve(required(argv, "--state-file")), repositoryRoot: root, label: "Installation Terraform state" }).bytes : generated.stateBytes;
+  if (!argv.includes("--state-file") && generated.stateBytes !== undefined) throw new Error("Preparation state is present; bind the authenticated state file instead of claiming absence.");
+  if (!argv.includes("--state-file") && !(generated.stateBytes === undefined && !argv.includes("--plan"))) throw new Error("State absence must be proven by the canonical Terraform backend read.");
+  const preparation = prepareInstallation({ sourceSha, planBytes: plan.bytes, planJson, stateBytes, livePredecessor, outputPath, repositoryRoot: root });
+  return preparation;
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) runPrepareCli().then((value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`));
