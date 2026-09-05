@@ -103,6 +103,9 @@ const isTransientPolicyVersionRead = (error) => error?.code === INITIAL_ACTIVATI
 
 const isTransientConvergenceRead = (error) => {
   if (isTransientPolicyVersionRead(error)) return true;
+  // Exact botocore diagnostics at this root's IAM endpoint, not arbitrary timeout text.
+  const transport = /^(?:(?:Could not connect to the endpoint URL|Connect timeout on endpoint URL|Read timeout on endpoint URL): "https:\/\/iam\.amazonaws\.com\/?"|Connection was closed before we received a valid response from endpoint URL: "https:\/\/iam\.amazonaws\.com\/?"\.)$/;
+  if (transport.test(String(error?.stderr || "").trim())) return true;
   const retryable = /^(Throttling|ThrottlingException|TooManyRequestsException|RequestLimitExceeded|ServiceUnavailable|ServiceUnavailableException|ServiceFailure|InternalFailure|InternalError)$/;
   // AWS CLI wraps the service code in a diagnostic; never match arbitrary message substrings.
   const diagnostic = String(error?.stderr || error?.message || "").match(/(?:^|\n)An error occurred \((\w+)\) when calling the (GetPolicy|GetPolicyVersion|ListPolicyVersions|GetRole|ListAttachedRolePolicies|ListEntitiesForPolicy) operation(?: \(reached max retries: \d+\))?:/);

@@ -104,11 +104,21 @@ test("policy-centric entity discovery consumes every page and fails closed on in
   assert.equal(assertInitialActivationLifecyclePolicyState(readInitialActivationLifecyclePolicyLiveState(run), { desired }).status, "AUTHENTICATED_PREDECESSOR");
   const incomplete = (args) => args[1] === "list-entities-for-policy" ? JSON.stringify({ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: true }) : run(args);
   assert.throws(() => readInitialActivationLifecyclePolicyLiveState(incomplete), /incomplete/);
-  for (const code of ["ServiceUnavailable", "ServiceFailure"]) for (const failures of [["get-policy"], ["get-policy-version"], ["list-policy-versions"], ["get-role"], ["list-attached-role-policies"], ["list-entities-for-policy"], ["get-policy", "get-role", "list-entities-for-policy"], Array(6).fill("get-policy")]) {
+  const diagnostics = [
+    'Could not connect to the endpoint URL: "https://iam.amazonaws.com/"',
+    'Connect timeout on endpoint URL: "https://iam.amazonaws.com/"',
+    'Read timeout on endpoint URL: "https://iam.amazonaws.com/"',
+    'Connection was closed before we received a valid response from endpoint URL: "https://iam.amazonaws.com/".',
+  ];
+  const transientErrors = [
+    ...["Throttling", "ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded", "ServiceUnavailable", "ServiceUnavailableException", "ServiceFailure", "InternalFailure", "InternalError"].map((code) => ({ code })),
+    ...diagnostics.map((stderr) => ({ code: 255, stderr: Buffer.from(`\n${stderr}\n`) })),
+  ];
+  for (const failure of transientErrors) for (const failures of [["get-policy"], ["get-policy-version"], ["list-policy-versions"], ["get-role"], ["list-attached-role-policies"], ["list-entities-for-policy"], ["get-policy", "get-role", "list-entities-for-policy"], Array(6).fill("get-policy")]) {
     let creates = 0; let retries = 0;
     const pending = [...failures];
     const execute = () => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { retries += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; }, readLiveState: () => readInitialActivationLifecyclePolicyLiveState((args) => {
-      if (creates && args[1] === pending[0]) { pending.shift(); throw Object.assign(new Error("service failure"), { code }); }
+      if (creates && args[1] === pending[0]) { pending.shift(); throw Object.assign(new Error("Command failed: aws iam read"), failure); }
       const response = JSON.parse(run(args));
       if (creates && args[1] === "get-policy") response.Policy.DefaultVersionId = "v2";
       if (creates && args[1] === "get-policy-version") response.PolicyVersion.Document = desired.document;
@@ -122,6 +132,62 @@ test("policy-centric entity discovery consumes every page and fails closed on in
   let preMutationCreates = 0;
   assert.throws(() => executeCore({ authorization: authorization(), sourceSha, desired, readLiveState: () => readInitialActivationLifecyclePolicyLiveState(() => { throw Object.assign(new Error("service failure"), { code: "ServiceFailure" }); }), createPolicyVersion: () => { preMutationCreates += 1; }, sleep: () => assert.fail("pre-mutation retry") }));
   assert.equal(preMutationCreates, 0);
+  for (const failure of [...transientErrors, ...["AccessDenied", "ValidationError", "MalformedPolicyDocument"].map((code) => ({ code }))]) {
+    let reads = 0;
+    assert.throws(() => executeCore({ authorization: authorization(), sourceSha, desired, readLiveState: () => { reads += 1; return readInitialActivationLifecyclePolicyLiveState(() => { throw Object.assign(new Error("read failed"), failure); }); }, createPolicyVersion: () => assert.fail("precondition failed"), sleep: () => assert.fail("pre-mutation retry") }));
+    assert.equal(reads, 1);
+  }
+  for (const stderr of ["timeout", "HTTP 500", "AccessDenied NoSuchEntity", ...diagnostics.map((value) => `untrusted prefix ${value}`), ...diagnostics.map((value) => value.replace("iam.amazonaws.com", "evil.example")), "SSL validation failed for https://iam.amazonaws.com/", "An error occurred (AccessDenied) when calling the GetPolicyVersion operation: NoSuchEntity"]) {
+    let creates = 0; let observations = 0;
+    assert.throws(() => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => assert.fail("non-transient retry"), createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; }, readLiveState: () => {
+      if (!creates) return readInitialActivationLifecyclePolicyLiveState(run);
+      observations += 1;
+      return readInitialActivationLifecyclePolicyLiveState((args) => { if (args[1] === "get-policy-version") throw Object.assign(new Error("CLI failed"), { stderr }); return run(args); });
+    } }));
+    assert.equal(creates, 1); assert.equal(observations, 1);
+  }
+  // CLI entrypoint -> private authorization -> real command wrapper -> real snapshot/core -> result.
+  for (const ambiguous of [false, true]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "initial-activation-runtime-contract-")); fs.chmodSync(directory, 0o700);
+    try {
+      const authBytes = Buffer.from(JSON.stringify(authorization()));
+      const authPath = path.join(directory, "authorization.json"); fs.writeFileSync(authPath, authBytes, { mode: 0o600 });
+      const output = path.join(directory, "result.json");
+      let creates = 0; let transientReads = 0; const calls = [];
+      const env = { AWS_ACCESS_KEY_ID: "fixture", AWS_SECRET_ACCESS_KEY: "fixture", AWS_SESSION_TOKEN: "fixture", AWS_MAX_ATTEMPTS: "10", GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_WORKFLOW_REF: `T-ej2003/genuine-scan-main/${CONTRACT.workflowPath}@refs/heads/main`, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ID: "1", GITHUB_RUN_ATTEMPT: "1", GITHUB_ACTOR: "operator" };
+      const cli = createInitialActivationReconciliationCommandRunner({ credentialSource: "github-oidc-initial-activation-bootstrap", env, exec: (file, args, options) => {
+        calls.push({ file, action: args[1], attempts: options.env.AWS_MAX_ATTEMPTS });
+        if (args[0] === "sts") return JSON.stringify({ Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-initial-activation-policy-reconciler/fixture" });
+        if (args[1] === "create-policy-version") {
+          creates += 1; assert.equal(creates, 1); assert.equal(options.env.AWS_MAX_ATTEMPTS, "1");
+          assert.equal(args[args.indexOf("--policy-arn") + 1], CONTRACT.policyArn);
+          assert.deepEqual(JSON.parse(args[args.indexOf("--policy-document") + 1]), desired.document); assert.ok(args.includes("--set-as-default"));
+          if (ambiguous) throw Object.assign(new Error("response lost"), { stderr: diagnostics[2] });
+          return JSON.stringify({ PolicyVersion: { VersionId: "v2" } });
+        }
+        if (creates && args[1] === "get-role" && transientReads++ === 0) throw Object.assign(new Error("Command failed: aws iam get-role"), { stderr: Buffer.from(diagnostics[3]), status: 255 });
+        const response = JSON.parse(run(args));
+        if (creates && args[1] === "get-policy") response.Policy.DefaultVersionId = "v2";
+        if (creates && args[1] === "get-policy-version") response.PolicyVersion.Document = desired.document;
+        if (creates && args[1] === "list-policy-versions") response.Versions.push({ VersionId: "v2" });
+        return JSON.stringify(response);
+      } });
+      const result = runInitialActivationLifecyclePolicyReconciliation(["--execute", "--source-sha", sourceSha, "--authorization", authPath, "--authorization-file-sha256", crypto.createHash("sha256").update(authBytes).digest("hex"), "--result-out", output], { env, readProtectedCheckout: () => ({ toolingSha: sourceSha }), run: cli });
+      assert.equal(result.status, ambiguous ? "COMPLETED_BY_READBACK" : "RECONCILED");
+      assert.equal(creates, 1); assert.ok(transientReads > 1);
+      assert.ok(calls.filter(({ action }) => action !== "create-policy-version").every(({ attempts }) => attempts === undefined));
+      assert.deepEqual(JSON.parse(fs.readFileSync(output)), result);
+      const prepareCalls = [];
+      const prepareRunner = createInitialActivationReconciliationCommandRunner({ credentialSource: "named-profile", profile: "mscqr-production-root", env: {}, exec: (file, args, options) => {
+        prepareCalls.push(args[1]); assert.equal(options.env.AWS_PROFILE, "mscqr-production-root");
+        if (args[0] === "sts") return JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" });
+        assert.notEqual(args[1], "create-policy-version"); return run(args);
+      } });
+      const preparation = runInitialActivationLifecyclePolicyReconciliation(["--prepare", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--live-state-out", path.join(directory, "live.json")], { readProtectedCheckout: () => ({ toolingSha: sourceSha }), run: prepareRunner });
+      assert.equal(preparation.status, "AUTHENTICATED_PREDECESSOR");
+      assert.deepEqual([...new Set(prepareCalls)].sort(), ["get-caller-identity", "get-policy", "get-policy-version", "list-policy-versions", "get-role", "list-attached-role-policies", "list-entities-for-policy"].sort());
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  }
 });
 
 test("approval freshness uses a fresh write-boundary clock after live reads", () => {
@@ -161,6 +227,12 @@ test("result destination is fully preflighted before entering the mutation execu
   const deps = { env: { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_WORKFLOW_REF: `${"T-ej2003/genuine-scan-main"}/${CONTRACT.workflowPath}@refs/heads/main`, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ID: "1", GITHUB_RUN_ATTEMPT: "1", GITHUB_ACTOR: "operator" }, readProtectedCheckout: () => ({ toolingSha: sourceSha }), run: () => JSON.stringify({ Arn: `arn:aws:sts::368992683803:assumed-role/${roleArn.split("/").at(-1)}/session` }), executeReconciliation: () => { executorCalls += 1; return { status: "ALREADY_RECONCILED", createPolicyVersionCount: 0, postState: assertInitialActivationLifecyclePolicyState(state({ document: desired.document, defaultVersionId: "v2" }), { desired }) }; } };
   const baseArgs = (resultOut) => ["--execute", "--source-sha", sourceSha, "--authorization", authPath, "--authorization-file-sha256", authSha, ...(resultOut === undefined ? [] : ["--result-out", resultOut])];
   const invoke = (args) => runInitialActivationLifecyclePolicyReconciliation(args, deps);
+  for (const Arn of ["arn:aws:iam::368992683803:root", "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/session", "arn:aws:sts::111111111111:assumed-role/mscqr-production-initial-activation-policy-reconciler/session"]) assert.throws(() => runInitialActivationLifecyclePolicyReconciliation(baseArgs(path.join(directory, "wrong-role.json")), { ...deps, run: () => JSON.stringify({ Arn }) }), /exact OIDC reconciler/);
+  for (const change of [{ GITHUB_REPOSITORY: "other/repository" }, { GITHUB_WORKFLOW_REF: "wrong-workflow" }, { GITHUB_EVENT_NAME: "push" }, { GITHUB_ACTIONS: "false" }]) assert.throws(() => runInitialActivationLifecyclePolicyReconciliation(baseArgs(path.join(directory, "wrong-workflow.json")), { ...deps, env: { ...deps.env, ...change }, run: () => assert.fail("wrong workflow reached AWS") }), /canonical protected GitHub workflow/);
+  assert.throws(() => runInitialActivationLifecyclePolicyReconciliation(baseArgs(path.join(directory, "wrong-source.json")), { ...deps, readProtectedCheckout: () => ({ toolingSha: "b".repeat(40) }), run: () => assert.fail("wrong source reached AWS") }), /authorized protected source/);
+  for (const attempt of [undefined, "2", "10"]) assert.throws(() => runInitialActivationLifecyclePolicyReconciliation(baseArgs(path.join(directory, "rerun.json")), { ...deps, env: { ...deps.env, GITHUB_RUN_ATTEMPT: attempt }, run: () => assert.fail("rerun must not reach AWS") }), /reruns are forbidden/);
+  const workflow = yaml.load(fs.readFileSync(CONTRACT.workflowPath, "utf8"));
+  assert.match(workflow.jobs.authorize.steps.find(({ name }) => name === "Authenticate exact protected source").run, /test "\$GITHUB_RUN_ATTEMPT" = 1/);
   for (const [index, args] of [baseArgs(undefined), baseArgs(""), baseArgs(path.join(directory, "missing", "result.json")), baseArgs(process.cwd()), baseArgs(path.join(directory, "insecure", "result.json")), baseArgs(path.join(directory, "existing.json")), baseArgs(path.join(directory, "result-link.json")), baseArgs(path.join(process.cwd(), "..", path.basename(process.cwd()), "escaped.json")), baseArgs(path.join(directory, "unwritable", "result.json"))].entries()) {
     if (args.some((arg) => arg.endsWith("/insecure/result.json"))) { fs.mkdirSync(path.join(directory, "insecure")); fs.chmodSync(path.join(directory, "insecure"), 0o755); }
     if (args.some((arg) => arg.endsWith("/existing.json"))) fs.writeFileSync(path.join(directory, "existing.json"), "existing");

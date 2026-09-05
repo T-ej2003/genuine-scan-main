@@ -44,7 +44,7 @@ export function readInitialActivationLifecyclePolicyLiveState(run) {
   let version;
   try { version = json(run, ["iam", "get-policy-version", "--policy-arn", INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, "--version-id", defaultVersionId]).PolicyVersion; }
   catch (error) {
-    if (/NoSuchEntity(?:Exception)?/i.test(`${error?.name || ""}\n${error?.code || ""}\n${error?.message || ""}\n${error?.stderr || ""}`)) error.code = INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ;
+    if (/^NoSuchEntity(?:Exception)?$/.test(error?.code || error?.name || "") || /^An error occurred \(NoSuchEntity(?:Exception)?\) when calling the GetPolicyVersion operation: [^\n]+$/.test(String(error?.stderr || "").trim())) error.code = INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ;
     throw error;
   }
   const versions = json(run, ["iam", "list-policy-versions", "--policy-arn", INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn]).Versions;
@@ -72,6 +72,7 @@ export function runInitialActivationLifecyclePolicyReconciliation(argv = process
   if (checkout.toolingSha !== sourceSha) throw new Error("Initial activation lifecycle policy executor is not at the authorized protected source.");
   const workflowEnvironment = deps.env || process.env;
   if (executeMode && (workflowEnvironment.GITHUB_ACTIONS !== "true" || workflowEnvironment.GITHUB_REPOSITORY !== "T-ej2003/genuine-scan-main" || workflowEnvironment.GITHUB_WORKFLOW_REF !== `${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/${INITIAL_ACTIVATION_POLICY_RECONCILIATION.workflowPath}@refs/heads/main` || workflowEnvironment.GITHUB_EVENT_NAME !== "workflow_dispatch")) throw new Error("Initial activation lifecycle policy mutation is reachable only inside its canonical protected GitHub workflow.");
+  if (executeMode && workflowEnvironment.GITHUB_RUN_ATTEMPT !== "1") throw new Error("Reconciliation workflow reruns are forbidden; use read-only live verification after an ambiguous attempt.");
   const run = deps.run || createInitialActivationReconciliationCommandRunner({ credentialSource: executeMode ? PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP : PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: adminProfile, env: workflowEnvironment });
   const identity = json(run, ["sts", "get-caller-identity"]);
   if (prepare && identity?.Arn !== "arn:aws:iam::368992683803:root") throw new Error("Initial activation lifecycle policy preparation requires the independently authenticated root operator.");
