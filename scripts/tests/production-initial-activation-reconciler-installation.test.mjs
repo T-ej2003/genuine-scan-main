@@ -37,11 +37,15 @@ const completePlanBytes = Buffer.from("exact-saved-noop-plan");
 const completePreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(installedState)), livePredecessor: "EXACT_COMPLETE", planJson: completePlan, planBytes: completePlanBytes, preparedAt: now.toISOString() });
 const completeAuthorization = createInstallationAuthorization({ preparation: completePreparation, preparationArtifactSha256: completePreparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
 
-const discoveryRun = ({ attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) => (args) => {
+const discoveryRun = ({ role = true, policy = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], policyPages } = {}) => (args) => {
   if (args[0] === "sts") return JSON.stringify({ Arn: INSTALLATION.administratorArn });
   if (args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"] });
-  if (args[1] === "get-role") return JSON.stringify({ Role: { Arn: INITIAL_ACTIVATION_RECONCILER.roleArn, MaxSessionDuration: 3600, AssumeRolePolicyDocument: JSON.parse(trust) } });
-  if (args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0 } });
+  if (args[1] === "get-role") { if (!role) throw Object.assign(new Error("NoSuchEntity"), { stderr: "NoSuchEntity" }); return JSON.stringify({ Role: { Arn: INITIAL_ACTIVATION_RECONCILER.roleArn, MaxSessionDuration: 3600, AssumeRolePolicyDocument: JSON.parse(trust) } }); }
+  if (args[1] === "get-policy") { if (!policy) throw Object.assign(new Error("NoSuchEntity"), { stderr: "NoSuchEntity" }); return JSON.stringify({ Policy: { Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0 } }); }
+  if (args[1] === "list-policies") {
+    const pages = policyPages || [{ Policies: policy ? [{ Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName }] : [], IsTruncated: false }];
+    return JSON.stringify(pages[args.includes("--marker") ? 1 : 0]);
+  }
   if (args[1] === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: JSON.parse(permissions) } });
   if (args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: attached });
   if (args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: inline });
@@ -97,6 +101,16 @@ test("discovery reaches exact-complete only through the canonical verifier topol
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ attached: [] }) }), "EXACT_PARTIAL");
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ attached: [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }, { PolicyArn: "arn:aws:iam::368992683803:policy/unexpected" }] }) }), "UNEXPECTED");
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ entities: [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [{ UserName: "unexpected" }], PolicyGroups: [], IsTruncated: false }] }) }), "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: true, policy: false, attached: [{ PolicyArn: "arn:aws:iam::368992683803:policy/unexpected" }] }) }), "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: true, policy: false, inline: ["unexpected"] }) }), "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: false, policy: false, policyPages: [{ Policies: [{ Arn: "arn:aws:iam::368992683803:policy/other/MSCQRProductionInitialActivationPolicyReconciler", PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName }], IsTruncated: false }] }) }), "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: false, policy: false, policyPages: [{ Policies: [], IsTruncated: true, Marker: "next" }, { Policies: [{ Arn: "arn:aws:iam::368992683803:policy/other/MSCQRProductionInitialActivationPolicyReconciler", PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName }], IsTruncated: false }] }) }), "UNEXPECTED");
+  assert.throws(() => discoverInstallationPredecessor({ run: discoveryRun({ role: false, policy: false, policyPages: [{ Policies: [], IsTruncated: true }] }) }), /pagination/);
+  assert.throws(() => discoverInstallationPredecessor({ run: (args) => {
+    if (args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"] });
+    if (args[1] === "get-role") throw Object.assign(new Error("endpoint not found"), { stderr: "transport endpoint not found" });
+    throw new Error(`unexpected discovery call: ${args.join(" ")}`);
+  } }), /endpoint not found/);
 });
 
 test("authorization is source, plan, root and environment bound", () => {
@@ -178,6 +192,7 @@ test("realistic absent first install reaches only the mocked exact saved-plan ap
     if (args[0] === "sts") return JSON.stringify({ Arn: INSTALLATION.administratorArn });
     if (args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"] });
     if (!applied && (args[1] === "get-role" || args[1] === "get-policy")) { const error = new Error("NoSuchEntity"); error.stderr = "NoSuchEntity"; throw error; }
+    if (!applied && args[1] === "list-policies") return JSON.stringify({ Policies: [], IsTruncated: false });
     return discoveryRun()(args);
   };
   const args = ["--execute", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--preparation", preparationPath, "--preparation-file-sha256", crypto.createHash("sha256").update(preparationBytes).digest("hex"), "--authorization-workflow-run-id", "100", "--authorization-workflow-run-attempt", "1", "--plan", planPath, "--result", resultPath, "--terraform-data-dir", terraformDataDir];
@@ -315,6 +330,9 @@ test("initialized backend and state-pull contracts fail closed", () => {
   assert.throws(() => assertInstallationInitializedBackendMetadata({ type: "local", hash: 1, config: {} }), /backend/);
   assert.throws(() => assertInstallationInitializedBackendMetadata({ ...metadata.backend, config: { ...metadata.backend.config, unreviewed: true } }), /unreviewed/);
   assert.deepEqual(classifyInstallationStatePullError({ stderr: "No state file was found!" }), undefined);
+  assert.deepEqual(classifyInstallationStatePullError({ stderr: "No state file was found!\n\nState management commands require a state file. Run this command in a directory where Terraform has been run.\n" }), undefined);
+  assert.deepEqual(classifyInstallationStatePullError({ stderr: "\u001b[31m╷\u001b[0m\n\u001b[31m│ Error: No state file was found!\u001b[0m\n\u001b[31m│ State management commands require a state file. Run this command in a directory where Terraform has been run.\u001b[0m\n╵\n" }), undefined);
+  assert.throws(() => classifyInstallationStatePullError({ stderr: "Error: No state file was found!\nError: AccessDenied" }), (error) => error.stderr.includes("AccessDenied"));
   assert.throws(() => classifyInstallationStatePullError({ stderr: "AccessDenied" }), (error) => error.stderr === "AccessDenied");
   assert.throws(() => classifyInstallationStatePullError({ stderr: "timeout" }), (error) => error.stderr === "timeout");
   assert.throws(() => classifyInstallationStatePullError({ stderr: "malformed state" }), (error) => error.stderr === "malformed state");

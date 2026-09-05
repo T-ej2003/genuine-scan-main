@@ -32,6 +32,13 @@ aliases, extra outputs, and additional configuration are rejected. Terraform
 commands receive the repository's sanitized named-profile environment, so
 ambient session credentials or endpoint redirects cannot override the
 authenticated administrator profile.
+Before planning or applying, predecessor discovery enumerates the reserved
+customer-managed policy name across every IAM path and page. A role-only
+partial state is accepted only when the exact role has no managed or inline
+policies; a noncanonical same-named policy or any surviving role capability is
+unexpected and fails closed. Terraform's complete, possibly colored
+`No state file was found!` diagnostic is the sole state-pull error classified
+as first-install absence; every other backend failure remains fatal.
 The authorization workflow passes dispatcher and prior-step values through
 step environment variables; no caller-controlled GitHub expression is
 interpolated directly into its shell program.

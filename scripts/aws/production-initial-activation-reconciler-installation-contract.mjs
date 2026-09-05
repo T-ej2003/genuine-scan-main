@@ -127,8 +127,15 @@ export function assertInstallationInitializedBackendMetadata(metadata) {
 }
 
 export function classifyInstallationStatePullError(error) {
-  const messages = [error?.stderr, error?.message].filter((value) => value !== undefined && value !== null).map(String).map((value) => value.trim());
-  if (messages.some((message) => /^No state file was found!?$/i.test(message) || /^Error:\s*No state file was found!?$/i.test(message))) return undefined;
+  const diagnostic = String(error?.stderr ?? error?.message ?? "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[│╷╵]\s*/, ""))
+    .filter(Boolean);
+  const errors = diagnostic.filter((line) => /^Error:\s*/i.test(line));
+  const noStateTitle = errors.length === 1 ? /^Error:\s*No state file was found!?$/i.test(errors[0]) : errors.length === 0 && /^No state file was found!?$/i.test(diagnostic[0] || "");
+  const canonicalTail = diagnostic.length === 1 || diagnostic.some((line) => /^State management commands require a state file\./i.test(line));
+  if (noStateTitle && canonicalTail) return undefined;
   throw error;
 }
 

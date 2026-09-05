@@ -15,7 +15,23 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
 const runJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
-const noSuchEntity = (error) => /NoSuchEntity|does not exist|not found/i.test(`${error?.stderr || ""} ${error?.message || ""}`);
+const noSuchEntity = (error) => /\bNoSuchEntity(?:Exception)?\b/.test(`${error?.stderr || ""} ${error?.message || ""}`);
+
+function readReservedPolicies(run) {
+  const policies = [];
+  const seenMarkers = new Set();
+  let marker;
+  for (;;) {
+    const response = runJson(run, ["iam", "list-policies", "--scope", "Local", "--no-paginate", ...(marker ? ["--marker", marker] : [])]);
+    if (!Array.isArray(response.Policies) || typeof response.IsTruncated !== "boolean") throw new Error("Initial-activation reconciler policy inventory is malformed.");
+    policies.push(...response.Policies.filter((candidate) => candidate?.PolicyName === INITIAL_ACTIVATION_RECONCILER.policyName));
+    if (!response.IsTruncated) break;
+    if (typeof response.Marker !== "string" || !response.Marker || seenMarkers.has(response.Marker)) throw new Error("Initial-activation reconciler policy inventory pagination is invalid.");
+    seenMarkers.add(response.Marker);
+    marker = response.Marker;
+  }
+  return policies;
+}
 
 function readInitializedBackend(terraformDataDir) {
   const metadata = JSON.parse(readStageBPrivateFileBytes({ filePath: path.join(terraformDataDir, "terraform.tfstate"), repositoryRoot: root, label: "Installation initialized Terraform backend metadata" }).bytes.toString("utf8"));
@@ -40,6 +56,8 @@ export function discoverInstallationPredecessor({ run } = {}) {
   let policy;
   try { role = runJson(run, ["iam", "get-role", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).Role; } catch (error) { if (!noSuchEntity(error)) throw error; }
   try { policy = runJson(run, ["iam", "get-policy", "--policy-arn", INSTALLATION.policyArn]).Policy; } catch (error) { if (!noSuchEntity(error)) throw error; }
+  const reservedPolicies = readReservedPolicies(run);
+  if (reservedPolicies.length !== (policy ? 1 : 0) || policy && reservedPolicies[0]?.Arn !== INSTALLATION.policyArn) return "UNEXPECTED";
   if (!role && !policy) return "ABSENT";
   const trust = JSON.parse(fs.readFileSync(path.join(root, `${INSTALLATION.terraformRoot}/trust-policy.json`), "utf8"));
   const roleExact = !role || (role.Arn === INSTALLATION.roleArn && role.MaxSessionDuration === 3600 && !Object.hasOwn(role, "PermissionsBoundary") && canonicalJson(normalizeIamPolicyDocument(role.AssumeRolePolicyDocument, "reconciler trust policy")) === canonicalJson(trust));
@@ -55,6 +73,11 @@ export function discoverInstallationPredecessor({ run } = {}) {
   const policyExact = !policy || (policy.Arn === INSTALLATION.policyArn && policy.PolicyName === "MSCQRProductionInitialActivationPolicyReconciler" && policy.PermissionsBoundaryUsageCount === 0 && policyDocumentExact);
   if (!roleExact || !policyExact) return "UNEXPECTED";
   if (!role || !policy) {
+    if (role) {
+      const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).AttachedPolicies;
+      const inline = runJson(run, ["iam", "list-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).PolicyNames;
+      if (!Array.isArray(attached) || attached.length !== 0 || !Array.isArray(inline) || inline.length !== 0) return "UNEXPECTED";
+    }
     if (policy) {
       const entities = readPolicyEntities(run);
       if (entities.roles.length !== 0 || entities.users.length !== 0 || entities.groups.length !== 0) return "UNEXPECTED";
