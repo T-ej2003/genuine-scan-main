@@ -109,7 +109,7 @@
     "production:initial-activation-reconciler:prepare": "node scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs",
     "production:initial-activation-reconciler:authorize": "node scripts/aws/authorize-production-initial-activation-reconciler-installation.mjs",
     "production:initial-activation-reconciler:install": "node scripts/aws/install-production-initial-activation-reconciler.mjs",
-    "test:production-initial-activation-reconciler": "node --test scripts/tests/production-initial-activation-reconciler.test.mjs",
+    "test:production-initial-activation-reconciler": "node --test scripts/tests/production-initial-activation-reconciler.test.mjs scripts/tests/production-initial-activation-reconciler-installation.test.mjs",
     "production:normal-backend-activation": "node scripts/aws/production-normal-backend-activation.mjs",
     "stage-a:temporary-kms-capability": "node scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs",
     "stage-a:approval-key-reconciliation": "node scripts/aws/run-production-stage-a-approval-key-reconciliation.mjs",

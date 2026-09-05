@@ -18,6 +18,7 @@ const capability = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProduction
 const fixture = (name) => JSON.parse(fs.readFileSync(`scripts/tests/fixtures/production-initial-activation-reconciler-plan-${name}.json`, "utf8"));
 const plan = fixture("absent");
 const partialPlans = [fixture("partial-role"), fixture("partial-policy"), fixture("partial-unattached")];
+const allAddresses = [...INSTALLATION.expectedAddresses].sort();
 const planBytes = Buffer.from("exact-saved-plan");
 const state = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 0, lineage: "first-install-lineage", outputs: {}, resources: [] });
 const installedState = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 1, lineage: "first-install-lineage", outputs: {}, resources: [
@@ -30,11 +31,11 @@ const approval = createProductionEnvironmentApprovalEvidence({
   repository: INSTALLATION.repository, environment: "production", sourceSha,
   workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "100", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 7, environmentName: "production", userId: 3, userLogin: "reviewer" },
 });
-const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "ABSENT", planJson: plan, planBytes, preparedAt: now.toISOString() });
+const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "ABSENT", livePredecessorAddresses: [], planJson: plan, planBytes, preparedAt: now.toISOString() });
 const authorization = createInstallationAuthorization({ preparation, preparationArtifactSha256: preparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
 const completePlan = fixture("complete");
 const completePlanBytes = Buffer.from("exact-saved-noop-plan");
-const completePreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(installedState)), livePredecessor: "EXACT_COMPLETE", planJson: completePlan, planBytes: completePlanBytes, preparedAt: now.toISOString() });
+const completePreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(installedState)), livePredecessor: "EXACT_COMPLETE", livePredecessorAddresses: allAddresses, planJson: completePlan, planBytes: completePlanBytes, preparedAt: now.toISOString() });
 const completeAuthorization = createInstallationAuthorization({ preparation: completePreparation, preparationArtifactSha256: completePreparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
 
 const discoveryRun = ({ role = true, policy = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], policyPages } = {}) => (args) => {
@@ -90,21 +91,31 @@ test("real exact-partial plans count only creates across every safe topology", (
     const semantics = assertInstallationPlan(partial);
     assert.ok(semantics.createCount === 1 || semantics.createCount === 2);
     assert.equal(semantics.noOpCount, 3 - semantics.createCount);
-    const partialPreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(state)), livePredecessor: "EXACT_PARTIAL", planJson: partial, planBytes, preparedAt: now.toISOString() });
+    const livePredecessorAddresses = assertInstallationPlan(partial).noOpAddresses;
+    const partialPreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(state)), livePredecessor: "EXACT_PARTIAL", livePredecessorAddresses, planJson: partial, planBytes, preparedAt: now.toISOString() });
     assert.doesNotThrow(() => assertInstallationPreparation(partialPreparation, { sourceSha, planBytes }));
-    assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "EXACT_PARTIAL", planJson: partial, planBytes, preparedAt: now.toISOString() }), /state predecessor/);
+    assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "EXACT_PARTIAL", livePredecessorAddresses, planJson: partial, planBytes, preparedAt: now.toISOString() }), /state predecessor/);
   }
+  assert.throws(() => createInstallationPreparation({
+    sourceSha,
+    state: stateIdentity(Buffer.from(state)),
+    livePredecessor: "EXACT_PARTIAL",
+    livePredecessorAddresses: ["aws_iam_policy.reconciler", "aws_iam_role.reconciler"],
+    planJson: fixture("partial-role"),
+    planBytes,
+    preparedAt: now.toISOString(),
+  }), /authenticated live predecessor/);
 });
 
 test("discovery reaches exact-complete only through the canonical verifier topology", () => {
-  assert.equal(discoverInstallationPredecessor({ run: discoveryRun() }), "EXACT_COMPLETE");
-  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ attached: [] }) }), "EXACT_PARTIAL");
-  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ attached: [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }, { PolicyArn: "arn:aws:iam::368992683803:policy/unexpected" }] }) }), "UNEXPECTED");
-  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ entities: [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [{ UserName: "unexpected" }], PolicyGroups: [], IsTruncated: false }] }) }), "UNEXPECTED");
-  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: true, policy: false, attached: [{ PolicyArn: "arn:aws:iam::368992683803:policy/unexpected" }] }) }), "UNEXPECTED");
-  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: true, policy: false, inline: ["unexpected"] }) }), "UNEXPECTED");
-  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: false, policy: false, policyPages: [{ Policies: [{ Arn: "arn:aws:iam::368992683803:policy/other/MSCQRProductionInitialActivationPolicyReconciler", PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName }], IsTruncated: false }] }) }), "UNEXPECTED");
-  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: false, policy: false, policyPages: [{ Policies: [], IsTruncated: true, Marker: "next" }, { Policies: [{ Arn: "arn:aws:iam::368992683803:policy/other/MSCQRProductionInitialActivationPolicyReconciler", PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName }], IsTruncated: false }] }) }), "UNEXPECTED");
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun() }), { classification: "EXACT_COMPLETE", existingAddresses: allAddresses });
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ attached: [], entities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] }) }), { classification: "EXACT_PARTIAL", existingAddresses: ["aws_iam_policy.reconciler", "aws_iam_role.reconciler"] });
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ attached: [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }, { PolicyArn: "arn:aws:iam::368992683803:policy/unexpected" }] }) }).classification, "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ entities: [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [{ UserName: "unexpected" }], PolicyGroups: [], IsTruncated: false }] }) }).classification, "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: true, policy: false, attached: [{ PolicyArn: "arn:aws:iam::368992683803:policy/unexpected" }] }) }).classification, "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: true, policy: false, inline: ["unexpected"] }) }).classification, "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: false, policy: false, policyPages: [{ Policies: [{ Arn: "arn:aws:iam::368992683803:policy/other/MSCQRProductionInitialActivationPolicyReconciler", PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName }], IsTruncated: false }] }) }).classification, "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: false, policy: false, policyPages: [{ Policies: [], IsTruncated: true, Marker: "next" }, { Policies: [{ Arn: "arn:aws:iam::368992683803:policy/other/MSCQRProductionInitialActivationPolicyReconciler", PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName }], IsTruncated: false }] }) }).classification, "UNEXPECTED");
   assert.throws(() => discoverInstallationPredecessor({ run: discoveryRun({ role: false, policy: false, policyPages: [{ Policies: [], IsTruncated: true }] }) }), /pagination/);
   assert.throws(() => discoverInstallationPredecessor({ run: (args) => {
     if (args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"] });
@@ -149,7 +160,7 @@ test("executor applies one exact plan and requires canonical verifier", () => {
   const resultPath = path.join(directory, "result.json");
   let applies = 0;
   let reads = 0;
-  const result = executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", applySavedPlan: ({ planBytes: bytes }) => { applies += 1; assert.deepEqual(bytes, planBytes); }, verifyInstalled: () => true, readState: () => reads++ === 0 ? undefined : Buffer.from(installedState), resultPath, consumptionDirectory: path.join(directory, "consumptions"), now });
+  const result = executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", livePredecessorAddresses: [], applySavedPlan: ({ planBytes: bytes }) => { applies += 1; assert.deepEqual(bytes, planBytes); }, verifyInstalled: () => true, readState: () => reads++ === 0 ? undefined : Buffer.from(installedState), resultPath, consumptionDirectory: path.join(directory, "consumptions"), now });
   assert.equal(applies, 1);
   assert.equal(result.applyCount, 1);
   assert.equal(result.targetPolicyCreatePolicyVersionCount, 0);
@@ -217,12 +228,12 @@ test("real exact-partial plans traverse preparation, authorization, state CAS, a
     const noOpAddresses = partialPlan.resource_changes.filter((entry) => entry.change.actions[0] === "no-op").map((entry) => entry.address);
     const partialState = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: index + 1, lineage: "partial-lineage", outputs: {}, resources: allStateResources.filter((resource) => noOpAddresses.includes(`${resource.type}.${resource.name}`)) });
     const partialPlanBytes = Buffer.from(`exact-partial-plan-${index}`);
-    const partialPreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(partialState)), livePredecessor: "EXACT_PARTIAL", planJson: partialPlan, planBytes: partialPlanBytes, preparedAt: now.toISOString() });
+    const partialPreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(partialState)), livePredecessor: "EXACT_PARTIAL", livePredecessorAddresses: noOpAddresses, planJson: partialPlan, planBytes: partialPlanBytes, preparedAt: now.toISOString() });
     const partialAuthorization = createInstallationAuthorization({ preparation: partialPreparation, preparationArtifactSha256: partialPreparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-partial-"));
     let applies = 0;
     let reads = 0;
-    const result = executeInstallation({ sourceSha, preparation: partialPreparation, authorization: partialAuthorization, planBytes: partialPlanBytes, planJson: partialPlan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "EXACT_PARTIAL", applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(reads++ === 0 ? partialState : installedState), resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now });
+    const result = executeInstallation({ sourceSha, preparation: partialPreparation, authorization: partialAuthorization, planBytes: partialPlanBytes, planJson: partialPlan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "EXACT_PARTIAL", livePredecessorAddresses: noOpAddresses, applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(reads++ === 0 ? partialState : installedState), resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now });
     assert.equal(applies, 1);
     assert.equal(result.applyCount, 1);
     fs.rmSync(directory, { recursive: true, force: true });
@@ -232,7 +243,7 @@ test("real exact-partial plans traverse preparation, authorization, state CAS, a
 test("exact-complete replay performs zero apply", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-replay-"));
   let applies = 0;
-  const result = executeInstallation({ sourceSha, preparation: completePreparation, authorization: completeAuthorization, planBytes: completePlanBytes, planJson: completePlan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "EXACT_COMPLETE", applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(installedState), resultPath: path.join(directory, "result.json"), now });
+  const result = executeInstallation({ sourceSha, preparation: completePreparation, authorization: completeAuthorization, planBytes: completePlanBytes, planJson: completePlan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "EXACT_COMPLETE", livePredecessorAddresses: allAddresses, applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(installedState), resultPath: path.join(directory, "result.json"), now });
   assert.equal(applies, 0);
   assert.equal(result.applyCount, 0);
   fs.rmSync(directory, { recursive: true, force: true });
@@ -269,7 +280,7 @@ test("real exact-complete plan traverses the CLI contract and performs zero appl
 
 test("exact-complete replay rejects absent state instead of adopting live resources", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-replay-state-"));
-  assert.throws(() => executeInstallation({ sourceSha, preparation: completePreparation, authorization: completeAuthorization, planBytes: completePlanBytes, planJson: completePlan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "EXACT_COMPLETE", applySavedPlan: () => { throw new Error("must not apply"); }, verifyInstalled: () => true, readState: () => undefined, resultPath: path.join(directory, "result.json"), now }), /state/);
+  assert.throws(() => executeInstallation({ sourceSha, preparation: completePreparation, authorization: completeAuthorization, planBytes: completePlanBytes, planJson: completePlan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "EXACT_COMPLETE", livePredecessorAddresses: allAddresses, applySavedPlan: () => { throw new Error("must not apply"); }, verifyInstalled: () => true, readState: () => undefined, resultPath: path.join(directory, "result.json"), now }), /state/);
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
@@ -277,7 +288,7 @@ test("ambiguous apply recovers only through a successful read-only verifier", ()
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-ambiguous-"));
   let applies = 0;
   let reads = 0;
-  const result = executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", applySavedPlan: () => { applies += 1; throw new Error("transport lost after commit"); }, verifyInstalled: () => true, readState: () => reads++ === 0 ? undefined : Buffer.from(installedState), resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now });
+  const result = executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", livePredecessorAddresses: [], applySavedPlan: () => { applies += 1; throw new Error("transport lost after commit"); }, verifyInstalled: () => true, readState: () => reads++ === 0 ? undefined : Buffer.from(installedState), resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now });
   assert.equal(applies, 1);
   assert.equal(result.recoveredFromAmbiguousApply, true);
   fs.rmSync(directory, { recursive: true, force: true });
@@ -286,17 +297,17 @@ test("ambiguous apply recovers only through a successful read-only verifier", ()
 test("ambiguous apply never retries when read-only verification fails", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-ambiguous-fail-"));
   let applies = 0;
-  assert.throws(() => executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", applySavedPlan: () => { applies += 1; throw new Error("transport lost"); }, verifyInstalled: () => { throw new Error("not complete"); }, readState: () => undefined, resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now }), /transport lost/);
+  assert.throws(() => executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", livePredecessorAddresses: [], applySavedPlan: () => { applies += 1; throw new Error("transport lost"); }, verifyInstalled: () => { throw new Error("not complete"); }, readState: () => undefined, resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now }), /transport lost/);
   assert.equal(applies, 1);
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
 test("unsafe state and plan changes fail before apply", () => {
   assert.deepEqual(stateIdentity(undefined), { stateExists: false });
-  assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "UNEXPECTED", planJson: plan, planBytes }), /Unexpected|classification/);
+  assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "UNEXPECTED", livePredecessorAddresses: [], planJson: plan, planBytes }), /Unexpected|classification/);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-fail-"));
   let applies = 0;
-  assert.throws(() => executeInstallation({ sourceSha, preparation, authorization, planBytes: Buffer.from("changed"), planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, resultPath: path.join(directory, "result.json"), now }), /saved plan/);
+  assert.throws(() => executeInstallation({ sourceSha, preparation, authorization, planBytes: Buffer.from("changed"), planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "ABSENT", livePredecessorAddresses: [], applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, resultPath: path.join(directory, "result.json"), now }), /saved plan/);
   assert.equal(applies, 0);
   fs.rmSync(directory, { recursive: true, force: true });
 });

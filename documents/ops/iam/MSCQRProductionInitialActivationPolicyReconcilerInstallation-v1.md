@@ -36,7 +36,10 @@ Before planning or applying, predecessor discovery enumerates the reserved
 customer-managed policy name across every IAM path and page. A role-only
 partial state is accepted only when the exact role has no managed or inline
 policies; a noncanonical same-named policy or any surviving role capability is
-unexpected and fails closed. Terraform's complete, possibly colored
+unexpected and fails closed. The exact live role/policy address set is carried
+through preparation and authorization and must match both Terraform state and
+the plan's no-op entries, so an untracked live resource can never be authorized
+as a create. Terraform's complete, possibly colored
 `No state file was found!` diagnostic is the sole state-pull error classified
 as first-install absence; every other backend failure remains fatal.
 Backend initialization uses only supported `terraform init` options; native
@@ -44,6 +47,9 @@ state locking remains enabled on the saved-plan apply with a bounded timeout.
 The authorization workflow passes dispatcher and prior-step values through
 step environment variables; no caller-controlled GitHub expression is
 interpolated directly into its shell program.
+The named installation test command includes both the live-topology verifier
+and the full preparation/authorization/execution lifecycle and is run by the
+required Quality Gate workflow.
 
 This contract does not install the live role in source development, grant the
 runtime role self-installation capability, mutate the InitialActivationLifecycle

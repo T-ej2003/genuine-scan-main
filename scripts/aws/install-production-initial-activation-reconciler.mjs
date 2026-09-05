@@ -24,7 +24,7 @@ function consumeOnce({ authorizationArtifactSha256, directory, fsOps = fs } = {}
   return filePath;
 }
 
-export function executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson, administratorArn = INSTALLATION.administratorArn, livePredecessor, applySavedPlan, verifyInstalled, readState, resultPath, consumptionDirectory, now = new Date() } = {}) {
+export function executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson, administratorArn = INSTALLATION.administratorArn, livePredecessor, livePredecessorAddresses, applySavedPlan, verifyInstalled, readState, resultPath, consumptionDirectory, now = new Date() } = {}) {
   assertInstallationPreparation(preparation, { sourceSha, planBytes });
   assertFreshInstallationAuthorization(authorization, { sourceSha, preparation, now });
   if (administratorArn !== INSTALLATION.administratorArn) throw new Error("Installation administrator identity is not exact.");
@@ -32,13 +32,13 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   if (livePredecessor !== "ABSENT" && livePredecessor !== "EXACT_PARTIAL" && livePredecessor !== "EXACT_COMPLETE") throw new Error("Installation live predecessor is not a supported exact state.");
   if (livePredecessor === "ABSENT" && semantics.resourceChangeCount !== INSTALLATION.expectedAddresses.length) throw new Error("First-install plan mutation scope is not exact.");
   if (livePredecessor === "EXACT_PARTIAL" && semantics.resourceChangeCount < 1) throw new Error("Partial-install plan mutation scope is not exact.");
-  if (livePredecessor !== "EXACT_COMPLETE" && livePredecessor !== preparation.livePredecessor) throw new Error("Installation live predecessor changed after preparation.");
+  if (livePredecessor !== preparation.livePredecessor || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(preparation.livePredecessorAddresses)) throw new Error("Installation live predecessor changed after preparation.");
   const beforeStateBytes = readState?.();
   const beforeState = stateIdentity(beforeStateBytes);
   if (JSON.stringify(beforeState) !== JSON.stringify(preparation.predecessorState)) throw new Error("Installation Terraform state changed after preparation.");
   if (livePredecessor === "EXACT_COMPLETE" && (!beforeState.stateExists || semantics.resourceChangeCount !== 0)) throw new Error("Exact-complete replay requires an authenticated state and no-op plan.");
   if (livePredecessor === "EXACT_COMPLETE") assertInstallationStateResources(beforeStateBytes);
-  if (livePredecessor === "EXACT_PARTIAL") assertInstallationStateResources(beforeStateBytes, { requiredAddresses: INSTALLATION.expectedAddresses.filter((address) => !semantics.changedAddresses.includes(address)) });
+  if (livePredecessor === "EXACT_PARTIAL") assertInstallationStateResources(beforeStateBytes, { requiredAddresses: livePredecessorAddresses });
   const output = assertStageBArtifactPath({ artifactPath: resultPath, repositoryRoot: root, label: "Installation result", allowExisting: false });
   ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, create: true, label: "Installation result directory" });
   if (livePredecessor === "EXACT_COMPLETE") {
@@ -98,7 +98,7 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   const workspace = String(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "workspace", "show"], { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
   if (workspace !== "default") throw new Error("Installation requires the canonical default Terraform workspace.");
   const livePredecessor = discoverInstallationPredecessor({ run });
-  if (livePredecessor === "UNEXPECTED") throw new Error("Installation live predecessor is unexpected.");
+  if (livePredecessor.classification === "UNEXPECTED") throw new Error("Installation live predecessor is unexpected.");
   const plan = readStageBPrivateFileBytes({ filePath: planPath, repositoryRoot: root, label: "Installation saved Terraform plan" });
   if (plan.sha256 !== planBeforeAuthorization.sha256 || plan.sha256 !== preparation.savedPlanSha256) throw new Error("Installation saved plan changed after authorization.");
   const renderPath = path.join(path.dirname(planPath), `.${path.basename(planPath)}.render.tfplan`);
@@ -117,7 +117,7 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   };
   const verifyInstalled = () => verifyInitialActivationPolicyReconciler({ run });
   const readState = () => { try { return Buffer.from(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "state", "pull"], { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })); } catch (error) { return classifyInstallationStatePullError(error); } };
-  return executeInstallation({ sourceSha, preparation, authorization, planBytes: plan.bytes, planJson, administratorArn: identity.Arn, livePredecessor, applySavedPlan, verifyInstalled, readState, resultPath, consumptionDirectory: path.join(path.dirname(resultPath), ".consumptions"), now: deps.now || new Date() });
+  return executeInstallation({ sourceSha, preparation, authorization, planBytes: plan.bytes, planJson, administratorArn: identity.Arn, livePredecessor: livePredecessor.classification, livePredecessorAddresses: livePredecessor.existingAddresses, applySavedPlan, verifyInstalled, readState, resultPath, consumptionDirectory: path.join(path.dirname(resultPath), ".consumptions"), now: deps.now || new Date() });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) process.stdout.write(`${JSON.stringify(runInstallCli(), null, 2)}\n`);

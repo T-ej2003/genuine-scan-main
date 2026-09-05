@@ -157,6 +157,7 @@ export function assertInstallationPlan(plan) {
   if (new Set(addresses).size !== addresses.length || addresses.some((address) => !INSTALLATION.expectedAddresses.includes(address)) || INSTALLATION.expectedAddresses.some((address) => !addresses.includes(address))) throw new Error("Installation plan contains an unreviewed, missing, or duplicate resource address.");
   const policyCreated = JSON.stringify(changes.find((entry) => entry?.address === "aws_iam_policy.reconciler")?.change?.actions) === JSON.stringify(["create"]);
   const createdAddresses = [];
+  const noOpAddresses = [];
   let noOpCount = 0;
   for (const entry of changes) {
     const action = JSON.stringify(entry.change?.actions);
@@ -165,7 +166,7 @@ export function assertInstallationPlan(plan) {
     if (entry.type !== expectedType || entry.name !== "reconciler" || entry.provider_name !== "registry.terraform.io/hashicorp/aws") throw new Error("Installation plan resource identity is not exact.");
     const create = action === JSON.stringify(["create"]);
     if (create ? entry.change.before !== null : canonicalJson(entry.change.before) !== canonicalJson(entry.change.after)) throw new Error("Installation plan action predecessor is not exact.");
-    if (create) createdAddresses.push(entry.address); else noOpCount += 1;
+    if (create) createdAddresses.push(entry.address); else { noOpAddresses.push(entry.address); noOpCount += 1; }
     const after = entry.change.after;
     if (!after || typeof after !== "object" || Array.isArray(after)) throw new Error("Installation plan resource values are missing.");
     if (entry.address === "aws_iam_role.reconciler") {
@@ -178,7 +179,7 @@ export function assertInstallationPlan(plan) {
       if (after.role !== ROLE_NAME || !(policyArnKnown || policyArnComputed)) throw new Error("Installation plan attachment contract is not exact.");
     }
   }
-  return Object.freeze({ plannedResourceCount: changes.length, resourceChangeCount: createdAddresses.length, actionableResourceChangeCount: createdAddresses.length, createCount: createdAddresses.length, noOpCount, updateCount: 0, deleteCount: 0, replaceCount: 0, changedAddresses: createdAddresses.sort() });
+  return Object.freeze({ plannedResourceCount: changes.length, resourceChangeCount: createdAddresses.length, actionableResourceChangeCount: createdAddresses.length, createCount: createdAddresses.length, noOpCount, updateCount: 0, deleteCount: 0, replaceCount: 0, changedAddresses: createdAddresses.sort(), noOpAddresses: noOpAddresses.sort() });
 }
 
 export function stateIdentity(rawBytes) {
@@ -208,30 +209,32 @@ export function assertInstallationStateResources(rawBytes, { requiredAddresses =
   return identity;
 }
 
-export function createInstallationPreparation({ sourceSha, state, livePredecessor, planJson, planBytes, preparedAt = new Date().toISOString() } = {}) {
+export function createInstallationPreparation({ sourceSha, state, livePredecessor, livePredecessorAddresses, planJson, planBytes, preparedAt = new Date().toISOString() } = {}) {
   if (!SHA40.test(sourceSha || "")) throw new Error("Installation source SHA is invalid.");
   if (!state || typeof state.stateExists !== "boolean") throw new Error("Installation predecessor state identity is required.");
   if (livePredecessor === "EXACT_PARTIAL" && !state.stateExists) throw new Error("Partial installation requires an authenticated Terraform state predecessor.");
   if (state.stateExists ? (Object.keys(state).sort().join(",") !== "lineage,serial,stateExists,stateSha256" || typeof state.lineage !== "string" || !Number.isSafeInteger(state.serial) || !SHA256.test(state.stateSha256 || "")) : Object.keys(state).length !== 1) throw new Error("Installation predecessor state identity is malformed.");
   if (!["ABSENT", "EXACT_PARTIAL", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor classification is invalid.");
   if (livePredecessor === "UNEXPECTED") throw new Error("Unexpected installation predecessor must fail closed.");
+  if (!Array.isArray(livePredecessorAddresses) || new Set(livePredecessorAddresses).size !== livePredecessorAddresses.length || livePredecessorAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address)) || JSON.stringify(livePredecessorAddresses) !== JSON.stringify([...livePredecessorAddresses].sort())) throw new Error("Installation live predecessor resource set is invalid.");
   const semantics = assertInstallationPlan(planJson);
   if (livePredecessor === "ABSENT" && (semantics.createCount !== INSTALLATION.expectedAddresses.length || semantics.noOpCount !== 0)
     || livePredecessor === "EXACT_PARTIAL" && (semantics.createCount < 1 || semantics.createCount >= INSTALLATION.expectedAddresses.length || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - semantics.createCount)
-    || livePredecessor === "EXACT_COMPLETE" && (semantics.createCount !== 0 || semantics.noOpCount !== INSTALLATION.expectedAddresses.length)) throw new Error("Installation plan does not match the authenticated live predecessor.");
+    || livePredecessor === "EXACT_COMPLETE" && (semantics.createCount !== 0 || semantics.noOpCount !== INSTALLATION.expectedAddresses.length)
+    || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(semantics.noOpAddresses)) throw new Error("Installation plan does not match the authenticated live predecessor.");
   if (!Buffer.isBuffer(planBytes) || planBytes.length < 1) throw new Error("Saved Terraform plan bytes are required.");
   const body = {
     schemaVersion: INSTALLATION.schemaVersion, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_PREPARATION", operation: INSTALLATION.operation,
     repository: INSTALLATION.repository, environment: INSTALLATION.environment, sourceSha, terraformRoot: INSTALLATION.terraformRoot, backend: INSTALLATION.backend,
     administratorArn: INSTALLATION.administratorArn, roleArn: INSTALLATION.roleArn, policyArn: INSTALLATION.policyArn, sourceContractHashes: sourceHashes(),
-    predecessorState: state, livePredecessor, savedPlanSha256: sha256(planBytes), savedPlanByteLength: planBytes.length, planSemantics: semantics,
+    predecessorState: state, livePredecessor, livePredecessorAddresses, savedPlanSha256: sha256(planBytes), savedPlanByteLength: planBytes.length, planSemantics: semantics,
     maxAwsMutations: INSTALLATION.maxAwsMutations, preparedAt,
   };
   if (!Number.isFinite(Date.parse(preparedAt))) throw new Error("Preparation timestamp is invalid.");
   return Object.freeze({ ...body, preparationArtifactSha256: canonicalSha256(body) });
 }
 
-const PREPARATION_FIELDS = new Set(["schemaVersion", "kind", "operation", "repository", "environment", "sourceSha", "terraformRoot", "backend", "administratorArn", "roleArn", "policyArn", "sourceContractHashes", "predecessorState", "livePredecessor", "savedPlanSha256", "savedPlanByteLength", "planSemantics", "maxAwsMutations", "preparedAt", "preparationArtifactSha256"]);
+const PREPARATION_FIELDS = new Set(["schemaVersion", "kind", "operation", "repository", "environment", "sourceSha", "terraformRoot", "backend", "administratorArn", "roleArn", "policyArn", "sourceContractHashes", "predecessorState", "livePredecessor", "livePredecessorAddresses", "savedPlanSha256", "savedPlanByteLength", "planSemantics", "maxAwsMutations", "preparedAt", "preparationArtifactSha256"]);
 export function assertInstallationPreparation(value, { sourceSha, planBytes } = {}) {
   exactFields(value, PREPARATION_FIELDS, "Installation preparation");
   const { preparationArtifactSha256, ...body } = value;
@@ -239,13 +242,15 @@ export function assertInstallationPreparation(value, { sourceSha, planBytes } = 
   if (JSON.stringify(value.backend) !== JSON.stringify(INSTALLATION.backend) || JSON.stringify(value.sourceContractHashes) !== JSON.stringify(sourceHashes()) || JSON.stringify(value.maxAwsMutations) !== JSON.stringify(INSTALLATION.maxAwsMutations) || value.administratorArn !== INSTALLATION.administratorArn || value.roleArn !== INSTALLATION.roleArn || value.policyArn !== INSTALLATION.policyArn || value.livePredecessor === "UNEXPECTED" || !SHA256.test(value.savedPlanSha256 || "") || !Number.isSafeInteger(value.savedPlanByteLength) || value.savedPlanByteLength < 1 || !SHA40.test(value.sourceSha || "") || !value.predecessorState || typeof value.predecessorState.stateExists !== "boolean" || value.predecessorState.stateExists && (!SHA256.test(value.predecessorState.stateSha256 || "") || !Number.isSafeInteger(value.predecessorState.serial) || typeof value.predecessorState.lineage !== "string") || !value.predecessorState.stateExists && Object.keys(value.predecessorState).length !== 1) throw new Error("Installation preparation binding is invalid.");
   if (planBytes !== undefined && (sha256(planBytes) !== value.savedPlanSha256 || planBytes.length !== value.savedPlanByteLength)) throw new Error("Installation saved plan bytes changed after preparation.");
   if (value.livePredecessor === "EXACT_PARTIAL" && !value.predecessorState.stateExists) throw new Error("Partial installation requires an authenticated Terraform state predecessor.");
-  if (!value.planSemantics || !Array.isArray(value.planSemantics.changedAddresses)
+  if (!value.planSemantics || !Array.isArray(value.planSemantics.changedAddresses) || !Array.isArray(value.planSemantics.noOpAddresses)
     || value.planSemantics.plannedResourceCount !== INSTALLATION.expectedAddresses.length
     || !Number.isSafeInteger(value.planSemantics.resourceChangeCount) || value.planSemantics.resourceChangeCount < 0 || value.planSemantics.resourceChangeCount > INSTALLATION.expectedAddresses.length
     || value.planSemantics.actionableResourceChangeCount !== value.planSemantics.resourceChangeCount || value.planSemantics.createCount !== value.planSemantics.resourceChangeCount
     || value.planSemantics.noOpCount !== INSTALLATION.expectedAddresses.length - value.planSemantics.createCount
     || value.planSemantics.updateCount !== 0 || value.planSemantics.deleteCount !== 0 || value.planSemantics.replaceCount !== 0
     || value.planSemantics.changedAddresses.length !== value.planSemantics.createCount || JSON.stringify(value.planSemantics.changedAddresses) !== JSON.stringify([...value.planSemantics.changedAddresses].sort()) || value.planSemantics.changedAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address))
+    || value.planSemantics.noOpAddresses.length !== value.planSemantics.noOpCount || JSON.stringify(value.planSemantics.noOpAddresses) !== JSON.stringify([...value.planSemantics.noOpAddresses].sort()) || value.planSemantics.noOpAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address))
+    || JSON.stringify(value.livePredecessorAddresses) !== JSON.stringify(value.planSemantics.noOpAddresses)
     || value.livePredecessor === "ABSENT" && value.planSemantics.createCount !== INSTALLATION.expectedAddresses.length
     || value.livePredecessor === "EXACT_PARTIAL" && (value.planSemantics.createCount < 1 || value.planSemantics.createCount >= INSTALLATION.expectedAddresses.length)
     || value.livePredecessor === "EXACT_COMPLETE" && value.planSemantics.createCount !== 0) throw new Error("Installation preparation plan semantics are not exact.");
@@ -257,15 +262,15 @@ export function createInstallationAuthorization({ preparation, preparationArtifa
   if (preparation.preparationArtifactSha256 !== preparationArtifactSha256) throw new Error("Installation preparation artifact digest is invalid.");
   assertProductionEnvironmentApprovalIdentity(protectedEnvironmentApprovalEvidence, { sourceSha, repository: INSTALLATION.repository });
   if (protectedEnvironmentApprovalEvidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef) throw new Error("Installation approval workflow binding is invalid.");
-  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_AUTHORIZATION", operation: INSTALLATION.operation, repository: INSTALLATION.repository, environment: INSTALLATION.environment, sourceSha, preparationArtifactSha256, terraformRoot: INSTALLATION.terraformRoot, backend: INSTALLATION.backend, predecessorState: preparation.predecessorState, livePredecessor: preparation.livePredecessor, administratorArn: INSTALLATION.administratorArn, roleArn: INSTALLATION.roleArn, policyArn: INSTALLATION.policyArn, savedPlanSha256: preparation.savedPlanSha256, sourceContractHashes: preparation.sourceContractHashes, maxAwsMutations: INSTALLATION.maxAwsMutations, protectedEnvironmentApprovalEvidence, protectedEnvironmentApprovalEvidenceSha256: protectedEnvironmentApprovalEvidence.evidenceSha256, authorizedAt: now };
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_AUTHORIZATION", operation: INSTALLATION.operation, repository: INSTALLATION.repository, environment: INSTALLATION.environment, sourceSha, preparationArtifactSha256, terraformRoot: INSTALLATION.terraformRoot, backend: INSTALLATION.backend, predecessorState: preparation.predecessorState, livePredecessor: preparation.livePredecessor, livePredecessorAddresses: preparation.livePredecessorAddresses, administratorArn: INSTALLATION.administratorArn, roleArn: INSTALLATION.roleArn, policyArn: INSTALLATION.policyArn, savedPlanSha256: preparation.savedPlanSha256, sourceContractHashes: preparation.sourceContractHashes, maxAwsMutations: INSTALLATION.maxAwsMutations, protectedEnvironmentApprovalEvidence, protectedEnvironmentApprovalEvidenceSha256: protectedEnvironmentApprovalEvidence.evidenceSha256, authorizedAt: now };
   return Object.freeze({ ...body, authorizationArtifactSha256: canonicalSha256(body) });
 }
 
-const AUTH_FIELDS = new Set(["schemaVersion", "kind", "operation", "repository", "environment", "sourceSha", "preparationArtifactSha256", "terraformRoot", "backend", "predecessorState", "livePredecessor", "administratorArn", "roleArn", "policyArn", "savedPlanSha256", "sourceContractHashes", "maxAwsMutations", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "authorizedAt", "authorizationArtifactSha256"]);
+const AUTH_FIELDS = new Set(["schemaVersion", "kind", "operation", "repository", "environment", "sourceSha", "preparationArtifactSha256", "terraformRoot", "backend", "predecessorState", "livePredecessor", "livePredecessorAddresses", "administratorArn", "roleArn", "policyArn", "savedPlanSha256", "sourceContractHashes", "maxAwsMutations", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "authorizedAt", "authorizationArtifactSha256"]);
 export function assertInstallationAuthorization(value, { sourceSha, preparation } = {}) {
   exactFields(value, AUTH_FIELDS, "Installation authorization");
   const { authorizationArtifactSha256, ...body } = value;
-  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_AUTHORIZATION" || value.operation !== INSTALLATION.operation || value.repository !== INSTALLATION.repository || value.environment !== INSTALLATION.environment || value.sourceSha !== sourceSha || value.preparationArtifactSha256 !== preparation.preparationArtifactSha256 || value.savedPlanSha256 !== preparation.savedPlanSha256 || canonicalSha256(body) !== authorizationArtifactSha256) throw new Error("Installation authorization binding or hash is invalid.");
+  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_AUTHORIZATION" || value.operation !== INSTALLATION.operation || value.repository !== INSTALLATION.repository || value.environment !== INSTALLATION.environment || value.sourceSha !== sourceSha || value.preparationArtifactSha256 !== preparation.preparationArtifactSha256 || value.savedPlanSha256 !== preparation.savedPlanSha256 || JSON.stringify(value.livePredecessorAddresses) !== JSON.stringify(preparation.livePredecessorAddresses) || canonicalSha256(body) !== authorizationArtifactSha256) throw new Error("Installation authorization binding or hash is invalid.");
   assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: INSTALLATION.repository });
   if (value.protectedEnvironmentApprovalEvidence.workflowRef !== PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256 || JSON.stringify(value.sourceContractHashes) !== JSON.stringify(sourceHashes()) || JSON.stringify(value.maxAwsMutations) !== JSON.stringify(INSTALLATION.maxAwsMutations) || value.terraformRoot !== INSTALLATION.terraformRoot || JSON.stringify(value.backend) !== JSON.stringify(INSTALLATION.backend) || value.administratorArn !== INSTALLATION.administratorArn || value.roleArn !== INSTALLATION.roleArn || value.policyArn !== INSTALLATION.policyArn) throw new Error("Installation authorization is not bound to the exact operation.");
   return value;

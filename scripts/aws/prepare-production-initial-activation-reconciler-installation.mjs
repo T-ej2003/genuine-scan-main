@@ -33,6 +33,8 @@ function readReservedPolicies(run) {
   return policies;
 }
 
+const predecessor = (classification, existingAddresses = []) => Object.freeze({ classification, existingAddresses: Object.freeze([...existingAddresses].sort()) });
+
 function readInitializedBackend(terraformDataDir) {
   const metadata = JSON.parse(readStageBPrivateFileBytes({ filePath: path.join(terraformDataDir, "terraform.tfstate"), repositoryRoot: root, label: "Installation initialized Terraform backend metadata" }).bytes.toString("utf8"));
   assertInstallationInitializedBackendMetadata(metadata?.backend);
@@ -57,8 +59,9 @@ export function discoverInstallationPredecessor({ run } = {}) {
   try { role = runJson(run, ["iam", "get-role", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).Role; } catch (error) { if (!noSuchEntity(error)) throw error; }
   try { policy = runJson(run, ["iam", "get-policy", "--policy-arn", INSTALLATION.policyArn]).Policy; } catch (error) { if (!noSuchEntity(error)) throw error; }
   const reservedPolicies = readReservedPolicies(run);
-  if (reservedPolicies.length !== (policy ? 1 : 0) || policy && reservedPolicies[0]?.Arn !== INSTALLATION.policyArn) return "UNEXPECTED";
-  if (!role && !policy) return "ABSENT";
+  const existingAddresses = [role && "aws_iam_role.reconciler", policy && "aws_iam_policy.reconciler"].filter(Boolean);
+  if (reservedPolicies.length !== (policy ? 1 : 0) || policy && reservedPolicies[0]?.Arn !== INSTALLATION.policyArn) return predecessor("UNEXPECTED", existingAddresses);
+  if (!role && !policy) return predecessor("ABSENT");
   const trust = JSON.parse(fs.readFileSync(path.join(root, `${INSTALLATION.terraformRoot}/trust-policy.json`), "utf8"));
   const roleExact = !role || (role.Arn === INSTALLATION.roleArn && role.MaxSessionDuration === 3600 && !Object.hasOwn(role, "PermissionsBoundary") && canonicalJson(normalizeIamPolicyDocument(role.AssumeRolePolicyDocument, "reconciler trust policy")) === canonicalJson(trust));
   let policyDocumentExact = true;
@@ -71,33 +74,32 @@ export function discoverInstallationPredecessor({ run } = {}) {
     }
   }
   const policyExact = !policy || (policy.Arn === INSTALLATION.policyArn && policy.PolicyName === "MSCQRProductionInitialActivationPolicyReconciler" && policy.PermissionsBoundaryUsageCount === 0 && policyDocumentExact);
-  if (!roleExact || !policyExact) return "UNEXPECTED";
+  if (!roleExact || !policyExact) return predecessor("UNEXPECTED", existingAddresses);
   if (!role || !policy) {
     if (role) {
       const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).AttachedPolicies;
       const inline = runJson(run, ["iam", "list-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).PolicyNames;
-      if (!Array.isArray(attached) || attached.length !== 0 || !Array.isArray(inline) || inline.length !== 0) return "UNEXPECTED";
+      if (!Array.isArray(attached) || attached.length !== 0 || !Array.isArray(inline) || inline.length !== 0) return predecessor("UNEXPECTED", existingAddresses);
     }
     if (policy) {
       const entities = readPolicyEntities(run);
-      if (entities.roles.length !== 0 || entities.users.length !== 0 || entities.groups.length !== 0) return "UNEXPECTED";
+      if (entities.roles.length !== 0 || entities.users.length !== 0 || entities.groups.length !== 0) return predecessor("UNEXPECTED", existingAddresses);
     }
-    return "EXACT_PARTIAL";
+    return predecessor("EXACT_PARTIAL", existingAddresses);
   }
   try {
     verifyInitialActivationPolicyReconciler({ run });
-    return "EXACT_COMPLETE";
+    return predecessor("EXACT_COMPLETE", INSTALLATION.expectedAddresses);
   } catch {
     const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).AttachedPolicies;
     const inline = runJson(run, ["iam", "list-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).PolicyNames;
     const entities = readPolicyEntities(run);
-    const safePartial = Array.isArray(attached) && (attached.length === 0 || attached.length === 1 && attached[0]?.PolicyArn === INSTALLATION.policyArn)
+    const safePartial = Array.isArray(attached) && attached.length === 0
       && Array.isArray(inline) && inline.length === 0
       && entities.users.length === 0 && entities.groups.length === 0
-      && entities.roles.every((candidate) => candidate?.RoleName === INSTALLATION.roleArn.split("/").at(-1))
-      && (attached.length === 0 || entities.roles.length === 0);
-    if (!safePartial) return "UNEXPECTED";
-    return "EXACT_PARTIAL";
+      && entities.roles.length === 0;
+    if (!safePartial) return predecessor("UNEXPECTED", existingAddresses);
+    return predecessor("EXACT_PARTIAL", existingAddresses);
   }
 }
 
@@ -141,10 +143,10 @@ function renderExactPlanJson({ planPath, planBytes, terraformDataDir, profile, e
   }
 }
 
-export function prepareInstallation({ sourceSha, planBytes, planJson, stateBytes, livePredecessor, preparedAt, outputPath, repositoryRoot = root } = {}) {
-  const semantics = assertInstallationPlan(planJson);
-  if (livePredecessor === "EXACT_PARTIAL") assertInstallationStateResources(stateBytes, { requiredAddresses: INSTALLATION.expectedAddresses.filter((address) => !semantics.changedAddresses.includes(address)) });
-  const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(stateBytes), livePredecessor, planJson, planBytes, preparedAt });
+export function prepareInstallation({ sourceSha, planBytes, planJson, stateBytes, livePredecessor, livePredecessorAddresses, preparedAt, outputPath, repositoryRoot = root } = {}) {
+  assertInstallationPlan(planJson);
+  if (livePredecessor !== "ABSENT") assertInstallationStateResources(stateBytes, { requiredAddresses: livePredecessorAddresses });
+  const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(stateBytes), livePredecessor, livePredecessorAddresses, planJson, planBytes, preparedAt });
   const output = assertStageBArtifactPath({ artifactPath: outputPath, repositoryRoot, label: "Installation preparation artifact", allowExisting: false });
   writeStageBPrivateFilesAtomic({ repositoryRoot, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`), label: "Installation preparation artifact" }] });
   return preparation;
@@ -159,7 +161,7 @@ export function runPrepareCli(argv = process.argv.slice(2), deps = {}) {
   ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: root, create: true, label: "Installation preparation directory" });
   const run = deps.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile });
   const livePredecessor = discoverInstallationPredecessor({ run });
-  if (livePredecessor === "UNEXPECTED") throw new Error("Live installation topology is unexpected.");
+  if (livePredecessor.classification === "UNEXPECTED") throw new Error("Live installation topology is unexpected.");
   const outputDir = path.dirname(outputPath);
   if (argv.includes("--plan-json")) throw new Error("Independent --plan-json input is not supported; plan JSON is always rendered from the saved plan.");
   const exec = deps.exec || execFileSync;
@@ -178,7 +180,7 @@ export function runPrepareCli(argv = process.argv.slice(2), deps = {}) {
   const stateBytes = argv.includes("--state-file") ? readStageBPrivateFileBytes({ filePath: path.resolve(required(argv, "--state-file")), repositoryRoot: root, label: "Installation Terraform state" }).bytes : generated.stateBytes;
   if (!argv.includes("--state-file") && generated.stateBytes !== undefined) throw new Error("Preparation state is present; bind the authenticated state file instead of claiming absence.");
   if (!argv.includes("--state-file") && !(generated.stateBytes === undefined && !argv.includes("--plan"))) throw new Error("State absence must be proven by the canonical Terraform backend read.");
-  const preparation = prepareInstallation({ sourceSha, planBytes: plan.bytes, planJson, stateBytes, livePredecessor, outputPath, repositoryRoot: root });
+  const preparation = prepareInstallation({ sourceSha, planBytes: plan.bytes, planJson, stateBytes, livePredecessor: livePredecessor.classification, livePredecessorAddresses: livePredecessor.existingAddresses, outputPath, repositoryRoot: root });
   return preparation;
 }
 
