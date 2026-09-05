@@ -74,6 +74,19 @@ test("policy-centric entity discovery consumes every page and fails closed on in
   assert.equal(assertInitialActivationLifecyclePolicyState(readInitialActivationLifecyclePolicyLiveState(run), { desired }).status, "AUTHENTICATED_PREDECESSOR");
   const incomplete = (args) => args[1] === "list-entities-for-policy" ? JSON.stringify({ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: true }) : run(args);
   assert.throws(() => readInitialActivationLifecyclePolicyLiveState(incomplete), /incomplete/);
+  for (const failures of [["get-policy"], ["get-policy-version"], ["list-policy-versions"], ["get-role"], ["list-attached-role-policies"], ["list-entities-for-policy"], ["get-policy", "get-role", "list-entities-for-policy"]]) {
+    let creates = 0; let retries = 0;
+    const pending = [...failures];
+    const result = executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { retries += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; }, readLiveState: () => readInitialActivationLifecyclePolicyLiveState((args) => {
+      if (creates && args[1] === pending[0]) { pending.shift(); throw Object.assign(new Error("service unavailable"), { code: "ServiceUnavailable" }); }
+      const response = JSON.parse(run(args));
+      if (creates && args[1] === "get-policy") response.Policy.DefaultVersionId = "v2";
+      if (creates && args[1] === "get-policy-version") response.PolicyVersion.Document = desired.document;
+      if (creates && args[1] === "list-policy-versions") response.Versions.push({ VersionId: "v2" });
+      return JSON.stringify(response);
+    }) });
+    assert.equal(result.status, "RECONCILED"); assert.equal(creates, 1); assert.equal(retries, failures.length);
+  }
 });
 
 test("approval freshness uses a fresh write-boundary clock after live reads", () => {
@@ -207,6 +220,41 @@ test("transient IAM read failures exhaust the bounded convergence window without
   let reads = 0; const sleeps = [];
   assert.throws(() => waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => { const error = new Error("NoSuchEntity"); error.code = INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ; reads += 1; throw error; }, before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: authorization(), desired, sleep: (milliseconds) => sleeps.push(milliseconds) }), /did not converge/);
   assert.equal(reads, 6); assert.deepEqual(sleeps, [100, 200, 400, 800, 1000]);
+});
+
+test("all snapshot operations retry only recognized read errors after one mutation", () => {
+  const operations = ["GetPolicy", "GetPolicyVersion", "ListPolicyVersions", "GetRole", "ListAttachedRolePolicies", "ListEntitiesForPolicy"];
+  for (const code of ["Throttling", "ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded", "ServiceUnavailable", "ServiceUnavailableException", "InternalFailure", "InternalError", "AccessDenied", "ValidationError", "UnknownError"]) {
+    for (const operation of operations) {
+      let creates = 0; let reads = 0; let sleeps = 0;
+      const transient = !["AccessDenied", "ValidationError", "UnknownError"].includes(code);
+      const run = () => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { sleeps += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; }, readLiveState: () => {
+        reads += 1;
+        if (!creates) return state();
+        if (reads === 3) throw Object.assign(new Error("Command failed: aws"), { stderr: Buffer.from(`An error occurred (${code}) when calling the ${operation} operation (reached max retries: 2): service error`) });
+        return state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 });
+      } });
+      if (transient) assert.equal(run().status, "RECONCILED"); else assert.throws(run);
+      assert.equal(creates, 1); assert.equal(reads, transient ? 4 : 3); assert.equal(sleeps, transient ? 1 : 0);
+    }
+  }
+});
+
+test("successive read failures and exhaustion never retry the mutation or bypass pre-mutation CAS", () => {
+  for (const failureCount of [3, 6]) {
+    let creates = 0; let reads = 0; let sleeps = 0;
+    const run = () => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { sleeps += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; }, readLiveState: () => {
+      reads += 1;
+      if (!creates) return state();
+      if (reads <= failureCount + 2) throw Object.assign(new Error("service unavailable"), { code: "ServiceUnavailable" });
+      return state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 });
+    } });
+    if (failureCount === 3) assert.equal(run().status, "RECONCILED"); else assert.throws(run, /did not converge/);
+    assert.equal(creates, 1); assert.equal(sleeps, failureCount === 3 ? 3 : 5);
+  }
+  let creates = 0;
+  assert.throws(() => executeCore({ authorization: authorization(), sourceSha, desired, readLiveState: () => { throw Object.assign(new Error("throttled"), { code: "Throttling" }); }, createPolicyVersion: () => { creates += 1; }, sleep: () => assert.fail("pre-mutation retry") }));
+  assert.equal(creates, 0);
 });
 
 test("IAM convergence exhaustion never authorizes a second policy version", () => {

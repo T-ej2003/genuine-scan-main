@@ -101,6 +101,14 @@ const defaultSleep = (milliseconds) => { Atomics.wait(new Int32Array(new SharedA
 
 const isTransientPolicyVersionRead = (error) => error?.code === INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ;
 
+const isTransientConvergenceRead = (error) => {
+  if (isTransientPolicyVersionRead(error)) return true;
+  const retryable = /^(Throttling|ThrottlingException|TooManyRequestsException|RequestLimitExceeded|ServiceUnavailable|ServiceUnavailableException|InternalFailure|InternalError)$/;
+  // AWS CLI wraps the service code in a diagnostic; never match arbitrary message substrings.
+  const diagnostic = String(error?.stderr || error?.message || "").match(/(?:^|\n)An error occurred \((\w+)\) when calling the (GetPolicy|GetPolicyVersion|ListPolicyVersions|GetRole|ListAttachedRolePolicies|ListEntitiesForPolicy) operation(?: \(reached max retries: \d+\))?:/);
+  return retryable.test(error?.code || error?.name || "") || Boolean(diagnostic && retryable.test(diagnostic[1]));
+};
+
 const hasExpectedConvergenceTopology = (value, authorization) => {
   if (!value || typeof value !== "object" || value.policyArn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || !Array.isArray(value.releaseRolePolicyArns) || !Array.isArray(value.targetPolicyRoles) || !Array.isArray(value.targetPolicyUsers) || !Array.isArray(value.targetPolicyGroups) || value.permissionsBoundaryUsageCount !== 0) return false;
   const releaseRolePolicyArns = [...value.releaseRolePolicyArns].sort();
@@ -132,7 +140,7 @@ export function waitForInitialActivationLifecyclePolicyConvergence({ readLiveSta
       raw = readLiveState();
       candidate = assertInitialActivationLifecyclePolicyState(raw, { desired });
     } catch (error) {
-      if (!isTransientPolicyVersionRead(error) && !isTransientConvergenceSnapshot(raw, before, authorization, desired, expectedVersionId)) throw error;
+      if (!(raw === undefined && isTransientConvergenceRead(error)) && !isTransientConvergenceSnapshot(raw, before, authorization, desired, expectedVersionId)) throw error;
       if (attempt < CONVERGENCE_ATTEMPTS - 1) sleep(CONVERGENCE_DELAYS[attempt]);
       continue;
     }

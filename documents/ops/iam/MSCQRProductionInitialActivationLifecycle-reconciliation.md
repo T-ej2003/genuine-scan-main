@@ -1,5 +1,7 @@
 # Production initial-activation lifecycle policy reconciliation
 
+Post-mutation readback uses at most six snapshots. Exact AWS throttling and service-availability error codes from any snapshot read consume that existing retry budget, as does the reviewed policy-version propagation condition. Authorization, CAS, malformed responses, and unexpected topology remain fail-closed. Readback retries never repeat `CreatePolicyVersion`.
+
 `PRODUCTION_INITIAL_ACTIVATION_LIFECYCLE_POLICY_RECONCILIATION` is a one-target governed repair for `arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle`.
 
 It accepts only the authenticated `v1` predecessor with SHA-256 `2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71`, or an already-reconciled source document. The desired document is always `documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json` with SHA-256 `7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564`.
