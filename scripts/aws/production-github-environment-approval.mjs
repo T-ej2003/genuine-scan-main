@@ -37,7 +37,7 @@ const approvedWorkflowRefs = new Set([
   PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapWorkflowRef,
 ]);
 
-const environmentForWorkflow = (workflowRef) => workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapWorkflowRef
+const environmentForWorkflow = (workflowRef) => [PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef].includes(workflowRef)
   ? PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapEnvironment
   : PRODUCTION_ENVIRONMENT_APPROVAL.environment;
 

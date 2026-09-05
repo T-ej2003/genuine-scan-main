@@ -28,9 +28,9 @@ const installedState = JSON.stringify({ version: 4, terraform_version: "1.15.8",
   { mode: "managed", type: "aws_iam_role_policy_attachment", name: "reconciler", instances: [{}] },
 ] });
 const approval = createProductionEnvironmentApprovalEvidence({
-  environmentConfig: { id: 7, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] },
-  repository: INSTALLATION.repository, environment: "production", sourceSha,
-  workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "100", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 7, environmentName: "production", userId: 3, userLogin: "reviewer" },
+  environmentConfig: { id: 7, name: INSTALLATION.environment, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] },
+  repository: INSTALLATION.repository, environment: INSTALLATION.environment, sourceSha,
+  workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "100", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 7, environmentName: INSTALLATION.environment, userId: 3, userLogin: "reviewer" },
 });
 const bootstrapApproval = createProductionEnvironmentApprovalEvidence({
   environmentConfig: { id: 8, name: INSTALLATION_BOOTSTRAP.environment, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] },
@@ -636,7 +636,8 @@ test("installation and bootstrap workflows share the one non-cancelling producti
     assert.match(workflow, /cancel-in-progress: false/);
   }
   const installationWorkflow = fs.readFileSync(".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml", "utf8");
-  assert.match(installationWorkflow, /environment: production/);
+  assert.match(installationWorkflow, new RegExp(`environment: ${INSTALLATION.environment}`));
+  assert.match(installationWorkflow, new RegExp(`--repository \\\"\\$GITHUB_REPOSITORY\\\" --environment ${INSTALLATION.environment}`));
   assert.match(installationWorkflow, /role-to-assume: arn:aws:iam::368992683803:role\/mscqr-production-initial-activation-policy-reconciler-bootstrap/);
   assert.match(installationWorkflow, /terraform_version: 1\.15\.8/);
   assert.doesNotMatch(installationWorkflow, /mscqr-production-root|mscqr-production-release-deployer|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/);
@@ -649,9 +650,13 @@ test("installation and bootstrap workflows share the one non-cancelling producti
   assert.match(bootstrapWorkflow, /group: production-deploy/);
   assert.match(bootstrapWorkflow, /--require-actual-approval/);
   const workflowFiles = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") || file.endsWith(".yaml"));
-  const otherBootstrapUsers = workflowFiles.filter((file) => file !== "authorize-production-initial-activation-policy-reconciler-bootstrap.yml")
+  const allowedBootstrapEnvironmentUsers = new Set(["authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "authorize-production-initial-activation-policy-reconciler-installation.yml"]);
+  const otherBootstrapUsers = workflowFiles.filter((file) => !allowedBootstrapEnvironmentUsers.has(file))
     .filter((file) => fs.readFileSync(path.join(".github/workflows", file), "utf8").includes(`environment: ${INSTALLATION_BOOTSTRAP.environment}`));
   assert.deepEqual(otherBootstrapUsers, []);
+  const trustPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.trustPath, "utf8"));
+  const trustedSubject = trustPolicy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"];
+  assert.equal(trustedSubject, `repo:${INSTALLATION.repository}:environment:${INSTALLATION.environment}`);
 });
 
 test("terraform show failure always removes the unique render copy", () => {

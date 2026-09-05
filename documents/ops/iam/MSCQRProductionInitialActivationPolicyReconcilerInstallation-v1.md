@@ -12,7 +12,9 @@ the saved plan; temporary render copies are unique, private, and removed in
 `finally`.
 
 The saved plan and preparation bytes are submitted to the canonical GitHub
-workflow. The `production` environment supplies independent human approval.
+workflow. The dedicated `production-initial-activation-reconciler-bootstrap`
+environment supplies independent human approval and the matching OIDC subject;
+`production` remains the deployment tier, not the GitHub environment identity.
 The same workflow run assumes only
 `mscqr-production-initial-activation-policy-reconciler-bootstrap`, rechecks the
 source, backend, default workspace, state/live predecessor, plan digest and

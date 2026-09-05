@@ -10,7 +10,7 @@ export const INSTALLATION = Object.freeze({
   kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION",
   operation: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION",
   repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository,
-  environment: "production",
+  environment: PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapEnvironment,
   region: "eu-west-2",
   terraformVersion: "1.15.8",
   executionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap",
