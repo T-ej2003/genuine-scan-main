@@ -157,16 +157,12 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 46, capabilities: 379, uniqueActions: 134, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 46, capabilities: 377, uniqueActions: 134, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
-  for (const [id, action] of [["initial-activation-policy-reconciliation-root-read-reservation-exact", "s3:GetObject"], ["initial-activation-policy-reconciliation-root-conditional-create-reservation-exact", "s3:PutObject"]]) {
-    assert(first.sourceScan.some((call) => call.capabilityId === id && call.sourceFile === "scripts/aws/production-initial-activation-policy-reconciliation.mjs" && call.phase === "initial-activation-lifecycle-policy-reconciliation" && call.identity === "ROOT_OPERATOR" && call.action === action));
-    assert(first.capabilities.some((capability) => capability.id === id && capability.phase === "initial-activation-lifecycle-policy-reconciliation" && capability.action === action));
-  }
   assert.equal(first.capabilities.filter(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "ecs:ExecuteCommand").length, 0);
-  assert.deepEqual(first.capabilities.filter(({ id }) => id === "initial-activation-policy-reconciliation-root-list-policy-entities").map(({ identity, action, resources }) => ({ identity, action, resources })), [{ identity: "ROOT_OPERATOR", action: "iam:ListEntitiesForPolicy", resources: ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"]}]);
+  assert.deepEqual(first.capabilities.filter(({ id }) => id === "initial-activation-policy-reconciliation-root-list-policy-entities").map(({ identity, action, resources }) => ({ identity, action, resources })), [{ identity: "INITIAL_ACTIVATION_RECONCILER", action: "iam:ListEntitiesForPolicy", resources: ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"]}]);
   assert.equal(first.capabilities.find(({ id }) => id === "manifest-release-deployer-ecs-exec").identity, "ADMINISTRATOR");
   assert.equal(first.capabilities.filter(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:PutSecretValue" && resources.includes("arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho")).length, 1);
   assert.equal(first.capabilities.filter(({ identity, action, resources }) => identity === "RELEASE_DEPLOYER" && action === "secretsmanager:PutSecretValue" && resources.includes("arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho")).length, 0);
