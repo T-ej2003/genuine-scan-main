@@ -157,7 +157,7 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 46, capabilities: 375, uniqueActions: 134, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 46, capabilities: 377, uniqueActions: 134, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));

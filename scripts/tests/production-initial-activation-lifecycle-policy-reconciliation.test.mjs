@@ -6,10 +6,10 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
-import { INITIAL_ACTIVATION_POLICY_RECONCILIATION as CONTRACT, assertInitialActivationLifecyclePolicyReconciliationAuthorization, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, createInitialActivationLifecyclePolicyReconciliationAuthorization, executeInitialActivationLifecyclePolicyReconciliation, readInitialActivationLifecycleDesiredPolicy, resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact } from "../aws/production-initial-activation-policy-reconciliation.mjs";
+import { INITIAL_ACTIVATION_POLICY_RECONCILIATION as CONTRACT, assertInitialActivationLifecyclePolicyReconciliationAuthorization, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, createInitialActivationLifecyclePolicyReconciliationAuthorization, createInitialActivationLifecyclePolicyReservation, createInitialActivationLifecyclePolicyReservationStore, executeInitialActivationLifecyclePolicyReconciliation as executeCore, initialActivationLifecyclePolicyReservationKey, readInitialActivationLifecycleDesiredPolicy, resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact, waitForInitialActivationLifecyclePolicyConvergence } from "../aws/production-initial-activation-policy-reconciliation.mjs";
 import { readInitialActivationLifecyclePolicyLiveState, runInitialActivationLifecyclePolicyReconciliation } from "../aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
-import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
+import { canonicalJson, canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 
 const sourceSha = "a".repeat(40);
@@ -23,6 +23,7 @@ const approval = (observedAt = new Date().toISOString()) => createProductionEnvi
 const releaseRolePolicyArns = sourcePolicyEvidence().map(({ arn }) => arn).sort();
 const state = (overrides = {}) => ({ policyArn: CONTRACT.policyArn, defaultVersionId: "v1", document: predecessor, policyVersionCount: 1, releaseRolePolicyArns, targetPolicyRoles: ["mscqr-production-release-deployer"], targetPolicyUsers: [], targetPolicyGroups: [], permissionsBoundaryUsageCount: 0, ...overrides });
 const authorization = (live = state()) => createInitialActivationLifecyclePolicyReconciliationAuthorization({ sourceSha, liveState: live, protectedEnvironmentApprovalEvidence: approval(), desired });
+const executeInitialActivationLifecyclePolicyReconciliation = (input) => executeCore({ reserve: () => ({ owned: true }), ...input });
 
 test("exact predecessor authorizes only the fixed target and exact tracked desired policy", () => {
   const value = authorization();
@@ -70,8 +71,8 @@ test("approval freshness uses a fresh write-boundary clock after live reads", ()
   const value = createInitialActivationLifecyclePolicyReconciliationAuthorization({ sourceSha, liveState: state(), protectedEnvironmentApprovalEvidence: approval(observedAt), desired, now: entryTime });
   assert.doesNotThrow(() => assertInitialActivationLifecyclePolicyReconciliationAuthorization(value, { sourceSha, now: entryTime }));
   let clockReads = 0; let liveReads = 0; let creates = 0;
-  assert.throws(() => executeInitialActivationLifecyclePolicyReconciliation({ authorization: value, sourceSha, desired, now: () => { assert.equal(liveReads, clockReads, "clock must be read after the preceding live-state read"); return [entryTime, writeTime][clockReads++]; }, readLiveState: () => { liveReads += 1; return state(); }, createPolicyVersion: () => { creates += 1; } }), /stale/);
-  assert.equal(clockReads, 2); assert.equal(liveReads, 1); assert.equal(creates, 0);
+  assert.throws(() => executeInitialActivationLifecyclePolicyReconciliation({ authorization: value, sourceSha, desired, now: () => { if (clockReads === 1) assert.equal(liveReads, 2, "clock must be read after the final live-state read"); return [entryTime, writeTime][clockReads++]; }, readLiveState: () => { liveReads += 1; return state(); }, createPolicyVersion: () => { creates += 1; } }), /stale/);
+  assert.equal(clockReads, 2); assert.equal(liveReads, 2); assert.equal(creates, 0);
 });
 
 test("approval valid at the write boundary permits exactly one transition", () => {
@@ -154,6 +155,58 @@ test("ambiguous successful create converges by exact desired readback without a 
     creates += 1; live = state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 }); throw new Error("transport response lost");
   } });
   assert.equal(outcome.status, "COMPLETED_BY_READBACK"); assert.equal(outcome.createPolicyVersionCount, 1); assert.equal(creates, 1);
+});
+
+function reservationMemoryS3() {
+  const objects = new Map(); const calls = []; let conflictNext = false; let conflictObject;
+  const run = (args) => {
+    calls.push([...args]); const operation = args[1]; const key = args[args.indexOf("--key") + 1];
+    if (operation === "get-object") {
+      if (!objects.has(key)) { const error = new Error("AccessDenied"); error.stderr = "NoSuchKey"; throw error; }
+      fs.writeFileSync(args.at(-1), objects.get(key)); return "{}";
+    }
+    if (operation === "put-object") {
+      assert.equal(args[args.indexOf("--if-none-match") + 1], "*");
+      if (conflictNext || objects.has(key)) { if (conflictNext && conflictObject) objects.set(key, conflictObject); conflictNext = false; conflictObject = undefined; const error = new Error("PreconditionFailed"); error.stderr = "PreconditionFailed"; throw error; }
+      objects.set(key, fs.readFileSync(args[args.indexOf("--body") + 1])); return "{}";
+    }
+    throw new Error(`unexpected S3 operation ${operation}`);
+  };
+  return { run, objects, calls, conflict(bytes) { conflictNext = true; conflictObject = bytes; } };
+}
+
+const reservationInput = () => ({ sourceSha, authorizationSha256: authorization().authorizationSha256, predecessorDefaultVersionId: CONTRACT.predecessorVersionId, predecessorPolicySha256: CONTRACT.predecessorPolicySha256, desiredPolicySha256: CONTRACT.desiredPolicySha256 });
+
+test("reservation is exact-key, conditional, immutable, and matching replay-safe", () => {
+  const s3 = reservationMemoryS3(); const store = createInitialActivationLifecyclePolicyReservationStore({ run: s3.run }); const identity = reservationInput();
+  const first = store.reserve(identity); assert.equal(first.owned, true); assert.equal(first.created, true);
+  const key = initialActivationLifecyclePolicyReservationKey(createInitialActivationLifecyclePolicyReservation(identity));
+  assert.equal(first.key, key); assert.match(key, /production-initial-activation-lifecycle-policy-reconciliation\/reservations\/[a-f0-9]{64}\.json$/);
+  const replay = store.reserve(identity); assert.equal(replay.owned, true); assert.equal(replay.created, false); assert.deepEqual(replay.reservation, first.reservation);
+  assert.equal(s3.calls.filter((args) => args[1] === "put-object").length, 1); assert.equal(s3.calls.filter((args) => args[1] === "put-object")[0].includes("--if-none-match"), true);
+  assert.throws(() => store.reserve({ ...identity, desiredPolicySha256: "b".repeat(64) }), /reservation|desired/);
+});
+
+test("conditional reservation conflict authenticates the exact existing bytes and never overwrites", () => {
+  const s3 = reservationMemoryS3(); const store = createInitialActivationLifecyclePolicyReservationStore({ run: s3.run }); const identity = reservationInput();
+  const reservation = createInitialActivationLifecyclePolicyReservation(identity); const key = initialActivationLifecyclePolicyReservationKey(reservation); const bytes = Buffer.from(`${canonicalJson(reservation)}\n`);
+  s3.conflict(bytes);
+  const result = store.reserve(identity); assert.equal(result.created, false); assert.deepEqual(result.reservation, reservation);
+  assert.equal(s3.calls.filter((args) => args[1] === "put-object").length, 1);
+  assert.equal(bytes.equals(s3.objects.get(key)), true); assert.equal(s3.calls.filter((args) => args[1] === "get-object").at(-1).includes(key), true);
+});
+
+test("IAM convergence accepts temporary predecessor visibility, bounds polling, and rejects unexpected state", () => {
+  const value = authorization(); let reads = 0; const sleeps = []; const states = [state(), state(), state(), state(), state(), state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 })];
+  const result = waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => states[reads++], before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: value, desired, expectedVersionId: "v2", sleep: (milliseconds) => sleeps.push(milliseconds) });
+  assert.equal(result.status, "ALREADY_RECONCILED"); assert.deepEqual(sleeps, [100, 200, 400, 800, 1000]); assert.equal(reads, 6);
+  assert.throws(() => waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 3 }), before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: value, desired, expectedVersionId: "v2", sleep: () => {} }), /unexpected default version/);
+});
+
+test("IAM convergence exhaustion never authorizes a second policy version", () => {
+  const value = authorization(); let creates = 0; const sleeps = [];
+  assert.throws(() => executeInitialActivationLifecyclePolicyReconciliation({ authorization: value, sourceSha, desired, readLiveState: () => state(), sleep: (milliseconds) => sleeps.push(milliseconds), createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; } }), /did not converge/);
+  assert.equal(creates, 1); assert.deepEqual(sleeps, [100, 200, 400, 800, 1000]);
 });
 
 test("only the exact successful workflow artifact is accepted as authorization", () => {

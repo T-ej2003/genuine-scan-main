@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { INITIAL_ACTIVATION_POLICY_RECONCILIATION, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, executeInitialActivationLifecyclePolicyReconciliation, readInitialActivationLifecycleDesiredPolicy, resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact } from "./production-initial-activation-policy-reconciliation.mjs";
+import { INITIAL_ACTIVATION_POLICY_RECONCILIATION, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, createInitialActivationLifecyclePolicyReservationStore, executeInitialActivationLifecyclePolicyReconciliation, readInitialActivationLifecycleDesiredPolicy, resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact } from "./production-initial-activation-policy-reconciliation.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 
@@ -70,7 +70,8 @@ export function runInitialActivationLifecyclePolicyReconciliation(argv = process
   const resolved = (deps.resolveAuthorizationArtifact || resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact)({ workflowRunId: required(argv, "--workflow-run-id"), workflowRunAttempt: required(argv, "--workflow-run-attempt"), sourceSha });
   const authorization = resolved.authorization;
   const resultOut = resolveResultOutput(argv);
-  const outcome = (deps.executeReconciliation || executeInitialActivationLifecyclePolicyReconciliation)({ authorization, sourceSha, desired, readLiveState: () => readInitialActivationLifecyclePolicyLiveState(run), createPolicyVersion: ({ PolicyArn, PolicyDocument, SetAsDefault }) => json(run, ["iam", "create-policy-version", "--policy-arn", PolicyArn, "--policy-document", JSON.stringify(PolicyDocument), "--set-as-default"]) });
+  const reservationStore = deps.reservationStore || createInitialActivationLifecyclePolicyReservationStore({ run });
+  const outcome = (deps.executeReconciliation || executeInitialActivationLifecyclePolicyReconciliation)({ authorization, sourceSha, desired, reserve: (identity) => reservationStore.reserve(identity), readLiveState: () => readInitialActivationLifecyclePolicyLiveState(run), createPolicyVersion: ({ PolicyArn, PolicyDocument, SetAsDefault }) => json(run, ["iam", "create-policy-version", "--policy-arn", PolicyArn, "--policy-document", JSON.stringify(PolicyDocument), "--set-as-default"]) });
   const result = buildInitialActivationLifecyclePolicyReconciliationResult({ authorization, outcome });
   writeStageBPrivateFileExclusive({ filePath: resultOut, bytes: Buffer.from(`${JSON.stringify(result, null, 2)}\n`), repositoryRoot: root, label: "Initial activation lifecycle policy result" });
   return result;
