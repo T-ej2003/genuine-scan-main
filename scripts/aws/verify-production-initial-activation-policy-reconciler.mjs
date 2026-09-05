@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
+import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const INITIAL_ACTIVATION_RECONCILER = Object.freeze({
@@ -25,7 +26,7 @@ const readJson = (relativePath) => JSON.parse(fs.readFileSync(path.join(root, re
 const readBytes = (relativePath) => fs.readFileSync(path.join(root, relativePath));
 const decodeAwsDocument = (value, label) => normalizeIamPolicyDocument(value, label);
 const exactJson = (actual, expected, label) => {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label} differs from the protected source contract.`);
+  if (canonicalJson(actual) !== canonicalJson(expected)) throw new Error(`${label} differs from the protected source contract.`);
 };
 const json = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 

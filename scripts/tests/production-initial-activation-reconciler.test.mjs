@@ -12,6 +12,7 @@ const backend = JSON.parse(fs.readFileSync(`${root}/state-backend-contract.json`
 const installation = JSON.parse(fs.readFileSync(`${root}/installation-contract.json`, "utf8"));
 const capability = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationPolicyReconciler-capability-v1.json", "utf8"));
 const encoded = (value) => encodeURIComponent(JSON.stringify(value));
+const reorder = (value) => Array.isArray(value) ? value.map(reorder) : (value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, nested]) => [key, reorder(nested)])) : value);
 
 const commands = ({ provider = {}, role = {}, policyMetadata = {}, version = policy, encodeRole = true, encodeVersion = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) => {
   const calls = [];
@@ -99,6 +100,7 @@ test("normalizes parsed and encoded AWS documents and authenticates paginated po
   assert.equal(encodedResult.permissionsBoundaryUsageCount, 0);
   const parsedResult = verifyInitialActivationPolicyReconciler(commands({ encodeRole: false, encodeVersion: false }));
   assert.equal(parsedResult.roleArn, INITIAL_ACTIVATION_RECONCILER.roleArn);
+  assert.doesNotThrow(() => verifyInitialActivationPolicyReconciler(commands({ role: { AssumeRolePolicyDocument: reorder(trust) }, version: reorder(policy), encodeRole: false, encodeVersion: false })));
 });
 
 test("readback hashes match Terraform's exact source-byte contract", () => {
