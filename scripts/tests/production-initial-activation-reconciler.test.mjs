@@ -17,7 +17,7 @@ const commands = ({ role = {}, policyMetadata = {}, version = policy, encodeRole
   const run = (args) => {
     calls.push(args);
     if (args[0] === "sts") return JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" });
-    if (args[0] === "iam" && args[1] === "get-role") return JSON.stringify({ Role: { Arn: INITIAL_ACTIVATION_RECONCILER.roleArn, AssumeRolePolicyDocument: encodeRole ? encoded(trust) : trust, ...role } });
+    if (args[0] === "iam" && args[1] === "get-role") return JSON.stringify({ Role: { Arn: INITIAL_ACTIVATION_RECONCILER.roleArn, MaxSessionDuration: 3600, AssumeRolePolicyDocument: encodeRole ? encoded(trust) : trust, ...role } });
     if (args[0] === "iam" && args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0, ...policyMetadata } });
     if (args[0] === "iam" && args[1] === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: encodeVersion ? encoded(version) : version } });
     if (args[0] === "iam" && args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: attached });
@@ -102,6 +102,7 @@ test("rejects malformed, primitive, extra-entity, truncated, and boundary-used p
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ entities: [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }, { RoleName: "other" }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] })), /entity topology/);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ entities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: true }] })), /pagination/);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ policyMetadata: { PermissionsBoundaryUsageCount: 1 } })), /permissions-boundary/);
+  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ role: { MaxSessionDuration: 7200 } })), /session duration/);
 });
 
 test("capability contract defines the role without claiming PR #448 migration", () => {

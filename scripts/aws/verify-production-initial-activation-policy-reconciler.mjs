@@ -54,7 +54,7 @@ export function verifyInitialActivationPolicyReconciler({ run, expectedCallerArn
   const identity = json(run, ["sts", "get-caller-identity"]);
   if (identity?.Arn !== expectedCallerArn) throw new Error("Initial-activation reconciler verification requires the authorized administrator identity.");
   const role = json(run, ["iam", "get-role", "--role-name", INITIAL_ACTIVATION_RECONCILER.roleName]).Role;
-  if (role?.Arn !== INITIAL_ACTIVATION_RECONCILER.roleArn) throw new Error("Initial-activation reconciler role ARN is not exact.");
+  if (role?.Arn !== INITIAL_ACTIVATION_RECONCILER.roleArn || role.MaxSessionDuration !== 3600) throw new Error("Initial-activation reconciler role ARN or session duration is not exact.");
   if (Object.hasOwn(role, "PermissionsBoundary")) throw new Error("Initial-activation reconciler role must not have a permissions boundary.");
   exactJson(decodeAwsDocument(role.AssumeRolePolicyDocument, "reconciler trust policy"), trust, "reconciler trust policy");
   const policy = json(run, ["iam", "get-policy", "--policy-arn", INITIAL_ACTIVATION_RECONCILER.policyArn]).Policy;
