@@ -13,15 +13,15 @@ export function runAuthorizeCli(argv = process.argv.slice(2), deps = {}) {
   if (!argv.includes("--authorize")) throw new Error("Installation authorization requires --authorize.");
   const sourceSha = required(argv, "--source-sha");
   const preparationPath = path.resolve(required(argv, "--preparation"));
-  const preparationSha256 = required(argv, "--preparation-sha256");
+  const preparationFileSha256 = required(argv, "--preparation-file-sha256");
   const approvalPath = path.resolve(required(argv, "--environment-approval"));
   const approvalSha256 = required(argv, "--environment-approval-sha256");
   const outputPath = path.resolve(required(argv, "--output"));
-  const preparation = readBoundStageBPrivateJson({ filePath: preparationPath, expectedSha256: preparationSha256, repositoryRoot: root, label: "Installation preparation artifact" });
+  const preparation = readBoundStageBPrivateJson({ filePath: preparationPath, expectedSha256: preparationFileSha256, repositoryRoot: root, label: "Installation preparation artifact" });
   const approval = readBoundStageBPrivateJson({ filePath: approvalPath, expectedSha256: approvalSha256, repositoryRoot: root, label: "Installation environment approval" });
   const env = deps.env || process.env;
   assertProductionEnvironmentApprovalEvidence(approval, { sourceSha, repository: INSTALLATION.repository, environment: INSTALLATION.environment, workflowRef: env.GITHUB_WORKFLOW_REF, eventName: env.GITHUB_EVENT_NAME, workflowRunId: env.GITHUB_RUN_ID, workflowRunAttempt: env.GITHUB_RUN_ATTEMPT, executionActor: env.GITHUB_ACTOR, githubActions: env.GITHUB_ACTIONS });
-  const authorization = createInstallationAuthorization({ preparation, preparationSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+  const authorization = createInstallationAuthorization({ preparation, preparationArtifactSha256: preparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
   const output = assertStageBArtifactPath({ artifactPath: outputPath, repositoryRoot: root, label: "Installation authorization artifact", allowExisting: false });
   ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, create: true, label: "Installation authorization directory" });
   writeStageBPrivateFilesAtomic({ repositoryRoot: root, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(authorization, null, 2)}\n`), label: "Installation authorization artifact" }] });

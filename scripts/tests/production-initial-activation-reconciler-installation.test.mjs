@@ -7,6 +7,8 @@ import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { INSTALLATION, assertInstallationAuthorization, assertInstallationPlan, assertInstallationPreparation, createInstallationAuthorization, createInstallationPreparation, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { executeInstallation } from "../aws/install-production-initial-activation-reconciler.mjs";
+import { discoverInstallationPredecessor } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
+import { INITIAL_ACTIVATION_RECONCILER } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
 
 const sourceSha = "a".repeat(40);
 const now = new Date("2026-09-05T12:00:00.000Z");
@@ -26,7 +28,23 @@ const approval = createProductionEnvironmentApprovalEvidence({
   workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "100", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 7, environmentName: "production", userId: 3, userLogin: "reviewer" },
 });
 const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(state)), livePredecessor: "ABSENT", planJson: plan, planBytes, preparedAt: now.toISOString() });
-const authorization = createInstallationAuthorization({ preparation, preparationSha256: preparation.preparationSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+const authorization = createInstallationAuthorization({ preparation, preparationArtifactSha256: preparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+const completePlan = { resource_changes: [] };
+const completePlanBytes = Buffer.from("exact-saved-noop-plan");
+const completePreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(state)), livePredecessor: "EXACT_COMPLETE", planJson: completePlan, planBytes: completePlanBytes, preparedAt: now.toISOString() });
+const completeAuthorization = createInstallationAuthorization({ preparation: completePreparation, preparationArtifactSha256: completePreparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+
+const discoveryRun = ({ attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) => (args) => {
+  if (args[0] === "sts") return JSON.stringify({ Arn: INSTALLATION.administratorArn });
+  if (args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"] });
+  if (args[1] === "get-role") return JSON.stringify({ Role: { Arn: INITIAL_ACTIVATION_RECONCILER.roleArn, MaxSessionDuration: 3600, AssumeRolePolicyDocument: JSON.parse(trust) } });
+  if (args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0 } });
+  if (args[1] === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: JSON.parse(permissions) } });
+  if (args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: attached });
+  if (args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: inline });
+  if (args[1] === "list-entities-for-policy") return JSON.stringify(entities[args.includes("--marker") ? 1 : 0]);
+  throw new Error(`unexpected discovery call: ${args.join(" ")}`);
+};
 
 test("first-install preparation binds absent state and exact plan addresses", () => {
   assert.equal(preparation.predecessorState.stateExists, true);
@@ -42,8 +60,18 @@ test("exact partial installation accepts only the remaining reviewed creates", (
   assert.doesNotThrow(() => assertInstallationPreparation(partialPreparation, { sourceSha, planBytes }));
 });
 
+test("discovery reaches exact-complete only through the canonical verifier topology", () => {
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun() }), "EXACT_COMPLETE");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ attached: [] }) }), "EXACT_PARTIAL");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ attached: [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }, { PolicyArn: "arn:aws:iam::368992683803:policy/unexpected" }] }) }), "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ entities: [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [{ UserName: "unexpected" }], PolicyGroups: [], IsTruncated: false }] }) }), "UNEXPECTED");
+});
+
 test("authorization is source, plan, root and environment bound", () => {
   assert.doesNotThrow(() => assertInstallationAuthorization(authorization, { sourceSha, preparation }));
+  const prettyFileSha256 = crypto.createHash("sha256").update(`${JSON.stringify(preparation, null, 2)}\n`).digest("hex");
+  assert.notEqual(prettyFileSha256, preparation.preparationArtifactSha256);
+  assert.throws(() => createInstallationAuthorization({ preparation, preparationArtifactSha256: prettyFileSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha }), /artifact digest/);
   assert.throws(() => assertInstallationAuthorization({ ...authorization, sourceSha: "b".repeat(40) }, { sourceSha, preparation }), /binding|hash/);
   assert.throws(() => assertInstallationAuthorization({ ...authorization, administratorArn: "arn:aws:iam::368992683803:role/other" }, { sourceSha, preparation }), /operation|hash/);
 });
@@ -63,9 +91,15 @@ test("executor applies one exact plan and requires canonical verifier", () => {
 test("exact-complete replay performs zero apply", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-replay-"));
   let applies = 0;
-  const result = executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson: plan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "EXACT_COMPLETE", applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(state), resultPath: path.join(directory, "result.json"), now });
+  const result = executeInstallation({ sourceSha, preparation: completePreparation, authorization: completeAuthorization, planBytes: completePlanBytes, planJson: completePlan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "EXACT_COMPLETE", applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(state), resultPath: path.join(directory, "result.json"), now });
   assert.equal(applies, 0);
   assert.equal(result.applyCount, 0);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("exact-complete replay rejects absent state instead of adopting live resources", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-replay-state-"));
+  assert.throws(() => executeInstallation({ sourceSha, preparation: completePreparation, authorization: completeAuthorization, planBytes: completePlanBytes, planJson: completePlan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "EXACT_COMPLETE", applySavedPlan: () => { throw new Error("must not apply"); }, verifyInstalled: () => true, readState: () => undefined, resultPath: path.join(directory, "result.json"), now }), /state/);
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
@@ -100,6 +134,12 @@ test("no installation artifact contains credential-shaped material", () => {
   const serialized = JSON.stringify({ preparation, authorization });
   assert.doesNotMatch(serialized, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|MFA|token/i);
   assert.ok(crypto.createHash("sha256").update(planBytes).digest("hex") === preparation.savedPlanSha256);
+  assert.notEqual(preparation.preparationArtifactSha256, crypto.createHash("sha256").update(JSON.stringify(preparation, null, 2)).digest("hex"));
+});
+
+test("stale embedded preparation digest fails closed", () => {
+  const tampered = { ...preparation, savedPlanByteLength: preparation.savedPlanByteLength + 1 };
+  assert.throws(() => assertInstallationPreparation(tampered, { sourceSha, planBytes }), /hash/);
 });
 
 test("installation capability is purpose-bound and cannot consume the runtime target", () => {

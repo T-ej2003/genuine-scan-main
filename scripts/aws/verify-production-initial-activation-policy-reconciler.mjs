@@ -30,7 +30,7 @@ const exactJson = (actual, expected, label) => {
 };
 const json = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 
-function readPolicyEntities(run) {
+export function readPolicyEntities(run) {
   const roles = [];
   const users = [];
   const groups = [];

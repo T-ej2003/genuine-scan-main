@@ -82,7 +82,7 @@ jobs:
           test "$(sha256sum "$workdir/preparation.json" | awk '{print $1}')" = "$PREPARATION_SHA256"
           node scripts/aws/authorize-production-initial-activation-reconciler-installation.mjs --authorize \
             --source-sha "$SOURCE_SHA" --preparation "$workdir/preparation.json" \
-            --preparation-sha256 "$PREPARATION_SHA256" \
+            --preparation-file-sha256 "$PREPARATION_SHA256" \
             --environment-approval "$workdir/environment-approval.json" \
             --environment-approval-sha256 "${{ steps.environment-approval.outputs.sha256 }}" \
             --output "$workdir/authorization.json"

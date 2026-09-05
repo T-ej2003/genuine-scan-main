@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { INSTALLATION, createInstallationPreparation, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
-import { INITIAL_ACTIVATION_RECONCILER } from "./verify-production-initial-activation-policy-reconciler.mjs";
+import { INITIAL_ACTIVATION_RECONCILER, readPolicyEntities, verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 
@@ -49,7 +49,28 @@ export function discoverInstallationPredecessor({ run } = {}) {
   }
   const policyExact = !policy || (policy.Arn === INSTALLATION.policyArn && policy.PolicyName === "MSCQRProductionInitialActivationPolicyReconciler" && policy.PermissionsBoundaryUsageCount === 0 && policyDocumentExact);
   if (!roleExact || !policyExact) return "UNEXPECTED";
-  return "EXACT_PARTIAL";
+  if (!role || !policy) {
+    if (policy) {
+      const entities = readPolicyEntities(run);
+      if (entities.roles.length !== 0 || entities.users.length !== 0 || entities.groups.length !== 0) return "UNEXPECTED";
+    }
+    return "EXACT_PARTIAL";
+  }
+  try {
+    verifyInitialActivationPolicyReconciler({ run });
+    return "EXACT_COMPLETE";
+  } catch {
+    const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).AttachedPolicies;
+    const inline = runJson(run, ["iam", "list-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).PolicyNames;
+    const entities = readPolicyEntities(run);
+    const safePartial = Array.isArray(attached) && (attached.length === 0 || attached.length === 1 && attached[0]?.PolicyArn === INSTALLATION.policyArn)
+      && Array.isArray(inline) && inline.length === 0
+      && entities.users.length === 0 && entities.groups.length === 0
+      && entities.roles.every((candidate) => candidate?.RoleName === INSTALLATION.roleArn.split("/").at(-1))
+      && (attached.length === 0 || entities.roles.length === 0);
+    if (!safePartial) return "UNEXPECTED";
+    return "EXACT_PARTIAL";
+  }
 }
 
 function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSync } = {}) {
@@ -57,18 +78,35 @@ function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSy
   const env = { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir };
   const backendArgs = [`-backend-config=bucket=${INSTALLATION.backend.bucket}`, `-backend-config=key=${INSTALLATION.backend.key}`, `-backend-config=region=${INSTALLATION.region}`];
   exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "init", "-input=false", "-lock=false", ...backendArgs], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  let stateBytes;
-  try {
-    stateBytes = Buffer.from(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "state", "pull"], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-  } catch (error) {
-    if (!noState(error)) throw error;
-  }
+  const pullState = () => {
+    try { return Buffer.from(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "state", "pull"], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })); }
+    catch (error) { if (noState(error)) return undefined; throw error; }
+  };
+  const stateBefore = pullState();
   const planPath = path.join(outputDir, "installation.tfplan");
   const planJsonPath = path.join(outputDir, "installation.plan.json");
   exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "plan", "-input=false", "-lock=false", "-out", planPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  const rendered = exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "show", "-json", planPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const planBytes = readStageBPrivateFileBytes({ filePath: planPath, repositoryRoot: root, label: "Installation saved Terraform plan" }).bytes;
+  const renderPath = path.join(outputDir, "installation-render.tfplan");
+  fs.writeFileSync(renderPath, planBytes, { flag: "wx", mode: 0o600 });
+  const rendered = exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "show", "-json", renderPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  fs.unlinkSync(renderPath);
   fs.writeFileSync(planJsonPath, rendered, { flag: "wx", mode: 0o600 });
-  return { planPath, planJsonPath, stateBytes };
+  const stateAfter = pullState();
+  if (JSON.stringify(stateIdentity(stateBefore)) !== JSON.stringify(stateIdentity(stateAfter))) throw new Error("Terraform state changed during read-only installation preparation.");
+  return { planPath, planJsonPath, stateBytes: stateAfter };
+}
+
+function renderExactPlanJson({ planPath, planBytes, terraformDataDir, profile, exec = execFileSync, outputPath } = {}) {
+  const directory = path.dirname(planPath);
+  const renderPath = path.join(directory, `.${path.basename(planPath)}.render.tfplan`);
+  fs.writeFileSync(renderPath, planBytes, { flag: "wx", mode: 0o600 });
+  try {
+    const rendered = exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "show", "-json", renderPath], { cwd: root, env: { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    fs.writeFileSync(outputPath, rendered, { flag: "wx", mode: 0o600 });
+  } finally {
+    fs.unlinkSync(renderPath);
+  }
 }
 
 export function prepareInstallation({ sourceSha, planBytes, planJson, stateBytes, livePredecessor, preparedAt, outputPath, repositoryRoot = root } = {}) {
@@ -89,8 +127,11 @@ export function runPrepareCli(argv = process.argv.slice(2), deps = {}) {
   const livePredecessor = discoverInstallationPredecessor({ run });
   if (livePredecessor === "UNEXPECTED") throw new Error("Live installation topology is unexpected.");
   const outputDir = path.dirname(outputPath);
-  const generated = argv.includes("--plan") && argv.includes("--plan-json") ? { planPath: path.resolve(required(argv, "--plan")), planJsonPath: path.resolve(required(argv, "--plan-json")) } : terraformPlan({ terraformDataDir: path.resolve(required(argv, "--terraform-data-dir")), outputDir, profile, exec: deps.exec || execFileSync });
+  if (argv.includes("--plan-json")) throw new Error("Independent --plan-json input is not supported; plan JSON is always rendered from the saved plan.");
+  const exec = deps.exec || execFileSync;
+  const generated = argv.includes("--plan") ? { planPath: path.resolve(required(argv, "--plan")), planJsonPath: path.join(outputDir, "installation.plan.json") } : terraformPlan({ terraformDataDir: path.resolve(required(argv, "--terraform-data-dir")), outputDir, profile, exec });
   const plan = readStageBPrivateFileBytes({ filePath: generated.planPath, repositoryRoot: root, label: "Installation saved Terraform plan" });
+  if (argv.includes("--plan")) renderExactPlanJson({ planPath: generated.planPath, planBytes: plan.bytes, terraformDataDir: path.resolve(required(argv, "--terraform-data-dir")), profile, exec, outputPath: generated.planJsonPath });
   const planJson = JSON.parse(readStageBPrivateFileBytes({ filePath: generated.planJsonPath, repositoryRoot: root, label: "Installation rendered Terraform plan" }).bytes.toString("utf8"));
   if (!argv.includes("--state-file") && !argv.includes("--state-absent")) throw new Error("Preparation must explicitly authenticate a state file or --state-absent.");
   const stateBytes = argv.includes("--state-file") ? readStageBPrivateFileBytes({ filePath: path.resolve(required(argv, "--state-file")), repositoryRoot: root, label: "Installation Terraform state" }).bytes : generated.stateBytes;
