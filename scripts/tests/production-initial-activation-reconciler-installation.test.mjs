@@ -427,9 +427,11 @@ test("updates, deletes, replacements, reads, and unexpected no-ops fail closed",
 
 test("production apply uses native Terraform state locking", () => {
   const source = fs.readFileSync("scripts/aws/install-production-initial-activation-reconciler.mjs", "utf8");
+  const preparationSource = fs.readFileSync("scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs", "utf8");
   assert.doesNotMatch(source, /"apply",[^\n]*"-lock=false"/);
   assert.match(source, /"apply",[^\n]*"-lock-timeout=60s"/);
-  assert.match(fs.readFileSync("scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs", "utf8"), /-backend-config=use_lockfile=\$\{INSTALLATION\.backend\.useLockfile\}/);
+  assert.match(preparationSource, /-backend-config=use_lockfile=\$\{INSTALLATION\.backend\.useLockfile\}/);
+  assert.doesNotMatch(preparationSource, /"init",[^\n]*"-lock=false"/);
 });
 
 test("authorization workflow passes dynamic values through environment variables, never shell interpolation", () => {

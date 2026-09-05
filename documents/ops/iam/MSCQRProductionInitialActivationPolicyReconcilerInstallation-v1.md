@@ -39,6 +39,8 @@ policies; a noncanonical same-named policy or any surviving role capability is
 unexpected and fails closed. Terraform's complete, possibly colored
 `No state file was found!` diagnostic is the sole state-pull error classified
 as first-install absence; every other backend failure remains fatal.
+Backend initialization uses only supported `terraform init` options; native
+state locking remains enabled on the saved-plan apply with a bounded timeout.
 The authorization workflow passes dispatcher and prior-step values through
 step environment variables; no caller-controlled GitHub expression is
 interpolated directly into its shell program.

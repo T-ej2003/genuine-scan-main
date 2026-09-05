@@ -105,7 +105,7 @@ function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSy
   ensureStageBPrivateDirectory({ directory: terraformDataDir, repositoryRoot: root, create: true, label: "Installation Terraform data directory" });
   const env = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, env: parentEnvironment }), TF_DATA_DIR: terraformDataDir };
   const backendArgs = [`-backend-config=bucket=${INSTALLATION.backend.bucket}`, `-backend-config=key=${INSTALLATION.backend.key}`, `-backend-config=region=${INSTALLATION.backend.region}`, `-backend-config=encrypt=${INSTALLATION.backend.encrypt}`, `-backend-config=use_lockfile=${INSTALLATION.backend.useLockfile}`];
-  exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "init", "-input=false", "-lock=false", ...backendArgs], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "init", "-input=false", ...backendArgs], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   readInitializedBackend(terraformDataDir);
   const workspace = String(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "workspace", "show"], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
   if (workspace !== "default") throw new Error("Installation requires the canonical default Terraform workspace.");
