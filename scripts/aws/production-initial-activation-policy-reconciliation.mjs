@@ -53,6 +53,11 @@ export function initialActivationLifecyclePolicyReservationIdentity({ sourceSha,
   return Object.freeze({ operation: INITIAL_ACTIVATION_POLICY_RECONCILIATION.operation, environment: "production", repository, sourceSha, targetPolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, authorizationSha256, predecessorDefaultVersionId, predecessorPolicySha256, desiredPolicySha256 });
 }
 
+export function initialActivationLifecyclePolicyReservationTransitionIdentity(input = {}) {
+  const { authorizationSha256: _authorizationSha256, ...transition } = initialActivationLifecyclePolicyReservationIdentity(input);
+  return Object.freeze(transition);
+}
+
 export function createInitialActivationLifecyclePolicyReservation(input = {}) {
   const identity = initialActivationLifecyclePolicyReservationIdentity(input);
   if (!OWNER_NONCE.test(input.ownerNonce || "")) throw new Error("ownerNonce is invalid.");
@@ -61,7 +66,7 @@ export function createInitialActivationLifecyclePolicyReservation(input = {}) {
 }
 
 export function initialActivationLifecyclePolicyReservationKey(reservation) {
-  const identity = initialActivationLifecyclePolicyReservationIdentity(reservation);
+  const identity = initialActivationLifecyclePolicyReservationTransitionIdentity(reservation);
   return `${INITIAL_ACTIVATION_RESERVATION_PREFIX}${canonicalSha256(identity)}.json`;
 }
 
@@ -177,12 +182,22 @@ export function assertInitialActivationLifecyclePolicyReconciliationAuthorizatio
 
 const CONVERGENCE_ATTEMPTS = 6;
 const CONVERGENCE_DELAYS = Object.freeze([100, 200, 400, 800, 1000]);
+export const INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ = "INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ";
 const defaultSleep = (milliseconds) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds); };
+
+const isTransientPolicyVersionRead = (error) => error?.code === INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ;
 
 export function waitForInitialActivationLifecyclePolicyConvergence({ readLiveState, before, authorization, desired, expectedVersionId, sleep = defaultSleep } = {}) {
   if (typeof readLiveState !== "function" || !before || !authorization || !desired) throw new Error("Initial activation lifecycle convergence inputs are required.");
   for (let attempt = 0; attempt < CONVERGENCE_ATTEMPTS; attempt += 1) {
-    const candidate = assertInitialActivationLifecyclePolicyState(readLiveState(), { desired });
+    let candidate;
+    try {
+      candidate = assertInitialActivationLifecyclePolicyState(readLiveState(), { desired });
+    } catch (error) {
+      if (!isTransientPolicyVersionRead(error)) throw error;
+      if (attempt < CONVERGENCE_ATTEMPTS - 1) sleep(CONVERGENCE_DELAYS[attempt]);
+      continue;
+    }
     if (candidate.releaseRolePolicySetSha256 !== authorization.releaseRolePolicySetSha256 || candidate.targetPolicyEntityBoundarySha256 !== authorization.targetPolicyEntityBoundarySha256) throw new Error("Initial activation lifecycle policy topology changed during convergence.");
     if (candidate.status === "AUTHENTICATED_PREDECESSOR") {
       if (candidate.defaultVersionId !== before.defaultVersionId || candidate.policySha256 !== before.policySha256 || candidate.policyVersionCount !== before.policyVersionCount) throw new Error("Initial activation lifecycle policy entered an unexpected predecessor state during convergence.");

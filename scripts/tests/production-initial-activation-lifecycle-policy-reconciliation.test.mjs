@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
-import { INITIAL_ACTIVATION_POLICY_RECONCILIATION as CONTRACT, assertInitialActivationLifecyclePolicyReconciliationAuthorization, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, createInitialActivationLifecyclePolicyReconciliationAuthorization, createInitialActivationLifecyclePolicyReservation, createInitialActivationLifecyclePolicyReservationStore, executeInitialActivationLifecyclePolicyReconciliation as executeCore, initialActivationLifecyclePolicyReservationKey, readInitialActivationLifecycleDesiredPolicy, resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact, waitForInitialActivationLifecyclePolicyConvergence } from "../aws/production-initial-activation-policy-reconciliation.mjs";
+import { INITIAL_ACTIVATION_POLICY_RECONCILIATION as CONTRACT, INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ, assertInitialActivationLifecyclePolicyReconciliationAuthorization, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, createInitialActivationLifecyclePolicyReconciliationAuthorization, createInitialActivationLifecyclePolicyReservation, createInitialActivationLifecyclePolicyReservationStore, executeInitialActivationLifecyclePolicyReconciliation as executeCore, initialActivationLifecyclePolicyReservationKey, readInitialActivationLifecycleDesiredPolicy, resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact, waitForInitialActivationLifecyclePolicyConvergence } from "../aws/production-initial-activation-policy-reconciliation.mjs";
 import { readInitialActivationLifecyclePolicyLiveState, runInitialActivationLifecyclePolicyReconciliation } from "../aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import { canonicalJson, canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
@@ -192,6 +192,13 @@ test("reservation uses unique ownership bytes while retaining one deterministic 
   assert.throws(() => store.reserve({ ...identity, desiredPolicySha256: "b".repeat(64) }), /reservation|desired/);
 });
 
+test("reservation key serializes the transition across different authorizations", () => {
+  const first = reservationInput("a".repeat(32)); const second = { ...first, authorizationSha256: "b".repeat(64), ownerNonce: "b".repeat(32) };
+  const firstReservation = createInitialActivationLifecyclePolicyReservation(first); const secondReservation = createInitialActivationLifecyclePolicyReservation(second);
+  assert.equal(initialActivationLifecyclePolicyReservationKey(firstReservation), initialActivationLifecyclePolicyReservationKey(secondReservation));
+  assert.notDeepEqual(firstReservation, secondReservation);
+});
+
 test("conditional reservation conflict authenticates the exact existing bytes and never overwrites", () => {
   const s3 = reservationMemoryS3(); const store = createInitialActivationLifecyclePolicyReservationStore({ run: s3.run }); const identity = reservationInput("a".repeat(32));
   const reservation = createInitialActivationLifecyclePolicyReservation(identity); const key = initialActivationLifecyclePolicyReservationKey(reservation); const bytes = Buffer.from(`${canonicalJson(reservation)}\n`);
@@ -219,6 +226,25 @@ test("IAM convergence accepts temporary predecessor visibility, bounds polling, 
   const result = waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => states[reads++], before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: value, desired, expectedVersionId: "v2", sleep: (milliseconds) => sleeps.push(milliseconds) });
   assert.equal(result.status, "ALREADY_RECONCILED"); assert.deepEqual(sleeps, [100, 200, 400, 800, 1000]); assert.equal(reads, 6);
   assert.throws(() => waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 3 }), before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: value, desired, expectedVersionId: "v2", sleep: () => {} }), /unexpected default version/);
+});
+
+test("IAM convergence retries only the authenticated transient policy-version read failure", () => {
+  let reads = 0; const sleeps = [];
+  const result = waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => {
+    if (reads++ < 2) { const error = new Error("NoSuchEntity"); error.code = INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ; throw error; }
+    return state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 });
+  }, before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: authorization(), desired, expectedVersionId: "v2", sleep: (milliseconds) => sleeps.push(milliseconds) });
+  assert.equal(result.status, "ALREADY_RECONCILED"); assert.equal(reads, 3); assert.deepEqual(sleeps, [100, 200]);
+});
+
+test("unclassified IAM read failures fail closed without retry", () => {
+  let reads = 0; assert.throws(() => waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => { reads += 1; throw new Error("AccessDenied"); }, before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: authorization(), desired, sleep: () => { throw new Error("must not sleep"); } }), /AccessDenied/); assert.equal(reads, 1);
+});
+
+test("transient IAM read failures exhaust the bounded convergence window without a retry write", () => {
+  let reads = 0; const sleeps = [];
+  assert.throws(() => waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => { const error = new Error("NoSuchEntity"); error.code = INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ; reads += 1; throw error; }, before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: authorization(), desired, sleep: (milliseconds) => sleeps.push(milliseconds) }), /did not converge/);
+  assert.equal(reads, 6); assert.deepEqual(sleeps, [100, 200, 400, 800, 1000]);
 });
 
 test("IAM convergence exhaustion never authorizes a second policy version", () => {

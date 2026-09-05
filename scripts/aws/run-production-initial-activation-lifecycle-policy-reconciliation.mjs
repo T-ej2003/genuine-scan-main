@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { INITIAL_ACTIVATION_POLICY_RECONCILIATION, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, createInitialActivationLifecyclePolicyReservationStore, executeInitialActivationLifecyclePolicyReconciliation, readInitialActivationLifecycleDesiredPolicy, resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact } from "./production-initial-activation-policy-reconciliation.mjs";
+import { INITIAL_ACTIVATION_POLICY_RECONCILIATION, INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ, assertInitialActivationLifecyclePolicyState, buildInitialActivationLifecyclePolicyReconciliationResult, createInitialActivationLifecyclePolicyReservationStore, executeInitialActivationLifecyclePolicyReconciliation, readInitialActivationLifecycleDesiredPolicy, resolveInitialActivationLifecyclePolicyReconciliationAuthorizationArtifact } from "./production-initial-activation-policy-reconciliation.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 
@@ -31,7 +31,12 @@ const resolveResultOutput = (argv) => {
 export function readInitialActivationLifecyclePolicyLiveState(run) {
   const policy = json(run, ["iam", "get-policy", "--policy-arn", INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn]).Policy;
   const defaultVersionId = policy?.DefaultVersionId;
-  const version = json(run, ["iam", "get-policy-version", "--policy-arn", INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, "--version-id", defaultVersionId]).PolicyVersion;
+  let version;
+  try { version = json(run, ["iam", "get-policy-version", "--policy-arn", INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, "--version-id", defaultVersionId]).PolicyVersion; }
+  catch (error) {
+    if (/NoSuchEntity(?:Exception)?/i.test(`${error?.name || ""}\n${error?.code || ""}\n${error?.message || ""}\n${error?.stderr || ""}`)) error.code = INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ;
+    throw error;
+  }
   const versions = json(run, ["iam", "list-policy-versions", "--policy-arn", INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn]).Versions;
   const role = json(run, ["iam", "get-role", "--role-name", "mscqr-production-release-deployer"]).Role;
   const attached = paged(run, ["iam", "list-attached-role-policies", "--role-name", "mscqr-production-release-deployer"], "AttachedPolicies");
