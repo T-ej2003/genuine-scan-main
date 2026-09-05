@@ -1,5 +1,7 @@
 # Production initial-activation lifecycle policy reconciliation
 
+Capability evidence models seven shared STS/IAM reads twice: `ROOT_OPERATOR` read-only preparation through `--prepare`, and `INITIAL_ACTIVATION_RECONCILER` workflow execution. Only the latter owns the `iam:CreatePolicyVersion` edge. Root preparation uses the existing authenticated-root/source-contract authority representation; the OIDC execution edges remain bound to the reconciler permissions policy.
+
 The exact `iam create-policy-version` subprocess forces `AWS_MAX_ATTEMPTS=1` after credential-environment construction. One callback therefore permits only one CLI request attempt; ambiguous outcomes use authenticated readback. Read subprocesses retain the existing credential wrapper's retry configuration.
 
 IAM `ServiceFailure` is included in the exact post-mutation transient read-error allowlist. HTTP status 500 alone does not authorize retry; pre-mutation failures remain immediate failures.

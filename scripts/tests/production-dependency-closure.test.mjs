@@ -37,7 +37,7 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 8); // reviewed baseline calls plus exact Stage-A and target-policy IAM calls
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15); // baseline plus exact Stage-A and preparation/execution calls
   assert.equal(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("initial-activation-policy-reconciliation-root-")).every(({ identity }) => identity === "INITIAL_ACTIVATION_RECONCILER"), true);
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("stage-a-artifacts-recovery-release-lock-")).map(({ action, resources, identity }) => [action, resources, identity]), [
     ["s3:PutObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"], "RELEASE_DEPLOYER"],
@@ -162,6 +162,25 @@ test("initial-activation reconciliation runner identity is closure-bound", () =>
     ? { ...call, identity: "RELEASE_DEPLOYER" }
     : call);
   assert.throws(() => assertChangedAwsCallClosure(changed, current), /Changed production AWS calls differ/);
+});
+
+test("root preparation and OIDC execution retain separate read-only and mutation edges", () => {
+  const calls = discoverAwsCliActions(); const current = graph();
+  const preparation = calls.filter(({ capabilityId }) => capabilityId?.startsWith("initial-activation-policy-reconciliation-prepare-"));
+  assert.deepEqual(preparation.map(({ action }) => action).sort(), ["sts:GetCallerIdentity", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListEntitiesForPolicy"].sort());
+  for (const call of preparation) {
+    const capability = current.capabilities.find(({ id }) => id === call.capabilityId);
+    assert.equal(call.identity, "ROOT_OPERATOR"); assert.equal(capability.identity, call.identity);
+    assert.equal(capability.mutation, false); assert.equal(capability.context.executionMode, "PREPARATION");
+    assert.equal(capability.context.principalArn, "arn:aws:iam::368992683803:root");
+    assert.equal(capability.classification, "ADMIN_DIRECT_READ"); assert.equal(capability.policy.livePolicyArn, null);
+    assert.equal(capability.policy.sourceFile, call.sourceFile);
+    assert(calls.some((other) => other.sourceFile === call.sourceFile && other.action === call.action && other.identity === "INITIAL_ACTIVATION_RECONCILER"));
+    assert.throws(() => assertChangedAwsCallClosure(calls.filter((other) => other !== call), current), /Changed production AWS calls/);
+  }
+  const mutations = calls.filter(({ sourceFile, action }) => sourceFile.endsWith("run-production-initial-activation-lifecycle-policy-reconciliation.mjs") && action === "iam:CreatePolicyVersion");
+  assert.equal(mutations.length, 1); assert.equal(mutations[0].identity, "INITIAL_ACTIVATION_RECONCILER");
+  assert.throws(() => assertChangedAwsCallClosure(calls.map((call) => call === mutations[0] ? { ...call, identity: "ROOT_OPERATOR" } : call), current), /Changed production AWS calls/);
 });
 
 test("documented ECS response shape is represented by the real service-revision boundary", () => {

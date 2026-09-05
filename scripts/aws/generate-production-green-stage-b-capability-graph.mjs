@@ -409,7 +409,17 @@ export function discoverAwsCliActions() {
       } else if (sourceFile === "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs") {
         const id = ({ "sts:GetCallerIdentity": "initial-activation-policy-reconciliation-root-identify", "iam:GetPolicy": "initial-activation-policy-reconciliation-root-read-policy", "iam:GetPolicyVersion": "initial-activation-policy-reconciliation-root-read-policy-version", "iam:ListPolicyVersions": "initial-activation-policy-reconciliation-root-list-policy-versions", "iam:GetRole": "initial-activation-policy-reconciliation-root-read-release-role", "iam:ListAttachedRolePolicies": "initial-activation-policy-reconciliation-root-read-policy-attachment", "iam:ListEntitiesForPolicy": "initial-activation-policy-reconciliation-root-list-policy-entities", "iam:CreatePolicyVersion": "initial-activation-policy-reconciliation-root-create-policy-version" })[action];
         if (!id) throw new Error("Initial activation lifecycle policy reconciliation uses an unreviewed AWS action.");
-        calls.push({ sourceFile, sourceFunction: id, phase: "initial-activation-lifecycle-policy-reconciliation", identity: "INITIAL_ACTIVATION_RECONCILER", action, resources: INITIAL_ACTIVATION_POLICY_RECONCILIATION_CAPABILITIES.find(([candidate]) => candidate === id)[2], capabilityId: id });
+        const snapshotStart = source.indexOf("export function readInitialActivationLifecyclePolicyLiveState(");
+        const runnerStart = source.indexOf("export function runInitialActivationLifecyclePolicyReconciliation(");
+        const prepareStart = source.indexOf("  if (prepare) {", runnerStart);
+        const executionStart = source.indexOf('  if (argv.includes("--admin-profile"))', prepareStart);
+        const sharedRead = action === "sts:GetCallerIdentity"
+          ? match.index > runnerStart && match.index < prepareStart
+          : action !== "iam:CreatePolicyVersion" && match.index > snapshotStart && match.index < runnerStart;
+        if (snapshotStart < 0 || runnerStart < 0 || prepareStart < 0 || executionStart < 0 || (!sharedRead && !(action === "iam:CreatePolicyVersion" && match.index > executionStart))) throw new Error("Initial activation reconciliation call is outside its reviewed execution context.");
+        const call = { sourceFile, sourceFunction: id, phase: "initial-activation-lifecycle-policy-reconciliation", identity: "INITIAL_ACTIVATION_RECONCILER", action, resources: INITIAL_ACTIVATION_POLICY_RECONCILIATION_CAPABILITIES.find(([candidate]) => candidate === id)[2], capabilityId: id };
+        calls.push(call);
+        if (sharedRead) calls.push({ ...call, identity: "ROOT_OPERATOR", sourceFunction: id.replace("-root-", "-prepare-"), capabilityId: id.replace("-root-", "-prepare-") });
       } else {
         calls.push(sourceFile === "scripts/aws/produce-production-root-drop-evidence.mjs" && action === "kms:Sign"
           ? { sourceFile, sourceFunction: "produce-production-root-drop-evidence", phase: "root-drop-evidence-signing", identity: "ROOT_OPERATOR", action, resources: [ROOT_DROP_SIGNING_KEY_ARN], capabilityId: "root-drop-sign-evidence" }
@@ -510,6 +520,10 @@ export function buildStageBDeploymentCapabilityGraph() {
     context: { account: STAGE_B.account, region: STAGE_B.region, targetPolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn }, classification: mutation ? "GITHUB_OIDC_IAM_POLICY_RECONCILIATION" : "GITHUB_OIDC_IAM_POLICY_READ", probe: "structural", probeIds: [],
     policy: assertInitialActivationReconcilerAuthority({ action, resources }), required: true, mutation,
   }));
+  const initialActivationPreparation = initialActivationPolicyReconciliation.filter(({ mutation }) => !mutation).map((capability) => {
+    const id = capability.id.replace("-root-", "-prepare-");
+    return { ...capability, id, sourceFunction: id, identity: "ROOT_OPERATOR", executor: "aws-cli", context: { ...capability.context, executionMode: "PREPARATION", principalArn: "arn:aws:iam::368992683803:root" }, classification: "ADMIN_DIRECT_READ", policy: { sourceFile: capability.sourceFile, sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null } };
+  });
   const stageABackendPolicySid = Object.freeze({
     "stage-a-artifacts-reconciliation-terraform-read-bucket-location": "ReadExactStageABackendBucketLocation",
     "stage-a-artifacts-reconciliation-release-read-raw-state": "ReadExactStageAStateForHandoff",
@@ -543,7 +557,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   });
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: !/^(?:ecr:|kms:Verify|secretsmanager:Get|s3:Get)/.test(action) }));
   const runtimeAdmin = RUNTIME_ADMIN_CAPABILITIES.map(([id, phase, action, resources, mutation]) => ({ id, phase, identity: "ADMINISTRATOR", executor: "aws-cli", sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/prepare-production-ecs-runtime-consumability.mjs", sourceFunction: id, action, resources, context: { account: STAGE_B.account, region: STAGE_B.region }, classification: mutation ? "ADMIN_IAM_OR_SIGNING_MUTATION" : "ADMIN_RUNTIME_CLOSURE_READ", probe: action === "iam:SimulatePrincipalPolicy" ? "administrator-simulation" : "administrator-live-read", probeIds: [], policy: { sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/production-ecs-runtime-consumability.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation }));
-  const capabilities = [...fixed, ...normalActivation, ...initialActivationPolicyReconciliation, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, ...normalActivation, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
