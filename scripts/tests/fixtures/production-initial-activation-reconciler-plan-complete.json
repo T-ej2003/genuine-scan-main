@@ -531,17 +531,13 @@
         "full_name": "registry.terraform.io/hashicorp/aws",
         "version_constraint": ">= 6.41.0, < 7.0.0",
         "expressions": {
+          "allowed_account_ids": {
+            "constant_value": [
+              "368992683803"
+            ]
+          },
           "region": {
             "constant_value": "eu-west-2"
-          },
-          "skip_credentials_validation": {
-            "constant_value": true
-          },
-          "skip_metadata_api_check": {
-            "constant_value": true
-          },
-          "skip_requesting_account_id": {
-            "constant_value": true
           }
         }
       }
@@ -684,13 +680,13 @@
     {
       "resource": "aws_iam_policy.reconciler",
       "attribute": [
-        "name"
+        "arn"
       ]
     },
     {
       "resource": "aws_iam_policy.reconciler",
       "attribute": [
-        "arn"
+        "name"
       ]
     },
     {
@@ -706,7 +702,7 @@
       ]
     }
   ],
-  "timestamp": "2026-09-05T14:33:19Z",
+  "timestamp": "2026-09-05T14:52:47Z",
   "applyable": true,
   "complete": true,
   "errored": false

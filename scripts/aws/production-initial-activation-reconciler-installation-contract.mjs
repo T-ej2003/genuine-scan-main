@@ -59,6 +59,53 @@ const ROLE_NAME = "mscqr-production-initial-activation-policy-reconciler";
 const POLICY_NAME = "MSCQRProductionInitialActivationPolicyReconciler";
 const ROLE_DESCRIPTION = "GitHub OIDC-only writer for the exact InitialActivationLifecycle policy reconciliation.";
 const POLICY_DESCRIPTION = "Exact readback and CreatePolicyVersion capability for InitialActivationLifecycle reconciliation.";
+const EXPECTED_PROVIDER_CONFIGURATION = Object.freeze({
+  aws: {
+    name: "aws",
+    full_name: "registry.terraform.io/hashicorp/aws",
+    version_constraint: ">= 6.41.0, < 7.0.0",
+    expressions: {
+      allowed_account_ids: { constant_value: ["368992683803"] },
+      region: { constant_value: INSTALLATION.region },
+    },
+  },
+});
+const EXPECTED_OUTPUT_CONFIGURATION = Object.freeze({
+  permissions_policy_sha256: { expression: { references: ["path.module"] } },
+  policy_arn: { expression: { references: ["aws_iam_policy.reconciler.arn", "aws_iam_policy.reconciler"] } },
+  policy_name: { expression: { references: ["aws_iam_policy.reconciler.name", "aws_iam_policy.reconciler"] } },
+  role_arn: { expression: { references: ["aws_iam_role.reconciler.arn", "aws_iam_role.reconciler"] } },
+  role_name: { expression: { references: ["aws_iam_role.reconciler.name", "aws_iam_role.reconciler"] } },
+  trust_policy_sha256: { expression: { references: ["path.module"] } },
+});
+const EXPECTED_RESOURCE_CONFIGURATION = Object.freeze({
+  "aws_iam_policy.reconciler": {
+    address: "aws_iam_policy.reconciler", mode: "managed", type: "aws_iam_policy", name: "reconciler", provider_config_key: "aws", schema_version: 0,
+    expressions: {
+      description: { constant_value: POLICY_DESCRIPTION },
+      name: { references: ["local.policy_name"] },
+      policy: { references: ["path.module"] },
+      tags: { references: ["local.tags"] },
+    },
+  },
+  "aws_iam_role.reconciler": {
+    address: "aws_iam_role.reconciler", mode: "managed", type: "aws_iam_role", name: "reconciler", provider_config_key: "aws", schema_version: 0,
+    expressions: {
+      assume_role_policy: { references: ["path.module"] },
+      description: { constant_value: ROLE_DESCRIPTION },
+      max_session_duration: { constant_value: 3600 },
+      name: { references: ["local.role_name"] },
+      tags: { references: ["local.tags"] },
+    },
+  },
+  "aws_iam_role_policy_attachment.reconciler": {
+    address: "aws_iam_role_policy_attachment.reconciler", mode: "managed", type: "aws_iam_role_policy_attachment", name: "reconciler", provider_config_key: "aws", schema_version: 0,
+    expressions: {
+      policy_arn: { references: ["aws_iam_policy.reconciler.arn", "aws_iam_policy.reconciler"] },
+      role: { references: ["aws_iam_role.reconciler.name", "aws_iam_role.reconciler"] },
+    },
+  },
+});
 
 const INITIALIZED_BACKEND_REQUIRED_KEYS = Object.freeze(["bucket", "key", "region", "encrypt", "use_lockfile"]);
 const INITIALIZED_BACKEND_OPTIONAL_KEYS = Object.freeze([
@@ -87,10 +134,16 @@ export function classifyInstallationStatePullError(error) {
 
 export function assertInstallationPlan(plan) {
   if (!plan || typeof plan !== "object" || !Array.isArray(plan.resource_changes)) throw new Error("Installation Terraform plan JSON is malformed.");
-  const configuration = plan.configuration?.root_module?.resources;
-  if (!Array.isArray(configuration)) throw new Error("Installation Terraform plan configuration is malformed.");
-  const configuredAttachment = configuration.filter((resource) => resource?.address === "aws_iam_role_policy_attachment.reconciler");
-  if (configuredAttachment.length !== 1 || configuredAttachment[0]?.mode !== "managed" || configuredAttachment[0]?.type !== "aws_iam_role_policy_attachment" || JSON.stringify(configuredAttachment[0]?.expressions?.role?.references) !== JSON.stringify(["aws_iam_role.reconciler.name", "aws_iam_role.reconciler"]) || JSON.stringify(configuredAttachment[0]?.expressions?.policy_arn?.references) !== JSON.stringify(["aws_iam_policy.reconciler.arn", "aws_iam_policy.reconciler"])) throw new Error("Installation plan attachment configuration reference is not exact.");
+  if (!plan.configuration || Object.keys(plan.configuration).sort().join(",") !== "provider_config,root_module") throw new Error("Installation Terraform configuration boundary is not exact.");
+  if (canonicalJson(plan.configuration?.provider_config) !== canonicalJson(EXPECTED_PROVIDER_CONFIGURATION)) throw new Error("Installation plan provider configuration is not exact.");
+  const rootModule = plan.configuration?.root_module;
+  if (!rootModule || Object.keys(rootModule).sort().join(",") !== "outputs,resources" || canonicalJson(rootModule.outputs) !== canonicalJson(EXPECTED_OUTPUT_CONFIGURATION) || !Array.isArray(rootModule.resources)) throw new Error("Installation Terraform root configuration is not exact.");
+  if (rootModule.resources.length !== INSTALLATION.expectedAddresses.length) throw new Error("Installation plan configured resource count is not exact.");
+  const configuredAddresses = rootModule.resources.map((resource) => resource?.address);
+  if (new Set(configuredAddresses).size !== configuredAddresses.length || INSTALLATION.expectedAddresses.some((address) => !configuredAddresses.includes(address))) throw new Error("Installation plan configured resource ownership is not exact.");
+  for (const configured of rootModule.resources) {
+    if (!configured?.address || canonicalJson(configured) !== canonicalJson(EXPECTED_RESOURCE_CONFIGURATION[configured.address])) throw new Error("Installation plan resource configuration, provider binding, or provisioner boundary is not exact.");
+  }
   const changes = plan.resource_changes;
   if (changes.length !== INSTALLATION.expectedAddresses.length) throw new Error("Installation plan resource count is not exact.");
   const addresses = changes.map((entry) => entry?.address);

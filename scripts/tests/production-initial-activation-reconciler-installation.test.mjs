@@ -159,9 +159,11 @@ test("realistic absent first install reaches only the mocked exact saved-plan ap
   let applies = 0;
   let applied = false;
   let pulls = 0;
-  const exec = (command, args) => {
+  const terraformEnvironments = [];
+  const exec = (command, args, options = {}) => {
     if (command === "git") return args[0] === "status" ? "" : sourceSha;
     if (command !== "terraform") throw new Error(`unexpected executable: ${command}`);
+    terraformEnvironments.push(options.env);
     if (args.includes("workspace")) return "default\n";
     if (args.includes("show")) return JSON.stringify(plan);
     if (args.includes("state") && args.includes("pull")) {
@@ -181,10 +183,16 @@ test("realistic absent first install reaches only the mocked exact saved-plan ap
   const args = ["--execute", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--preparation", preparationPath, "--preparation-file-sha256", crypto.createHash("sha256").update(preparationBytes).digest("hex"), "--authorization-workflow-run-id", "100", "--authorization-workflow-run-attempt", "1", "--plan", planPath, "--result", resultPath, "--terraform-data-dir", terraformDataDir];
   assert.throws(() => runInstallCli(args, { exec, run, githubRun: () => { throw new Error("forged local authorization has no GitHub provenance"); }, now }), /unavailable/);
   assert.equal(applies, 0);
-  const result = runInstallCli(args, { exec, run, githubRun: githubAuthorizationRunner(), now });
+  const result = runInstallCli(args, { exec, run, githubRun: githubAuthorizationRunner(), now, env: { HOME: os.homedir(), PATH: process.env.PATH, AWS_ACCESS_KEY_ID: "attacker", AWS_SECRET_ACCESS_KEY: "attacker", AWS_ENDPOINT_URL: "https://attacker.invalid", AWS_PROFILE: "attacker" } });
   assert.equal(applies, 1);
   assert.equal(pulls, 2);
   assert.equal(result.applyCount, 1);
+  for (const environment of terraformEnvironments) {
+    assert.equal(environment.AWS_PROFILE, "mscqr-production-root");
+    assert.equal(environment.AWS_ACCESS_KEY_ID, undefined);
+    assert.equal(environment.AWS_SECRET_ACCESS_KEY, undefined);
+    assert.equal(environment.AWS_ENDPOINT_URL, undefined);
+  }
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
@@ -318,10 +326,10 @@ test("first-install attachment permits only its exact computed policy reference"
   assert.doesNotThrow(() => assertInstallationPlan(plan));
   const withoutReference = structuredClone(plan);
   withoutReference.configuration.root_module.resources[2].expressions.policy_arn = {};
-  assert.throws(() => assertInstallationPlan(withoutReference), /configuration reference/);
+  assert.throws(() => assertInstallationPlan(withoutReference), /resource configuration/);
   const wrongReference = structuredClone(plan);
   wrongReference.configuration.root_module.resources[2].expressions.policy_arn.references = ["aws_iam_policy.other.arn"];
-  assert.throws(() => assertInstallationPlan(wrongReference), /configuration reference/);
+  assert.throws(() => assertInstallationPlan(wrongReference), /resource configuration/);
   const literal = structuredClone(plan);
   literal.resource_changes[2].change.after.policy_arn = INSTALLATION.policyArn;
   delete literal.resource_changes[2].change.after_unknown.policy_arn;
@@ -330,6 +338,26 @@ test("first-install attachment permits only its exact computed policy reference"
   const wrongRole = structuredClone(plan);
   wrongRole.resource_changes[2].change.after.role = "other";
   assert.throws(() => assertInstallationPlan(wrongRole), /attachment contract/);
+});
+
+test("saved plans bind the exact provider, resource configuration, and no-provisioner boundary", () => {
+  for (const canonicalPlan of [plan, ...partialPlans, completePlan]) assert.doesNotThrow(() => assertInstallationPlan(canonicalPlan));
+  for (const mutate of [
+    (candidate) => { candidate.configuration.provider_config.aws.expressions.allowed_account_ids.constant_value = ["000000000000"]; },
+    (candidate) => { candidate.configuration.provider_config.aws.expressions.profile = { constant_value: "other" }; },
+    (candidate) => { candidate.configuration.provider_config.aws.expressions.assume_role = { references: ["local.other_role"] }; },
+    (candidate) => { candidate.configuration.provider_config.aws.expressions.endpoints = { constant_value: { iam: "https://attacker.invalid" } }; },
+    (candidate) => { candidate.configuration.provider_config.other = structuredClone(candidate.configuration.provider_config.aws); },
+    (candidate) => { candidate.configuration.root_module.resources[0].provider_config_key = "aws.other"; },
+    (candidate) => { candidate.configuration.root_module.resources[0].provisioners = [{ type: "local-exec", expressions: { command: { constant_value: "aws iam create-user --user-name attacker" } } }]; },
+    (candidate) => { candidate.configuration.root_module.module_calls = { attacker: { source: "./attacker" } }; },
+    (candidate) => { candidate.configuration.root_module.resources[1].expressions.name = { constant_value: "other" }; },
+    (candidate) => { candidate.configuration.root_module.outputs.unreviewed = { expression: { constant_value: "other" } }; },
+  ]) {
+    const changed = structuredClone(plan);
+    mutate(changed);
+    assert.throws(() => assertInstallationPlan(changed), /configuration boundary|provider configuration|root configuration|resource configuration/);
+  }
 });
 
 test("real no-op plan authenticates all resources while counting zero mutation", () => {

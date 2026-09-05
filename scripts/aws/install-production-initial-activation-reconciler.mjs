@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createProductionAwsCommandRunner, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { INSTALLATION, assertFreshInstallationAuthorization, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, resolveInstallationAuthorizationArtifact, stateIdentity, assertInstallationResult } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { discoverInstallationPredecessor, assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
@@ -83,6 +83,7 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   const planPath = path.resolve(required(argv, "--plan"));
   const resultPath = path.resolve(required(argv, "--result"));
   const terraformDataDir = path.resolve(required(argv, "--terraform-data-dir"));
+  const terraformEnvironment = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, env: deps.env || process.env }), TF_DATA_DIR: terraformDataDir };
   const exec = deps.exec || execFileSync;
   assertProtectedCheckout({ sourceSha, repositoryRoot: root, exec });
   const preparation = readBoundStageBPrivateJson({ filePath: preparationPath, expectedSha256: preparationFileSha256, repositoryRoot: root, label: "Installation preparation artifact" });
@@ -94,7 +95,7 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   if (identity?.Arn !== INSTALLATION.administratorArn) throw new Error("Installation requires the exact root administrator identity.");
   const backendMetadata = JSON.parse(readStageBPrivateFileBytes({ filePath: path.join(terraformDataDir, "terraform.tfstate"), repositoryRoot: root, label: "Installation initialized Terraform backend metadata" }).bytes.toString("utf8"));
   assertInstallationInitializedBackendMetadata(backendMetadata?.backend);
-  const workspace = String(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "workspace", "show"], { cwd: root, env: { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
+  const workspace = String(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "workspace", "show"], { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
   if (workspace !== "default") throw new Error("Installation requires the canonical default Terraform workspace.");
   const livePredecessor = discoverInstallationPredecessor({ run });
   if (livePredecessor === "UNEXPECTED") throw new Error("Installation live predecessor is unexpected.");
@@ -104,7 +105,7 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   fs.writeFileSync(renderPath, plan.bytes, { flag: "wx", mode: 0o600 });
   let planJson;
   try {
-    const rendered = exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "show", "-json", renderPath], { cwd: root, env: { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const rendered = exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "show", "-json", renderPath], { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     planJson = JSON.parse(rendered);
   } finally {
     fs.unlinkSync(renderPath);
@@ -112,11 +113,10 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   const applySavedPlan = ({ planBytes }) => {
     const appliedPath = path.join(path.dirname(planPath), "authorized-installation.tfplan");
     fs.writeFileSync(appliedPath, planBytes, { flag: "wx", mode: 0o600 });
-    const env = { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir };
-    exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "apply", "-input=false", "-lock-timeout=60s", appliedPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "apply", "-input=false", "-lock-timeout=60s", appliedPath], { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   };
   const verifyInstalled = () => verifyInitialActivationPolicyReconciler({ run });
-  const readState = () => { try { return Buffer.from(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "state", "pull"], { cwd: root, env: { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })); } catch (error) { return classifyInstallationStatePullError(error); } };
+  const readState = () => { try { return Buffer.from(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "state", "pull"], { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })); } catch (error) { return classifyInstallationStatePullError(error); } };
   return executeInstallation({ sourceSha, preparation, authorization, planBytes: plan.bytes, planJson, administratorArn: identity.Arn, livePredecessor, applySavedPlan, verifyInstalled, readState, resultPath, consumptionDirectory: path.join(path.dirname(resultPath), ".consumptions"), now: deps.now || new Date() });
 }
 

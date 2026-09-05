@@ -24,6 +24,14 @@ resources; `create` is actionable, while `no-op` is still fully authenticated
 but counts as zero mutation. Role and policy paths, descriptions, tags, trust,
 permissions, session duration, permissions-boundary absence, provider identity,
 and the attachment's exact configuration references are source-bound.
+The rendered configuration must also contain exactly the canonical AWS provider
+with the production account allowlist and region, the three resources must all
+use that unaliased provider, and their complete configuration must match the
+reviewed root. Provisioners, alternate profiles, assumed roles, endpoints,
+aliases, extra outputs, and additional configuration are rejected. Terraform
+commands receive the repository's sanitized named-profile environment, so
+ambient session credentials or endpoint redirects cannot override the
+authenticated administrator profile.
 
 This contract does not install the live role in source development, grant the
 runtime role self-installation capability, mutate the InitialActivationLifecycle

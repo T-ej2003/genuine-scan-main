@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationPreparation, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { INITIAL_ACTIVATION_RECONCILER, readPolicyEntities, verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
@@ -78,9 +78,9 @@ export function discoverInstallationPredecessor({ run } = {}) {
   }
 }
 
-function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSync } = {}) {
+function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSync, parentEnvironment = process.env } = {}) {
   ensureStageBPrivateDirectory({ directory: terraformDataDir, repositoryRoot: root, create: true, label: "Installation Terraform data directory" });
-  const env = { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir };
+  const env = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, env: parentEnvironment }), TF_DATA_DIR: terraformDataDir };
   const backendArgs = [`-backend-config=bucket=${INSTALLATION.backend.bucket}`, `-backend-config=key=${INSTALLATION.backend.key}`, `-backend-config=region=${INSTALLATION.backend.region}`, `-backend-config=encrypt=${INSTALLATION.backend.encrypt}`, `-backend-config=use_lockfile=${INSTALLATION.backend.useLockfile}`];
   exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "init", "-input=false", "-lock=false", ...backendArgs], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   readInitializedBackend(terraformDataDir);
@@ -105,12 +105,13 @@ function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSy
   return { planPath, planJsonPath, stateBytes: stateAfter };
 }
 
-function renderExactPlanJson({ planPath, planBytes, terraformDataDir, profile, exec = execFileSync, outputPath } = {}) {
+function renderExactPlanJson({ planPath, planBytes, terraformDataDir, profile, exec = execFileSync, outputPath, parentEnvironment = process.env } = {}) {
   const directory = path.dirname(planPath);
   const renderPath = path.join(directory, `.${path.basename(planPath)}.render.tfplan`);
+  const env = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, env: parentEnvironment }), TF_DATA_DIR: terraformDataDir };
   fs.writeFileSync(renderPath, planBytes, { flag: "wx", mode: 0o600 });
   try {
-    const rendered = exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "show", "-json", renderPath], { cwd: root, env: { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const rendered = exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "show", "-json", renderPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     fs.writeFileSync(outputPath, rendered, { flag: "wx", mode: 0o600 });
   } finally {
     fs.unlinkSync(renderPath);
@@ -140,13 +141,14 @@ export function runPrepareCli(argv = process.argv.slice(2), deps = {}) {
   if (argv.includes("--plan-json")) throw new Error("Independent --plan-json input is not supported; plan JSON is always rendered from the saved plan.");
   const exec = deps.exec || execFileSync;
   const terraformDataDir = path.resolve(required(argv, "--terraform-data-dir"));
-  const generated = argv.includes("--plan") ? { planPath: path.resolve(required(argv, "--plan")), planJsonPath: path.join(outputDir, "installation.plan.json") } : terraformPlan({ terraformDataDir, outputDir, profile, exec });
+  const terraformEnvironment = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, env: deps.env || process.env }), TF_DATA_DIR: terraformDataDir };
+  const generated = argv.includes("--plan") ? { planPath: path.resolve(required(argv, "--plan")), planJsonPath: path.join(outputDir, "installation.plan.json") } : terraformPlan({ terraformDataDir, outputDir, profile, exec, parentEnvironment: deps.env || process.env });
   const plan = readStageBPrivateFileBytes({ filePath: generated.planPath, repositoryRoot: root, label: "Installation saved Terraform plan" });
   if (argv.includes("--plan")) {
     readInitializedBackend(terraformDataDir);
-    const workspace = String(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "workspace", "show"], { cwd: root, env: { ...process.env, AWS_PROFILE: profile, AWS_REGION: INSTALLATION.region, AWS_DEFAULT_REGION: INSTALLATION.region, AWS_EC2_METADATA_DISABLED: "true", TF_DATA_DIR: terraformDataDir }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
+    const workspace = String(exec("terraform", [`-chdir=${path.join(root, INSTALLATION.terraformRoot)}`, "workspace", "show"], { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
     if (workspace !== "default") throw new Error("Installation requires the canonical default Terraform workspace.");
-    renderExactPlanJson({ planPath: generated.planPath, planBytes: plan.bytes, terraformDataDir, profile, exec, outputPath: generated.planJsonPath });
+    renderExactPlanJson({ planPath: generated.planPath, planBytes: plan.bytes, terraformDataDir, profile, exec, outputPath: generated.planJsonPath, parentEnvironment: deps.env || process.env });
   }
   const planJson = JSON.parse(readStageBPrivateFileBytes({ filePath: generated.planJsonPath, repositoryRoot: root, label: "Installation rendered Terraform plan" }).bytes.toString("utf8"));
   if (!argv.includes("--state-file") && !argv.includes("--state-absent")) throw new Error("Preparation must explicitly authenticate a state file or --state-absent.");
