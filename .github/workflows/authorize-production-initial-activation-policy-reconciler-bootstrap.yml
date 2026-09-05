@@ -38,7 +38,7 @@ jobs:
           test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq '.commit.sha')"
           test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-      - name: Capture independent production approval
+      - name: Capture authorized production approval
         id: approval
         env:
           GITHUB_TOKEN: ${{ github.token }}

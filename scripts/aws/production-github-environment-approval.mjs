@@ -86,6 +86,7 @@ export function createProductionEnvironmentApprovalEvidence({ environmentConfig,
     || !RUN_ID.test(String(workflowRunId || "")) || !RUN_ID.test(String(workflowRunAttempt || ""))) throw new Error("GitHub environment approval source or workflow identity is invalid.");
   const rules = (environmentConfig.protection_rules || []).filter((rule) => rule?.type === "required_reviewers");
   if (rules.length !== 1 || typeof rules[0].prevent_self_review !== "boolean") throw new Error("Production environment required-reviewer policy is invalid.");
+  if (environment === PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapEnvironment && rules[0].prevent_self_review !== false) throw new Error("Initial-activation bootstrap environment must permit the authorized single operator to self-review.");
   const configuredReviewers = normalizeReviewers(rules[0].reviewers);
   if (environmentConfig.can_admins_bypass !== false) throw new Error("Production environment must disable administrator bypass.");
   const body = {
@@ -144,7 +145,8 @@ export function assertProductionEnvironmentApprovalIdentity(evidence, { sourceSh
     || !RUN_ID.test(evidence.workflowRunId) || !RUN_ID.test(evidence.workflowRunAttempt)
     || !Number.isSafeInteger(evidence.environmentId) || evidence.environmentId < 1
     || !Number.isSafeInteger(evidence.requiredReviewerCount) || evidence.requiredReviewerCount !== reviewers.length
-    || typeof evidence.preventSelfReview !== "boolean" || evidence.canAdminsBypass !== false) throw new Error("GitHub environment approval evidence is not bound to this protected recovery run.");
+    || typeof evidence.preventSelfReview !== "boolean" || evidence.canAdminsBypass !== false
+    || evidence.environment === PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapEnvironment && evidence.preventSelfReview !== false) throw new Error("GitHub environment approval evidence is not bound to this protected recovery run.");
   const observed = new Date(evidence.observedAt);
   if (!Number.isFinite(observed.getTime()) || observed.toISOString() !== evidence.observedAt) throw new Error("GitHub environment approval evidence is stale or malformed.");
   if (evidence.schemaVersion === 3) assertActualApproval(evidence.actualApproval, evidence.environmentId, evidence.environment);

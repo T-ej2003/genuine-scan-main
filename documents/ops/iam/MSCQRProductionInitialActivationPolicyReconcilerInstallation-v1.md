@@ -13,7 +13,7 @@ the saved plan; temporary render copies are unique, private, and removed in
 
 The saved plan and preparation bytes are submitted to the canonical GitHub
 workflow. The dedicated `production-initial-activation-reconciler-bootstrap`
-environment supplies independent human approval and the matching OIDC subject;
+environment supplies authenticated human approval and the matching OIDC subject;
 `production` remains the deployment tier, not the GitHub environment identity.
 The same workflow run assumes only
 `mscqr-production-initial-activation-policy-reconciler-bootstrap`, rechecks the
@@ -27,7 +27,7 @@ with zero apply. An ambiguous apply is never retried; exact post-state and the
 canonical live verifier must both authenticate before completion evidence is
 written. Unexpected or partial ambiguous outcomes fail closed.
 
-The workflow bootstrap role has depth one. Its independently approved local-root
+The workflow bootstrap role has depth one. Its authorized local-root
 installer can create only that exact OIDC role and its fixed inline policy. The
 root transition is convergent and is documented in
 `MSCQR_PRODUCTION_INITIAL_ACTIVATION_RECONCILER_BOOTSTRAP.md`. Root credentials

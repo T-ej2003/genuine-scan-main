@@ -1,6 +1,6 @@
 # Initial-activation reconciler installation bootstrap
 
-This bounded bridge has depth one. An independently approved local
+This bounded bridge has depth one. An authorized human-approved local
 `mscqr-production-root` session may create only the exact GitHub OIDC bootstrap
 role and its one exact inline policy. The role then runs the already-reviewed
 InitialActivation reconciler Terraform root inside the dedicated protected
@@ -21,6 +21,12 @@ exact role without its inline policy. `PutRolePolicy` always writes the same
 source-hashed document and is the final root mutation, so an ambiguous response
 is resolved only by exact readback. Unexpected trust, tags, boundaries,
 attachments, or inline policies fail closed.
+
+MSCQR currently operates with one authorized production operator, so the
+dedicated environment intentionally permits self-review
+(`prevent_self_review=false`). Approval is still real GitHub environment
+approval bound to the exact run, source, and operation; locally fabricated
+approval is rejected.
 
 The role remains narrowly available for authenticated recovery runs. Removing
 it would require another privileged transition and provides no security gain

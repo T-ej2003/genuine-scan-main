@@ -29,12 +29,12 @@ const installedState = JSON.stringify({ version: 4, terraform_version: "1.15.8",
   { mode: "managed", type: "aws_iam_role_policy_attachment", name: "reconciler", instances: [{}] },
 ] });
 const approval = createProductionEnvironmentApprovalEvidence({
-  environmentConfig: { id: 7, name: INSTALLATION.environment, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] },
+  environmentConfig: { id: 7, name: INSTALLATION.environment, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] },
   repository: INSTALLATION.repository, environment: INSTALLATION.environment, sourceSha,
   workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "100", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 7, environmentName: INSTALLATION.environment, userId: 3, userLogin: "reviewer" },
 });
 const bootstrapApproval = createProductionEnvironmentApprovalEvidence({
-  environmentConfig: { id: 8, name: INSTALLATION_BOOTSTRAP.environment, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] },
+  environmentConfig: { id: 8, name: INSTALLATION_BOOTSTRAP.environment, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] },
   repository: INSTALLATION_BOOTSTRAP.repository, environment: INSTALLATION_BOOTSTRAP.environment, sourceSha,
   workflowRef: INSTALLATION_BOOTSTRAP.workflowRef, eventName: "workflow_dispatch", workflowRunId: "200", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 8, environmentName: INSTALLATION_BOOTSTRAP.environment, userId: 3, userLogin: "reviewer" },
 });
@@ -592,7 +592,7 @@ test("root bootstrap accepts only canonical GitHub run, approval, and artifact p
   const archive = Buffer.from("bootstrap-authorization-archive");
   const workflow = { id: 200, repository: { id: 1, full_name: INSTALLATION_BOOTSTRAP.repository }, head_repository: { full_name: INSTALLATION_BOOTSTRAP.repository }, path: INSTALLATION_BOOTSTRAP.workflowPath, event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1, actor: { login: "operator" } };
   const artifact = { id: 12, name: INSTALLATION_BOOTSTRAP.artifactName, expired: false, workflow_run: { id: 200, head_sha: sourceSha, repository_id: 1 }, digest: `sha256:${crypto.createHash("sha256").update(archive).digest("hex")}` };
-  const environment = { id: 8, name: INSTALLATION_BOOTSTRAP.environment, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] };
+  const environment = { id: 8, name: INSTALLATION_BOOTSTRAP.environment, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] };
   const githubRun = (command, args) => {
     if (command === "unzip") {
       if (args[0] === "-Z1") return "bootstrap-authorization.json\n";
