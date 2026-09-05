@@ -105,6 +105,8 @@
     "stage-b:supersede-stale-rotation": "node scripts/aws/supersede-production-stale-rotation.mjs",
     "stage-b:produce-root-drop-evidence": "node scripts/aws/produce-production-root-drop-evidence.mjs",
     "production:release-oidc-trust": "node scripts/aws/converge-production-release-oidc-trust.mjs",
+    "production:verify-initial-activation-reconciler": "node scripts/aws/verify-production-initial-activation-policy-reconciler.mjs",
+    "test:production-initial-activation-reconciler": "node --test scripts/tests/production-initial-activation-reconciler.test.mjs",
     "production:normal-backend-activation": "node scripts/aws/production-normal-backend-activation.mjs",
     "stage-a:temporary-kms-capability": "node scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs",
     "stage-a:approval-key-reconciliation": "node scripts/aws/run-production-stage-a-approval-key-reconciliation.mjs",

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "kind": "MSCQR_PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_CAPABILITY",
+  "roleDefinedInSource": true,
+  "pr448RuntimeMigrated": false,
+  "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
+  "policyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+  "trustPolicySource": "infra/aws/terraform/production-initial-activation-policy-reconciler/trust-policy.json",
+  "permissionsPolicySource": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+  "terraformRoot": "infra/aws/terraform/production-initial-activation-policy-reconciler",
+  "environment": "production",
+  "oidcSubject": "repo:T-ej2003/genuine-scan-main:environment:production",
+  "capabilities": [
+    { "action": "sts:GetCallerIdentity", "resource": "*", "mutation": false },
+    { "action": "iam:GetPolicy", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle", "mutation": false },
+    { "action": "iam:GetPolicyVersion", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle", "mutation": false },
+    { "action": "iam:ListPolicyVersions", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle", "mutation": false },
+    { "action": "iam:ListEntitiesForPolicy", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle", "mutation": false },
+    { "action": "iam:GetRole", "resource": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", "mutation": false },
+    { "action": "iam:ListAttachedRolePolicies", "resource": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", "mutation": false },
+    { "action": "iam:CreatePolicyVersion", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle", "mutation": true }
+  ],
+  "installation": {
+    "authority": "existing independently authorized administrator/root boundary",
+    "maxCreateRole": 1,
+    "maxCreatePolicy": 1,
+    "maxAttachRolePolicy": 1,
+    "runtimeSelfInstallation": false,
+    "executionPerformedInThisSource": false
+  }
+}

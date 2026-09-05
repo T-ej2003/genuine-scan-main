@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "terraformRoot": "infra/aws/terraform/production-initial-activation-policy-reconciler",
+  "bucketName": "mscqr-production-terraform-state-368992683803-eu-west-2",
+  "stateKey": "mscqr/production/initial-activation-policy-reconciler/terraform.tfstate",
+  "stateLockKey": "mscqr/production/initial-activation-policy-reconciler/terraform.tfstate.tflock",
+  "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
+  "policyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+  "rootApplyRequired": true,
+  "productionExecutionEnabled": false,
+  "sourceOnlyUntilSeparatelyAuthorized": true
+}
