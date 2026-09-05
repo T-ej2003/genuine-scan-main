@@ -27,7 +27,7 @@ export const INSTALLATION_BOOTSTRAP = Object.freeze({
   schemaVersion: 1,
   operation: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_BOOTSTRAP_INSTALLATION",
   repository: "T-ej2003/genuine-scan-main",
-  environment: "production",
+  environment: PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapEnvironment,
   account: "368992683803",
   region: "eu-west-2",
   administratorArn: "arn:aws:iam::368992683803:root",
@@ -111,11 +111,11 @@ export function resolveBootstrapAuthorization({ workflowRunId, workflowRunAttemp
     const authorizationBytes = Buffer.from(githubRun("unzip", ["-p", archive, "bootstrap-authorization.json"]));
     const authorization = JSON.parse(authorizationBytes.toString("utf8"));
     assertBootstrapAuthorization(authorization, { sourceSha, now });
-    const environment = parseGithubJson(githubRun, ["api", `repos/${INSTALLATION_BOOTSTRAP.repository}/environments/production`], "Production environment");
+    const environment = parseGithubJson(githubRun, ["api", `repos/${INSTALLATION_BOOTSTRAP.repository}/environments/${INSTALLATION_BOOTSTRAP.environment}`], "Bootstrap environment");
     const approvals = parseGithubJson(githubRun, ["api", `repos/${INSTALLATION_BOOTSTRAP.repository}/actions/runs/${workflowRunId}/approvals`], "Bootstrap approvals");
-    const matchesApproval = (Array.isArray(approvals) ? approvals : []).flatMap((approval) => approval?.state === "approved" ? (approval.environments || []).filter((item) => item?.id === environment.id && item?.name === "production").map(() => ({ state: "approved", environmentId: environment.id, environmentName: "production", userId: approval.user?.id, userLogin: approval.user?.login })) : []);
+    const matchesApproval = (Array.isArray(approvals) ? approvals : []).flatMap((approval) => approval?.state === "approved" ? (approval.environments || []).filter((item) => item?.id === environment.id && item?.name === INSTALLATION_BOOTSTRAP.environment).map(() => ({ state: "approved", environmentId: environment.id, environmentName: INSTALLATION_BOOTSTRAP.environment, userId: approval.user?.id, userLogin: approval.user?.login })) : []);
     if (matchesApproval.length !== 1) throw new Error("Exactly one bootstrap production approval is required.");
-    const observed = createProductionEnvironmentApprovalEvidence({ environmentConfig: environment, repository: INSTALLATION_BOOTSTRAP.repository, environment: "production", sourceSha, workflowRef: INSTALLATION_BOOTSTRAP.workflowRef, eventName: "workflow_dispatch", workflowRunId: String(workflow.id), workflowRunAttempt: String(workflow.run_attempt), executionActor: workflow.actor?.login, observedAt: authorization.approval.observedAt, actualApproval: matchesApproval[0] });
+    const observed = createProductionEnvironmentApprovalEvidence({ environmentConfig: environment, repository: INSTALLATION_BOOTSTRAP.repository, environment: INSTALLATION_BOOTSTRAP.environment, sourceSha, workflowRef: INSTALLATION_BOOTSTRAP.workflowRef, eventName: "workflow_dispatch", workflowRunId: String(workflow.id), workflowRunAttempt: String(workflow.run_attempt), executionActor: workflow.actor?.login, observedAt: authorization.approval.observedAt, actualApproval: matchesApproval[0] });
     if (canonicalJson(observed) !== canonicalJson(authorization.approval)) throw new Error("Bootstrap approval differs from GitHub provenance.");
     return authorization;
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }

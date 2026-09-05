@@ -179,7 +179,19 @@ export function assertInstallationPlan(plan) {
       if (after.role !== ROLE_NAME || !(policyArnKnown || policyArnComputed)) throw new Error("Installation plan attachment contract is not exact.");
     }
   }
-  return Object.freeze({ plannedResourceCount: changes.length, resourceChangeCount: createdAddresses.length, actionableResourceChangeCount: createdAddresses.length, createCount: createdAddresses.length, noOpCount, updateCount: 0, deleteCount: 0, replaceCount: 0, changedAddresses: createdAddresses.sort(), noOpAddresses: noOpAddresses.sort() });
+  const resourceChanges = changes.map((entry) => Object.freeze({
+    address: entry.address,
+    mode: entry.mode,
+    type: entry.type,
+    name: entry.name,
+    providerName: entry.provider_name,
+    actions: entry.change.actions,
+    before: entry.change.before,
+    after: entry.change.after,
+    afterUnknown: entry.change.after_unknown,
+    configuration: rootModule.resources.find((resource) => resource.address === entry.address),
+  }));
+  return Object.freeze({ plannedResourceCount: changes.length, resourceChangeCount: createdAddresses.length, actionableResourceChangeCount: createdAddresses.length, createCount: createdAddresses.length, noOpCount, updateCount: 0, deleteCount: 0, replaceCount: 0, changedAddresses: createdAddresses.sort(), noOpAddresses: noOpAddresses.sort(), resourceChanges });
 }
 
 export function stateIdentity(rawBytes) {
@@ -243,6 +255,7 @@ export function assertInstallationPreparation(value, { sourceSha, planBytes } = 
   if (planBytes !== undefined && (sha256(planBytes) !== value.savedPlanSha256 || planBytes.length !== value.savedPlanByteLength)) throw new Error("Installation saved plan bytes changed after preparation.");
   if (value.livePredecessor === "EXACT_PARTIAL" && !value.predecessorState.stateExists) throw new Error("Partial installation requires an authenticated Terraform state predecessor.");
   if (!value.planSemantics || !Array.isArray(value.planSemantics.changedAddresses) || !Array.isArray(value.planSemantics.noOpAddresses)
+    || !Array.isArray(value.planSemantics.resourceChanges) || value.planSemantics.resourceChanges.length !== INSTALLATION.expectedAddresses.length
     || value.planSemantics.plannedResourceCount !== INSTALLATION.expectedAddresses.length
     || !Number.isSafeInteger(value.planSemantics.resourceChangeCount) || value.planSemantics.resourceChangeCount < 0 || value.planSemantics.resourceChangeCount > INSTALLATION.expectedAddresses.length
     || value.planSemantics.actionableResourceChangeCount !== value.planSemantics.resourceChangeCount || value.planSemantics.createCount !== value.planSemantics.resourceChangeCount

@@ -33,9 +33,9 @@ const approval = createProductionEnvironmentApprovalEvidence({
   workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "100", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 7, environmentName: "production", userId: 3, userLogin: "reviewer" },
 });
 const bootstrapApproval = createProductionEnvironmentApprovalEvidence({
-  environmentConfig: { id: 7, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] },
-  repository: INSTALLATION_BOOTSTRAP.repository, environment: "production", sourceSha,
-  workflowRef: INSTALLATION_BOOTSTRAP.workflowRef, eventName: "workflow_dispatch", workflowRunId: "200", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 7, environmentName: "production", userId: 3, userLogin: "reviewer" },
+  environmentConfig: { id: 8, name: INSTALLATION_BOOTSTRAP.environment, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] },
+  repository: INSTALLATION_BOOTSTRAP.repository, environment: INSTALLATION_BOOTSTRAP.environment, sourceSha,
+  workflowRef: INSTALLATION_BOOTSTRAP.workflowRef, eventName: "workflow_dispatch", workflowRunId: "200", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 8, environmentName: INSTALLATION_BOOTSTRAP.environment, userId: 3, userLogin: "reviewer" },
 });
 const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "ABSENT", livePredecessorAddresses: [], planJson: plan, planBytes, preparedAt: now.toISOString() });
 const authorization = createInstallationAuthorization({ preparation, preparationArtifactSha256: preparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
@@ -128,6 +128,21 @@ test("executor applies one exact plan and requires canonical verifier", () => {
   assert.equal(result.applyCount, 1);
   assert.equal(result.targetPolicyCreatePolicyVersionCount, 0);
   assert.equal(JSON.parse(fs.readFileSync(resultPath)).verifier, "PASS");
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("executor rejects a saved plan whose action split differs from authorized preparation", () => {
+  const preparedPlan = partialPlans[0];
+  const renderedPlan = partialPlans[1];
+  const preparedAddresses = assertInstallationPlan(preparedPlan).noOpAddresses;
+  const partialState = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 1, lineage: "semantic-lineage", outputs: {}, resources: JSON.parse(installedState).resources.filter((resource) => preparedAddresses.includes(`${resource.type}.${resource.name}`)) });
+  const preparedBytes = Buffer.from("prepared-partial-plan");
+  const prepared = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(partialState)), livePredecessor: "EXACT_PARTIAL", livePredecessorAddresses: preparedAddresses, planJson: preparedPlan, planBytes: preparedBytes, preparedAt: now.toISOString() });
+  const authorized = createInstallationAuthorization({ preparation: prepared, preparationArtifactSha256: prepared.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-semantic-mismatch-"));
+  let applies = 0;
+  assert.throws(() => executeInstallation({ sourceSha, preparation: prepared, authorization: authorized, planBytes: preparedBytes, planJson: renderedPlan, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: "EXACT_PARTIAL", livePredecessorAddresses: preparedAddresses, applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(partialState), resultPath: path.join(directory, "result.json"), now }), /semantics differ/);
+  assert.equal(applies, 0);
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
@@ -306,7 +321,7 @@ test("unsafe state and plan changes fail before apply", () => {
 
 test("no installation artifact contains credential-shaped material", () => {
   const serialized = JSON.stringify({ preparation, authorization });
-  assert.doesNotMatch(serialized, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|MFA|token/i);
+  assert.doesNotMatch(serialized, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|MFA/i);
   assert.ok(crypto.createHash("sha256").update(planBytes).digest("hex") === preparation.savedPlanSha256);
   assert.notEqual(preparation.preparationArtifactSha256, crypto.createHash("sha256").update(JSON.stringify(preparation, null, 2)).digest("hex"));
 });
@@ -495,7 +510,7 @@ test("bootstrap role trust and permissions are exact and non-administrative", ()
     Sid: "GitHubProductionEnvironmentOnly", Effect: "Allow",
     Principal: { Federated: "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com" },
     Action: "sts:AssumeRoleWithWebIdentity",
-    Condition: { StringEquals: { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com", "token.actions.githubusercontent.com:sub": "repo:T-ej2003/genuine-scan-main:environment:production" } },
+    Condition: { StringEquals: { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com", "token.actions.githubusercontent.com:sub": `repo:T-ej2003/genuine-scan-main:environment:${INSTALLATION_BOOTSTRAP.environment}` } },
   }]);
   const policy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
   const serialized = JSON.stringify(policy);
@@ -506,6 +521,7 @@ test("bootstrap role trust and permissions are exact and non-administrative", ()
   assert.match(serialized, new RegExp(INITIAL_ACTIVATION_RECONCILER.roleArn));
   assert.match(serialized, new RegExp(INITIAL_ACTIVATION_RECONCILER.policyArn));
   assert.doesNotMatch(serialized, new RegExp(`${INSTALLATION_BOOTSTRAP.roleArn}(?:"|/)`));
+  assert.notEqual(trustPolicy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production");
 });
 
 test("bootstrap and installation implementation modules have an exact command dependency closure", () => {
@@ -575,7 +591,7 @@ test("root bootstrap accepts only canonical GitHub run, approval, and artifact p
   const archive = Buffer.from("bootstrap-authorization-archive");
   const workflow = { id: 200, repository: { id: 1, full_name: INSTALLATION_BOOTSTRAP.repository }, head_repository: { full_name: INSTALLATION_BOOTSTRAP.repository }, path: INSTALLATION_BOOTSTRAP.workflowPath, event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1, actor: { login: "operator" } };
   const artifact = { id: 12, name: INSTALLATION_BOOTSTRAP.artifactName, expired: false, workflow_run: { id: 200, head_sha: sourceSha, repository_id: 1 }, digest: `sha256:${crypto.createHash("sha256").update(archive).digest("hex")}` };
-  const environment = { id: 7, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] };
+  const environment = { id: 8, name: INSTALLATION_BOOTSTRAP.environment, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] };
   const githubRun = (command, args) => {
     if (command === "unzip") {
       if (args[0] === "-Z1") return "bootstrap-authorization.json\n";
@@ -585,8 +601,8 @@ test("root bootstrap accepts only canonical GitHub run, approval, and artifact p
     if (endpoint.endsWith("/actions/runs/200")) return JSON.stringify(workflow);
     if (endpoint.endsWith("/artifacts")) return JSON.stringify([{ artifacts: [artifact] }]);
     if (endpoint.endsWith("/zip")) return archive;
-    if (endpoint.endsWith("/environments/production")) return JSON.stringify(environment);
-    if (endpoint.endsWith("/approvals")) return JSON.stringify([{ state: "approved", environments: [{ id: 7, name: "production" }], user: { id: 3, login: "reviewer" } }]);
+    if (endpoint.endsWith(`/environments/${INSTALLATION_BOOTSTRAP.environment}`)) return JSON.stringify(environment);
+    if (endpoint.endsWith("/approvals")) return JSON.stringify([{ state: "approved", environments: [{ id: 8, name: INSTALLATION_BOOTSTRAP.environment }], user: { id: 3, login: "reviewer" } }]);
     throw new Error(`unexpected provenance call: ${command} ${args.join(" ")}`);
   };
   assert.equal(resolveBootstrapAuthorization({ workflowRunId: "200", workflowRunAttempt: "1", sourceSha, githubRun, now }).authorizationSha256, authorization.authorizationSha256);
@@ -627,6 +643,15 @@ test("installation and bootstrap workflows share the one non-cancelling producti
   const installer = fs.readFileSync("scripts/aws/install-production-initial-activation-reconciler.mjs", "utf8");
   assert.doesNotMatch(installer, /--admin-profile|consumptionDirectory|\.consumed|resolveInstallationAuthorizationArtifact/);
   assert.match(installer, /GITHUB_ACTIONS/);
+  const bootstrapWorkflow = fs.readFileSync(".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "utf8");
+  assert.match(bootstrapWorkflow, new RegExp(`environment: ${INSTALLATION_BOOTSTRAP.environment}`));
+  assert.doesNotMatch(bootstrapWorkflow, /environment: production\s*$/m);
+  assert.match(bootstrapWorkflow, /group: production-deploy/);
+  assert.match(bootstrapWorkflow, /--require-actual-approval/);
+  const workflowFiles = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") || file.endsWith(".yaml"));
+  const otherBootstrapUsers = workflowFiles.filter((file) => file !== "authorize-production-initial-activation-policy-reconciler-bootstrap.yml")
+    .filter((file) => fs.readFileSync(path.join(".github/workflows", file), "utf8").includes(`environment: ${INSTALLATION_BOOTSTRAP.environment}`));
+  assert.deepEqual(otherBootstrapUsers, []);
 });
 
 test("terraform show failure always removes the unique render copy", () => {

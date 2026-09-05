@@ -16,7 +16,7 @@ concurrency:
 jobs:
   authorize-bootstrap:
     runs-on: ubuntu-latest
-    environment: production
+    environment: production-initial-activation-reconciler-bootstrap
     steps:
       - uses: actions/checkout@v6
         with:
@@ -49,7 +49,7 @@ jobs:
           install -d -m 700 "$workdir"
           node scripts/aws/production-github-environment-approval.mjs \
             --output "$workdir/environment-approval.json" \
-            --repository "$GITHUB_REPOSITORY" --environment production \
+            --repository "$GITHUB_REPOSITORY" --environment production-initial-activation-reconciler-bootstrap \
             --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" \
             --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" \
             --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" \

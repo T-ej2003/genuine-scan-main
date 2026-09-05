@@ -3,8 +3,11 @@
 This bounded bridge has depth one. An independently approved local
 `mscqr-production-root` session may create only the exact GitHub OIDC bootstrap
 role and its one exact inline policy. The role then runs the already-reviewed
-InitialActivation reconciler Terraform root inside the protected `production`
-environment and shared `production-deploy` concurrency group.
+InitialActivation reconciler Terraform root inside the dedicated protected
+`production-initial-activation-reconciler-bootstrap` environment and shared
+`production-deploy` concurrency group. This dedicated environment is used only
+by the bootstrap workflow, so its immutable GitHub OIDC subject cannot be
+minted by unrelated production jobs.
 
 The bootstrap role is not an administrator. Its IAM writes are limited to the
 exact reconciler role, exact reconciler managed policy, and their exact
