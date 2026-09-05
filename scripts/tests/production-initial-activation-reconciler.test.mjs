@@ -13,11 +13,12 @@ const installation = JSON.parse(fs.readFileSync(`${root}/installation-contract.j
 const capability = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationPolicyReconciler-capability-v1.json", "utf8"));
 const encoded = (value) => encodeURIComponent(JSON.stringify(value));
 
-const commands = ({ role = {}, policyMetadata = {}, version = policy, encodeRole = true, encodeVersion = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) => {
+const commands = ({ provider = {}, role = {}, policyMetadata = {}, version = policy, encodeRole = true, encodeVersion = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) => {
   const calls = [];
   const run = (args) => {
     calls.push(args);
     if (args[0] === "sts") return JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" });
+    if (args[0] === "iam" && args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"], ...provider });
     if (args[0] === "iam" && args[1] === "get-role") return JSON.stringify({ Role: { Arn: INITIAL_ACTIVATION_RECONCILER.roleArn, MaxSessionDuration: 3600, AssumeRolePolicyDocument: encodeRole ? encoded(trust) : trust, ...role } });
     if (args[0] === "iam" && args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0, ...policyMetadata } });
     if (args[0] === "iam" && args[1] === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: encodeVersion ? encoded(version) : version } });
@@ -77,6 +78,15 @@ test("exact installed topology verifies read-only and fails closed on drift", ()
   assert.equal(exact.calls.some((args) => args[0] === "iam" && ["create-role", "create-policy", "attach-role-policy", "update-assume-role-policy"].includes(args[1])), false);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ attached: [{ PolicyArn: "arn:aws:iam::368992683803:policy/unrelated" }] })), /attachment topology/);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ inline: ["unexpected"] })), /inline policies/);
+});
+
+test("authenticates the exact GitHub OIDC provider and forces JSON AWS output", () => {
+  const exact = commands();
+  verifyInitialActivationPolicyReconciler(exact);
+  assert.ok(exact.calls.every((args) => args.at(-3) === "--output" && args.at(-2) === "json" && args.at(-1) === "--no-cli-pager"));
+  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ provider: { Url: "example.invalid" } })), /OIDC provider/);
+  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ provider: { ClientIDList: [] } })), /OIDC provider/);
+  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ provider: { ClientIDList: ["other.example"] } })), /OIDC provider/);
 });
 
 test("normalizes parsed and encoded AWS documents and authenticates paginated policy topology", () => {

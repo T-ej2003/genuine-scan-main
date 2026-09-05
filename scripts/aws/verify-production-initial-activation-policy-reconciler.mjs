@@ -15,6 +15,7 @@ export const INITIAL_ACTIVATION_RECONCILER = Object.freeze({
   policyArn: "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
   targetPolicyArn: "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
   releaseRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+  oidcProviderArn: "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com",
   trustPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/trust-policy.json",
   permissionsPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
 });
@@ -26,7 +27,7 @@ const decodeAwsDocument = (value, label) => normalizeIamPolicyDocument(value, la
 const exactJson = (actual, expected, label) => {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label} differs from the protected source contract.`);
 };
-const json = (run, args) => JSON.parse(run(args));
+const json = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 
 function readPolicyEntities(run) {
   const roles = [];
@@ -54,6 +55,8 @@ export function verifyInitialActivationPolicyReconciler({ run, expectedCallerArn
   const permissions = readJson(INITIAL_ACTIVATION_RECONCILER.permissionsPath);
   const identity = json(run, ["sts", "get-caller-identity"]);
   if (identity?.Arn !== expectedCallerArn) throw new Error("Initial-activation reconciler verification requires the authorized administrator identity.");
+  const provider = json(run, ["iam", "get-open-id-connect-provider", "--open-id-connect-provider-arn", INITIAL_ACTIVATION_RECONCILER.oidcProviderArn]);
+  if (provider?.Url !== "token.actions.githubusercontent.com" || !Array.isArray(provider.ClientIDList) || !provider.ClientIDList.includes("sts.amazonaws.com")) throw new Error("GitHub Actions OIDC provider URL or audience is not exact.");
   const role = json(run, ["iam", "get-role", "--role-name", INITIAL_ACTIVATION_RECONCILER.roleName]).Role;
   if (role?.Arn !== INITIAL_ACTIVATION_RECONCILER.roleArn || role.MaxSessionDuration !== 3600) throw new Error("Initial-activation reconciler role ARN or session duration is not exact.");
   if (Object.hasOwn(role, "PermissionsBoundary")) throw new Error("Initial-activation reconciler role must not have a permissions boundary.");
