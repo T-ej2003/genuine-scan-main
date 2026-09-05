@@ -137,6 +137,10 @@ export function waitForInitialActivationLifecyclePolicyConvergence({ readLiveSta
       continue;
     }
     if (candidate.releaseRolePolicySetSha256 !== authorization.releaseRolePolicySetSha256 || candidate.targetPolicyEntityBoundarySha256 !== authorization.targetPolicyEntityBoundarySha256) throw new Error("Initial activation lifecycle policy topology changed during convergence.");
+    if (isTransientConvergenceSnapshot(candidate, before, authorization, desired, expectedVersionId)) {
+      if (attempt < CONVERGENCE_ATTEMPTS - 1) sleep(CONVERGENCE_DELAYS[attempt]);
+      continue;
+    }
     if (candidate.status === "AUTHENTICATED_PREDECESSOR") {
       if (candidate.defaultVersionId !== before.defaultVersionId || candidate.policySha256 !== before.policySha256 || candidate.policyVersionCount !== before.policyVersionCount) throw new Error("Initial activation lifecycle policy entered an unexpected predecessor state during convergence.");
     } else {

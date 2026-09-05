@@ -191,8 +191,8 @@ test("IAM convergence retries only the authenticated transient policy-version re
 test("IAM convergence retries authenticated partially converged snapshots", () => {
   const value = authorization(); const before = assertInitialActivationLifecyclePolicyState(state(), { desired }); const sleeps = []; let reads = 0;
   const snapshots = [
-    state({ document: desired.document, policyVersionCount: 2 }),
-    state({ defaultVersionId: "v2", document: predecessor, policyVersionCount: 1 }),
+    state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 1 }),
+    state({ defaultVersionId: "v1", document: predecessor, policyVersionCount: 2 }),
     state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 }),
   ];
   const result = waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => snapshots[reads++], before, authorization: value, desired, expectedVersionId: "v2", sleep: (milliseconds) => sleeps.push(milliseconds) });
