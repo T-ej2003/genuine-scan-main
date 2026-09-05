@@ -23,6 +23,7 @@ const partialPlans = [fixture("partial-role"), fixture("partial-policy"), fixtur
 const allAddresses = [...INSTALLATION.expectedAddresses].sort();
 const planBytes = Buffer.from("exact-saved-plan");
 const state = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 0, lineage: "first-install-lineage", outputs: {}, resources: [] });
+const emptyTerraformState = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 0, lineage: "", outputs: {}, resources: [], check_results: null });
 const installedState = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 1, lineage: "first-install-lineage", outputs: {}, resources: [
   { mode: "managed", type: "aws_iam_role", name: "reconciler", instances: [{}] },
   { mode: "managed", type: "aws_iam_policy", name: "reconciler", instances: [{}] },
@@ -312,11 +313,38 @@ test("ambiguous apply never retries when read-only verification fails", () => {
 
 test("unsafe state and plan changes fail before apply", () => {
   assert.deepEqual(stateIdentity(undefined), { stateExists: false });
+  assert.deepEqual(stateIdentity(Buffer.from(emptyTerraformState)), { stateExists: false });
+  assert.throws(() => stateIdentity(Buffer.from(JSON.stringify({ ...JSON.parse(emptyTerraformState), resources: [{ mode: "managed" }] }))), /state identity/);
+  assert.throws(() => stateIdentity(Buffer.from(JSON.stringify({ ...JSON.parse(state), lineage: "" }))), /state identity/);
+  assert.throws(() => stateIdentity(Buffer.from(JSON.stringify({ ...JSON.parse(state), serial: undefined }))), /state identity/);
   assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "UNEXPECTED", livePredecessorAddresses: [], planJson: plan, planBytes }), /Unexpected|classification/);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-fail-"));
   let applies = 0;
   assert.throws(() => executeInstallation({ sourceSha, preparation, authorization, planBytes: Buffer.from("changed"), planJson: plan, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: "ABSENT", livePredecessorAddresses: [], applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, resultPath: path.join(directory, "result.json"), now }), /saved plan/);
   assert.equal(applies, 0);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("first-install preparation normalizes Terraform's canonical empty state sentinel", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-empty-state-"));
+  fs.chmodSync(directory, 0o700);
+  const terraformDataDir = path.join(directory, "terraform");
+  const outputPath = path.join(directory, "preparation.json");
+  const backendMetadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8"));
+  backendMetadata.backend.config.key = INSTALLATION.backend.key;
+  const exec = (command, args) => {
+    if (command === "git") return args[0] === "status" ? "" : sourceSha;
+    if (args.includes("init")) { fs.mkdirSync(terraformDataDir, { recursive: true, mode: 0o700 }); fs.writeFileSync(path.join(terraformDataDir, "terraform.tfstate"), JSON.stringify(backendMetadata), { mode: 0o600 }); return ""; }
+    if (args.includes("workspace")) return "default\n";
+    if (args.includes("state") && args.includes("pull")) return emptyTerraformState;
+    if (args.includes("plan")) { fs.writeFileSync(args[args.indexOf("-out") + 1], planBytes, { mode: 0o600 }); return ""; }
+    if (args.includes("show")) return JSON.stringify(plan);
+    throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
+  };
+  const prepared = runPrepareCli(["--prepare", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--output", outputPath, "--terraform-data-dir", terraformDataDir, "--state-absent"], { exec, run: discoveryRun({ role: false, policy: false }) });
+  assert.equal(prepared.predecessorState.stateExists, false);
+  assert.equal(Object.hasOwn(prepared.predecessorState, "lineage"), false);
+  assert.equal(Object.hasOwn(prepared.predecessorState, "serial"), false);
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
