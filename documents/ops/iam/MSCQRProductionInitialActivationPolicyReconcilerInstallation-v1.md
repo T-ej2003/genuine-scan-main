@@ -17,6 +17,14 @@ existing `mscqr-production-root` administrator profile, and then requires the
 canonical read-only verifier to pass. Ambiguous apply outcomes are never
 retried blindly; exact-complete replay performs zero apply.
 
+The plan validator is regression-tested with Terraform 1.15.8 and the locked
+AWS provider using local-only, refresh-disabled plans for absent, all three safe
+partial, and exact-complete states. Every plan must contain the three reviewed
+resources; `create` is actionable, while `no-op` is still fully authenticated
+but counts as zero mutation. Role and policy paths, descriptions, tags, trust,
+permissions, session duration, permissions-boundary absence, provider identity,
+and the attachment's exact configuration references are source-bound.
+
 This contract does not install the live role in source development, grant the
 runtime role self-installation capability, mutate the InitialActivationLifecycle
 target policy, reopen Stage A, or change PR #448.

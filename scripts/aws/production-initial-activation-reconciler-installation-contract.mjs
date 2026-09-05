@@ -54,6 +54,11 @@ const policyValue = (value, label) => {
     return parsed;
   } catch { throw new Error(`${label} is not a valid IAM policy document.`); }
 };
+const EXPECTED_TAGS = Object.freeze({ ManagedBy: "Terraform", Environment: "production", Component: "initial-activation-policy-reconciliation", Stack: "production-initial-activation-policy-reconciler" });
+const ROLE_NAME = "mscqr-production-initial-activation-policy-reconciler";
+const POLICY_NAME = "MSCQRProductionInitialActivationPolicyReconciler";
+const ROLE_DESCRIPTION = "GitHub OIDC-only writer for the exact InitialActivationLifecycle policy reconciliation.";
+const POLICY_DESCRIPTION = "Exact readback and CreatePolicyVersion capability for InitialActivationLifecycle reconciliation.";
 
 const INITIALIZED_BACKEND_REQUIRED_KEYS = Object.freeze(["bucket", "key", "region", "encrypt", "use_lockfile"]);
 const INITIALIZED_BACKEND_OPTIONAL_KEYS = Object.freeze([
@@ -80,33 +85,40 @@ export function classifyInstallationStatePullError(error) {
   throw error;
 }
 
-export function assertInstallationPlan(plan, { expectedAddresses = INSTALLATION.expectedAddresses } = {}) {
+export function assertInstallationPlan(plan) {
   if (!plan || typeof plan !== "object" || !Array.isArray(plan.resource_changes)) throw new Error("Installation Terraform plan JSON is malformed.");
   const configuration = plan.configuration?.root_module?.resources;
   if (!Array.isArray(configuration)) throw new Error("Installation Terraform plan configuration is malformed.");
   const configuredAttachment = configuration.filter((resource) => resource?.address === "aws_iam_role_policy_attachment.reconciler");
-  if (configuredAttachment.length !== 1 || configuredAttachment[0]?.mode !== "managed" || configuredAttachment[0]?.type !== "aws_iam_role_policy_attachment" || JSON.stringify(configuredAttachment[0]?.expressions?.role?.references) !== JSON.stringify(["aws_iam_role.reconciler.name"]) || JSON.stringify(configuredAttachment[0]?.expressions?.policy_arn?.references) !== JSON.stringify(["aws_iam_policy.reconciler.arn"])) throw new Error("Installation plan attachment configuration reference is not exact.");
+  if (configuredAttachment.length !== 1 || configuredAttachment[0]?.mode !== "managed" || configuredAttachment[0]?.type !== "aws_iam_role_policy_attachment" || JSON.stringify(configuredAttachment[0]?.expressions?.role?.references) !== JSON.stringify(["aws_iam_role.reconciler.name", "aws_iam_role.reconciler"]) || JSON.stringify(configuredAttachment[0]?.expressions?.policy_arn?.references) !== JSON.stringify(["aws_iam_policy.reconciler.arn", "aws_iam_policy.reconciler"])) throw new Error("Installation plan attachment configuration reference is not exact.");
   const changes = plan.resource_changes;
-  if (changes.length > expectedAddresses.length) throw new Error("Installation plan resource count is not exact.");
+  if (changes.length !== INSTALLATION.expectedAddresses.length) throw new Error("Installation plan resource count is not exact.");
   const addresses = changes.map((entry) => entry?.address);
-  if (new Set(addresses).size !== addresses.length || addresses.some((address) => !expectedAddresses.includes(address))) throw new Error("Installation plan contains an unreviewed or duplicate resource address.");
+  if (new Set(addresses).size !== addresses.length || addresses.some((address) => !INSTALLATION.expectedAddresses.includes(address)) || INSTALLATION.expectedAddresses.some((address) => !addresses.includes(address))) throw new Error("Installation plan contains an unreviewed, missing, or duplicate resource address.");
+  const policyCreated = JSON.stringify(changes.find((entry) => entry?.address === "aws_iam_policy.reconciler")?.change?.actions) === JSON.stringify(["create"]);
+  const createdAddresses = [];
+  let noOpCount = 0;
   for (const entry of changes) {
-    if (entry.mode !== "managed" || !Array.isArray(entry.change?.actions) || JSON.stringify(entry.change.actions) !== JSON.stringify(["create"])) throw new Error("Installation plan contains an unreviewed resource action.");
-    if (!["aws_iam_role", "aws_iam_policy", "aws_iam_role_policy_attachment"].includes(entry.type)) throw new Error("Installation plan contains an unreviewed resource type.");
-    if (entry.change.before !== null) throw new Error("Installation plan is not bound to the absent predecessor.");
+    const action = JSON.stringify(entry.change?.actions);
+    if (entry.mode !== "managed" || ![JSON.stringify(["create"]), JSON.stringify(["no-op"])].includes(action)) throw new Error("Installation plan contains an unreviewed resource action.");
+    const expectedType = entry.address === "aws_iam_role.reconciler" ? "aws_iam_role" : entry.address === "aws_iam_policy.reconciler" ? "aws_iam_policy" : "aws_iam_role_policy_attachment";
+    if (entry.type !== expectedType || entry.name !== "reconciler" || entry.provider_name !== "registry.terraform.io/hashicorp/aws") throw new Error("Installation plan resource identity is not exact.");
+    const create = action === JSON.stringify(["create"]);
+    if (create ? entry.change.before !== null : canonicalJson(entry.change.before) !== canonicalJson(entry.change.after)) throw new Error("Installation plan action predecessor is not exact.");
+    if (create) createdAddresses.push(entry.address); else noOpCount += 1;
     const after = entry.change.after;
     if (!after || typeof after !== "object" || Array.isArray(after)) throw new Error("Installation plan resource values are missing.");
     if (entry.address === "aws_iam_role.reconciler") {
-      if (after.name !== "mscqr-production-initial-activation-policy-reconciler" || after.max_session_duration !== 3600 || Object.hasOwn(after, "permissions_boundary") && after.permissions_boundary !== null || canonicalJson(policyValue(after.assume_role_policy, "Installation plan trust policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/trust-policy.json`))) throw new Error("Installation plan role contract is not exact.");
+      if (after.name !== ROLE_NAME || after.path !== "/" || after.description !== ROLE_DESCRIPTION || after.force_detach_policies !== false || after.max_session_duration !== 3600 || after.permissions_boundary !== null || canonicalJson(after.tags) !== canonicalJson(EXPECTED_TAGS) || canonicalJson(after.tags_all) !== canonicalJson(EXPECTED_TAGS) || canonicalJson(policyValue(after.assume_role_policy, "Installation plan trust policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/trust-policy.json`)) || !create && after.arn !== INSTALLATION.roleArn) throw new Error("Installation plan role contract is not exact.");
     } else if (entry.address === "aws_iam_policy.reconciler") {
-      if (after.name !== "MSCQRProductionInitialActivationPolicyReconciler" || canonicalJson(policyValue(after.policy, "Installation plan permissions policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`))) throw new Error("Installation plan policy contract is not exact.");
+      if (after.name !== POLICY_NAME || after.path !== "/" || after.description !== POLICY_DESCRIPTION || after.delay_after_policy_creation_in_ms !== null || canonicalJson(after.tags) !== canonicalJson(EXPECTED_TAGS) || canonicalJson(after.tags_all) !== canonicalJson(EXPECTED_TAGS) || canonicalJson(policyValue(after.policy, "Installation plan permissions policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`)) || !create && after.arn !== INSTALLATION.policyArn) throw new Error("Installation plan policy contract is not exact.");
     } else if (entry.address === "aws_iam_role_policy_attachment.reconciler") {
-      const policyArnKnown = after.policy_arn === INSTALLATION.policyArn && (entry.change.after_unknown?.policy_arn === undefined || entry.change.after_unknown?.policy_arn === false || entry.change.after_unknown?.policy_arn === null);
-      const policyArnComputed = after.policy_arn === null && entry.change.after_unknown?.policy_arn === true;
-      if (after.role !== "mscqr-production-initial-activation-policy-reconciler" || !Object.hasOwn(after, "policy_arn") || !(policyArnKnown || policyArnComputed)) throw new Error("Installation plan attachment contract is not exact.");
+      const policyArnKnown = !policyCreated && after.policy_arn === INSTALLATION.policyArn && entry.change.after_unknown?.policy_arn === undefined;
+      const policyArnComputed = policyCreated && !Object.hasOwn(after, "policy_arn") && entry.change.after_unknown?.policy_arn === true;
+      if (after.role !== ROLE_NAME || !(policyArnKnown || policyArnComputed)) throw new Error("Installation plan attachment contract is not exact.");
     }
   }
-  return Object.freeze({ resourceChangeCount: changes.length, createCount: changes.length, updateCount: 0, deleteCount: 0, replaceCount: 0, changedAddresses: [...addresses].sort() });
+  return Object.freeze({ plannedResourceCount: changes.length, resourceChangeCount: createdAddresses.length, actionableResourceChangeCount: createdAddresses.length, createCount: createdAddresses.length, noOpCount, updateCount: 0, deleteCount: 0, replaceCount: 0, changedAddresses: createdAddresses.sort() });
 }
 
 export function stateIdentity(rawBytes) {
@@ -144,7 +156,9 @@ export function createInstallationPreparation({ sourceSha, state, livePredecesso
   if (!["ABSENT", "EXACT_PARTIAL", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor classification is invalid.");
   if (livePredecessor === "UNEXPECTED") throw new Error("Unexpected installation predecessor must fail closed.");
   const semantics = assertInstallationPlan(planJson);
-  if (livePredecessor === "ABSENT" && semantics.resourceChangeCount !== INSTALLATION.expectedAddresses.length || livePredecessor === "EXACT_PARTIAL" && semantics.resourceChangeCount < 1) throw new Error("Installation plan does not match the authenticated live predecessor.");
+  if (livePredecessor === "ABSENT" && (semantics.createCount !== INSTALLATION.expectedAddresses.length || semantics.noOpCount !== 0)
+    || livePredecessor === "EXACT_PARTIAL" && (semantics.createCount < 1 || semantics.createCount >= INSTALLATION.expectedAddresses.length || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - semantics.createCount)
+    || livePredecessor === "EXACT_COMPLETE" && (semantics.createCount !== 0 || semantics.noOpCount !== INSTALLATION.expectedAddresses.length)) throw new Error("Installation plan does not match the authenticated live predecessor.");
   if (!Buffer.isBuffer(planBytes) || planBytes.length < 1) throw new Error("Saved Terraform plan bytes are required.");
   const body = {
     schemaVersion: INSTALLATION.schemaVersion, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_PREPARATION", operation: INSTALLATION.operation,
@@ -165,7 +179,16 @@ export function assertInstallationPreparation(value, { sourceSha, planBytes } = 
   if (JSON.stringify(value.backend) !== JSON.stringify(INSTALLATION.backend) || JSON.stringify(value.sourceContractHashes) !== JSON.stringify(sourceHashes()) || JSON.stringify(value.maxAwsMutations) !== JSON.stringify(INSTALLATION.maxAwsMutations) || value.administratorArn !== INSTALLATION.administratorArn || value.roleArn !== INSTALLATION.roleArn || value.policyArn !== INSTALLATION.policyArn || value.livePredecessor === "UNEXPECTED" || !SHA256.test(value.savedPlanSha256 || "") || !Number.isSafeInteger(value.savedPlanByteLength) || value.savedPlanByteLength < 1 || !SHA40.test(value.sourceSha || "") || !value.predecessorState || typeof value.predecessorState.stateExists !== "boolean" || value.predecessorState.stateExists && (!SHA256.test(value.predecessorState.stateSha256 || "") || !Number.isSafeInteger(value.predecessorState.serial) || typeof value.predecessorState.lineage !== "string") || !value.predecessorState.stateExists && Object.keys(value.predecessorState).length !== 1) throw new Error("Installation preparation binding is invalid.");
   if (planBytes !== undefined && (sha256(planBytes) !== value.savedPlanSha256 || planBytes.length !== value.savedPlanByteLength)) throw new Error("Installation saved plan bytes changed after preparation.");
   if (value.livePredecessor === "EXACT_PARTIAL" && !value.predecessorState.stateExists) throw new Error("Partial installation requires an authenticated Terraform state predecessor.");
-  if (!value.planSemantics || !Array.isArray(value.planSemantics.changedAddresses) || !Number.isSafeInteger(value.planSemantics.resourceChangeCount) || value.planSemantics.resourceChangeCount < 0 || value.planSemantics.resourceChangeCount > INSTALLATION.expectedAddresses.length || value.planSemantics.createCount !== value.planSemantics.resourceChangeCount || value.planSemantics.updateCount !== 0 || value.planSemantics.deleteCount !== 0 || value.planSemantics.replaceCount !== 0 || JSON.stringify(value.planSemantics.changedAddresses) !== JSON.stringify([...value.planSemantics.changedAddresses].sort()) || value.planSemantics.changedAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address)) || value.livePredecessor === "ABSENT" && value.planSemantics.resourceChangeCount !== INSTALLATION.expectedAddresses.length || value.livePredecessor === "EXACT_PARTIAL" && value.planSemantics.resourceChangeCount < 1 || value.livePredecessor === "EXACT_COMPLETE" && value.planSemantics.resourceChangeCount !== 0) throw new Error("Installation preparation plan semantics are not exact.");
+  if (!value.planSemantics || !Array.isArray(value.planSemantics.changedAddresses)
+    || value.planSemantics.plannedResourceCount !== INSTALLATION.expectedAddresses.length
+    || !Number.isSafeInteger(value.planSemantics.resourceChangeCount) || value.planSemantics.resourceChangeCount < 0 || value.planSemantics.resourceChangeCount > INSTALLATION.expectedAddresses.length
+    || value.planSemantics.actionableResourceChangeCount !== value.planSemantics.resourceChangeCount || value.planSemantics.createCount !== value.planSemantics.resourceChangeCount
+    || value.planSemantics.noOpCount !== INSTALLATION.expectedAddresses.length - value.planSemantics.createCount
+    || value.planSemantics.updateCount !== 0 || value.planSemantics.deleteCount !== 0 || value.planSemantics.replaceCount !== 0
+    || value.planSemantics.changedAddresses.length !== value.planSemantics.createCount || JSON.stringify(value.planSemantics.changedAddresses) !== JSON.stringify([...value.planSemantics.changedAddresses].sort()) || value.planSemantics.changedAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address))
+    || value.livePredecessor === "ABSENT" && value.planSemantics.createCount !== INSTALLATION.expectedAddresses.length
+    || value.livePredecessor === "EXACT_PARTIAL" && (value.planSemantics.createCount < 1 || value.planSemantics.createCount >= INSTALLATION.expectedAddresses.length)
+    || value.livePredecessor === "EXACT_COMPLETE" && value.planSemantics.createCount !== 0) throw new Error("Installation preparation plan semantics are not exact.");
   return value;
 }
 

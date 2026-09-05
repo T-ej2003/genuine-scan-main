@@ -15,16 +15,9 @@ const now = new Date("2026-09-05T12:00:00.000Z");
 const trust = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/trust-policy.json", "utf8");
 const permissions = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json", "utf8");
 const capability = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationPolicyReconcilerInstallation-v1.json", "utf8"));
-const planConfiguration = { root_module: { resources: [
-  { address: "aws_iam_role.reconciler", mode: "managed", type: "aws_iam_role", expressions: {} },
-  { address: "aws_iam_policy.reconciler", mode: "managed", type: "aws_iam_policy", expressions: {} },
-  { address: "aws_iam_role_policy_attachment.reconciler", mode: "managed", type: "aws_iam_role_policy_attachment", expressions: { role: { references: ["aws_iam_role.reconciler.name"] }, policy_arn: { references: ["aws_iam_policy.reconciler.arn"] } } },
-] } };
-const plan = { configuration: planConfiguration, resource_changes: [
-  { address: "aws_iam_role.reconciler", mode: "managed", type: "aws_iam_role", change: { actions: ["create"], before: null, after: { name: "mscqr-production-initial-activation-policy-reconciler", max_session_duration: 3600, assume_role_policy: trust } } },
-  { address: "aws_iam_policy.reconciler", mode: "managed", type: "aws_iam_policy", change: { actions: ["create"], before: null, after: { name: "MSCQRProductionInitialActivationPolicyReconciler", policy: permissions } } },
-  { address: "aws_iam_role_policy_attachment.reconciler", mode: "managed", type: "aws_iam_role_policy_attachment", change: { actions: ["create"], before: null, after: { role: "mscqr-production-initial-activation-policy-reconciler", policy_arn: null }, after_unknown: { policy_arn: true } } },
-] };
+const fixture = (name) => JSON.parse(fs.readFileSync(`scripts/tests/fixtures/production-initial-activation-reconciler-plan-${name}.json`, "utf8"));
+const plan = fixture("absent");
+const partialPlans = [fixture("partial-role"), fixture("partial-policy"), fixture("partial-unattached")];
 const planBytes = Buffer.from("exact-saved-plan");
 const state = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 0, lineage: "first-install-lineage", outputs: {}, resources: [] });
 const installedState = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 1, lineage: "first-install-lineage", outputs: {}, resources: [
@@ -39,7 +32,7 @@ const approval = createProductionEnvironmentApprovalEvidence({
 });
 const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "ABSENT", planJson: plan, planBytes, preparedAt: now.toISOString() });
 const authorization = createInstallationAuthorization({ preparation, preparationArtifactSha256: preparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
-const completePlan = { configuration: planConfiguration, resource_changes: [] };
+const completePlan = fixture("complete");
 const completePlanBytes = Buffer.from("exact-saved-noop-plan");
 const completePreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(installedState)), livePredecessor: "EXACT_COMPLETE", planJson: completePlan, planBytes: completePlanBytes, preparedAt: now.toISOString() });
 const completeAuthorization = createInstallationAuthorization({ preparation: completePreparation, preparationArtifactSha256: completePreparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
@@ -83,16 +76,20 @@ const githubAuthorizationRunner = ({ artifactBody = authorization, mutateWorkflo
 test("first-install preparation binds absent state and exact plan addresses", () => {
   assert.equal(preparation.predecessorState.stateExists, false);
   assert.equal(preparation.planSemantics.resourceChangeCount, 3);
+  assert.equal(preparation.planSemantics.noOpCount, 0);
   assert.doesNotThrow(() => assertInstallationPreparation(preparation, { sourceSha, planBytes }));
   assert.throws(() => assertInstallationPlan({ ...plan, resource_changes: [...plan.resource_changes, { address: "aws_s3_bucket.unrelated", mode: "managed", type: "aws_s3_bucket", change: { actions: ["create"], before: null } }] }), /resource count|unreviewed/);
 });
 
-test("exact partial installation accepts only the remaining reviewed creates", () => {
-  const partial = { configuration: planConfiguration, resource_changes: [plan.resource_changes[1], plan.resource_changes[2]] };
-  assert.equal(assertInstallationPlan(partial).resourceChangeCount, 2);
-  const partialPreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(state)), livePredecessor: "EXACT_PARTIAL", planJson: partial, planBytes, preparedAt: now.toISOString() });
-  assert.doesNotThrow(() => assertInstallationPreparation(partialPreparation, { sourceSha, planBytes }));
-  assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "EXACT_PARTIAL", planJson: partial, planBytes, preparedAt: now.toISOString() }), /state predecessor/);
+test("real exact-partial plans count only creates across every safe topology", () => {
+  for (const partial of partialPlans) {
+    const semantics = assertInstallationPlan(partial);
+    assert.ok(semantics.createCount === 1 || semantics.createCount === 2);
+    assert.equal(semantics.noOpCount, 3 - semantics.createCount);
+    const partialPreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(state)), livePredecessor: "EXACT_PARTIAL", planJson: partial, planBytes, preparedAt: now.toISOString() });
+    assert.doesNotThrow(() => assertInstallationPreparation(partialPreparation, { sourceSha, planBytes }));
+    assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "EXACT_PARTIAL", planJson: partial, planBytes, preparedAt: now.toISOString() }), /state predecessor/);
+  }
 });
 
 test("discovery reaches exact-complete only through the canonical verifier topology", () => {
@@ -191,12 +188,59 @@ test("realistic absent first install reaches only the mocked exact saved-plan ap
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
+test("real exact-partial plans traverse preparation, authorization, state CAS, and one intercepted apply", () => {
+  const allStateResources = JSON.parse(installedState).resources;
+  for (const [index, partialPlan] of partialPlans.entries()) {
+    const noOpAddresses = partialPlan.resource_changes.filter((entry) => entry.change.actions[0] === "no-op").map((entry) => entry.address);
+    const partialState = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: index + 1, lineage: "partial-lineage", outputs: {}, resources: allStateResources.filter((resource) => noOpAddresses.includes(`${resource.type}.${resource.name}`)) });
+    const partialPlanBytes = Buffer.from(`exact-partial-plan-${index}`);
+    const partialPreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(partialState)), livePredecessor: "EXACT_PARTIAL", planJson: partialPlan, planBytes: partialPlanBytes, preparedAt: now.toISOString() });
+    const partialAuthorization = createInstallationAuthorization({ preparation: partialPreparation, preparationArtifactSha256: partialPreparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-partial-"));
+    let applies = 0;
+    let reads = 0;
+    const result = executeInstallation({ sourceSha, preparation: partialPreparation, authorization: partialAuthorization, planBytes: partialPlanBytes, planJson: partialPlan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "EXACT_PARTIAL", applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(reads++ === 0 ? partialState : installedState), resultPath: path.join(directory, "result.json"), consumptionDirectory: path.join(directory, "consumptions"), now });
+    assert.equal(applies, 1);
+    assert.equal(result.applyCount, 1);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("exact-complete replay performs zero apply", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-replay-"));
   let applies = 0;
   const result = executeInstallation({ sourceSha, preparation: completePreparation, authorization: completeAuthorization, planBytes: completePlanBytes, planJson: completePlan, administratorArn: INSTALLATION.administratorArn, livePredecessor: "EXACT_COMPLETE", applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(installedState), resultPath: path.join(directory, "result.json"), now });
   assert.equal(applies, 0);
   assert.equal(result.applyCount, 0);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("real exact-complete plan traverses the CLI contract and performs zero apply", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-complete-cli-"));
+  const terraformDataDir = path.join(directory, "terraform");
+  fs.mkdirSync(terraformDataDir, { mode: 0o700 });
+  const metadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8"));
+  metadata.backend.config.key = INSTALLATION.backend.key;
+  fs.writeFileSync(path.join(terraformDataDir, "terraform.tfstate"), JSON.stringify(metadata), { mode: 0o600 });
+  const planPath = path.join(directory, "complete.tfplan");
+  const preparationPath = path.join(directory, "preparation.json");
+  const resultPath = path.join(directory, "result.json");
+  fs.writeFileSync(planPath, completePlanBytes, { mode: 0o600 });
+  const preparationBytes = Buffer.from(`${JSON.stringify(completePreparation, null, 2)}\n`);
+  fs.writeFileSync(preparationPath, preparationBytes, { mode: 0o600 });
+  let applies = 0;
+  const exec = (command, args) => {
+    if (command === "git") return args[0] === "status" ? "" : sourceSha;
+    if (args.includes("workspace")) return "default\n";
+    if (args.includes("show")) return JSON.stringify(completePlan);
+    if (args.includes("state") && args.includes("pull")) return installedState;
+    if (args.includes("apply")) { applies += 1; throw new Error("complete replay must not apply"); }
+    throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
+  };
+  const run = (args) => args[0] === "sts" ? JSON.stringify({ Arn: INSTALLATION.administratorArn }) : discoveryRun()(args);
+  const result = runInstallCli(["--execute", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--preparation", preparationPath, "--preparation-file-sha256", crypto.createHash("sha256").update(preparationBytes).digest("hex"), "--authorization-workflow-run-id", "100", "--authorization-workflow-run-attempt", "1", "--plan", planPath, "--result", resultPath, "--terraform-data-dir", terraformDataDir], { exec, run, githubRun: githubAuthorizationRunner({ artifactBody: completeAuthorization }), now });
+  assert.equal(result.applyCount, 0);
+  assert.equal(applies, 0);
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
@@ -280,11 +324,59 @@ test("first-install attachment permits only its exact computed policy reference"
   assert.throws(() => assertInstallationPlan(wrongReference), /configuration reference/);
   const literal = structuredClone(plan);
   literal.resource_changes[2].change.after.policy_arn = INSTALLATION.policyArn;
-  literal.resource_changes[2].change.after_unknown = { policy_arn: false };
-  assert.doesNotThrow(() => assertInstallationPlan(literal));
+  delete literal.resource_changes[2].change.after_unknown.policy_arn;
+  assert.throws(() => assertInstallationPlan(literal), /attachment contract/);
+  assert.doesNotThrow(() => assertInstallationPlan(completePlan));
   const wrongRole = structuredClone(plan);
   wrongRole.resource_changes[2].change.after.role = "other";
   assert.throws(() => assertInstallationPlan(wrongRole), /attachment contract/);
+});
+
+test("real no-op plan authenticates all resources while counting zero mutation", () => {
+  const semantics = assertInstallationPlan(completePlan);
+  assert.equal(semantics.plannedResourceCount, 3);
+  assert.equal(semantics.noOpCount, 3);
+  assert.equal(semantics.actionableResourceChangeCount, 0);
+  assert.deepEqual(semantics.changedAddresses, []);
+  assert.doesNotThrow(() => assertInstallationPreparation(completePreparation, { sourceSha, planBytes: completePlanBytes }));
+});
+
+test("IAM paths and every security-relevant desired value are exact for create and no-op", () => {
+  for (const canonicalPlan of [plan, ...partialPlans, completePlan]) {
+    assert.doesNotThrow(() => assertInstallationPlan(canonicalPlan));
+    for (const [address, field, value] of [
+      ["aws_iam_role.reconciler", "name", "wrong"],
+      ["aws_iam_role.reconciler", "path", "/evil/"],
+      ["aws_iam_role.reconciler", "description", "wrong"],
+      ["aws_iam_role.reconciler", "force_detach_policies", true],
+      ["aws_iam_role.reconciler", "max_session_duration", 7200],
+      ["aws_iam_role.reconciler", "permissions_boundary", "arn:aws:iam::368992683803:policy/other"],
+      ["aws_iam_role.reconciler", "assume_role_policy", "{}"],
+      ["aws_iam_role.reconciler", "tags", {}],
+      ["aws_iam_policy.reconciler", "name", "wrong"],
+      ["aws_iam_policy.reconciler", "path", "/evil/"],
+      ["aws_iam_policy.reconciler", "description", "wrong"],
+      ["aws_iam_policy.reconciler", "delay_after_policy_creation_in_ms", 1],
+      ["aws_iam_policy.reconciler", "policy", "{}"],
+      ["aws_iam_policy.reconciler", "tags", {}],
+    ]) {
+      const changed = structuredClone(canonicalPlan);
+      const resource = changed.resource_changes.find((entry) => entry.address === address);
+      resource.change.after[field] = value;
+      assert.throws(() => assertInstallationPlan(changed), /predecessor|contract/);
+    }
+  }
+});
+
+test("updates, deletes, replacements, reads, and unexpected no-ops fail closed", () => {
+  for (const actions of [["update"], ["delete"], ["delete", "create"], ["create", "delete"], ["read"]]) {
+    const changed = structuredClone(completePlan);
+    changed.resource_changes[0].change.actions = actions;
+    assert.throws(() => assertInstallationPlan(changed), /resource action/);
+  }
+  const unexpected = structuredClone(completePlan);
+  unexpected.resource_changes[0].address = "aws_iam_policy.other";
+  assert.throws(() => assertInstallationPlan(unexpected), /unreviewed|missing/);
 });
 
 test("production apply uses native Terraform state locking", () => {
