@@ -1,5 +1,7 @@
 # Production initial-activation lifecycle policy reconciliation
 
+IAM `ServiceFailure` is included in the exact post-mutation transient read-error allowlist. HTTP status 500 alone does not authorize retry; pre-mutation failures remain immediate failures.
+
 Post-mutation readback uses at most six snapshots. Exact AWS throttling and service-availability error codes from any snapshot read consume that existing retry budget, as does the reviewed policy-version propagation condition. Authorization, CAS, malformed responses, and unexpected topology remain fail-closed. Readback retries never repeat `CreatePolicyVersion`.
 
 `PRODUCTION_INITIAL_ACTIVATION_LIFECYCLE_POLICY_RECONCILIATION` is a one-target governed repair for `arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle`.

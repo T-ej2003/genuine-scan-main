@@ -103,7 +103,7 @@ const isTransientPolicyVersionRead = (error) => error?.code === INITIAL_ACTIVATI
 
 const isTransientConvergenceRead = (error) => {
   if (isTransientPolicyVersionRead(error)) return true;
-  const retryable = /^(Throttling|ThrottlingException|TooManyRequestsException|RequestLimitExceeded|ServiceUnavailable|ServiceUnavailableException|InternalFailure|InternalError)$/;
+  const retryable = /^(Throttling|ThrottlingException|TooManyRequestsException|RequestLimitExceeded|ServiceUnavailable|ServiceUnavailableException|ServiceFailure|InternalFailure|InternalError)$/;
   // AWS CLI wraps the service code in a diagnostic; never match arbitrary message substrings.
   const diagnostic = String(error?.stderr || error?.message || "").match(/(?:^|\n)An error occurred \((\w+)\) when calling the (GetPolicy|GetPolicyVersion|ListPolicyVersions|GetRole|ListAttachedRolePolicies|ListEntitiesForPolicy) operation(?: \(reached max retries: \d+\))?:/);
   return retryable.test(error?.code || error?.name || "") || Boolean(diagnostic && retryable.test(diagnostic[1]));

@@ -74,19 +74,24 @@ test("policy-centric entity discovery consumes every page and fails closed on in
   assert.equal(assertInitialActivationLifecyclePolicyState(readInitialActivationLifecyclePolicyLiveState(run), { desired }).status, "AUTHENTICATED_PREDECESSOR");
   const incomplete = (args) => args[1] === "list-entities-for-policy" ? JSON.stringify({ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: true }) : run(args);
   assert.throws(() => readInitialActivationLifecyclePolicyLiveState(incomplete), /incomplete/);
-  for (const failures of [["get-policy"], ["get-policy-version"], ["list-policy-versions"], ["get-role"], ["list-attached-role-policies"], ["list-entities-for-policy"], ["get-policy", "get-role", "list-entities-for-policy"]]) {
+  for (const code of ["ServiceUnavailable", "ServiceFailure"]) for (const failures of [["get-policy"], ["get-policy-version"], ["list-policy-versions"], ["get-role"], ["list-attached-role-policies"], ["list-entities-for-policy"], ["get-policy", "get-role", "list-entities-for-policy"], Array(6).fill("get-policy")]) {
     let creates = 0; let retries = 0;
     const pending = [...failures];
-    const result = executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { retries += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; }, readLiveState: () => readInitialActivationLifecyclePolicyLiveState((args) => {
-      if (creates && args[1] === pending[0]) { pending.shift(); throw Object.assign(new Error("service unavailable"), { code: "ServiceUnavailable" }); }
+    const execute = () => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { retries += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; }, readLiveState: () => readInitialActivationLifecyclePolicyLiveState((args) => {
+      if (creates && args[1] === pending[0]) { pending.shift(); throw Object.assign(new Error("service failure"), { code }); }
       const response = JSON.parse(run(args));
       if (creates && args[1] === "get-policy") response.Policy.DefaultVersionId = "v2";
       if (creates && args[1] === "get-policy-version") response.PolicyVersion.Document = desired.document;
       if (creates && args[1] === "list-policy-versions") response.Versions.push({ VersionId: "v2" });
       return JSON.stringify(response);
     }) });
-    assert.equal(result.status, "RECONCILED"); assert.equal(creates, 1); assert.equal(retries, failures.length);
+    if (failures.length === 6) assert.throws(execute, /did not converge/);
+    else assert.equal(execute().status, "RECONCILED");
+    assert.equal(creates, 1); assert.equal(retries, Math.min(failures.length, 5));
   }
+  let preMutationCreates = 0;
+  assert.throws(() => executeCore({ authorization: authorization(), sourceSha, desired, readLiveState: () => readInitialActivationLifecyclePolicyLiveState(() => { throw Object.assign(new Error("service failure"), { code: "ServiceFailure" }); }), createPolicyVersion: () => { preMutationCreates += 1; }, sleep: () => assert.fail("pre-mutation retry") }));
+  assert.equal(preMutationCreates, 0);
 });
 
 test("approval freshness uses a fresh write-boundary clock after live reads", () => {
@@ -224,10 +229,10 @@ test("transient IAM read failures exhaust the bounded convergence window without
 
 test("all snapshot operations retry only recognized read errors after one mutation", () => {
   const operations = ["GetPolicy", "GetPolicyVersion", "ListPolicyVersions", "GetRole", "ListAttachedRolePolicies", "ListEntitiesForPolicy"];
-  for (const code of ["Throttling", "ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded", "ServiceUnavailable", "ServiceUnavailableException", "InternalFailure", "InternalError", "AccessDenied", "ValidationError", "UnknownError"]) {
+  for (const code of ["Throttling", "ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded", "ServiceUnavailable", "ServiceUnavailableException", "ServiceFailure", "InternalFailure", "InternalError", "AccessDenied", "ValidationError", "MalformedPolicyDocument", "500", "UnknownError"]) {
     for (const operation of operations) {
       let creates = 0; let reads = 0; let sleeps = 0;
-      const transient = !["AccessDenied", "ValidationError", "UnknownError"].includes(code);
+      const transient = !["AccessDenied", "ValidationError", "MalformedPolicyDocument", "500", "UnknownError"].includes(code);
       const run = () => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { sleeps += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; }, readLiveState: () => {
         reads += 1;
         if (!creates) return state();
