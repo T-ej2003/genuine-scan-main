@@ -54,7 +54,7 @@ export function initialActivationLifecyclePolicyReservationIdentity({ sourceSha,
 }
 
 export function initialActivationLifecyclePolicyReservationTransitionIdentity(input = {}) {
-  const { authorizationSha256: _authorizationSha256, ...transition } = initialActivationLifecyclePolicyReservationIdentity(input);
+  const { authorizationSha256: _authorizationSha256, sourceSha: _sourceSha, ...transition } = initialActivationLifecyclePolicyReservationIdentity(input);
   return Object.freeze(transition);
 }
 
@@ -187,14 +187,38 @@ const defaultSleep = (milliseconds) => { Atomics.wait(new Int32Array(new SharedA
 
 const isTransientPolicyVersionRead = (error) => error?.code === INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ;
 
+const hasExpectedConvergenceTopology = (value, authorization) => {
+  if (!value || typeof value !== "object" || value.policyArn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || !Array.isArray(value.releaseRolePolicyArns) || !Array.isArray(value.targetPolicyRoles) || !Array.isArray(value.targetPolicyUsers) || !Array.isArray(value.targetPolicyGroups) || value.permissionsBoundaryUsageCount !== 0) return false;
+  const releaseRolePolicyArns = [...value.releaseRolePolicyArns].sort();
+  const targetPolicyRoles = [...value.targetPolicyRoles].sort();
+  const targetPolicyUsers = [...value.targetPolicyUsers].sort();
+  const targetPolicyGroups = [...value.targetPolicyGroups].sort();
+  return sha({ releaseRolePolicyArns }) === authorization.releaseRolePolicySetSha256 && sha({ targetPolicyRoles, targetPolicyUsers, targetPolicyGroups, permissionsBoundaryUsageCount: 0 }) === authorization.targetPolicyEntityBoundarySha256;
+};
+
+const isTransientConvergenceSnapshot = (value, before, authorization, desired, expectedVersionId) => {
+  if (!hasExpectedConvergenceTopology(value, authorization) || !VERSION.test(value.defaultVersionId || "") || !Number.isSafeInteger(value.policyVersionCount)) return false;
+  let policySha256;
+  try { policySha256 = sha(normalizeIamPolicyDocument(value.document, "Initial activation lifecycle convergence snapshot")); } catch { return false; }
+  const predecessorDocument = policySha256 === before.policySha256;
+  const desiredDocument = policySha256 === desired.policySha256;
+  const predecessorDefault = value.defaultVersionId === before.defaultVersionId;
+  const desiredDefault = value.defaultVersionId !== before.defaultVersionId && (!expectedVersionId || value.defaultVersionId === expectedVersionId);
+  const plausibleNewDefault = desiredDefault || (!expectedVersionId && value.defaultVersionId !== before.defaultVersionId);
+  const oldCount = value.policyVersionCount === before.policyVersionCount;
+  const newCount = value.policyVersionCount === before.policyVersionCount + 1;
+  return (predecessorDefault && desiredDocument && (oldCount || newCount)) || (plausibleNewDefault && predecessorDocument && (oldCount || newCount)) || (desiredDocument && desiredDefault && oldCount) || (predecessorDocument && predecessorDefault && newCount);
+};
+
 export function waitForInitialActivationLifecyclePolicyConvergence({ readLiveState, before, authorization, desired, expectedVersionId, sleep = defaultSleep } = {}) {
   if (typeof readLiveState !== "function" || !before || !authorization || !desired) throw new Error("Initial activation lifecycle convergence inputs are required.");
   for (let attempt = 0; attempt < CONVERGENCE_ATTEMPTS; attempt += 1) {
-    let candidate;
+    let raw; let candidate;
     try {
-      candidate = assertInitialActivationLifecyclePolicyState(readLiveState(), { desired });
+      raw = readLiveState();
+      candidate = assertInitialActivationLifecyclePolicyState(raw, { desired });
     } catch (error) {
-      if (!isTransientPolicyVersionRead(error)) throw error;
+      if (!isTransientPolicyVersionRead(error) && !isTransientConvergenceSnapshot(raw, before, authorization, desired, expectedVersionId)) throw error;
       if (attempt < CONVERGENCE_ATTEMPTS - 1) sleep(CONVERGENCE_DELAYS[attempt]);
       continue;
     }

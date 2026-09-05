@@ -197,6 +197,8 @@ test("reservation key serializes the transition across different authorizations"
   const firstReservation = createInitialActivationLifecyclePolicyReservation(first); const secondReservation = createInitialActivationLifecyclePolicyReservation(second);
   assert.equal(initialActivationLifecyclePolicyReservationKey(firstReservation), initialActivationLifecyclePolicyReservationKey(secondReservation));
   assert.notDeepEqual(firstReservation, secondReservation);
+  const differentSource = createInitialActivationLifecyclePolicyReservation({ ...second, sourceSha: "c".repeat(40) });
+  assert.equal(initialActivationLifecyclePolicyReservationKey(firstReservation), initialActivationLifecyclePolicyReservationKey(differentSource));
 });
 
 test("conditional reservation conflict authenticates the exact existing bytes and never overwrites", () => {
@@ -234,6 +236,17 @@ test("IAM convergence retries only the authenticated transient policy-version re
     if (reads++ < 2) { const error = new Error("NoSuchEntity"); error.code = INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ; throw error; }
     return state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 });
   }, before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: authorization(), desired, expectedVersionId: "v2", sleep: (milliseconds) => sleeps.push(milliseconds) });
+  assert.equal(result.status, "ALREADY_RECONCILED"); assert.equal(reads, 3); assert.deepEqual(sleeps, [100, 200]);
+});
+
+test("IAM convergence retries authenticated partially converged snapshots", () => {
+  const value = authorization(); const before = assertInitialActivationLifecyclePolicyState(state(), { desired }); const sleeps = []; let reads = 0;
+  const snapshots = [
+    state({ document: desired.document, policyVersionCount: 2 }),
+    state({ defaultVersionId: "v2", document: predecessor, policyVersionCount: 1 }),
+    state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 }),
+  ];
+  const result = waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => snapshots[reads++], before, authorization: value, desired, expectedVersionId: "v2", sleep: (milliseconds) => sleeps.push(milliseconds) });
   assert.equal(result.status, "ALREADY_RECONCILED"); assert.equal(reads, 3); assert.deepEqual(sleeps, [100, 200]);
 });
 
