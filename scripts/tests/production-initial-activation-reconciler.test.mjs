@@ -12,16 +12,21 @@ const installation = JSON.parse(fs.readFileSync(`${root}/installation-contract.j
 const capability = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationPolicyReconciler-capability-v1.json", "utf8"));
 const encoded = (value) => encodeURIComponent(JSON.stringify(value));
 
-const commands = ({ role = {}, policyMetadata = {}, version = policy, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [] } = {}) => {
+const commands = ({ role = {}, policyMetadata = {}, version = policy, encodeRole = true, encodeVersion = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) => {
   const calls = [];
   const run = (args) => {
     calls.push(args);
     if (args[0] === "sts") return JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" });
-    if (args[0] === "iam" && args[1] === "get-role") return JSON.stringify({ Role: { Arn: INITIAL_ACTIVATION_RECONCILER.roleArn, AssumeRolePolicyDocument: encoded(trust), ...role } });
-    if (args[0] === "iam" && args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName, DefaultVersionId: "v1", ...policyMetadata } });
-    if (args[0] === "iam" && args[1] === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: encoded(version) } });
+    if (args[0] === "iam" && args[1] === "get-role") return JSON.stringify({ Role: { Arn: INITIAL_ACTIVATION_RECONCILER.roleArn, AssumeRolePolicyDocument: encodeRole ? encoded(trust) : trust, ...role } });
+    if (args[0] === "iam" && args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0, ...policyMetadata } });
+    if (args[0] === "iam" && args[1] === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: encodeVersion ? encoded(version) : version } });
     if (args[0] === "iam" && args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: attached });
     if (args[0] === "iam" && args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: inline });
+    if (args[0] === "iam" && args[1] === "list-entities-for-policy") {
+      const page = entities[args.includes("--marker") ? 1 : 0];
+      if (!page) throw new Error("unexpected entity page");
+      return JSON.stringify(page);
+    }
     throw new Error(`unexpected command: ${args.join(" ")}`);
   };
   return { run, calls };
@@ -71,6 +76,26 @@ test("exact installed topology verifies read-only and fails closed on drift", ()
   assert.equal(exact.calls.some((args) => args[0] === "iam" && ["create-role", "create-policy", "attach-role-policy", "update-assume-role-policy"].includes(args[1])), false);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ attached: [{ PolicyArn: "arn:aws:iam::368992683803:policy/unrelated" }] })), /attachment topology/);
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ inline: ["unexpected"] })), /inline policies/);
+});
+
+test("normalizes parsed and encoded AWS documents and authenticates paginated policy topology", () => {
+  const parsed = commands({ entities: [
+    { PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: true, Marker: "page-2" },
+    { PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false },
+  ] });
+  const encodedResult = verifyInitialActivationPolicyReconciler(parsed);
+  assert.equal(encodedResult.policyRoleCount, 1);
+  assert.equal(encodedResult.permissionsBoundaryUsageCount, 0);
+  const parsedResult = verifyInitialActivationPolicyReconciler(commands({ encodeRole: false, encodeVersion: false }));
+  assert.equal(parsedResult.roleArn, INITIAL_ACTIVATION_RECONCILER.roleArn);
+});
+
+test("rejects malformed, primitive, extra-entity, truncated, and boundary-used policy shapes", () => {
+  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ role: { AssumeRolePolicyDocument: "%7B" } })), /trust policy/);
+  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ version: 7 })), /permissions policy/);
+  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ entities: [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }, { RoleName: "other" }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] })), /entity topology/);
+  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ entities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: true }] })), /pagination/);
+  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ policyMetadata: { PermissionsBoundaryUsageCount: 1 } })), /permissions-boundary/);
 });
 
 test("capability contract defines the role without claiming PR #448 migration", () => {
