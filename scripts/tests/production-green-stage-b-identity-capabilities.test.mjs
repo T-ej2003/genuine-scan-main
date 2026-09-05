@@ -10,7 +10,7 @@ import {
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
+import { assertInitialActivationReconcilerAuthority, assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { assertStageBAdministratorEvidenceIdentity, buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
@@ -162,7 +162,20 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
   assert.equal(first.capabilities.filter(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "ecs:ExecuteCommand").length, 0);
-  assert.deepEqual(first.capabilities.filter(({ id }) => id === "initial-activation-policy-reconciliation-root-list-policy-entities").map(({ identity, action, resources }) => ({ identity, action, resources })), [{ identity: "INITIAL_ACTIVATION_RECONCILER", action: "iam:ListEntitiesForPolicy", resources: ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"]}]);
+  const reconcilerCapabilities = first.capabilities.filter(({ identity }) => identity === "INITIAL_ACTIVATION_RECONCILER");
+  assert.equal(reconcilerCapabilities.length, 8);
+  for (const capability of reconcilerCapabilities) {
+    assert.deepEqual(capability.policy, assertInitialActivationReconcilerAuthority(capability));
+    assert.equal(capability.policy.sourceFile, "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json");
+    assert.equal(capability.policy.livePolicyArn, "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler");
+    assert.equal(capability.context.targetPolicyArn, "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle");
+  }
+  const targetBound = structuredClone(first); targetBound.capabilities.find(({ identity }) => identity === "INITIAL_ACTIVATION_RECONCILER").policy.livePolicyArn = "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle";
+  assert.throws(() => assertStageBDeploymentCapabilityGraph(targetBound), /stale or incomplete/);
+  const reconcilerPolicy = JSON.parse(fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json", "utf8"));
+  assert.throws(() => assertInitialActivationReconcilerAuthority({ action: "iam:CreatePolicyVersion", resources: ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"] }, { ...reconcilerPolicy, Statement: reconcilerPolicy.Statement.map((statement) => statement.Sid === "CreateExactInitialActivationLifecyclePolicyVersion" ? { ...statement, Action: "iam:GetPolicy" } : statement) }), /does not authorize/);
+  assert.throws(() => assertInitialActivationReconcilerAuthority({ action: "iam:CreatePolicyVersion", resources: ["arn:aws:iam::368992683803:policy/other"] }, reconcilerPolicy), /does not authorize/);
+  assert.throws(() => assertInitialActivationReconcilerAuthority({ action: "iam:CreatePolicyVersion", resources: ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"] }, JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json", "utf8"))), /does not authorize/);
   assert.equal(first.capabilities.find(({ id }) => id === "manifest-release-deployer-ecs-exec").identity, "ADMINISTRATOR");
   assert.equal(first.capabilities.filter(({ identity, action, resources }) => identity === "INDEPENDENT_CHECKER" && action === "secretsmanager:PutSecretValue" && resources.includes("arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho")).length, 1);
   assert.equal(first.capabilities.filter(({ identity, action, resources }) => identity === "RELEASE_DEPLOYER" && action === "secretsmanager:PutSecretValue" && resources.includes("arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho")).length, 0);

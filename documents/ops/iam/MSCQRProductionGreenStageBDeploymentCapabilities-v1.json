@@ -1326,11 +1326,11 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
-        "sid": "initial-activation-policy-reconciliation-root-create-policy-version",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
-        "expectedVersion": "exact-authorized-predecessor-or-desired",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "CreateExactInitialActivationLifecyclePolicyVersion",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
       },
       "required": true,
       "mutation": true
@@ -1355,11 +1355,11 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
-        "sid": "initial-activation-policy-reconciliation-root-identify",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
-        "expectedVersion": "exact-authorized-predecessor-or-desired",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "IdentifyCurrentSession",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
       },
       "required": true,
       "mutation": false
@@ -1384,11 +1384,11 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
-        "sid": "initial-activation-policy-reconciliation-root-list-policy-entities",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
-        "expectedVersion": "exact-authorized-predecessor-or-desired",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactInitialActivationLifecyclePolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
       },
       "required": true,
       "mutation": false
@@ -1413,11 +1413,11 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
-        "sid": "initial-activation-policy-reconciliation-root-list-policy-versions",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
-        "expectedVersion": "exact-authorized-predecessor-or-desired",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactInitialActivationLifecyclePolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
       },
       "required": true,
       "mutation": false
@@ -1442,11 +1442,11 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
-        "sid": "initial-activation-policy-reconciliation-root-read-policy",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
-        "expectedVersion": "exact-authorized-predecessor-or-desired",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactInitialActivationLifecyclePolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
       },
       "required": true,
       "mutation": false
@@ -1471,11 +1471,11 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
-        "sid": "initial-activation-policy-reconciliation-root-read-policy-attachment",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
-        "expectedVersion": "exact-authorized-predecessor-or-desired",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactInitialActivationReleaseRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
       },
       "required": true,
       "mutation": false
@@ -1500,11 +1500,11 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
-        "sid": "initial-activation-policy-reconciliation-root-read-policy-version",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
-        "expectedVersion": "exact-authorized-predecessor-or-desired",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactInitialActivationLifecyclePolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
       },
       "required": true,
       "mutation": false
@@ -1529,11 +1529,11 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
-        "sid": "initial-activation-policy-reconciliation-root-read-release-role",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
-        "expectedVersion": "exact-authorized-predecessor-or-desired",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactInitialActivationReleaseRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
       },
       "required": true,
       "mutation": false

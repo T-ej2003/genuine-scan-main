@@ -16,6 +16,7 @@ import { ROOT_ATTESTATION_KEY_ALIAS_ARN } from "./production-root-attestation-ke
 import { PRODUCTION_RELEASE_ROLE_ARN, assertProductionReleaseOidcSourceContract } from "./production-release-oidc-contract.mjs";
 import { NORMAL_ACTIVATION } from "./production-normal-backend-activation-policy.mjs";
 import { INITIAL_ACTIVATION_POLICY_RECONCILIATION } from "./production-initial-activation-policy-reconciliation.mjs";
+import { INITIAL_ACTIVATION_RECONCILER } from "./verify-production-initial-activation-policy-reconciler.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -310,6 +311,23 @@ function authority(entry, forbidden, policies) {
   throw new Error(`No reviewed source policy authorizes ${entry.id}.`);
 }
 
+const INITIAL_ACTIVATION_RECONCILER_POLICY_SOURCE = INITIAL_ACTIVATION_RECONCILER.permissionsPath;
+
+export function assertInitialActivationReconcilerAuthority({ action, resources } = {}, policy = readJson(INITIAL_ACTIVATION_RECONCILER_POLICY_SOURCE)) {
+  if (!action || !Array.isArray(resources) || !policy || !Array.isArray(policy.Statement)) throw new Error("Initial activation reconciler permissions policy is malformed.");
+  const statement = policy.Statement.find((candidate) => candidate.Effect === "Allow"
+    && asArray(candidate.Action).includes(action)
+    && resources.every((resource) => asArray(candidate.Resource).some((allowed) => allowed === resource)));
+  if (!statement) throw new Error(`Initial activation reconciler permissions policy does not authorize ${action} on the exact resource set.`);
+  return {
+    sourceFile: INITIAL_ACTIVATION_RECONCILER_POLICY_SOURCE,
+    sid: statement.Sid,
+    livePolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn,
+    expectedVersion: "installed",
+    expectedPolicySha256: sha256(fs.readFileSync(path.join(root, INITIAL_ACTIVATION_RECONCILER_POLICY_SOURCE))),
+  };
+}
+
 function operatorAuthority(entry, forbidden) {
   if (forbidden) return { sourceFile: null, sid: "implicit-deny", livePolicyArn: null, expectedVersion: null, expectedPolicySha256: null };
   const statement = operatorPolicy.Statement.find((candidate) => {
@@ -490,7 +508,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   const initialActivationPolicyReconciliation = INITIAL_ACTIVATION_POLICY_RECONCILIATION_CAPABILITIES.map(([id, action, resources, mutation, sourceFile = "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"]) => ({
     id, phase: "initial-activation-lifecycle-policy-reconciliation", identity: "INITIAL_ACTIVATION_RECONCILER", executor: "github-actions", sourceFile, sourceFunction: id, action, resources,
     context: { account: STAGE_B.account, region: STAGE_B.region, targetPolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn }, classification: mutation ? "GITHUB_OIDC_IAM_POLICY_RECONCILIATION" : "GITHUB_OIDC_IAM_POLICY_READ", probe: "structural", probeIds: [],
-    policy: { sourceFile: INITIAL_ACTIVATION_POLICY_RECONCILIATION.sourcePath, sid: id, livePolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, expectedVersion: "exact-authorized-predecessor-or-desired", expectedPolicySha256: INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredPolicySha256 }, required: true, mutation,
+    policy: assertInitialActivationReconcilerAuthority({ action, resources }), required: true, mutation,
   }));
   const stageABackendPolicySid = Object.freeze({
     "stage-a-artifacts-reconciliation-terraform-read-bucket-location": "ReadExactStageABackendBucketLocation",
