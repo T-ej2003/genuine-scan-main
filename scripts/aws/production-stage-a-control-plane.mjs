@@ -137,10 +137,21 @@ export function buildStageAProductionArtifactsBucketPolicyWithInitialActivationR
   };
 }
 
+export function buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation() {
+  return buildStageAProductionArtifactsBucketPolicy();
+}
+
+export function stageAProductionArtifactsInitialActivationReservationRetirementTransition() {
+  const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const desired = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
+  return Object.freeze({ predecessor, desired, predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
+}
+
 export function resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256, desiredPolicySha256 } = {}) {
   const transitions = [
     [buildStageAProductionArtifactsBucketPolicyPredecessor(), buildStageAProductionArtifactsBucketPolicy()],
     [buildStageAProductionArtifactsBucketPolicy(), buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()],
+    [buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation(), buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation()],
   ];
   const transition = transitions.find(([predecessor, desired]) => stageAProductionArtifactsPolicySha256(predecessor) === predecessorPolicySha256 && stageAProductionArtifactsPolicySha256(desired) === desiredPolicySha256);
   if (!transition) throw new Error("Stage A production-artifacts bucket-policy transition is not exact or reviewed.");

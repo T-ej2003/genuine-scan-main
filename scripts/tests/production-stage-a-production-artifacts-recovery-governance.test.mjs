@@ -29,10 +29,11 @@ import {
   stageAProductionArtifactsGovernedExecutableManifest,
   stageAProductionArtifactsGovernedExecutableManifestSha256,
 } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
-import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, createStageAProductionArtifactsReconciliationPrepareEvidence, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
+import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, createStageAProductionArtifactsReconciliationPrepareEvidence, currentStageAProductionArtifactsBucketPolicyTransition, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "../aws/production-stage-a-production-artifacts-journal.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { authorizeStageAProductionArtifactsReconciliation } from "../aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs";
+import { authorizeStageAProductionArtifactsRecovery } from "../aws/authorize-production-stage-a-production-artifacts-recovery.mjs";
 
 const sourceSha = "a".repeat(40);
 const preState = { lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 35, stateSha256: "b".repeat(64) };
@@ -61,6 +62,20 @@ test("fresh recovery authorization binds the exact deployed-to-reservation polic
   assert.equal(authorization.desiredPolicySha256, stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()));
   assert.equal(authorization.expectedLivePolicySha256, authorization.predecessorPolicySha256);
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha, preState }));
+});
+
+test("production recovery authorizer remains on the reservation-bearing transition until reconciler migration", () => {
+  const transition = currentStageAProductionArtifactsBucketPolicyTransition();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-a-current-authorizer-"));
+  const source = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const approvalPath = path.join(directory, "approval.json"); const outputPath = path.join(directory, "authorization.json");
+  fs.writeFileSync(approvalPath, JSON.stringify(approval(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF, source)));
+  try {
+    authorizeStageAProductionArtifactsRecovery(["--source-sha", source, "--state-lineage", preState.lineage, "--state-serial", String(preState.serial), "--state-sha256", preState.stateSha256, "--verification-ref", "current-transition", "--environment-approval", approvalPath, "--output", outputPath]);
+    const authorization = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+    assert.equal(authorization.predecessorPolicySha256, transition.predecessorPolicySha256);
+    assert.equal(authorization.desiredPolicySha256, transition.desiredPolicySha256);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
 const githubRun = ({ operation, authorization, id = 123, attempt = 1, actor = "operator", headSha = sourceSha, workflowPath } = {}) => {

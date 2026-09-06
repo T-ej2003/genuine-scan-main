@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
-import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, createStageAProductionArtifactsReconciliationPrepareEvidence, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
+import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation, createStageAProductionArtifactsReconciliationPrepareEvidence, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
 import { createStageAProductionArtifactsRecoveryAuthorization as createRecoveryAuthorization, createStageAProductionArtifactsRecoveryAttemptEvidence, createStageAProductionArtifactsRecoveryCompletionEvidence, createStageAProductionArtifactsContinuationRebindAuthorization, createStageAProductionArtifactsReconciliationAuthorization, STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_OPERATION, STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_WORKFLOW_REF, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
 import { assertStageAProductionArtifactsJournalRetention, createStageARecoveryRootCommandRunner, runStageAProductionArtifactsRecovery } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
 import { createStageAProductionArtifactsJournalResult, createStageAProductionArtifactsPostApplyEvidence, createStageAProductionArtifactsReservation, STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "../aws/production-stage-a-production-artifacts-journal.mjs";
@@ -14,6 +14,7 @@ import { assertStageAProductionArtifactsReconciliationPrivateArtifactPath, runSt
 const sourceSha = "a".repeat(40); const lineage = "02afb75a-f902-ab8a-f4c1-751d4aef7837"; const stateSha256 = "b".repeat(64);
 const governedExecutableManifestSha256 = "9".repeat(64);
 const historicalTransition = Object.freeze({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy()) });
+const reverseReservationTransition = Object.freeze({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation()) });
 const createStageAProductionArtifactsRecoveryAuthorization = (input) => createRecoveryAuthorization({ ...input, governedExecutableManifestSha256, transition: historicalTransition });
 const unchangedGovernedSource = () => governedExecutableManifestSha256;
 const state = { lineage, serial: 35, stateSha256 };
@@ -75,6 +76,44 @@ test("durable recovery attempt consumes mutation authority across failures and n
     assert.ok(puts <= 1, mode);
     if (["predecessor", "target", "unexpected", "readback-failure"].includes(mode)) assert.ok(readsAfterPut > 0, "ambiguous error attempts immediate readback");
   }
+});
+
+test("reverse reservation cleanup cannot rewrite after an ambiguous attempt", async () => {
+  const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "507"), verificationRef: "reverse-ambiguous", governedExecutableManifestSha256, transition: reverseReservationTransition });
+  let attempt; let puts = 0; const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : JSON.stringify({ Policy: JSON.stringify(predecessor) });
+  const rootRun = (args) => {
+    if (args[1] === "get-caller-identity") return rootIdentity;
+    if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
+    if (args[1] === "get-bucket-lifecycle-configuration") throw Error("NoSuchLifecycleConfiguration");
+    if (args[1] === "put-bucket-policy") { puts += 1; throw Error("ambiguous transport failure"); }
+    throw Error(`unexpected root ${args[1]}`);
+  };
+  const journal = {
+    readRecoveryAttempt: () => attempt && { bytes: attempt }, readRecoveryCompletion: () => null,
+    writeRecoveryAttempt: ({ bytes }) => { attempt = bytes; return { key: "attempt" }; },
+    writeRecoveryCompletion: () => { throw Error("must not complete"); },
+  };
+  const input = { sourceSha, workflowRunId: "507", workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => state, terraformStateLock, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal, recoveryJournal: journal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true };
+  await assert.rejects(() => runStageAProductionArtifactsRecovery(input), /PREDECESSOR_LIVE_EXACT/);
+  await assert.rejects(() => runStageAProductionArtifactsRecovery(input), /MUTATION_ATTEMPT_STARTED/);
+  assert.equal(puts, 1);
+});
+
+test("reverse reservation cleanup accepts only the exact target policy", async () => {
+  const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "508"), verificationRef: "reverse-success", governedExecutableManifestSha256, transition: reverseReservationTransition });
+  let live = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation(); let puts = 0; let completion;
+  const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : JSON.stringify({ Policy: JSON.stringify(live) });
+  const rootRun = (args) => {
+    if (args[1] === "get-caller-identity") return rootIdentity;
+    if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
+    if (args[1] === "get-bucket-lifecycle-configuration") throw Error("NoSuchLifecycleConfiguration");
+    if (args[1] === "put-bucket-policy") { puts += 1; live = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation(); return ""; }
+    throw Error(`unexpected root ${args[1]}`);
+  };
+  const journal = { readRecoveryAttempt: () => null, readRecoveryCompletion: () => completion && { bytes: completion }, writeRecoveryAttempt: () => ({ key: "attempt" }), writeRecoveryCompletion: ({ bytes }) => { completion = bytes; return { key: "completion", sha256: "a".repeat(64) }; } };
+  const result = await runStageAProductionArtifactsRecovery({ sourceSha, workflowRunId: "508", workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => state, terraformStateLock, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal, recoveryJournal: journal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true });
+  assert.equal(result.recovered, true); assert.equal(puts, 1); assert.equal(JSON.parse(completion).desiredPolicySha256, reverseReservationTransition.desiredPolicySha256);
 });
 
 const policyResource = (policy) => ({ bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, expected_bucket_owner: null, id: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(policy), region: "eu-west-2" });

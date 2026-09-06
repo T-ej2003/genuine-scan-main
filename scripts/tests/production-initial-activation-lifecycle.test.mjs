@@ -230,6 +230,19 @@ test("source policy and bucket policy enforce only exact conditional lifecycle o
   assert.doesNotMatch(bucketPolicy, /rls-(?:broker-)?receipts|ignore_changes|production-activation-lifecycle\/\*/);
 });
 
+test("lifecycle documentation distinguishes the current reservation boundary from the prepared reconciler migration", () => {
+  const document = readFileSync("documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.md", "utf8");
+  assert.match(document, /Current reservation boundary \(migration pending\)/);
+  assert.match(document, /production-initial-activation-lifecycle-policy-reconciliation\/reservations\//);
+  assert.match(document, /six associated Stage-A bucket-policy statements/);
+  assert.match(document, /Prepared reconciler migration/);
+  assert.match(document, /INITIAL_ACTIVATION_RECONCILER/);
+  assert.match(document, /GitHub Actions OIDC/);
+  assert.match(document, /production-deploy/);
+  assert.match(document, /not yet the current InitialActivationLifecycle mutation path/);
+  assert.match(document, /do not treat the reconciler path as live or the reservation statements as retired/);
+});
+
 test("initial-activation policy reconciliation reservation is exact, conditional, root-only, and immutable", () => {
   const current = buildStageAProductionArtifactsBucketPolicy();
   const desired = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();

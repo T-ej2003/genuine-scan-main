@@ -5,7 +5,10 @@ import test from "node:test";
 import {
   buildStageAProductionArtifactsBucketPolicy,
   buildStageAProductionArtifactsBucketPolicyPredecessor,
+  buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation,
+  buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation,
   canonicalizeStageAProductionArtifactsPolicy,
+  resolveStageAProductionArtifactsBucketPolicyTransition,
   stageAProductionArtifactsPolicySemanticallyEqual,
   stageAProductionArtifactsPolicySha256,
 } from "../aws/production-stage-a-control-plane.mjs";
@@ -23,6 +26,35 @@ test("Stage-A policy canonicalization preserves the historical desired hash and 
   assert.equal(stageAProductionArtifactsPolicySha256(live), stageAProductionArtifactsPolicySha256(desired));
   assert.equal(stageAProductionArtifactsPolicySemanticallyEqual(live, desired), true);
   assert.equal(canonicalizeStageAProductionArtifactsPolicy(live).Statement.length, desired.Statement.length);
+});
+
+test("reviewed reverse transition removes exactly the six obsolete reservation statements", () => {
+  const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const target = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
+  const transition = resolveStageAProductionArtifactsBucketPolicyTransition({
+    predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor),
+    desiredPolicySha256: stageAProductionArtifactsPolicySha256(target),
+  });
+  assert.equal(stageAProductionArtifactsPolicySha256(predecessor), "0d5d20a784351f38712513252223fbdfaca52e4301bd00b5d0298882702842be");
+  assert.equal(stageAProductionArtifactsPolicySha256(target), "765e091f99ee56e186741aa2fd849d755dc19f0b668779801855105350db8ff3");
+  const targetSids = new Set(target.Statement.map(({ Sid }) => Sid));
+  const removed = predecessor.Statement.filter(({ Sid }) => !targetSids.has(Sid)).map(({ Sid }) => Sid);
+  assert.deepEqual(removed, [
+    "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
+    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationReads",
+    "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
+    "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
+    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
+    "DenyInitialActivationPolicyReconciliationReservationDeletion",
+  ]);
+  assert.equal(removed.length, 6);
+  assert.deepEqual(transition.predecessor, predecessor);
+  assert.deepEqual(transition.desired, target);
+  for (const statement of target.Statement) assert.deepEqual(statement, predecessor.Statement.find(({ Sid }) => Sid === statement.Sid));
+  assert.throws(() => resolveStageAProductionArtifactsBucketPolicyTransition({
+    predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor),
+    desiredPolicySha256: stageAProductionArtifactsPolicySha256({ ...target, Statement: target.Statement.slice(1) }),
+  }), /not exact or reviewed/);
 });
 
 test("IAM grammar singleton forms are normalized only at their grammar positions", () => {
