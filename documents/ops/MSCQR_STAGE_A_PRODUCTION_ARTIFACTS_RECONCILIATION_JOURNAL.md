@@ -53,7 +53,10 @@ On restart, a persisted attempt plus predecessor is not retry authority. Target
 plus authenticated attempt permits completion only; unexpected state fails closed.
 
 The outer lock and existing immutable journal are reused. No new object namespace,
-lock, principal, policy transition or authorization format is introduced. Existing
+lock, principal, or authorization format is introduced. This change adds one exact
+reviewed reverse policy transition, from the reservation-bearing Stage-A policy to
+canonical policy without the six reservation statements. That transition remains
+dormant until the #448 reconciler runtime migration is complete. Existing
 refresh-only state reconciliation and normal no-op closure remain unchanged.
 Tests cover failure before/after marker persistence, lost response, failed readback,
 post-write process loss, repeated invocation, and mutation-only CLI retry settings.
