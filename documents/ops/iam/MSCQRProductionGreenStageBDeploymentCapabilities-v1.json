@@ -1272,64 +1272,6 @@
       "mutation": true
     },
     {
-      "id": "initial-activation-policy-reconciliation-root-conditional-create-reservation",
-      "phase": "initial-activation-lifecycle",
-      "identity": "ROOT_OPERATOR",
-      "executor": "aws-cli",
-      "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
-      "sourceFunction": "initial-activation-policy-reconciliation-root-conditional-create-reservation",
-      "action": "s3:PutObject",
-      "resources": [
-        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/*"
-      ],
-      "context": {
-        "account": "368992683803",
-        "region": "eu-west-2",
-        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
-      },
-      "classification": "ROOT_CONDITIONAL_JOURNAL_CREATE",
-      "probe": "structural",
-      "probeIds": [],
-      "policy": {
-        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
-        "sid": "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
-        "livePolicyArn": null,
-        "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": null
-      },
-      "required": true,
-      "mutation": true
-    },
-    {
-      "id": "initial-activation-policy-reconciliation-root-read-reservation",
-      "phase": "initial-activation-lifecycle",
-      "identity": "ROOT_OPERATOR",
-      "executor": "aws-cli",
-      "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
-      "sourceFunction": "initial-activation-policy-reconciliation-root-read-reservation",
-      "action": "s3:GetObject",
-      "resources": [
-        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/*"
-      ],
-      "context": {
-        "account": "368992683803",
-        "region": "eu-west-2",
-        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
-      },
-      "classification": "ROOT_GOVERNED_RECOVERY_READ",
-      "probe": "structural",
-      "probeIds": [],
-      "policy": {
-        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
-        "sid": "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
-        "livePolicyArn": null,
-        "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": null
-      },
-      "required": true,
-      "mutation": false
-    },
-    {
       "id": "initial-activation-read-claim",
       "phase": "initial-activation-lifecycle",
       "identity": "RELEASE_DEPLOYER",

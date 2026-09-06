@@ -137,8 +137,6 @@ const NORMAL_ACTIVATION_CAPABILITIES = Object.freeze([
 ]);
 
 const STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES = Object.freeze([
-  ["initial-activation-policy-reconciliation-root-read-reservation", "initial-activation-lifecycle", "ROOT_OPERATOR", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn], false, "infra/aws/terraform/production-green-stage-a/main.tf"],
-  ["initial-activation-policy-reconciliation-root-conditional-create-reservation", "initial-activation-lifecycle", "ROOT_OPERATOR", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn], true, "infra/aws/terraform/production-green-stage-a/main.tf"],
   ["stage-a-artifacts-recovery-root-identify", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "sts:GetCallerIdentity", ["*"], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
   ["stage-a-artifacts-recovery-root-read-versioning", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:GetBucketVersioning", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
   ["stage-a-artifacts-recovery-root-read-lifecycle", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:GetBucketLifecycleConfiguration", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
@@ -476,16 +474,12 @@ export function buildStageBDeploymentCapabilityGraph() {
     "stage-a-artifacts-recovery-release-lock-acquire": "WriteExactStageALock",
     "stage-a-artifacts-recovery-release-lock-release": "ReleaseExactStageALock",
   });
-  const stageAProductionArtifactsPolicySid = Object.freeze({
-    "initial-activation-policy-reconciliation-root-read-reservation": "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
-    "initial-activation-policy-reconciliation-root-conditional-create-reservation": "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
-  });
   const stageAProductionArtifacts = STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES.map(([id, phase, identity, action, resources, mutation, sourceFile]) => ({
     id, phase, identity, executor: id.startsWith("stage-a-artifacts-reconciliation-terraform-") ? "terraform" : "aws-cli", sourceFile, sourceFunction: id, action, resources,
     context: { account: STAGE_B.account, region: STAGE_B.region, bucket: stageABackendPolicySid[id] ? STAGE_A_TERRAFORM_BACKEND.bucket : PRODUCTION_ACTIVATION_LIFECYCLE.bucket },
     classification: id === "stage-a-artifacts-reconciliation-terraform-write-state" ? "TERRAFORM_STATE_MUTATION" : id === "stage-a-artifacts-reconciliation-terraform-read-lock" ? "TERRAFORM_BACKEND_LOCK_READ" : id.startsWith("stage-a-artifacts-reconciliation-terraform-") ? "TERRAFORM_BACKEND_READ" : mutation ? action === "s3:PutBucketPolicy" ? "ROOT_GOVERNED_POLICY_RECOVERY" : action === "kms:Sign" ? "ROOT_GOVERNED_ATTESTATION_SIGNING" : id.endsWith("-lock-acquire") ? "TERRAFORM_BACKEND_LOCK_ACQUIRE" : id.endsWith("-lock-release") ? "TERRAFORM_BACKEND_LOCK_RELEASE" : identity === "ROOT_OPERATOR" ? "ROOT_CONDITIONAL_JOURNAL_CREATE" : "RELEASE_CONDITIONAL_JOURNAL_CREATE" : identity === "ROOT_OPERATOR" ? "ROOT_GOVERNED_RECOVERY_READ" : "RELEASE_DIRECT_READ",
     probe: identity === "RELEASE_DEPLOYER" ? "direct" : "structural", probeIds: identity === "RELEASE_DEPLOYER" ? [`${id}-authenticated`] : [],
-    policy: { sourceFile: stageABackendPolicySid[id] ? stageAReleaseS3ContractPath : "infra/aws/terraform/production-green-stage-a/main.tf", sid: stageABackendPolicySid[id] || stageAProductionArtifactsPolicySid[id] || id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null },
+    policy: { sourceFile: stageABackendPolicySid[id] ? stageAReleaseS3ContractPath : "infra/aws/terraform/production-green-stage-a/main.tf", sid: stageABackendPolicySid[id] || id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null },
     required: true, mutation,
   }));
   const recovery = RECOVERY_CAPABILITIES.map(([id, action, resources]) => {
@@ -554,13 +548,6 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   for (const [id, action, mutation] of [["stage-a-artifacts-recovery-root-journal-read", "s3:GetObject", false], ["stage-a-artifacts-recovery-root-journal-conditional-create", "s3:PutObject", true]]) {
     const capability = graph.capabilities.find(({ id: candidate }) => candidate === id);
     if (!capability || capability.phase !== "stage-a-production-artifacts-policy-recovery" || capability.identity !== "ROOT_OPERATOR" || capability.sourceFile !== "scripts/aws/production-stage-a-production-artifacts-journal.mjs" || capability.action !== action || capability.mutation !== mutation || JSON.stringify(capability.resources) !== JSON.stringify([PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn])) throw new Error("Stage-A root journal capability boundary is not exact.");
-  }
-  for (const [id, action, mutation, sid] of [
-    ["initial-activation-policy-reconciliation-root-read-reservation", "s3:GetObject", false, "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations"],
-    ["initial-activation-policy-reconciliation-root-conditional-create-reservation", "s3:PutObject", true, "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate"],
-  ]) {
-    const capability = graph.capabilities.find(({ id: candidate }) => candidate === id);
-    if (!capability || capability.phase !== "initial-activation-lifecycle" || capability.identity !== "ROOT_OPERATOR" || capability.sourceFile !== "infra/aws/terraform/production-green-stage-a/main.tf" || capability.action !== action || capability.mutation !== mutation || JSON.stringify(capability.resources) !== JSON.stringify([PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn]) || capability.policy?.sid !== sid) throw new Error(`Initial-activation policy reconciliation reservation capability is not exact: ${sid}.`);
   }
   const rootSigning = graph.capabilities.find(({ id }) => id === "stage-a-artifacts-recovery-root-sign");
   if (!rootSigning || rootSigning.phase !== "stage-a-production-artifacts-policy-recovery" || rootSigning.identity !== "ROOT_OPERATOR" || rootSigning.sourceFile !== "scripts/aws/production-root-attestation-signer.mjs" || rootSigning.action !== "kms:Sign" || rootSigning.mutation !== true || JSON.stringify(rootSigning.resources) !== JSON.stringify([ROOT_ATTESTATION_KEY_ALIAS_ARN])) throw new Error("Stage-A root signing capability boundary is not exact.");

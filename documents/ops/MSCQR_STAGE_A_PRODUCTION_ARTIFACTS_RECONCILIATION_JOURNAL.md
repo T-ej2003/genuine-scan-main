@@ -15,6 +15,16 @@ binds one root-operated `PutBucketPolicy` from `P0` directly to the final
 policy (`P2`). `P2` contains the existing rebaseline-evidence rules plus the
 isolated journal rules. There is no `P0 -> P1 -> P2` sequence.
 
+The reviewed reservation-retirement transition is the exact reverse from the
+policy containing the six historical `InitialActivationLifecycle` reservation
+statements to canonical `P2` without those statements. It is bound to
+predecessor SHA-256
+`0d5d20a784351f38712513252223fbdfaca52e4301bd00b5d0298882702842be` and
+target SHA-256
+`765e091f99ee56e186741aa2fd849d755dc19f0b668779801855105350db8ff3`.
+The resolver rejects partial removal, additional statement changes, and
+arbitrary bucket-policy replacements.
+
 The recovery runner requires the exact clean protected checkout, authorization,
 state identity, and predecessor before it creates a root-attested conditional
 `recovery/<authorization-sha256>/attempt.json` record. It then performs the one
