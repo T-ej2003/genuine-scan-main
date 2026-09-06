@@ -23,6 +23,31 @@ the process stops after the policy write, the same authorization may resume
 only when that immutable signed attempt exists and live policy is exact `P2`;
 the retry performs no policy write. An existing valid completion is idempotent.
 
+### Single-attempt recovery safety
+
+The existing signed, conditional-create `attempt.json` is the durable mutation-intent
+boundary. Absence is the only persisted pre-write representation; there is no
+separate resumable `PRE_WRITE` record. Every existing attempt, including legacy
+records, means `MUTATION_ATTEMPT_STARTED` conservatively. Only the invocation
+whose exclusive attempt creation succeeds can enter the policy write. A crash
+after persistence but before the child starts consumes that authorization too.
+Conflicting or ambiguous journal creation never permits the policy write.
+
+The exact root `s3api put-bucket-policy` child forces `AWS_MAX_ATTEMPTS=1`,
+overriding inherited configuration without changing read subprocess environments.
+Source, authorization, state, policy CAS and approval freshness are checked before
+the write. A mutation exception immediately attempts read-only policy observation:
+exact target proceeds to verified completion; exact predecessor remains ambiguous
+and stops; unexpected policy or failed observation stops. No catch retries the write.
+On restart, a persisted attempt plus predecessor is not retry authority. Target
+plus authenticated attempt permits completion only; unexpected state fails closed.
+
+The outer lock and existing immutable journal are reused. No new object namespace,
+lock, principal, policy transition or authorization format is introduced. Existing
+refresh-only state reconciliation and normal no-op closure remain unchanged.
+Tests cover failure before/after marker persistence, lost response, failed readback,
+post-write process loss, repeated invocation, and mutation-only CLI retry settings.
+
 ## Namespace and permissions
 
 The only namespace is:
