@@ -11,7 +11,8 @@ The runtime policy permits only the exact IAM reads required to authenticate the
 reviewed InitialActivationLifecycle target and one
 `iam:CreatePolicyVersion` action on that exact policy ARN. It does not grant
 `SetDefaultPolicyVersion`, version deletion, attachment, trust, role, or policy
-creation actions. PR #448 is not migrated by this source package.
+creation actions. PR #448 is migrated to this purpose-bound OIDC execution
+path.
 
 Installation is performed only by the protected production-environment workflow
 using the exact OIDC bootstrap role documented in
