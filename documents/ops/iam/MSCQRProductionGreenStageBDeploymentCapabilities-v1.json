@@ -228,6 +228,11 @@
       "order": 45,
       "id": "stage-a-production-artifacts-state-reconciliation",
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"
+    },
+    {
+      "order": 46,
+      "id": "initial-activation-lifecycle-policy-reconciliation",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"
     }
   ],
   "identities": [
@@ -238,7 +243,8 @@
     "RELEASE_DEPLOYER",
     "INDEPENDENT_CHECKER",
     "ECS_EXEC_VERIFIER_OPERATOR",
-    "SERVICE_RUNTIME"
+    "SERVICE_RUNTIME",
+    "INITIAL_ACTIVATION_RECONCILER"
   ],
   "capabilities": [
     {
@@ -1272,6 +1278,223 @@
       "mutation": true
     },
     {
+      "id": "initial-activation-policy-reconciliation-prepare-identify",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "executionMode": "PREPARATION",
+        "principalArn": "arn:aws:iam::368992683803:root"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+        "sid": "initial-activation-policy-reconciliation-prepare-identify",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-prepare-list-policy-entities",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-list-policy-entities",
+      "action": "iam:ListEntitiesForPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "executionMode": "PREPARATION",
+        "principalArn": "arn:aws:iam::368992683803:root"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+        "sid": "initial-activation-policy-reconciliation-prepare-list-policy-entities",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-prepare-list-policy-versions",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-list-policy-versions",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "executionMode": "PREPARATION",
+        "principalArn": "arn:aws:iam::368992683803:root"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+        "sid": "initial-activation-policy-reconciliation-prepare-list-policy-versions",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-prepare-read-policy",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-read-policy",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "executionMode": "PREPARATION",
+        "principalArn": "arn:aws:iam::368992683803:root"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+        "sid": "initial-activation-policy-reconciliation-prepare-read-policy",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-prepare-read-policy-attachment",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-read-policy-attachment",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "executionMode": "PREPARATION",
+        "principalArn": "arn:aws:iam::368992683803:root"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+        "sid": "initial-activation-policy-reconciliation-prepare-read-policy-attachment",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-prepare-read-policy-version",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-read-policy-version",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "executionMode": "PREPARATION",
+        "principalArn": "arn:aws:iam::368992683803:root"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+        "sid": "initial-activation-policy-reconciliation-prepare-read-policy-version",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-prepare-read-release-role",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-read-release-role",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "executionMode": "PREPARATION",
+        "principalArn": "arn:aws:iam::368992683803:root"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+        "sid": "initial-activation-policy-reconciliation-prepare-read-release-role",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "initial-activation-policy-reconciliation-root-conditional-create-reservation",
       "phase": "initial-activation-lifecycle",
       "identity": "ROOT_OPERATOR",
@@ -1299,6 +1522,238 @@
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-root-create-policy-version",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "github-actions",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-create-policy-version",
+      "action": "iam:CreatePolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_RECONCILIATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "CreateExactInitialActivationLifecyclePolicyVersion",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-root-identify",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "github-actions",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "IdentifyCurrentSession",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-root-list-policy-entities",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "github-actions",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-list-policy-entities",
+      "action": "iam:ListEntitiesForPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactInitialActivationLifecyclePolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-root-list-policy-versions",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "github-actions",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-list-policy-versions",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactInitialActivationLifecyclePolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-root-read-policy",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "github-actions",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-read-policy",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactInitialActivationLifecyclePolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-root-read-policy-attachment",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "github-actions",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-read-policy-attachment",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactInitialActivationReleaseRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-root-read-policy-version",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "github-actions",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-read-policy-version",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactInitialActivationLifecyclePolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "initial-activation-policy-reconciliation-root-read-release-role",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "github-actions",
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-read-release-role",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactInitialActivationReleaseRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+      },
+      "required": true,
+      "mutation": false
     },
     {
       "id": "initial-activation-policy-reconciliation-root-read-reservation",
@@ -12945,6 +13400,171 @@
     {
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs",
       "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-create-policy-version",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "iam:CreatePolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-root-create-policy-version"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-read-policy",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-root-read-policy"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-read-policy",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-prepare-read-policy"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-read-policy-version",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-root-read-policy-version"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-read-policy-version",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-prepare-read-policy-version"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-read-release-role",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-root-read-release-role"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-read-release-role",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-prepare-read-release-role"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-read-policy-attachment",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-root-read-policy-attachment"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-read-policy-attachment",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-prepare-read-policy-attachment"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-list-policy-entities",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "iam:ListEntitiesForPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-root-list-policy-entities"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-list-policy-entities",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListEntitiesForPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-prepare-list-policy-entities"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-list-policy-versions",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-root-list-policy-versions"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-list-policy-versions",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-prepare-list-policy-versions"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-root-identify",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-root-identify"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
+      "sourceFunction": "initial-activation-policy-reconciliation-prepare-identify",
+      "phase": "initial-activation-lifecycle-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "initial-activation-policy-reconciliation-prepare-identify"
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",

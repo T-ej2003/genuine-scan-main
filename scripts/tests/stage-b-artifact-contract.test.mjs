@@ -142,6 +142,28 @@ test("initial-activation reconciler installation artifacts form a closed private
   }
 });
 
+test("initial-activation lifecycle reconciliation artifacts are registered", () => {
+  const expected = {
+    "initial-activation-lifecycle-policy-reconciliation-authorization": {
+      producer: ".github/workflows/authorize-production-initial-activation-lifecycle-policy-reconciliation.yml",
+      consumers: ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"],
+    },
+    "initial-activation-lifecycle-policy-reconciliation-result": {
+      producer: "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs:runInitialActivationLifecyclePolicyReconciliation --execute",
+      consumers: [".github/workflows/authorize-production-initial-activation-lifecycle-policy-reconciliation.yml"],
+    },
+  };
+  for (const [id, contract] of Object.entries(expected)) {
+    const artifact = STAGE_B_ARTIFACT_CONTRACTS.find((candidate) => candidate.id === id);
+    assert.equal(artifact?.producer, contract.producer);
+    assert.deepEqual(artifact?.consumers, contract.consumers);
+    assert.equal(artifact?.directoryMode, "0700"); assert.equal(artifact?.fileMode, "0600");
+    assert.equal(artifact?.outsideRepository, true); assert.equal(artifact?.atomic, true);
+    assert.equal(artifact?.overwrite, false); assert.equal(artifact?.hashBound, true);
+    assert.deepEqual(canonicalStageBArtifactContracts().artifacts.find((candidate) => candidate.id === id)?.consumers, contract.consumers);
+  }
+});
+
 test("reference-audit contract registers every production consumer", () => {
   const referenceAudit = STAGE_B_ARTIFACT_CONTRACTS.find(({ id }) => id === "reference-audit");
   assert.deepEqual(referenceAudit?.consumers, [

@@ -1203,6 +1203,43 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "initial-activation-lifecycle-policy-reconciliation-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-initial-activation-lifecycle-policy-reconciliation.yml",
+      "consumers": [
+        "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "initial-activation-lifecycle-policy-reconciliation-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-lifecycle-policy-reconciliation-result",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs:runInitialActivationLifecyclePolicyReconciliation --execute",
+      "consumers": [
+        ".github/workflows/authorize-production-initial-activation-lifecycle-policy-reconciliation.yml"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-lifecycle-policy-reconciliation-result",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "backend-recovery-candidate",
       "kind": "file",
       "producer": "scripts/aws/prepare-production-backend-recovery-candidate.mjs:runCli",
