@@ -109,6 +109,10 @@ test("policy-centric entity discovery consumes every page and fails closed on in
     'Connect timeout on endpoint URL: "https://iam.amazonaws.com/"',
     'Read timeout on endpoint URL: "https://iam.amazonaws.com/"',
     'Connection was closed before we received a valid response from endpoint URL: "https://iam.amazonaws.com/".',
+    'Could not connect to the endpoint URL: "https://iam.eu-west-2.amazonaws.com/"',
+    'Connect timeout on endpoint URL: "https://iam.eu-west-2.amazonaws.com/"',
+    'Read timeout on endpoint URL: "https://iam.eu-west-2.amazonaws.com/"',
+    'Connection was closed before we received a valid response from endpoint URL: "https://iam.eu-west-2.amazonaws.com/".',
   ];
   const transientErrors = [
     ...["Throttling", "ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded", "ServiceUnavailable", "ServiceUnavailableException", "ServiceFailure", "InternalFailure", "InternalError"].map((code) => ({ code })),
