@@ -64,12 +64,12 @@ const checkerRoleChange = ({ actions = ["no-op"], before = {}, after = {} } = {}
     after: { name: STAGE_A_CHECKER_ROLE_TRUST.name, assume_role_policy: checkerRoleTrustDocument(), ...after },
   },
 });
-const artifactsBucketPolicyChange = ({ actions = ["create"], before = null, beforePolicy, after = {}, policy = buildStageAProductionArtifactsBucketPolicy() } = {}) => ({
+const artifactsBucketPolicyChange = ({ actions = ["create"], before = null, beforePolicy, after = {}, policy = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation() } = {}) => ({
   address: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address,
   type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type,
   change: {
     actions,
-    before: actions[0] === "no-op" ? { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(buildStageAProductionArtifactsBucketPolicy()), ...before } : beforePolicy ? { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(beforePolicy), ...before } : before,
+    before: actions[0] === "no-op" ? { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()), ...before } : beforePolicy ? { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(beforePolicy), ...before } : before,
     after: { bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(policy), ...after },
   },
 });
@@ -239,7 +239,7 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
   assert.equal(exactUpdateValidation.changes, 3);
   assert.equal(exactUpdateValidation.recoveryRequired, true);
   assert.equal(exactUpdateValidation.executionDisposition, "RECOVERY_REQUIRED");
-  const intentionalReservationUpdate = assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation() }) }), inputs);
+  const intentionalReservationUpdate = assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicy() }) }), inputs);
   assert.equal(intentionalReservationUpdate.recoveryRequired, true);
   assert.equal(intentionalReservationUpdate.executionDisposition, "RECOVERY_REQUIRED");
   assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: { ...exactUpdate, address: "aws_s3_bucket_policy.unrelated" } }), inputs));
@@ -247,7 +247,7 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
     assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions, beforePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor() }) }), inputs));
   }
   const predecessor = buildStageAProductionArtifactsBucketPolicyPredecessor();
-  const desired = buildStageAProductionArtifactsBucketPolicy();
+  const desired = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   const predecessorMutation = structuredClone(predecessor);
   predecessorMutation.Statement[0].Action = "s3:PutObject";
   const predecessorRemoved = structuredClone(predecessor);
@@ -333,7 +333,7 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
 
 test("Stage A refuses to apply the self-denied bucket-policy transition through the release deployer", async () => {
   const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
-  for (const beforePolicy of [buildStageAProductionArtifactsBucketPolicyPredecessor(), buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()]) {
+  for (const beforePolicy of [buildStageAProductionArtifactsBucketPolicyPredecessor(), buildStageAProductionArtifactsBucketPolicy()]) {
     const saved = { sourceSha: "a".repeat(40), savedPlanSha256: "b".repeat(64), evidenceRef: "terraform-plan:test", evidenceSha256: "b".repeat(64), plan: stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy }) }) };
     let applyCalls = 0;
     await assert.rejects(() => runStageAControlPlane({

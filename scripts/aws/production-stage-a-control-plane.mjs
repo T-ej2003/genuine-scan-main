@@ -588,14 +588,14 @@ function assertStageAProductionArtifactsBucketPolicyChange(entry) {
   const change = entry.change;
   if (!exactActions(change?.actions, ["create"]) && !exactActions(change?.actions, ["update"]) && !exactActions(change?.actions, ["no-op"])) throw new Error("Stage A production-artifacts bucket policy must be an exact create, reviewed update, or converged no-op.");
   if (change.replace_paths?.length || change.after?.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket) throw new Error("Stage A production-artifacts bucket-policy identity is wrong.");
-  const expected = stageAProductionArtifactsPolicyCanonicalJson(buildStageAProductionArtifactsBucketPolicy());
+  const expected = stageAProductionArtifactsPolicyCanonicalJson(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation());
   if (stageAProductionArtifactsPolicyCanonicalJson(decodePolicyDocument(change.after?.policy, "Stage A production-artifacts bucket policy")) !== expected) throw new Error("Stage A production-artifacts bucket-policy semantics are not exact.");
   if (exactActions(change.actions, ["create"])) {
     if (change.before !== null) throw new Error("Stage A production-artifacts bucket policy does not have the authenticated absent predecessor.");
   } else if (exactActions(change.actions, ["update"])) {
     if (change.before?.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket) throw new Error("Stage A production-artifacts bucket policy update predecessor identity is not exact.");
     const predecessor = stageAProductionArtifactsPolicyCanonicalJson(decodePolicyDocument(change.before.policy, "Stage A production-artifacts bucket policy predecessor"));
-    if (![buildStageAProductionArtifactsBucketPolicyPredecessor(), buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()].some((policy) => predecessor === stageAProductionArtifactsPolicyCanonicalJson(policy))) throw new Error("Stage A production-artifacts bucket policy update predecessor is not an exact reviewed policy.");
+    if (![buildStageAProductionArtifactsBucketPolicyPredecessor(), buildStageAProductionArtifactsBucketPolicy()].some((policy) => predecessor === stageAProductionArtifactsPolicyCanonicalJson(policy))) throw new Error("Stage A production-artifacts bucket policy update predecessor is not an exact reviewed policy.");
   } else if (stageAProductionArtifactsPolicyCanonicalJson(decodePolicyDocument(change.before?.policy, "Stage A converged production-artifacts bucket policy")) !== expected
     || change.before?.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket) throw new Error("Stage A converged production-artifacts bucket-policy predecessor is not exact.");
   const recoveryRequired = exactActions(change.actions, ["update"]);

@@ -602,8 +602,7 @@ test("recovery journal retention rejects overlapping current-object expiration a
     { Prefix: "production-initial-activation-lifecycle-policy-reconciliation/" },
     { Prefix: "" },
     { Filter: { And: { Prefix: "production-initial-activation-lifecycle-policy-reconciliation/reservations/", Tag: { Key: "retention", Value: "short" } } } },
-  ]) assert.throws(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive(rule)] }, ["production-stage-a-production-artifacts-reconciliation/", "production-initial-activation-lifecycle-policy-reconciliation/reservations/"]), /protected immutable record unavailable/);
-  assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive({ Prefix: "production-initial-activation-lifecycle-policy-reconciliation/reservations/" })] }));
+  ]) assert.throws(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive(rule)] }), /protected immutable record unavailable/);
   assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [] }));
   assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Disabled", Prefix: "production-initial-activation-lifecycle-policy-reconciliation/reservations/", Expiration: { Days: 1 } }] }));
   assert.doesNotThrow(() => assertStageAProductionArtifactsJournalRetention({ Rules: [destructive({ Filter: { And: { Prefix: "unrelated/", Tag: { Key: "retention", Value: "short" } } } })] }));
@@ -621,14 +620,14 @@ test("recovery journal retention rejects overlapping current-object expiration a
   assert.throws(() => assertStageAProductionArtifactsJournalRetention({ Rules: [{ Status: "Enabled", Prefix: "", Expiration: { Date: "2026-01-01T00:00:00Z", ExpiredObjectDeleteMarker: true } }] }), /protected immutable record unavailable/);
 });
 
-test("active journal-affecting lifecycle fails before the governed bucket-policy write", async () => {
+test("reservation-affecting lifecycle fails before the governed bucket-policy write", async () => {
   const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "506"), verificationRef: "retention", governedExecutableManifestSha256 });
   let policyWrites = 0;
   const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : (() => { throw new Error(`unexpected release ${args[1]}`); })();
   const rootRun = (args) => {
     if (args[1] === "get-caller-identity") return rootIdentity;
     if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
-    if (args[1] === "get-bucket-lifecycle-configuration") return JSON.stringify({ Rules: [{ ID: "reservation-expiry", Status: "Enabled", Prefix: "production-stage-a-production-artifacts-reconciliation/", Expiration: { Days: 1 } }] });
+    if (args[1] === "get-bucket-lifecycle-configuration") return JSON.stringify({ Rules: [{ ID: "reservation-expiry", Status: "Enabled", Prefix: "production-initial-activation-lifecycle-policy-reconciliation/reservations/", Expiration: { Days: 1 } }] });
     if (args[1] === "put-bucket-policy") { policyWrites += 1; return ""; }
     throw new Error(`unexpected root ${args[1]}`);
   };

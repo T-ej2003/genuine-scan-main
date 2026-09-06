@@ -64,7 +64,7 @@ const proveProtectedMainDescendant = ({ ancestorSha, descendantSha }) => {
   try { execFileSync("git", ["cat-file", "-e", `${ancestorSha}^{commit}`], { cwd: root, stdio: "ignore" }); execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
 };
 
-export function assertStageAProductionArtifactsJournalRetention(lifecycle, journalPrefixes = ["production-stage-a-production-artifacts-reconciliation/"]) {
+export function assertStageAProductionArtifactsJournalRetention(lifecycle, journalPrefixes = ["production-stage-a-production-artifacts-reconciliation/", PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationPrefix]) {
   if (!lifecycle || !Array.isArray(lifecycle.Rules)) throw new Error("Stage A recovery journal lifecycle response is malformed.");
   const protectedPrefixes = (Array.isArray(journalPrefixes) ? journalPrefixes : [journalPrefixes]).filter((prefix) => typeof prefix === "string" && prefix.length > 0);
   if (!protectedPrefixes.length) throw new Error("Stage A recovery journal protected prefixes are invalid.");

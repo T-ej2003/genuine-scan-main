@@ -29,11 +29,11 @@ import {
   stageAProductionArtifactsGovernedExecutableManifest,
   stageAProductionArtifactsGovernedExecutableManifestSha256,
 } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
-import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, createStageAProductionArtifactsReconciliationPrepareEvidence, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
+import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, createStageAProductionArtifactsReconciliationPrepareEvidence, currentStageAProductionArtifactsBucketPolicyTransition, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "../aws/production-stage-a-production-artifacts-journal.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { authorizeStageAProductionArtifactsReconciliation } from "../aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs";
-import { authorizeStageAProductionArtifactsRecovery, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_TRANSITION } from "../aws/authorize-production-stage-a-production-artifacts-recovery.mjs";
+import { authorizeStageAProductionArtifactsRecovery } from "../aws/authorize-production-stage-a-production-artifacts-recovery.mjs";
 
 const sourceSha = "a".repeat(40);
 const preState = { lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 35, stateSha256: "b".repeat(64) };
@@ -64,22 +64,17 @@ test("fresh recovery authorization binds the exact deployed-to-reservation polic
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha, preState }));
 });
 
-test("production recovery authorizer selects the reviewed reservation-retirement transition", () => {
-  assert.equal(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_TRANSITION.predecessorPolicySha256, stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()));
-  assert.equal(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_TRANSITION.desiredPolicySha256, stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy()));
-});
-
-test("production recovery authorizer emits the reverse transition in its real artifact", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-a-reverse-authorizer-"));
+test("production recovery authorizer remains on the reservation-bearing transition until reconciler migration", () => {
+  const transition = currentStageAProductionArtifactsBucketPolicyTransition();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-a-current-authorizer-"));
   const source = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const approvalPath = path.join(directory, "approval.json"); const outputPath = path.join(directory, "authorization.json");
-  const approvalEvidence = createProductionEnvironmentApprovalEvidence({ environmentConfig: environment, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: "production", sourceSha: source, workflowRef: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF, eventName: "workflow_dispatch", workflowRunId: "777", workflowRunAttempt: "1", executionActor: "operator", observedAt: "2026-09-02T00:00:00.000Z", actualApproval: { state: "approved", environmentId: 1, environmentName: "production", userId: 2, userLogin: "reviewer" } });
-  fs.writeFileSync(approvalPath, JSON.stringify(approvalEvidence));
+  fs.writeFileSync(approvalPath, JSON.stringify(approval(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF, source)));
   try {
-    authorizeStageAProductionArtifactsRecovery(["--source-sha", source, "--state-lineage", preState.lineage, "--state-serial", String(preState.serial), "--state-sha256", preState.stateSha256, "--verification-ref", "reverse-transition", "--environment-approval", approvalPath, "--output", outputPath]);
+    authorizeStageAProductionArtifactsRecovery(["--source-sha", source, "--state-lineage", preState.lineage, "--state-serial", String(preState.serial), "--state-sha256", preState.stateSha256, "--verification-ref", "current-transition", "--environment-approval", approvalPath, "--output", outputPath]);
     const authorization = JSON.parse(fs.readFileSync(outputPath, "utf8"));
-    assert.equal(authorization.predecessorPolicySha256, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_TRANSITION.predecessorPolicySha256);
-    assert.equal(authorization.desiredPolicySha256, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_TRANSITION.desiredPolicySha256);
+    assert.equal(authorization.predecessorPolicySha256, transition.predecessorPolicySha256);
+    assert.equal(authorization.desiredPolicySha256, transition.desiredPolicySha256);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
