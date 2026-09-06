@@ -213,14 +213,9 @@ test("source policy and bucket policy enforce only exact conditional lifecycle o
     "DenyNonConditionalStageAProductionArtifactsReconciliationWrites",
     "DenyOtherPrincipalsStageAProductionArtifactsReconciliationWrites",
     "DenyStageAProductionArtifactsReconciliationDeletion",
-    "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
-    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationReads",
-    "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
-    "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
-    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
-    "DenyInitialActivationPolicyReconciliationReservationDeletion",
     "DenyProductionArtifactsBucketPolicyMutation",
   ]);
+  assert.doesNotMatch(bucketPolicy, /InitialActivationPolicyReconciliationReservation|production-initial-activation-lifecycle-policy-reconciliation\/reservations/);
   const evidence = policy.Statement.filter(({ Sid }) => ["ReadExactRebaselineEvidence", "CreateExactRebaselineEvidenceConditionally", "DenyNonConditionalRebaselineEvidenceWrites", "DenyRebaselineEvidenceDeletion"].includes(Sid));
   assert.equal(evidence.length, 4);
   for (const statement of evidence) assert.equal(statement.Resource, PRODUCTION_ACTIVATION_LIFECYCLE.rebaselineEvidenceArn);

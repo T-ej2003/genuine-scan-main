@@ -33,6 +33,7 @@ import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifa
 import { STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "../aws/production-stage-a-production-artifacts-journal.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { authorizeStageAProductionArtifactsReconciliation } from "../aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs";
+import { STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_TRANSITION } from "../aws/authorize-production-stage-a-production-artifacts-recovery.mjs";
 
 const sourceSha = "a".repeat(40);
 const preState = { lineage: "02afb75a-f902-ab8a-f4c1-751d4aef7837", serial: 35, stateSha256: "b".repeat(64) };
@@ -61,6 +62,11 @@ test("fresh recovery authorization binds the exact deployed-to-reservation polic
   assert.equal(authorization.desiredPolicySha256, stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()));
   assert.equal(authorization.expectedLivePolicySha256, authorization.predecessorPolicySha256);
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha, preState }));
+});
+
+test("production recovery authorizer selects the reviewed reservation-retirement transition", () => {
+  assert.equal(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_TRANSITION.predecessorPolicySha256, stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()));
+  assert.equal(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_TRANSITION.desiredPolicySha256, stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy()));
 });
 
 const githubRun = ({ operation, authorization, id = 123, attempt = 1, actor = "operator", headSha = sourceSha, workflowPath } = {}) => {
