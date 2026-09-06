@@ -15,6 +15,7 @@ import { createRootAttestationKmsVerifier } from "./production-root-attestation-
 import { createStageAProductionArtifactsJournal } from "./production-stage-a-production-artifacts-journal.mjs";
 import { createStageAProductionArtifactsRecoveryAttemptEvidence, assertStageAProductionArtifactsRecoveryAttemptEvidence, createStageAProductionArtifactsRecoveryCompletionEvidence, assertStageAProductionArtifactsRecoveryAuthorization, assertStageAProductionArtifactsRecoveryCompletionEvidence, assertStageAProductionArtifactsRecoverySourceCompatibility, resolveStageAProductionArtifactsAuthorizationArtifact, stageAProductionArtifactsGovernedExecutableManifest, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION } from "./production-stage-a-production-artifacts-recovery-governance.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { assertProductionEnvironmentApprovalFreshness } from "./production-github-environment-approval.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const i = argv.indexOf(name); const value = i < 0 ? undefined : argv[i + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
@@ -45,7 +46,7 @@ export function readRawTerraformStateIdentity(run) {
 
 export const STAGE_A_RECOVERY_CLASSIFICATION = Object.freeze({
   READY_FOR_WRITE: "READY_FOR_WRITE",
-  ATTEMPT_PENDING_BEFORE_WRITE: "ATTEMPT_PENDING_BEFORE_WRITE",
+  MUTATION_ATTEMPT_STARTED: "MUTATION_ATTEMPT_STARTED",
   POST_WRITE_COMPLETION_PENDING: "POST_WRITE_COMPLETION_PENDING",
   LIVE_POLICY_CONFLICT: "LIVE_POLICY_CONFLICT",
   P2_WITHOUT_ATTEMPT: "P2_WITHOUT_ATTEMPT",
@@ -55,7 +56,7 @@ export function classifyStageAProductionArtifactsRecovery({ livePolicy, attempt,
   if (completion) return STAGE_A_RECOVERY_CLASSIFICATION.COMPLETED;
   const equal = (left, right) => { try { return stageAProductionArtifactsPolicySemanticallyEqual(left, right); } catch { return false; } };
   if (equal(livePolicy, transition.desired)) return attempt ? STAGE_A_RECOVERY_CLASSIFICATION.POST_WRITE_COMPLETION_PENDING : STAGE_A_RECOVERY_CLASSIFICATION.P2_WITHOUT_ATTEMPT;
-  if (equal(livePolicy, transition.predecessor)) return attempt ? STAGE_A_RECOVERY_CLASSIFICATION.ATTEMPT_PENDING_BEFORE_WRITE : STAGE_A_RECOVERY_CLASSIFICATION.READY_FOR_WRITE;
+  if (equal(livePolicy, transition.predecessor)) return attempt ? STAGE_A_RECOVERY_CLASSIFICATION.MUTATION_ATTEMPT_STARTED : STAGE_A_RECOVERY_CLASSIFICATION.READY_FOR_WRITE;
   return STAGE_A_RECOVERY_CLASSIFICATION.LIVE_POLICY_CONFLICT;
 }
 
@@ -139,12 +140,16 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
     }
   };
   let attempt = decode(readAttempt(), "Stage A recovery attempt");
+  let createdAttempt = false;
   if (!attempt) {
     if (!predecessorLive) throw new Error("Stage A recovery desired-policy resume lacks the immutable signed pre-write attempt.");
+    assertProductionEnvironmentApprovalFreshness(authorization.protectedEnvironmentApprovalEvidence);
     attempt = createStageAProductionArtifactsRecoveryAttemptEvidence({ authorization, sign });
     attemptJournal.writeRecoveryAttempt({ recoveryAuthorizationSha256: authorization.authorizationSha256, bytes: Buffer.from(`${JSON.stringify(attempt)}\n`) });
+    createdAttempt = true;
   }
   assertStageAProductionArtifactsRecoveryAttemptEvidence(attempt, { authorization, verify });
+  if (!createdAttempt && predecessorLive) throw new Error("Stage A recovery MUTATION_ATTEMPT_STARTED: PREDECESSOR_LIVE_EXACT does not permit another PutBucketPolicy; governed recovery decision required.");
   const classification = classifyStageAProductionArtifactsRecovery({ livePolicy: before, attempt, transition });
   if ([STAGE_A_RECOVERY_CLASSIFICATION.LIVE_POLICY_CONFLICT, STAGE_A_RECOVERY_CLASSIFICATION.P2_WITHOUT_ATTEMPT].includes(classification)) throw new Error(`Stage A recovery classification is not executable: ${classification}.`);
   const postWriteContinuation = classification === STAGE_A_RECOVERY_CLASSIFICATION.POST_WRITE_COMPLETION_PENDING;
@@ -154,11 +159,11 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
     fs.writeFileSync(policyPath, JSON.stringify(transition.desired), { mode: 0o600, flag: "wx" });
     let after;
     await terraformStateLock.acquire(); lockHeld = true;
+    const finalSource = readProtectedSource({ cwd: root, requireCanonicalRepository: true, run: (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), expectedSourceSha: sourceSha }); const finalSourceSha = finalSource.toolingSha || finalSource.headSha;
+    assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: finalSourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256: authorization.governedExecutableManifestSha256, readGovernedExecutableManifestSha256, ...(readProtectedSource === readStageBProtectedMainCheckout ? { readContinuationChangedFiles } : {}) });
+    const finalAuthenticated = resolveAuthorization({ workflowRunId, workflowRunAttempt, sourceSha: recoverySourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, readGovernedExecutableManifestSha256 });
+    if (finalAuthenticated?.authorization?.authorizationSha256 !== authorization.authorizationSha256) throw new Error("Stage A recovery authorization changed at the locked execution boundary.");
     if (postWriteContinuation) {
-      const finalSource = readProtectedSource({ cwd: root, requireCanonicalRepository: true, run: (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), expectedSourceSha: sourceSha }); const finalSourceSha = finalSource.toolingSha || finalSource.headSha;
-      assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: finalSourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256: authorization.governedExecutableManifestSha256, readGovernedExecutableManifestSha256, ...(readProtectedSource === readStageBProtectedMainCheckout ? { readContinuationChangedFiles } : {}) });
-      const finalAuthenticated = resolveAuthorization({ workflowRunId, workflowRunAttempt, sourceSha: recoverySourceSha, operation: STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION, readGovernedExecutableManifestSha256 });
-      if (finalAuthenticated?.authorization?.authorizationSha256 !== authorization.authorizationSha256) throw new Error("Stage A recovery authorization changed before completion continuation.");
       const finalAttempt = decode(attemptJournal.readRecoveryAttempt(authorization.authorizationSha256), "Stage A recovery attempt");
       assertStageAProductionArtifactsRecoveryAttemptEvidence(finalAttempt, { authorization, verify });
       const finalState = await readStateIdentity();
@@ -175,7 +180,14 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
       assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha: recoverySourceSha, preState: finalState });
       const finalPolicy = readPolicy(releaseRun);
       if (!samePolicy(finalPolicy, before)) throw new Error("Stage A recovery live policy changed before the policy write.");
-      if (predecessorLive) await rootRun(["s3api", "put-bucket-policy", "--bucket", authorization.bucket, "--policy", `file://${policyPath}`]);
+      assertProductionEnvironmentApprovalFreshness(authorization.protectedEnvironmentApprovalEvidence);
+      try { if (predecessorLive) await rootRun(["s3api", "put-bucket-policy", "--bucket", authorization.bucket, "--policy", `file://${policyPath}`]); }
+      catch (error) {
+        // The durable attempt is consumed even if the request never reached AWS.
+        const observed = readPolicy(releaseRun);
+        if (samePolicy(observed, transition.predecessor)) throw new Error("Stage A recovery ambiguous mutation: PREDECESSOR_LIVE_EXACT; no automatic PutBucketPolicy retry.", { cause: error });
+        if (!samePolicy(observed, transition.desired)) throw new Error("Stage A recovery ambiguous mutation: UNEXPECTED live policy; no automatic PutBucketPolicy retry.", { cause: error });
+      }
       after = readPolicy(releaseRun); if (!stageAProductionArtifactsPolicySemanticallyEqual(after, transition.desired)) throw new Error("Stage A production-artifacts recovery readback is not the exact desired policy.");
     }
     const completion = createStageAProductionArtifactsRecoveryCompletionEvidence({ authorization, preRecoveryLivePolicy: transition.predecessor, postRecoveryLivePolicy: after, sign }); const bytes = Buffer.from(`${JSON.stringify(completion)}\n`);
@@ -186,12 +198,16 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
   } finally { try { if (lockHeld) await terraformStateLock.release(); } finally { fs.rmSync(directory, { recursive: true, force: true }); } }
 }
 
+export function createStageARecoveryRootCommandRunner({ exec = execFileSync, ...options } = {}) {
+  return createProductionAwsCommandRunner({ ...options, exec: (file, args, execution) => exec(file, args, { ...execution, env: args[0] === "s3api" && args[1] === "put-bucket-policy" ? { ...execution.env, AWS_MAX_ATTEMPTS: "1" } : execution.env }) });
+}
+
 export async function runStageAProductionArtifactsRecoveryCli(argv = process.argv.slice(2), deps = {}) {
   if (!argv.includes("--production")) throw new Error("Stage A production-artifacts recovery requires --production.");
   const sourceSha = required(argv, "--source-sha"); const recoverySourceSha = argv.includes("--recovery-source-sha") ? required(argv, "--recovery-source-sha") : sourceSha; const rootProfile = required(argv, "--root-profile"); const terraformDataDir = path.resolve(required(argv, "--terraform-data-dir"));
   if (!path.isAbsolute(terraformDataDir) || terraformDataDir.startsWith(`${root}${path.sep}`)) throw new Error("Stage A recovery Terraform data directory must be external and absolute.");
   fs.mkdirSync(terraformDataDir, { recursive: true, mode: 0o700 }); fs.chmodSync(terraformDataDir, 0o700);
-  const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: "eu-west-2" }); const rootRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: rootProfile, region: "eu-west-2" });
+  const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: "eu-west-2" }); const rootRun = createStageARecoveryRootCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: rootProfile, region: "eu-west-2" });
   const terraformEnvironment = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: "eu-west-2" }), TF_DATA_DIR: terraformDataDir };
   const terraformRun = async (args) => execFileSync(args[0], args.slice(1), { cwd: root, env: terraformEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const adapter = createTerraformStageAAdapter({ root: "infra/aws/terraform/production-green-stage-a", planPath: path.join(terraformDataDir, "unused.tfplan"), backendArgs: Object.entries(STAGE_A_TERRAFORM_BACKEND).filter(([key]) => key !== "type").map(([key, value]) => `-backend-config=${key}=${value}`), run: terraformRun, describeIngress: async () => ({ present: false }), readProductionArtifactsPolicy: async () => readPolicy(releaseRun), sourceSha });

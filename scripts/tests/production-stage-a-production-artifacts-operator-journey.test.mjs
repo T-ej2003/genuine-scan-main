@@ -7,7 +7,7 @@ import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, createStageAProductionArtifactsReconciliationPrepareEvidence, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
 import { createStageAProductionArtifactsRecoveryAuthorization as createRecoveryAuthorization, createStageAProductionArtifactsRecoveryAttemptEvidence, createStageAProductionArtifactsRecoveryCompletionEvidence, createStageAProductionArtifactsContinuationRebindAuthorization, createStageAProductionArtifactsReconciliationAuthorization, STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_OPERATION, STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_WORKFLOW_REF, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
-import { assertStageAProductionArtifactsJournalRetention, runStageAProductionArtifactsRecovery } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
+import { assertStageAProductionArtifactsJournalRetention, createStageARecoveryRootCommandRunner, runStageAProductionArtifactsRecovery } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
 import { createStageAProductionArtifactsJournalResult, createStageAProductionArtifactsPostApplyEvidence, createStageAProductionArtifactsReservation, STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "../aws/production-stage-a-production-artifacts-journal.mjs";
 import { assertStageAProductionArtifactsReconciliationPrivateArtifactPath, runStageAProductionArtifactsReconciliation as runReconciliation, runStageAProductionArtifactsReconciliationCli } from "../aws/run-production-stage-a-production-artifacts-reconciliation.mjs";
 
@@ -24,8 +24,58 @@ const runStageAProductionArtifactsReconciliation = (input) => runReconciliation(
 const rootIdentity = JSON.stringify({ Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" });
 const releaseIdentity = JSON.stringify({ Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test" });
 const environment = { id: 1, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 2, login: "reviewer" } }] }] };
-const approval = (workflowRef, runId, approvedSourceSha = sourceSha) => createProductionEnvironmentApprovalEvidence({ environmentConfig: environment, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: "production", sourceSha: approvedSourceSha, workflowRef, eventName: "workflow_dispatch", workflowRunId: runId, workflowRunAttempt: "1", executionActor: "operator", observedAt: "2026-09-02T00:00:00.000Z", actualApproval: { state: "approved", environmentId: 1, environmentName: "production", userId: 2, userLogin: "reviewer" } });
+const approval = (workflowRef, runId, approvedSourceSha = sourceSha, observedAt = new Date().toISOString()) => createProductionEnvironmentApprovalEvidence({ environmentConfig: environment, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: "production", sourceSha: approvedSourceSha, workflowRef, eventName: "workflow_dispatch", workflowRunId: runId, workflowRunAttempt: "1", executionActor: "operator", observedAt, actualApproval: { state: "approved", environmentId: 1, environmentName: "production", userId: 2, userLogin: "reviewer" } });
 const source = () => ({ headSha: sourceSha });
+
+test("root policy subprocess forces one attempt and leaves read environments untouched", () => {
+  for (const inherited of [undefined, "2", "10"]) {
+    const env = inherited ? { AWS_MAX_ATTEMPTS: inherited } : {}; const calls = [];
+    const run = createStageARecoveryRootCommandRunner({ credentialSource: "named-profile", profile: "root", env, exec: (file, args, options) => { calls.push({ file, args, env: options.env }); return "{}"; } });
+    run(["s3api", "get-bucket-policy"]); run(["s3api", "put-bucket-policy"]); run(["s3api", "get-bucket-policy"]);
+    assert.equal(calls[1].file, "aws"); assert.equal(calls[1].env.AWS_MAX_ATTEMPTS, "1");
+    assert.equal(calls[0].env.AWS_MAX_ATTEMPTS, undefined); assert.deepEqual(calls[2].env, calls[0].env);
+    assert.equal(env.AWS_MAX_ATTEMPTS, inherited);
+  }
+});
+
+test("durable recovery attempt consumes mutation authority across failures and new invocations", async () => {
+  for (const mode of ["success", "predecessor", "target", "unexpected", "readback-failure", "before-marker", "after-marker", "after-write", "stale", "wrong-bucket", "wrong-account", "wrong-source", "corrupt-attempt", "changed-predecessor"]) {
+    let live = buildStageAProductionArtifactsBucketPolicyPredecessor(); let puts = 0; let attempt; let completion; let fail = true; let readsAfterPut = 0; let reads = 0;
+    const authorization = { ...createStageAProductionArtifactsRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "201", sourceSha, mode === "stale" ? "2020-01-01T00:00:00.000Z" : new Date().toISOString()), verificationRef: "single-attempt" }) };
+    if (mode === "wrong-bucket") authorization.bucket = "wrong-bucket";
+    if (mode === "wrong-account") authorization.account = "111111111111";
+    if (mode === "corrupt-attempt") attempt = Buffer.from("corrupt");
+    const journal = {
+      readRecoveryAttempt: () => attempt && { bytes: attempt }, readRecoveryCompletion: () => completion && { bytes: completion },
+      writeRecoveryAttempt: ({ bytes }) => { if (mode === "before-marker" && fail) throw Error("before marker"); attempt = bytes; if (mode === "after-marker" && fail) throw Error("after marker"); return { key: "attempt" }; },
+      writeRecoveryCompletion: ({ bytes }) => { completion = bytes; return { key: "completion" }; },
+    };
+    const input = { sourceSha, workflowRunId: "201", workflowRunAttempt: "1", readProtectedSource: mode === "wrong-source" ? () => { throw Error("protected source changed"); } : source, resolveAuthorization: () => ({ authorization }), readStateIdentity: async () => state, terraformStateLock, journal, recoveryJournal: journal, verify: () => true,
+      sign: () => { if (puts && mode === "after-write" && fail) throw Error("process lost before completion"); return Buffer.from("fixture").toString("base64"); },
+      rootRun: (args) => {
+        if (args[1] === "get-caller-identity") return rootIdentity;
+        if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
+        if (args[1] === "get-bucket-lifecycle-configuration") throw Error("NoSuchLifecycleConfiguration");
+        assert.equal(args[1], "put-bucket-policy"); puts += 1;
+        assert.equal(args[args.indexOf("--bucket") + 1], STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket);
+        assert.deepEqual(JSON.parse(fs.readFileSync(args.at(-1).slice(7))), buildStageAProductionArtifactsBucketPolicy());
+        if (["success", "target", "after-write"].includes(mode)) live = buildStageAProductionArtifactsBucketPolicy();
+        if (mode === "unexpected") live = { Version: "2012-10-17", Statement: [] };
+        if (["predecessor", "target", "unexpected", "readback-failure"].includes(mode)) throw Error("ambiguous transport failure");
+        live = buildStageAProductionArtifactsBucketPolicy(); return "";
+      },
+      releaseRun: (args) => { if (args[1] === "get-caller-identity") return releaseIdentity; assert.equal(args[1], "get-bucket-policy"); if (++reads === 2 && mode === "changed-predecessor") live = { Version: "2012-10-17", Statement: [] }; if (puts) { readsAfterPut += 1; if (mode === "readback-failure" && fail) throw Error("read unavailable"); } return JSON.stringify({ Policy: JSON.stringify(live) }); },
+    };
+    if (["success", "target"].includes(mode)) assert.equal((await runStageAProductionArtifactsRecovery(input)).recovered, true);
+    else await assert.rejects(() => runStageAProductionArtifactsRecovery(input));
+    const initialPuts = puts; fail = false;
+    if (["success", "target", "after-write", "before-marker"].includes(mode)) await runStageAProductionArtifactsRecovery(input);
+    else await assert.rejects(() => runStageAProductionArtifactsRecovery(input));
+    assert.equal(puts, mode === "before-marker" ? 1 : initialPuts, mode);
+    assert.ok(puts <= 1, mode);
+    if (["predecessor", "target", "unexpected", "readback-failure"].includes(mode)) assert.ok(readsAfterPut > 0, "ambiguous error attempts immediate readback");
+  }
+});
 
 const policyResource = (policy) => ({ bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, expected_bucket_owner: null, id: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(policy), region: "eu-west-2" });
 const refreshPlan = (savedPolicy) => ({ complete: true, errored: false, applyable: true, resource_changes: [], resource_drift: [{ address: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address, mode: "managed", type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type, name: "production_artifacts", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: policyResource(buildStageAProductionArtifactsBucketPolicyPredecessor()), after: policyResource(savedPolicy), replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } }] });

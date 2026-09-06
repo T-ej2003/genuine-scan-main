@@ -58,7 +58,7 @@ test("policy semantic comparison rejects authorization broadening and malformed 
 test("recovery classifier distinguishes write-free completion from writable P0", () => {
   const predecessor = buildStageAProductionArtifactsBucketPolicyPredecessor();
   assert.equal(classifyStageAProductionArtifactsRecovery({ livePolicy: predecessor }), STAGE_A_RECOVERY_CLASSIFICATION.READY_FOR_WRITE);
-  assert.equal(classifyStageAProductionArtifactsRecovery({ livePolicy: predecessor, attempt: {} }), STAGE_A_RECOVERY_CLASSIFICATION.ATTEMPT_PENDING_BEFORE_WRITE);
+  assert.equal(classifyStageAProductionArtifactsRecovery({ livePolicy: predecessor, attempt: {} }), STAGE_A_RECOVERY_CLASSIFICATION.MUTATION_ATTEMPT_STARTED);
   const normalizedP2 = clone(); for (const entry of normalizedP2.Statement) if (Array.isArray(entry.Resource) && entry.Resource.length === 1) entry.Resource = entry.Resource[0];
   assert.equal(classifyStageAProductionArtifactsRecovery({ livePolicy: normalizedP2, attempt: {} }), STAGE_A_RECOVERY_CLASSIFICATION.POST_WRITE_COMPLETION_PENDING);
   assert.equal(classifyStageAProductionArtifactsRecovery({ livePolicy: normalizedP2 }), STAGE_A_RECOVERY_CLASSIFICATION.P2_WITHOUT_ATTEMPT);
