@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
 import path from "node:path";
 import { assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalIdentity, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
-import { assertProductionSupersessionEvidence } from "../security/production-initial-migration-source-advance.mjs";
+import { assertProductionSupersessionEvidence, assertProductionInitialMigrationSourceAdvance } from "../security/production-initial-migration-source-advance.mjs";
 import { assertImageAuthorization } from "./production-cutover-control-plane.mjs";
 import { PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
 
@@ -68,7 +68,15 @@ export function assertRebaselineQrHandoff({ config, current, state } = {}) {
     recoveryEnvelope: runtime.recoveryEnvelope, recoveryAuthorization: runtime.authorization,
     completion: bindings.baselineCompletion,
   }))) fail("QR handoff recovery bindings differ from the authenticated original preparation.");
-  if (bindings.sourceSha !== config.sourceSha || bindings.rotationId !== config.rotationId
+  let sourceAdvance;
+  if (bindings.sourceSha !== config.sourceSha) {
+    try { sourceAdvance = assertProductionInitialMigrationSourceAdvance(config.initialMigrationSourceAdvance); } catch (error) { fail(`QR handoff source advance is not authenticated: ${error.message}`); }
+    if (sourceAdvance.currentSourceSha !== config.sourceSha
+      || sourceAdvance.supersessionEvidence.sourceSha !== bindings.sourceSha
+      || sourceAdvance.supersessionEvidence.rotationId !== config.rotationId
+      || canonical(Object.fromEntries(Object.entries(sourceAdvance.supersessionEvidence.resources).map(([slot, value]) => [slot, value.arn]))) !== canonical(bindings.baselineCompletion.resources)) fail("QR handoff source advance is not bound to the rebaseline resources.");
+  }
+  if ((bindings.sourceSha !== config.sourceSha && !sourceAdvance) || bindings.rotationId !== config.rotationId
     || canonical(bindings.jwt) !== canonical(config.jwt) || canonical(bindings.qr) !== canonical(config.qr)
     || config.baselineCompletionSha256 !== bindings.baselineCompletionSha256) fail("QR handoff config is not bound to its rebaseline.");
   const abandonment = assertAbandonmentEvidence(bindings.abandonmentEvidence, {

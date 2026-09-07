@@ -13,6 +13,7 @@ import {
   createPartialRebaselineRecoveryAuthorization, buildPartialRebaselineRecoveryCompletion,
   buildPartialRebaselineRecoveryRotationBindings,
 } from "../aws/production-dual-slot-rebaseline-contract.mjs";
+import { productionSupersessionEvidenceIdentity, productionSupersessionVersionId, assertProductionInitialMigrationSourceAdvance } from "../security/production-initial-migration-source-advance.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { prepare, readCurrentState } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
@@ -62,6 +63,25 @@ test("exact production handoff identities authenticate without retaining product
     assert.throws(() => assertRebaselineQrHandoff({ config, state: forged }));
   }
   for (const field of ["sourceSha", "rotationId"]) assert.throws(() => assertRebaselineQrHandoff({ config: { ...config, [field]: "substituted" }, state }));
+});
+
+test("authenticated initial-migration source advance permits a descendant coordinator source", () => {
+  const f = fixture();
+  try {
+    const currentSourceSha = "f".repeat(40);
+    const resources = f.config.rebaselineRuntime.bindings.baselineCompletion.resources;
+    const evidence = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha, staleSourceSha: "7".repeat(40), rotationId, staleRotationId: "rotation-stale-source", generatedAt: "2026-08-29T02:00:00.000Z", resources: Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: productionSupersessionVersionId(sourceSha, rotationId, slot), stages: ["AWSCURRENT"] }])) };
+    evidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(evidence);
+    const config = { ...f.config, sourceSha: currentSourceSha, initialMigrationSourceAdvance: { schemaVersion: 1, kind: "PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE", currentSourceSha, supersessionEvidence: evidence } };
+    assert.doesNotThrow(() => assertProductionInitialMigrationSourceAdvance(config.initialMigrationSourceAdvance));
+    assert.doesNotThrow(() => assertRebaselineQrHandoff({ config }));
+    assert.throws(() => assertRebaselineQrHandoff({ config: { ...config, initialMigrationSourceAdvance: undefined } }));
+    const forged = structuredClone(config); forged.initialMigrationSourceAdvance.currentSourceSha = "e".repeat(40);
+    assert.throws(() => assertRebaselineQrHandoff({ config: forged }));
+    const wrongPredecessor = structuredClone(config); wrongPredecessor.initialMigrationSourceAdvance.supersessionEvidence.sourceSha = "d".repeat(40);
+    wrongPredecessor.initialMigrationSourceAdvance.supersessionEvidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(wrongPredecessor.initialMigrationSourceAdvance.supersessionEvidence);
+    assert.throws(() => assertRebaselineQrHandoff({ config: wrongPredecessor }));
+  } finally { f.dispose(); }
 });
 
 function fixture() {
