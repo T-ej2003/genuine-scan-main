@@ -21,6 +21,9 @@ const args = parse(process.argv.slice(2));
 const outputDirectory = path.resolve(args.get("output-directory") || path.join(os.homedir(), ".mscqr", "production-cutover", "rotation-supersession"));
 mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
 const gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const proveDescendant = ({ ancestorSha, descendantSha }) => {
+  try { gitRun(["cat-file", "-e", `${ancestorSha}^{commit}`]); gitRun(["merge-base", "--is-ancestor", ancestorSha, descendantSha]); return true; } catch { return false; }
+};
 const fresh = readFreshProtectedMainIdentity({ run: gitRun, expectedSourceSha: args.get("source-sha") });
 const sourceSha = fresh.headSha;
 const rotationId = args.get("rotation-id");
@@ -33,8 +36,8 @@ const service = JSON.parse(run(["ecs", "describe-services", "--cluster", "mscqr-
 if (!service?.taskDefinition) throw new Error("Current production task definition is unavailable.");
 const taskDefinition = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", service.taskDefinition, "--include", "TAGS"]));
 const result = await supersedeStalePendingRotation({
-  send: (command) => client.send(command), sourceSha, staleSourceSha: args.get("stale-source-sha"), rotationId, staleRotationId,
+  send: (command) => client.send(command), taskDefinition, sourceSha, staleSourceSha: args.get("stale-source-sha"), rotationId, staleRotationId, proveDescendant,
   outputFile: path.join(outputDirectory, "rotation-supersession.json"), repositoryRoot: process.cwd(),
 });
-const binding = await bootstrapInitialDualSlotRotation({ send: (command) => client.send(command), taskDefinition, sourceSha, rotationId, outputFile: path.join(outputDirectory, "rotation-bindings.json"), repositoryRoot: process.cwd() });
+const binding = await bootstrapInitialDualSlotRotation({ send: (command) => client.send(command), taskDefinition, sourceSha, rotationId, supersessionEvidence: result.evidence, supersessionPredecessor: result.predecessor, outputFile: path.join(outputDirectory, "rotation-bindings.json"), repositoryRoot: process.cwd() });
 process.stdout.write(`${JSON.stringify({ status: "valid", transition: result.transition, sourceSha, staleSourceSha: result.staleSourceSha, rotationId, staleRotationId, supersessionEvidenceFile: result.evidenceFile, bindingFile: binding.bindingFile, writes: result.writes }, null, 2)}\n`);
