@@ -533,9 +533,19 @@ export function assertCompletedRebaselinePayload({ slot, payload, sourceSha, rot
   if (pending) {
     let expectedKeyVersion;
     if (qrPending) {
-      try { expectedKeyVersion = fingerprint(slot === "qrPrivatePending" ? crypto.createPublicKey(payload.value).export({ format: "pem", type: "spki" }) : payload.value); } catch { fail(`Completed rebaseline ${slot} QR material is invalid.`); }
+      let keyObject;
+      if (slot === "qrPrivatePending") {
+        try { keyObject = crypto.createPrivateKey(payload.value); } catch { fail(`Completed rebaseline ${slot} QR material is invalid.`); }
+      } else {
+        let privateKey = false;
+        try { crypto.createPrivateKey(payload.value); privateKey = true; } catch { /* public PEM */ }
+        if (privateKey) fail(`Completed rebaseline ${slot} QR material must be public.`);
+        try { keyObject = crypto.createPublicKey(payload.value); } catch { fail(`Completed rebaseline ${slot} QR material is invalid.`); }
+      }
+      if (keyObject.type !== (slot === "qrPrivatePending" ? "private" : "public") || keyObject.asymmetricKeyType !== "ed25519") fail(`Completed rebaseline ${slot} QR material has an invalid key type.`);
+      try { expectedKeyVersion = fingerprint((slot === "qrPrivatePending" ? crypto.createPublicKey(keyObject) : keyObject).export({ format: "pem", type: "spki" })); } catch { fail(`Completed rebaseline ${slot} QR material is invalid.`); }
     }
-    if (payload.materialType !== "fresh-generated" || payload.materialFingerprint !== fingerprint(payload.value) || (qrPending && payload.keyVersion !== expectedKeyVersion) || (!qrPending && payload.keyVersion !== undefined)) fail(`Completed rebaseline ${slot} material identity is invalid.`);
+    if ((slot === "jwtPending" && !payload.value) || payload.materialType !== "fresh-generated" || payload.materialFingerprint !== fingerprint(payload.value) || (qrPending && payload.keyVersion !== expectedKeyVersion) || (!qrPending && payload.keyVersion !== undefined)) fail(`Completed rebaseline ${slot} material identity is invalid.`);
   } else {
     const expectedMarker = slot === "qrCurrentVersion" ? "adopted-authenticated-legacy-active-identity" : "empty-baseline-marker";
     if (payload.initialMigration !== true || payload.baselineMarker !== expectedMarker || (slot === "qrCurrentVersion" ? !LEGACY_VERSION_ID.test(payload.value) : payload.value !== "")) fail(`Completed rebaseline ${slot} marker identity is invalid.`);

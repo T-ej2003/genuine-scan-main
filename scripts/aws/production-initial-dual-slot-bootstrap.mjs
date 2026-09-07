@@ -490,11 +490,12 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
   const resources = {};
   const existing = {};
   const currentVersionIds = {};
-  const completedRebaselineSlots = new Set();
+  const versionTopologies = {};
   for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
     const described = await send(new DescribeSecretCommand({ SecretId: name }));
     resources[slot] = exactArn(described, name);
     const stages = assertRotationVersionTopology(described, name);
+    versionTopologies[slot] = stages;
     currentVersionIds[slot] = Object.entries(stages).find(([, labels]) => labels.includes("AWSCURRENT"))?.[0];
     const response = await send(new GetSecretValueCommand({ SecretId: resources[slot], VersionId: currentVersionIds[slot] }));
     if (response?.VersionId !== currentVersionIds[slot]) throw new Error(`Rotation supersession ${slot} predecessor version is not authenticated.`);
@@ -513,11 +514,9 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
     if (value.family !== family || value.slot !== expectedSlot || typeof value.value !== "string") return "INVALID";
     const pending = slot.endsWith("Pending");
     if (value.sourceSha === staleSourceSha) {
-      const rebaselineShape = staleSourceSha === PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA || value.baselineMarker !== undefined || value.materialType !== undefined;
-      if (rebaselineShape) {
+      if (staleSourceSha === PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA) {
         try {
           assertCompletedRebaselinePayload({ slot, payload: value, sourceSha: staleSourceSha, rotationId: staleRotationId });
-          completedRebaselineSlots.add(slot);
           return "OLD_AUTHENTICATED";
         } catch {
           return "INVALID";
@@ -540,41 +539,47 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
   };
   const states = Object.fromEntries(Object.keys(INITIAL_DUAL_SLOT_NAMES).map((slot) => [slot, classify(slot)]));
   if (Object.values(states).some((state) => state === "UNKNOWN" || state === "INVALID")) throw new Error("Rotation state contains unknown or invalid slot evidence; refusing mutation.");
-  if (completedRebaselineSlots.size !== 0) {
-    if (completedRebaselineSlots.size !== Object.keys(INITIAL_DUAL_SLOT_NAMES).length) throw new Error("Rotation state mixes completed-rebaseline and canonical predecessor schemas.");
-    let derivedPublic;
-    try { derivedPublic = createPublicKey(existing.qrPrivatePending.value).export({ format: "pem", type: "spki" }); } catch { throw new Error("Completed rebaseline QR private predecessor is malformed."); }
-    if (derivedPublic !== existing.qrPublicPending.value || existing.qrPrivatePending.keyVersion !== existing.qrPublicPending.keyVersion) throw new Error("Completed rebaseline QR predecessor pair is not authenticated.");
-  }
   const newSlots = replacementOrder.filter((slot) => states[slot] === "NEW_AUTHENTICATED");
   if (newSlots.some((slot, index) => slot !== replacementOrder[index])) throw new Error("Rotation state is not an authenticated resumable transition prefix.");
-  const allNew = newSlots.length === replacementOrder.length;
-  const expectedEvidenceResources = Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: transitionVersionId(slot), stages: ["AWSCURRENT"] }]));
-  const existingEvidence = readExistingSupersessionEvidence({ outputFile, repositoryRoot, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, transitionVersionId });
-  const slotIdentities = {};
+  const logicalPredecessors = {};
   for (const [slot, secretArn] of Object.entries(resources)) {
     let versionId = currentVersionIds[slot];
     let material = existing[slot];
     if (states[slot] === "NEW_AUTHENTICATED") {
-      const previous = Object.entries((await send(new DescribeSecretCommand({ SecretId: secretArn }))).VersionIdsToStages || {}).find(([, stages]) => Array.isArray(stages) && stages.includes("AWSPREVIOUS"))?.[0];
-      if (!previous) throw new Error(`Rotation supersession cannot authenticate the prior ${slot} version for resume.`);
-      versionId = previous;
-      const response = await send(new GetSecretValueCommand({ SecretId: secretArn, VersionId: previous }));
-      if (response?.VersionId !== previous) throw new Error(`Rotation supersession prior ${slot} version is not authenticated.`);
+      const previous = Object.entries(versionTopologies[slot]).filter(([, stages]) => Array.isArray(stages) && stages.includes("AWSPREVIOUS"));
+      if (previous.length !== 1 || previous[0][0] === versionId || JSON.stringify(previous[0][1]) !== '["AWSPREVIOUS"]') throw new Error(`Rotation supersession cannot authenticate the expected prior ${slot} version for resume.`);
+      [versionId] = previous[0];
+      const response = await send(new GetSecretValueCommand({ SecretId: secretArn, VersionId: versionId }));
+      if (response?.VersionId !== versionId) throw new Error(`Rotation supersession prior ${slot} version is not authenticated.`);
       material = parseStoredValue(response, `${slot} prior`);
     }
+    if (staleSourceSha === PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA) assertCompletedRebaselinePayload({ slot, payload: material, sourceSha: staleSourceSha, rotationId: staleRotationId });
+    logicalPredecessors[slot] = { secretArn, versionId, material };
+  }
+  if (Object.keys(logicalPredecessors).length !== Object.keys(INITIAL_DUAL_SLOT_NAMES).length) throw new Error("Rotation supersession logical predecessor set is incomplete.");
+  if (staleSourceSha === PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA) {
+    let derivedPublic;
+    try { derivedPublic = createPublicKey(logicalPredecessors.qrPrivatePending.material.value).export({ format: "pem", type: "spki" }); } catch { throw new Error("Completed rebaseline QR private predecessor is malformed."); }
+    if (derivedPublic !== logicalPredecessors.qrPublicPending.material.value || logicalPredecessors.qrPrivatePending.material.keyVersion !== logicalPredecessors.qrPublicPending.material.keyVersion) throw new Error("Completed rebaseline QR predecessor pair is not authenticated.");
+  }
+  const allNew = newSlots.length === replacementOrder.length;
+  const expectedEvidenceResources = Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: transitionVersionId(slot), stages: ["AWSCURRENT"] }]));
+  const existingEvidence = readExistingSupersessionEvidence({ outputFile, repositoryRoot, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, transitionVersionId });
+  const slotIdentities = {};
+  for (const [slot, { secretArn, versionId, material }] of Object.entries(logicalPredecessors)) {
     slotIdentities[slot] = { secretArn, versionId, payloadSha256: canonicalSha256(material), materialFingerprint: material.materialFingerprint || null, keyVersion: material.keyVersion || null };
   }
   if (existingEvidence && canonical(existingEvidence.evidence.predecessorSlotIdentities) !== canonical(slotIdentities)) throw new Error("Existing stale rotation supersession predecessor evidence does not match live state.");
   const supersessionEvidenceIdentitySha256 = productionSupersessionEvidenceIdentity({ sourceSha, staleSourceSha, rotationId, staleRotationId, resources: expectedEvidenceResources, predecessorSlotIdentities: slotIdentities });
   const { baseline, predecessor } = await authenticateSupersessionPredecessor({ send, taskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, supersessionEvidenceIdentitySha256, slotIdentities });
-  if (existing.qrCurrentVersion.value !== baseline.qrCurrentVersion) throw new Error("Stale QR current key-version marker does not match the authenticated runtime baseline.");
+  if (logicalPredecessors.qrCurrentVersion.material.value !== baseline.qrCurrentVersion) throw new Error("Stale QR current key-version marker does not match the authenticated runtime baseline.");
   if (existingEvidence && !allNew) throw new Error("Existing stale rotation supersession evidence conflicts with a non-converged secret topology.");
-  const generated = allNew ? null : generatePendingMaterial();
   const materialFile = materialFileFor(outputFile);
-  const journalMaterial = allNew ? null : readMaterialJournal(materialFile, sourceSha, rotationId);
+  const journalMaterial = readMaterialJournal(materialFile, sourceSha, rotationId);
+  if (allNew && !existingEvidence && !journalMaterial) throw new Error("All-new stale rotation supersession replay is missing its authenticated replacement material journal.");
+  const generated = allNew ? null : generatePendingMaterial();
   const material = allNew
-    ? { jwt: existing.jwtPending.value, qrPrivate: existing.qrPrivatePending.value, qrPublic: existing.qrPublicPending.value, qrKeyVersion: existing.qrPrivatePending.keyVersion }
+    ? journalMaterial || { jwt: existing.jwtPending.value, qrPrivate: existing.qrPrivatePending.value, qrPublic: existing.qrPublicPending.value, qrKeyVersion: existing.qrPrivatePending.keyVersion }
     : journalMaterial || writeMaterialJournal(materialFile, sourceSha, rotationId, generated);
   const payloads = pendingPayloads({ rotationId, material });
   for (const payload of Object.values(payloads)) payload.sourceSha = sourceSha;
@@ -590,7 +595,7 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
     qrPublicPending: payloads.qrPublicPending,
     jwtPrevious: emptySlot("jwt_secrets", "empty", sourceSha),
     qrPublicPrevious: emptySlot("qr_signing_keys", "empty", sourceSha),
-    qrCurrentVersion: versionSlot(existing.qrCurrentVersion.value, "current", sourceSha),
+    qrCurrentVersion: versionSlot(logicalPredecessors.qrCurrentVersion.material.value, "current", sourceSha),
     qrPreviousVersion: versionSlot("", "previous-empty", sourceSha),
   };
   for (const payload of Object.values(replacement)) payload.supersessionPredecessorIdentitySha256 = predecessor.predecessorIdentitySha256;
@@ -599,6 +604,7 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
     const stages = assertRotationVersionTopology(await send(new DescribeSecretCommand({ SecretId: resources[slot] })), name);
     const currentVersionId = Object.entries(stages).find(([, labels]) => labels.includes("AWSCURRENT"))?.[0];
     if (currentVersionId !== currentVersionIds[slot]) throw new Error(`Rotation supersession ${slot} predecessor changed before mutation.`);
+    if (states[slot] === "NEW_AUTHENTICATED" && JSON.stringify(stages[logicalPredecessors[slot].versionId]) !== '["AWSPREVIOUS"]') throw new Error(`Rotation supersession ${slot} expected predecessor changed before mutation.`);
   }
   for (const [name, expected] of Object.entries(predecessor.current)) {
     const described = await send(new DescribeSecretCommand({ SecretId: expected.secretArn }));
