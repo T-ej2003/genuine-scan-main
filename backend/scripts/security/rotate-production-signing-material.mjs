@@ -424,13 +424,19 @@ const prepare = async (context) => {
   const fixtureFile = fixturePath(values);
   if (inventoryBindingRequired && state && state.inventoryEvidenceSha256 !== inventoryEvidenceSha256) throw new Error("rotation state is not bound to the current bounded inventory evidence");
   let current = await slots(sm, config);
-  if (!state && config.initialMigrationSourceAdvance && !isAuthenticatedInitialMigration(current, config, sourceAdvanceProof(context))) throw new Error("initial-migration source advance does not match authenticated live state");
-  for (const [name, record] of [["jwt", current.jwtPending], ["QR private", current.qrPrivatePending], ["QR public", current.qrPublicPending]]) assertPendingOwnership(name, record.material, config.rotationId);
   let oldMetadataKeyVersion;
+  let completedRebaselineHandoff = false;
+  if (!state && config.rebaselineRuntime) {
+    oldMetadataKeyVersion = assertRebaselineQrHandoff({ config, current });
+    authenticateEd25519Pair(current.qrPrivateCurrent.material.value, current.qrPublicCurrent.material.value, "rebaseline current QR");
+    completedRebaselineHandoff = true;
+  }
+  if (!state && config.initialMigrationSourceAdvance && !completedRebaselineHandoff && !isAuthenticatedInitialMigration(current, config, sourceAdvanceProof(context))) throw new Error("initial-migration source advance does not match authenticated live state");
+  for (const [name, record] of [["jwt", current.jwtPending], ["QR private", current.qrPrivatePending], ["QR public", current.qrPublicPending]]) assertPendingOwnership(name, record.material, config.rotationId);
   if (state?.qr?.oldMetadataKeyVersion && state.phase === "prepared") assertRebaselineQrHandoff({ config, current, state });
   if (state) assertPrepareLineage(state, current);
   else {
-    if (config.rebaselineRuntime && current.qrPublicCurrent.material.metadata.keyVersion
+    if (!completedRebaselineHandoff && config.rebaselineRuntime && current.qrPublicCurrent.material.metadata.keyVersion
       && current.qrPublicCurrent.material.metadata.keyVersion !== qrSlotValue(current.qrCurrentVersion)) {
       oldMetadataKeyVersion = assertRebaselineQrHandoff({ config, current });
       authenticateEd25519Pair(current.qrPrivateCurrent.material.value, current.qrPublicCurrent.material.value, "rebaseline current QR");
@@ -482,7 +488,7 @@ const prepare = async (context) => {
     try {
       authenticateEd25519Pair(current.qrPrivateCurrent.material.value, oldQrPublic, "legacy QR");
     } catch (error) {
-      if (error?.code !== "QR_KEYPAIR_INVALID" || !isAuthenticatedInitialMigration(current, config, sourceAdvanceProof(context))) throw error;
+      if (error?.code !== "QR_KEYPAIR_INVALID" || (!completedRebaselineHandoff && !isAuthenticatedInitialMigration(current, config, sourceAdvanceProof(context)))) throw error;
       historicalContinuity = QR_CONTINUITY_UNRECOVERABLE;
     }
     state = stateForPending({

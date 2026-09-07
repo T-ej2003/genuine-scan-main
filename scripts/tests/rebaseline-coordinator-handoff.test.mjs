@@ -84,6 +84,40 @@ test("authenticated initial-migration source advance permits a descendant coordi
   } finally { f.dispose(); }
 });
 
+test("production-shaped descendant handoff routes through prepare", async () => {
+  const f = fixture();
+  try {
+    const currentSourceSha = "f".repeat(40);
+    const resources = f.config.rebaselineRuntime.bindings.baselineCompletion.resources;
+    const evidence = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha, staleSourceSha: "7".repeat(40), rotationId, staleRotationId: "rotation-stale-source", generatedAt: "2026-08-29T02:00:00.000Z", resources: Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: productionSupersessionVersionId(sourceSha, rotationId, slot), stages: ["AWSCURRENT"] }])) };
+    evidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(evidence);
+    const config = { ...f.config, sourceSha: currentSourceSha, initialMigrationSourceAdvance: { schemaVersion: 1, kind: "PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE", currentSourceSha, supersessionEvidence: evidence } };
+    const context = { ...f.context, config, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === currentSourceSha };
+    await prepare(context);
+    const state = readCurrentState(context);
+    assert.equal(state.phase, "overlap-deploy-required");
+    assert.equal(state.sourceSha, currentSourceSha);
+    assert.equal(state.qr.oldMetadataKeyVersion, f.old.qrKeyVersion);
+    assert.equal(state.qr.oldKeyVersion, "2026-04-20");
+    const count = f.writes.length;
+    await prepare(context);
+    assert.equal(f.writes.length, count);
+  } finally { f.dispose(); }
+});
+
+test("ordinary initial migration keeps the strict marker gate", async () => {
+  const f = fixture();
+  try {
+    const currentSourceSha = "f".repeat(40);
+    const resources = f.config.rebaselineRuntime.bindings.baselineCompletion.resources;
+    const evidence = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha, staleSourceSha: "7".repeat(40), rotationId, staleRotationId: "rotation-stale-source", generatedAt: "2026-08-29T02:00:00.000Z", resources: Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: productionSupersessionVersionId(sourceSha, rotationId, slot), stages: ["AWSCURRENT"] }])) };
+    evidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(evidence);
+    const config = { ...f.config, sourceSha: currentSourceSha, rebaselineRuntime: undefined, initialMigrationSourceAdvance: { schemaVersion: 1, kind: "PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE", currentSourceSha, supersessionEvidence: evidence } };
+    await assert.rejects(prepare({ ...f.context, config, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === currentSourceSha }), /initial-migration source advance does not match authenticated live state/);
+    assert.equal(f.writes.length, 0);
+  } finally { f.dispose(); }
+});
+
 function fixture() {
   const old = generateRebaselineMaterial();
   const next = generateRebaselineMaterial();
