@@ -174,10 +174,11 @@ export function buildProductionRotationConfig({ sourceSha, rotationId, approval,
   }
   if (!SHA40.test(overlapDeploymentSha || "")) throw new Error("overlapDeploymentSha must be a full protected-main SHA.");
   const checkedRebaselineCoordinates = checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? assertRebaselineAuthorizationCoordinates(rebaselineAuthorizationCoordinates) : undefined;
+  const authorizationSourceSha = checkedBindings.sourceSha;
   const checkedRebaselineAuthorization = checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND
     ? recoveryEnvelope
-      ? assertPartialRebaselineRecoveryAuthorization(rebaselineAuthorization, { sourceSha, recoveryEnvelope, imageAuthorization, proveDescendant: proveRecoveryDescendant })
-      : assertProductionDualSlotRebaselineAuthorization(rebaselineAuthorization, { sourceSha, rotationId, resources: { jwtPending: checkedBindings.jwt.pendingSecretId, qrPrivatePending: checkedBindings.qr.privatePendingSecretId, qrPublicPending: checkedBindings.qr.publicPendingSecretId, jwtPrevious: checkedBindings.jwt.previousSecretId, qrPublicPrevious: checkedBindings.qr.publicPreviousSecretId, qrCurrentVersion: checkedBindings.qr.currentKeyVersionSecretId, qrPreviousVersion: checkedBindings.qr.previousKeyVersionSecretId } })
+      ? assertPartialRebaselineRecoveryAuthorization(rebaselineAuthorization, { sourceSha: authorizationSourceSha, recoveryEnvelope, imageAuthorization, proveDescendant: proveRecoveryDescendant })
+      : assertProductionDualSlotRebaselineAuthorization(rebaselineAuthorization, { sourceSha: authorizationSourceSha, rotationId, resources: { jwtPending: checkedBindings.jwt.pendingSecretId, qrPrivatePending: checkedBindings.qr.privatePendingSecretId, qrPublicPending: checkedBindings.qr.publicPendingSecretId, jwtPrevious: checkedBindings.jwt.previousSecretId, qrPublicPrevious: checkedBindings.qr.publicPreviousSecretId, qrCurrentVersion: checkedBindings.qr.currentKeyVersionSecretId, qrPreviousVersion: checkedBindings.qr.previousKeyVersionSecretId } })
     : undefined;
   return {
     region: REGION,

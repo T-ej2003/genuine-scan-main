@@ -84,6 +84,18 @@ test("authenticated initial-migration source advance permits a descendant coordi
   } finally { f.dispose(); }
 });
 
+test("production config validates descendant rebaseline authorization at its binding source", () => {
+  const f = fixture();
+  try {
+    const currentSourceSha = "f".repeat(40);
+    const runtime = f.config.rebaselineRuntime;
+    const bindings = runtime.bindings;
+    const resources = bindings.baselineCompletion.resources;
+    const livePostWrite = { kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha, rotationId, authorizationSha256: runtime.authorization.authorizationSha256, resources, versionIds: runtime.authorization.writeIdentities, payloadIdentities: runtime.authorization.writePayloadIdentities };
+    assert.doesNotThrow(() => buildProductionRotationConfig({ sourceSha: currentSourceSha, rotationId, approval: { ticket: "CHG-HANDOFF", approvedBy: "checker", approverRole: "production-independent-checker", reason: "fixture", verificationRef: "ticket-handoff-fixture", minimumGraceSeconds: 2592000 }, bindings, rebaselineAuthorization: runtime.authorization, rebaselineAuthorizationCoordinates: { workflowRunId: "123456", workflowRunAttempt: "1" }, verifyRebaselineLivePostWrite: () => ({ ...livePostWrite, livePostWriteSha256: canonicalSha256(livePostWrite) }), verifyInitialBindingOrigin: () => { throw new Error("not initial bindings"); } }));
+  } finally { f.dispose(); }
+});
+
 test("production-shaped descendant handoff routes through prepare", async () => {
   const f = fixture();
   try {
