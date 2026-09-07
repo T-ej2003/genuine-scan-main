@@ -12,7 +12,7 @@ import {
   productionSupersessionEvidenceIdentity,
 } from "../security/production-initial-migration-source-advance.mjs";
 import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
-import { generateRebaselineMaterial, fingerprint as secureFingerprint } from "./production-dual-slot-rebaseline-contract.mjs";
+import { assertCompletedRebaselinePayload, generateRebaselineMaterial, PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA, fingerprint as secureFingerprint } from "./production-dual-slot-rebaseline-contract.mjs";
 
 export { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 
@@ -490,6 +490,7 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
   const resources = {};
   const existing = {};
   const currentVersionIds = {};
+  const completedRebaselineSlots = new Set();
   for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
     const described = await send(new DescribeSecretCommand({ SecretId: name }));
     resources[slot] = exactArn(described, name);
@@ -512,6 +513,17 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
     if (value.family !== family || value.slot !== expectedSlot || typeof value.value !== "string") return "INVALID";
     const pending = slot.endsWith("Pending");
     if (value.sourceSha === staleSourceSha) {
+      const rebaselineShape = staleSourceSha === PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA || value.baselineMarker !== undefined || value.materialType !== undefined;
+      if (rebaselineShape) {
+        try {
+          assertCompletedRebaselinePayload({ slot, payload: value, sourceSha: staleSourceSha, rotationId: staleRotationId });
+          completedRebaselineSlots.add(slot);
+          return "OLD_AUTHENTICATED";
+        } catch {
+          return "INVALID";
+        }
+      }
+      // The older initial-dual-slot predecessor has a separate exact schema.
       const expectedKeys = pending
         ? ["value", "sourceSha", "rotationId", "family", "slot", "materialFingerprint", ...(["qrPrivatePending", "qrPublicPending"].includes(slot) ? ["keyVersion"] : [])]
         : ["value", "sourceSha", "family", "slot", "initialMigration"];
@@ -528,6 +540,12 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
   };
   const states = Object.fromEntries(Object.keys(INITIAL_DUAL_SLOT_NAMES).map((slot) => [slot, classify(slot)]));
   if (Object.values(states).some((state) => state === "UNKNOWN" || state === "INVALID")) throw new Error("Rotation state contains unknown or invalid slot evidence; refusing mutation.");
+  if (completedRebaselineSlots.size !== 0) {
+    if (completedRebaselineSlots.size !== Object.keys(INITIAL_DUAL_SLOT_NAMES).length) throw new Error("Rotation state mixes completed-rebaseline and canonical predecessor schemas.");
+    let derivedPublic;
+    try { derivedPublic = createPublicKey(existing.qrPrivatePending.value).export({ format: "pem", type: "spki" }); } catch { throw new Error("Completed rebaseline QR private predecessor is malformed."); }
+    if (derivedPublic !== existing.qrPublicPending.value || existing.qrPrivatePending.keyVersion !== existing.qrPublicPending.keyVersion) throw new Error("Completed rebaseline QR predecessor pair is not authenticated.");
+  }
   const newSlots = replacementOrder.filter((slot) => states[slot] === "NEW_AUTHENTICATED");
   if (newSlots.some((slot, index) => slot !== replacementOrder[index])) throw new Error("Rotation state is not an authenticated resumable transition prefix.");
   const allNew = newSlots.length === replacementOrder.length;

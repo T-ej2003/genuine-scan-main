@@ -10,7 +10,7 @@ import { assertAuthenticatedCurrentStageBState, assertPostApplyStageAPlanRecover
 import { assertStageAStateContract, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { bootstrapInitialDualSlotRotation, createInitialDualSlotSecretsManagerClient, generatePendingMaterial, INITIAL_DUAL_SLOT_NAMES, supersedeStalePendingRotation, verifyLiveInitialDualSlotBindingWithRunner } from "../aws/production-initial-dual-slot-bootstrap.mjs";
 import { buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
-import { PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA } from "../aws/production-dual-slot-rebaseline-contract.mjs";
+import { buildRebaselinePayloads, PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { fixtureInput, sourceSha as rehearsalSourceSha } from "./production-cutover-rehearsal.test.mjs";
 import { runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
@@ -49,6 +49,25 @@ function rotationStore() {
   for (const [name, value, family, slot] of [["jwt", "jwt-current-material", "jwt_secrets", "current"], ["qrPrivate", currentPair.privateKey, "qr_signing_keys", "current-private"], ["qrPublic", currentPair.publicKey, "qr_signing_keys", "current-public"]]) {
     store.set(currentNames[name], { value: { value, rotationId: currentOwnerRotationId, family, slot, ...(name === "jwt" ? {} : { keyVersion: metadataKeyVersion }), materialFingerprint: digest(value).slice(0, 16) }, versionId: `${name}-current-version` });
   }
+  return store;
+}
+
+function completedProductionRebaselineStore() {
+  const store = rotationStore();
+  const sourceSha = PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA;
+  const rotationId = "rotation-20260829015311-765c8a16";
+  const payloads = buildRebaselinePayloads({
+    sourceSha,
+    rotationId,
+    generatedMaterial: {
+      jwt: store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.value,
+      qrPrivate: store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).value.value,
+      qrPublic: store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value.value,
+      qrKeyVersion: store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value.keyVersion,
+    },
+    legacyBaseline: { jwtCurrent: arn(currentNames.jwt), qrPrivateCurrent: arn(currentNames.qrPrivate), qrPublicCurrent: arn(currentNames.qrPublic), qrCurrentVersion: "2026-04-20" },
+  });
+  for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) store.get(name).value = payloads[slot];
   return store;
 }
 
@@ -350,6 +369,97 @@ test("unknown rotation slot evidence fails closed before any write", async () =>
   assert.equal(sender.writes, 0);
 });
 
+test("completed production rebaseline payloads are exact stale supersession predecessors", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-stale-schema-"));
+  const store = completedProductionRebaselineStore();
+  const sender = rotationSender(store);
+  try {
+    const result = await supersedeStalePendingRotation({
+      send: sender.send,
+      ...supersessionArgs({
+        sourceSha: "a".repeat(40),
+        staleSourceSha: PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA,
+        rotationId: "rotation-fresh-rebaseline-schema",
+        staleRotationId: "rotation-20260829015311-765c8a16",
+        proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA && descendantSha === "a".repeat(40),
+        outputFile: path.join(directory, "supersession.json"),
+        repositoryRoot: "/private/tmp/mscqr-post330-exec",
+      }),
+    });
+    assert.equal(result.writes, 7);
+    assert.equal(sender.writes, 7);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("completed production rebaseline fixture preserves every historical slot schema", () => {
+  const store = completedProductionRebaselineStore();
+  const expected = {
+    jwtPending: ["family", "materialFingerprint", "materialType", "rotationId", "slot", "sourceSha", "value"],
+    qrPrivatePending: ["family", "keyVersion", "materialFingerprint", "materialType", "rotationId", "slot", "sourceSha", "value"],
+    qrPublicPending: ["family", "keyVersion", "materialFingerprint", "materialType", "rotationId", "slot", "sourceSha", "value"],
+    jwtPrevious: ["baselineMarker", "family", "initialMigration", "rotationId", "slot", "sourceSha", "value"],
+    qrPublicPrevious: ["baselineMarker", "family", "initialMigration", "rotationId", "slot", "sourceSha", "value"],
+    qrCurrentVersion: ["baselineMarker", "family", "initialMigration", "rotationId", "slot", "sourceSha", "value"],
+    qrPreviousVersion: ["baselineMarker", "family", "initialMigration", "rotationId", "slot", "sourceSha", "value"],
+  };
+  for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
+    const value = store.get(name).value;
+    assert.deepEqual(Object.keys(value).sort(), expected[slot], slot);
+    assert.equal(value.sourceSha, PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA, slot);
+    assert.equal(value.rotationId, "rotation-20260829015311-765c8a16", slot);
+  }
+  assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.baselineMarker, "adopted-authenticated-legacy-active-identity");
+  for (const slot of ["jwtPrevious", "qrPublicPrevious", "qrPreviousVersion"]) assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES[slot]).value.baselineMarker, "empty-baseline-marker", slot);
+  for (const slot of ["jwtPending", "qrPrivatePending", "qrPublicPending"]) assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES[slot]).value.materialType, "fresh-generated", slot);
+});
+
+test("completed rebaseline payload schema rejects altered provenance before supersession writes", async () => {
+  const mutations = [
+    ["unknown extra field", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.unrecognized = true; }],
+    ["missing marker", (store) => { delete store.get(INITIAL_DUAL_SLOT_NAMES.jwtPrevious).value.baselineMarker; }],
+    ["forged marker", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.baselineMarker = "empty-baseline-marker"; }],
+    ["wrong rotation", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.rotationId = "rotation-other-rebaseline"; }],
+    ["missing rotation", (store) => { delete store.get(INITIAL_DUAL_SLOT_NAMES.jwtPrevious).value.rotationId; }],
+    ["wrong source", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.sourceSha = "0".repeat(40); }],
+    ["missing material type", (store) => { delete store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.materialType; }],
+    ["wrong material type", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.materialType = "other"; }],
+    ["cross-family material type", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).value.materialType = "empty-baseline-marker"; }],
+    ["wrong family", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value.family = "jwt_secrets"; }],
+    ["wrong slot", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value.slot = "pending-private"; }],
+    ["wrong fingerprint", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.materialFingerprint = "0".repeat(16); }],
+    ["wrong key version", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).value.keyVersion = "0".repeat(16); }],
+    ["pending masquerades as marker", (store) => { const value = store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value; delete value.materialType; value.baselineMarker = "empty-baseline-marker"; }],
+    ["marker masquerades as pending", (store) => { const value = store.get(INITIAL_DUAL_SLOT_NAMES.jwtPrevious).value; value.materialType = "fresh-generated"; value.materialFingerprint = digest(value.value).slice(0, 16); }],
+    ["hybrid payload", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPrevious).value.materialFingerprint = digest("").slice(0, 16); }],
+    ["mixed historical and canonical schemas", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPrevious).value = rotationStore().get(INITIAL_DUAL_SLOT_NAMES.jwtPrevious).value; }],
+    ["untrusted runtime marker", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value = "2026-04-21"; }],
+    ["substituted current jwt", (store) => { store.get(currentNames.jwt).value.value = "substituted-current-jwt"; }],
+    ["substituted current qr", (store) => { store.get(currentNames.qrPublic).value.keyVersion = "0".repeat(16); }],
+    ["extra historical-looking metadata", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPreviousVersion).value.historicalMarker = "forged"; }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-stale-reject-"));
+    const store = completedProductionRebaselineStore();
+    const sender = rotationSender(store);
+    mutate(store);
+    try {
+      await assert.rejects(() => supersedeStalePendingRotation({
+        send: sender.send,
+        ...supersessionArgs({
+          sourceSha: "a".repeat(40),
+          staleSourceSha: PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA,
+          rotationId: "rotation-fresh-rebaseline-schema",
+          staleRotationId: "rotation-20260829015311-765c8a16",
+          proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA && descendantSha === "a".repeat(40),
+          outputFile: path.join(directory, "supersession.json"),
+          repositoryRoot: "/private/tmp/mscqr-post330-exec",
+        }),
+      }), undefined, label);
+      assert.equal(sender.writes, 0, label);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
 test("stale rotation supersession resumes every sequential write boundary without rewriting authenticated new slots", async () => {
   for (let failure = 1; failure <= 7; failure += 1) {
     const directory = mkdtempSync(path.join(os.tmpdir(), `mscqr-rotation-resume-${failure}-`));
@@ -376,13 +486,7 @@ test("production-shaped stale supersession bootstraps a distinct canonical rotat
   const currentProtectedDescendant = "9".repeat(40);
   const freshRotationId = "rotation-fresh-source-only-fixture";
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-fresh-supersession-"));
-  const store = rotationStore();
-  for (const name of Object.values(INITIAL_DUAL_SLOT_NAMES)) {
-    const record = store.get(name);
-    record.value.sourceSha = productionOldSource;
-    if (record.value.rotationId === staleRotationId) record.value.rotationId = productionOldRotationId;
-  }
-  store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value = "2026-04-20";
+  const store = completedProductionRebaselineStore();
   const sender = rotationSender(store);
   try {
     const result = await supersedeStalePendingRotation({
