@@ -170,7 +170,7 @@ function fixture() {
   const livePostWrite = { kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha, rotationId, authorizationSha256: authorization.authorizationSha256, resources, versionIds: writeIdentities, payloadIdentities: writePayloadIdentities };
   const config = buildProductionRotationConfig({ sourceSha, rotationId, approval: { ticket: "CHG-HANDOFF", approvedBy: "checker", approverRole: "production-independent-checker", reason: "fixture", verificationRef: "ticket-handoff-fixture", minimumGraceSeconds: 2592000 }, bindings, rebaselineAuthorization: authorization, rebaselineAuthorizationCoordinates: { workflowRunId: "123456", workflowRunAttempt: "1" }, verifyRebaselineLivePostWrite: () => ({ ...livePostWrite, livePostWriteSha256: canonicalSha256(livePostWrite) }), verifyInitialBindingOrigin: () => { throw new Error("not initial bindings"); } });
   const records = new Map(writePlan.map(({ secretArn, clientRequestToken, payload }) => [secretArn, { payload: structuredClone(payload), versionId: clientRequestToken }]));
-  for (const [name, value, family, slot] of [["jwtCurrent", old.jwt, "jwt_secrets", "current"], ["qrPrivateCurrent", old.qrPrivate, "qr_signing_keys", "current-private"], ["qrPublicCurrent", old.qrPublic, "qr_signing_keys", "current-public"]]) records.set(arn(name), { versionId: name === "jwtCurrent" ? currentVersionIds.jwtPending : canonicalSha256({ old: name }), payload: { rotationId: historicalRotationId, family, slot, ...(family === "qr_signing_keys" ? { keyVersion: old.qrKeyVersion } : {}), materialFingerprint: fingerprint(value), value } });
+  for (const [name, value, family, slot] of [["jwtCurrent", old.jwt, "jwt_secrets", "current"], ["qrPrivateCurrent", old.qrPrivate, "qr_signing_keys", "current-private"], ["qrPublicCurrent", old.qrPublic, "qr_signing_keys", "current-public"]]) records.set(arn(name), { versionId: canonicalSha256({ legacyCurrent: name }), payload: { rotationId: historicalRotationId, family, slot, ...(family === "qr_signing_keys" ? { keyVersion: old.qrKeyVersion } : {}), materialFingerprint: fingerprint(value), value } });
   const writes = [];
   const sm = { failAfter: 0, async send(command) {
     const input = command.input;
@@ -249,7 +249,7 @@ const attacks = {
   "forged authorization": (f) => { f.config.rebaselineRuntime = structuredClone(f.config.rebaselineRuntime); f.config.rebaselineRuntime.authorization.authorizationSha256 = "a".repeat(64); },
   "mismatched private pair": (f) => { f.records.get(arn("qrPrivateCurrent")).payload.value = f.next.qrPrivate; },
   "unbound abandoned owner": (f) => { f.records.get(arn("qrPublicCurrent")).payload.rotationId = rotationId; },
-  "substituted current JWT version": (f) => { f.records.get(arn("jwtCurrent")).versionId = "substituted-jwt-version"; },
+  "invalid current JWT version": (f) => { f.records.get(arn("jwtCurrent")).versionId = "bad"; },
   "substituted current JWT metadata": (f) => { f.records.get(arn("jwtCurrent")).payload.materialFingerprint = fingerprint(f.next.jwt); },
   "cross-rotation current JWT": (f) => { f.records.get(arn("jwtCurrent")).payload.rotationId = "rotation-unrelated-2026"; },
 };

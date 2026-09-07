@@ -89,8 +89,8 @@ export function assertRebaselineQrHandoff({ config, current, state, proveDescend
   const legacyJwt = anchor[abandonment.schemaVersion === 3 ? "jwtPrevious" : "jwtPending"];
   const currentJwt = current?.jwtCurrent;
   const assertLegacyJwt = (record) => {
+    if (record) assertVersion(record.raw.versionId, "QR handoff legacy current JWT VersionId");
     if (record && (record.id !== bindings.legacy.jwtCurrent
-      || record.raw.versionId !== legacyJwt.versionId
       || fingerprint(record.material.value) !== legacyJwt.materialFingerprint
       || record.material.metadata.family !== "jwt_secrets"
       || record.material.metadata.slot !== "current"
