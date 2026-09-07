@@ -153,6 +153,35 @@ test("legacy source receives exactly four authenticated secret bindings and reje
   assert.throws(() => assertLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, candidate: override, recoveryImageDigest: digest, imageReleaseSha: sourceSha, artifactSigningBindings }), /outside the exact/);
 });
 
+test("canonical artifact-signing bindings are preserved once and every other source shape is rejected", () => {
+  const canonicalEntries = Object.entries(artifactSigningBindings).map(([name, valueFrom]) => ({ name, valueFrom }));
+  const complete = structuredClone(current);
+  complete.taskDefinition.taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50";
+  complete.taskDefinition.revision = 50;
+  complete.taskDefinition.containerDefinitions[0].secrets.push(...canonicalEntries);
+  const rendered = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: complete, recoveryImageDigest: digest, imageReleaseSha: sourceSha, artifactSigningBindings });
+  assert.deepEqual(rendered.containerDefinitions[0].secrets, complete.taskDefinition.containerDefinitions[0].secrets);
+  assert.equal(rendered.containerDefinitions[0].secrets.filter(({ name }) => name.startsWith("ARTIFACT_SIGN_")).length, 4);
+
+  const reject = (mutate) => {
+    const source = structuredClone(complete);
+    mutate(source.taskDefinition);
+    assert.throws(() => buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: source, recoveryImageDigest: digest, imageReleaseSha: sourceSha, artifactSigningBindings }), /artifact-signing bindings|plaintext/);
+  };
+  reject(({ containerDefinitions: [backend] }) => { backend.secrets = backend.secrets.filter(({ name }) => name !== "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"); });
+  reject(({ containerDefinitions: [backend] }) => { backend.secrets = backend.secrets.filter(({ name }) => !["ARTIFACT_SIGN_PUBLIC_KEYS_JSON", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION"].includes(name)); });
+  reject(({ containerDefinitions: [backend] }) => { backend.secrets.push({ ...canonicalEntries[0] }); });
+  reject(({ containerDefinitions: [backend] }) => { backend.secrets.find(({ name }) => name === canonicalEntries[0].name).valueFrom += "-wrong"; });
+  reject(({ containerDefinitions: [backend] }) => { backend.secrets.find(({ name }) => name === canonicalEntries[0].name).valueFrom = canonicalEntries[1].valueFrom; });
+  reject(({ containerDefinitions: [backend] }) => { backend.environment.push({ name: canonicalEntries[0].name, value: "plaintext" }); });
+  reject(({ containerDefinitions: [backend] }) => { backend.secrets.find(({ name }) => name === canonicalEntries[0].name).valueFrom = undefined; });
+  reject(({ containerDefinitions: [backend] }) => { backend.secrets.push({ name: "ARTIFACT_SIGN_LEGACY_KEY", valueFrom: canonicalEntries[0].valueFrom.replace("private-key-current", "legacy-key") }); });
+  reject(({ containerDefinitions }) => {
+    containerDefinitions.push({ name: "sidecar", image: "example.invalid/sidecar", secrets: [containerDefinitions[0].secrets.pop()] });
+  });
+  reject(({ containerDefinitions: [backend] }) => { backend.secrets.push({ name: "ARTIFACT_SIGN_LEGACY_KEY", valueFrom: canonicalEntries[0].valueFrom }); });
+});
+
 test("optional legacy secrets normalize without changing existing entries", () => {
   for (const secrets of [undefined, []]) {
     const source = structuredClone(current);
