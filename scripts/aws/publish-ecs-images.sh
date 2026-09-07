@@ -101,8 +101,8 @@ if [[ "$SERVICE_SCOPE" == "production-green-stage-b" ]]; then
   fi
 fi
 
+AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}"
 if [[ -z "${ECR_REGISTRY:-}" ]]; then
-  AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}"
   ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 fi
 
@@ -144,7 +144,28 @@ case "$SERVICE_SCOPE" in
 esac
 
 echo "Checking ECR repositories in ${AWS_REGION}: ${REPOSITORIES[*]}"
-aws ecr describe-repositories --region "$AWS_REGION" --repository-names "${REPOSITORIES[@]}" >/dev/null
+PREFLIGHT_DIR="$(mktemp -d)"
+trap 'rm -r "$PREFLIGHT_DIR"' EXIT
+for repository_name in "${REPOSITORIES[@]}"; do
+  repository_file="$PREFLIGHT_DIR/repository-${repository_name}.json"
+  aws ecr describe-repositories --region "$AWS_REGION" --repository-names "$repository_name" >"$repository_file"
+  node --input-type=module - "$repository_file" "$repository_name" "$AWS_ACCOUNT_ID" "$AWS_REGION" <<'NODE'
+import fs from "node:fs";
+const [file, name, account, region] = process.argv.slice(2);
+const response = JSON.parse(fs.readFileSync(file, "utf8"));
+const repositories = response?.repositories;
+const repository = repositories?.[0];
+const expectedArn = `arn:aws:ecr:${region}:${account}:repository/${name}`;
+const expectedUri = `${account}.dkr.ecr.${region}.amazonaws.com/${name}`;
+if (!Array.isArray(repositories) || repositories.length !== 1
+  || repository?.repositoryName !== name || repository?.repositoryArn !== expectedArn
+  || String(repository?.registryId) !== account || repository?.repositoryUri !== expectedUri
+  || repository?.imageTagMutability !== "IMMUTABLE"
+  || repository?.imageTagMutabilityExclusionFilters?.length) {
+  throw new Error(`ECR repository ${name} is missing, mismatched, or not authoritatively immutable.`);
+}
+NODE
+done
 
 echo "Logging in to ${ECR_REGISTRY}"
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
@@ -231,33 +252,68 @@ verify_stage_b_reuse() {
 }
 
 declare -a IMAGE_URIS=()
+declare -a PREFLIGHT_DIGESTS=()
 
 for service in "${SERVICES[@]}"; do
   image_uri="$(image_uri_for_service "$service")"
-  dockerfile="$(dockerfile_for_service "$service")"
-  build_context="$(context_for_service "$service")"
-  target="$(target_for_service "$service")"
   published_tag="${image_uri##*:}"
   IMAGE_URIS+=("$image_uri")
   repository_name="${image_uri#${ECR_REGISTRY}/}"
   repository_name="${repository_name%%:*}"
-  existing_digest="$(
-    aws ecr describe-images \
-      --region "$AWS_REGION" \
-      --repository-name "$repository_name" \
-      --image-ids imageTag="$published_tag" \
-      --query 'imageDetails[0].imageDigest' \
-      --output text 2>/dev/null || true
-  )"
+  response_file="$PREFLIGHT_DIR/image-${service}.json"
+  error_file="$PREFLIGHT_DIR/image-${service}.error"
+  if aws ecr describe-images \
+    --region "$AWS_REGION" \
+    --repository-name "$repository_name" \
+    --image-ids imageTag="$published_tag" \
+    --output json >"$response_file" 2>"$error_file"; then
+    existing_digest="$(node --input-type=module - "$response_file" "$repository_name" "$published_tag" "$AWS_ACCOUNT_ID" <<'NODE'
+import fs from "node:fs";
+const [file, repository, tag, account] = process.argv.slice(2);
+const response = JSON.parse(fs.readFileSync(file, "utf8"));
+const details = response?.imageDetails;
+const image = details?.[0];
+if (!Array.isArray(details) || details.length !== 1
+  || image?.repositoryName !== repository || String(image?.registryId) !== account
+  || !/^sha256:[a-f0-9]{64}$/.test(image?.imageDigest || "")
+  || !Array.isArray(image?.imageTags) || !image.imageTags.includes(tag)) {
+  throw new Error(`ECR tag readback is malformed or mismatched for ${repository}:${tag}.`);
+}
+process.stdout.write(image.imageDigest);
+NODE
+)"
+    PREFLIGHT_DIGESTS+=("$existing_digest")
+    continue
+  fi
+  aws_error="$(<"$error_file")"
+  aws_error_code=""
+  if [[ "$aws_error" =~ \(([A-Za-z0-9]*Exception)\) ]]; then
+    aws_error_code="${BASH_REMATCH[1]}"
+  fi
+  if [[ "$aws_error_code" == "ImageNotFoundException" ]]; then
+    PREFLIGHT_DIGESTS+=("ABSENT")
+    continue
+  fi
+  echo "ECR tag lookup failed for ${repository_name}:${published_tag} (AWS error: ${aws_error_code:-UNCLASSIFIED})." >&2
+  exit 1
+done
 
-  if [[ "$existing_digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
-    echo "Reusing immutable ${service} image ${image_uri}@${existing_digest}"
-    REQUIRED_PLATFORMS="$PLATFORMS" "$VERIFY_SCRIPT" "$image_uri"
-    if [[ "$SERVICE_SCOPE" == "production-green-stage-b" ]]; then
-      verify_stage_b_reuse "$service" "$image_uri"
-    fi
-    if [[ -n "${OUTPUT_FILE:-}" ]]; then
-      node --input-type=module - "$OUTPUT_FILE" "$service" "$repository_name" "$image_uri" "$published_tag" "$existing_digest" <<'NODE'
+service_index=0
+for service in "${SERVICES[@]}"; do
+  existing_digest="${PREFLIGHT_DIGESTS[$service_index]}"
+  service_index=$((service_index + 1))
+  if [[ "$existing_digest" == "ABSENT" ]]; then continue; fi
+  image_uri="$(image_uri_for_service "$service")"
+  published_tag="${image_uri##*:}"
+  repository_name="${image_uri#${ECR_REGISTRY}/}"
+  repository_name="${repository_name%%:*}"
+  echo "Reusing immutable ${service} image ${image_uri}@${existing_digest}"
+  REQUIRED_PLATFORMS="$PLATFORMS" "$VERIFY_SCRIPT" "$image_uri"
+  if [[ "$SERVICE_SCOPE" == "production-green-stage-b" ]]; then
+    verify_stage_b_reuse "$service" "$image_uri"
+  fi
+  if [[ -n "${OUTPUT_FILE:-}" ]]; then
+    node --input-type=module - "$OUTPUT_FILE" "$service" "$repository_name" "$image_uri" "$published_tag" "$existing_digest" <<'NODE'
 import fs from "node:fs";
 const [outputPath, service, repositoryName, imageUri, imageTag, imageDigest] = process.argv.slice(2);
 fs.appendFileSync(outputPath, `${JSON.stringify({
@@ -265,10 +321,21 @@ fs.appendFileSync(outputPath, `${JSON.stringify({
   image_digest: imageDigest, image_ref: imageUri.replace(/:[^:@]+$/, `@${imageDigest}`),
 })}\n`);
 NODE
-    fi
-    continue
   fi
+done
 
+service_index=0
+for service in "${SERVICES[@]}"; do
+  existing_digest="${PREFLIGHT_DIGESTS[$service_index]}"
+  service_index=$((service_index + 1))
+  if [[ "$existing_digest" != "ABSENT" ]]; then continue; fi
+  image_uri="$(image_uri_for_service "$service")"
+  dockerfile="$(dockerfile_for_service "$service")"
+  build_context="$(context_for_service "$service")"
+  target="$(target_for_service "$service")"
+  published_tag="${image_uri##*:}"
+  repository_name="${image_uri#${ECR_REGISTRY}/}"
+  repository_name="${repository_name%%:*}"
   echo
   echo "Building ${service}"
   echo "  Dockerfile: ${dockerfile}"
