@@ -4,7 +4,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, ran
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import jwt from "jsonwebtoken";
-import { assertRebaselineQrHandoff } from "../../../scripts/aws/production-dual-slot-rebaseline-contract.mjs";
+import { assertRebaselineQrHandoff, canonicalSha256 } from "../../../scripts/aws/production-dual-slot-rebaseline-contract.mjs";
 import {
   assertLegacyProductionRotationGraceSeconds,
   assertNormalizedProductionRotationGraceSeconds,
@@ -16,6 +16,8 @@ import {
 } from "./production-rotation-grace-contract.mjs";
 import {
   assertProductionInitialMigrationSourceAdvance,
+  assertProductionStaleSupersessionPredecessor,
+  productionSupersessionEvidenceIdentity,
   productionSupersessionVersionId,
 } from "../../../scripts/security/production-initial-migration-source-advance.mjs";
 import {
@@ -96,6 +98,12 @@ const loadConfig = (file, expectedSha256) => {
     const bridge = assertProductionInitialMigrationSourceAdvance(config.initialMigrationSourceAdvance);
     if (bridge.currentSourceSha !== config.sourceSha || bridge.supersessionEvidence.rotationId !== config.rotationId) throw new Error("initial-migration source advance does not match config identity");
   }
+  if (config.staleSupersessionPredecessor !== undefined) {
+    const predecessor = assertProductionStaleSupersessionPredecessor(config.staleSupersessionPredecessor, { rotationId: config.rotationId });
+    if (predecessor.sourceSha !== config.sourceSha && config.initialMigrationSourceAdvance === undefined) throw new Error("stale-supersession predecessor source does not match config identity");
+    if (config.rebaselineRuntime !== undefined) throw new Error("stale supersession and rebaseline runtime authority cannot be combined");
+  }
+  if ((config.staleSupersessionPredecessor === undefined) !== (config.staleSupersessionBindingOrigin === undefined)) throw new Error("complete stale-supersession binding origin is required");
   reference(config.verificationRef);
   return config;
 };
@@ -178,6 +186,53 @@ const isAuthenticatedInitialMigration = (current, config, proveDescendant) => {
   } catch {
     return false;
   }
+};
+const assertStaleSupersessionBindingOrigin = ({ config, current, predecessor }) => {
+  const origin = config.staleSupersessionBindingOrigin;
+  const fields = ["schemaVersion", "kind", "producer", "sourceSha", "rotationId", "resources", "observedSlots", "supersessionPredecessorIdentitySha256", "bindingSha256", "originSha256", "bindingKind"];
+  if (!origin || JSON.stringify(Object.keys(origin).sort()) !== JSON.stringify(fields.sort()) || origin.schemaVersion !== 1 || origin.kind !== "PRODUCTION_INITIAL_DUAL_SLOT_BINDING_ORIGIN" || origin.bindingKind !== "PRODUCTION_INITIAL_DUAL_SLOT_ROTATION_BINDINGS" || origin.producer !== "scripts/aws/production-initial-dual-slot-bootstrap.mjs:bootstrapInitialDualSlotRotation" || origin.sourceSha !== predecessor.sourceSha || origin.rotationId !== config.rotationId || origin.supersessionPredecessorIdentitySha256 !== predecessor.predecessorIdentitySha256 || !/^[a-f0-9]{64}$/.test(origin.bindingSha256 || "")) throw new Error("stale-supersession binding origin is invalid");
+  const body = Object.fromEntries(Object.entries(origin).filter(([key]) => !["bindingSha256", "originSha256", "bindingKind"].includes(key)));
+  if (canonicalSha256(body) !== origin.originSha256) throw new Error("stale-supersession binding origin integrity is invalid");
+  const records = initialMigrationRecords(current);
+  const resources = {
+    jwtPending: config.jwt.pendingSecretId,
+    qrPrivatePending: config.qr.privatePendingSecretId,
+    qrPublicPending: config.qr.publicPendingSecretId,
+    jwtPrevious: config.jwt.previousSecretId,
+    qrPublicPrevious: config.qr.publicPreviousSecretId,
+    qrCurrentVersion: config.qr.currentKeyVersionSecretId,
+    qrPreviousVersion: config.qr.previousKeyVersionSecretId,
+  };
+  if (JSON.stringify(Object.keys(origin.resources).sort()) !== JSON.stringify(Object.keys(records).sort()) || JSON.stringify(Object.keys(origin.observedSlots).sort()) !== JSON.stringify(Object.keys(records).sort())) throw new Error("stale-supersession binding origin slots are incomplete");
+  for (const [slot, record] of Object.entries(records)) {
+    const observed = origin.observedSlots[slot];
+    const version = productionSupersessionVersionId(origin.sourceSha, config.rotationId, slot);
+    if (origin.resources[slot] !== resources[slot] || record.id !== resources[slot] || !observed || observed.arn !== resources[slot] || observed.versionId !== version || record.raw.versionId !== version || JSON.stringify(observed.stages) !== '["AWSCURRENT"]' || observed.payloadSha256 !== canonicalSha256(record.material.metadata) || observed.materialFingerprint !== (record.material.metadata.materialFingerprint || null) || observed.keyVersion !== (record.material.metadata.keyVersion || null) || record.material.metadata.sourceSha !== origin.sourceSha || record.material.metadata.supersessionPredecessorIdentitySha256 !== predecessor.predecessorIdentitySha256) throw new Error(`live ${slot} does not match the authenticated stale-supersession binding origin`);
+  }
+  const evidenceResources = Object.fromEntries(Object.keys(origin.resources).map((slot) => [slot, { arn: resources[slot], versionId: productionSupersessionVersionId(origin.sourceSha, config.rotationId, slot), stages: ["AWSCURRENT"] }]));
+  if (productionSupersessionEvidenceIdentity({ sourceSha: origin.sourceSha, staleSourceSha: predecessor.staleSourceSha, rotationId: config.rotationId, staleRotationId: predecessor.staleRotationId, resources: evidenceResources }) !== predecessor.supersessionEvidenceIdentitySha256) throw new Error("stale-supersession binding origin does not match its transition evidence");
+};
+const assertStaleSupersessionQrHandoff = ({ config, current, state, proveDescendant }) => {
+  const predecessor = assertProductionStaleSupersessionPredecessor(config.staleSupersessionPredecessor, { rotationId: config.rotationId });
+  if (predecessor.sourceSha !== config.sourceSha) {
+    const bridge = assertProductionInitialMigrationSourceAdvance(config.initialMigrationSourceAdvance);
+    if (bridge.currentSourceSha !== config.sourceSha || bridge.supersessionEvidence.sourceSha !== predecessor.sourceSha || bridge.supersessionEvidence.rotationId !== predecessor.rotationId || bridge.supersessionEvidence.evidenceIdentitySha256 !== predecessor.supersessionEvidenceIdentitySha256 || proveDescendant?.({ ancestorSha: predecessor.sourceSha, descendantSha: config.sourceSha }) !== true) throw new Error("stale-supersession handoff source ancestry is not authenticated");
+  }
+  if (config.qr.previousKeyVersion !== predecessor.runtimeQrVersionLabel || predecessor.current.qrPublic.keyVersion === predecessor.runtimeQrVersionLabel) throw new Error("stale-supersession QR predecessor identities are invalid");
+  const refs = { jwt: config.jwt.currentSecretId, qrPrivate: config.qr.privateCurrentSecretId, qrPublic: config.qr.publicCurrentSecretId };
+  if (Object.entries(refs).some(([name, arn]) => predecessor.current[name].secretArn !== arn)) throw new Error("stale-supersession predecessor resources do not match config");
+  if (state) {
+    if (state.jwt?.oldFingerprint !== predecessor.current.jwt.materialFingerprint || state.qr?.oldPrivateFingerprint !== predecessor.current.qrPrivate.materialFingerprint || state.qr?.oldPublicFingerprint !== predecessor.current.qrPublic.materialFingerprint || state.qr?.oldMetadataKeyVersion !== predecessor.current.qrPublic.keyVersion || state.qr?.oldKeyVersion !== predecessor.runtimeQrVersionLabel || qrHistoricalContinuity(state) !== QR_CONTINUITY_VERIFIED) throw new Error("prepared state does not match the authenticated stale-supersession predecessor");
+    return predecessor.current.qrPublic.keyVersion;
+  }
+  assertStaleSupersessionBindingOrigin({ config, current, predecessor });
+  const records = { jwt: current?.jwtCurrent, qrPrivate: current?.qrPrivateCurrent, qrPublic: current?.qrPublicCurrent };
+  for (const [name, record] of Object.entries(records)) {
+    const expected = predecessor.current[name];
+    const metadata = record?.material?.metadata;
+    if (record?.raw?.versionId !== expected.versionId || fingerprint(record?.material?.value || "") !== expected.materialFingerprint || metadata?.rotationId !== expected.rotationId || metadata?.family !== expected.family || metadata?.slot !== expected.slot || metadata?.materialFingerprint !== expected.materialFingerprint || (expected.keyVersion !== undefined && metadata?.keyVersion !== expected.keyVersion)) throw new Error(`live ${name} does not match the authenticated stale-supersession predecessor`);
+  }
+  return predecessor.current.qrPublic.keyVersion;
 };
 const sourceAdvanceProof = (context) => context.proveDescendant || (({ ancestorSha, descendantSha }) => {
   try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; }
@@ -348,7 +403,10 @@ const initialMigrationSourceSha = (state) => state.initialMigrationSourceSha || 
 
 const assertState = (state, config, proveDescendant) => {
   assertStateIdentity(state, config);
-  if (state.qr?.oldMetadataKeyVersion !== undefined) assertRebaselineQrHandoff({ config, state, proveDescendant });
+  if (state.qr?.oldMetadataKeyVersion !== undefined) {
+    if (config.staleSupersessionPredecessor) assertStaleSupersessionQrHandoff({ config, state, proveDescendant });
+    else assertRebaselineQrHandoff({ config, state, proveDescendant });
+  }
   if (state.stateVersion !== PRODUCTION_ROTATION_STATE_VERSION) throw new Error(`state stateVersion must be ${PRODUCTION_ROTATION_STATE_VERSION}`);
   assertNormalizedProductionRotationGraceSeconds(state);
   if (state.minimumGraceSeconds !== config.minimumGraceSeconds) throw new Error("state minimum grace does not match the reviewed config");
@@ -415,6 +473,7 @@ const assertPrepareLineage = (state, current) => {
 
 const prepare = async (context) => {
   const { config, sm, values, identity, inventoryEvidenceSha256 } = context;
+  if ((config.staleSupersessionPredecessor === undefined) !== (config.staleSupersessionBindingOrigin === undefined)) throw new Error("complete stale-supersession binding origin is required");
   let state = readCurrentState(context);
   if (!state || state.graceContract !== PRODUCTION_ROTATION_LEGACY_GRACE_CONTRACT) assertProductionRotationGraceSeconds(config.minimumGraceSeconds, "config.minimumGraceSeconds");
   deriveProductionRotationCleanupEligibleAt(nowIso(clockOf(context)), config.minimumGraceSeconds);
@@ -426,14 +485,23 @@ const prepare = async (context) => {
   let current = await slots(sm, config);
   let oldMetadataKeyVersion;
   let completedRebaselineHandoff = false;
+  let completedSupersessionHandoff = false;
+  if (!state && config.staleSupersessionPredecessor) {
+    oldMetadataKeyVersion = assertStaleSupersessionQrHandoff({ config, current, proveDescendant: sourceAdvanceProof(context) });
+    authenticateEd25519Pair(current.qrPrivateCurrent.material.value, current.qrPublicCurrent.material.value, "stale-supersession current QR");
+    completedSupersessionHandoff = true;
+  }
   if (!state && config.rebaselineRuntime) {
     oldMetadataKeyVersion = assertRebaselineQrHandoff({ config, current, proveDescendant: sourceAdvanceProof(context) });
     authenticateEd25519Pair(current.qrPrivateCurrent.material.value, current.qrPublicCurrent.material.value, "rebaseline current QR");
     completedRebaselineHandoff = true;
   }
-  if (!state && config.initialMigrationSourceAdvance && !completedRebaselineHandoff && !isAuthenticatedInitialMigration(current, config, sourceAdvanceProof(context))) throw new Error("initial-migration source advance does not match authenticated live state");
+  if (!state && config.initialMigrationSourceAdvance && !completedRebaselineHandoff && !completedSupersessionHandoff && !isAuthenticatedInitialMigration(current, config, sourceAdvanceProof(context))) throw new Error("initial-migration source advance does not match authenticated live state");
   for (const [name, record] of [["jwt", current.jwtPending], ["QR private", current.qrPrivatePending], ["QR public", current.qrPublicPending]]) assertPendingOwnership(name, record.material, config.rotationId);
-  if (state?.qr?.oldMetadataKeyVersion && state.phase === "prepared") assertRebaselineQrHandoff({ config, current, state, proveDescendant: sourceAdvanceProof(context) });
+  if (state?.qr?.oldMetadataKeyVersion && state.phase === "prepared") {
+    if (config.staleSupersessionPredecessor) assertStaleSupersessionQrHandoff({ config, current, state, proveDescendant: sourceAdvanceProof(context) });
+    else assertRebaselineQrHandoff({ config, current, state, proveDescendant: sourceAdvanceProof(context) });
+  }
   if (state) assertPrepareLineage(state, current);
   else {
     if (!completedRebaselineHandoff && config.rebaselineRuntime && current.qrPublicCurrent.material.metadata.keyVersion
@@ -519,7 +587,10 @@ const prepare = async (context) => {
 
   assertState(state, config, sourceAdvanceProof(context));
   current = await slots(sm, config);
-  if (state.qr.oldMetadataKeyVersion && state.phase === "prepared") assertRebaselineQrHandoff({ config, current, state, proveDescendant: sourceAdvanceProof(context) });
+  if (state.qr.oldMetadataKeyVersion && state.phase === "prepared") {
+    if (config.staleSupersessionPredecessor) assertStaleSupersessionQrHandoff({ config, current, state, proveDescendant: sourceAdvanceProof(context) });
+    else assertRebaselineQrHandoff({ config, current, state, proveDescendant: sourceAdvanceProof(context) });
+  }
   if (state.phase === "prepared") assertPrepareLineage(state, current);
   const pendingJwt = current.jwtPending.material;
   const pendingPrivate = current.qrPrivatePending.material;

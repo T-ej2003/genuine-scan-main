@@ -4,7 +4,13 @@ import { chmodSync, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSy
 import path from "node:path";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { rotationBindingsToTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
-import { productionSupersessionEvidenceIdentity } from "../security/production-initial-migration-source-advance.mjs";
+import {
+  assertProductionStaleSupersessionPredecessor,
+  assertProductionSupersessionEvidence,
+  PRODUCTION_STALE_SUPERSESSION_PREDECESSOR_KIND,
+  productionStaleSupersessionPredecessorIdentity,
+  productionSupersessionEvidenceIdentity,
+} from "../security/production-initial-migration-source-advance.mjs";
 import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 import { generateRebaselineMaterial, fingerprint as secureFingerprint } from "./production-dual-slot-rebaseline-contract.mjs";
 
@@ -173,18 +179,73 @@ function assertLegacyMatches(legacy, baseline) {
   }
 }
 
+const exactKeys = (value, keys, label) => {
+  if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...keys].sort())) throw new Error(`${label} schema is not exact.`);
+};
+
+function assertCurrentPayload(payload, { family, slot, qr = false } = {}) {
+  exactKeys(payload, qr ? ["rotationId", "family", "slot", "keyVersion", "materialFingerprint", "value"] : ["rotationId", "family", "slot", "materialFingerprint", "value"], `Current ${slot}`);
+  if (!ROTATION_ID.test(payload.rotationId || "") || payload.family !== family || payload.slot !== slot || typeof payload.value !== "string" || !payload.value || payload.materialFingerprint !== fingerprint(payload.value)) throw new Error(`Current ${slot} predecessor is not authenticated.`);
+  if (qr && !VERSION.test(payload.keyVersion || "")) throw new Error(`Current ${slot} QR identity is invalid.`);
+  return payload;
+}
+
+async function authenticateSupersessionPredecessor({ send, taskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, supersessionEvidenceIdentitySha256 }) {
+  const baseline = deriveLegacyRotationBaseline(taskDefinition);
+  const specifications = {
+    jwt: [baseline.jwtCurrent, "jwt_secrets", "current", false],
+    qrPrivate: [baseline.qrPrivateCurrent, "qr_signing_keys", "current-private", true],
+    qrPublic: [baseline.qrPublicCurrent, "qr_signing_keys", "current-public", true],
+  };
+  const current = {};
+  const payloads = {};
+  for (const [name, [secretArn, family, slot, qr]] of Object.entries(specifications)) {
+    const described = await send(new DescribeSecretCommand({ SecretId: secretArn }));
+    if (described?.ARN !== secretArn) throw new Error(`Current ${name} predecessor resource is not authenticated.`);
+    const stages = assertRotationVersionTopology(described, `current ${name}`);
+    const versionId = Object.entries(stages).find(([, labels]) => labels.includes("AWSCURRENT"))?.[0];
+    const response = await send(new GetSecretValueCommand({ SecretId: secretArn, VersionId: versionId }));
+    if (response?.VersionId !== versionId) throw new Error(`Current ${name} predecessor version is not authenticated.`);
+    const payload = assertCurrentPayload(parseStoredValue(response, `current ${name}`), { family, slot, qr });
+    payloads[name] = payload;
+    current[name] = { secretArn, versionId, rotationId: payload.rotationId, family, slot, ...(qr ? { keyVersion: payload.keyVersion } : {}), materialFingerprint: payload.materialFingerprint };
+  }
+  if (new Set(Object.values(payloads).map(({ rotationId: owner }) => owner)).size !== 1) throw new Error("Current signing predecessor is owned by multiple rotations.");
+  assertPendingMaterial({ jwt: payloads.jwt.value, qrPrivate: payloads.qrPrivate.value, qrPublic: payloads.qrPublic.value, qrKeyVersion: payloads.qrPublic.keyVersion });
+  if (payloads.qrPrivate.keyVersion !== payloads.qrPublic.keyVersion) throw new Error("Current QR predecessor key identities are inconsistent.");
+  const body = {
+    schemaVersion: 1,
+    kind: PRODUCTION_STALE_SUPERSESSION_PREDECESSOR_KIND,
+    sourceSha,
+    rotationId,
+    staleSourceSha,
+    staleRotationId,
+    supersessionEvidenceIdentitySha256,
+    runtimeQrVersionLabel: baseline.qrCurrentVersion,
+    currentRotationId: payloads.jwt.rotationId,
+    current,
+  };
+  const predecessor = { ...body, predecessorIdentitySha256: productionStaleSupersessionPredecessorIdentity(body) };
+  assertProductionStaleSupersessionPredecessor(predecessor, { sourceSha, rotationId });
+  return { baseline, predecessor };
+}
+
 export function assertInitialDualSlotBindings(bindings) {
   const refs = [bindings?.jwt?.currentSecretId, bindings?.jwt?.previousSecretId, bindings?.jwt?.pendingSecretId, bindings?.qr?.privateCurrentSecretId, bindings?.qr?.privatePendingSecretId, bindings?.qr?.publicCurrentSecretId, bindings?.qr?.publicPreviousSecretId, bindings?.qr?.publicPendingSecretId, bindings?.qr?.currentKeyVersionSecretId, bindings?.qr?.previousKeyVersionSecretId];
   if (refs.some((value) => !SECRET_ARN.test(String(value || ""))) || new Set(refs).size !== refs.length) throw new Error("Initial dual-slot bindings must contain distinct production secret ARNs.");
   if (!VERSION.test(bindings?.qr?.previousKeyVersion || "")) throw new Error("Initial dual-slot previous QR key version is invalid.");
-  if (bindings?.schemaVersion !== 2 || bindings?.kind !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND || bindings?.producer !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER || !SHA40.test(bindings?.sourceSha || "") || !ROTATION_ID.test(bindings?.rotationId || "")) throw new Error("Initial dual-slot identity binding is invalid.");
+  if (![2, 3].includes(bindings?.schemaVersion) || bindings?.kind !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND || bindings?.producer !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER || !SHA40.test(bindings?.sourceSha || "") || !ROTATION_ID.test(bindings?.rotationId || "")) throw new Error("Initial dual-slot identity binding is invalid.");
+  if (bindings.schemaVersion === 3) {
+    const evidence = assertProductionSupersessionEvidence(bindings.supersessionEvidence);
+    assertProductionStaleSupersessionPredecessor(bindings.supersessionPredecessor, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, supersessionEvidence: evidence });
+  } else if (bindings.supersessionEvidence !== undefined || bindings.supersessionPredecessor !== undefined) throw new Error("Ordinary initial bindings cannot carry stale-supersession authority.");
   if (bindings?.ecs && JSON.stringify(bindings.ecs) !== JSON.stringify(rotationBindingsToTaskBindings(bindings))) throw new Error("Initial dual-slot ECS bindings do not match the canonical SDK bindings.");
   return true;
 }
 
 function assertInitialBindingSchemaClosed(bindings) {
   const exact = (value, keys, label) => { if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...keys].sort())) throw new Error(`${label} schema is not closed.`); };
-  exact(bindings, ["schemaVersion", "kind", "producer", "sourceSha", "rotationId", "legacy", "jwt", "qr", "ecs"], "Initial dual-slot bindings");
+  exact(bindings, ["schemaVersion", "kind", "producer", "sourceSha", "rotationId", "legacy", "jwt", "qr", "ecs", ...(bindings.schemaVersion === 3 ? ["supersessionEvidence", "supersessionPredecessor"] : [])], "Initial dual-slot bindings");
   exact(bindings.legacy, ["jwtCurrent", "qrPrivateCurrent", "qrPublicCurrent", "qrCurrentVersion"], "Initial dual-slot legacy bindings");
   exact(bindings.jwt, ["currentSecretId", "previousSecretId", "pendingSecretId"], "Initial dual-slot JWT bindings");
   exact(bindings.qr, ["privateCurrentSecretId", "privatePendingSecretId", "publicCurrentSecretId", "publicPreviousSecretId", "publicPendingSecretId", "currentKeyVersionSecretId", "previousKeyVersionSecretId", "previousKeyVersion", "pendingKeyVersion"], "Initial dual-slot QR bindings");
@@ -198,6 +259,7 @@ function runnerJson(run, args, label) {
 }
 
 function assertInitialLivePayload(slot, payload, bindings) {
+  const supersessionKeys = bindings.schemaVersion === 3 ? ["supersessionPredecessorIdentitySha256"] : [];
   const expected = {
     jwtPending: ["family", "materialFingerprint", "rotationId", "slot", "sourceSha", "value"],
     qrPrivatePending: ["family", "keyVersion", "materialFingerprint", "rotationId", "slot", "sourceSha", "value"],
@@ -206,17 +268,18 @@ function assertInitialLivePayload(slot, payload, bindings) {
     qrPublicPrevious: ["family", "initialMigration", "slot", "sourceSha", "value"],
     qrCurrentVersion: ["family", "initialMigration", "slot", "sourceSha", "value"],
     qrPreviousVersion: ["family", "initialMigration", "slot", "sourceSha", "value"],
-  }[slot];
-  if (!payload || JSON.stringify(Object.keys(payload).sort()) !== JSON.stringify(expected)) throw new Error(`Initial ${slot} payload schema is not exact.`);
+  }[slot].concat(supersessionKeys);
+  if (!payload || JSON.stringify(Object.keys(payload).sort()) !== JSON.stringify(expected.sort())) throw new Error(`Initial ${slot} payload schema is not exact.`);
   const shape = { jwtPending: ["jwt_secrets", "pending"], qrPrivatePending: ["qr_signing_keys", "pending-private"], qrPublicPending: ["qr_signing_keys", "pending-public"], jwtPrevious: ["jwt_secrets", "empty"], qrPublicPrevious: ["qr_signing_keys", "empty"], qrCurrentVersion: ["qr_key_versions", "current"], qrPreviousVersion: ["qr_key_versions", "previous-empty"] }[slot];
   if (payload.family !== shape[0] || payload.slot !== shape[1] || payload.sourceSha !== bindings.sourceSha || typeof payload.value !== "string") throw new Error(`Initial ${slot} payload identity is not authenticated.`);
   if (["jwtPending", "qrPrivatePending", "qrPublicPending"].includes(slot)) {
     if (payload.rotationId !== bindings.rotationId || payload.materialFingerprint !== fingerprint(payload.value)) throw new Error(`Initial ${slot} payload provenance is not authenticated.`);
   } else if (payload.initialMigration !== true || payload.value !== (slot === "qrCurrentVersion" ? bindings.legacy.qrCurrentVersion : "")) throw new Error(`Initial ${slot} baseline marker is not authenticated.`);
+  if (bindings.schemaVersion === 3 && payload.supersessionPredecessorIdentitySha256 !== bindings.supersessionPredecessor.predecessorIdentitySha256) throw new Error(`Initial ${slot} stale-supersession predecessor is not authenticated.`);
   return Object.freeze({ payloadSha256: canonicalSha256(payload), materialFingerprint: payload.materialFingerprint || null, keyVersion: payload.keyVersion || null });
 }
 
-export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings } = {}) {
+export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings, proveDescendant } = {}) {
   if (typeof run !== "function") throw new Error("Initial binding origin verification runner is required.");
   assertInitialBindingSchemaClosed(bindings);
   assertInitialDualSlotBindings(bindings);
@@ -234,17 +297,47 @@ export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings } = {
     try { payload = JSON.parse(value.SecretString); } catch { throw new Error(`Initial ${slot} payload is malformed.`); }
     observedSlots[slot] = { arn, versionId, stages: ["AWSCURRENT"], ...assertInitialLivePayload(slot, payload, bindings) };
   }
-  if (observedSlots.qrPrivatePending.materialFingerprint && observedSlots.qrPrivatePending.materialFingerprint !== observedSlots.qrPublicPending.materialFingerprint) throw new Error("Initial QR pending payload identities are inconsistent.");
-  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_DUAL_SLOT_BINDING_ORIGIN", producer: INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources, observedSlots };
+  if (observedSlots.qrPrivatePending.keyVersion && observedSlots.qrPrivatePending.keyVersion !== observedSlots.qrPublicPending.keyVersion) throw new Error("Initial QR pending payload identities are inconsistent.");
+  let supersessionPredecessorIdentitySha256;
+  if (bindings.schemaVersion === 3) {
+    const evidence = assertProductionSupersessionEvidence(bindings.supersessionEvidence);
+    const predecessor = assertProductionStaleSupersessionPredecessor(bindings.supersessionPredecessor, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, supersessionEvidence: evidence });
+    if (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: evidence.staleSourceSha, descendantSha: bindings.sourceSha }) !== true) throw new Error("Stale-supersession source ancestry is not independently authenticated.");
+    if (predecessor.runtimeQrVersionLabel !== bindings.legacy.qrCurrentVersion) throw new Error("Stale-supersession runtime QR label does not match initial bindings.");
+    const payloads = {};
+    for (const [name, expected] of Object.entries(predecessor.current)) {
+      const described = runnerJson(run, ["aws", "secretsmanager", "describe-secret", "--secret-id", expected.secretArn], `Current ${name} predecessor description`);
+      if (described.ARN !== expected.secretArn || described.VersionIdsToStages?.[expected.versionId]?.includes("AWSCURRENT") !== true) throw new Error(`Current ${name} predecessor resource/version is not authenticated.`);
+      const value = runnerJson(run, ["aws", "secretsmanager", "get-secret-value", "--secret-id", expected.secretArn, "--version-id", expected.versionId], `Current ${name} predecessor value`);
+      if (value.VersionId !== expected.versionId || typeof value.SecretString !== "string") throw new Error(`Current ${name} predecessor version is not authenticated.`);
+      let payload;
+      try { payload = JSON.parse(value.SecretString); } catch { throw new Error(`Current ${name} predecessor payload is malformed.`); }
+      payloads[name] = assertCurrentPayload(payload, { family: expected.family, slot: expected.slot, qr: name !== "jwt" });
+      const observed = { secretArn: expected.secretArn, versionId: expected.versionId, rotationId: payload.rotationId, family: payload.family, slot: payload.slot, ...(name !== "jwt" ? { keyVersion: payload.keyVersion } : {}), materialFingerprint: payload.materialFingerprint };
+      if (canonical(observed) !== canonical(expected)) throw new Error(`Current ${name} predecessor does not match initial bindings.`);
+    }
+    assertPendingMaterial({ jwt: payloads.jwt.value, qrPrivate: payloads.qrPrivate.value, qrPublic: payloads.qrPublic.value, qrKeyVersion: payloads.qrPublic.keyVersion });
+    supersessionPredecessorIdentitySha256 = predecessor.predecessorIdentitySha256;
+  }
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_DUAL_SLOT_BINDING_ORIGIN", producer: INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources, observedSlots, ...(supersessionPredecessorIdentitySha256 ? { supersessionPredecessorIdentitySha256 } : {}) };
   return Object.freeze({ ...body, bindingSha256: canonicalSha256(bindings), originSha256: canonicalSha256(body) });
 }
 
-export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, sourceSha, rotationId, legacyBindings, outputFile, repositoryRoot = process.cwd() } = {}) {
+export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, sourceSha, rotationId, legacyBindings, supersessionEvidence, supersessionPredecessor, outputFile, repositoryRoot = process.cwd() } = {}) {
   if (typeof send !== "function") throw new Error("Initial dual-slot bootstrap Secrets Manager sender is required.");
   if (!SHA40.test(sourceSha || "") || !ROTATION_ID.test(rotationId || "")) throw new Error("Initial dual-slot source/rotation identity is invalid.");
   if (typeof outputFile !== "string" || !outputFile) throw new Error("Initial dual-slot rotation binding output is required.");
   const baseline = deriveLegacyRotationBaseline(taskDefinition);
   assertLegacyMatches(legacyBindings, baseline);
+  if ((supersessionEvidence === undefined) !== (supersessionPredecessor === undefined)) throw new Error("Complete stale-supersession predecessor evidence is required.");
+  const checkedSupersessionEvidence = supersessionEvidence === undefined ? undefined : assertProductionSupersessionEvidence(supersessionEvidence);
+  let checkedSupersessionPredecessor;
+  if (checkedSupersessionEvidence) {
+    checkedSupersessionPredecessor = assertProductionStaleSupersessionPredecessor(supersessionPredecessor, { sourceSha, rotationId, supersessionEvidence: checkedSupersessionEvidence });
+    const observed = await authenticateSupersessionPredecessor({ send, taskDefinition, sourceSha, staleSourceSha: checkedSupersessionEvidence.staleSourceSha, rotationId, staleRotationId: checkedSupersessionEvidence.staleRotationId, supersessionEvidenceIdentitySha256: checkedSupersessionEvidence.evidenceIdentitySha256 });
+    if (canonical(observed.predecessor) !== canonical(checkedSupersessionPredecessor)) throw new Error("Live stale-supersession predecessor changed before binding generation.");
+    if (checkedSupersessionPredecessor.runtimeQrVersionLabel === checkedSupersessionPredecessor.current.qrPublic.keyVersion) checkedSupersessionPredecessor = undefined;
+  }
   const resources = {};
   const created = [];
   for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
@@ -252,6 +345,7 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
     resources[slot] = exactArn(result.response, name);
     if (result.created) created.push(slot);
   }
+  if (checkedSupersessionEvidence && Object.entries(resources).some(([slot, arn]) => checkedSupersessionEvidence.resources[slot]?.arn !== arn)) throw new Error("Stale-supersession evidence resources do not match the initial binding topology.");
   const existingMaterial = {};
   let secretValueWrites = 0;
   ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(outputFile)), repositoryRoot, create: true, normalize: true, label: "Replacement material journal directory" });
@@ -259,6 +353,7 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
   const material = await recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile });
   const payloads = pendingPayloads({ rotationId, material });
   for (const payload of Object.values(payloads)) payload.sourceSha = sourceSha;
+  if (checkedSupersessionPredecessor) for (const payload of Object.values(payloads)) payload.supersessionPredecessorIdentitySha256 = checkedSupersessionPredecessor.predecessorIdentitySha256;
   const ensure = async (options) => {
     const result = await ensureValue({ send, ...options });
     secretValueWrites += result.wrote ? 1 : 0;
@@ -280,17 +375,19 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
       throw new Error("QR pending material does not form the reviewed key pair.");
     }
   }
-  await ensure({ arn: resources.jwtPrevious, name: "JWT previous", expected: emptySlot("jwt_secrets", "empty", sourceSha), rotationId });
-  await ensure({ arn: resources.qrPublicPrevious, name: "QR public previous", expected: emptySlot("qr_signing_keys", "empty", sourceSha), rotationId });
-  await ensure({ arn: resources.qrCurrentVersion, name: "QR current key version", expected: versionSlot(baseline.qrCurrentVersion, "current", sourceSha), rotationId });
-  await ensure({ arn: resources.qrPreviousVersion, name: "QR previous key version", expected: versionSlot("", "previous-empty", sourceSha), rotationId });
+  const handoff = checkedSupersessionPredecessor ? { supersessionPredecessorIdentitySha256: checkedSupersessionPredecessor.predecessorIdentitySha256 } : {};
+  await ensure({ arn: resources.jwtPrevious, name: "JWT previous", expected: { ...emptySlot("jwt_secrets", "empty", sourceSha), ...handoff }, rotationId });
+  await ensure({ arn: resources.qrPublicPrevious, name: "QR public previous", expected: { ...emptySlot("qr_signing_keys", "empty", sourceSha), ...handoff }, rotationId });
+  await ensure({ arn: resources.qrCurrentVersion, name: "QR current key version", expected: { ...versionSlot(baseline.qrCurrentVersion, "current", sourceSha), ...handoff }, rotationId });
+  await ensure({ arn: resources.qrPreviousVersion, name: "QR previous key version", expected: { ...versionSlot("", "previous-empty", sourceSha), ...handoff }, rotationId });
   const bindings = {
-    schemaVersion: 2,
+    schemaVersion: checkedSupersessionPredecessor ? 3 : 2,
     kind: INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND,
     producer: INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER,
     sourceSha,
     rotationId,
     legacy: baseline,
+    ...(checkedSupersessionPredecessor ? { supersessionEvidence: checkedSupersessionEvidence, supersessionPredecessor: checkedSupersessionPredecessor } : {}),
     jwt: { currentSecretId: baseline.jwtCurrent, previousSecretId: resources.jwtPrevious, pendingSecretId: resources.jwtPending },
     qr: {
       privateCurrentSecretId: baseline.qrPrivateCurrent,
@@ -356,10 +453,11 @@ function readExistingSupersessionEvidence({ outputFile, repositoryRoot, sourceSh
   return { evidence, sha256: sha256(bytes) };
 }
 
-export async function supersedeStalePendingRotation({ send, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile, repositoryRoot = process.cwd() } = {}) {
+export async function supersedeStalePendingRotation({ send, taskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile, repositoryRoot = process.cwd(), proveDescendant } = {}) {
   if (typeof send !== "function") throw new Error("Stale rotation supersession Secrets Manager sender is required.");
   if (!SHA40.test(sourceSha || "") || !SHA40.test(staleSourceSha || "") || !ROTATION_ID.test(rotationId || "") || !ROTATION_ID.test(staleRotationId || "")) throw new Error("Stale rotation supersession identity is invalid.");
   if (sourceSha === staleSourceSha || rotationId === staleRotationId) throw new Error("Stale and replacement rotation identities must be distinct.");
+  if (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: staleSourceSha, descendantSha: sourceSha }) !== true) throw new Error("Stale rotation source is not an authenticated ancestor of the replacement source.");
   const resources = {};
   const existing = {};
   const currentVersionIds = {};
@@ -383,8 +481,13 @@ export async function supersedeStalePendingRotation({ send, sourceSha, staleSour
     if (value.family !== family || value.slot !== expectedSlot || typeof value.value !== "string") return "INVALID";
     const pending = slot.endsWith("Pending");
     if (value.sourceSha === staleSourceSha) {
+      const expectedKeys = pending
+        ? ["value", "sourceSha", "rotationId", "family", "slot", "materialFingerprint", ...(["qrPrivatePending", "qrPublicPending"].includes(slot) ? ["keyVersion"] : [])]
+        : ["value", "sourceSha", "family", "slot", "initialMigration"];
+      if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(expectedKeys.sort())) return "INVALID";
       if ((pending && value.rotationId !== staleRotationId) || (!pending && value.rotationId !== undefined)) return "INVALID";
       if (pending && (!value.materialFingerprint || value.materialFingerprint !== fingerprint(value.value))) return "INVALID";
+      if (!pending && (value.initialMigration !== true || value.value !== (slot === "qrCurrentVersion" ? value.value : "") || (slot === "qrCurrentVersion" && !VERSION.test(value.value)))) return "INVALID";
       return "OLD_AUTHENTICATED";
     }
     if ((pending && value.rotationId !== rotationId) || (!pending && value.rotationId !== undefined)) return "INVALID";
@@ -398,6 +501,9 @@ export async function supersedeStalePendingRotation({ send, sourceSha, staleSour
   if (newSlots.some((slot, index) => slot !== replacementOrder[index])) throw new Error("Rotation state is not an authenticated resumable transition prefix.");
   const allNew = newSlots.length === replacementOrder.length;
   const expectedEvidenceResources = Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: transitionVersionId(slot), stages: ["AWSCURRENT"] }]));
+  const supersessionEvidenceIdentitySha256 = productionSupersessionEvidenceIdentity({ sourceSha, staleSourceSha, rotationId, staleRotationId, resources: expectedEvidenceResources });
+  const { baseline, predecessor } = await authenticateSupersessionPredecessor({ send, taskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, supersessionEvidenceIdentitySha256 });
+  if (existing.qrCurrentVersion.value !== baseline.qrCurrentVersion) throw new Error("Stale QR current key-version marker does not match the authenticated runtime baseline.");
   const existingEvidence = readExistingSupersessionEvidence({ outputFile, repositoryRoot, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, transitionVersionId });
   if (existingEvidence && !allNew) throw new Error("Existing stale rotation supersession evidence conflicts with a non-converged secret topology.");
   const generated = allNew ? null : generatePendingMaterial();
@@ -423,6 +529,7 @@ export async function supersedeStalePendingRotation({ send, sourceSha, staleSour
     qrCurrentVersion: versionSlot(existing.qrCurrentVersion.value, "current", sourceSha),
     qrPreviousVersion: versionSlot("", "previous-empty", sourceSha),
   };
+  for (const payload of Object.values(replacement)) payload.supersessionPredecessorIdentitySha256 = predecessor.predecessorIdentitySha256;
   for (const slot of Object.keys(replacement)) if (states[slot] === "NEW_AUTHENTICATED" && JSON.stringify(existing[slot]) !== JSON.stringify(replacement[slot])) throw new Error(`Replacement ${slot} evidence does not match the authenticated transition.`);
   const versionIds = {};
   for (const slot of replacementOrder) {
@@ -453,6 +560,7 @@ export async function supersedeStalePendingRotation({ send, sourceSha, staleSour
   const evidence = { ...evidenceCore, evidenceIdentitySha256: productionSupersessionEvidenceIdentity(evidenceCore) };
   const bytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`);
   const persisted = existingEvidence || writeStageBPrivateFileAtomic({ filePath: outputFile, bytes, repositoryRoot, label: "Stale rotation supersession evidence" });
+  const returnedEvidence = existingEvidence?.evidence || evidence;
   if (lstatSync(materialFile, { throwIfNoEntry: false })) unlinkSync(materialFile);
-  return { valid: true, transition: evidence.transition, idempotentReplay: allNew, writes: existingEvidence ? 0 : Object.keys(versionIds).filter((slot) => states[slot] !== "NEW_AUTHENTICATED").length, evidenceFile: existingEvidence ? path.resolve(outputFile) : persisted.path, evidenceSha256: persisted.sha256, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, versionIds };
+  return { valid: true, transition: returnedEvidence.transition, idempotentReplay: allNew, writes: existingEvidence ? 0 : Object.keys(versionIds).filter((slot) => states[slot] !== "NEW_AUTHENTICATED").length, evidence: returnedEvidence, predecessor, evidenceFile: existingEvidence ? path.resolve(outputFile) : persisted.path, evidenceSha256: persisted.sha256, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, versionIds };
 }

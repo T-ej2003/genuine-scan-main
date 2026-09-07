@@ -70,7 +70,7 @@ const onboardingPaths = args.has("onboarding-paths") ? read("onboarding-paths") 
 const verifyRebaselineLivePostWrite = rebaselineAuthorizationCoordinates
   ? ({ bindings, authorization }) => verifyLiveProductionDualSlotRebaselineWithRunner({ run: releaseRun, bindings, authorization, recoveryEnvelope, originalPreparation, imageAuthorization, proveDescendant: proveRecoveryDescendant })
   : undefined;
-const verifyInitialBindingOrigin = ({ bindings }) => verifyLiveInitialDualSlotBindingWithRunner({ run: releaseRun, bindings });
+const verifyInitialBindingOrigin = ({ bindings }) => verifyLiveInitialDualSlotBindingWithRunner({ run: releaseRun, bindings, proveDescendant: proveRecoveryDescendant });
 const loadCurrentTaskDefinition = () => {
   const currentService = JSON.parse(releaseRun(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2"])).services?.[0];
   if (!currentService?.taskDefinition) throw new Error("Current production task definition is unavailable.");

@@ -1,19 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { constants, createHash, generateKeyPairSync, sign, verify } from "node:crypto";
-import { lstatSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { assertRootDropEvidence, buildRootDropEvidence, buildRootDropPayload, canonicalRootDropPayload, ROOT_DROP_SIGNING_KEY_ARN } from "../aws/production-root-drop-evidence.mjs";
 import { assertAuthenticatedCurrentStageBState, assertPostApplyStageAPlanRecovery, producePostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "../aws/production-stage-a-recovery-evidence.mjs";
 import { assertStageAStateContract, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { createInitialDualSlotSecretsManagerClient, generatePendingMaterial, INITIAL_DUAL_SLOT_NAMES, supersedeStalePendingRotation } from "../aws/production-initial-dual-slot-bootstrap.mjs";
+import { bootstrapInitialDualSlotRotation, createInitialDualSlotSecretsManagerClient, generatePendingMaterial, INITIAL_DUAL_SLOT_NAMES, supersedeStalePendingRotation, verifyLiveInitialDualSlotBindingWithRunner } from "../aws/production-initial-dual-slot-bootstrap.mjs";
+import { buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { fixtureInput, sourceSha as rehearsalSourceSha } from "./production-cutover-rehearsal.test.mjs";
 import { runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { productionStageAIngress, productionStageAState, STAGE_A_LINEAGE, STAGE_A_STATE_OBJECT } from "./fixtures/production-stage-a-state.mjs";
+import { prepare, readCurrentState } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
+import { validateRotationTransition } from "../security/check-production-rotation-transition.mjs";
+import { assertProductionStaleSupersessionPredecessor, productionStaleSupersessionPredecessorIdentity } from "../security/production-initial-migration-source-advance.mjs";
 
 const sourceSha = "8".repeat(40);
 const staleSourceSha = "e".repeat(40);
@@ -22,6 +27,11 @@ const staleRotationId = "rotation-old-20260812";
 const arn = (name) => `arn:aws:secretsmanager:eu-west-2:368992683803:secret:${name.replaceAll("/", "-")}-abc`;
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const requireBackend = createRequire(path.resolve("backend/package.json"));
+const currentOwnerRotationId = "rotation-current-20260801";
+const productionQrMetadataIdentifier = "c41ca96ab047dd25"; // ggignore: authenticated public-key fingerprint, not secret material
+const currentNames = { jwt: "current-jwt", qrPrivate: "current-qr-private", qrPublic: "current-qr-public" };
+const staleTaskDefinition = { taskDefinition: { containerDefinitions: [{ name: "backend", environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "2026-04-20" }], secrets: [{ name: "JWT_SECRET", valueFrom: arn(currentNames.jwt) }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: arn(currentNames.qrPrivate) }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: arn(currentNames.qrPublic) }] }] } };
+const supersessionArgs = (overrides = {}) => ({ taskDefinition: staleTaskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha, ...overrides });
 
 function rotationStore() {
   const pair = generateKeyPairSync("ed25519", { privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } });
@@ -31,28 +41,47 @@ function rotationStore() {
     const pending = ["jwtPending", "qrPrivatePending", "qrPublicPending"].includes(slot);
     const value = pending
       ? { value: slot === "jwtPending" ? "jwt-old-material" : slot === "qrPrivatePending" ? pair.privateKey : pair.publicKey, sourceSha: staleSourceSha, rotationId: staleRotationId, family: slot === "jwtPending" ? "jwt_secrets" : "qr_signing_keys", slot: slot === "jwtPending" ? "pending" : slot === "qrPrivatePending" ? "pending-private" : "pending-public", ...(slot === "qrPrivatePending" || slot === "qrPublicPending" ? { keyVersion } : {}), materialFingerprint: digest(slot === "jwtPending" ? "jwt-old-material" : slot === "qrPrivatePending" ? pair.privateKey : pair.publicKey).slice(0, 16) }
-      : { value: slot === "qrCurrentVersion" ? "v1" : "", sourceSha: staleSourceSha, family: slot === "qrCurrentVersion" || slot === "qrPreviousVersion" ? "qr_key_versions" : slot === "jwtPrevious" ? "jwt_secrets" : "qr_signing_keys", slot: slot === "qrCurrentVersion" ? "current" : slot === "qrPreviousVersion" ? "previous-empty" : "empty", initialMigration: true };
+      : { value: slot === "qrCurrentVersion" ? "2026-04-20" : "", sourceSha: staleSourceSha, family: slot === "qrCurrentVersion" || slot === "qrPreviousVersion" ? "qr_key_versions" : slot === "jwtPrevious" ? "jwt_secrets" : "qr_signing_keys", slot: slot === "qrCurrentVersion" ? "current" : slot === "qrPreviousVersion" ? "previous-empty" : "empty", initialMigration: true };
     store.set(name, { value, versionId: `${slot}-old` });
+  }
+  const currentPair = generateKeyPairSync("ed25519", { privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } });
+  const metadataKeyVersion = digest(currentPair.publicKey).slice(0, 16);
+  for (const [name, value, family, slot] of [["jwt", "jwt-current-material", "jwt_secrets", "current"], ["qrPrivate", currentPair.privateKey, "qr_signing_keys", "current-private"], ["qrPublic", currentPair.publicKey, "qr_signing_keys", "current-public"]]) {
+    store.set(currentNames[name], { value: { value, rotationId: currentOwnerRotationId, family, slot, ...(name === "jwt" ? {} : { keyVersion: metadataKeyVersion }), materialFingerprint: digest(value).slice(0, 16) }, versionId: `${name}-current-version` });
   }
   return store;
 }
 
 function rotationSender(store, { failAt } = {}) {
   let writes = 0;
+  let updates = 0;
   const send = async (command) => {
     const name = command.input.SecretId;
     const key = [...store.keys()].find((candidate) => candidate === name || arn(candidate) === name);
     if (command.constructor.name === "DescribeSecretCommand") return { Name: key, ARN: arn(key), VersionIdsToStages: { [store.get(key).versionId]: ["AWSCURRENT"] } };
-    if (command.constructor.name === "GetSecretValueCommand") return { SecretString: JSON.stringify(store.get(key).value) };
+    if (command.constructor.name === "GetSecretValueCommand") return { SecretString: JSON.stringify(store.get(key).value), VersionId: store.get(key).versionId };
     if (command.constructor.name === "PutSecretValueCommand") {
       writes += 1;
       store.set(key, { value: JSON.parse(command.input.SecretString), versionId: command.input.ClientRequestToken });
       if (writes === failAt) throw new Error(`injected PutSecretValue failure ${writes}`);
       return { VersionId: command.input.ClientRequestToken };
     }
+    if (command.constructor.name === "UpdateSecretVersionStageCommand") { updates += 1; return {}; }
     throw new Error(`unexpected command ${command.constructor.name}`);
   };
-  return { send, get writes() { return writes; } };
+  return { send, get writes() { return writes; }, get updates() { return updates; } };
+}
+
+function originRunner(store) {
+  return (args) => {
+    const action = args[2];
+    const secretId = args[args.indexOf("--secret-id") + 1];
+    const key = [...store.keys()].find((candidate) => candidate === secretId || arn(candidate) === secretId);
+    const record = store.get(key);
+    if (action === "describe-secret") return JSON.stringify({ Name: key, ARN: arn(key), VersionIdsToStages: { [record.versionId]: ["AWSCURRENT"] } });
+    if (action === "get-secret-value") return JSON.stringify({ VersionId: record.versionId, SecretString: JSON.stringify(record.value) });
+    throw new Error(`unexpected runner action ${action}`);
+  };
 }
 
 function convergedStageBState() {
@@ -163,33 +192,47 @@ test("post-apply Stage-A recovery is distinct from and stricter than a historica
 
 test("stale rotation supersession requires exact old topology and writes a new identity", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-supersession-"));
-  const store = new Map();
-  const pair = generateKeyPairSync("ed25519", { privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } });
-  const keyVersion = digest(pair.publicKey).slice(0, 16);
-  for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
-    const value = ["jwtPending", "qrPrivatePending", "qrPublicPending"].includes(slot)
-      ? { value: slot === "jwtPending" ? "jwt-old-material" : slot === "qrPrivatePending" ? pair.privateKey : pair.publicKey, sourceSha: staleSourceSha, rotationId: staleRotationId, family: slot === "jwtPending" ? "jwt_secrets" : "qr_signing_keys", slot: slot === "jwtPending" ? "pending" : slot === "qrPrivatePending" ? "pending-private" : "pending-public", ...(slot === "qrPrivatePending" || slot === "qrPublicPending" ? { keyVersion } : {}), materialFingerprint: digest(slot === "jwtPending" ? "jwt-old-material" : slot === "qrPrivatePending" ? pair.privateKey : pair.publicKey).slice(0, 16) }
-      : { value: slot === "qrCurrentVersion" ? "v1" : "", sourceSha: staleSourceSha, family: slot === "qrCurrentVersion" || slot === "qrPreviousVersion" ? "qr_key_versions" : slot === "jwtPrevious" ? "jwt_secrets" : "qr_signing_keys", slot: slot === "qrCurrentVersion" ? "current" : slot === "qrPreviousVersion" ? "previous-empty" : "empty", initialMigration: true };
-    store.set(name, { value, versionId: `${slot}-old` });
-  }
+  const store = rotationStore();
   const send = async (command) => {
     const name = command.input.SecretId;
     const key = [...store.keys()].find((candidate) => candidate === name || arn(candidate) === name);
     if (command.constructor.name === "DescribeSecretCommand") return { Name: key, ARN: arn(key), VersionIdsToStages: { [store.get(key).versionId]: ["AWSCURRENT"] } };
-    if (command.constructor.name === "GetSecretValueCommand") return { SecretString: JSON.stringify(store.get(key).value) };
+    if (command.constructor.name === "GetSecretValueCommand") return { SecretString: JSON.stringify(store.get(key).value), VersionId: store.get(key).versionId };
     if (command.constructor.name === "PutSecretValueCommand") { const versionId = command.input.ClientRequestToken; store.set(key, { value: JSON.parse(command.input.SecretString), versionId }); return { VersionId: versionId }; }
     throw new Error(`unexpected command ${command.constructor.name}`);
   };
-  const result = await supersedeStalePendingRotation({ send, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+  const result = await supersedeStalePendingRotation({ send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
   assert.equal(result.writes, 7);
-  const replay = await supersedeStalePendingRotation({ send, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+  const persistedEvidenceBytes = readFileSync(path.join(directory, "supersession.json"));
+  const persistedEvidence = JSON.parse(persistedEvidenceBytes);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const replay = await supersedeStalePendingRotation({ send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
   assert.equal(replay.writes, 0);
   assert.equal(replay.idempotentReplay, true);
+  assert.deepEqual(replay.evidence, persistedEvidence);
+  assert.equal(replay.evidenceSha256, digest(persistedEvidenceBytes));
   const tampered = JSON.parse(readFileSync(path.join(directory, "supersession.json"), "utf8"));
   tampered.rotationId = "rotation-tampered-20260817";
   writeFileSync(path.join(directory, "supersession.json"), `${JSON.stringify(tampered)}\n`, { mode: 0o600 });
-  await assert.rejects(() => supersedeStalePendingRotation({ send, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /existing.*does not match|authenticated transition/i);
-  await assert.rejects(() => supersedeStalePendingRotation({ send, sourceSha: "7".repeat(40), staleSourceSha, rotationId: "rotation-new-20260818", staleRotationId, outputFile: path.join(directory, "second.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /unknown|invalid|resumable/i);
+  await assert.rejects(() => supersedeStalePendingRotation({ send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /existing.*does not match|authenticated transition/i);
+  await assert.rejects(() => supersedeStalePendingRotation({ send, ...supersessionArgs({ sourceSha: "7".repeat(40), rotationId: "rotation-new-20260818" }), outputFile: path.join(directory, "second.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /ancestor|unknown|invalid|resumable/i);
+});
+
+test("stale QR runtime marker mismatch fails before stale-supersession mutation", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-qr-runtime-mismatch-"));
+  const store = rotationStore();
+  store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value = "v1";
+  const sender = rotationSender(store);
+  try {
+    const evidenceFile = path.join(directory, "supersession.json");
+    const bindingFile = path.join(directory, "bindings.json");
+    await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: evidenceFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /current key-version marker does not match the authenticated runtime baseline/);
+    assert.equal(sender.writes, 0);
+    assert.equal(sender.updates, 0);
+    assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value, "v1");
+    assert.equal(lstatSync(evidenceFile, { throwIfNoEntry: false }), undefined);
+    assert.equal(lstatSync(bindingFile, { throwIfNoEntry: false }), undefined);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("unknown rotation slot evidence fails closed before any write", async () => {
@@ -198,7 +241,7 @@ test("unknown rotation slot evidence fails closed before any write", async () =>
   const first = store.keys().next().value;
   store.get(first).value.sourceSha = "f".repeat(40);
   const sender = rotationSender(store);
-  await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile: path.join(directory, "unknown.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /unknown/);
+  await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: path.join(directory, "unknown.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /unknown/);
   assert.equal(sender.writes, 0);
 });
 
@@ -208,16 +251,184 @@ test("stale rotation supersession resumes every sequential write boundary withou
     const store = rotationStore();
     const first = rotationSender(store, { failAt: failure });
     const outputFile = path.join(directory, "first.json");
-    await assert.rejects(() => supersedeStalePendingRotation({ send: first.send, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /injected PutSecretValue failure/);
+    await assert.rejects(() => supersedeStalePendingRotation({ send: first.send, ...supersessionArgs(), outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /injected PutSecretValue failure/);
     const journal = JSON.parse(readFileSync(`${outputFile}.material`, "utf8"));
     assert.equal(statSync(`${outputFile}.material`).mode & 0o077, 0);
     const retry = rotationSender(store);
-    const result = await supersedeStalePendingRotation({ send: retry.send, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+    const result = await supersedeStalePendingRotation({ send: retry.send, ...supersessionArgs(), outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" });
     assert.equal(result.writes, 7 - failure);
     assert.equal(result.idempotentReplay, failure === 7);
     for (const slot of ["jwtPending", "qrPrivatePending", "qrPublicPending"]) assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES[slot]).value.value, journal.material[slot === "jwtPending" ? "jwt" : slot === "qrPrivatePending" ? "qrPrivate" : "qrPublic"]);
     assert.notEqual(store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.value, "jwt-old-material");
     assert.equal(lstatSync(`${outputFile}.material`, { throwIfNoEntry: false }), undefined);
+  }
+});
+
+test("production-shaped stale supersession bootstraps a distinct canonical rotation through real prepare", async () => {
+  const productionOldRotationId = "rotation-20260829015311-765c8a16";
+  const productionOldSource = PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA;
+  const protectedSource = "61ef3f172a501880d4a8d3b59a5aab8ff4e1a1b3";
+  const currentProtectedDescendant = "9".repeat(40);
+  const freshRotationId = "rotation-fresh-source-only-fixture";
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-fresh-supersession-"));
+  const store = rotationStore();
+  for (const name of Object.values(INITIAL_DUAL_SLOT_NAMES)) {
+    const record = store.get(name);
+    record.value.sourceSha = productionOldSource;
+    if (record.value.rotationId === staleRotationId) record.value.rotationId = productionOldRotationId;
+  }
+  store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value = "2026-04-20";
+  const sender = rotationSender(store);
+  try {
+    const result = await supersedeStalePendingRotation({
+      send: sender.send,
+      taskDefinition: staleTaskDefinition,
+      sourceSha: protectedSource,
+      staleSourceSha: productionOldSource,
+      rotationId: freshRotationId,
+      staleRotationId: productionOldRotationId,
+      proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === productionOldSource && descendantSha === protectedSource,
+      outputFile: path.join(directory, "supersession.json"),
+      repositoryRoot: "/private/tmp/mscqr-post330-exec",
+    });
+    assert.equal(result.writes, 7);
+    assert.notEqual(result.rotationId, result.staleRotationId);
+    assert.equal(result.predecessor.runtimeQrVersionLabel, "2026-04-20");
+    assert.notEqual(result.predecessor.current.qrPublic.keyVersion, result.predecessor.runtimeQrVersionLabel);
+    const productionIdentityFixture = structuredClone(result.predecessor);
+    productionIdentityFixture.current.qrPrivate.keyVersion = productionQrMetadataIdentifier;
+    productionIdentityFixture.current.qrPublic.keyVersion = productionQrMetadataIdentifier;
+    productionIdentityFixture.predecessorIdentitySha256 = productionStaleSupersessionPredecessorIdentity(productionIdentityFixture);
+    assert.equal(assertProductionStaleSupersessionPredecessor(productionIdentityFixture).current.qrPublic.keyVersion, productionQrMetadataIdentifier);
+    const binding = await bootstrapInitialDualSlotRotation({
+      send: sender.send,
+      taskDefinition: staleTaskDefinition,
+      sourceSha: protectedSource,
+      rotationId: freshRotationId,
+      supersessionEvidence: result.evidence,
+      supersessionPredecessor: result.predecessor,
+      outputFile: path.join(directory, "rotation-bindings.json"),
+      repositoryRoot: "/private/tmp/mscqr-post330-exec",
+    });
+    assert.equal(binding.secretValueWrites, 0);
+    assert.equal(binding.bindings.schemaVersion, 3);
+    const origin = verifyLiveInitialDualSlotBindingWithRunner({ run: originRunner(store), bindings: binding.bindings, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === productionOldSource && descendantSha === protectedSource });
+    assert.throws(() => verifyLiveInitialDualSlotBindingWithRunner({ run: originRunner(store), bindings: binding.bindings, proveDescendant: () => false }), /ancestry/);
+    const substitutedBinding = structuredClone(binding.bindings);
+    substitutedBinding.supersessionPredecessor.current.jwt.materialFingerprint = "0".repeat(16);
+    substitutedBinding.supersessionPredecessor.predecessorIdentitySha256 = productionStaleSupersessionPredecessorIdentity(substitutedBinding.supersessionPredecessor);
+    assert.throws(() => verifyLiveInitialDualSlotBindingWithRunner({ run: originRunner(store), bindings: substitutedBinding, proveDescendant: () => true }), /stale-supersession predecessor/);
+    const directConfig = buildProductionRotationConfig({
+      sourceSha: currentProtectedDescendant,
+      rotationId: freshRotationId,
+      liveCurrentKeyVersion: "2026-04-20",
+      approval: { ticket: "CHG-FRESH-SUPERSESSION", approvedBy: "checker", approverRole: "production-independent-checker", reason: "source-only fresh rotation fixture", verificationRef: "fixture://fresh-supersession", minimumGraceSeconds: 2592000 },
+      bindings: binding.bindings,
+      verifyInitialBindingOrigin: () => origin,
+    });
+    const config = { ...directConfig, initialMigrationSourceAdvance: { schemaVersion: 1, kind: "PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE", currentSourceSha: currentProtectedDescendant, supersessionEvidence: result.evidence } };
+    const stateFile = path.join(directory, "rotation-state.json");
+    const context = { config, sm: { send: sender.send }, identity: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/fixture", clock: () => Date.parse("2026-09-07T00:00:00.000Z"), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === protectedSource && descendantSha === currentProtectedDescendant, values: new Map([["state-file", stateFile], ["fixture-file", path.join(directory, "rotation-fixture.json")]]) };
+    const writesBeforePrepare = sender.writes;
+    await assert.rejects(() => prepare({ ...context, proveDescendant: () => false, values: new Map([["state-file", path.join(directory, "unrelated-state.json")], ["fixture-file", path.join(directory, "unrelated-fixture.json")]]) }), /ancestry/);
+    await assert.rejects(() => prepare({ ...context, config: { ...config, staleSupersessionPredecessor: undefined }, values: new Map([["state-file", path.join(directory, "unbound-state.json")], ["fixture-file", path.join(directory, "unbound-fixture.json")]]) }), /complete stale-supersession binding origin/);
+    const forged = structuredClone(config);
+    forged.staleSupersessionPredecessor.current.jwt.materialFingerprint = "0".repeat(16);
+    forged.staleSupersessionPredecessor.predecessorIdentitySha256 = productionStaleSupersessionPredecessorIdentity(forged.staleSupersessionPredecessor);
+    await assert.rejects(() => prepare({ ...context, config: forged, values: new Map([["state-file", path.join(directory, "forged-state.json")], ["fixture-file", path.join(directory, "forged-fixture.json")]]) }), /binding origin|live jwt/);
+    const rejectChangedSupersessionSlot = async (slot, mutate, label) => {
+      const original = structuredClone(store.get(INITIAL_DUAL_SLOT_NAMES[slot]));
+      mutate(store.get(INITIAL_DUAL_SLOT_NAMES[slot]));
+      await assert.rejects(() => prepare({ ...context, sm: { send: async (command) => {
+        if (command.constructor.name === "PutSecretValueCommand") throw new Error("unexpected mutation before supersession slot authentication");
+        return sender.send(command);
+      } }, values: new Map([["state-file", path.join(directory, `${label}-state.json`)], ["fixture-file", path.join(directory, `${label}-fixture.json`)]]) }), /authenticated stale-supersession binding origin/);
+      store.set(INITIAL_DUAL_SLOT_NAMES[slot], original);
+    };
+    await rejectChangedSupersessionSlot("jwtPending", (record) => { record.versionId = "substituted-jwt-version"; }, "changed-version");
+    await rejectChangedSupersessionSlot("jwtPending", (record) => { record.value.value = "substituted-jwt-pending"; record.value.materialFingerprint = digest(record.value.value).slice(0, 16); }, "changed-payload");
+    await rejectChangedSupersessionSlot("qrPreviousVersion", (record) => { record.value.sourceSha = "0".repeat(40); }, "changed-marker");
+    const forgedOrigin = structuredClone(config);
+    forgedOrigin.staleSupersessionBindingOrigin.observedSlots.jwtPending.versionId = "forged-origin-version";
+    await assert.rejects(() => prepare({ ...context, config: forgedOrigin, values: new Map([["state-file", path.join(directory, "forged-origin-state.json")], ["fixture-file", path.join(directory, "forged-origin-fixture.json")]]) }), /binding origin integrity/);
+    assert.equal(sender.writes, writesBeforePrepare);
+    await prepare(context);
+    const state = readCurrentState(context);
+    assert.equal(state.phase, "overlap-deploy-required");
+    assert.equal(state.qr.oldKeyVersion, "2026-04-20");
+    assert.equal(state.qr.oldMetadataKeyVersion, result.predecessor.current.qrPublic.keyVersion);
+    assert.equal(store.get(currentNames.qrPublic).value.keyVersion, store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value);
+    assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPrevious).value.keyVersion, store.get(INITIAL_DUAL_SLOT_NAMES.qrPreviousVersion).value.value);
+    const writesAfterPrepare = sender.writes;
+    await prepare(context);
+    assert.equal(sender.writes, writesAfterPrepare);
+    const rawState = readFileSync(stateFile);
+    assert.equal(validateRotationTransition({ mode: "rotation-overlap", sourceSha: currentProtectedDescendant, rotationId: freshRotationId, deploymentSha: state.overlapDeploymentSha, rawState, stateSha256: digest(rawState), taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:51", expectedCurrentTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50", imageDigest: `sha256:${"d".repeat(64)}`, now: Date.now() }).phase, "overlap-deploy-required");
+    const alteredState = JSON.parse(rawState);
+    alteredState.jwt.oldFingerprint = "0".repeat(16);
+    writeFileSync(stateFile, `${JSON.stringify(alteredState, null, 2)}\n`, { mode: 0o600 });
+    assert.throws(() => readCurrentState(context), /authenticated stale-supersession predecessor/);
+    await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, taskDefinition: staleTaskDefinition, sourceSha: protectedSource, staleSourceSha: productionOldSource, rotationId: freshRotationId, staleRotationId: productionOldRotationId, proveDescendant: () => true, outputFile: path.join(directory, "replay.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /lineage|invalid|unknown/);
+    assert.equal(sender.writes, writesAfterPrepare);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("stale supersession rejects incomplete or substituted predecessor provenance before its first write", async () => {
+  const cases = [
+    ["unproven source", (store, args) => { args.proveDescendant = () => false; }],
+    ["wrong stale owner", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.rotationId = "rotation-unrelated-pending"; }],
+    ["wrong stale rotation", (_store, args) => { args.staleRotationId = "rotation-unrelated-stale"; }],
+    ["forged previous marker", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPrevious).value.initialMigration = false; }],
+    ["nonempty previous marker", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPrevious).value.value = "substituted"; }],
+    ["malformed stale QR marker", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value = "not a valid version"; }],
+    ["runtime active version unavailable", (_store, args) => { const altered = structuredClone(staleTaskDefinition); altered.taskDefinition.containerDefinitions[0].environment = []; args.taskDefinition = altered; }],
+    ["runtime active version malformed", (_store, args) => { const altered = structuredClone(staleTaskDefinition); altered.taskDefinition.containerDefinitions[0].environment[0].value = "not a valid version"; args.taskDefinition = altered; }],
+    ["substituted JWT", (store) => { store.get(currentNames.jwt).value.value = "substituted-current-jwt"; }],
+    ["wrong JWT version metadata", (store) => { store.get(currentNames.jwt).value.materialFingerprint = "0".repeat(16); }],
+    ["cross-rotation current JWT", (store) => { store.get(currentNames.jwt).value.rotationId = "rotation-unrelated-current"; }],
+    ["substituted QR public", (store) => { store.get(currentNames.qrPublic).value.value = generateKeyPairSync("ed25519", { publicKeyEncoding: { format: "pem", type: "spki" }, privateKeyEncoding: { format: "pem", type: "pkcs8" } }).publicKey; }],
+    ["substituted QR private", (store) => { store.get(currentNames.qrPrivate).value.value = generateKeyPairSync("ed25519", { publicKeyEncoding: { format: "pem", type: "spki" }, privateKeyEncoding: { format: "pem", type: "pkcs8" } }).privateKey; }],
+    ["wrong QR metadata", (store) => { store.get(currentNames.qrPublic).value.keyVersion = "wrong-key-version"; }],
+    ["wrong resource", (_store, args) => { const altered = structuredClone(staleTaskDefinition); altered.taskDefinition.containerDefinitions[0].secrets[0].valueFrom = arn("unreviewed-current-jwt"); args.taskDefinition = altered; }],
+  ];
+  for (const [label, mutate] of cases) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-supersession-reject-"));
+    const store = rotationStore();
+    const sender = rotationSender(store);
+    const args = supersessionArgs({ outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+    mutate(store, args);
+    try {
+      await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...args }), undefined, label);
+      assert.equal(sender.writes, 0, label);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
+test("fresh bootstrap rejects forged or incomplete supersession handoff provenance without another write", async () => {
+  const mutations = [
+    ["runtime label", (value) => { value.runtimeQrVersionLabel = "forged-runtime-label"; }],
+    ["JWT fingerprint", (value) => { value.current.jwt.materialFingerprint = "0".repeat(16); }],
+    ["JWT version", (value) => { value.current.jwt.versionId = "forged-current-version"; }],
+    ["QR metadata", (value) => { value.current.qrPrivate.keyVersion = "forged-key-version"; value.current.qrPublic.keyVersion = "forged-key-version"; }],
+    ["resource ARN", (value) => { value.current.qrPublic.secretArn = arn("forged-current-public"); }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-bootstrap-reject-"));
+    const store = rotationStore();
+    const sender = rotationSender(store);
+    try {
+      const result = await supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+      const forged = structuredClone(result.predecessor);
+      mutate(forged);
+      forged.predecessorIdentitySha256 = productionStaleSupersessionPredecessorIdentity(forged);
+      const writes = sender.writes;
+      await assert.rejects(() => bootstrapInitialDualSlotRotation({ send: sender.send, taskDefinition: staleTaskDefinition, sourceSha, rotationId, supersessionEvidence: result.evidence, supersessionPredecessor: forged, outputFile: path.join(directory, "bindings.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), undefined, label);
+      assert.equal(sender.writes, writes, label);
+      await assert.rejects(() => bootstrapInitialDualSlotRotation({ send: sender.send, taskDefinition: staleTaskDefinition, sourceSha, rotationId, supersessionPredecessor: result.predecessor, outputFile: path.join(directory, "incomplete.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /Complete stale-supersession/);
+      assert.equal(sender.writes, writes, label);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   }
 });
 

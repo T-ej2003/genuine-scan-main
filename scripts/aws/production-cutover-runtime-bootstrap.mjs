@@ -17,6 +17,7 @@ import { assertStageBAdministratorEvidenceIdentity, verifyPermissionReportSignat
 import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertProductionRotationGraceSeconds } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 import {
+  assertProductionStaleSupersessionPredecessor,
   assertProductionInitialMigrationSourceAdvance,
   assertProductionSupersessionEvidence,
   PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE_KIND,
@@ -75,8 +76,11 @@ function assertLiveRebaselinePostWrite(value, { bindings, authorization } = {}) 
 }
 
 function assertAuthenticatedOrigin(origin, bindings) {
-  if (!origin || ![INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND, REBASELINE_ROTATION_BINDINGS_KIND].includes(origin.kind) || typeof origin.producer !== "string" || origin.bindingSha256 !== canonicalHash(bindings) || origin.sourceSha !== bindings.sourceSha || origin.rotationId !== bindings.rotationId || bindings.kind !== origin.kind || bindings.producer !== origin.producer) throw new Error("Rotation binding origin is not independently authenticated.");
-  return origin;
+  const bindingKind = origin?.kind === "PRODUCTION_INITIAL_DUAL_SLOT_BINDING_ORIGIN" ? INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND : origin?.kind;
+  if (!origin || ![INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND, REBASELINE_ROTATION_BINDINGS_KIND].includes(bindingKind) || typeof origin.producer !== "string" || origin.bindingSha256 !== canonicalHash(bindings) || origin.sourceSha !== bindings.sourceSha || origin.rotationId !== bindings.rotationId || bindings.kind !== bindingKind || bindings.producer !== origin.producer) throw new Error("Rotation binding origin is not independently authenticated.");
+  if (bindings.supersessionPredecessor && origin.supersessionPredecessorIdentitySha256 !== bindings.supersessionPredecessor.predecessorIdentitySha256) throw new Error("Stale-supersession predecessor origin is not independently authenticated.");
+  if (!bindings.supersessionPredecessor && origin.supersessionPredecessorIdentitySha256 !== undefined) throw new Error("Ordinary rotation binding origin cannot carry stale-supersession predecessor authority.");
+  return { ...origin, bindingKind };
 }
 
 function assertBindings(bindings = {}, { rebaselineAuthorization, recoveryEnvelope, originalPreparation, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin } = {}) {
@@ -113,7 +117,9 @@ function assertBindings(bindings = {}, { rebaselineAuthorization, recoveryEnvelo
   const origin = rebaselineOrigin || initialOrigin;
   const ecs = rotationBindingsToTaskBindings(checked);
   if (bindings.ecs && JSON.stringify(bindings.ecs) !== JSON.stringify(ecs)) throw new Error("ECS rotation bindings do not match the canonical base-ARN bindings.");
-  return Object.freeze({ ...checked, kind: origin.kind, producer: origin.producer, schemaVersion: bindings.schemaVersion, bindingOrigin: origin, ...(origin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? { operation: bindings.operation, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, historicalRotationId: bindings.historicalRotationId, abandonmentEvidenceSha256: bindings.abandonmentEvidenceSha256, abandonmentEvidence: bindings.abandonmentEvidence, baselineCompletionSha256: bindings.baselineCompletionSha256, baselineCompletion: bindings.baselineCompletion, authorizationSha256: bindings.authorizationSha256, ...(livePostWrite ? { livePostWrite } : {}) } : { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, legacy: bindings.legacy }), ecs: Object.freeze(ecs) });
+  const supersessionEvidence = bindings.supersessionEvidence === undefined ? undefined : assertProductionSupersessionEvidence(bindings.supersessionEvidence);
+  const supersessionPredecessor = bindings.supersessionPredecessor === undefined ? undefined : assertProductionStaleSupersessionPredecessor(bindings.supersessionPredecessor, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, supersessionEvidence });
+  return Object.freeze({ ...checked, kind: origin.kind, producer: origin.producer, schemaVersion: bindings.schemaVersion, bindingOrigin: origin, ...(origin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? { operation: bindings.operation, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, historicalRotationId: bindings.historicalRotationId, abandonmentEvidenceSha256: bindings.abandonmentEvidenceSha256, abandonmentEvidence: bindings.abandonmentEvidence, baselineCompletionSha256: bindings.baselineCompletionSha256, baselineCompletion: bindings.baselineCompletion, authorizationSha256: bindings.authorizationSha256, ...(livePostWrite ? { livePostWrite } : {}) } : { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, legacy: bindings.legacy, ...(supersessionPredecessor ? { supersessionEvidence, supersessionPredecessor } : {}) }), ecs: Object.freeze(ecs) });
 }
 
 function readInputFile(filePath, repositoryRoot, label, parse = (bytes) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))) {
@@ -195,6 +201,7 @@ export function buildProductionRotationConfig({ sourceSha, rotationId, approval,
     jwt: checkedBindings.jwt,
     qr: checkedBindings.qr,
     ...(checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? { operation: checkedBindings.operation, baselineCompletionSha256: checkedBindings.baselineCompletionSha256, baselineCompletion: checkedBindings.baselineCompletion, rebaselineRuntime: { runtimeVariant: recoveryEnvelope ? "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME" : "ORDINARY_REBASELINE_RUNTIME", bindings, authorization: checkedRebaselineAuthorization, authorizationCoordinates: checkedRebaselineCoordinates, ...(recoveryEnvelope ? { recoveryEnvelope, originalPreparation, imageAuthorization } : {}) }, ...(checkedBindings.livePostWrite ? { livePostWriteSha256: checkedBindings.livePostWrite.livePostWriteSha256 } : {}) } : {}),
+    ...(checkedBindings.supersessionPredecessor ? { staleSupersessionPredecessor: checkedBindings.supersessionPredecessor, staleSupersessionBindingOrigin: checkedBindings.bindingOrigin } : {}),
   };
 }
 
