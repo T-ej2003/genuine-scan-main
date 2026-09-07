@@ -146,8 +146,10 @@ esac
 echo "Checking ECR repositories in ${AWS_REGION}: ${REPOSITORIES[*]}"
 PREFLIGHT_DIR="$(mktemp -d)"
 trap 'rm -r "$PREFLIGHT_DIR"' EXIT
+repository_index=0
 for repository_name in "${REPOSITORIES[@]}"; do
-  repository_file="$PREFLIGHT_DIR/repository-${repository_name}.json"
+  repository_file="$PREFLIGHT_DIR/repository-${repository_index}.json"
+  repository_index=$((repository_index + 1))
   aws ecr describe-repositories --region "$AWS_REGION" --repository-names "$repository_name" >"$repository_file"
   node --input-type=module - "$repository_file" "$repository_name" "$AWS_ACCOUNT_ID" "$AWS_REGION" <<'NODE'
 import fs from "node:fs";

@@ -25,8 +25,9 @@ const repos = [
 ];
 const publisherSha = "a".repeat(40);
 const rlsChecksums = JSON.parse(fs.readFileSync("documents/security/rls-program/generated/checksums.json", "utf8"));
+const publisherSource = fs.readFileSync("scripts/aws/publish-ecs-images.sh", "utf8");
 
-function runPublisher({ imageMode = "absent", repositoryMode = "immutable", scope = "backend" } = {}) {
+function runPublisher({ backendRepository = "mscqr-backend", imageMode = "absent", repositoryMode = "immutable", scope = "backend" } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "image-publisher-cas-"));
   const bin = path.join(directory, "bin");
   const log = path.join(directory, "calls.log");
@@ -98,6 +99,7 @@ exec /usr/bin/git "$@"`);
       AWS_SESSION_TOKEN: "fixture-c",
       AWS_ACCOUNT_ID: "368992683803",
       AWS_REGION: "eu-west-2",
+      BACKEND_ECR_REPO: backendRepository,
       IMAGE_TAG: publisherSha,
       SOURCE_RELEASE_SHA: publisherSha,
       SOURCE_CONTRACT_SHA256: rlsChecksums.sourceContractSha256,
@@ -118,6 +120,15 @@ test("publisher treats only ImageNotFound as absent and preserves immutable-tag 
   assert.equal(existing.status, 0, existing.stderr);
   assert.equal(existing.calls.some((call) => call.startsWith("docker buildx build ")), false);
   assert.match(existing.stdout, /Reusing immutable backend image/);
+});
+
+test("publisher preserves namespaced ECR repository names without deriving temporary paths from them", () => {
+  const result = runPublisher({ backendRepository: "team/backend" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.calls.some((call) => call.includes("--repository-names team/backend")), true);
+  assert.equal(result.calls.some((call) => call.includes("--repository-name team/backend")), true);
+  assert.match(publisherSource, /repository_file="\$PREFLIGHT_DIR\/repository-\$\{repository_index\}\.json"/);
+  assert.doesNotMatch(publisherSource, /repository_file=.*repository_name/);
 });
 
 test("publisher fails closed on every non-ImageNotFound tag lookup failure", () => {
