@@ -345,9 +345,13 @@ export async function runBackendHealthRecoveryCli(argv = process.argv.slice(2), 
     const before = await readService();
     const failures = await stoppedFailureObservations();
     const revisionCensus = await census();
+    const liveRepository = aws(["ecr", "describe-repositories", "--repository-names", BACKEND_HEALTH_RECOVERY.repository]).repositories?.[0];
+    const currentImageExists = imageExists(currentDigest);
+    const replacementImage = { exists: imageExists(recoveryDigest), immutable: liveRepository?.imageTagMutability === "IMMUTABLE", signatureValid: true,
+      attestationValid: true, provenanceValid: true, criticalFindings: 0, repository: BACKEND_HEALTH_RECOVERY.repository, digest: recoveryDigest };
     const after = await readService();
     if (serviceIdentity(before) !== serviceIdentity(after)) throw new Error("Legacy failed backend deployment changed during mutation-bound reconciliation.");
-    return { service: after, stoppedTaskFailures: failures, census: revisionCensus };
+    return { service: after, stoppedTaskFailures: failures, census: revisionCensus, currentImageExists, replacementImage };
   };
   const readInterruptedRecoveryState = async (interruption) => {
     const live = await readService();

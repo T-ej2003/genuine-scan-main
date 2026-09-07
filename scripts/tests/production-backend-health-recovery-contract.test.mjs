@@ -77,10 +77,10 @@ const healthy = Object.freeze({ healthy: true, success: true, status: "ready" })
 const runtimeClosure = Object.freeze({ status: "PASS", evidenceSha256: runtimeConsumabilitySha256, liveVerifiedAt: new Date().toISOString() });
 const runLegacyBackendHealthRecovery = (input, adapters) => runRecoveryContract(input, {
   record: async () => {}, verifyRuntimeClosure: async () => runtimeClosure,
-  readLegacyFailureState: async () => ({ service: input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: await adapters.census() }),
+  readLegacyFailureState: async () => ({ service: input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: await adapters.census(), currentImageExists: input.currentImageExists, replacementImage: input.replacementImage }),
   ...adapters,
 });
-const readMissingImageFailureState = (input, census) => async () => ({ service: input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: await census() });
+const readMissingImageFailureState = (input, census) => async () => ({ service: input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: await census(), currentImageExists: input.currentImageExists, replacementImage: input.replacementImage });
 const rollbackProof = ({ rollbackDeploymentArn, rollbackServiceRevisionArn, rollbackTaskDefinitionArn, rollbackDigest, forwardTaskDefinitionArn, forwardTaskDefinitionFingerprint = "f".repeat(64), forwardDigest = digest } = {}) => {
   const forwardServiceRevisionArn = rollbackServiceRevisionArn.replace("minus-1", "failed-forward");
   const rollbackEcsServiceDeploymentId = "ecs-svc/3599551810517927503";
@@ -570,13 +570,73 @@ test("eligibility rejects absent approval, wrong bindings, present current image
 
 test("missing-image recovery requires the canonical unavailable service state and exact current failure", () => {
   assert.doesNotThrow(() => assertLegacyBackendRecoveryEligibility(base()));
-  for (const [input, label] of [
-    [mutate("service.runningCount", 2), "healthy"],
-    [mutate("service.runningCount", 1), "partially serving"],
-    [mutate("service.pendingCount", 1), "progressing"],
-    [mutate("stoppedTaskFailures.0.taskDefinitionArn", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:46"), "old revision"],
-    [mutate("stoppedTaskFailures", []), "missing authoritative task failure"],
-  ]) assert.throws(() => assertLegacyBackendRecoveryEligibility(input), /degradation is not authenticated/, label);
+  const completed = base();
+  completed.service.deployments[0] = { ...completed.service.deployments[0], rolloutState: "COMPLETED", failedTasks: 0 };
+  assert.doesNotThrow(() => assertLegacyBackendRecoveryEligibility(completed));
+  const wrongDigest = mutate("stoppedTaskFailures.0.stoppedReason", "CannotPullContainerError: image sha256:" + "f".repeat(64) + " not found");
+  wrongDigest.stoppedTaskFailures[0].containerReasons = [wrongDigest.stoppedTaskFailures[0].stoppedReason];
+  for (const [input, pattern, label] of [
+    [mutate("service.runningCount", 2), /degradation is not authenticated/, "healthy"],
+    [mutate("service.runningCount", 1), /degradation is not authenticated/, "partially serving"],
+    [mutate("service.pendingCount", 1), /degradation is not authenticated/, "progressing"],
+    [mutate("service.desiredCount", 0), /boundary/, "disabled"],
+    [mutate("replacementImage.exists", false), /image/, "replacement missing"],
+    [mutate("replacementImage.digest", "sha256:" + "f".repeat(64)), /different incident|digest/, "replacement digest mismatch"],
+    [mutate("stoppedTaskFailures.0.startedBy", "ecs-svc/4599551810517927504"), /degradation is not authenticated/, "wrong deployment"],
+    [mutate("stoppedTaskFailures.0.taskDefinitionArn", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:46"), /degradation is not authenticated/, "old revision"],
+    [mutate("stoppedTaskFailures.0.stopCode", "EssentialContainerExited"), /degradation is not authenticated/, "backend started"],
+    [wrongDigest, /degradation is not authenticated/, "wrong digest"],
+    [mutate("stoppedTaskFailures", []), /degradation is not authenticated/, "missing authoritative task failure"],
+  ]) assert.throws(() => assertLegacyBackendRecoveryEligibility(input), pattern, label);
+});
+
+test("eligibility and mutation freshness share legacy-first proof precedence", async () => {
+  const input = base();
+  const currentArn = current.taskDefinition.taskDefinitionArn;
+  const sourceRevision = { taskDefinition: { ...structuredClone(current.taskDefinition), taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:46", revision: 46 }, tags: [] };
+  const sourceRevisionArn = sourceRevision.taskDefinition.taskDefinitionArn;
+  const currentFingerprint = taskDefinitionFingerprint(current, []);
+  const failedRecoveryEvidenceSha256 = "c".repeat(64);
+  const failedRecoveryEvidenceReferenceSha256 = "d".repeat(64);
+  const terminal = {
+    repository: "T-ej2003/genuine-scan-main", taskDefinitionArn: currentArn, candidateFingerprint: currentFingerprint,
+    taskDefinitionFingerprint: currentFingerprint, evidenceFileSha256: "a".repeat(64), workflowRunId: "32759665989",
+    workflowCreatedAt: "2026-08-24T17:53:00.000Z", status: "SERVICE_STABILIZATION_FAILED", classification: "TERMINAL_FAILURE",
+    failureClassification: "SERVICE_STABILIZATION_FAILED", sourceSha, service: BACKEND_HEALTH_RECOVERY.service,
+    releaseMode: BACKEND_HEALTH_RECOVERY.kind, currentTaskDefinitionArn: sourceRevisionArn, recoveryImageDigest: digest,
+    imageReleaseSha: sourceSha, artifactSigningBindingSha256, runtimeConsumabilitySha256: null,
+    predecessorHistoryReferenceSha256: null, predecessorHistoryLineageSha256: null,
+    initialRevisionCensusSha256: canonicalSha256([{ taskDefinitionArn: sourceRevisionArn, taskDefinitionFingerprint: taskDefinitionFingerprint(sourceRevision, []) }]),
+    expectedRevisionCensusSha256: canonicalSha256([{ taskDefinitionArn: sourceRevisionArn, taskDefinitionFingerprint: taskDefinitionFingerprint(sourceRevision, []) }, { taskDefinitionArn: currentArn, taskDefinitionFingerprint: currentFingerprint }]),
+    registrations: 1, updates: 1,
+    evidenceContract: "PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE", requiresLiveFailureReconciliation: true,
+    authenticatedLegacyPredecessors: [],
+  };
+  input.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: digest,
+    imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256,
+    failedRecoveryEvidenceSha256, failedRecoveryEvidenceReferenceSha256,
+    approval: { ...approval, failedRecoveryEvidenceSha256, failedRecoveryEvidenceReferenceSha256 } });
+  input.authenticatedFailedRecoveryEvidence = { envelopeSha256: failedRecoveryEvidenceSha256, referenceSha256: failedRecoveryEvidenceReferenceSha256,
+    recoveryHistory: [terminal], knownFailedRevisions: [terminal], interruptedRecoveries: [] };
+  const eligible = assertLegacyBackendRecoveryEligibility(input);
+  assert.ok(eligible.legacyFailureProof);
+  assert.ok(eligible.missingImageFailureProof);
+  assert.equal(eligible.recoveryProofKind, "LEGACY_FAILED_DEPLOYMENT");
+  assert.equal(eligible.recoveryProofSha256, eligible.legacyFailureProofSha256);
+  assert.notEqual(eligible.recoveryProofSha256, eligible.missingImageFailureProofSha256);
+
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  let registrations = 0; let updates = 0; let service = input.service;
+  const result = await runLegacyBackendHealthRecovery(input, {
+    census: async () => registrations ? [sourceRevision, current, registered] : [sourceRevision, current],
+    register: async () => { registrations += 1; return registered; }, describe: async () => registered,
+    readService: async () => service, updateService: async (arn) => { updates += 1; service = { ...service, taskDefinition: arn, runningCount: 2 }; },
+    readLegacyFailureState: async () => ({ service, stoppedTaskFailures: input.stoppedTaskFailures, census: registrations ? [sourceRevision, current, registered] : [sourceRevision, current], currentImageExists: input.currentImageExists, replacementImage: input.replacementImage }),
+    waitStable: async () => {}, readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy,
+  });
+  assert.equal(result.targetArn, targetArn);
+  assert.deepEqual({ registrations, updates }, { registrations: 1, updates: 1 });
 });
 
 test("missing-image availability and exact deployment failure are refreshed at both mutation boundaries", async () => {
@@ -587,12 +647,69 @@ test("missing-image availability and exact deployment failure are refreshed at b
     const census = async () => registrations ? [registered] : [];
     await assert.rejects(() => runRecoveryContract(input, {
       verifyRuntimeClosure: async () => runtimeClosure, census,
-      readLegacyFailureState: async () => ({ service: ++checks === changeAt ? { ...input.service, runningCount: 2 } : input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: await census() }),
+      readLegacyFailureState: async () => ({ service: ++checks === changeAt ? { ...input.service, runningCount: 2 } : input.service, stoppedTaskFailures: input.stoppedTaskFailures,
+        census: await census(), currentImageExists: input.currentImageExists, replacementImage: input.replacementImage }),
       register: async () => { registrations += 1; return registered; }, describe: async () => registered,
       readService: async () => input.service, updateService: async () => { updates += 1; }, waitStable: async () => {},
       readRunningTasks: async () => [], verifyHealth: async () => healthy, record: async () => {},
     }), /deployment proof changed/);
     assert.deepEqual({ registrations, updates }, expected);
+  }
+});
+
+test("missing-image ECR facts are refreshed at both mutation boundaries", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  for (const [changeAt, change, expected] of [
+    [1, { currentImageExists: true }, { registrations: 0, updates: 0 }],
+    [2, { replacementImage: { ...base().replacementImage, exists: false } }, { registrations: 1, updates: 0 }],
+  ]) {
+    const input = base(); let checks = 0; let registrations = 0; let updates = 0;
+    const census = async () => registrations ? [registered] : [];
+    await assert.rejects(() => runRecoveryContract(input, {
+      verifyRuntimeClosure: async () => runtimeClosure, census,
+      readLegacyFailureState: async () => ({ service: input.service, stoppedTaskFailures: input.stoppedTaskFailures, census: await census(),
+        currentImageExists: input.currentImageExists, replacementImage: input.replacementImage, ...(++checks === changeAt ? change : {}) }),
+      register: async () => { registrations += 1; return registered; }, describe: async () => registered,
+      readService: async () => input.service, updateService: async () => { updates += 1; }, waitStable: async () => {},
+      readRunningTasks: async () => [], verifyHealth: async () => healthy, record: async () => {},
+    }), /deployment proof changed/);
+    assert.deepEqual({ registrations, updates }, expected);
+  }
+});
+
+test("completed historical deployment recovers only from exact current missing-image proof", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  const input = base();
+  input.service.deployments[0] = { ...input.service.deployments[0], rolloutState: "COMPLETED", failedTasks: 0 };
+  let service = input.service; let registrations = 0; let updates = 0;
+  const result = await runLegacyBackendHealthRecovery(input, {
+    census: async () => registrations ? [registered] : [], register: async () => { registrations += 1; return registered; }, describe: async () => registered,
+    readService: async () => service, updateService: async (arn) => { updates += 1; service = { ...service, taskDefinition: arn, runningCount: 2 }; },
+    waitStable: async () => {}, readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy,
+  });
+  assert.equal(result.targetArn, targetArn);
+  assert.deepEqual({ registrations, updates }, { registrations: 1, updates: 1 });
+});
+
+test("equivalent scheduler retries do not change the missing-image proof witness", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  const witnessA = stoppedTaskFailure({ suffix: "1" });
+  const witnessB = stoppedTaskFailure({ suffix: "2" });
+  for (const [label, secondSnapshot] of [["added and reordered", [witnessB, witnessA]], ["older witness expired", [witnessB]]]) {
+    const input = base(); let service = input.service; let reads = 0; let registrations = 0; let updates = 0;
+    const result = await runRecoveryContract(input, {
+      verifyRuntimeClosure: async () => runtimeClosure, census: async () => registrations ? [registered] : [],
+      readLegacyFailureState: async () => ({ service, stoppedTaskFailures: reads++ === 0 ? [witnessA] : secondSnapshot, census: registrations ? [registered] : [],
+        currentImageExists: input.currentImageExists, replacementImage: input.replacementImage }),
+      register: async () => { registrations += 1; return registered; }, describe: async () => registered,
+      readService: async () => service, updateService: async (arn) => { updates += 1; service = { ...service, taskDefinition: arn, runningCount: 2 }; },
+      waitStable: async () => {}, readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy, record: async () => {},
+    });
+    assert.equal(result.targetArn, targetArn, label);
+    assert.deepEqual({ registrations, updates }, { registrations: 1, updates: 1 }, label);
   }
 });
 
