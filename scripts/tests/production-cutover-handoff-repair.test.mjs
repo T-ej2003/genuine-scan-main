@@ -52,34 +52,54 @@ function rotationStore() {
   return store;
 }
 
-function rotationSender(store, { failAt } = {}) {
+function rotationSender(store, { failAt, onDescribe, onGet } = {}) {
   let writes = 0;
   let updates = 0;
+  const reads = [];
   const send = async (command) => {
     const name = command.input.SecretId;
     const key = [...store.keys()].find((candidate) => candidate === name || arn(candidate) === name);
-    if (command.constructor.name === "DescribeSecretCommand") return { Name: key, ARN: arn(key), VersionIdsToStages: { [store.get(key).versionId]: ["AWSCURRENT"] } };
-    if (command.constructor.name === "GetSecretValueCommand") return { SecretString: JSON.stringify(store.get(key).value), VersionId: store.get(key).versionId };
+    if (command.constructor.name === "DescribeSecretCommand") {
+      const record = store.get(key);
+      const response = { Name: key, ARN: arn(key), VersionIdsToStages: { [record.versionId]: ["AWSCURRENT"], ...(record.previous ? { [record.previous.versionId]: ["AWSPREVIOUS"] } : {}) } };
+      await onDescribe?.({ key, record: structuredClone(record), store });
+      return response;
+    }
+    if (command.constructor.name === "GetSecretValueCommand") {
+      const record = store.get(key);
+      reads.push({ key, versionId: command.input.VersionId || null });
+      const selected = command.input.VersionId && command.input.VersionId === record.previous?.versionId ? record.previous : record;
+      const response = { SecretString: JSON.stringify(selected.value), VersionId: selected.versionId };
+      return await onGet?.({ response, key, versionId: command.input.VersionId || null }) || response;
+    }
     if (command.constructor.name === "PutSecretValueCommand") {
       writes += 1;
-      store.set(key, { value: JSON.parse(command.input.SecretString), versionId: command.input.ClientRequestToken });
+      store.set(key, { value: JSON.parse(command.input.SecretString), versionId: command.input.ClientRequestToken, previous: store.get(key) });
       if (writes === failAt) throw new Error(`injected PutSecretValue failure ${writes}`);
       return { VersionId: command.input.ClientRequestToken };
     }
     if (command.constructor.name === "UpdateSecretVersionStageCommand") { updates += 1; return {}; }
     throw new Error(`unexpected command ${command.constructor.name}`);
   };
-  return { send, get writes() { return writes; }, get updates() { return updates; } };
+  return { send, get writes() { return writes; }, get updates() { return updates; }, get reads() { return reads; } };
 }
 
-function originRunner(store) {
+function originRunner(store, { mutateDescribe, mutateValue } = {}) {
   return (args) => {
     const action = args[2];
     const secretId = args[args.indexOf("--secret-id") + 1];
     const key = [...store.keys()].find((candidate) => candidate === secretId || arn(candidate) === secretId);
     const record = store.get(key);
-    if (action === "describe-secret") return JSON.stringify({ Name: key, ARN: arn(key), VersionIdsToStages: { [record.versionId]: ["AWSCURRENT"] } });
-    if (action === "get-secret-value") return JSON.stringify({ VersionId: record.versionId, SecretString: JSON.stringify(record.value) });
+    if (action === "describe-secret") {
+      const response = { Name: key, ARN: arn(key), VersionIdsToStages: { [record.versionId]: ["AWSCURRENT"], ...(record.previous ? { [record.previous.versionId]: ["AWSPREVIOUS"] } : {}) } };
+      return JSON.stringify(mutateDescribe?.(structuredClone(response), { key, record }) || response);
+    }
+    if (action === "get-secret-value") {
+      const versionId = args[args.indexOf("--version-id") + 1];
+      const selected = versionId && versionId === record.previous?.versionId ? record.previous : record;
+      const response = { VersionId: selected.versionId, SecretString: JSON.stringify(selected.value) };
+      return JSON.stringify(mutateValue?.(structuredClone(response), { key, record, versionId }) || response);
+    }
     throw new Error(`unexpected runner action ${action}`);
   };
 }
@@ -193,20 +213,13 @@ test("post-apply Stage-A recovery is distinct from and stricter than a historica
 test("stale rotation supersession requires exact old topology and writes a new identity", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-supersession-"));
   const store = rotationStore();
-  const send = async (command) => {
-    const name = command.input.SecretId;
-    const key = [...store.keys()].find((candidate) => candidate === name || arn(candidate) === name);
-    if (command.constructor.name === "DescribeSecretCommand") return { Name: key, ARN: arn(key), VersionIdsToStages: { [store.get(key).versionId]: ["AWSCURRENT"] } };
-    if (command.constructor.name === "GetSecretValueCommand") return { SecretString: JSON.stringify(store.get(key).value), VersionId: store.get(key).versionId };
-    if (command.constructor.name === "PutSecretValueCommand") { const versionId = command.input.ClientRequestToken; store.set(key, { value: JSON.parse(command.input.SecretString), versionId }); return { VersionId: versionId }; }
-    throw new Error(`unexpected command ${command.constructor.name}`);
-  };
-  const result = await supersedeStalePendingRotation({ send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+  const sender = rotationSender(store);
+  const result = await supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
   assert.equal(result.writes, 7);
   const persistedEvidenceBytes = readFileSync(path.join(directory, "supersession.json"));
   const persistedEvidence = JSON.parse(persistedEvidenceBytes);
   await new Promise((resolve) => setTimeout(resolve, 5));
-  const replay = await supersedeStalePendingRotation({ send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+  const replay = await supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
   assert.equal(replay.writes, 0);
   assert.equal(replay.idempotentReplay, true);
   assert.deepEqual(replay.evidence, persistedEvidence);
@@ -214,8 +227,8 @@ test("stale rotation supersession requires exact old topology and writes a new i
   const tampered = JSON.parse(readFileSync(path.join(directory, "supersession.json"), "utf8"));
   tampered.rotationId = "rotation-tampered-20260817";
   writeFileSync(path.join(directory, "supersession.json"), `${JSON.stringify(tampered)}\n`, { mode: 0o600 });
-  await assert.rejects(() => supersedeStalePendingRotation({ send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /existing.*does not match|authenticated transition/i);
-  await assert.rejects(() => supersedeStalePendingRotation({ send, ...supersessionArgs({ sourceSha: "7".repeat(40), rotationId: "rotation-new-20260818" }), outputFile: path.join(directory, "second.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /ancestor|unknown|invalid|resumable/i);
+  await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /existing.*does not match|authenticated transition|evidence .*binding/i);
+  await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs({ sourceSha: "7".repeat(40), rotationId: "rotation-new-20260818" }), outputFile: path.join(directory, "second.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /ancestor|unknown|invalid|resumable/i);
 });
 
 test("stale QR runtime marker mismatch fails before stale-supersession mutation", async () => {
@@ -232,6 +245,98 @@ test("stale QR runtime marker mismatch fails before stale-supersession mutation"
     assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value, "v1");
     assert.equal(lstatSync(evidenceFile, { throwIfNoEntry: false }), undefined);
     assert.equal(lstatSync(bindingFile, { throwIfNoEntry: false }), undefined);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("stale predecessor capture pins every version and rejects an AWSCURRENT race before mutation", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-supersession-predecessor-race-"));
+  const store = rotationStore();
+  const capturedVersionId = store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).versionId;
+  let raced = false;
+  const sender = rotationSender(store, { onDescribe: ({ key, record, store: mutableStore }) => {
+    if (raced || key !== INITIAL_DUAL_SLOT_NAMES.jwtPending) return;
+    raced = true;
+    const value = { ...record.value, value: "raced-current-material", materialFingerprint: digest("raced-current-material").slice(0, 16) };
+    mutableStore.set(key, { value, versionId: "jwt-pending-raced-current", previous: record });
+  } });
+  const evidenceFile = path.join(directory, "supersession.json");
+  try {
+    await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: evidenceFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /predecessor changed before mutation/);
+    assert.equal(raced, true);
+    assert.equal(sender.reads.find(({ key }) => key === INITIAL_DUAL_SLOT_NAMES.jwtPending)?.versionId, capturedVersionId);
+    for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) assert.equal(sender.reads.find(({ key, versionId }) => key === name && versionId === `${slot}-old`)?.versionId, `${slot}-old`, `${slot} predecessor read is version-pinned`);
+    assert.equal(sender.writes, 0);
+    assert.equal(sender.updates, 0);
+    assert.equal(lstatSync(evidenceFile, { throwIfNoEntry: false }), undefined);
+    assert.equal(lstatSync(path.join(directory, "bindings.json"), { throwIfNoEntry: false }), undefined);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("stale predecessor capture rejects a mismatched pinned-read response before mutation", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-supersession-predecessor-response-"));
+  const store = rotationStore();
+  let replaced = false;
+  const sender = rotationSender(store, { onGet: ({ response, key }) => {
+    if (!replaced && key === INITIAL_DUAL_SLOT_NAMES.jwtPending) {
+      replaced = true;
+      return { ...response, VersionId: "substituted-version-id" };
+    }
+    return response;
+  } });
+  const evidenceFile = path.join(directory, "supersession.json");
+  try {
+    await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: evidenceFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /predecessor version is not authenticated/);
+    assert.equal(sender.writes, 0);
+    assert.equal(sender.updates, 0);
+    assert.equal(lstatSync(evidenceFile, { throwIfNoEntry: false }), undefined);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("stale supersession rechecks the authenticated current JWT predecessor before mutation", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-supersession-current-predecessor-race-"));
+  const store = rotationStore();
+  let raced = false;
+  const sender = rotationSender(store, { onDescribe: ({ key, record, store: mutableStore }) => {
+    if (raced || key !== currentNames.jwt) return;
+    raced = true;
+    const value = { ...record.value, value: "raced-legacy-jwt", materialFingerprint: digest("raced-legacy-jwt").slice(0, 16) };
+    mutableStore.set(key, { value, versionId: "current-jwt-raced-version", previous: record });
+  } });
+  const evidenceFile = path.join(directory, "supersession.json");
+  try {
+    await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: evidenceFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /current jwt predecessor changed before mutation/);
+    assert.equal(raced, true);
+    assert.equal(sender.writes, 0);
+    assert.equal(sender.updates, 0);
+    assert.equal(lstatSync(evidenceFile, { throwIfNoEntry: false }), undefined);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("every stale supersession retains schema-v3 origin verification when legacy QR labels already match", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-supersession-matching-labels-"));
+  const store = rotationStore();
+  const matchingTaskDefinition = structuredClone(staleTaskDefinition);
+  const runtimeVersion = store.get(currentNames.qrPublic).value.keyVersion;
+  matchingTaskDefinition.taskDefinition.containerDefinitions[0].environment[0].value = runtimeVersion;
+  store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value = runtimeVersion;
+  const sender = rotationSender(store);
+  try {
+    const result = await supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs({ taskDefinition: matchingTaskDefinition }), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+    const binding = await bootstrapInitialDualSlotRotation({ send: sender.send, taskDefinition: matchingTaskDefinition, sourceSha, rotationId, supersessionEvidence: result.evidence, supersessionPredecessor: result.predecessor, outputFile: path.join(directory, "bindings.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+    assert.equal(binding.bindings.schemaVersion, 3);
+    const origin = verifyLiveInitialDualSlotBindingWithRunner({ run: originRunner(store), bindings: binding.bindings, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha });
+    assert.equal(origin.originSha256.length, 64);
+    const config = buildProductionRotationConfig({
+      sourceSha,
+      rotationId,
+      liveCurrentKeyVersion: runtimeVersion,
+      approval: { ticket: "CHG-MATCHING-SUPERSESSION", approvedBy: "checker", approverRole: "production-independent-checker", reason: "matching legacy labels fixture", verificationRef: "fixture://matching-supersession", minimumGraceSeconds: 2592000 },
+      bindings: binding.bindings,
+      verifyInitialBindingOrigin: () => origin,
+    });
+    const context = { config, sm: { send: sender.send }, identity: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/fixture", clock: () => Date.parse("2026-09-07T00:00:00.000Z"), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === sourceSha, values: new Map([["state-file", path.join(directory, "state.json")], ["fixture-file", path.join(directory, "fixture.json")]]) };
+    await prepare(context);
+    assert.equal(readCurrentState(context).phase, "overlap-deploy-required");
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -313,6 +418,38 @@ test("production-shaped stale supersession bootstraps a distinct canonical rotat
     assert.equal(binding.secretValueWrites, 0);
     assert.equal(binding.bindings.schemaVersion, 3);
     const origin = verifyLiveInitialDualSlotBindingWithRunner({ run: originRunner(store), bindings: binding.bindings, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === productionOldSource && descendantSha === protectedSource });
+    for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
+      assert.throws(() => verifyLiveInitialDualSlotBindingWithRunner({
+        run: originRunner(store, { mutateDescribe: (response, context) => {
+          if (context.key === name) delete response.VersionIdsToStages[context.record.previous.versionId];
+          return response;
+        } }),
+        bindings: binding.bindings,
+        proveDescendant: () => true,
+      }), /supersession version topology/, `${slot} must retain its authenticated AWSPREVIOUS predecessor`);
+    }
+    for (const [label, mutateDescribe] of [
+      ["missing authenticated current", (response, { record }) => { delete response.VersionIdsToStages[record.versionId]; return response; }],
+      ["predecessor marked current", (response, { record }) => { response.VersionIdsToStages[record.previous.versionId] = ["AWSCURRENT"]; return response; }],
+      ["unexpected third labeled version", (response) => { response.VersionIdsToStages["unrelated-version"] = ["AWSPREVIOUS"]; return response; }],
+      ["unexpected stage label", (response, { record }) => { response.VersionIdsToStages[record.previous.versionId] = ["AWSPREVIOUS", "AWSPENDING"]; return response; }],
+    ]) {
+      assert.throws(() => verifyLiveInitialDualSlotBindingWithRunner({ run: originRunner(store, { mutateDescribe }), bindings: binding.bindings, proveDescendant: () => true }), /topology/, label);
+    }
+    assert.throws(() => verifyLiveInitialDualSlotBindingWithRunner({
+      run: originRunner(store, { mutateValue: (response, { key, record, versionId }) => {
+        if (key === INITIAL_DUAL_SLOT_NAMES.jwtPending && versionId === record.previous.versionId) response.SecretString = JSON.stringify({ ...record.previous.value, value: "substituted-predecessor", materialFingerprint: digest("substituted-predecessor").slice(0, 16) });
+        return response;
+      } }),
+      bindings: binding.bindings,
+      proveDescendant: () => true,
+    }), /predecessor payload/, "the authenticated predecessor payload is required");
+    const unlabeledHistoryOrigin = verifyLiveInitialDualSlotBindingWithRunner({
+      run: originRunner(store, { mutateDescribe: (response) => ({ ...response, VersionIdsToStages: { ...response.VersionIdsToStages, "retained-unlabelled-history": [] } }) }),
+      bindings: binding.bindings,
+      proveDescendant: () => true,
+    });
+    assert.equal(unlabeledHistoryOrigin.originSha256, origin.originSha256);
     assert.throws(() => verifyLiveInitialDualSlotBindingWithRunner({ run: originRunner(store), bindings: binding.bindings, proveDescendant: () => false }), /ancestry/);
     const substitutedBinding = structuredClone(binding.bindings);
     substitutedBinding.supersessionPredecessor.current.jwt.materialFingerprint = "0".repeat(16);
