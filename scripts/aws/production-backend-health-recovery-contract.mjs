@@ -613,6 +613,45 @@ function legacyFailedDeploymentProof(service, stoppedTaskFailures, taskDefinitio
   });
 }
 
+function exactMissingImageFailureProof({ service, stoppedTaskFailures, taskDefinitionArn, currentImageDigest, currentImageExists, replacementImage, recoveryImageDigest }) {
+  const expectedServiceArn = `arn:aws:ecs:${BACKEND_HEALTH_RECOVERY.region}:${BACKEND_HEALTH_RECOVERY.account}:service/${BACKEND_HEALTH_RECOVERY.cluster}/${BACKEND_HEALTH_RECOVERY.service}`;
+  if (service?.serviceArn !== expectedServiceArn
+    || service?.clusterArn !== `arn:aws:ecs:${BACKEND_HEALTH_RECOVERY.region}:${BACKEND_HEALTH_RECOVERY.account}:cluster/${BACKEND_HEALTH_RECOVERY.cluster}`
+    || service?.serviceName !== BACKEND_HEALTH_RECOVERY.service
+    || !Number.isInteger(service.desiredCount) || service.desiredCount < 1 || !Number.isInteger(service.runningCount) || service.runningCount !== 0
+    || !Number.isInteger(service.pendingCount) || service.pendingCount !== 0 || !SHA256.test(currentImageDigest || "") || currentImageExists !== false
+    || replacementImage?.exists !== true || replacementImage?.immutable !== true || replacementImage?.signatureValid !== true
+    || replacementImage?.attestationValid !== true || replacementImage?.provenanceValid !== true || replacementImage?.criticalFindings !== 0
+    || replacementImage?.repository !== BACKEND_HEALTH_RECOVERY.repository || replacementImage?.digest !== recoveryImageDigest || !SHA256.test(recoveryImageDigest || "")) return null;
+  const deployments = (service.deployments || []).filter((deployment) => deployment?.status === "PRIMARY" && deployment?.taskDefinition === taskDefinitionArn
+    && ["FAILED", "COMPLETED"].includes(deployment?.rolloutState) && SERVICE_DEPLOYMENT_ID.test(deployment?.id || "")
+    && Number.isInteger(deployment?.failedTasks) && deployment.failedTasks >= 0 && Number.isFinite(Date.parse(deployment?.createdAt)));
+  if (deployments.length !== 1 || !Array.isArray(stoppedTaskFailures)) return null;
+  const deployment = deployments[0];
+  const failures = stoppedTaskFailures.filter((task) => {
+    const createdAt = Date.parse(task?.createdAt); const startedAt = task?.startedAt == null ? createdAt : Date.parse(task.startedAt); const stoppedAt = Date.parse(task?.stoppedAt);
+    const reasons = [task?.stoppedReason, ...(Array.isArray(task?.containerReasons) ? task.containerReasons : [])];
+    return TASK_INSTANCE_ARN.test(task?.taskArn || "") && task.taskDefinitionArn === taskDefinitionArn && task.startedBy === deployment.id
+      && task.desiredStatus === "STOPPED" && task.lastStatus === "STOPPED" && task.stopCode === "TaskFailedToStart"
+      && reasons.every((reason) => typeof reason === "string") && reasons.some((reason) => /CannotPullContainerError/i.test(reason)
+        && /not found|does not exist/i.test(reason) && reason.includes(currentImageDigest))
+      && Number.isFinite(createdAt) && Number.isFinite(startedAt) && Number.isFinite(stoppedAt) && createdAt >= Date.parse(deployment.createdAt)
+      && startedAt >= createdAt && stoppedAt >= startedAt;
+  });
+  if (!failures.length) return null;
+  return Object.freeze({
+    serviceArn: service.serviceArn,
+    clusterArn: service.clusterArn, serviceName: service.serviceName, taskDefinitionArn, desiredCount: service.desiredCount,
+    runningCount: service.runningCount, pendingCount: service.pendingCount, deploymentId: deployment.id, rolloutState: deployment.rolloutState,
+    failedTasks: deployment.failedTasks, deploymentCreatedAt: deployment.createdAt, currentImageDigest, currentImageExists, recoveryImageDigest,
+    replacementImage: { exists: replacementImage.exists, immutable: replacementImage.immutable, signatureValid: replacementImage.signatureValid,
+      attestationValid: replacementImage.attestationValid, provenanceValid: replacementImage.provenanceValid,
+      criticalFindings: replacementImage.criticalFindings, repository: replacementImage.repository, digest: replacementImage.digest },
+    deployments: service.deployments.map(({ id, status, taskDefinition, rolloutState, failedTasks, desiredCount, runningCount, pendingCount, createdAt, updatedAt }) => ({ id, status, taskDefinition, rolloutState, failedTasks, desiredCount, runningCount, pendingCount, createdAt, updatedAt })).sort((a, b) => String(a.id).localeCompare(String(b.id))),
+    stoppedTasks: failures.map(({ taskArn, taskDefinitionArn: arn, startedBy, desiredStatus, lastStatus, stopCode, stoppedReason, containerReasons, createdAt, startedAt, stoppedAt }) => ({ taskArn, taskDefinitionArn: arn, startedBy, desiredStatus, lastStatus, stopCode, stoppedReason, containerReasons, createdAt, startedAt, stoppedAt })).sort((a, b) => a.taskArn.localeCompare(b.taskArn)),
+  });
+}
+
 export function assertLegacyBackendRecoveryEligibility(input = {}) {
   const { sourceSha, service, currentTaskDefinition, currentImageExists, replacementImage, stoppedTaskFailures = [], authorization, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindings, artifactSigningBindingSha256, runtimeConsumabilitySha256, authenticatedFailedRecoveryEvidence, githubContext, executionActor } = input;
   const knownFailedRevisions = authenticatedFailedRecoveryEvidence?.knownFailedRevisions || [];
@@ -641,30 +680,19 @@ export function assertLegacyBackendRecoveryEligibility(input = {}) {
   const currentFailedRevision = knownFailedRevisions.find(({ taskDefinitionArn: arn, classification }) => arn === service.taskDefinition && classification === "TERMINAL_FAILURE")
     || (currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.FAILED ? currentInterruption.interruption : null);
   const unavailable = service.runningCount === 0 && service.pendingCount === 0;
-  const exactFailedDeployments = (taskDefinitionArn) => deployments.filter((deployment) => deployment?.taskDefinition === taskDefinitionArn && deployment?.rolloutState === "FAILED"
-    && SERVICE_DEPLOYMENT_ID.test(deployment?.id || "") && Number(deployment?.failedTasks) > 0 && Number.isFinite(Date.parse(deployment?.createdAt)));
-  const exactFailures = (taskDefinitionArn, matchingDeployments) => matchingDeployments.length === 1 && Array.isArray(stoppedTaskFailures) ? stoppedTaskFailures.filter((task) => {
-    const createdAt = Date.parse(task?.createdAt); const startedAt = task?.startedAt == null ? createdAt : Date.parse(task.startedAt); const stoppedAt = Date.parse(task?.stoppedAt);
-    return TASK_INSTANCE_ARN.test(task?.taskArn || "") && task.taskDefinitionArn === taskDefinitionArn && task.startedBy === matchingDeployments[0].id
-      && task.desiredStatus === "STOPPED" && task.lastStatus === "STOPPED" && typeof task.stopCode === "string"
-      && typeof task.stoppedReason === "string" && Array.isArray(task.containerReasons) && task.containerReasons.every((reason) => typeof reason === "string")
-      && Number.isFinite(createdAt) && Number.isFinite(startedAt) && Number.isFinite(stoppedAt) && createdAt >= Date.parse(matchingDeployments[0].createdAt)
-      && startedAt >= createdAt && stoppedAt >= startedAt;
-  }) : [];
-  const sourceFailureReasons = exactFailures(currentArn, exactFailedDeployments(currentArn)).flatMap((task) => [task.stoppedReason, ...task.containerReasons]);
   const historicalLegacyFailureProof = currentFailedRevision?.requiresLiveFailureReconciliation === true ? legacyFailedDeploymentProof(service, stoppedTaskFailures, service.taskDefinition) : null;
   const legacyFailureLive = !currentFailedRevision?.requiresLiveFailureReconciliation || historicalLegacyFailureProof !== null;
   const unavailableKnownFailure = unavailable && currentFailedRevision && legacyFailureLive;
-  const unavailableMissingImage = unavailable && currentImageExists === false && sourceFailureReasons.some((reason) => /CannotPullContainerError/i.test(reason) && /not found|does not exist/i.test(reason) && reason.includes(imageMatch[1]));
-  const missingImageFailureProof = unavailableMissingImage && service.taskDefinition === currentArn ? legacyFailedDeploymentProof(service, stoppedTaskFailures, currentArn) : null;
-  if (unavailableMissingImage && service.taskDefinition === currentArn && !missingImageFailureProof) throw new Error("Missing-image recovery lacks an exact mutation-bound deployment failure proof.");
+  if (replacementImage?.exists !== true || replacementImage?.immutable !== true || replacementImage?.signatureValid !== true
+    || replacementImage?.attestationValid !== true || replacementImage?.provenanceValid !== true || replacementImage?.criticalFindings !== 0
+    || replacementImage?.repository !== BACKEND_HEALTH_RECOVERY.repository || !SHA256.test(replacementImage?.digest || "")) throw new Error("Replacement image does not satisfy the recovery evidence contract.");
+  const missingImageFailureProof = exactMissingImageFailureProof({ service, stoppedTaskFailures, taskDefinitionArn: currentArn,
+    currentImageDigest: imageMatch[1], currentImageExists, replacementImage, recoveryImageDigest: replacementImage?.digest });
+  const unavailableMissingImage = missingImageFailureProof !== null;
   const reconciledInterruption = currentInterruption?.result.classification === INTERRUPTED_RECOVERY_STATE.SUCCEEDED
     || unavailable && interruptionReconciliations.some(({ result }) => [INTERRUPTED_RECOVERY_STATE.NO_EFFECT, INTERRUPTED_RECOVERY_STATE.RESUMABLE].includes(result.classification));
   const stalledRollback = authorization?.rollbackProof?.classification === ROLLBACK_VIABILITY.STALLED_UNRECOVERABLE;
   if (!reconciledInterruption && !stalledRollback && !unavailableKnownFailure && !unavailableMissingImage) throw new Error("Backend degradation is not authenticated as the current digest's missing-image pull failure or an unavailable approved terminal recovery failure.");
-  if (replacementImage?.exists !== true || replacementImage?.immutable !== true || replacementImage?.signatureValid !== true
-    || replacementImage?.attestationValid !== true || replacementImage?.provenanceValid !== true || replacementImage?.criticalFindings !== 0
-    || replacementImage?.repository !== BACKEND_HEALTH_RECOVERY.repository || !SHA256.test(replacementImage?.digest || "")) throw new Error("Replacement image does not satisfy the recovery evidence contract.");
   assertLegacyBackendRecoveryAuthorization(authorization, { sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: replacementImage.digest, imageAuthorization, imageValidation, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, failedRecoveryEvidenceSha256: authenticatedFailedRecoveryEvidence?.envelopeSha256 || null, failedRecoveryEvidenceReferenceSha256: authenticatedFailedRecoveryEvidence?.referenceSha256 || null, recoveryHistory, knownFailedRevisions, interruptedRecoveries, githubContext, executionActor });
   const checked = assertLegacyBackendRecoveryCandidate({ currentTaskDefinition, candidate: input.candidate, recoveryImageDigest: replacementImage.digest, imageReleaseSha: authorization.imageReleaseSha, artifactSigningBindings });
   const reconciledFailedRevisions = interruptionReconciliations.filter(({ result }) => result.classification === INTERRUPTED_RECOVERY_STATE.FAILED).map(({ interruption }) => interruption);
@@ -703,7 +731,10 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     const snapshot = await adapters.readLegacyFailureState();
     const lineage = classifyRevisionCensus(snapshot?.census, eligible);
     if (lineage.identitySha256 !== expectedCensusSha256) throw new Error("Legacy backend revision census changed at the failed-deployment mutation boundary.");
-    const freshProof = legacyFailedDeploymentProof(snapshot?.service, snapshot?.stoppedTaskFailures, eligible.observedServiceTaskDefinitionArn);
+    const freshProof = eligible.missingImageFailureProof ? exactMissingImageFailureProof({ service: snapshot?.service, stoppedTaskFailures: snapshot?.stoppedTaskFailures,
+      taskDefinitionArn: eligible.observedServiceTaskDefinitionArn, currentImageDigest: eligible.currentImageDigest, currentImageExists: snapshot?.currentImageExists,
+      replacementImage: snapshot?.replacementImage, recoveryImageDigest: eligible.recoveryImageDigest })
+      : legacyFailedDeploymentProof(snapshot?.service, snapshot?.stoppedTaskFailures, eligible.observedServiceTaskDefinitionArn);
     if (!freshProof || canonicalSha256(freshProof) !== expectedProofSha256) throw new Error("Legacy failed backend deployment proof changed before mutation.");
     if (allowedRevision && !lineage.matches.some(({ taskDefinitionArn, fingerprint }) => taskDefinitionArn === allowedRevision.taskDefinitionArn && fingerprint === allowedRevision.taskDefinitionFingerprint)) throw new Error("Recovery registration is absent from the authenticated mutation-bound census.");
     return snapshot.service;
