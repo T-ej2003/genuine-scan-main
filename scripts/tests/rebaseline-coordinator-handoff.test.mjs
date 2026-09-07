@@ -136,7 +136,7 @@ test("production-shaped handoff rejects substituted legacy JWT", async () => {
   try {
     const record = f.records.get(f.config.jwt.currentSecretId);
     record.payload.value = "substituted-jwt-material";
-    await assert.rejects(prepare(f.context), /legacy current JWT is not the authenticated predecessor/);
+    await assert.rejects(prepare(f.context), /current JWT does not match prepared lineage|legacy current JWT is not the authenticated predecessor/);
     assert.equal(f.writes.length, 0);
   } finally { f.dispose(); }
 });
@@ -267,6 +267,17 @@ test("prepared handoff rejects substituted recorded old-key lineage", async () =
     state.qr.oldPublicFingerprint = f.next.qrKeyVersion;
     writeFileSync(f.stateFile, JSON.stringify(state));
     await assert.rejects(prepare(f.context));
+    assert.equal(f.writes.length, 1);
+  } finally { f.dispose(); }
+});
+
+test("prepared handoff rejects substituted legacy current JWT before promotion", async () => {
+  const f = fixture();
+  try {
+    f.sm.failAfter = 1;
+    await assert.rejects(prepare(f.context));
+    f.records.get(arn("jwtCurrent")).payload.value = "substituted-jwt-material";
+    await assert.rejects(prepare(f.context), /current JWT does not match prepared lineage|legacy current JWT is not the authenticated predecessor/);
     assert.equal(f.writes.length, 1);
   } finally { f.dispose(); }
 });
