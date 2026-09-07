@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import yaml from "js-yaml";
 import { assertStageBImageBindings } from "../aws/stage-b-image-bindings.mjs";
@@ -20,6 +23,156 @@ const repos = [
   "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
   "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker",
 ];
+const publisherSha = "a".repeat(40);
+const rlsChecksums = JSON.parse(fs.readFileSync("documents/security/rls-program/generated/checksums.json", "utf8"));
+const publisherSource = fs.readFileSync("scripts/aws/publish-ecs-images.sh", "utf8");
+
+function runPublisher({ backendRepository = "mscqr-backend", imageMode = "absent", repositoryMode = "immutable", scope = "backend" } = {}) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "image-publisher-cas-"));
+  const bin = path.join(directory, "bin");
+  const log = path.join(directory, "calls.log");
+  fs.mkdirSync(bin);
+  const executable = (name, body) => {
+    const file = path.join(bin, name);
+    fs.writeFileSync(file, `#!/usr/bin/env bash\nset -euo pipefail\n${body}\n`, { mode: 0o755 });
+  };
+  executable("aws", String.raw`
+echo "aws $*" >> "$PUBLISHER_CALL_LOG"
+if [[ "$1 $2" == "ecr describe-repositories" ]]; then
+  repository=""; while (( $# )); do [[ "$1" == "--repository-names" ]] && { repository="$2"; break; }; shift; done
+  [[ "$PUBLISHER_REPOSITORY_MODE" == "read-failure" ]] && { echo 'An error occurred (AccessDeniedException) when calling DescribeRepositories' >&2; exit 254; }
+  mutability="IMMUTABLE"
+  [[ "$PUBLISHER_REPOSITORY_MODE" == "mutable" ]] && mutability="MUTABLE"
+  [[ "$PUBLISHER_REPOSITORY_MODE" == "exclusion" ]] && mutability="IMMUTABLE_WITH_EXCLUSION"
+  [[ "$PUBLISHER_REPOSITORY_MODE" == "wrong-identity" ]] && repository="other"
+  [[ "$PUBLISHER_REPOSITORY_MODE" == "malformed" ]] && { echo '{"repositories":[]}'; exit; }
+  printf '{"repositories":[{"repositoryName":"%s","repositoryArn":"arn:aws:ecr:eu-west-2:368992683803:repository/%s","registryId":"368992683803","repositoryUri":"368992683803.dkr.ecr.eu-west-2.amazonaws.com/%s","imageTagMutability":"%s"}]}\n' "$repository" "$repository" "$repository" "$mutability"
+  exit
+fi
+if [[ "$1 $2" == "ecr get-login-password" ]]; then echo password; exit; fi
+if [[ "$1 $2" == "ecr describe-images" ]]; then
+  repository=""; tag=""; while (( $# )); do
+    [[ "$1" == "--repository-name" ]] && repository="$2"
+    [[ "$1" == "--image-ids" ]] && tag="$(printf '%s' "$2" | cut -d= -f2-)"
+    shift
+  done
+  case "$PUBLISHER_IMAGE_MODE" in
+    absent) echo 'An error occurred (ImageNotFoundException) when calling DescribeImages' >&2; exit 254 ;;
+    access-denied) echo 'An error occurred (AccessDeniedException) when calling DescribeImages' >&2; exit 254 ;;
+    repository-not-found) echo 'An error occurred (RepositoryNotFoundException) when calling DescribeImages' >&2; exit 254 ;;
+    server-error) echo 'An error occurred (ServerException) when calling DescribeImages' >&2; exit 254 ;;
+    unexpected-error) echo 'unexpected transport failure' >&2; exit 42 ;;
+    malformed) echo '{"imageDetails":[]}'; exit ;;
+    mismatched) printf '{"imageDetails":[{"registryId":"368992683803","repositoryName":"other","imageDigest":"sha256:%064d","imageTags":["%s"]}]}\n' 0 "$tag"; exit ;;
+    existing) printf '{"imageDetails":[{"registryId":"368992683803","repositoryName":"%s","imageDigest":"sha256:%064d","imageTags":["%s"]}]}\n' "$repository" 0 "$tag"; exit ;;
+  esac
+fi
+echo "unexpected aws call: $*" >&2; exit 90`);
+  executable("docker", String.raw`
+echo "docker $*" >> "$PUBLISHER_CALL_LOG"
+[[ "$1" == "login" ]] && { cat >/dev/null; exit; }
+[[ "$1 $2 $3" == "buildx imagetools inspect" ]] && { [[ " $* " == *" --raw "* ]] && echo '{"manifests":[{"platform":{"os":"linux","architecture":"amd64"}}]}' || echo 'Platform: linux/amd64'; exit; }
+[[ "$1 $2" == "buildx inspect" ]] && exit
+[[ "$1 $2" == "buildx use" ]] && exit
+[[ "$1 $2" == "buildx build" ]] && exit
+[[ "$1" == "pull" ]] && exit
+[[ "$1 $2" == "image inspect" ]] && { echo '{}'; exit; }
+exit`);
+  executable("git", String.raw`
+[[ "$1 $2" == "rev-parse HEAD" ]] && { echo "$PUBLISHER_SHA"; exit; }
+[[ "$1 $2 $3" == "remote get-url origin" ]] && { echo 'https://github.com/T-ej2003/genuine-scan-main.git'; exit; }
+exec /usr/bin/git "$@"`);
+  executable("npm", "echo \"npm $*\" >> \"$PUBLISHER_CALL_LOG\"");
+  const result = spawnSync("bash", ["scripts/aws/publish-ecs-images.sh", scope], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      PUBLISHER_CALL_LOG: log,
+      PUBLISHER_IMAGE_MODE: imageMode,
+      PUBLISHER_REPOSITORY_MODE: repositoryMode,
+      PUBLISHER_SHA: publisherSha,
+      MSCQR_AWS_CREDENTIAL_SOURCE: "github-oidc-release-deployer",
+      AWS_ACCESS_KEY_ID: "fixture-a",
+      AWS_SECRET_ACCESS_KEY: "fixture-b",
+      AWS_SESSION_TOKEN: "fixture-c",
+      AWS_ACCOUNT_ID: "368992683803",
+      AWS_REGION: "eu-west-2",
+      BACKEND_ECR_REPO: backendRepository,
+      IMAGE_TAG: publisherSha,
+      SOURCE_RELEASE_SHA: publisherSha,
+      SOURCE_CONTRACT_SHA256: rlsChecksums.sourceContractSha256,
+      MIGRATION_SET_DIGEST: rlsChecksums.migrationSetDigest,
+    },
+  });
+  const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : [];
+  fs.rmSync(directory, { recursive: true, force: true });
+  return { ...result, calls };
+}
+
+test("publisher treats only ImageNotFound as absent and preserves immutable-tag reuse", () => {
+  const absent = runPublisher();
+  assert.equal(absent.status, 0, absent.stderr);
+  assert.equal(absent.calls.filter((call) => call.startsWith("docker buildx build ")).length, 1);
+
+  const existing = runPublisher({ imageMode: "existing" });
+  assert.equal(existing.status, 0, existing.stderr);
+  assert.equal(existing.calls.some((call) => call.startsWith("docker buildx build ")), false);
+  assert.match(existing.stdout, /Reusing immutable backend image/);
+});
+
+test("publisher preserves namespaced ECR repository names without deriving temporary paths from them", () => {
+  const result = runPublisher({ backendRepository: "team/backend" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.calls.some((call) => call.includes("--repository-names team/backend")), true);
+  assert.equal(result.calls.some((call) => call.includes("--repository-name team/backend")), true);
+  assert.match(publisherSource, /repository_file="\$PREFLIGHT_DIR\/repository-\$\{repository_index\}\.json"/);
+  assert.doesNotMatch(publisherSource, /repository_file=.*repository_name/);
+});
+
+test("publisher fails closed on every non-ImageNotFound tag lookup failure", () => {
+  for (const [imageMode, errorCode] of [
+    ["access-denied", "AccessDeniedException"],
+    ["repository-not-found", "RepositoryNotFoundException"],
+    ["server-error", "ServerException"],
+    ["unexpected-error", "UNCLASSIFIED"],
+  ]) {
+    const result = runPublisher({ imageMode });
+    assert.notEqual(result.status, 0, imageMode);
+    assert.equal(result.calls.some((call) => call.startsWith("docker buildx build ")), false, imageMode);
+    assert.match(result.stderr, new RegExp(`AWS error: ${errorCode}`), imageMode);
+    assert.doesNotMatch(result.stderr, /fixture-[abc]/, imageMode);
+  }
+});
+
+test("publisher rejects malformed tag readback and unauthenticated repository state before push", () => {
+  for (const input of [
+    { imageMode: "malformed" },
+    { imageMode: "mismatched" },
+    { repositoryMode: "mutable" },
+    { repositoryMode: "exclusion" },
+    { repositoryMode: "wrong-identity" },
+    { repositoryMode: "malformed" },
+    { repositoryMode: "read-failure" },
+  ]) {
+    const result = runPublisher(input);
+    assert.notEqual(result.status, 0, JSON.stringify(input));
+    assert.equal(result.calls.some((call) => call.startsWith("docker buildx build ")), false, JSON.stringify(input));
+  }
+});
+
+test("four-image publisher authenticates every repository and target tag before its first push", () => {
+  const result = runPublisher({ scope: "production-green-stage-b" });
+  assert.equal(result.status, 0, result.stderr);
+  const firstPush = result.calls.findIndex((call) => call.startsWith("docker buildx build "));
+  const repositoryChecks = result.calls.map((call, index) => [call, index]).filter(([call]) => call.startsWith("aws ecr describe-repositories "));
+  const tagChecks = result.calls.map((call, index) => [call, index]).filter(([call]) => call.startsWith("aws ecr describe-images "));
+  assert.equal(repositoryChecks.length, 2);
+  assert.equal(tagChecks.length, 4);
+  assert.ok(firstPush > Math.max(...repositoryChecks.map(([, index]) => index), ...tagChecks.map(([, index]) => index)));
+  assert.equal(result.calls.filter((call) => call.startsWith("docker buildx build ")).length, 4);
+});
 
 const canAssume = (claims) => {
   const expected = trust.Statement[0].Condition.StringEquals;
