@@ -86,7 +86,11 @@ export function assertRebaselineQrHandoff({ config, current, state, proveDescend
     historicalTopologySha256: bindings.abandonmentEvidence.historicalTopologySha256,
   });
   const anchor = abandonment.observedSlotIdentities;
-  const legacyJwt = anchor[abandonment.schemaVersion === 3 ? "jwtPrevious" : "jwtPending"];
+  // Schema-3 recovery records the coordinator's post-promotion topology: the
+  // live current JWT is the authenticated pending material, while jwtPrevious
+  // is the former current predecessor.  Both schemas therefore anchor the
+  // live current JWT to jwtPending; never treat the previous slot as current.
+  const legacyJwt = anchor.jwtPending;
   const currentJwt = current?.jwtCurrent;
   const assertLegacyJwt = (record) => {
     if (record) assertVersion(record.raw.versionId, "QR handoff legacy current JWT VersionId");
