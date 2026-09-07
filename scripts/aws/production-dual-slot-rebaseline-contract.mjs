@@ -59,7 +59,7 @@ export const fingerprint = (value) => sha256(value).slice(0, 16);
 // The runtime label adopted by rebaseline is not the abandoned writer's key
 // identifier. Authenticate both identities before the coordinator can carry
 // them separately through its initial prepared-state promotion.
-export function assertRebaselineQrHandoff({ config, current, state } = {}) {
+export function assertRebaselineQrHandoff({ config, current, state, proveDescendant } = {}) {
   const runtime = config?.rebaselineRuntime;
   if (!runtime) fail("QR handoff requires authenticated rebaseline provenance.");
   const bindings = assertRebaselineRotationBindings(runtime.bindings, runtime);
@@ -71,6 +71,7 @@ export function assertRebaselineQrHandoff({ config, current, state } = {}) {
   let sourceAdvance;
   if (bindings.sourceSha !== config.sourceSha) {
     try { sourceAdvance = assertProductionInitialMigrationSourceAdvance(config.initialMigrationSourceAdvance); } catch (error) { fail(`QR handoff source advance is not authenticated: ${error.message}`); }
+    if (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: bindings.sourceSha, descendantSha: config.sourceSha }) !== true) fail("QR handoff source ancestry is not authenticated.");
     if (sourceAdvance.currentSourceSha !== config.sourceSha
       || sourceAdvance.supersessionEvidence.sourceSha !== bindings.sourceSha
       || sourceAdvance.supersessionEvidence.rotationId !== config.rotationId
@@ -85,6 +86,16 @@ export function assertRebaselineQrHandoff({ config, current, state } = {}) {
     historicalTopologySha256: bindings.abandonmentEvidence.historicalTopologySha256,
   });
   const anchor = abandonment.observedSlotIdentities;
+  const legacyJwt = anchor[abandonment.schemaVersion === 3 ? "jwtPrevious" : "jwtPending"];
+  const currentJwt = current?.jwtCurrent;
+  if (!state && currentJwt && (currentJwt.id !== bindings.legacy.jwtCurrent
+    || currentJwt.raw.versionId !== legacyJwt.versionId
+    || fingerprint(currentJwt.material.value) !== legacyJwt.materialFingerprint
+    || currentJwt.material.metadata.family !== "jwt_secrets"
+    || currentJwt.material.metadata.slot !== "current"
+    || currentJwt.material.metadata.rotationId !== legacyJwt.observedRotationId
+    || currentJwt.material.metadata.materialFingerprint !== legacyJwt.materialFingerprint
+    || (currentJwt.material.metadata.sourceSha !== undefined && currentJwt.material.metadata.sourceSha !== legacyJwt.observedSourceSha))) fail("QR handoff legacy current JWT is not the authenticated predecessor.");
   const oldMetadataKeyVersion = anchor.qrPublicPending.keyVersion;
   if (!oldMetadataKeyVersion || oldMetadataKeyVersion !== anchor.qrPrivatePending.keyVersion
     || oldMetadataKeyVersion !== anchor.qrPublicPending.materialFingerprint) fail("QR handoff predecessor key identity is invalid.");

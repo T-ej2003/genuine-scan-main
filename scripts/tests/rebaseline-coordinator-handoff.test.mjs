@@ -74,7 +74,7 @@ test("authenticated initial-migration source advance permits a descendant coordi
     evidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(evidence);
     const config = { ...f.config, sourceSha: currentSourceSha, initialMigrationSourceAdvance: { schemaVersion: 1, kind: "PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE", currentSourceSha, supersessionEvidence: evidence } };
     assert.doesNotThrow(() => assertProductionInitialMigrationSourceAdvance(config.initialMigrationSourceAdvance));
-    assert.doesNotThrow(() => assertRebaselineQrHandoff({ config }));
+    assert.doesNotThrow(() => assertRebaselineQrHandoff({ config, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === currentSourceSha }));
     assert.throws(() => assertRebaselineQrHandoff({ config: { ...config, initialMigrationSourceAdvance: undefined } }));
     const forged = structuredClone(config); forged.initialMigrationSourceAdvance.currentSourceSha = "e".repeat(40);
     assert.throws(() => assertRebaselineQrHandoff({ config: forged }));
@@ -118,6 +118,29 @@ test("ordinary initial migration keeps the strict marker gate", async () => {
   } finally { f.dispose(); }
 });
 
+test("production-shaped handoff rejects an unproven source advance", async () => {
+  const f = fixture();
+  try {
+    const currentSourceSha = "f".repeat(40);
+    const resources = f.config.rebaselineRuntime.bindings.baselineCompletion.resources;
+    const evidence = { schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha, staleSourceSha: "7".repeat(40), rotationId, staleRotationId: "rotation-stale-source", generatedAt: "2026-08-29T02:00:00.000Z", resources: Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: productionSupersessionVersionId(sourceSha, rotationId, slot), stages: ["AWSCURRENT"] }])) };
+    evidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(evidence);
+    const config = { ...f.config, sourceSha: currentSourceSha, initialMigrationSourceAdvance: { schemaVersion: 1, kind: "PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE", currentSourceSha, supersessionEvidence: evidence } };
+    await assert.rejects(prepare({ ...f.context, config, proveDescendant: () => false }), /QR handoff source ancestry is not authenticated/);
+    assert.equal(f.writes.length, 0);
+  } finally { f.dispose(); }
+});
+
+test("production-shaped handoff rejects substituted legacy JWT", async () => {
+  const f = fixture();
+  try {
+    const record = f.records.get(f.config.jwt.currentSecretId);
+    record.payload.value = "substituted-jwt-material";
+    await assert.rejects(prepare(f.context), /legacy current JWT is not the authenticated predecessor/);
+    assert.equal(f.writes.length, 0);
+  } finally { f.dispose(); }
+});
+
 function fixture() {
   const old = generateRebaselineMaterial();
   const next = generateRebaselineMaterial();
@@ -147,7 +170,7 @@ function fixture() {
   const livePostWrite = { kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha, rotationId, authorizationSha256: authorization.authorizationSha256, resources, versionIds: writeIdentities, payloadIdentities: writePayloadIdentities };
   const config = buildProductionRotationConfig({ sourceSha, rotationId, approval: { ticket: "CHG-HANDOFF", approvedBy: "checker", approverRole: "production-independent-checker", reason: "fixture", verificationRef: "ticket-handoff-fixture", minimumGraceSeconds: 2592000 }, bindings, rebaselineAuthorization: authorization, rebaselineAuthorizationCoordinates: { workflowRunId: "123456", workflowRunAttempt: "1" }, verifyRebaselineLivePostWrite: () => ({ ...livePostWrite, livePostWriteSha256: canonicalSha256(livePostWrite) }), verifyInitialBindingOrigin: () => { throw new Error("not initial bindings"); } });
   const records = new Map(writePlan.map(({ secretArn, clientRequestToken, payload }) => [secretArn, { payload: structuredClone(payload), versionId: clientRequestToken }]));
-  for (const [name, value, family, slot] of [["jwtCurrent", old.jwt, "jwt_secrets", "current"], ["qrPrivateCurrent", old.qrPrivate, "qr_signing_keys", "current-private"], ["qrPublicCurrent", old.qrPublic, "qr_signing_keys", "current-public"]]) records.set(arn(name), { versionId: canonicalSha256({ old: name }), payload: { rotationId: historicalRotationId, family, slot, ...(family === "qr_signing_keys" ? { keyVersion: old.qrKeyVersion } : {}), materialFingerprint: fingerprint(value), value } });
+  for (const [name, value, family, slot] of [["jwtCurrent", old.jwt, "jwt_secrets", "current"], ["qrPrivateCurrent", old.qrPrivate, "qr_signing_keys", "current-private"], ["qrPublicCurrent", old.qrPublic, "qr_signing_keys", "current-public"]]) records.set(arn(name), { versionId: name === "jwtCurrent" ? currentVersionIds.jwtPending : canonicalSha256({ old: name }), payload: { rotationId: historicalRotationId, family, slot, ...(family === "qr_signing_keys" ? { keyVersion: old.qrKeyVersion } : {}), materialFingerprint: fingerprint(value), value } });
   const writes = [];
   const sm = { failAfter: 0, async send(command) {
     const input = command.input;
@@ -226,6 +249,9 @@ const attacks = {
   "forged authorization": (f) => { f.config.rebaselineRuntime = structuredClone(f.config.rebaselineRuntime); f.config.rebaselineRuntime.authorization.authorizationSha256 = "a".repeat(64); },
   "mismatched private pair": (f) => { f.records.get(arn("qrPrivateCurrent")).payload.value = f.next.qrPrivate; },
   "unbound abandoned owner": (f) => { f.records.get(arn("qrPublicCurrent")).payload.rotationId = rotationId; },
+  "substituted current JWT version": (f) => { f.records.get(arn("jwtCurrent")).versionId = "substituted-jwt-version"; },
+  "substituted current JWT metadata": (f) => { f.records.get(arn("jwtCurrent")).payload.materialFingerprint = fingerprint(f.next.jwt); },
+  "cross-rotation current JWT": (f) => { f.records.get(arn("jwtCurrent")).payload.rotationId = "rotation-unrelated-2026"; },
 };
 for (const [name, attack] of Object.entries(attacks)) test(`handoff rejects ${name} before mutation`, async () => {
   const f = fixture();

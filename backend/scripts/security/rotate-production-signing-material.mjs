@@ -216,7 +216,7 @@ const readCurrentState = (context, { persistMigration = true } = {}) => {
   if (!persisted) return null;
   assertStateIdentity(persisted, context.config);
   const normalized = normalizeProductionRotationState(persisted, { reviewedMinimumGraceSeconds: context.config.minimumGraceSeconds });
-  assertState(normalized.state, context.config);
+  assertState(normalized.state, context.config, sourceAdvanceProof(context));
   if (normalized.migrated && persistMigration) persist(context, normalized.state);
   return normalized.state;
 };
@@ -346,9 +346,9 @@ const stateForPending = ({ config, identity, oldJwt, oldQrPrivate, oldQrPublic, 
 
 const initialMigrationSourceSha = (state) => state.initialMigrationSourceSha || state.sourceSha;
 
-const assertState = (state, config) => {
+const assertState = (state, config, proveDescendant) => {
   assertStateIdentity(state, config);
-  if (state.qr?.oldMetadataKeyVersion !== undefined) assertRebaselineQrHandoff({ config, state });
+  if (state.qr?.oldMetadataKeyVersion !== undefined) assertRebaselineQrHandoff({ config, state, proveDescendant });
   if (state.stateVersion !== PRODUCTION_ROTATION_STATE_VERSION) throw new Error(`state stateVersion must be ${PRODUCTION_ROTATION_STATE_VERSION}`);
   assertNormalizedProductionRotationGraceSeconds(state);
   if (state.minimumGraceSeconds !== config.minimumGraceSeconds) throw new Error("state minimum grace does not match the reviewed config");
@@ -427,18 +427,18 @@ const prepare = async (context) => {
   let oldMetadataKeyVersion;
   let completedRebaselineHandoff = false;
   if (!state && config.rebaselineRuntime) {
-    oldMetadataKeyVersion = assertRebaselineQrHandoff({ config, current });
+    oldMetadataKeyVersion = assertRebaselineQrHandoff({ config, current, proveDescendant: sourceAdvanceProof(context) });
     authenticateEd25519Pair(current.qrPrivateCurrent.material.value, current.qrPublicCurrent.material.value, "rebaseline current QR");
     completedRebaselineHandoff = true;
   }
   if (!state && config.initialMigrationSourceAdvance && !completedRebaselineHandoff && !isAuthenticatedInitialMigration(current, config, sourceAdvanceProof(context))) throw new Error("initial-migration source advance does not match authenticated live state");
   for (const [name, record] of [["jwt", current.jwtPending], ["QR private", current.qrPrivatePending], ["QR public", current.qrPublicPending]]) assertPendingOwnership(name, record.material, config.rotationId);
-  if (state?.qr?.oldMetadataKeyVersion && state.phase === "prepared") assertRebaselineQrHandoff({ config, current, state });
+  if (state?.qr?.oldMetadataKeyVersion && state.phase === "prepared") assertRebaselineQrHandoff({ config, current, state, proveDescendant: sourceAdvanceProof(context) });
   if (state) assertPrepareLineage(state, current);
   else {
     if (!completedRebaselineHandoff && config.rebaselineRuntime && current.qrPublicCurrent.material.metadata.keyVersion
       && current.qrPublicCurrent.material.metadata.keyVersion !== qrSlotValue(current.qrCurrentVersion)) {
-      oldMetadataKeyVersion = assertRebaselineQrHandoff({ config, current });
+      oldMetadataKeyVersion = assertRebaselineQrHandoff({ config, current, proveDescendant: sourceAdvanceProof(context) });
       authenticateEd25519Pair(current.qrPrivateCurrent.material.value, current.qrPublicCurrent.material.value, "rebaseline current QR");
     }
     assertQrVersionSlots(current, null, oldMetadataKeyVersion);
@@ -517,9 +517,9 @@ const prepare = async (context) => {
     persist(context, state);
   }
 
-  assertState(state, config);
+  assertState(state, config, sourceAdvanceProof(context));
   current = await slots(sm, config);
-  if (state.qr.oldMetadataKeyVersion && state.phase === "prepared") assertRebaselineQrHandoff({ config, current, state });
+  if (state.qr.oldMetadataKeyVersion && state.phase === "prepared") assertRebaselineQrHandoff({ config, current, state, proveDescendant: sourceAdvanceProof(context) });
   if (state.phase === "prepared") assertPrepareLineage(state, current);
   const pendingJwt = current.jwtPending.material;
   const pendingPrivate = current.qrPrivatePending.material;
