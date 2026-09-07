@@ -56,6 +56,70 @@ export const sha256 = (value) => crypto.createHash("sha256").update(Buffer.isBuf
 export const canonicalSha256 = (value) => sha256(canonical(value));
 export const fingerprint = (value) => sha256(value).slice(0, 16);
 
+// The runtime label adopted by rebaseline is not the abandoned writer's key
+// identifier. Authenticate both identities before the coordinator can carry
+// them separately through its initial prepared-state promotion.
+export function assertRebaselineQrHandoff({ config, current, state } = {}) {
+  const runtime = config?.rebaselineRuntime;
+  if (!runtime) fail("QR handoff requires authenticated rebaseline provenance.");
+  const bindings = assertRebaselineRotationBindings(runtime.bindings, runtime);
+  if (bindings.schemaVersion === 3 && canonical(bindings) !== canonical(buildPartialRebaselineRecoveryRotationBindings({
+    sourceSha: bindings.sourceSha, originalPreparation: runtime.originalPreparation,
+    recoveryEnvelope: runtime.recoveryEnvelope, recoveryAuthorization: runtime.authorization,
+    completion: bindings.baselineCompletion,
+  }))) fail("QR handoff recovery bindings differ from the authenticated original preparation.");
+  if (bindings.sourceSha !== config.sourceSha || bindings.rotationId !== config.rotationId
+    || canonical(bindings.jwt) !== canonical(config.jwt) || canonical(bindings.qr) !== canonical(config.qr)
+    || config.baselineCompletionSha256 !== bindings.baselineCompletionSha256) fail("QR handoff config is not bound to its rebaseline.");
+  const abandonment = assertAbandonmentEvidence(bindings.abandonmentEvidence, {
+    sourceSha: bindings.transitionSourceSha || bindings.sourceSha,
+    resources: bindings.baselineCompletion.resources,
+    historicalTopologySha256: bindings.abandonmentEvidence.historicalTopologySha256,
+  });
+  const anchor = abandonment.observedSlotIdentities;
+  const oldMetadataKeyVersion = anchor.qrPublicPending.keyVersion;
+  if (!oldMetadataKeyVersion || oldMetadataKeyVersion !== anchor.qrPrivatePending.keyVersion
+    || oldMetadataKeyVersion !== anchor.qrPublicPending.materialFingerprint) fail("QR handoff predecessor key identity is invalid.");
+  const legacyLabel = bindings.legacy.qrCurrentVersion;
+  if (state && (state.qr.oldMetadataKeyVersion !== oldMetadataKeyVersion
+    || state.qr.historicalContinuity !== "VERIFIED_PREVIOUS_QR" || state.qr.rollbackCapable !== true
+    || state.qr.oldKeyVersion !== legacyLabel
+    || state.qr.oldPublicFingerprint !== anchor.qrPublicPending.materialFingerprint
+    || state.qr.oldPrivateFingerprint !== anchor.qrPrivatePending.materialFingerprint)) fail("Prepared QR handoff lineage is not authenticated.");
+  if (state) {
+    const identities = bindings.baselineCompletion.payloadIdentities;
+    const versions = bindings.baselineCompletion.versionIds;
+    if (state.qr.newPublicFingerprint !== identities.qrPublicPending.keyVersion
+      || state.qr.newKeyVersion !== identities.qrPublicPending.keyVersion
+      || state.pending?.jwtVersionId !== versions.jwtPending
+      || state.pending?.qrPrivateVersionId !== versions.qrPrivatePending
+      || state.pending?.qrPublicVersionId !== versions.qrPublicPending) fail("Prepared handoff pending lineage differs from the authorized rebaseline.");
+  }
+  if (!current) return oldMetadataKeyVersion;
+  const slots = state ? ["jwtPending", "qrPrivatePending", "qrPublicPending"] : REBASELINE_SLOT_ORDER;
+  for (const slot of slots) {
+    const record = current[slot];
+    if (record?.id !== bindings.baselineCompletion.resources[slot]
+      || record.raw.versionId !== bindings.baselineCompletion.versionIds[slot]
+      || canonicalSha256(record.material.metadata) !== bindings.baselineCompletion.payloadIdentities[slot].payloadSha256) fail(`QR handoff ${slot} differs from the authorized rebaseline.`);
+    if (state) {
+      const expected = slot === "jwtPending" ? state.jwt?.newFingerprint : slot === "qrPrivatePending" ? state.qr.newPrivateFingerprint : state.qr.newPublicFingerprint;
+      if (fingerprint(record.material.value) !== expected) fail(`Prepared ${slot} material differs from its authenticated lineage.`);
+    }
+  }
+  for (const [name, slot, kind] of [["qrPublicCurrent", "qrPublicPending", "current-public"], ["qrPrivateCurrent", "qrPrivatePending", "current-private"]]) {
+    const record = current[name];
+    if (state && fingerprint(record.material.value) === state.qr[slot === "qrPublicPending" ? "newPublicFingerprint" : "newPrivateFingerprint"]) continue;
+    const expected = anchor[slot];
+    const historicalPayload = { rotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, family: "qr_signing_keys", slot: expected.payloadKind.slot,
+      keyVersion: oldMetadataKeyVersion, materialFingerprint: expected.materialFingerprint, sourceSha: expected.observedSourceSha, value: record.material.value };
+    const currentPayload = { rotationId: REBASELINE_ABANDONED_HISTORICAL_ROTATION_ID, family: "qr_signing_keys", slot: kind,
+      keyVersion: oldMetadataKeyVersion, materialFingerprint: expected.materialFingerprint, value: record.material.value };
+    if (canonicalSha256(historicalPayload) !== expected.payloadSha256 || canonical(record.material.metadata) !== canonical(currentPayload)) fail(`QR handoff ${name} is not the authenticated abandoned key.`);
+  }
+  return oldMetadataKeyVersion;
+}
+
 // This is a reviewed trust anchor for the one retained coordinator transition that
 // may be adopted.  The supplied evidence remains an integrity envelope; it is not
 // allowed to mint historical authority by recomputing its own digest.

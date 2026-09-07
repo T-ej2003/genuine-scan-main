@@ -193,7 +193,7 @@ export function buildProductionRotationConfig({ sourceSha, rotationId, approval,
     verificationRef: checkedApproval.verificationRef,
     jwt: checkedBindings.jwt,
     qr: checkedBindings.qr,
-    ...(checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? { operation: checkedBindings.operation, baselineCompletionSha256: checkedBindings.baselineCompletionSha256, baselineCompletion: checkedBindings.baselineCompletion, rebaselineRuntime: { runtimeVariant: recoveryEnvelope ? "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME" : "ORDINARY_REBASELINE_RUNTIME", bindings: recoveryEnvelope ? bindings : checkedBindings, authorization: checkedRebaselineAuthorization, authorizationCoordinates: checkedRebaselineCoordinates, ...(recoveryEnvelope ? { recoveryEnvelope, originalPreparation, imageAuthorization } : {}) }, ...(checkedBindings.livePostWrite ? { livePostWriteSha256: checkedBindings.livePostWrite.livePostWriteSha256 } : {}) } : {}),
+    ...(checkedBindings.bindingOrigin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? { operation: checkedBindings.operation, baselineCompletionSha256: checkedBindings.baselineCompletionSha256, baselineCompletion: checkedBindings.baselineCompletion, rebaselineRuntime: { runtimeVariant: recoveryEnvelope ? "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME" : "ORDINARY_REBASELINE_RUNTIME", bindings, authorization: checkedRebaselineAuthorization, authorizationCoordinates: checkedRebaselineCoordinates, ...(recoveryEnvelope ? { recoveryEnvelope, originalPreparation, imageAuthorization } : {}) }, ...(checkedBindings.livePostWrite ? { livePostWriteSha256: checkedBindings.livePostWrite.livePostWriteSha256 } : {}) } : {}),
   };
 }
 

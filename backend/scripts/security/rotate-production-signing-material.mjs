@@ -4,6 +4,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, ran
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import jwt from "jsonwebtoken";
+import { assertRebaselineQrHandoff } from "../../../scripts/aws/production-dual-slot-rebaseline-contract.mjs";
 import {
   assertLegacyProductionRotationGraceSeconds,
   assertNormalizedProductionRotationGraceSeconds,
@@ -233,13 +234,13 @@ const slots = async (sm, config) => {
 const validQrVersion = (value) => /^[A-Za-z0-9._:-]{1,128}$/.test(String(value || ""));
 const qrSlotValue = (record) => String(record?.material?.value || "");
 const qrHistoricalContinuity = (state) => state?.qr?.historicalContinuity || QR_CONTINUITY_VERIFIED;
-const assertQrVersionSlots = (current, state = null) => {
+const assertQrVersionSlots = (current, state = null, authenticatedOldMetadataKeyVersion = null) => {
   const currentVersion = qrSlotValue(current.qrCurrentVersion);
   const previousVersion = qrSlotValue(current.qrPreviousVersion);
   if (!validQrVersion(currentVersion)) throw new Error("current QR key-version slot is missing or invalid");
   if (previousVersion && !validQrVersion(previousVersion)) throw new Error("previous QR key-version slot is invalid");
   if (previousVersion && previousVersion === currentVersion) throw new Error("QR current and previous key-version slots must be distinct");
-  if (current.qrPublicCurrent.material.value && current.qrPublicCurrent.material.metadata.keyVersion && current.qrPublicCurrent.material.metadata.keyVersion !== currentVersion) throw new Error("current QR key and key-version slots are inconsistent");
+  if (current.qrPublicCurrent.material.value && current.qrPublicCurrent.material.metadata.keyVersion && current.qrPublicCurrent.material.metadata.keyVersion !== (authenticatedOldMetadataKeyVersion || currentVersion)) throw new Error("current QR key and key-version slots are inconsistent");
   if (current.qrPublicPrevious.material.value && current.qrPublicPrevious.material.metadata.keyVersion && current.qrPublicPrevious.material.metadata.keyVersion !== previousVersion) throw new Error("previous QR key and key-version slots are inconsistent");
   const retiredPreviousVersion = isRetired(current.qrPreviousVersion.material);
   const previousVersionRetiredAfterGrace = !previousVersion && retiredPreviousVersion && ["retirement-started", "retirement-complete", "cleanup-deploy-required", "cleanup-runtime-verified", "cleaned"].includes(state?.phase);
@@ -347,6 +348,7 @@ const initialMigrationSourceSha = (state) => state.initialMigrationSourceSha || 
 
 const assertState = (state, config) => {
   assertStateIdentity(state, config);
+  if (state.qr?.oldMetadataKeyVersion !== undefined) assertRebaselineQrHandoff({ config, state });
   if (state.stateVersion !== PRODUCTION_ROTATION_STATE_VERSION) throw new Error(`state stateVersion must be ${PRODUCTION_ROTATION_STATE_VERSION}`);
   assertNormalizedProductionRotationGraceSeconds(state);
   if (state.minimumGraceSeconds !== config.minimumGraceSeconds) throw new Error("state minimum grace does not match the reviewed config");
@@ -385,8 +387,9 @@ const assertPrepareLineage = (state, current) => {
   if (current.jwtPrevious.material.value) check(current.jwtPrevious, state.jwt?.oldFingerprint, state.jwt?.oldFingerprint, "previous JWT");
   if (jwtCurrentNew && !current.jwtPrevious.material.value) throw new Error("prepared JWT promotion is incomplete");
 
-  const qrPrivateNew = check(current.qrPrivateCurrent, state.qr?.oldPrivateFingerprint, state.qr?.newPrivateFingerprint, "current QR private key", state.qr?.newKeyVersion, state.qr?.oldKeyVersion);
-  const qrPublicNew = check(current.qrPublicCurrent, state.qr?.oldPublicFingerprint, state.qr?.newPublicFingerprint, "current QR public key", state.qr?.newKeyVersion, state.qr?.oldKeyVersion);
+  const oldCurrentMetadataVersion = state.phase === "prepared" ? state.qr.oldMetadataKeyVersion || state.qr.oldKeyVersion : state.qr.oldKeyVersion;
+  const qrPrivateNew = check(current.qrPrivateCurrent, state.qr?.oldPrivateFingerprint, state.qr?.newPrivateFingerprint, "current QR private key", state.qr?.newKeyVersion, oldCurrentMetadataVersion);
+  const qrPublicNew = check(current.qrPublicCurrent, state.qr?.oldPublicFingerprint, state.qr?.newPublicFingerprint, "current QR public key", state.qr?.newKeyVersion, oldCurrentMetadataVersion);
   if (qrPublicNew && !qrPrivateNew) throw new Error("prepared QR public promotion is ahead of its private key");
   const historicalContinuity = qrHistoricalContinuity(state);
   if (historicalContinuity === QR_CONTINUITY_UNRECOVERABLE) {
@@ -423,8 +426,17 @@ const prepare = async (context) => {
   let current = await slots(sm, config);
   if (!state && config.initialMigrationSourceAdvance && !isAuthenticatedInitialMigration(current, config, sourceAdvanceProof(context))) throw new Error("initial-migration source advance does not match authenticated live state");
   for (const [name, record] of [["jwt", current.jwtPending], ["QR private", current.qrPrivatePending], ["QR public", current.qrPublicPending]]) assertPendingOwnership(name, record.material, config.rotationId);
+  let oldMetadataKeyVersion;
+  if (state?.qr?.oldMetadataKeyVersion && state.phase === "prepared") assertRebaselineQrHandoff({ config, current, state });
   if (state) assertPrepareLineage(state, current);
-  else assertQrVersionSlots(current);
+  else {
+    if (config.rebaselineRuntime && current.qrPublicCurrent.material.metadata.keyVersion
+      && current.qrPublicCurrent.material.metadata.keyVersion !== qrSlotValue(current.qrCurrentVersion)) {
+      oldMetadataKeyVersion = assertRebaselineQrHandoff({ config, current });
+      authenticateEd25519Pair(current.qrPrivateCurrent.material.value, current.qrPublicCurrent.material.value, "rebaseline current QR");
+    }
+    assertQrVersionSlots(current, null, oldMetadataKeyVersion);
+  }
 
   if (!state) {
     assertJwtPreviousSlotAvailable(current.jwtPrevious.material);
@@ -483,6 +495,7 @@ const prepare = async (context) => {
       inventoryEvidenceSha256: inventoryEvidenceSha256 || null,
       historicalContinuity,
     });
+    if (oldMetadataKeyVersion) state.qr.oldMetadataKeyVersion = oldMetadataKeyVersion;
     const fixture = {
       payload: null,
       signature: null,
@@ -500,6 +513,7 @@ const prepare = async (context) => {
 
   assertState(state, config);
   current = await slots(sm, config);
+  if (state.qr.oldMetadataKeyVersion && state.phase === "prepared") assertRebaselineQrHandoff({ config, current, state });
   if (state.phase === "prepared") assertPrepareLineage(state, current);
   const pendingJwt = current.jwtPending.material;
   const pendingPrivate = current.qrPrivatePending.material;

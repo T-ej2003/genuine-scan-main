@@ -56,6 +56,32 @@ current private/public pair; verification accepts the current public key or one
 explicit previous public key selected by `kid`. There is no arbitrary keyring
 and no HMAC downgrade in the rotation path.
 
+### Authenticated rebaseline QR handoff
+
+The initial seven-slot rebaseline adopts the deployed runtime's QR version
+label without rewriting the existing current signing secrets. That label can
+differ from the abandoned coordinator's cryptographic key identifier. These
+identifiers are not interchangeable: the runtime label identifies old signed
+QR codes; the metadata identifier binds the actual old key.
+
+Preparation accepts that difference only with the canonical rebaseline binding,
+authorization and completion, exact seven-slot payload hashes and VersionIds,
+and the authenticated abandoned predecessor payload identities. The current
+private/public pair must still match. The config retains the original binding
+document rather than a derived projection so it can be independently checked.
+
+The prepared journal retains `qr.oldKeyVersion` as the adopted runtime label
+and `qr.oldMetadataKeyVersion` as the authenticated old metadata identifier.
+Interrupted promotion rechecks both and the authorized pending material.
+Previous public material is promoted under the old runtime label; new current
+material uses its own key-derived identifier. Normal rotations and post-promotion
+current-version checks retain strict equality. This compatibility does not
+authorize rebaseline replay, arbitrary mismatches, or another rotation.
+
+This is a source contract, not evidence of production continuation. Overlap
+deployment, runtime verification, grace, retirement and cleanup verification
+remain separate required phases. No secret metadata should be repaired by hand.
+
 During the first authenticated dual-slot migration only, the bootstrap's exact
 empty previous-slot markers permit the coordinator to record
 `LEGACY_QR_KEYPAIR_UNRECOVERABLE` when the pre-existing QR private/public pair
