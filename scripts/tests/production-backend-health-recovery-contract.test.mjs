@@ -644,6 +644,26 @@ test("completed historical deployment recovers only from exact current missing-i
   assert.deepEqual({ registrations, updates }, { registrations: 1, updates: 1 });
 });
 
+test("equivalent scheduler retries do not change the missing-image proof witness", async () => {
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  const witnessA = stoppedTaskFailure({ suffix: "1" });
+  const witnessB = stoppedTaskFailure({ suffix: "2" });
+  for (const [label, secondSnapshot] of [["added and reordered", [witnessB, witnessA]], ["older witness expired", [witnessB]]]) {
+    const input = base(); let service = input.service; let reads = 0; let registrations = 0; let updates = 0;
+    const result = await runRecoveryContract(input, {
+      verifyRuntimeClosure: async () => runtimeClosure, census: async () => registrations ? [registered] : [],
+      readLegacyFailureState: async () => ({ service, stoppedTaskFailures: reads++ === 0 ? [witnessA] : secondSnapshot, census: registrations ? [registered] : [],
+        currentImageExists: input.currentImageExists, replacementImage: input.replacementImage }),
+      register: async () => { registrations += 1; return registered; }, describe: async () => registered,
+      readService: async () => service, updateService: async (arn) => { updates += 1; service = { ...service, taskDefinition: arn, runningCount: 2 }; },
+      waitStable: async () => {}, readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy, record: async () => {},
+    });
+    assert.equal(result.targetArn, targetArn, label);
+    assert.deepEqual({ registrations, updates }, { registrations: 1, updates: 1 }, label);
+  }
+});
+
 test("hybrid green semantics and every protected legacy field fail closed", () => {
   const mutations = [
     (x) => { x.taskRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"; },

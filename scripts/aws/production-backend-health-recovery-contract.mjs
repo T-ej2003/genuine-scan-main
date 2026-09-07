@@ -639,16 +639,16 @@ function exactMissingImageFailureProof({ service, stoppedTaskFailures, taskDefin
       && startedAt >= createdAt && stoppedAt >= startedAt;
   });
   if (!failures.length) return null;
+  const witness = failures.sort((left, right) => left.taskArn.localeCompare(right.taskArn))[0];
   return Object.freeze({
     serviceArn: service.serviceArn,
     clusterArn: service.clusterArn, serviceName: service.serviceName, taskDefinitionArn, desiredCount: service.desiredCount,
     runningCount: service.runningCount, pendingCount: service.pendingCount, deploymentId: deployment.id, rolloutState: deployment.rolloutState,
-    failedTasks: deployment.failedTasks, deploymentCreatedAt: deployment.createdAt, currentImageDigest, currentImageExists, recoveryImageDigest,
+    currentImageDigest, currentImageExists, recoveryImageDigest,
     replacementImage: { exists: replacementImage.exists, immutable: replacementImage.immutable, signatureValid: replacementImage.signatureValid,
       attestationValid: replacementImage.attestationValid, provenanceValid: replacementImage.provenanceValid,
       criticalFindings: replacementImage.criticalFindings, repository: replacementImage.repository, digest: replacementImage.digest },
-    deployments: service.deployments.map(({ id, status, taskDefinition, rolloutState, failedTasks, desiredCount, runningCount, pendingCount, createdAt, updatedAt }) => ({ id, status, taskDefinition, rolloutState, failedTasks, desiredCount, runningCount, pendingCount, createdAt, updatedAt })).sort((a, b) => String(a.id).localeCompare(String(b.id))),
-    stoppedTasks: failures.map(({ taskArn, taskDefinitionArn: arn, startedBy, desiredStatus, lastStatus, stopCode, stoppedReason, containerReasons, createdAt, startedAt, stoppedAt }) => ({ taskArn, taskDefinitionArn: arn, startedBy, desiredStatus, lastStatus, stopCode, stoppedReason, containerReasons, createdAt, startedAt, stoppedAt })).sort((a, b) => a.taskArn.localeCompare(b.taskArn)),
+    failureWitness: { taskDefinitionArn: witness.taskDefinitionArn, startedBy: witness.startedBy, stopCode: witness.stopCode, failureClass: "CannotPullContainerError", imageDigest: currentImageDigest },
   });
 }
 
@@ -729,6 +729,7 @@ export async function runLegacyBackendHealthRecovery(input, adapters = {}) {
     if (!expectedProof) return null;
     if (typeof adapters.readLegacyFailureState !== "function") throw new Error("Legacy failed-revision mutation-bound reconciliation adapter is required.");
     const snapshot = await adapters.readLegacyFailureState();
+    if (snapshot?.service?.taskDefinition !== eligible.observedServiceTaskDefinitionArn) throw new Error("Legacy backend service task definition changed before mutation.");
     const lineage = classifyRevisionCensus(snapshot?.census, eligible);
     if (lineage.identitySha256 !== expectedCensusSha256) throw new Error("Legacy backend revision census changed at the failed-deployment mutation boundary.");
     const freshProof = eligible.missingImageFailureProof ? exactMissingImageFailureProof({ service: snapshot?.service, stoppedTaskFailures: snapshot?.stoppedTaskFailures,
