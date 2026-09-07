@@ -590,6 +590,55 @@ test("missing-image recovery requires the canonical unavailable service state an
   ]) assert.throws(() => assertLegacyBackendRecoveryEligibility(input), pattern, label);
 });
 
+test("eligibility and mutation freshness share legacy-first proof precedence", async () => {
+  const input = base();
+  const currentArn = current.taskDefinition.taskDefinitionArn;
+  const sourceRevision = { taskDefinition: { ...structuredClone(current.taskDefinition), taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:46", revision: 46 }, tags: [] };
+  const sourceRevisionArn = sourceRevision.taskDefinition.taskDefinitionArn;
+  const currentFingerprint = taskDefinitionFingerprint(current, []);
+  const failedRecoveryEvidenceSha256 = "c".repeat(64);
+  const failedRecoveryEvidenceReferenceSha256 = "d".repeat(64);
+  const terminal = {
+    repository: "T-ej2003/genuine-scan-main", taskDefinitionArn: currentArn, candidateFingerprint: currentFingerprint,
+    taskDefinitionFingerprint: currentFingerprint, evidenceFileSha256: "a".repeat(64), workflowRunId: "32759665989",
+    workflowCreatedAt: "2026-08-24T17:53:00.000Z", status: "SERVICE_STABILIZATION_FAILED", classification: "TERMINAL_FAILURE",
+    failureClassification: "SERVICE_STABILIZATION_FAILED", sourceSha, service: BACKEND_HEALTH_RECOVERY.service,
+    releaseMode: BACKEND_HEALTH_RECOVERY.kind, currentTaskDefinitionArn: sourceRevisionArn, recoveryImageDigest: digest,
+    imageReleaseSha: sourceSha, artifactSigningBindingSha256, runtimeConsumabilitySha256: null,
+    predecessorHistoryReferenceSha256: null, predecessorHistoryLineageSha256: null,
+    initialRevisionCensusSha256: canonicalSha256([{ taskDefinitionArn: sourceRevisionArn, taskDefinitionFingerprint: taskDefinitionFingerprint(sourceRevision, []) }]),
+    expectedRevisionCensusSha256: canonicalSha256([{ taskDefinitionArn: sourceRevisionArn, taskDefinitionFingerprint: taskDefinitionFingerprint(sourceRevision, []) }, { taskDefinitionArn: currentArn, taskDefinitionFingerprint: currentFingerprint }]),
+    registrations: 1, updates: 1,
+    evidenceContract: "PRE_RUNTIME_CLOSURE_LEGACY_EVIDENCE", requiresLiveFailureReconciliation: true,
+    authenticatedLegacyPredecessors: [],
+  };
+  input.authorization = createLegacyBackendRecoveryAuthorization({ sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: digest,
+    imageAuthorization: imageFixture.authorization, environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256,
+    failedRecoveryEvidenceSha256, failedRecoveryEvidenceReferenceSha256,
+    approval: { ...approval, failedRecoveryEvidenceSha256, failedRecoveryEvidenceReferenceSha256 } });
+  input.authenticatedFailedRecoveryEvidence = { envelopeSha256: failedRecoveryEvidenceSha256, referenceSha256: failedRecoveryEvidenceReferenceSha256,
+    recoveryHistory: [terminal], knownFailedRevisions: [terminal], interruptedRecoveries: [] };
+  const eligible = assertLegacyBackendRecoveryEligibility(input);
+  assert.ok(eligible.legacyFailureProof);
+  assert.ok(eligible.missingImageFailureProof);
+  assert.equal(eligible.recoveryProofKind, "LEGACY_FAILED_DEPLOYMENT");
+  assert.equal(eligible.recoveryProofSha256, eligible.legacyFailureProofSha256);
+  assert.notEqual(eligible.recoveryProofSha256, eligible.missingImageFailureProofSha256);
+
+  const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
+  const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
+  let registrations = 0; let updates = 0; let service = input.service;
+  const result = await runLegacyBackendHealthRecovery(input, {
+    census: async () => registrations ? [sourceRevision, current, registered] : [sourceRevision, current],
+    register: async () => { registrations += 1; return registered; }, describe: async () => registered,
+    readService: async () => service, updateService: async (arn) => { updates += 1; service = { ...service, taskDefinition: arn, runningCount: 2 }; },
+    readLegacyFailureState: async () => ({ service, stoppedTaskFailures: input.stoppedTaskFailures, census: registrations ? [sourceRevision, current, registered] : [sourceRevision, current], currentImageExists: input.currentImageExists, replacementImage: input.replacementImage }),
+    waitStable: async () => {}, readRunningTasks: async () => [1, 2].map(() => ({ taskDefinitionArn: targetArn, imageDigest: digest, healthStatus: "HEALTHY" })), verifyHealth: async () => healthy,
+  });
+  assert.equal(result.targetArn, targetArn);
+  assert.deepEqual({ registrations, updates }, { registrations: 1, updates: 1 });
+});
+
 test("missing-image availability and exact deployment failure are refreshed at both mutation boundaries", async () => {
   const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
   const registered = { taskDefinition: { ...structuredClone(candidate), taskDefinitionArn: targetArn, revision: 48, status: "ACTIVE" }, tags: [] };
