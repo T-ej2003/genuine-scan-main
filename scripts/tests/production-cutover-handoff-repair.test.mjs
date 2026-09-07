@@ -10,7 +10,7 @@ import { assertAuthenticatedCurrentStageBState, assertPostApplyStageAPlanRecover
 import { assertStageAStateContract, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { bootstrapInitialDualSlotRotation, createInitialDualSlotSecretsManagerClient, generatePendingMaterial, INITIAL_DUAL_SLOT_NAMES, supersedeStalePendingRotation, verifyLiveInitialDualSlotBindingWithRunner } from "../aws/production-initial-dual-slot-bootstrap.mjs";
 import { buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
-import { PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA } from "../aws/production-dual-slot-rebaseline-contract.mjs";
+import { buildRebaselinePayloads, PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { fixtureInput, sourceSha as rehearsalSourceSha } from "./production-cutover-rehearsal.test.mjs";
 import { runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
@@ -52,6 +52,37 @@ function rotationStore() {
   return store;
 }
 
+function completedProductionRebaselineStore() {
+  const store = rotationStore();
+  const sourceSha = PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA;
+  const rotationId = "rotation-20260829015311-765c8a16";
+  const payloads = buildRebaselinePayloads({
+    sourceSha,
+    rotationId,
+    generatedMaterial: {
+      jwt: store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.value,
+      qrPrivate: store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).value.value,
+      qrPublic: store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value.value,
+      qrKeyVersion: store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value.keyVersion,
+    },
+    legacyBaseline: { jwtCurrent: arn(currentNames.jwt), qrPrivateCurrent: arn(currentNames.qrPrivate), qrPublicCurrent: arn(currentNames.qrPublic), qrCurrentVersion: "2026-04-20" },
+  });
+  for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) store.get(name).value = payloads[slot];
+  return store;
+}
+
+function completedRebaselineSupersessionArgs(directory) {
+  return supersessionArgs({
+    sourceSha: "a".repeat(40),
+    staleSourceSha: PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA,
+    rotationId: "rotation-fresh-rebaseline-schema",
+    staleRotationId: "rotation-20260829015311-765c8a16",
+    proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA && descendantSha === "a".repeat(40),
+    outputFile: path.join(directory, "supersession.json"),
+    repositoryRoot: "/private/tmp/mscqr-post330-exec",
+  });
+}
+
 function rotationSender(store, { failAt, onDescribe, onGet } = {}) {
   let writes = 0;
   let updates = 0;
@@ -62,8 +93,7 @@ function rotationSender(store, { failAt, onDescribe, onGet } = {}) {
     if (command.constructor.name === "DescribeSecretCommand") {
       const record = store.get(key);
       const response = { Name: key, ARN: arn(key), VersionIdsToStages: { [record.versionId]: ["AWSCURRENT"], ...(record.previous ? { [record.previous.versionId]: ["AWSPREVIOUS"] } : {}) } };
-      await onDescribe?.({ key, record: structuredClone(record), store });
-      return response;
+      return await onDescribe?.({ response, key, record: structuredClone(record), store }) || response;
     }
     if (command.constructor.name === "GetSecretValueCommand") {
       const record = store.get(key);
@@ -102,6 +132,27 @@ function originRunner(store, { mutateDescribe, mutateValue } = {}) {
     }
     throw new Error(`unexpected runner action ${action}`);
   };
+}
+
+async function assertCompletedRebaselineRetryContinuation({ store, sender, result, directory, suffix }) {
+  const source = "a".repeat(40);
+  const rotation = "rotation-fresh-rebaseline-schema";
+  const binding = await bootstrapInitialDualSlotRotation({ send: sender.send, taskDefinition: staleTaskDefinition, sourceSha: source, rotationId: rotation, supersessionEvidence: result.evidence, supersessionPredecessor: result.predecessor, outputFile: path.join(directory, `${suffix}-bindings.json`), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+  const origin = verifyLiveInitialDualSlotBindingWithRunner({ run: originRunner(store), bindings: binding.bindings, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA && descendantSha === source });
+  const config = buildProductionRotationConfig({
+    sourceSha: source,
+    rotationId: rotation,
+    liveCurrentKeyVersion: "2026-04-20",
+    approval: { ticket: "CHG-REBASELINE-RETRY", approvedBy: "checker", approverRole: "production-independent-checker", reason: "source-only retry fixture", verificationRef: `fixture://rebaseline-retry/${suffix}`, minimumGraceSeconds: 2592000 },
+    bindings: binding.bindings,
+    verifyInitialBindingOrigin: () => origin,
+  });
+  const context = { config, sm: { send: sender.send }, identity: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/fixture", clock: () => Date.parse("2026-09-07T00:00:00.000Z"), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === source && descendantSha === source, values: new Map([["state-file", path.join(directory, `${suffix}-state.json`)], ["fixture-file", path.join(directory, `${suffix}-fixture.json`)]]) };
+  await prepare(context);
+  assert.equal(readCurrentState(context).phase, "overlap-deploy-required");
+  await prepare(context);
+  const rawState = readFileSync(context.values.get("state-file"));
+  assert.equal(validateRotationTransition({ mode: "rotation-overlap", sourceSha: source, rotationId: rotation, deploymentSha: readCurrentState(context).overlapDeploymentSha, rawState, stateSha256: digest(rawState), taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:51", expectedCurrentTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50", imageDigest: `sha256:${"d".repeat(64)}`, now: Date.now() }).phase, "overlap-deploy-required");
 }
 
 function convergedStageBState() {
@@ -350,6 +401,238 @@ test("unknown rotation slot evidence fails closed before any write", async () =>
   assert.equal(sender.writes, 0);
 });
 
+test("completed production rebaseline payloads are exact stale supersession predecessors", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-stale-schema-"));
+  const store = completedProductionRebaselineStore();
+  const sender = rotationSender(store);
+  try {
+    const result = await supersedeStalePendingRotation({
+      send: sender.send,
+      ...supersessionArgs({
+        sourceSha: "a".repeat(40),
+        staleSourceSha: PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA,
+        rotationId: "rotation-fresh-rebaseline-schema",
+        staleRotationId: "rotation-20260829015311-765c8a16",
+        proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA && descendantSha === "a".repeat(40),
+        outputFile: path.join(directory, "supersession.json"),
+        repositoryRoot: "/private/tmp/mscqr-post330-exec",
+      }),
+    });
+    assert.equal(result.writes, 7);
+    assert.equal(sender.writes, 7);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("completed production rebaseline fixture preserves every historical slot schema", () => {
+  const store = completedProductionRebaselineStore();
+  const expected = {
+    jwtPending: ["family", "materialFingerprint", "materialType", "rotationId", "slot", "sourceSha", "value"],
+    qrPrivatePending: ["family", "keyVersion", "materialFingerprint", "materialType", "rotationId", "slot", "sourceSha", "value"],
+    qrPublicPending: ["family", "keyVersion", "materialFingerprint", "materialType", "rotationId", "slot", "sourceSha", "value"],
+    jwtPrevious: ["baselineMarker", "family", "initialMigration", "rotationId", "slot", "sourceSha", "value"],
+    qrPublicPrevious: ["baselineMarker", "family", "initialMigration", "rotationId", "slot", "sourceSha", "value"],
+    qrCurrentVersion: ["baselineMarker", "family", "initialMigration", "rotationId", "slot", "sourceSha", "value"],
+    qrPreviousVersion: ["baselineMarker", "family", "initialMigration", "rotationId", "slot", "sourceSha", "value"],
+  };
+  for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
+    const value = store.get(name).value;
+    assert.deepEqual(Object.keys(value).sort(), expected[slot], slot);
+    assert.equal(value.sourceSha, PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA, slot);
+    assert.equal(value.rotationId, "rotation-20260829015311-765c8a16", slot);
+  }
+  assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.baselineMarker, "adopted-authenticated-legacy-active-identity");
+  for (const slot of ["jwtPrevious", "qrPublicPrevious", "qrPreviousVersion"]) assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES[slot]).value.baselineMarker, "empty-baseline-marker", slot);
+  for (const slot of ["jwtPending", "qrPrivatePending", "qrPublicPending"]) assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES[slot]).value.materialType, "fresh-generated", slot);
+});
+
+test("completed rebaseline payload schema rejects altered provenance before supersession writes", async () => {
+  const mutations = [
+    ["unknown extra field", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.unrecognized = true; }],
+    ["missing marker", (store) => { delete store.get(INITIAL_DUAL_SLOT_NAMES.jwtPrevious).value.baselineMarker; }],
+    ["forged marker", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.baselineMarker = "empty-baseline-marker"; }],
+    ["wrong rotation", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.rotationId = "rotation-other-rebaseline"; }],
+    ["missing rotation", (store) => { delete store.get(INITIAL_DUAL_SLOT_NAMES.jwtPrevious).value.rotationId; }],
+    ["wrong source", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.sourceSha = "0".repeat(40); }],
+    ["missing material type", (store) => { delete store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.materialType; }],
+    ["wrong material type", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.materialType = "other"; }],
+    ["cross-family material type", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).value.materialType = "empty-baseline-marker"; }],
+    ["wrong family", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value.family = "jwt_secrets"; }],
+    ["wrong slot", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value.slot = "pending-private"; }],
+    ["empty JWT material", (store) => { const value = store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value; value.value = ""; value.materialFingerprint = digest("").slice(0, 16); }],
+    ["wrong fingerprint", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.materialFingerprint = "0".repeat(16); }],
+    ["wrong key version", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).value.keyVersion = "0".repeat(16); }],
+    ["public key in private slot", (store) => { const value = store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).value; value.value = store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value.value; value.materialFingerprint = digest(value.value).slice(0, 16); value.keyVersion = digest(value.value).slice(0, 16); }],
+    ["private key in public slot", (store) => { const value = store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value; value.value = store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).value.value; value.materialFingerprint = digest(value.value).slice(0, 16); value.keyVersion = digest(store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value.value).slice(0, 16); }],
+    ["RSA private key", (store) => { const pair = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } }); const value = store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).value; value.value = pair.privateKey; value.materialFingerprint = digest(value.value).slice(0, 16); value.keyVersion = digest(pair.publicKey).slice(0, 16); }],
+    ["RSA public key", (store) => { const pair = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } }); const value = store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value; value.value = pair.publicKey; value.materialFingerprint = digest(value.value).slice(0, 16); value.keyVersion = digest(value.value).slice(0, 16); }],
+    ["empty private material", (store) => { const value = store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).value; value.value = ""; value.materialFingerprint = digest("").slice(0, 16); value.keyVersion = digest("").slice(0, 16); }],
+    ["empty public material", (store) => { const value = store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).value; value.value = ""; value.materialFingerprint = digest("").slice(0, 16); value.keyVersion = digest("").slice(0, 16); }],
+    ["pending masquerades as marker", (store) => { const value = store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value; delete value.materialType; value.baselineMarker = "empty-baseline-marker"; }],
+    ["marker masquerades as pending", (store) => { const value = store.get(INITIAL_DUAL_SLOT_NAMES.jwtPrevious).value; value.materialType = "fresh-generated"; value.materialFingerprint = digest(value.value).slice(0, 16); }],
+    ["hybrid payload", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPrevious).value.materialFingerprint = digest("").slice(0, 16); }],
+    ["mixed historical and canonical schemas", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPrevious).value = rotationStore().get(INITIAL_DUAL_SLOT_NAMES.jwtPrevious).value; }],
+    ["untrusted runtime marker", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value = "2026-04-21"; }],
+    ["substituted current jwt", (store) => { store.get(currentNames.jwt).value.value = "substituted-current-jwt"; }],
+    ["substituted current qr", (store) => { store.get(currentNames.qrPublic).value.keyVersion = "0".repeat(16); }],
+    ["extra historical-looking metadata", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPreviousVersion).value.historicalMarker = "forged"; }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-stale-reject-"));
+    const store = completedProductionRebaselineStore();
+    const sender = rotationSender(store);
+    mutate(store);
+    try {
+      await assert.rejects(() => supersedeStalePendingRotation({
+        send: sender.send,
+        ...supersessionArgs({
+          sourceSha: "a".repeat(40),
+          staleSourceSha: PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA,
+          rotationId: "rotation-fresh-rebaseline-schema",
+          staleRotationId: "rotation-20260829015311-765c8a16",
+          proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA && descendantSha === "a".repeat(40),
+          outputFile: path.join(directory, "supersession.json"),
+          repositoryRoot: "/private/tmp/mscqr-post330-exec",
+        }),
+      }), undefined, label);
+      assert.equal(sender.writes, 0, label);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
+test("completed rebaseline supersession resumes each deterministic prefix from seven logical predecessors", async () => {
+  for (let prefix = 0; prefix <= 7; prefix += 1) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), `mscqr-rebaseline-prefix-${prefix}-`));
+    const store = completedProductionRebaselineStore();
+    const args = completedRebaselineSupersessionArgs(directory);
+    try {
+      if (prefix) {
+        const first = rotationSender(store, { failAt: prefix });
+        await assert.rejects(() => supersedeStalePendingRotation({ send: first.send, ...args }), /injected PutSecretValue failure/);
+      }
+      const expectedPredecessors = Object.fromEntries(Object.entries(INITIAL_DUAL_SLOT_NAMES).map(([slot, name]) => [slot, store.get(name).previous?.versionId || store.get(name).versionId]));
+      const retry = rotationSender(store);
+      const result = await supersedeStalePendingRotation({ send: retry.send, ...args });
+      assert.equal(retry.writes, 7 - prefix, `prefix ${prefix}`);
+      assert.equal(result.writes, 7 - prefix, `prefix ${prefix}`);
+      assert.equal(Object.keys(result.evidence.predecessorSlotIdentities).length, 7, `prefix ${prefix}`);
+      for (const [slot, identity] of Object.entries(result.evidence.predecessorSlotIdentities)) assert.equal(identity.versionId, expectedPredecessors[slot], `${prefix}:${slot}`);
+      await assertCompletedRebaselineRetryContinuation({ store, sender: retry, result, directory, suffix: `prefix-${prefix}` });
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
+test("completed rebaseline all-new replay reauthenticates every AWSPREVIOUS predecessor", async () => {
+  const mutations = [
+    ["previous version", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).previous.versionId = "substituted-previous"; }],
+    ["baseline marker", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).previous.value.baselineMarker = "empty-baseline-marker"; }],
+    ["missing baseline marker", (store) => { delete store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).previous.value.baselineMarker; }],
+    ["missing material type", (store) => { delete store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).previous.value.materialType; }],
+    ["wrong source", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).previous.value.sourceSha = "0".repeat(40); }],
+    ["wrong rotation", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPending).previous.value.rotationId = "rotation-other"; }],
+    ["wrong family", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).previous.value.family = "qr_signing_keys"; }],
+    ["wrong slot", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).previous.value.slot = "pending-private"; }],
+    ["empty JWT material", (store) => { const value = store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).previous.value; value.value = ""; value.materialFingerprint = digest("").slice(0, 16); }],
+    ["wrong fingerprint", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).previous.value.materialFingerprint = "0".repeat(16); }],
+    ["wrong key version", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).previous.value.keyVersion = "0".repeat(16); }],
+    ["unknown field", (store) => { store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).previous.value.unexpected = true; }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-all-new-reject-"));
+    const store = completedProductionRebaselineStore();
+    const first = rotationSender(store, { failAt: 7 });
+    const args = completedRebaselineSupersessionArgs(directory);
+    try {
+      await assert.rejects(() => supersedeStalePendingRotation({ send: first.send, ...args }), /injected PutSecretValue failure/);
+      mutate(store);
+      const retry = rotationSender(store);
+      await assert.rejects(() => supersedeStalePendingRotation({ send: retry.send, ...args }), undefined, label);
+      assert.equal(retry.writes, 0, label);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
+test("completed rebaseline supersession rejects non-prefix replacement topology before another write", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-non-prefix-"));
+  const store = completedProductionRebaselineStore();
+  const first = rotationSender(store, { failAt: 4 });
+  const args = completedRebaselineSupersessionArgs(directory);
+  try {
+    await assert.rejects(() => supersedeStalePendingRotation({ send: first.send, ...args }), /injected PutSecretValue failure/);
+    store.set(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending, store.get(INITIAL_DUAL_SLOT_NAMES.qrPrivatePending).previous);
+    const retry = rotationSender(store);
+    await assert.rejects(() => supersedeStalePendingRotation({ send: retry.send, ...args }), /resumable transition prefix/);
+    assert.equal(retry.writes, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("completed rebaseline partial replay rejects a substituted deterministic replacement before another write", async () => {
+  const mutations = [
+    ["payload", (record) => { record.value.value = "substituted-replacement"; record.value.materialFingerprint = digest(record.value.value).slice(0, 16); }],
+    ["source", (record) => { record.value.sourceSha = "0".repeat(40); }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-prefix-new-reject-"));
+    const store = completedProductionRebaselineStore();
+    const first = rotationSender(store, { failAt: 1 });
+    const args = completedRebaselineSupersessionArgs(directory);
+    try {
+      await assert.rejects(() => supersedeStalePendingRotation({ send: first.send, ...args }), /injected PutSecretValue failure/);
+      mutate(store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending));
+      const retry = rotationSender(store);
+      await assert.rejects(() => supersedeStalePendingRotation({ send: retry.send, ...args }), undefined, label);
+      assert.equal(retry.writes, 0, label);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
+test("completed rebaseline all-new replay rejects an unrelated AWSPREVIOUS predecessor before mutation", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-all-new-previous-topology-"));
+  const store = completedProductionRebaselineStore();
+  const first = rotationSender(store, { failAt: 7 });
+  const args = completedRebaselineSupersessionArgs(directory);
+  try {
+    await assert.rejects(() => supersedeStalePendingRotation({ send: first.send, ...args }), /injected PutSecretValue failure/);
+    const retry = rotationSender(store, { onDescribe: ({ response, key }) => {
+      if (key !== INITIAL_DUAL_SLOT_NAMES.jwtPending) return undefined;
+      const currentVersionId = Object.entries(response.VersionIdsToStages).find(([, stages]) => stages.includes("AWSCURRENT"))[0];
+      return { ...response, VersionIdsToStages: { [currentVersionId]: ["AWSCURRENT"], "unrelated-previous": ["AWSPREVIOUS"] } };
+    } });
+    await assert.rejects(() => supersedeStalePendingRotation({ send: retry.send, ...args }), undefined);
+    assert.equal(retry.writes, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("completed rebaseline all-new replay rejects a missing AWSPREVIOUS predecessor before mutation", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-all-new-missing-previous-"));
+  const store = completedProductionRebaselineStore();
+  const first = rotationSender(store, { failAt: 7 });
+  const args = completedRebaselineSupersessionArgs(directory);
+  try {
+    await assert.rejects(() => supersedeStalePendingRotation({ send: first.send, ...args }), /injected PutSecretValue failure/);
+    const retry = rotationSender(store, { onDescribe: ({ response, key }) => {
+      if (key !== INITIAL_DUAL_SLOT_NAMES.jwtPending) return undefined;
+      const currentVersionId = Object.entries(response.VersionIdsToStages).find(([, stages]) => stages.includes("AWSCURRENT"))[0];
+      return { ...response, VersionIdsToStages: { [currentVersionId]: ["AWSCURRENT"] } };
+    } });
+    await assert.rejects(() => supersedeStalePendingRotation({ send: retry.send, ...args }), undefined);
+    assert.equal(retry.writes, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("completed rebaseline all-new pre-evidence replay requires its authenticated replacement journal", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rebaseline-all-new-journal-"));
+  const store = completedProductionRebaselineStore();
+  const first = rotationSender(store, { failAt: 7 });
+  const args = completedRebaselineSupersessionArgs(directory);
+  try {
+    await assert.rejects(() => supersedeStalePendingRotation({ send: first.send, ...args }), /injected PutSecretValue failure/);
+    rmSync(`${args.outputFile}.material`);
+    const retry = rotationSender(store);
+    await assert.rejects(() => supersedeStalePendingRotation({ send: retry.send, ...args }), /authenticated replacement material journal/);
+    assert.equal(retry.writes, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("stale rotation supersession resumes every sequential write boundary without rewriting authenticated new slots", async () => {
   for (let failure = 1; failure <= 7; failure += 1) {
     const directory = mkdtempSync(path.join(os.tmpdir(), `mscqr-rotation-resume-${failure}-`));
@@ -376,13 +659,7 @@ test("production-shaped stale supersession bootstraps a distinct canonical rotat
   const currentProtectedDescendant = "9".repeat(40);
   const freshRotationId = "rotation-fresh-source-only-fixture";
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-fresh-supersession-"));
-  const store = rotationStore();
-  for (const name of Object.values(INITIAL_DUAL_SLOT_NAMES)) {
-    const record = store.get(name);
-    record.value.sourceSha = productionOldSource;
-    if (record.value.rotationId === staleRotationId) record.value.rotationId = productionOldRotationId;
-  }
-  store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value = "2026-04-20";
+  const store = completedProductionRebaselineStore();
   const sender = rotationSender(store);
   try {
     const result = await supersedeStalePendingRotation({

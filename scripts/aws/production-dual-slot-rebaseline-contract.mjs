@@ -515,6 +515,44 @@ export function deterministicWriteIdentity({ sourceSha, rotationId, slot, secret
 
 const marker = ({ sourceSha, rotationId, family, slot, value = "", baselineMarker }) => ({ sourceSha, rotationId, family, slot, value, baselineMarker, initialMigration: true });
 
+// The completed production rebaseline is an authenticated predecessor shape,
+// not a permissive legacy fallback.  Supersession may consume it only after
+// every producer-defined field is checked exactly.
+export function assertCompletedRebaselinePayload({ slot, payload, sourceSha, rotationId } = {}) {
+  if (!REBASELINE_SLOT_ORDER.includes(slot)) fail("Completed rebaseline payload slot is invalid.");
+  assertSha40(sourceSha, "Completed rebaseline sourceSha");
+  assertRotation(rotationId, "Completed rebaseline rotationId");
+  const expected = HISTORICAL_SLOT_SHAPES[slot];
+  const pending = ["jwtPending", "qrPrivatePending", "qrPublicPending"].includes(slot);
+  const qrPending = ["qrPrivatePending", "qrPublicPending"].includes(slot);
+  const expectedKeys = pending
+    ? ["sourceSha", "rotationId", "family", "slot", "materialType", "materialFingerprint", "value", ...(qrPending ? ["keyVersion"] : [])]
+    : ["sourceSha", "rotationId", "family", "slot", "value", "baselineMarker", "initialMigration"];
+  exactKeys(payload, expectedKeys, `Completed rebaseline ${slot} payload`);
+  if (payload.sourceSha !== sourceSha || payload.rotationId !== rotationId || payload.family !== expected.family || payload.slot !== expected.slot || typeof payload.value !== "string") fail(`Completed rebaseline ${slot} payload identity is invalid.`);
+  if (pending) {
+    let expectedKeyVersion;
+    if (qrPending) {
+      let keyObject;
+      if (slot === "qrPrivatePending") {
+        try { keyObject = crypto.createPrivateKey(payload.value); } catch { fail(`Completed rebaseline ${slot} QR material is invalid.`); }
+      } else {
+        let privateKey = false;
+        try { crypto.createPrivateKey(payload.value); privateKey = true; } catch { /* public PEM */ }
+        if (privateKey) fail(`Completed rebaseline ${slot} QR material must be public.`);
+        try { keyObject = crypto.createPublicKey(payload.value); } catch { fail(`Completed rebaseline ${slot} QR material is invalid.`); }
+      }
+      if (keyObject.type !== (slot === "qrPrivatePending" ? "private" : "public") || keyObject.asymmetricKeyType !== "ed25519") fail(`Completed rebaseline ${slot} QR material has an invalid key type.`);
+      try { expectedKeyVersion = fingerprint((slot === "qrPrivatePending" ? crypto.createPublicKey(keyObject) : keyObject).export({ format: "pem", type: "spki" })); } catch { fail(`Completed rebaseline ${slot} QR material is invalid.`); }
+    }
+    if ((slot === "jwtPending" && !payload.value) || payload.materialType !== "fresh-generated" || payload.materialFingerprint !== fingerprint(payload.value) || (qrPending && payload.keyVersion !== expectedKeyVersion) || (!qrPending && payload.keyVersion !== undefined)) fail(`Completed rebaseline ${slot} material identity is invalid.`);
+  } else {
+    const expectedMarker = slot === "qrCurrentVersion" ? "adopted-authenticated-legacy-active-identity" : "empty-baseline-marker";
+    if (payload.initialMigration !== true || payload.baselineMarker !== expectedMarker || (slot === "qrCurrentVersion" ? !LEGACY_VERSION_ID.test(payload.value) : payload.value !== "")) fail(`Completed rebaseline ${slot} marker identity is invalid.`);
+  }
+  return Object.freeze({ ...payload });
+}
+
 export function buildRebaselinePayloads({ sourceSha, rotationId, generatedMaterial, legacyBaseline } = {}) {
   assertSha40(sourceSha, "sourceSha"); assertRotation(rotationId, "rotationId"); assertGeneratedMaterial(generatedMaterial);
   const checkedLegacyBaseline = assertLegacyBaseline(legacyBaseline);
