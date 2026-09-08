@@ -87,8 +87,8 @@ on:
         description: "Exact approved immutable backend recovery digest."
         required: false
         type: string
-      backend_recovery_evidence_bundle_json:
-        description: "Canonical transaction-bound backend recovery evidence bundle."
+      backend_recovery_evidence_bundle_gzip_base64:
+        description: "Canonical gzip/base64 transport of the transaction-bound backend recovery evidence bundle."
         required: false
         type: string
       backend_recovery_evidence_bundle_sha256:
@@ -176,7 +176,7 @@ jobs:
           ROTATION_FIXTURE_SHA256: ${{ inputs.rotation_fixture_sha256 }}
           BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN: ${{ inputs.backend_recovery_current_task_definition_arn }}
           BACKEND_RECOVERY_IMAGE_DIGEST: ${{ inputs.backend_recovery_image_digest }}
-          BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON: ${{ inputs.backend_recovery_evidence_bundle_json }}
+          BACKEND_RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64: ${{ inputs.backend_recovery_evidence_bundle_gzip_base64 }}
           BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256: ${{ inputs.backend_recovery_evidence_bundle_sha256 }}
           NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
@@ -230,15 +230,16 @@ jobs:
               fi
               ;;
             backend-health-recovery)
-              for name in BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN BACKEND_RECOVERY_IMAGE_DIGEST BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256; do
+              for name in BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN BACKEND_RECOVERY_IMAGE_DIGEST BACKEND_RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64 BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256; do
                 if [ -z "${!name:-}" ]; then
                   echo "::error::${name} is required for ${RELEASE_MODE}."
                   exit 1
                 fi
               done
           node --input-type=module - <<'NODE'
-          import { parseBackendHealthRecoveryDispatchBundle } from "./scripts/aws/dispatch-production-backend-health-recovery.mjs";
-          parseBackendHealthRecoveryDispatchBundle(Buffer.from(process.env.BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON), process.env.BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256, {
+          import { decodeBackendHealthRecoveryBundleTransport, parseBackendHealthRecoveryDispatchBundle } from "./scripts/aws/dispatch-production-backend-health-recovery.mjs";
+          const bytes = decodeBackendHealthRecoveryBundleTransport(process.env.BACKEND_RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64, process.env.BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256);
+          parseBackendHealthRecoveryDispatchBundle(bytes, process.env.BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256, {
             sourceSha: process.env.SOURCE_SHA,
             currentTaskDefinitionArn: process.env.BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN,
             recoveryImageDigest: process.env.BACKEND_RECOVERY_IMAGE_DIGEST,
@@ -851,7 +852,7 @@ jobs:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           CURRENT_TASK_DEFINITION_ARN: ${{ inputs.backend_recovery_current_task_definition_arn }}
           RECOVERY_IMAGE_DIGEST: ${{ inputs.backend_recovery_image_digest }}
-          RECOVERY_EVIDENCE_BUNDLE_JSON: ${{ inputs.backend_recovery_evidence_bundle_json }}
+          RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64: ${{ inputs.backend_recovery_evidence_bundle_gzip_base64 }}
           RECOVERY_EVIDENCE_BUNDLE_SHA256: ${{ inputs.backend_recovery_evidence_bundle_sha256 }}
           GITHUB_ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ github.token }}
@@ -861,8 +862,12 @@ jobs:
           install -d -m 700 "$recovery_dir"
           bundle_file="$recovery_dir/dispatch-bundle.json"
           authorization_file="$recovery_dir/authorization.json"
-          printf '%s' "$RECOVERY_EVIDENCE_BUNDLE_JSON" > "$bundle_file"
-          chmod 600 "$bundle_file"
+          node --input-type=module - "$bundle_file" <<'NODE'
+          import fs from "node:fs";
+          import { decodeBackendHealthRecoveryBundleTransport } from "./scripts/aws/dispatch-production-backend-health-recovery.mjs";
+          const bytes = decodeBackendHealthRecoveryBundleTransport(process.env.RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64, process.env.RECOVERY_EVIDENCE_BUNDLE_SHA256);
+          fs.writeFileSync(process.argv[2], bytes, { flag: "wx", mode: 0o600 });
+          NODE
           bundle_result="$(node scripts/aws/extract-production-backend-recovery-dispatch-bundle.mjs \
             --bundle "$bundle_file" \
             --bundle-sha256 "$RECOVERY_EVIDENCE_BUNDLE_SHA256" \
