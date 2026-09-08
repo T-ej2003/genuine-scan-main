@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildBackendHealthRecoveryDispatch, canonicalWorkflowJsonInput, measureWorkflowDispatchInputs, parseBackendHealthRecoveryDispatchBundle, runCli, WORKFLOW_DISPATCH_INTERNAL_BUDGET, WORKFLOW_DISPATCH_PLATFORM_LIMIT } from "../aws/dispatch-production-backend-health-recovery.mjs";
+import { gzipSync } from "node:zlib";
+import { buildBackendHealthRecoveryDispatch, canonicalWorkflowJsonInput, decodeBackendHealthRecoveryBundleTransport, encodeBackendHealthRecoveryBundleTransport, MAX_DECOMPRESSED_BUNDLE_BYTES, measureWorkflowDispatchInputs, parseBackendHealthRecoveryDispatchBundle, runCli, WORKFLOW_DISPATCH_INTERNAL_BUDGET, WORKFLOW_DISPATCH_PLATFORM_LIMIT } from "../aws/dispatch-production-backend-health-recovery.mjs";
 import { extractProductionBackendRecoveryDispatchBundle } from "../aws/extract-production-backend-recovery-dispatch-bundle.mjs";
 import { createFailedRecoveryEvidenceReference } from "../aws/production-backend-failed-recovery-evidence-reference.mjs";
 import { buildLegacyBackendRecoveryCandidate } from "../aws/production-backend-health-recovery-contract.mjs";
@@ -41,7 +42,8 @@ const input = (fixture) => ({
   failedRecoveryEvidenceReferenceBytes: Buffer.from(JSON.stringify(failedRecoveryEvidenceReference)),
 });
 const fields = (dispatch) => Object.fromEntries(dispatch.args.flatMap((value, index) => value === "-f" ? [dispatch.args[index + 1].split(/=(.*)/s).slice(0, 2)] : []));
-const bundleFrom = (sent) => parseBackendHealthRecoveryDispatchBundle(Buffer.from(sent.backend_recovery_evidence_bundle_json), sent.backend_recovery_evidence_bundle_sha256);
+const bundleBytesFrom = (sent) => decodeBackendHealthRecoveryBundleTransport(sent.backend_recovery_evidence_bundle_gzip_base64, sent.backend_recovery_evidence_bundle_sha256);
+const bundleFrom = (sent) => parseBackendHealthRecoveryDispatchBundle(bundleBytesFrom(sent), sent.backend_recovery_evidence_bundle_sha256);
 const rehash = (authorization) => {
   authorization.evidenceSha256 = imageAuthorizationSha256(authorization);
   authorization.authorizationSha256 = authorization.evidenceSha256;
@@ -67,7 +69,7 @@ test("fresh and authenticated reused images dispatch with byte-identical hashes"
   for (const fixture of [fresh, reused]) {
     const dispatch = buildBackendHealthRecoveryDispatch(input(fixture));
     const sent = fields(dispatch);
-    assert.equal(hash(sent.backend_recovery_evidence_bundle_json), sent.backend_recovery_evidence_bundle_sha256);
+    assert.equal(hash(bundleBytesFrom(sent)), sent.backend_recovery_evidence_bundle_sha256);
     const bundle = bundleFrom(sent);
     for (const component of Object.values(bundle.components)) assert.equal(hash(component.value), component.sha256);
     assert.deepEqual(JSON.parse(bundle.components.imageAuthorization.value), fixture.authorization);
@@ -79,7 +81,7 @@ test("fresh and authenticated reused images dispatch with byte-identical hashes"
 
 test("canonical recovery bundle binds every component and transaction field", () => {
   const sent = fields(buildBackendHealthRecoveryDispatch(input(reused)));
-  const bytes = Buffer.from(sent.backend_recovery_evidence_bundle_json);
+  const bytes = bundleBytesFrom(sent);
   const parsed = bundleFrom(sent);
   assert.equal(parsed.value.sourceSha, reused.authorization.sourceSha);
   assert.throws(() => parseBackendHealthRecoveryDispatchBundle(bytes, "0".repeat(64)), /do not match/);
@@ -154,6 +156,55 @@ test("workflow dispatch measures the actual complete payload against a conservat
   assert.ok(dispatch.payload.bytes < WORKFLOW_DISPATCH_INTERNAL_BUDGET);
   assert.ok(WORKFLOW_DISPATCH_INTERNAL_BUDGET < WORKFLOW_DISPATCH_PLATFORM_LIMIT);
   assert.throws(() => measureWorkflowDispatchInputs({ exact: "x".repeat(WORKFLOW_DISPATCH_INTERNAL_BUDGET) }), /internal budget/);
+});
+
+test("recovery bundle transport is deterministic, canonical, bounded, and byte exact", () => {
+  const bytes = Buffer.from(JSON.stringify({ exact: "bundle", value: "x".repeat(4096) }));
+  const expectedSha256 = hash(bytes);
+  const first = encodeBackendHealthRecoveryBundleTransport(bytes);
+  const second = encodeBackendHealthRecoveryBundleTransport(bytes);
+  assert.equal(first, second);
+  assert.deepEqual([...Buffer.from(first, "base64").subarray(0, 10)], [31, 139, 8, 0, 0, 0, 0, 0, 2, 255]);
+  assert.equal(hash(first), "a5157540e0165a0946e5db64eeda3546d172bb1eb4bcd4ac59e76f118e074c7d");
+  assert.deepEqual(decodeBackendHealthRecoveryBundleTransport(first, expectedSha256), bytes);
+  assert.throws(() => decodeBackendHealthRecoveryBundleTransport(first, "0".repeat(64)), /SHA-256/);
+  for (const changed of [first.slice(0, -1), `${first} `, ` ${first}`, `${first}\n`, `${first}A`, "not+base64!", `${first}=`]) {
+    assert.throws(() => decodeBackendHealthRecoveryBundleTransport(changed, expectedSha256), /base64|invalid/);
+  }
+  const compressed = Buffer.from(first, "base64");
+  for (const changed of [compressed.subarray(0, compressed.length - 1), Buffer.from("not-gzip"), Buffer.concat([compressed, Buffer.from([0])]), Buffer.concat([compressed, compressed])]) {
+    assert.throws(() => decodeBackendHealthRecoveryBundleTransport(changed.toString("base64"), expectedSha256), /invalid|canonical/);
+  }
+});
+
+test("recovery bundle transport enforces its decompressed limit during gunzip", () => {
+  for (const size of [MAX_DECOMPRESSED_BUNDLE_BYTES - 1, MAX_DECOMPRESSED_BUNDLE_BYTES]) {
+    const bytes = Buffer.alloc(size, 0x78); const encoded = encodeBackendHealthRecoveryBundleTransport(bytes);
+    assert.equal(decodeBackendHealthRecoveryBundleTransport(encoded, hash(bytes)).length, size);
+  }
+  const oversized = Buffer.alloc(MAX_DECOMPRESSED_BUNDLE_BYTES + 1, 0x78);
+  assert.throws(() => encodeBackendHealthRecoveryBundleTransport(oversized), /decompressed limit/);
+  assert.throws(() => decodeBackendHealthRecoveryBundleTransport(gzipSync(oversized, { level: 9 }).toString("base64"), hash(oversized)), /decompressed limit/);
+});
+
+test("the previously failing payload size class has substantial encoded headroom", () => {
+  const legacyCharacters = (sent) => JSON.stringify({ ...sent, backend_recovery_evidence_bundle_json: bundleBytesFrom(sent).toString("utf8"), backend_recovery_evidence_bundle_gzip_base64: undefined }).length;
+  const withPadding = (padding) => buildBackendHealthRecoveryDispatch({ ...input(reused), runtimeConsumabilityBytes: Buffer.from(JSON.stringify({ ...runtimeConsumability, padding })) });
+  let low = 0; let high = 63_710;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    try {
+      if (legacyCharacters(fields(withPadding('"'.repeat(middle)))) <= 63_710) low = middle;
+      else high = middle - 1;
+    } catch { high = middle - 1; }
+  }
+  let representative = withPadding('"'.repeat(low));
+  representative = withPadding(`${'"'.repeat(low)}${"x".repeat(63_710 - legacyCharacters(fields(representative)))}`);
+  const sent = fields(representative);
+  assert.equal(legacyCharacters(sent), 63_710);
+  assert.ok(bundleBytesFrom(sent).length <= MAX_DECOMPRESSED_BUNDLE_BYTES);
+  assert.ok(representative.payload.characters < WORKFLOW_DISPATCH_INTERNAL_BUDGET);
+  assert.ok(WORKFLOW_DISPATCH_INTERNAL_BUDGET - representative.payload.characters > 3_710);
 });
 
 test("accumulated historical evidence never enters the bounded workflow dispatch payload", () => {

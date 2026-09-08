@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import yaml from "js-yaml";
+import { encodeBackendHealthRecoveryBundleTransport } from "../aws/dispatch-production-backend-health-recovery.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { verifyProductionReleaseImageAuthorization } from "../aws/verify-production-release-image-authorization.mjs";
 import { RELEASE_POLICY_SOURCES } from "../aws/validate-production-green-stage-b-permissions.mjs";
@@ -208,7 +209,8 @@ test("governed administrator convergence requires live readback before source en
 
 test("release gate exposes one bounded backend health recovery mode", () => {
   assert.match(workflow, /- backend-health-recovery/);
-  assert.match(workflow, /backend-health-recovery\)[\s\S]*BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN[\s\S]*BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON[\s\S]*BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256/);
+  assert.match(workflow, /backend-health-recovery\)[\s\S]*BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN[\s\S]*BACKEND_RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64[\s\S]*BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256/);
+  assert.doesNotMatch(workflow, /backend_recovery_evidence_bundle_json|BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON/);
   const recoveryCase = workflow.match(/backend-health-recovery\)([\s\S]*?)\n\s*;;/u)?.[1] || "";
   assert.doesNotMatch(recoveryCase, /check:rotation-evidence-freshness/);
   assert.match(workflow, /Execute governed legacy backend health recovery[\s\S]*recover-production-backend-health\.mjs[\s\S]*--execute/);
@@ -444,7 +446,7 @@ test("release gate heredocs parse and backend recovery lifecycle validation exec
     SOURCE_SHA: sourceSha,
     BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN: currentTaskDefinitionArn,
     BACKEND_RECOVERY_IMAGE_DIGEST: recoveryImageDigest,
-    BACKEND_RECOVERY_EVIDENCE_BUNDLE_JSON: bundle,
+    BACKEND_RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64: encodeBackendHealthRecoveryBundleTransport(Buffer.from(bundle)),
     BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256: createHash("sha256").update(bundle).digest("hex"),
   };
   assert.equal(spawnSync("bash", ["-e"], { input: lifecycle, env }).status, 0);
