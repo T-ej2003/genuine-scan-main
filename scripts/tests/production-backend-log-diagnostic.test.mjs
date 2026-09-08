@@ -5,10 +5,12 @@ import path from "node:path";
 import test from "node:test";
 import yaml from "js-yaml";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
-import { assertBackendLogDiagnosticAuthorization, assertBackendLogDiagnosticEvidence, assertBackendLogDiagnosticPolicy, backendLogStreams, buildBackendLogDiagnosticPolicy, createBackendLogDiagnosticAuthorization, createBackendLogDiagnosticJournal, executeBackendLogDiagnostic, PRODUCTION_BACKEND_LOG_DIAGNOSTIC } from "../aws/production-backend-log-diagnostic.mjs";
+import { assertBackendLogDiagnosticAuthorization, assertBackendLogDiagnosticEvidence, assertBackendLogDiagnosticPolicy, backendLogStreams, buildBackendLogDiagnosticPolicy, createBackendLogDiagnosticAuthorization, createBackendLogDiagnosticJournal, executeBackendLogDiagnostic, PRODUCTION_BACKEND_LOG_DIAGNOSTIC, runCli } from "../aws/production-backend-log-diagnostic.mjs";
 
 const sourceSha = "c426a911cd732cd2f4bc5c01134cb858882a0750";
 const now = new Date("2026-09-08T12:00:00.000Z");
+const credentialedDatabaseUrl = ["postgres", "://", "user", ":", "pass", "@example/db"].join("");
+const awsAccessKeyLike = ["AKIA", "1234567890ABCDEF"].join("");
 
 function approval({ reviewer = "T-ej2003", configured = "T-ej2003" } = {}) {
   return createProductionEnvironmentApprovalEvidence({
@@ -19,20 +21,15 @@ function approval({ reviewer = "T-ej2003", configured = "T-ej2003" } = {}) {
   });
 }
 
-const authorization = () => createBackendLogDiagnosticAuthorization({ sourceSha, protectedEnvironmentApprovalEvidence: approval(), issuedAt: now.toISOString() });
-function journalFixture() {
-  let reserved = false; let terminal = null;
-  return {
-    async reserve({ authorization: value }) { if (reserved) throw new Error("already durably reserved"); reserved = true; return { sha256: value.authorizationSha256 }; },
-    async finalize({ status, capabilityRevoked, counts, evidenceSha256 = null }) { if (terminal) throw new Error("terminal result already exists"); terminal = { status, capabilityRevoked, counts, evidenceSha256 }; return terminal; },
-    get terminal() { return terminal; },
-  };
-}
-function awsFixture({ policyReadLag = 0, readerReadLag = 0, deleteReadLag = 0, wrongPolicy = false, readerError = null, revokeError = null } = {}) {
-  let installed = null; let deletedPolicy = null; let deleted = false; let policyReads = 0; let readerReads = 0; let deleteReads = 0; const calls = { put: 0, del: 0, describe: 0, events: 0 };
+const authorization = (overrides = {}) => createBackendLogDiagnosticAuthorization({ sourceSha, protectedEnvironmentApprovalEvidence: approval(), issuedAt: now.toISOString(), ...overrides });
+const zeroCounts = (value = authorization()) => Object.fromEntries(Object.keys(value.mutationCeilings).map((key) => [key, 0]));
+function awsFixture({ policyReadLag = 0, readerReadLag = 0, deleteReadLag = 0, wrongPolicy = false, readerError = null, revokeError = null, journalWriteErrorAt = null, streamMismatchAt = null } = {}) {
+  let installed = null; let deletedPolicy = null; let deleted = false; let policyReads = 0; let readerReads = 0; let deleteReads = 0; const objects = new Map();
+  const calls = { sts: 0, getPolicy: 0, put: 0, del: 0, describe: 0, events: 0, s3Get: 0, s3Put: 0 };
   const admin = async (args) => {
-    if (args[0] === "sts") return { Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-bootstrap-mfa/session" };
+    if (args[0] === "sts") { calls.sts += 1; return { Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-bootstrap-mfa/session" }; }
     if (args[1] === "get-role-policy") {
+      calls.getPolicy += 1;
       policyReads += 1;
       if (deleted && deleteReads++ < deleteReadLag) return { PolicyDocument: deletedPolicy || {} };
       if (!installed) { const error = new Error("NoSuchEntity"); error.name = "NoSuchEntity"; throw error; }
@@ -41,26 +38,32 @@ function awsFixture({ policyReadLag = 0, readerReadLag = 0, deleteReadLag = 0, w
     }
     if (args[1] === "put-role-policy") { installed = JSON.parse(args.at(-1)); calls.put += 1; return {}; }
     if (args[1] === "delete-role-policy") { if (revokeError) throw revokeError; deletedPolicy = installed; installed = null; deleted = true; calls.del += 1; return {}; }
+    if (args[0] === "s3api") {
+      const key = args[args.indexOf("--key") + 1];
+      assert.equal(args[args.indexOf("--bucket") + 1], PRODUCTION_BACKEND_LOG_DIAGNOSTIC.journalBucket);
+      if (args[1] === "get-object") { calls.s3Get += 1; if (!objects.has(key)) { const error = new Error("NoSuchKey"); error.name = "NoSuchKey"; throw error; } fs.writeFileSync(args.at(-1), objects.get(key)); return {}; }
+      if (args[1] === "put-object") { calls.s3Put += 1; if (calls.s3Put === journalWriteErrorAt) throw new Error("journal write failed"); if (objects.has(key)) { const error = new Error("PreconditionFailed"); error.name = "PreconditionFailed"; throw error; } assert.ok(args.includes("--if-none-match")); assert.equal(args[args.indexOf("--server-side-encryption") + 1], "AES256"); objects.set(key, fs.readFileSync(args[args.indexOf("--body") + 1])); return {}; }
+    }
     throw new Error(`unexpected admin call ${args.join(" ")}`);
   };
   const reader = async (args) => {
-    if (args[0] === "sts") return { Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-independent-checker/session" };
-    if (args[1] === "describe-log-streams") { calls.describe += 1; if (readerError && readerReads++ >= readerError.after) throw readerError.error; if (readerReads++ < readerReadLag) { const error = new Error("AccessDenied eventual consistency"); error.name = "AccessDenied"; throw error; } return { logStreams: [{ logStreamName: args[args.indexOf("--log-stream-name-prefix") + 1] }] }; }
-    if (args[1] === "get-log-events") { calls.events += 1; return { events: [{ message: "startup failed password=super-secret Authorization: Bearer abc.def.ghi" }] }; }
+    if (args[0] === "sts") { calls.sts += 1; return { Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-independent-checker/session" }; }
+    if (args[1] === "describe-log-streams") { calls.describe += 1; if (readerError && readerReads++ >= readerError.after) throw readerError.error; if (readerReads++ < readerReadLag) { const error = new Error("AccessDenied eventual consistency"); error.name = "AccessDenied"; throw error; } const requested = args[args.indexOf("--log-stream-name-prefix") + 1]; return { logStreams: [{ logStreamName: calls.describe === streamMismatchAt ? `${requested}-other` : requested }] }; }
+    if (args[1] === "get-log-events") { calls.events += 1; assert.ok(args.includes("--no-paginate")); return { events: [{ message: `startup failed\npassword=super-secret\ntoken=abc.def.ghi\nAuthorization: Bearer bearer-value\nDATABASE_URL=${credentialedDatabaseUrl}\nAWS_ACCESS_KEY_ID=${awsAccessKeyLike}\nAWS_SECRET_ACCESS_KEY=secret-value` }] }; }
     throw new Error(`unexpected reader call ${args.join(" ")}`);
   };
-  return { admin, reader, calls, get installed() { return installed; }, get policyReads() { return policyReads; }, get readerReads() { return readerReads; }, get deleteReads() { return deleteReads; } };
+  return { admin, reader, calls, objects, get installed() { return installed; }, get policyReads() { return policyReads; }, get readerReads() { return readerReads; }, get deleteReads() { return deleteReads; } };
 }
-const runDiagnostic = ({ value = authorization(), journal = journalFixture(), aws = awsFixture(), state = "state.json", evidence = "evidence.json", sleep = async () => {} } = {}) => {
+const runDiagnostic = ({ value = authorization(), aws = awsFixture(), state = "state.json", evidence = "evidence.json", sleep = async () => {}, clock = () => now, protectedMain = () => ({ head: sourceSha }) } = {}) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-log-diagnostic-test-")); fs.chmodSync(directory, 0o700);
-  return executeBackendLogDiagnostic({ authorization: value, sourceSha, statePath: path.join(directory, state), evidencePath: path.join(directory, evidence), admin: aws.admin, reader: aws.reader, journal, protectedMain: () => ({ head: sourceSha }), now, sleep }).then((result) => ({ result, directory, journal, aws }));
+  return executeBackendLogDiagnostic({ authorization: value, sourceSha, statePath: path.join(directory, state), evidencePath: path.join(directory, evidence), admin: aws.admin, reader: aws.reader, protectedMain, now, clock, sleep }).then((result) => ({ result, directory, aws }));
 };
 
 test("policy grants only exact backend group and eight exact streams", () => {
   const value = authorization();
   assertBackendLogDiagnosticPolicy(value.policyDocument, { expiresAt: value.expiresAt });
   assert.deepEqual(value.policyDocument.Statement.map(({ Action }) => Action), ["logs:DescribeLogStreams", "logs:GetLogEvents"]);
-  assert.equal(value.policyDocument.Statement[0].Resource, "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-backend");
+  assert.equal(value.policyDocument.Statement[0].Resource, "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-backend:log-stream:*");
   assert.deepEqual(value.policyDocument.Statement[1].Resource, backendLogStreams().map((stream) => `arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-backend:log-stream:${stream}`));
   for (const action of ["logs:FilterLogEvents", "logs:StartQuery", "iam:PutRolePolicy", "ecs:UpdateService", "secretsmanager:GetSecretValue", "ssm:GetParameter"]) {
     const tampered = structuredClone(value.policyDocument); tampered.Statement[1].Action = action;
@@ -73,7 +76,8 @@ test("policy grants only exact backend group and eight exact streams", () => {
 test("authorization requires exact source, incident, approval, and untampered policy", () => {
   const value = authorization();
   assert.equal(assertBackendLogDiagnosticAuthorization(value, { sourceSha, now }), value);
-  for (const [field, replacement] of [["sourceSha", "a".repeat(40)], ["recoveryRunId", "1"], ["failedRecoveryEvidenceSha256", "0".repeat(64)], ["logStreams", ["ecs/backend/other"]], ["mutationCeilings", { ...value.mutationCeilings, otherAwsWrites: 1 }]]) {
+  assert.deepEqual(value.journal.allowedActions, ["s3:GetObject", "s3:PutObject"]); assert.equal(value.journal.putObjectMaxCount, 2); assert.equal(value.mutationCeilings.s3PutObject, 2);
+  for (const [field, replacement] of [["sourceSha", "a".repeat(40)], ["recoveryRunId", "1"], ["failedRecoveryEvidenceSha256", "0".repeat(64)], ["logStreams", ["ecs/backend/other"]], ["journal", { ...value.journal, bucket: "other" }], ["mutationCeilings", { ...value.mutationCeilings, otherAwsWrites: 1 }]]) {
     const tampered = { ...value, [field]: replacement };
     assert.throws(() => assertBackendLogDiagnosticAuthorization(tampered, { sourceSha, now }), /tampered|stale/);
   }
@@ -82,14 +86,22 @@ test("authorization requires exact source, incident, approval, and untampered po
   assert.throws(() => createBackendLogDiagnosticAuthorization({ sourceSha, protectedEnvironmentApprovalEvidence: team, issuedAt: now.toISOString() }), /User reviewers only/);
 });
 
-test("transaction uses separate principals, redacts evidence, revokes, and rejects replay", async () => {
-  const { result: evidence, journal, aws } = await runDiagnostic();
+test("complete production transaction counts every AWS call, redacts evidence, revokes, and rejects replay", async () => {
+  const aws = awsFixture(); const { result: evidence } = await runDiagnostic({ aws });
   const value = authorization();
   assertBackendLogDiagnosticEvidence(evidence, { authorization: value });
   assert.equal(aws.installed !== null, false); assert.equal(evidence.capabilityRevoked, true); assert.equal(evidence.streams.length, 8);
-  assert.equal(evidence.streams.every(({ excerptRedacted }) => !excerptRedacted.includes("super-secret") && !excerptRedacted.includes("abc.def.ghi") && excerptRedacted.includes("[REDACTED]")), true);
-  assert.equal(aws.calls.put, 1); assert.equal(aws.calls.del, 1); assert.equal(aws.calls.describe, 8); assert.equal(aws.calls.events, 8); assert.equal(journal.terminal.status, "COMPLETE");
-  await assert.rejects(runDiagnostic({ journal, aws, state: "different-state.json", evidence: "different-evidence.json" }), /durably reserved/);
+  assert.equal(evidence.streams.every(({ excerptRedacted }) => !/super-secret|abc\.def|bearer-value|postgres:\/\/user:pass|secret-value/.test(excerptRedacted) && !excerptRedacted.includes(awsAccessKeyLike) && excerptRedacted.includes("[REDACTED]")), true);
+  assert.deepEqual(evidence.counts, { stsGetCallerIdentity: 2, iamGetRolePolicy: 3, iamPutRolePolicy: 1, iamDeleteRolePolicy: 1, logsDescribeLogStreams: 8, logsGetLogEvents: 8, s3GetObject: 2, s3PutObject: 2, otherAwsCalls: 0, otherAwsWrites: 0, secretReads: 0, ssmReads: 0 });
+  assert.equal(aws.calls.put, 1); assert.equal(aws.calls.del, 1); assert.equal(aws.calls.describe, 8); assert.equal(aws.calls.events, 8); assert.equal(aws.calls.s3Put, 2); assert.equal(aws.calls.s3Get, 2);
+  assert.equal(JSON.parse(aws.objects.get(value.journal.terminalKey)).evidence.evidenceSha256, evidence.evidenceSha256);
+  await assert.rejects(runDiagnostic({ aws, state: "different-state.json", evidence: "different-evidence.json" }), /durably reserved/);
+});
+
+test("operator CLI consumes the authenticated workflow artifact through the complete transaction", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-log-diagnostic-cli-")); fs.chmodSync(directory, 0o700); const aws = awsFixture(); const value = authorization();
+  const evidence = await runCli(["--source-sha", sourceSha, "--authorization-workflow-run-id", "123456", "--authorization-workflow-run-attempt", "1", "--state", path.join(directory, "state.json"), "--evidence", path.join(directory, "evidence.json")], { resolveAuthorization: async ({ workflowRunId, workflowRunAttempt }) => { assert.equal(workflowRunId, "123456"); assert.equal(workflowRunAttempt, "1"); return { authorization: value }; }, admin: aws.admin, reader: aws.reader, protectedMain: () => ({ head: sourceSha }), now, clock: () => now, sleep: async () => {} });
+  assertBackendLogDiagnosticEvidence(evidence, { authorization: value }); assert.equal(aws.calls.put, 1); assert.equal(aws.calls.del, 1); assert.equal(aws.calls.s3Put, 2);
 });
 
 test("transaction fails closed for wrong reader and never installs capability", async () => {
@@ -98,16 +110,29 @@ test("transaction fails closed for wrong reader and never installs capability", 
   assert.equal(aws.calls.put, 0);
 });
 
+test("source drift and stale authorization fail before reservation or capability installation", async () => {
+  const drifted = awsFixture();
+  await assert.rejects(runDiagnostic({ aws: drifted, protectedMain: () => { throw new Error("protected main moved"); } }), /protected main moved/);
+  assert.equal(drifted.calls.s3Put, 0); assert.equal(drifted.calls.put, 0);
+  const expired = awsFixture();
+  await assert.rejects(runDiagnostic({ aws: expired, clock: () => new Date("2026-09-08T12:31:00.000Z") }), /stale|expired/);
+  assert.equal(expired.calls.put, 0); assert.equal(expired.calls.del, 0); assert.equal(expired.calls.s3Put, 0);
+  const expiresAfterReservation = awsFixture(); let freshnessChecks = 0;
+  await assert.rejects(runDiagnostic({ aws: expiresAfterReservation, clock: () => freshnessChecks++ === 0 ? now : new Date("2026-09-08T12:31:00.000Z") }), /stale|expired/);
+  assert.equal(expiresAfterReservation.calls.put, 0); assert.equal(expiresAfterReservation.calls.del, 0); assert.equal(expiresAfterReservation.calls.s3Put, 2);
+});
+
 test("revocation failure prevents COMPLETE evidence", async () => {
   const revokeError = new Error("revocation unavailable"); const aws = awsFixture({ revokeError });
-  await assert.rejects(runDiagnostic({ aws }), /revocation failed/);
+  await assert.rejects(runDiagnostic({ aws }), /cleanup failed/);
   assert.equal(aws.calls.put, 1); assert.equal(aws.calls.del, 0);
 });
 
 test("IAM convergence is bounded, read-only after one PutRolePolicy, and revokes after failures", async () => {
   const delayed = awsFixture({ policyReadLag: 2, readerReadLag: 2, deleteReadLag: 2 });
-  const { result, journal } = await runDiagnostic({ aws: delayed });
-  assert.equal(result.status, "COMPLETE"); assert.equal(delayed.calls.put, 1); assert.equal(delayed.calls.del, 1); assert.equal(journal.terminal.capabilityRevoked, true);
+  const { result } = await runDiagnostic({ aws: delayed });
+  assert.equal(result.status, "COMPLETE"); assert.equal(delayed.calls.put, 1); assert.equal(delayed.calls.del, 1);
+  assert.equal(result.counts.iamGetRolePolicy, 6); assert.equal(result.counts.logsDescribeLogStreams, 10);
   assert.ok(delayed.policyReads <= 1 + PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts + PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts);
   const wrong = awsFixture({ wrongPolicy: true });
   await assert.rejects(runDiagnostic({ aws: wrong }), /permanent exact-policy mismatch/); assert.equal(wrong.calls.put, 1); assert.equal(wrong.calls.del, 1);
@@ -117,16 +142,31 @@ test("IAM convergence is bounded, read-only after one PutRolePolicy, and revokes
   await assert.rejects(runDiagnostic({ aws: readFailure }), /CloudWatch unavailable/); assert.equal(readFailure.calls.put, 1); assert.equal(readFailure.calls.del, 1);
   const revokeTimeout = awsFixture({ deleteReadLag: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts + 1 });
   await assert.rejects(runDiagnostic({ aws: revokeTimeout }), /revocation did not converge/); assert.equal(revokeTimeout.calls.put, 1); assert.equal(revokeTimeout.calls.del, 1);
+  assert.equal(revokeTimeout.calls.getPolicy, 1 + 1 + PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts);
 });
 
-test("durable reservation is atomic across concurrent hosts and different authorizations do not collide", async () => {
-  const journal = journalFixture(); const value = authorization();
-  const first = journal.reserve({ authorization: value }); const second = journal.reserve({ authorization: value });
-  await first; await assert.rejects(second, /already durably reserved/);
-  const other = { ...authorization(), authorizationSha256: `${"0".repeat(63)}1` };
-  const separate = journalFixture(); await assert.doesNotReject(separate.reserve({ authorization: other }));
-  const concurrentJournal = journalFixture(); const concurrentAws = awsFixture();
-  const outcomes = await Promise.allSettled([runDiagnostic({ journal: concurrentJournal, aws: concurrentAws, state: "host-a-state.json", evidence: "host-a-evidence.json" }), runDiagnostic({ journal: concurrentJournal, aws: concurrentAws, state: "host-b-state.json", evidence: "host-b-evidence.json" })]);
+test("reader convergence counts every attempt and exact stream substitution fails closed", async () => {
+  const timeoutError = Object.assign(new Error("AccessDenied eventual consistency"), { name: "AccessDenied" });
+  const denied = awsFixture({ readerError: { after: 0, error: timeoutError } });
+  let failure; try { await runDiagnostic({ aws: denied }); } catch (error) { failure = error; }
+  assert.match(failure.message, /did not converge/); assert.equal(failure.counts.logsDescribeLogStreams, PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts); assert.equal(denied.calls.describe, PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts); assert.equal(denied.calls.del, 1);
+  const substituted = awsFixture({ streamMismatchAt: 2 });
+  await assert.rejects(runDiagnostic({ aws: substituted }), /permanently mismatched/); assert.equal(substituted.calls.events, 1); assert.equal(substituted.calls.del, 1);
+});
+
+test("FAILED_OR_INDETERMINATE is durable and forbids every later IAM or log sequence", async () => {
+  const aws = awsFixture({ readerError: { after: 0, error: new Error("permanent CloudWatch failure") } });
+  await assert.rejects(runDiagnostic({ aws }), /permanent CloudWatch failure/);
+  const value = authorization(); const terminal = JSON.parse(aws.objects.get(value.journal.terminalKey));
+  assert.equal(terminal.status, "FAILED_OR_INDETERMINATE"); assert.equal(terminal.capabilityRevoked, true);
+  assert.equal(terminal.counts.iamPutRolePolicy, 1); assert.equal(terminal.counts.iamDeleteRolePolicy, 1); assert.equal(terminal.counts.s3PutObject, 2); assert.equal(terminal.counts.s3GetObject, 2);
+  await assert.rejects(runDiagnostic({ aws, state: "second-host.json", evidence: "second-host-evidence.json" }), /durably reserved/);
+  assert.equal(aws.calls.put, 1); assert.equal(aws.calls.events, 0);
+});
+
+test("durable reservation is atomic across concurrent hosts and local paths cannot bypass replay", async () => {
+  const concurrentAws = awsFixture();
+  const outcomes = await Promise.allSettled([runDiagnostic({ aws: concurrentAws, state: "host-a-state.json", evidence: "host-a-evidence.json" }), runDiagnostic({ aws: concurrentAws, state: "host-b-state.json", evidence: "host-b-evidence.json" })]);
   assert.equal(outcomes.filter(({ status }) => status === "fulfilled").length, 1); assert.equal(outcomes.filter(({ status }) => status === "rejected").length, 1); assert.equal(concurrentAws.calls.put, 1); assert.equal(concurrentAws.calls.events, 8);
 });
 
@@ -138,16 +178,28 @@ test("the production S3 journal uses conditional create and rejects tampered rec
     if (args[1] === "put-object") { if (objects.has(key)) { const error = new Error("PreconditionFailed"); error.name = "PreconditionFailed"; throw error; } objects.set(key, fs.readFileSync(args[args.indexOf("--body") + 1])); return {}; }
     throw new Error(`unexpected journal call ${args.join(" ")}`);
   };
-  const journal = createBackendLogDiagnosticJournal({ run, bucket: "test-bucket" }); const value = authorization();
+  const counts = { s3GetObject: 0, s3PutObject: 0 }; const journal = createBackendLogDiagnosticJournal({ run, recordCall: (action) => { counts[action] += 1; } }); const value = authorization();
   await journal.reserve({ authorization: value }); await assert.rejects(journal.reserve({ authorization: value }), /already been durably reserved|tampered/);
   const key = [...objects.keys()][0]; objects.set(key, Buffer.from("tampered\n"));
   await assert.rejects(journal.reserve({ authorization: value }), /tampered/);
+  const later = authorization({ issuedAt: "2026-09-08T12:00:01.000Z" });
+  assert.notEqual(later.journal.reservationKey, value.journal.reservationKey); await assert.doesNotReject(journal.reserve({ authorization: later }));
+  await journal.finalize({ authorization: later, status: "FAILED_OR_INDETERMINATE", capabilityRevoked: true, counts: zeroCounts(later) });
+  objects.set(later.journal.terminalKey, Buffer.from("tampered\n"));
+  await assert.rejects(journal.finalize({ authorization: later, status: "FAILED_OR_INDETERMINATE", capabilityRevoked: true, counts: zeroCounts(later) }), /tampered/);
+});
+
+test("terminal journal failure cannot produce COMPLETE evidence or exceed two S3 writes", async () => {
+  const aws = awsFixture({ journalWriteErrorAt: 2 }); let failure;
+  try { await runDiagnostic({ aws }); } catch (error) { failure = error; }
+  assert.ok(failure); assert.equal(aws.calls.s3Put, 2); assert.equal(aws.calls.s3Get, 1); assert.equal(aws.calls.del, 1);
+  assert.equal([...aws.objects.keys()].some((key) => key.endsWith("terminal.json")), false);
 });
 
 test("authorization workflow is protected and cannot execute diagnostics", () => {
   const workflow = yaml.load(fs.readFileSync(".github/workflows/authorize-production-backend-log-diagnostic.yml", "utf8"));
   const job = workflow.jobs["authorize-backend-log-diagnostic"];
-  assert.equal(job.environment, "production"); assert.deepEqual(workflow.permissions, { contents: "read" });
+  assert.equal(job.environment, "production"); assert.deepEqual(workflow.permissions, { actions: "read", contents: "read" });
   const text = fs.readFileSync(".github/workflows/authorize-production-backend-log-diagnostic.yml", "utf8");
   assert.match(text, /--require-actual-approval/); assert.doesNotMatch(text, /put-role-policy|delete-role-policy|get-log-events|configure-aws-credentials/);
 });
