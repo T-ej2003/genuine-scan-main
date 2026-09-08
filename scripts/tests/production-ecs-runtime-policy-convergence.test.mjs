@@ -6,9 +6,10 @@ import { createAwsCliAdapter, createRuntimePolicyConvergenceAuthorization, planP
 import { buildLegacyBackendRecoveryCandidate } from "../aws/production-backend-health-recovery-contract.mjs";
 import { buildRuntimeDependencyInventory, deriveEcsRuntimeDependencies, signRuntimeDependencyInventory, RUNTIME_CONSUMABILITY } from "../aws/production-ecs-runtime-consumability.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
+import { loadBackendRecoveryTaskDefinition } from "./fixtures/backend-recovery-task-definition.mjs";
 
 const sourceSha = "b".repeat(40);
-const current = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
+const current = loadBackendRecoveryTaskDefinition();
 const bindings = Object.fromEntries(["PRIVATE_KEY_CURRENT", "PUBLIC_KEY_CURRENT", "ACTIVE_KEY_VERSION", "PUBLIC_KEYS_JSON"].map((suffix) => [`ARTIFACT_SIGN_${suffix}`, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/${suffix.toLowerCase().replaceAll("_", "-")}-AbCd12`]));
 const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: `sha256:${"6".repeat(64)}`, imageReleaseSha: sourceSha, artifactSigningBindings: bindings });
 const secretVersionId = `fixture_version_${"0".repeat(16)}`;

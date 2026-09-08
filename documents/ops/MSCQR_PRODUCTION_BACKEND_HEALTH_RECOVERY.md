@@ -62,9 +62,13 @@ current revision, replacement digest, candidate diff, and human approval.
 
 The candidate task definition is derived from the current AWS readback. Its
 named delta profile permits only the backend image,
-`GIT_SHA`/`RELEASE_GIT_SHA`, and the four mandatory artifact-signing ECS secret
-references. Both identity fields equal the image authorization's authenticated
-release SHA. The four references are resolved read-only from the exact
+`GIT_SHA`/`RELEASE_GIT_SHA`, the two legacy QR signing `valueFrom` selectors,
+and the four mandatory artifact-signing ECS secret references. The QR private
+and public secrets are JSON documents; recovery changes only their existing
+exact secret references to the ECS JSON-key form `<secret-arn>:value::` so the
+container receives PEM rather than the serialized envelope. Both identity
+fields equal the image authorization's authenticated release SHA. The four
+artifact-signing references are resolved read-only from the exact
 source-controlled production names, written to the canonical source-bound
 private runtime-binding file, and authenticated again immediately before task
 registration. Recovery reads and validates the key pair, active version, and

@@ -31,13 +31,14 @@ import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contrac
 import { prepareProductionEcsRuntimeConsumability, prepareProductionEcsRuntimeInventory } from "../aws/prepare-production-ecs-runtime-consumability.mjs";
 import { ECR_DOCUMENTED_NO_RESOURCE_POLICY, MALFORMED_ECR_REPOSITORY_POLICIES, VALID_ECR_REPOSITORY_POLICIES } from "./fixtures/ecr-repository-policy-fixtures.mjs";
 import { buildRootAttestationKeyPolicy, createRootAttestationKmsVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_SIGNING_ALGORITHM, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
+import { loadBackendRecoveryTaskDefinition } from "./fixtures/backend-recovery-task-definition.mjs";
 
 const sourceSha = "b64274e155434ae9390d28762d40a37801be5362";
 const digest = "sha256:6ce8e4eae1a9243c94368e95259a19446fb6c7241e127cf010b66d0611a17189";
 const secretVersionId = `fixture_version_${"0".repeat(16)}`;
 const describeSecretResponse = (resource, patch = {}) => ({ ARN: resource, KmsKeyId: null, VersionIdsToStages: { [secretVersionId]: ["AWSCURRENT"] }, ...patch });
 const listSecretVersionsResponse = (versionIdsToStages = { [secretVersionId]: ["AWSCURRENT"] }) => ({ Versions: Object.entries(versionIdsToStages).map(([VersionId, VersionStages]) => ({ VersionId, VersionStages })) });
-const legacy = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
+const legacy = loadBackendRecoveryTaskDefinition();
 const bindings = {
   ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-AbCd12",
   ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-key-current-AbCd12",
@@ -658,7 +659,10 @@ test("Secrets Manager JSON keys are proven in the exact selected version without
     if (operation === "logs describe-log-groups") { const logGroupName = args[args.indexOf("--log-group-name-prefix") + 1]; return { logGroups: [{ logGroupName, logGroupArn: `arn:aws:logs:eu-west-2:368992683803:log-group:${logGroupName}` }] }; }
     if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource);
     if (operation === "secretsmanager list-secret-version-ids") return listSecretVersionsResponse();
-    if (operation === "secretsmanager get-secret-value") return { ARN: resource, VersionId: args[args.indexOf("--version-id") + 1], SecretString: secretString };
+    if (operation === "secretsmanager get-secret-value") {
+      const keys = (jsonKeysBySecret(value)[resource] || []).map(({ context }) => context.secretSelector.jsonKey);
+      return { ARN: resource, VersionId: args[args.indexOf("--version-id") + 1], SecretString: resource === selectedSecret ? secretString : JSON.stringify(Object.fromEntries(keys.map((key) => [key, "fixture-present"]))) };
+    }
     if (operation === "secretsmanager get-resource-policy") return { ARN: resource, ResourcePolicy: null };
     throw new Error(operation);
   };
@@ -688,6 +692,10 @@ test("awslogs groups are exact, paginated, create-aware, and refreshed before mu
     if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "secretsmanager describe-secret") return describeSecretResponse(resource);
     if (operation === "secretsmanager list-secret-version-ids") return listSecretVersionsResponse();
+    if (operation === "secretsmanager get-secret-value") {
+      const keys = (jsonKeysBySecret(value)[resource] || []).map(({ context }) => context.secretSelector.jsonKey);
+      return { ARN: resource, VersionId: args[args.indexOf("--version-id") + 1], SecretString: JSON.stringify(Object.fromEntries(keys.map((key) => [key, "fixture-present"]))) };
+    }
     if (operation === "secretsmanager get-resource-policy") return { ARN: resource, ResourcePolicy: null };
     if (operation === "logs describe-log-groups") {
       calls.push(args);

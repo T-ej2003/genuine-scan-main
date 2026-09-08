@@ -156,7 +156,7 @@ test("execute authenticates semantic authorization before any AWS call", async (
     failedRecoveryEvidenceSha256: null,
     failedRecoveryEvidenceReferenceSha256: null,
     rollbackProof: null,
-    allowedDeltaProfile: "IMAGE_SOURCE_IDENTITY_AND_EXACT_ARTIFACT_SIGNING_BINDINGS",
+    allowedDeltaProfile: "IMAGE_SOURCE_IDENTITY_EXACT_ARTIFACT_SIGNING_AND_QR_VALUE_SELECTORS",
     approval: { ticket: "INC-1", approvedBy: "security", approverRole: "Security Lead", reason: "backend recovery", verificationRef: "https://example.invalid/1", sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: digest, runtimeConsumabilitySha256 },
   };
   authorization.authorizationSha256 = canonicalSha256(authorization);
