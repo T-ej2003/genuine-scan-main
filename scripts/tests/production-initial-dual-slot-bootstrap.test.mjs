@@ -18,8 +18,8 @@ const rotationId = "rotation-initial-20260812";
 const secretArn = (name) => ["arn", "aws", "secretsmanager", "eu-west-2", "368992683803", `secret:${name}`].join(":");
 const legacy = {
   jwt: secretArn("fixture-jwt-legacy"),
-  qrPrivate: secretArn("fixture-qr-private-legacy"),
-  qrPublic: secretArn("fixture-qr-public-legacy"),
+  qrPrivate: secretArn("mscqr/prod/qr_sign_private_key-AbCd12"),
+  qrPublic: secretArn("mscqr/prod/qr_sign_public_key-AbCd12"),
 };
 const taskDefinition = {
   taskDefinition: {
@@ -29,8 +29,8 @@ const taskDefinition = {
       environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "2026-04-20" }],
       secrets: [
         { name: "JWT_SECRET", valueFrom: legacy.jwt },
-        { name: "QR_SIGN_PRIVATE_KEY", valueFrom: legacy.qrPrivate },
-        { name: "QR_SIGN_PUBLIC_KEY", valueFrom: legacy.qrPublic },
+        { name: "QR_SIGN_PRIVATE_KEY", valueFrom: `${legacy.qrPrivate}:value::` },
+        { name: "QR_SIGN_PUBLIC_KEY", valueFrom: `${legacy.qrPublic}:value::` },
       ],
     }],
   },

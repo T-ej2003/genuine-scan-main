@@ -53,9 +53,9 @@ const bindings = {
     pendingSecretId: secretArn("mscqr/prod/jwt-pending-c"),
   },
   qr: {
-    privateCurrentSecretId: secretArn("mscqr/prod/qr-private-current-d"),
+    privateCurrentSecretId: secretArn("mscqr/prod/qr_sign_private_key-AbCd12"),
     privatePendingSecretId: secretArn("mscqr/prod/qr-private-pending-e"),
-    publicCurrentSecretId: secretArn("mscqr/prod/qr-public-current-f"),
+    publicCurrentSecretId: secretArn("mscqr/prod/qr_sign_public_key-AbCd12"),
     publicPreviousSecretId: secretArn("mscqr/prod/qr-public-previous-g"),
     currentKeyVersionSecretId: secretArn("mscqr/prod/qr-current-version-i"),
     previousKeyVersionSecretId: secretArn("mscqr/prod/qr-previous-version-j"),
@@ -102,7 +102,7 @@ const strictInitialBindingOrigin = ({ bindings: candidate }) => {
 };
 
 function taskDefinition(taskBindings = bindings) {
-  return { taskDefinition: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", containerDefinitions: [{ name: "backend", environment: [{ name: "PUBLIC_APP_URL", value: "https://www.mscqr.com" }, { name: "QR_SIGN_ACTIVE_KEY_VERSION", value: taskBindings.qr.previousKeyVersion }], secrets: [{ name: "JWT_SECRET", valueFrom: taskBindings.jwt.currentSecretId }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: taskBindings.qr.privateCurrentSecretId }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: taskBindings.qr.publicCurrentSecretId }] }] } };
+  return { taskDefinition: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47", containerDefinitions: [{ name: "backend", environment: [{ name: "PUBLIC_APP_URL", value: "https://www.mscqr.com" }, { name: "QR_SIGN_ACTIVE_KEY_VERSION", value: taskBindings.qr.previousKeyVersion }], secrets: [{ name: "JWT_SECRET", valueFrom: taskBindings.jwt.currentSecretId }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: `${taskBindings.qr.privateCurrentSecretId}:value::` }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: `${taskBindings.qr.publicCurrentSecretId}:value::` }] }] } };
 }
 
 function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha, imageReleaseSha, imageAuthorizationOverride) {

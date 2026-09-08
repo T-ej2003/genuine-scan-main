@@ -1,6 +1,12 @@
+import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
+
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
 const SECRET_ARN = new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:[A-Za-z0-9/_+=.@-]+$`);
+const QR_SECRET_RESOURCES = Object.freeze({
+  qrPrivateCurrent: new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:mscqr/prod/qr_sign_private_key-[A-Za-z0-9]{6}$`),
+  qrPublicCurrent: new RegExp(`^arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:mscqr/prod/qr_sign_public_key-[A-Za-z0-9]{6}$`),
+});
 const VERSION = /^[A-Za-z0-9._:-]{1,128}$/;
 
 const backendContainer = (taskDefinition) => {
@@ -18,6 +24,12 @@ export function deriveLegacyRotationBaseline(taskDefinition) {
     qrPublicCurrent: container.secrets?.find(({ name }) => name === "QR_SIGN_PUBLIC_KEY")?.valueFrom,
     qrCurrentVersion: environment.QR_SIGN_ACTIVE_KEY_VERSION,
   };
+  for (const [name, expectedResource] of Object.entries(QR_SECRET_RESOURCES)) {
+    let selector;
+    try { selector = parseEcsSecretsManagerReference(baseline[name]); } catch { throw new Error(`Live legacy ${name} binding is invalid.`); }
+    if (!expectedResource.test(selector.resource) || selector.jsonKey !== "value" || selector.versionStage || selector.versionId) throw new Error(`Live legacy ${name} binding is invalid.`);
+    baseline[name] = selector.resource;
+  }
   for (const [name, value] of Object.entries(baseline)) {
     if (name === "qrCurrentVersion") {
       if (!VERSION.test(String(value || ""))) throw new Error("Live QR active key version is invalid.");

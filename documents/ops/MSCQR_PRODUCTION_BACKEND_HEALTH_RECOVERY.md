@@ -79,6 +79,12 @@ authorization, or recovery evidence. Roles, existing secrets, database
 bindings, networking, ports, command, health check, logging, resources, and
 every other runtime field remain byte-semantically equal.
 
+Downstream rotation rebaseline derives QR resource identity only from these
+exact `:value::` references. It validates the `value` JSON key with no version
+stage or version ID, then removes the selector for Secrets Manager SDK and
+rotation-version comparisons. JWT legacy-baseline references remain bare ARNs.
+Bare or differently selected QR references fail before rotation preparation.
+
 An execute invocation writes durable `PENDING` signing-verification evidence
 before its first live signing lookup. Authenticated resolution advances that
 state to `VERIFIED`; STS, reference-discovery, secret-value, or domain
