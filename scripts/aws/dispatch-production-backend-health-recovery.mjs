@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { constants as zlibConstants, gunzipSync, gzipSync } from "node:zlib";
+import { constants as zlibConstants, gunzipSync, gzipSync, inflateRawSync } from "node:zlib";
 import { BACKEND_HEALTH_RECOVERY } from "./production-backend-health-recovery-contract.mjs";
 import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
@@ -40,6 +40,25 @@ function deterministicGzip(bytes) {
   return compressed;
 }
 
+function gzipDeflateOffset(compressed) {
+  if (compressed.length < 18 || compressed[0] !== 0x1f || compressed[1] !== 0x8b || compressed[2] !== 8 || (compressed[3] & 0xe0) !== 0) throw new Error("Recovery dispatch bundle gzip framing is invalid.");
+  const flags = compressed[3]; let offset = 10;
+  if (flags & 0x04) {
+    if (offset + 2 > compressed.length) throw new Error("Recovery dispatch bundle gzip framing is invalid.");
+    const extraLength = compressed.readUInt16LE(offset); offset += 2;
+    if (offset + extraLength > compressed.length) throw new Error("Recovery dispatch bundle gzip framing is invalid.");
+    offset += extraLength;
+  }
+  for (const flag of [0x08, 0x10]) if (flags & flag) {
+    const end = compressed.indexOf(0, offset);
+    if (end === -1) throw new Error("Recovery dispatch bundle gzip framing is invalid.");
+    offset = end + 1;
+  }
+  if (flags & 0x02) offset += 2;
+  if (offset + 8 >= compressed.length) throw new Error("Recovery dispatch bundle gzip framing is invalid.");
+  return offset;
+}
+
 export function encodeBackendHealthRecoveryBundleTransport(bytes) {
   if (!Buffer.isBuffer(bytes) || bytes.length === 0 || bytes.length > MAX_DECOMPRESSED_BUNDLE_BYTES) throw new Error(`Recovery dispatch bundle exceeds the ${MAX_DECOMPRESSED_BUNDLE_BYTES}-byte decompressed limit.`);
   return deterministicGzip(bytes).toString("base64");
@@ -50,9 +69,14 @@ export function decodeBackendHealthRecoveryBundleTransport(encoded, expectedSha2
   const compressed = Buffer.from(encoded, "base64");
   if (compressed.toString("base64") !== encoded) throw new Error("Recovery dispatch bundle transport is not canonical base64.");
   let bytes;
-  try { bytes = gunzipSync(compressed, { maxOutputLength: MAX_DECOMPRESSED_BUNDLE_BYTES }); }
+  try {
+    const deflateOffset = gzipDeflateOffset(compressed);
+    const deflateBytes = inflateRawSync(compressed.subarray(deflateOffset), { info: true, maxOutputLength: MAX_DECOMPRESSED_BUNDLE_BYTES }).engine.bytesWritten;
+    if (deflateOffset + deflateBytes + 8 !== compressed.length) throw new Error("Recovery dispatch bundle transport must contain exactly one gzip member without trailing data.");
+    bytes = gunzipSync(compressed, { maxOutputLength: MAX_DECOMPRESSED_BUNDLE_BYTES });
+  }
   catch { throw new Error("Recovery dispatch bundle transport is invalid or exceeds the decompressed limit."); }
-  if (!bytes.length || bytes.length > MAX_DECOMPRESSED_BUNDLE_BYTES || !deterministicGzip(bytes).equals(compressed)) throw new Error("Recovery dispatch bundle gzip representation is not canonical.");
+  if (!bytes.length || bytes.length > MAX_DECOMPRESSED_BUNDLE_BYTES) throw new Error("Recovery dispatch bundle transport is invalid or exceeds the decompressed limit.");
   if (!/^[a-f0-9]{64}$/.test(expectedSha256 || "") || sha256(bytes) !== expectedSha256) throw new Error("Recovery dispatch bundle bytes do not match their SHA-256.");
   return bytes;
 }
