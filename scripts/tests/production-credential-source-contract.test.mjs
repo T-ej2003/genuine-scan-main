@@ -378,7 +378,7 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
   const walk = (directory) => fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(`${directory}/${entry.name}`) : [`${directory}/${entry.name}`]);
   const direct = walk("scripts/aws").filter((file) => /\.(mjs|sh)$/.test(file) && /(?:execFileSync|execFile|spawnSync|spawn|run)\(["']aws["']|\baws\s+(?:sts|kms|ecr|ecs|iam|s3|secretsmanager|rds|cloudtrail)/.test(fs.readFileSync(file, "utf8"))).sort();
   const classified = [
-    "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/production-backend-log-diagnostic.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs",
+    "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs",
   ].sort();
   assert.deepEqual(direct, classified);
   const boundaries = {
@@ -387,7 +387,6 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
     "scripts/aws/deploy-ecs-service.sh": /configure_production_aws_credential_source/,
     "scripts/aws/discover-staging-endpoints.mjs": /--profile", C\.profile/,
     "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs": /createProductionAwsCommandRunner/,
-    "scripts/aws/production-backend-log-diagnostic.mjs": /const awsAdapter = \(profile\)[\s\S]+"--profile", profile/,
     "scripts/aws/production-cutover-production-adapters.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/production-dual-slot-rebaseline-contract.mjs": /explicit credential-bound AWS runner/,
     "scripts/aws/production-identity-adapters.mjs": /createProductionAwsCredentialEnvironment/,
@@ -403,4 +402,12 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
   };
   for (const [file, boundary] of Object.entries(boundaries)) assert.match(fs.readFileSync(file, "utf8"), boundary, file);
   assert.match(fs.readFileSync("scripts/aws/verify-production-dependency-closure.mjs", "utf8"), /requireTokens/);
+});
+
+test("backend log diagnostics use the canonical runner instead of a raw inherited-environment AWS adapter", () => {
+  const source = fs.readFileSync("scripts/aws/production-backend-log-diagnostic.mjs", "utf8");
+  assert.match(source, /createProductionAwsCommandRunner/);
+  assert.match(source, /createProductionGithubCommandRunner/);
+  assert.match(source, /PRODUCTION_AWS_CREDENTIAL_SOURCE\.NAMED_PROFILE/);
+  assert.doesNotMatch(source, /awsAdapter|(?:execFileSync|execFile|spawnSync|spawn)\(["']aws["']/);
 });

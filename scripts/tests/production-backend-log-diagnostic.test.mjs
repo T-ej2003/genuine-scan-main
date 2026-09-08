@@ -5,12 +5,18 @@ import path from "node:path";
 import test from "node:test";
 import yaml from "js-yaml";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
-import { assertBackendLogDiagnosticAuthorization, assertBackendLogDiagnosticEvidence, assertBackendLogDiagnosticPolicy, backendLogStreams, buildBackendLogDiagnosticPolicy, createBackendLogDiagnosticAuthorization, createBackendLogDiagnosticJournal, executeBackendLogDiagnostic, PRODUCTION_BACKEND_LOG_DIAGNOSTIC, runCli } from "../aws/production-backend-log-diagnostic.mjs";
+import { assertBackendLogDiagnosticAuthorization, assertBackendLogDiagnosticEvidence, assertBackendLogDiagnosticPolicy, backendLogStreams, buildBackendLogDiagnosticPolicy, createBackendLogDiagnosticAuthorization, createBackendLogDiagnosticAwsRunner, createBackendLogDiagnosticJournal, executeBackendLogDiagnostic, PRODUCTION_BACKEND_LOG_DIAGNOSTIC, runCli } from "../aws/production-backend-log-diagnostic.mjs";
+import { productionAwsCredentialSourceContract } from "../aws/production-credential-source-contract.mjs";
 
 const sourceSha = "c426a911cd732cd2f4bc5c01134cb858882a0750";
 const now = new Date("2026-09-08T12:00:00.000Z");
 const credentialedDatabaseUrl = ["postgres", "://", "user", ":", "pass", "@example/db"].join("");
 const awsAccessKeyLike = ["AKIA", "1234567890ABCDEF"].join("");
+const hostileAwsEnvironment = Object.freeze({
+  HOME: "/safe/home", PATH: "/safe/bin", LANG: "en_GB.UTF-8",
+  ...Object.fromEntries(productionAwsCredentialSourceContract.namedProfileStrips.map((name) => [name, `hostile-${name}`])),
+  AWS_ENDPOINT_URL_STS: "https://hostile.invalid/sts", AWS_ENDPOINT_URL_IAM: "https://hostile.invalid/iam", AWS_ENDPOINT_URL_S3: "https://hostile.invalid/s3", AWS_ENDPOINT_URL_LOGS: "https://hostile.invalid/logs",
+});
 
 function approval({ reviewer = "T-ej2003", configured = "T-ej2003" } = {}) {
   return createProductionEnvironmentApprovalEvidence({
@@ -102,6 +108,22 @@ test("operator CLI consumes the authenticated workflow artifact through the comp
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-log-diagnostic-cli-")); fs.chmodSync(directory, 0o700); const aws = awsFixture(); const value = authorization();
   const evidence = await runCli(["--source-sha", sourceSha, "--authorization-workflow-run-id", "123456", "--authorization-workflow-run-attempt", "1", "--state", path.join(directory, "state.json"), "--evidence", path.join(directory, "evidence.json")], { resolveAuthorization: async ({ workflowRunId, workflowRunAttempt }) => { assert.equal(workflowRunId, "123456"); assert.equal(workflowRunAttempt, "1"); return { authorization: value }; }, admin: aws.admin, reader: aws.reader, protectedMain: () => ({ head: sourceSha }), now, clock: () => now, sleep: async () => {} });
   assertBackendLogDiagnosticEvidence(evidence, { authorization: value }); assert.equal(aws.calls.put, 1); assert.equal(aws.calls.del, 1); assert.equal(aws.calls.s3Put, 2);
+});
+
+test("diagnostic admin and reader runners sanitize the complete hostile AWS environment", async () => {
+  for (const profile of ["default", "mscqr-production-independent-checker"]) {
+    const calls = [];
+    const run = createBackendLogDiagnosticAwsRunner({ profile, env: hostileAwsEnvironment, exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; } });
+    for (const args of [["sts", "get-caller-identity"], ["iam", "get-role-policy"], ["s3api", "get-object"], ["logs", "describe-log-streams"]]) await run(args);
+    assert.equal(calls.length, 4);
+    for (const { file, args, options } of calls) {
+      assert.equal(file, "aws"); assert.equal(options.env.AWS_PROFILE, profile); assert.equal(options.env.AWS_REGION, "eu-west-2"); assert.equal(options.env.AWS_DEFAULT_REGION, "eu-west-2"); assert.equal(options.env.AWS_EC2_METADATA_DISABLED, "true");
+      assert.equal(options.env.HOME, hostileAwsEnvironment.HOME); assert.equal(options.env.PATH, hostileAwsEnvironment.PATH); assert.equal(options.env.LANG, hostileAwsEnvironment.LANG);
+      for (const name of Object.keys(hostileAwsEnvironment).filter((name) => name.startsWith("AWS_") && name !== "AWS_PROFILE")) assert.equal(options.env[name], undefined, name);
+      assert.ok(args.includes("--region")); assert.ok(args.includes("--output")); assert.ok(args.includes("--no-cli-pager"));
+    }
+  }
+  assert.throws(() => createBackendLogDiagnosticAwsRunner({ profile: "", env: hostileAwsEnvironment, exec: () => { throw new Error("must not execute"); } }), /explicit profile/);
 });
 
 test("transaction fails closed for wrong reader and never installs capability", async () => {
