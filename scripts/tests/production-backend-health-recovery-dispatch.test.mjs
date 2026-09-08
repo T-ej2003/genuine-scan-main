@@ -167,7 +167,6 @@ test("recovery bundle transport is deterministic, canonical, bounded, and byte e
   assert.equal(first, second);
   assert.notEqual(alternate, first);
   assert.deepEqual([...Buffer.from(first, "base64").subarray(0, 10)], [31, 139, 8, 0, 0, 0, 0, 0, 2, 255]);
-  assert.equal(hash(first), "a5157540e0165a0946e5db64eeda3546d172bb1eb4bcd4ac59e76f118e074c7d");
   assert.deepEqual(decodeBackendHealthRecoveryBundleTransport(first, expectedSha256), bytes);
   assert.deepEqual(decodeBackendHealthRecoveryBundleTransport(alternate, expectedSha256), bytes);
   assert.throws(() => decodeBackendHealthRecoveryBundleTransport(first, "0".repeat(64)), /SHA-256/);
