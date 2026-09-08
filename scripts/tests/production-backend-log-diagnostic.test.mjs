@@ -23,11 +23,11 @@ function approval({ reviewer = "T-ej2003", configured = "T-ej2003" } = {}) {
 
 const authorization = (overrides = {}) => createBackendLogDiagnosticAuthorization({ sourceSha, protectedEnvironmentApprovalEvidence: approval(), issuedAt: now.toISOString(), ...overrides });
 const zeroCounts = (value = authorization()) => Object.fromEntries(Object.keys(value.mutationCeilings).map((key) => [key, 0]));
-function awsFixture({ policyReadLag = 0, readerReadLag = 0, deleteReadLag = 0, wrongPolicy = false, readerError = null, revokeError = null, journalWriteErrorAt = null, streamMismatchAt = null } = {}) {
+function awsFixture({ adminArn = "arn:aws:iam::368992683803:root", policyReadLag = 0, readerReadLag = 0, deleteReadLag = 0, wrongPolicy = false, readerError = null, revokeError = null, journalWriteErrorAt = null, streamMismatchAt = null } = {}) {
   let installed = null; let deletedPolicy = null; let deleted = false; let policyReads = 0; let readerReads = 0; let deleteReads = 0; const objects = new Map();
   const calls = { sts: 0, getPolicy: 0, put: 0, del: 0, describe: 0, events: 0, s3Get: 0, s3Put: 0 };
   const admin = async (args) => {
-    if (args[0] === "sts") { calls.sts += 1; return { Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-bootstrap-mfa/session" }; }
+    if (args[0] === "sts") { calls.sts += 1; return { Account: "368992683803", Arn: adminArn }; }
     if (args[1] === "get-role-policy") {
       calls.getPolicy += 1;
       policyReads += 1;
@@ -108,6 +108,19 @@ test("transaction fails closed for wrong reader and never installs capability", 
   const aws = awsFixture(); aws.reader = async () => ({ Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" });
   await assert.rejects(runDiagnostic({ aws }), /independent checker/);
   assert.equal(aws.calls.put, 0);
+});
+
+test("capability installation requires the exact root administrator and rejects bootstrap profile identity confusion", async () => {
+  assert.equal(PRODUCTION_BACKEND_LOG_DIAGNOSTIC.adminPrincipalArn, "arn:aws:iam::368992683803:root");
+  for (const adminArn of [
+    "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator",
+    "arn:aws:sts::368992683803:assumed-role/mscqr-production-bootstrap-mfa/session",
+    "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/session",
+  ]) {
+    const aws = awsFixture({ adminArn });
+    await assert.rejects(runDiagnostic({ aws }), /governed administrator boundary/);
+    assert.equal(aws.calls.s3Put, 0); assert.equal(aws.calls.put, 0); assert.equal(aws.calls.describe, 0);
+  }
 });
 
 test("source drift and stale authorization fail before reservation or capability installation", async () => {

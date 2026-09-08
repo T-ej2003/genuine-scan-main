@@ -34,6 +34,7 @@ export const PRODUCTION_BACKEND_LOG_DIAGNOSTIC = Object.freeze({
   artifactName: "production-backend-log-diagnostic-authorization",
   accountId: "368992683803",
   region: "eu-west-2",
+  adminPrincipalArn: "arn:aws:iam::368992683803:root",
   logGroupName: "/ecs/mscqr-backend",
   readerRoleName: "mscqr-production-independent-checker",
   readerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
@@ -125,7 +126,7 @@ export function assertBackendLogDiagnosticAuthorization(value, { sourceSha, now 
 const policyFromAws = (value) => value?.PolicyDocument ? (typeof value.PolicyDocument === "string" ? JSON.parse(decodeURIComponent(value.PolicyDocument)) : value.PolicyDocument) : null;
 const isMissingPolicy = (error) => /NoSuchEntity/i.test(`${error?.name || ""} ${error?.message || ""} ${error?.stderr || ""}`);
 const exactReader = (identity) => identity?.Account === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId && new RegExp(`^arn:aws:sts::${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId}:assumed-role/${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleName}/`).test(identity?.Arn || "");
-const exactAdmin = (identity) => identity?.Account === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId && /^(arn:aws:iam::368992683803:root|arn:aws:sts::368992683803:assumed-role\/mscqr-production-bootstrap-mfa\/)/.test(identity?.Arn || "");
+const exactAdmin = (identity) => identity?.Account === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId && identity?.Arn === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.adminPrincipalArn;
 const canonicalJournalBytes = (value) => Buffer.from(`${canonicalJson(value)}\n`);
 const redactBackendLogDiagnostic = (value) => redactStageBRefreshDiagnostic(value, { maxChars: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.maxEvidenceCharsPerStream })
   .replace(/\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s"']+/gi, "[REDACTED_CONNECTION_STRING]")
