@@ -664,9 +664,10 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
   return { valid: true, transition: returnedEvidence.transition, preWriteAuthorizationAuthenticated: true, idempotentReplay: allNew, writes: existingEvidence ? 0 : Object.keys(versionIds).filter((slot) => states[slot] !== "NEW_AUTHENTICATED").length, evidence: returnedEvidence, predecessor, evidenceFile: existingEvidence ? path.resolve(outputFile) : persisted.path, evidenceSha256: persisted.sha256, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, versionIds };
 }
 
-export function finalizeStaleRotationSupersessionMaterialJournal({ outputFile, repositoryRoot = process.cwd() } = {}) {
+export function finalizeStaleRotationSupersessionMaterialJournal({ outputFile, expectedFileSha256, repositoryRoot = process.cwd() } = {}) {
   const materialFile = materialFileFor(outputFile);
-  ensureStageBPrivateFile({ filePath: materialFile, repositoryRoot, label: "Replacement material journal" });
+  const authenticated = ensureStageBPrivateFile({ filePath: materialFile, repositoryRoot, label: "Replacement material journal" });
+  if (!/^[a-f0-9]{64}$/.test(expectedFileSha256 || "") || authenticated.sha256 !== expectedFileSha256) throw new Error("Replacement material journal differs from the consumed supersession transaction.");
   unlinkSync(materialFile);
   return true;
 }
