@@ -1,6 +1,6 @@
 import { canonicalSha256, taskDefinitionFingerprint } from "./stage-b-task-definition-recovery-contract.mjs";
 import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
-import { assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmentReviewer } from "./production-github-environment-approval.mjs";
+import { assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmentReviewer } from "./production-github-environment-approval.mjs";
 import { ARTIFACT_SIGNING_BINDINGS } from "./production-artifact-signing-domain.mjs";
 import { loadArtifactSigningBootstrapContract } from "./production-artifact-signing-bootstrap.mjs";
 import { ROLLBACK_VIABILITY, assertFreshRollbackEquivalence, assertRollbackSupersessionProof } from "./production-ecs-rollback-viability.mjs";
@@ -599,7 +599,11 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
       rollbackTargetDigest: approval.rollbackTargetDigest,
     });
   } else if (ROLLBACK_APPROVAL_FIELDS.some((field) => field in approval)) throw new Error("Human rollback approval lacks authenticated live rollback proof.");
-  assertProductionEnvironmentReviewer(environmentApproval, { approvedBy: approval.approvedBy, executionActor });
+  const actualReviewer = environmentApproval.schemaVersion === 3
+    ? assertProductionEnvironmentActualReviewer(environmentApproval, { sourceSha, repository: githubContext?.repository, executionActor })
+    : null;
+  if (actualReviewer && approval.approvedBy !== "UNSET" && actualReviewer.toLowerCase() !== approval.approvedBy.toLowerCase()) throw new Error("Backend health recovery approval reviewer differs from the authenticated GitHub approval event.");
+  assertProductionEnvironmentReviewer(environmentApproval, { approvedBy: approval.approvedBy === "UNSET" ? actualReviewer : approval.approvedBy, executionActor });
   if (/(BEGIN [A-Z ]+PRIVATE KEY|SecretString|AccessKeyId|SecretAccessKey|SessionToken|DATABASE_URL=|password|token)/i.test(JSON.stringify(approval))) throw new Error("Backend health recovery approval contains prohibited secret material.");
   const { authorizationSha256, ...body } = authorization;
   if (!HEX256.test(authorizationSha256 || "") || canonicalSha256(body) !== authorizationSha256) throw new Error("Backend health recovery authorization hash is invalid.");

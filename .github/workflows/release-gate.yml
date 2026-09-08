@@ -510,6 +510,10 @@ jobs:
             exit 1
           fi
           evidence_file="$approval_dir/production-environment-approval.json"
+          approval_args=()
+          if [[ "${{ inputs.release_mode }}" == "backend-health-recovery" ]]; then
+            approval_args+=(--require-actual-approval)
+          fi
           node scripts/aws/production-github-environment-approval.mjs \
             --repository "$GITHUB_REPOSITORY" \
             --environment production \
@@ -519,6 +523,7 @@ jobs:
             --workflow-run-id "$GITHUB_RUN_ID" \
             --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
             --execution-actor "$GITHUB_ACTOR" \
+            "${approval_args[@]}" \
             --output "$evidence_file"
           echo "evidence_file=$evidence_file" >> "$GITHUB_OUTPUT"
           echo "evidence_sha256=$(sha256sum "$evidence_file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"

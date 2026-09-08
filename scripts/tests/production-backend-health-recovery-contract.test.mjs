@@ -1041,6 +1041,31 @@ test("configured solo operator may dispatch and approve when GitHub allows self-
   assert.equal(assertLegacyBackendRecoveryEligibility(input).recoveryImageDigest, digest);
 });
 
+test("pre-approval reviewer placeholder is replaced only by the authenticated GitHub reviewer", () => {
+  const approvedEnvironment = (userLogin) => createProductionEnvironmentApprovalEvidence({
+    repository: githubContext.repository, environment: "production", sourceSha, workflowRunId: githubContext.workflowRunId,
+    workflowRef: githubContext.workflowRef, eventName: githubContext.eventName, workflowRunAttempt: githubContext.workflowRunAttempt, executionActor: "release-operator", observedAt: now.toISOString(),
+    environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 183396573, login: "T-ej2003" } }] }] },
+    actualApproval: { state: "approved", environmentId: 14514600120, environmentName: "production", userId: 183396573, userLogin },
+  });
+  const input = base();
+  input.environmentApproval = approvedEnvironment("T-ej2003");
+  input.authorization = createLegacyBackendRecoveryAuthorization({
+    sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
+    imageAuthorization: imageFixture.authorization, environmentApproval: input.environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, approval: { ...approval, approvedBy: "UNSET" },
+  });
+  assert.equal(assertLegacyBackendRecoveryEligibility(input).recoveryImageDigest, digest);
+  for (const reviewer of ["UNSET", "unauthorized-reviewer"]) {
+    const rejected = base();
+    rejected.environmentApproval = approvedEnvironment(reviewer);
+    rejected.authorization = createLegacyBackendRecoveryAuthorization({
+      sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
+      imageAuthorization: imageFixture.authorization, environmentApproval: rejected.environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, approval: { ...approval, approvedBy: "UNSET" },
+    });
+    assert.throws(() => assertLegacyBackendRecoveryEligibility(rejected), /not a configured production environment reviewer/);
+  }
+});
+
 test("fabricated human metadata cannot replace authenticated GitHub environment approval", async () => {
   for (const change of [
     (input) => { input.environmentApproval = undefined; },

@@ -22,14 +22,16 @@ The `backend-health-recovery` release-gate mode requires:
   reviewer and administrator bypass disabled.
 
 GitHub's protected-environment gate is the approval authority. The workflow
-authenticates its live reviewer principals and self-review policy through the
-GitHub API and binds the resulting private, source/run-specific evidence into
-recovery authorization before configuring AWS credentials. `approvedBy` must
-name one of those configured principals, but it is audit metadata rather than
-standalone proof of identity. When GitHub has `Prevent self-review` enabled it
-must differ from the dispatcher; when disabled, GitHub may accept the configured
-solo operator as both dispatcher and reviewer. `approverRole` remains descriptive
-audit metadata.
+authenticates its live reviewer principals, actual approval event, and
+self-review policy through the GitHub API and binds the resulting private,
+source/run-specific evidence into recovery authorization before configuring AWS
+credentials. A pre-approval dispatch bundle may retain `approvedBy=UNSET`; only
+the authenticated GitHub approval event may resolve that placeholder. A
+non-placeholder `approvedBy` must match the actual reviewer, and the effective
+reviewer must be configured for the environment. When GitHub has `Prevent
+self-review` enabled it must differ from the dispatcher; when disabled, GitHub
+may accept the configured solo operator as both dispatcher and reviewer.
+`approverRole` remains descriptive audit metadata.
 
 The workflow creates a dedicated operator-owned `0700` directory below
 `RUNNER_TEMP`; the shared artifact contract atomically publishes the approval
@@ -552,10 +554,13 @@ operation or runtime dependency fails Stage-B deployment closure.
    reviewed IAM policy versions are published. Require both exact ECR direct
    reads and both recovery mutation evaluations to pass before dispatch.
 2. Produce exact JSON bytes for canonical image authorization and human
-   approval. Record each file's SHA-256. The approval object must contain
+   approval. Record each file's SHA-256. The pre-approval object must contain
    `ticket`, `approvedBy`, `approverRole`, `reason`, `verificationRef`,
    `sourceSha`, `currentTaskDefinitionArn`, and `recoveryImageDigest`. A stalled
-   rollback supersession additionally requires the exact
+   request may use exactly `approvedBy=UNSET`; Release Gate replaces it only
+   with the authenticated GitHub deployment reviewer after approval. It never
+   accepts the placeholder or an unconfigured reviewer as the effective actor.
+   A stalled rollback supersession additionally requires the exact
    `rollbackDeploymentArn`, `rollbackTargetTaskDefinitionArn`, and
    `rollbackTargetDigest` from authenticated reconciliation.
 3. If authenticated failed-recovery history exists, produce its KMS-signed
