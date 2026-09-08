@@ -469,6 +469,28 @@ function assertArtifactSigningBindings(bindings) {
   return bindings;
 }
 
+function artifactSigningBindingSourceState(payload, checkedBindings) {
+  const containers = definition(payload).containerDefinitions || [];
+  const expectedRefs = new Set(Object.values(checkedBindings));
+  const relevantSecret = (entry) => String(entry?.name || "").startsWith("ARTIFACT_SIGN_") || expectedRefs.has(entry?.valueFrom);
+  for (const container of containers) {
+    const environment = Array.isArray(container.environment) ? container.environment : [];
+    if (environment.some((entry) => String(entry?.name || "").startsWith("ARTIFACT_SIGN_"))) throw new Error("Artifact-signing bindings must not be plaintext environment variables.");
+    if (container.name !== BACKEND_HEALTH_RECOVERY.container && (Array.isArray(container.secrets) ? container.secrets : []).some(relevantSecret)) throw new Error("Legacy artifact-signing bindings must belong only to the backend container.");
+  }
+  const container = backendContainer(payload);
+  const secrets = Array.isArray(container.secrets) ? container.secrets : [];
+  const bindings = secrets.filter(relevantSecret);
+  if (bindings.length === 0) return "ABSENT";
+  if (bindings.length !== ARTIFACT_SIGNING_BINDINGS.length
+    || bindings.some((entry) => !entry || Object.keys(entry).sort().join(",") !== "name,valueFrom" || !SIGNING_BINDINGS.has(entry.name) || entry.valueFrom !== checkedBindings[entry.name])
+    || new Set(bindings.map(({ name }) => name)).size !== ARTIFACT_SIGNING_BINDINGS.length
+    || new Set(bindings.map(({ valueFrom }) => valueFrom)).size !== ARTIFACT_SIGNING_BINDINGS.length) {
+    throw new Error("Legacy backend source must not contain partial, duplicate, or noncanonical artifact-signing bindings.");
+  }
+  return "COMPLETE_CANONICAL";
+}
+
 function buildLegacyImageIdentityOnlyCandidate({ currentTaskDefinition, recoveryImageDigest, imageReleaseSha } = {}) {
   if (!SHA.test(imageReleaseSha || "") || !SHA256.test(recoveryImageDigest || "")) throw new Error("Recovery image release SHA or image digest is invalid.");
   const current = definition(currentTaskDefinition);
@@ -479,19 +501,17 @@ function buildLegacyImageIdentityOnlyCandidate({ currentTaskDefinition, recovery
   container.image = image;
   const environment = Array.isArray(container.environment) ? container.environment : [];
   for (const name of IDENTITY_ENV) if (environment.filter((entry) => entry?.name === name).length !== 1) throw new Error(`Legacy backend must contain exactly one ${name} identity field.`);
-  if (environment.some(({ name }) => SIGNING_BINDINGS.has(name))) throw new Error("Artifact-signing bindings must not be plaintext environment variables.");
-  const secrets = Array.isArray(container.secrets) ? container.secrets : [];
-  if (secrets.some(({ name }) => SIGNING_BINDINGS.has(name))) throw new Error("Legacy backend source must not contain partial or duplicate artifact-signing bindings.");
   container.environment = environment.map((entry) => IDENTITY_ENV.has(entry?.name) ? { ...entry, value: imageReleaseSha } : entry);
   return payload;
 }
 
 export function buildLegacyBackendRecoveryCandidate({ currentTaskDefinition, recoveryImageDigest, imageReleaseSha, artifactSigningBindings } = {}) {
+  const checkedBindings = assertArtifactSigningBindings(artifactSigningBindings);
   const payload = buildLegacyImageIdentityOnlyCandidate({ currentTaskDefinition, recoveryImageDigest, imageReleaseSha });
   const container = backendContainer(payload);
-  const checkedBindings = assertArtifactSigningBindings(artifactSigningBindings);
+  const sourceState = artifactSigningBindingSourceState(payload, checkedBindings);
   const legacySecrets = Array.isArray(container.secrets) ? container.secrets : [];
-  container.secrets = [...legacySecrets, ...ARTIFACT_SIGNING_BINDINGS.map((name) => ({ name, valueFrom: checkedBindings[name] }))];
+  if (sourceState === "ABSENT") container.secrets = [...legacySecrets, ...ARTIFACT_SIGNING_BINDINGS.map((name) => ({ name, valueFrom: checkedBindings[name] }))];
   return payload;
 }
 
