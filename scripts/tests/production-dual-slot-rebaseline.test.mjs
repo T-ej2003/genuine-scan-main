@@ -26,6 +26,7 @@ import { persistProductionDualSlotRebaselineDurableEvidence } from "../aws/persi
 import { assertStageBCanonicalRepositoryUrl, readAuthenticatedGitHubProtectedMainIdentity } from "../aws/stage-b-deployment-identity.mjs";
 
 const sourceSha = "a".repeat(40);
+const syntheticSecretArn = (name) => ["arn", "aws", "secretsmanager", "eu-west-2", PRODUCTION_DUAL_SLOT_REBASELINE.accountId, `secret:${name}`].join(":");
 // Non-secret, production-safe recovery identity fixture.  The production validator
 // must still compare it to its literal protected-source anchor; recomputing this
 // envelope's own digest is deliberately insufficient.
@@ -35,7 +36,8 @@ const rotationId = "rotation-20260828000000-rebase";
 const resources = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot, index) => [slot, `arn:aws:secretsmanager:eu-west-2:${PRODUCTION_DUAL_SLOT_REBASELINE.accountId}:secret:fixture/${REBASELINE_SLOTS[slot]}-${index}`]));
 const currentVersionIds = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, sha256(`fixture-version:${slot}`)]));
 const historicalTopologySha256 = canonicalSha256({ resources, versionIds: currentVersionIds });
-const legacyBaseline = { jwtCurrent: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-jwt", qrPrivateCurrent: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-qr-private", qrPublicCurrent: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-qr-public", qrCurrentVersion: "legacy-v1" };
+const legacyBaseline = { jwtCurrent: syntheticSecretArn("legacy-jwt"), qrPrivateCurrent: syntheticSecretArn("mscqr/prod/qr_sign_private_key-AbCd12"), qrPublicCurrent: syntheticSecretArn("mscqr/prod/qr_sign_public_key-AbCd12"), qrCurrentVersion: "legacy-v1" };
+const legacyTaskReferences = (baseline = legacyBaseline) => [baseline.jwtCurrent, `${baseline.qrPrivateCurrent}:value::`, `${baseline.qrPublicCurrent}:value::`];
 const shapes = { jwtPending: ["jwt_secrets", "pending"], qrPrivatePending: ["qr_signing_keys", "pending-private"], qrPublicPending: ["qr_signing_keys", "pending-public"], jwtPrevious: ["jwt_secrets", "empty"], qrPublicPrevious: ["qr_signing_keys", "empty"], qrCurrentVersion: ["qr_key_versions", "current"], qrPreviousVersion: ["qr_key_versions", "previous-empty"] };
 function historicalPayload(slot, { source = REBASELINE_HISTORICAL_SOURCE_SHAS[0], rotation = historicalRotationId, value = `historical-${slot}` } = {}) { const [family, payloadSlot] = shapes[slot]; return { value, family, slot: payloadSlot, initialMigration: true, ...(rotation === undefined ? {} : { rotationId: rotation }), ...(source === undefined ? {} : { sourceSha: source }) }; }
 const observedSlotIdentities = Object.fromEntries(REBASELINE_SLOT_ORDER.map((slot) => [slot, historicalSlotIdentity({ slot, secretArn: resources[slot], versionId: currentVersionIds[slot], stages: ["AWSCURRENT"], payload: historicalPayload(slot, { source: slot === "qrPublicPending" ? REBASELINE_HISTORICAL_SOURCE_SHAS[1] : slot === "qrPreviousVersion" ? undefined : undefined }) })]));
@@ -923,7 +925,7 @@ test("dispatcher reviewer text cannot replace the actual protected-environment a
 });
 
 test("full live ECS audit rejects a legacy running revision when service points at a newer revision", () => {
-  const old = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50"; const current = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:51"; const legacy = [legacyBaseline.jwtCurrent, legacyBaseline.qrPrivateCurrent, legacyBaseline.qrPublicCurrent]; const definition = (arn, references = []) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: [...legacy, ...references].map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"][index] || `EXTRA_${index}`, valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } });
+  const old = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50"; const current = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:51"; const definition = (arn, references = []) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: [...legacyTaskReferences(), ...references].map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"][index] || `EXTRA_${index}`, valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } });
   const run = (args) => { if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition: current, desiredCount: 2, runningCount: 1, pendingCount: 1, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition: current }, { id: "rollback", status: "ACTIVE", taskDefinition: old }], deploymentController: { type: "ECS" } }] }); if (args[1] === "list-tasks") return JSON.stringify({ taskArns: args.includes("RUNNING") ? ["arn:aws:ecs:eu-west-2:368992683803:task/old"] : [] }); if (args[1] === "describe-tasks") return JSON.stringify({ tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/old", taskDefinitionArn: old, lastStatus: "RUNNING", desiredStatus: "RUNNING" }] }); if (args[1] === "describe-task-definition") return JSON.stringify(args[args.indexOf("--task-definition") + 1] === old ? definition(old, [resources.jwtPending]) : definition(current)); throw new Error(`unexpected ${args.join(" ")}`); };
   const result = auditLiveProductionDualSlotReferences({ run, resources }); assert.equal(result.status, "FAIL"); assert.equal(result.dualSlotReferences, 1); assert.equal(result.evidence.taskDefinitionArns.includes(old), true);
 });
@@ -932,7 +934,7 @@ test("ECS audit treats a desired-stopped draining task with a running lastStatus
   const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/draining/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const currentDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:51";
   const drainingDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50";
-  const definition = (arn, references = []) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: [legacyBaseline.jwtCurrent, legacyBaseline.qrPrivateCurrent, legacyBaseline.qrPublicCurrent, ...references].map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY", "JWT_PENDING"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } });
+  const definition = (arn, references = []) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: [...legacyTaskReferences(), ...references].map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY", "JWT_PENDING"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } });
   const run = (args) => {
     if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition: currentDefinition, desiredCount: 2, runningCount: 1, pendingCount: 0, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition: currentDefinition }], deploymentController: { type: "ECS" } }] });
     if (args[1] === "list-tasks") return JSON.stringify({ taskArns: args.includes("--desired-status") && args[args.indexOf("--desired-status") + 1] === "STOPPED" ? [taskArn] : [] });
@@ -949,8 +951,7 @@ test("ECS audit uses lastStatus for lifecycle safety and paginates the complete 
   const currentDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:51";
   const drainingDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50";
   const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/draining/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-  const legacy = [legacyBaseline.jwtCurrent, legacyBaseline.qrPrivateCurrent, legacyBaseline.qrPublicCurrent];
-  const definition = (arn, references = []) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: [...legacy, ...references].map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY", "JWT_PENDING"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } });
+  const definition = (arn, references = []) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: [...legacyTaskReferences(), ...references].map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY", "JWT_PENDING"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } });
   const listCalls = [];
   const run = (args) => {
     if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition: currentDefinition, desiredCount: 2, runningCount: 1, pendingCount: 0, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition: currentDefinition }], deploymentController: { type: "ECS" } }] });
@@ -974,7 +975,7 @@ test("ECS audit excludes only terminal stopped tasks and fails on DescribeTasks 
   const currentDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:51";
   const liveTaskArn = "arn:aws:ecs:eu-west-2:368992683803:task/live/cccccccccccccccccccccccccccccccc";
   const stoppedTaskArn = "arn:aws:ecs:eu-west-2:368992683803:task/stopped/cccccccccccccccccccccccccccccccc";
-  const definition = { taskDefinition: { taskDefinitionArn: currentDefinition, containerDefinitions: [{ name: "backend", secrets: [legacyBaseline.jwtCurrent, legacyBaseline.qrPrivateCurrent, legacyBaseline.qrPublicCurrent].map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } };
+  const definition = { taskDefinition: { taskDefinitionArn: currentDefinition, containerDefinitions: [{ name: "backend", secrets: legacyTaskReferences().map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } };
   const makeRun = ({ failures = false } = {}) => (args) => {
     if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition: currentDefinition, desiredCount: 0, runningCount: 0, pendingCount: 0, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition: currentDefinition }], deploymentController: { type: "ECS" } }] });
     if (args[1] === "list-tasks") return JSON.stringify({ taskArns: args[args.indexOf("--desired-status") + 1] === "STOPPED" ? [stoppedTaskArn] : [liveTaskArn] });
@@ -991,7 +992,7 @@ test("ECS audit treats every non-terminal lastStatus as live regardless of desir
   const protectedDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50";
   const liveTaskArn = "arn:aws:ecs:eu-west-2:368992683803:task/live/cccccccccccccccccccccccccccccccc";
   const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/matrix/dddddddddddddddddddddddddddddddd";
-  const definition = (arn, references = []) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: [[legacyBaseline.jwtCurrent, legacyBaseline.qrPrivateCurrent, legacyBaseline.qrPublicCurrent], ...references].flat().map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY", "JWT_PENDING"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } });
+  const definition = (arn, references = []) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: [legacyTaskReferences(), ...references].flat().map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY", "JWT_PENDING"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } });
   const audit = (desiredStatus, lastStatus) => auditLiveProductionDualSlotReferences({ resources, run: (args) => {
     if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition: currentDefinition, desiredCount: 1, runningCount: 1, pendingCount: 0, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition: currentDefinition }], deploymentController: { type: "ECS" } }] });
     if (args[1] === "list-tasks") return JSON.stringify({ taskArns: [taskArn, liveTaskArn] });
@@ -1008,9 +1009,14 @@ test("ECS audit rejects mixed live legacy baselines hidden by service.taskDefini
   const drainingDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:60";
   const currentTask = "arn:aws:ecs:eu-west-2:368992683803:task/current/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
   const drainingTask = "arn:aws:ecs:eu-west-2:368992683803:task/draining/ffffffffffffffffffffffffffffffff";
-  const definition = (arn, baseline) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: [{ name: "JWT_SECRET", valueFrom: baseline.jwtCurrent }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: baseline.qrPrivateCurrent }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: baseline.qrPublicCurrent }], environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: baseline.qrCurrentVersion }] }] } });
+  const definition = (arn, baseline) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: legacyTaskReferences(baseline).map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: baseline.qrCurrentVersion }] }] } });
   const baselineA = legacyBaseline;
-  const baselineB = { jwtCurrent: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:jwt-b", qrPrivateCurrent: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:qr-private-b", qrPublicCurrent: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:qr-public-b", qrCurrentVersion: "legacy-b" };
+  const baselineB = {
+    jwtCurrent: syntheticSecretArn("jwt-b"),
+    qrPrivateCurrent: syntheticSecretArn("mscqr/prod/qr_sign_private_key-EfGh34"),
+    qrPublicCurrent: legacyBaseline.qrPublicCurrent.replace("AbCd12", "000000"),
+    qrCurrentVersion: "legacy-b",
+  };
   const run = (args) => {
     if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition: currentDefinition, desiredCount: 2, runningCount: 1, pendingCount: 0, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition: currentDefinition }, { id: "rollback", status: "ACTIVE", taskDefinition: drainingDefinition }], deploymentController: { type: "ECS" } }] });
     if (args[1] === "list-tasks") return JSON.stringify({ taskArns: args[args.indexOf("--desired-status") + 1] === "STOPPED" ? [drainingTask] : [currentTask] });
@@ -1030,7 +1036,7 @@ test("ECS audit requires one canonical legacy baseline across every live service
   const replacementDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:62";
   const currentTask = "arn:aws:ecs:eu-west-2:368992683803:task/current/11111111111111111111111111111111";
   const replacementTask = "arn:aws:ecs:eu-west-2:368992683803:task/replacement/22222222222222222222222222222222";
-  const definition = (arn, baseline) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: [{ name: "JWT_SECRET", valueFrom: baseline.jwtCurrent }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: baseline.qrPrivateCurrent }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: baseline.qrPublicCurrent }], environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: baseline.qrCurrentVersion }] }] } });
+  const definition = (arn, baseline) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: legacyTaskReferences(baseline).map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: baseline.qrCurrentVersion }] }] } });
   const auditFor = (replacementBaseline) => auditLiveProductionDualSlotReferences({ resources, run: (args) => {
     if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition: currentDefinition, desiredCount: 2, runningCount: 2, pendingCount: 0, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition: currentDefinition }, { id: "active", status: "ACTIVE", taskDefinition: replacementDefinition }], deploymentController: { type: "ECS" } }] });
     if (args[1] === "list-tasks") return JSON.stringify({ taskArns: [currentTask, replacementTask] });
@@ -1043,7 +1049,7 @@ test("ECS audit requires one canonical legacy baseline across every live service
   assert.equal(same.liveLegacyBaselineCount, 1);
   assert.deepEqual(same.legacy, legacyBaseline);
   for (const field of ["jwtCurrent", "qrPrivateCurrent", "qrPublicCurrent", "qrCurrentVersion"]) {
-    const changed = { ...legacyBaseline, [field]: `${legacyBaseline[field]}-different` };
+    const changed = { ...legacyBaseline, [field]: field.startsWith("qr") && field !== "qrCurrentVersion" ? legacyBaseline[field].replace(/AbCd12$/, "EfGh34") : `${legacyBaseline[field]}-different` };
     const result = auditFor(changed);
     assert.equal(result.status, "FAIL", field);
     assert.equal(result.legacyRuntimeAuthoritative, false, field);
@@ -1054,7 +1060,7 @@ test("ECS audit requires one canonical legacy baseline across every live service
 test("ECS audit fails closed when no live service baseline can be authenticated", () => {
   const stoppedTaskArn = "arn:aws:ecs:eu-west-2:368992683803:task/stopped/33333333333333333333333333333333";
   const taskDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:61";
-  const definition = { taskDefinition: { taskDefinitionArn: taskDefinition, containerDefinitions: [{ name: "backend", secrets: [legacyBaseline.jwtCurrent, legacyBaseline.qrPrivateCurrent, legacyBaseline.qrPublicCurrent].map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } };
+  const definition = { taskDefinition: { taskDefinitionArn: taskDefinition, containerDefinitions: [{ name: "backend", secrets: legacyTaskReferences().map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } };
   const result = auditLiveProductionDualSlotReferences({ resources, run: (args) => {
     if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition, desiredCount: 0, runningCount: 0, pendingCount: 0, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition }], deploymentController: { type: "ECS" } }] });
     if (args[1] === "list-tasks") return JSON.stringify({ taskArns: args[args.indexOf("--desired-status") + 1] === "STOPPED" ? [stoppedTaskArn] : [] });
@@ -1069,8 +1075,7 @@ test("ECS audit fails closed when no live service baseline can be authenticated"
 
 test("ECS audit distinguishes harmless task replacement from a safe-but-reauthorization-worthy definition change", () => {
   const td50 = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:50"; const td51 = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:51";
-  const legacy = [legacyBaseline.jwtCurrent, legacyBaseline.qrPrivateCurrent, legacyBaseline.qrPublicCurrent];
-  const definition = (arn) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: legacy.map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } });
+  const definition = (arn) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: legacyTaskReferences().map((valueFrom, index) => ({ name: ["JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"][index], valueFrom })), environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "legacy-v1" }] }] } });
   const run = (taskArn, taskDefinition) => (args) => {
     if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition, desiredCount: 2, runningCount: 2, pendingCount: 0, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition }], deploymentController: { type: "ECS" } }] });
     if (args[1] === "list-tasks") return JSON.stringify({ taskArns: args.includes("RUNNING") ? [taskArn] : [] });

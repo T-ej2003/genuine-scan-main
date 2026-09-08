@@ -24,13 +24,13 @@ const sourceSha = "8".repeat(40);
 const staleSourceSha = "e".repeat(40);
 const rotationId = "rotation-new-20260817";
 const staleRotationId = "rotation-old-20260812";
-const arn = (name) => `arn:aws:secretsmanager:eu-west-2:368992683803:secret:${name.replaceAll("/", "-")}-abc`;
+const arn = (name) => `arn:aws:secretsmanager:eu-west-2:368992683803:secret:${name}-AbCd12`;
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const requireBackend = createRequire(path.resolve("backend/package.json"));
 const currentOwnerRotationId = "rotation-current-20260801";
 const productionQrMetadataIdentifier = "c41ca96ab047dd25"; // ggignore: authenticated public-key fingerprint, not secret material
-const currentNames = { jwt: "current-jwt", qrPrivate: "current-qr-private", qrPublic: "current-qr-public" };
-const staleTaskDefinition = { taskDefinition: { containerDefinitions: [{ name: "backend", environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "2026-04-20" }], secrets: [{ name: "JWT_SECRET", valueFrom: arn(currentNames.jwt) }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: arn(currentNames.qrPrivate) }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: arn(currentNames.qrPublic) }] }] } };
+const currentNames = { jwt: "current-jwt", qrPrivate: "mscqr/prod/qr_sign_private_key", qrPublic: "mscqr/prod/qr_sign_public_key" };
+const staleTaskDefinition = { taskDefinition: { containerDefinitions: [{ name: "backend", environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "2026-04-20" }], secrets: [{ name: "JWT_SECRET", valueFrom: arn(currentNames.jwt) }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: `${arn(currentNames.qrPrivate)}:value::` }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: `${arn(currentNames.qrPublic)}:value::` }] }] } };
 const supersessionArgs = (overrides = {}) => ({ taskDefinition: staleTaskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha, ...overrides });
 
 function rotationStore() {
