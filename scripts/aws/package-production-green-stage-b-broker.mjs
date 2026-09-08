@@ -6,7 +6,6 @@ import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
-import JSZip from "jszip";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 
 const root = process.cwd();
@@ -51,6 +50,7 @@ export function enumeratePackageTree(directory, relative = "") {
 }
 
 export async function createDeterministicArchive(directory) {
+  const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
   const entries = enumeratePackageTree(directory).sort((left, right) => compareNames(left.archivePath, right.archivePath));
   for (const entry of entries) {
