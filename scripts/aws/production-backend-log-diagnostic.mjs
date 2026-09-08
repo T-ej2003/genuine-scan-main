@@ -11,6 +11,7 @@ import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mj
 import { canonicalJson, canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { redactStageBRefreshDiagnostic } from "../refresh-production-green-stage-b.mjs";
+import { PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -45,6 +46,9 @@ export const PRODUCTION_BACKEND_LOG_DIAGNOSTIC = Object.freeze({
   maxAuthorizationAgeMs: 30 * 60 * 1000,
   maxEventsPerStream: 10_000,
   maxEvidenceCharsPerStream: 4096,
+  journalPrefix: "production-backend-log-diagnostic/",
+  convergenceAttempts: 6,
+  convergenceDelaysMs: Object.freeze([100, 200, 400, 800, 1000, 1000]),
 });
 
 export const backendLogStreams = () => PRODUCTION_BACKEND_LOG_DIAGNOSTIC.taskIds.map((taskId) => `ecs/backend/${taskId}`);
@@ -116,31 +120,122 @@ const policyFromAws = (value) => value?.PolicyDocument ? (typeof value.PolicyDoc
 const isMissingPolicy = (error) => /NoSuchEntity/i.test(`${error?.name || ""} ${error?.message || ""} ${error?.stderr || ""}`);
 const exactReader = (identity) => identity?.Account === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId && new RegExp(`^arn:aws:sts::${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId}:assumed-role/${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleName}/`).test(identity?.Arn || "");
 const exactAdmin = (identity) => identity?.Account === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId && /^(arn:aws:iam::368992683803:root|arn:aws:sts::368992683803:assumed-role\/mscqr-production-bootstrap-mfa\/)/.test(identity?.Arn || "");
+const canonicalJournalBytes = (value) => Buffer.from(`${canonicalJson(value)}\n`);
+const diagnosticJournalKey = (authorizationSha256, record) => {
+  if (!SHA256.test(authorizationSha256 || "") || !["reservation.json", "terminal.json"].includes(record)) throw new Error("Backend log diagnostic journal key is invalid.");
+  return `${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.journalPrefix}${authorizationSha256}/${record}`;
+};
+
+export function createBackendLogDiagnosticJournal({ run, bucket = PRODUCTION_ACTIVATION_LIFECYCLE.bucket } = {}) {
+  if (typeof run !== "function") throw new Error("Backend log diagnostic journal requires an explicit governed AWS runner.");
+  const read = async (key) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-backend-log-journal-")); const output = path.join(directory, "record.json");
+    try {
+      try { await run(["s3api", "get-object", "--bucket", bucket, "--key", key, "--output", "json", "--no-cli-pager", output]); }
+      catch (error) { if (/NoSuchKey|NotFound|404/i.test(`${error?.message || ""} ${error?.stderr || ""}`)) return null; throw error; }
+      return fs.readFileSync(output);
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  };
+  const conditionalCreate = async (key, bytes) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-backend-log-journal-")); const body = path.join(directory, "record.json");
+    try {
+      fs.writeFileSync(body, bytes, { mode: 0o600, flag: "wx" });
+      try { await run(["s3api", "put-object", "--bucket", bucket, "--key", key, "--body", body, "--content-type", "application/json", "--server-side-encryption", "AES256", "--if-none-match", "*", "--output", "json", "--no-cli-pager"]); }
+      catch (error) {
+        if (/PreconditionFailed|ConditionalRequestConflict|412|409/i.test(`${error?.message || ""} ${error?.stderr || ""}`)) {
+          const existing = await read(key);
+          if (!existing) throw new Error("Backend log diagnostic journal conditional create lost its existing record.");
+          if (!existing.equals(bytes)) throw new Error("Backend log diagnostic journal record is tampered or belongs to a different authorization.");
+          return false;
+        }
+        throw error;
+      }
+      const readback = await read(key);
+      if (!readback || !readback.equals(bytes)) throw new Error("Backend log diagnostic journal conditional create did not persist exact bytes.");
+      return true;
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  };
+  return Object.freeze({
+    async reserve({ authorization } = {}) {
+      const body = { schemaVersion: 1, kind: "PRODUCTION_BACKEND_LOG_DIAGNOSTIC_RESERVATION", sourceSha: authorization.sourceSha, recoveryRunId: authorization.recoveryRunId, recoveryTaskDefinition: authorization.recoveryTaskDefinition, recoveryImageDigest: authorization.recoveryImageDigest, failedRecoveryEvidenceSha256: authorization.failedRecoveryEvidenceSha256, authorizationSha256: authorization.authorizationSha256, policyName: authorization.policyName, logGroupName: authorization.logGroupName, logStreams: authorization.logStreams };
+      const bytes = canonicalJournalBytes(body); const key = diagnosticJournalKey(authorization.authorizationSha256, "reservation.json");
+      if (!(await conditionalCreate(key, bytes))) throw new Error("Backend log diagnostic authorization has already been durably reserved; replay is forbidden.");
+      return { key, sha256: sha256(bytes), value: body };
+    },
+    async readReservation({ authorizationSha256 } = {}) {
+      const bytes = await read(diagnosticJournalKey(authorizationSha256, "reservation.json"));
+      return bytes ? { bytes, sha256: sha256(bytes) } : null;
+    },
+    async finalize({ authorization, status, capabilityRevoked, counts, evidenceSha256 = null } = {}) {
+      if (!["COMPLETE", "FAILED_OR_INDETERMINATE"].includes(status)) throw new Error("Backend log diagnostic terminal state is invalid.");
+      if (status === "COMPLETE" && capabilityRevoked !== true) throw new Error("Backend log diagnostic cannot complete while capability revocation is unproven.");
+      const body = { schemaVersion: 1, kind: "PRODUCTION_BACKEND_LOG_DIAGNOSTIC_TERMINAL", status, sourceSha: authorization.sourceSha, recoveryRunId: authorization.recoveryRunId, authorizationSha256: authorization.authorizationSha256, policyName: authorization.policyName, capabilityRevoked: capabilityRevoked === true, evidenceSha256, counts };
+      const bytes = canonicalJournalBytes(body); const key = diagnosticJournalKey(authorization.authorizationSha256, "terminal.json");
+      if (!(await conditionalCreate(key, bytes))) throw new Error("Backend log diagnostic already has an immutable terminal result; replay is forbidden.");
+      return { key, sha256: sha256(bytes), value: body };
+    },
+  });
+}
+
+const transientIamRead = (error) => /AccessDenied|NoSuchEntity|NotFound|eventual|propagat|Throttl|ServiceUnavailable|InternalFailure|timeout/i.test(`${error?.name || ""} ${error?.message || ""} ${error?.stderr || ""}`);
+const sleepForConvergence = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+async function waitForPolicy({ admin, authorization, sleep = sleepForConvergence } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts; attempt += 1) {
+    try {
+      const installed = await readPolicyOrNull(admin);
+      if (installed && canonicalJson(installed) !== canonicalJson(authorization.policyDocument)) throw new Error("Installed backend log diagnostic policy is a permanent exact-policy mismatch.");
+      if (installed) return installed;
+    } catch (error) { if (!transientIamRead(error)) throw error; lastError = error; }
+    if (attempt < PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts - 1) await sleep(PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceDelaysMs[attempt]);
+  }
+  throw new Error(`Backend log diagnostic IAM policy did not converge within ${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts} attempts${lastError ? `: ${lastError.message}` : ""}`);
+}
+async function waitForCapabilityRevocation({ admin, sleep = sleepForConvergence } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts; attempt += 1) {
+    try { if (!(await readPolicyOrNull(admin))) return true; }
+    catch (error) { if (!transientIamRead(error)) throw error; lastError = error; }
+    if (attempt < PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts - 1) await sleep(PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceDelaysMs[attempt]);
+  }
+  throw new Error(`Backend log diagnostic IAM policy revocation did not converge within ${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts} attempts${lastError ? `: ${lastError.message}` : ""}`);
+}
+async function waitForReaderCapability({ reader, stream, sleep = sleepForConvergence } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts; attempt += 1) {
+    try {
+      const listed = await reader(["logs", "describe-log-streams", "--log-group-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.logGroupName, "--log-stream-name-prefix", stream, "--limit", "1", "--no-paginate"]);
+      if (!Array.isArray(listed?.logStreams) || listed.logStreams.length !== 1 || listed.logStreams[0]?.logStreamName !== stream) throw new Error(`Authorized log stream response is permanently mismatched: ${stream}`);
+      return listed;
+    } catch (error) { if (!transientIamRead(error)) throw error; lastError = error; }
+    if (attempt < PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts - 1) await sleep(PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceDelaysMs[attempt]);
+  }
+  throw new Error(`Backend log diagnostic reader capability did not converge within ${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts} attempts${lastError ? `: ${lastError.message}` : ""}`);
+}
 
 async function readPolicyOrNull(admin) {
   try { return policyFromAws(await admin(["iam", "get-role-policy", "--role-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleName, "--policy-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.policyName])); }
   catch (error) { if (isMissingPolicy(error)) return null; throw error; }
 }
 
-export async function executeBackendLogDiagnostic({ authorization, sourceSha, statePath, evidencePath, admin, reader, protectedMain = readFreshProtectedMainIdentity, now = new Date(), writeFiles = writeStageBPrivateFilesAtomic } = {}) {
+export async function executeBackendLogDiagnostic({ authorization, sourceSha, statePath, evidencePath, admin, reader, journal = createBackendLogDiagnosticJournal({ run: admin }), protectedMain = readFreshProtectedMainIdentity, now = new Date(), writeFiles = writeStageBPrivateFilesAtomic, sleep = sleepForConvergence } = {}) {
   protectedMain({ cwd: root, expectedSourceSha: sourceSha });
   assertBackendLogDiagnosticAuthorization(authorization, { sourceSha, now });
-  if (fs.lstatSync(statePath, { throwIfNoEntry: false }) || fs.lstatSync(evidencePath, { throwIfNoEntry: false })) throw new Error("Backend log diagnostic authorization cannot be replayed.");
+  if (fs.lstatSync(evidencePath, { throwIfNoEntry: false })) throw new Error("Backend log diagnostic evidence output already exists; replay is forbidden.");
   if (!exactAdmin(await admin(["sts", "get-caller-identity"]))) throw new Error("Backend log diagnostic capability installation requires the governed administrator boundary.");
   if (!exactReader(await reader(["sts", "get-caller-identity"]))) throw new Error("Backend logs must be read only by the production independent checker role.");
   if (await readPolicyOrNull(admin)) throw new Error("Backend log diagnostic capability is already installed.");
+  await journal.reserve({ authorization });
   const persistState = (state, counts) => writeFiles({ repositoryRoot: root, overwrite: true, files: [{ filePath: statePath, label: "Backend log diagnostic state", bytes: Buffer.from(`${JSON.stringify({ schemaVersion: 1, kind: "PRODUCTION_BACKEND_LOG_DIAGNOSTIC_STATE", state, sourceSha, authorizationSha256: authorization.authorizationSha256, counts, observedAt: nowIso(new Date()) }, null, 2)}\n`) }] });
   const counts = { putRolePolicy: 0, deleteRolePolicy: 0, describeLogStreams: 0, getLogEvents: 0 };
   persistState("INSTALLING", counts);
   let captured = []; let originalError;
   try {
     await admin(["iam", "put-role-policy", "--role-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleName, "--policy-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.policyName, "--policy-document", JSON.stringify(authorization.policyDocument)]); counts.putRolePolicy += 1;
-    const installed = await readPolicyOrNull(admin);
-    if (!installed || canonicalJson(installed) !== canonicalJson(authorization.policyDocument)) throw new Error("Installed backend log diagnostic policy readback is not exact.");
+    await waitForPolicy({ admin, authorization, sleep });
     persistState("CAPABILITY_INSTALLED", counts);
     for (const stream of authorization.logStreams) {
-      const listed = await reader(["logs", "describe-log-streams", "--log-group-name", authorization.logGroupName, "--log-stream-name-prefix", stream, "--limit", "1", "--no-paginate"]); counts.describeLogStreams += 1;
-      if (!Array.isArray(listed?.logStreams) || listed.logStreams.length !== 1 || listed.logStreams[0]?.logStreamName !== stream) throw new Error(`Exact authorized log stream is unavailable: ${stream}`);
+      const listed = await waitForReaderCapability({ reader, stream, sleep }); counts.describeLogStreams += 1;
       const page = await reader(["logs", "get-log-events", "--log-group-name", authorization.logGroupName, "--log-stream-name", stream, "--start-from-head", "--limit", String(PRODUCTION_BACKEND_LOG_DIAGNOSTIC.maxEventsPerStream), "--no-paginate"]); counts.getLogEvents += 1;
       if (!Array.isArray(page?.events)) throw new Error(`Authorized log stream response is malformed: ${stream}`);
       const messages = page.events.map(({ message }) => typeof message === "string" ? message : "").join("\n");
@@ -150,17 +245,22 @@ export async function executeBackendLogDiagnostic({ authorization, sourceSha, st
   } catch (error) { originalError = error; }
   try {
     await admin(["iam", "delete-role-policy", "--role-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleName, "--policy-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.policyName]); counts.deleteRolePolicy += 1;
-    if (await readPolicyOrNull(admin)) throw new Error("Backend log diagnostic capability revocation could not be authenticated.");
+    await waitForCapabilityRevocation({ admin, sleep });
     persistState("REVOKED", counts);
   } catch (revocationError) {
-    const error = new AggregateError([...(originalError ? [originalError] : []), revocationError], "Backend log diagnostic capability revocation failed.");
+    try { await journal.finalize({ authorization, status: "FAILED_OR_INDETERMINATE", capabilityRevoked: false, counts }); } catch (journalError) { revocationError = new AggregateError([revocationError, journalError], revocationError.message); }
+    const error = new AggregateError([...(originalError ? [originalError] : []), revocationError], `Backend log diagnostic capability revocation failed: ${revocationError.message}`);
     error.counts = counts; throw error;
   }
-  if (originalError) { originalError.counts = counts; throw originalError; }
+  if (originalError) {
+    try { await journal.finalize({ authorization, status: "FAILED_OR_INDETERMINATE", capabilityRevoked: true, counts }); } catch (journalError) { originalError = new AggregateError([originalError, journalError], originalError.message); }
+    originalError.counts = counts; throw originalError;
+  }
   if (captured.length !== authorization.logStreams.length || counts.putRolePolicy !== 1 || counts.deleteRolePolicy !== 1 || counts.describeLogStreams !== 8 || counts.getLogEvents !== 8) throw new Error("Backend log diagnostic mutation or read census is invalid.");
   const body = { schemaVersion: 1, kind: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.evidenceKind, status: "COMPLETE", sourceSha, authorizationSha256: authorization.authorizationSha256, recoveryRunId: authorization.recoveryRunId, recoveryTaskDefinition: authorization.recoveryTaskDefinition, recoveryImageDigest: authorization.recoveryImageDigest, failedRecoveryEvidenceSha256: authorization.failedRecoveryEvidenceSha256, readerRoleArn: authorization.readerRoleArn, logGroupName: authorization.logGroupName, streams: captured, capabilityRevoked: true, counts, completedAt: nowIso(new Date()) };
   const evidence = Object.freeze({ ...body, evidenceSha256: canonicalSha256(body) });
   writeFiles({ repositoryRoot: root, files: [{ filePath: evidencePath, label: "Backend log diagnostic evidence", bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`) }] });
+  await journal.finalize({ authorization, status: "COMPLETE", capabilityRevoked: true, counts, evidenceSha256: evidence.evidenceSha256 });
   persistState("COMPLETE", counts);
   return evidence;
 }
