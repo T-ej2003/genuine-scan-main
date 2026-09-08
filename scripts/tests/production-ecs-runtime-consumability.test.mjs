@@ -30,6 +30,7 @@ import { buildLegacyBackendRecoveryCandidate } from "../aws/production-backend-h
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { prepareProductionEcsRuntimeConsumability, prepareProductionEcsRuntimeInventory } from "../aws/prepare-production-ecs-runtime-consumability.mjs";
 import { ECR_DOCUMENTED_NO_RESOURCE_POLICY, MALFORMED_ECR_REPOSITORY_POLICIES, VALID_ECR_REPOSITORY_POLICIES } from "./fixtures/ecr-repository-policy-fixtures.mjs";
+import { buildRootAttestationKeyPolicy, createRootAttestationKmsVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_SIGNING_ALGORITHM, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
 
 const sourceSha = "b64274e155434ae9390d28762d40a37801be5362";
 const digest = "sha256:6ce8e4eae1a9243c94368e95259a19446fb6c7241e127cf010b66d0611a17189";
@@ -202,6 +203,35 @@ function signed(evidence, signedAt) {
   const envelope = signRuntimeConsumabilityEvidence(evidence, { signedAt, sign: ({ digest }) => { signedDigest = Buffer.from(digest); return "AQ=="; } });
   return { envelope, verify: ({ digest }) => Buffer.from(digest).equals(signedDigest) };
 }
+
+const rootKeyArn = "arn:aws:kms:eu-west-2:368992683803:key/11111111-2222-3333-4444-555555555555";
+const rootAttestationResponse = (args, signatureValid = true) => {
+  const operation = args.slice(0, 2).join(" ");
+  if (operation === "kms describe-key") return { KeyMetadata: { Arn: rootKeyArn, KeyId: rootKeyArn.split("/").at(-1), Description: ROOT_ATTESTATION_KEY_DESCRIPTION, KeyUsage: "SIGN_VERIFY", KeySpec: "RSA_3072", KeyState: "Enabled", Enabled: true, KeyManager: "CUSTOMER", Origin: "AWS_KMS", MultiRegion: false } };
+  if (operation === "kms get-key-policy") return { Policy: JSON.stringify(buildRootAttestationKeyPolicy()) };
+  if (operation === "kms list-resource-tags") return { Tags: Object.entries(ROOT_ATTESTATION_TAGS).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) };
+  if (operation === "kms verify") return { SignatureValid: signatureValid };
+  throw new Error(`Unexpected root-attestation operation: ${operation}`);
+};
+
+test("hydrated recovery runtime evidence accepts string or parsed AWS responses without weakening signature verification", () => {
+  const value = candidate(); const result = passing(value); const now = "2026-08-24T18:01:00.000Z";
+  const hydrated = JSON.parse(JSON.stringify(signRuntimeConsumabilityEvidence(result.evidence, { signedAt: now, sign: () => "AQ==" })));
+  const verify = (run) => assertSignedRuntimeConsumabilityEvidence(hydrated, { sourceSha, candidate: value, livePolicyIdentity: result.livePolicyIdentity, resourceMetadata: result.resourceMetadata, now: Date.parse(now), verify: createRootAttestationKmsVerifier({ run }) });
+  assert.equal(verify((args) => JSON.stringify(rootAttestationResponse(args))).status, "PASS");
+  assert.equal(verify((args) => rootAttestationResponse(args)).status, "PASS");
+  assert.throws(() => verify((args) => rootAttestationResponse(args, false)), /signature/);
+});
+
+test("root-attestation AWS response normalization rejects malformed and non-object values", () => {
+  const verify = createRootAttestationKmsVerifier({ run: () => "{" });
+  const input = { keyArn: ROOT_ATTESTATION_KEY_ALIAS_ARN, signingAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM, digest: Buffer.alloc(32), signature: Buffer.from([1]) };
+  assert.throws(() => verify(input), /not valid JSON/);
+  for (const value of [null, [], 1, true, "null", "[]", '"value"']) {
+    assert.throws(() => createRootAttestationKmsVerifier({ run: () => value })(input), /not a JSON object/);
+  }
+  assert.throws(() => createRootAttestationKmsVerifier({ run: () => ({ KeyMetadata: {} }) })(input), /metadata is invalid/);
+});
 
 test("candidate-derived closure binds exact execution-role runtime dependencies", () => {
   const value = candidate();
