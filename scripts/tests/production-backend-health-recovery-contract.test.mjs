@@ -1042,10 +1042,10 @@ test("configured solo operator may dispatch and approve when GitHub allows self-
 });
 
 test("pre-approval reviewer placeholder is replaced only by the authenticated GitHub reviewer", () => {
-  const approvedEnvironment = (userLogin) => createProductionEnvironmentApprovalEvidence({
+  const approvedEnvironment = (userLogin, reviewers = [{ type: "User", reviewer: { id: 183396573, login: "T-ej2003" } }]) => createProductionEnvironmentApprovalEvidence({
     repository: githubContext.repository, environment: "production", sourceSha, workflowRunId: githubContext.workflowRunId,
     workflowRef: githubContext.workflowRef, eventName: githubContext.eventName, workflowRunAttempt: githubContext.workflowRunAttempt, executionActor: "release-operator", observedAt: now.toISOString(),
-    environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 183396573, login: "T-ej2003" } }] }] },
+    environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers }] },
     actualApproval: { state: "approved", environmentId: 14514600120, environmentName: "production", userId: 183396573, userLogin },
   });
   const input = base();
@@ -1064,6 +1064,13 @@ test("pre-approval reviewer placeholder is replaced only by the authenticated Gi
     });
     assert.throws(() => assertLegacyBackendRecoveryEligibility(rejected), /not a configured production environment reviewer/);
   }
+  const teamReviewer = base();
+  teamReviewer.environmentApproval = approvedEnvironment("T-ej2003", [{ type: "Team", reviewer: { id: 1, slug: "production-operators" } }]);
+  teamReviewer.authorization = createLegacyBackendRecoveryAuthorization({
+    sourceSha, currentTaskDefinitionArn: current.taskDefinition.taskDefinitionArn, recoveryImageDigest: digest,
+    imageAuthorization: imageFixture.authorization, environmentApproval: teamReviewer.environmentApproval, artifactSigningBindingSha256, runtimeConsumabilitySha256, approval: { ...approval, approvedBy: "UNSET" },
+  });
+  assert.throws(() => assertLegacyBackendRecoveryEligibility(teamReviewer), /supports only GitHub User required reviewers; Team reviewers are unsupported/);
 });
 
 test("fabricated human metadata cannot replace authenticated GitHub environment approval", async () => {

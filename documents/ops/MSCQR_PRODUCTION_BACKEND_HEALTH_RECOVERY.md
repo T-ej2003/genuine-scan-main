@@ -28,7 +28,9 @@ source/run-specific evidence into recovery authorization before configuring AWS
 credentials. A pre-approval dispatch bundle may retain `approvedBy=UNSET`; only
 the authenticated GitHub approval event may resolve that placeholder. A
 non-placeholder `approvedBy` must match the actual reviewer, and the effective
-reviewer must be configured for the environment. When GitHub has `Prevent
+reviewer must match a configured GitHub User reviewer. Team required reviewers
+are unsupported and fail closed before recovery; no Team-membership inference is
+performed. When GitHub has `Prevent
 self-review` enabled it must differ from the dispatcher; when disabled, GitHub
 may accept the configured solo operator as both dispatcher and reviewer.
 `approverRole` remains descriptive audit metadata.

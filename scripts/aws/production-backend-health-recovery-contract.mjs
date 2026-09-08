@@ -578,6 +578,7 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
     || (history.length ? !HEX256.test(failedRecoveryEvidenceSha256 || "") || !HEX256.test(failedRecoveryEvidenceReferenceSha256 || "") || authorization.failedRecoveryEvidenceSha256 !== failedRecoveryEvidenceSha256 || authorization.failedRecoveryEvidenceReferenceSha256 !== failedRecoveryEvidenceReferenceSha256 : authorization.failedRecoveryEvidenceSha256 !== null || authorization.failedRecoveryEvidenceReferenceSha256 !== null)) throw new Error("Authenticated recovery history is malformed, missing, or duplicated.");
   recoveryHistoryLineageSha256(history);
   assertProductionEnvironmentApprovalEvidence(environmentApproval, { sourceSha, repository: githubContext?.repository, environment: "production", workflowRef: githubContext?.workflowRef, eventName: githubContext?.eventName, workflowRunId: githubContext?.workflowRunId, workflowRunAttempt: githubContext?.workflowRunAttempt, executionActor, githubActions: githubContext?.githubActions, now: githubContext?.now });
+  if (environmentApproval.configuredReviewers.some(({ type }) => type === "Team")) throw new Error("Backend health recovery supports only GitHub User required reviewers; Team reviewers are unsupported.");
   assertImageAuthorization(imageAuthorization, sourceSha, imageValidation);
   if (authorizedBackendDigest(imageAuthorization) !== recoveryImageDigest) throw new Error("Recovery digest differs from canonical image authorization.");
   const approval = authorization.approval;
