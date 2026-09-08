@@ -46,7 +46,8 @@ export const PRODUCTION_BACKEND_LOG_DIAGNOSTIC = Object.freeze({
   failedRecoveryEvidenceSha256: "5fbcfe4a48280a1f488a5a9ba6fb5cc29a590ae984493ed39a8086988c5f31df",
   taskIds: Object.freeze(["2cad6eb068d14cea83e22fbd901f9462", "31c3de798ed14c18a19eaf9547d132af", "5728a20ebd584dc6a8f80874e8f22e67", "71d4d17200e04e7ba20cdfc247dc5426", "cda9ce369a59409b84792dbc94eb00b9", "d2770807ae7e4911b1535ef7a11f61c1", "f6e73e5cab1345e5a222fde6f38763a3", "f84f325dd46e41ac923adb12a5c2ecc9"]),
   maxAuthorizationAgeMs: 30 * 60 * 1000,
-  maxEventsPerStream: 10_000,
+  maxEventsPerPage: 10_000,
+  maxGetLogEventsCallsPerStream: 4,
   maxEvidenceCharsPerStream: 4096,
   journalPrefix: "production-backend-log-diagnostic/",
   convergenceAttempts: 6,
@@ -62,7 +63,7 @@ export function buildBackendLogDiagnosticPolicy({ expiresAt } = {}) {
   const expiry = new Date(expiresAt);
   if (!Number.isFinite(expiry.getTime()) || expiry.toISOString() !== expiresAt) throw new Error("Diagnostic capability expiry is invalid.");
   return Object.freeze({ Version: "2012-10-17", Statement: [
-    { Sid: "DescribeExactBackendLogStreams", Effect: "Allow", Action: "logs:DescribeLogStreams", Resource: `${logGroupArn()}:log-stream:*`, Condition: { StringEquals: { "aws:RequestedRegion": PRODUCTION_BACKEND_LOG_DIAGNOSTIC.region }, DateLessThan: { "aws:CurrentTime": expiresAt } } },
+    { Sid: "DescribeExactBackendLogGroup", Effect: "Allow", Action: "logs:DescribeLogStreams", Resource: logGroupArn(), Condition: { StringEquals: { "aws:RequestedRegion": PRODUCTION_BACKEND_LOG_DIAGNOSTIC.region }, DateLessThan: { "aws:CurrentTime": expiresAt } } },
     { Sid: "ReadExactFailedBackendStreams", Effect: "Allow", Action: "logs:GetLogEvents", Resource: backendLogStreams().map(logStreamArn), Condition: { StringEquals: { "aws:RequestedRegion": PRODUCTION_BACKEND_LOG_DIAGNOSTIC.region }, DateLessThan: { "aws:CurrentTime": expiresAt } } },
   ] });
 }
@@ -75,7 +76,7 @@ export function assertBackendLogDiagnosticPolicy(policy, { expiresAt } = {}) {
   return policy;
 }
 
-const mutationCeilings = Object.freeze({ stsGetCallerIdentity: 2, iamGetRolePolicy: 13, iamPutRolePolicy: 1, iamDeleteRolePolicy: 1, logsDescribeLogStreams: 13, logsGetLogEvents: 8, s3GetObject: 2, s3PutObject: 2, otherAwsCalls: 0, otherAwsWrites: 0, secretReads: 0, ssmReads: 0 });
+const mutationCeilings = Object.freeze({ stsGetCallerIdentity: 2, iamGetRolePolicy: 13, iamPutRolePolicy: 1, iamDeleteRolePolicy: 1, logsDescribeLogStreams: 13, logsGetLogEvents: 32, s3GetObject: 2, s3PutObject: 2, otherAwsCalls: 0, otherAwsWrites: 0, secretReads: 0, ssmReads: 0 });
 const authorizationFields = new Set(["schemaVersion", "kind", "operation", "sourceSha", "repository", "accountId", "region", "recoveryRunId", "recoveryTaskDefinition", "recoveryImageDigest", "failedRecoveryEvidenceSha256", "logGroupName", "logStreams", "readerRoleArn", "policyName", "policyDocument", "policySha256", "journal", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "approvedBy", "approverRole", "issuedAt", "expiresAt", "mutationCeilings", "authorizationSha256"]);
 
 const journalIdentitySha256 = ({ sourceSha, protectedEnvironmentApprovalEvidenceSha256, issuedAt }) => canonicalSha256({ operation: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.operation, sourceSha, recoveryRunId: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.recoveryRunId, recoveryTaskDefinition: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.recoveryTaskDefinition, recoveryImageDigest: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.recoveryImageDigest, failedRecoveryEvidenceSha256: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.failedRecoveryEvidenceSha256, protectedEnvironmentApprovalEvidenceSha256, issuedAt });
@@ -231,6 +232,19 @@ async function waitForReaderCapability({ callReader, stream, sleep = sleepForCon
   throw new Error(`Backend log diagnostic reader capability did not converge within ${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.convergenceAttempts} attempts${lastError ? `: ${lastError.message}` : ""}`);
 }
 
+async function readExactLogStream({ authorization, callReader, stream, assertFresh } = {}) {
+  const events = []; let nextToken;
+  for (let attempt = 0; attempt < PRODUCTION_BACKEND_LOG_DIAGNOSTIC.maxGetLogEventsCallsPerStream; attempt += 1) {
+    assertFresh();
+    const page = await callReader("logsGetLogEvents", ["logs", "get-log-events", "--log-group-name", authorization.logGroupName, "--log-stream-name", stream, "--start-from-head", "--limit", String(PRODUCTION_BACKEND_LOG_DIAGNOSTIC.maxEventsPerPage), "--no-paginate", ...(nextToken ? ["--next-token", nextToken] : [])]);
+    if (!Array.isArray(page?.events) || typeof page.nextForwardToken !== "string" || !page.nextForwardToken) throw new Error(`Authorized log stream response is malformed: ${stream}`);
+    events.push(...page.events);
+    if (page.nextForwardToken === nextToken) return events;
+    nextToken = page.nextForwardToken;
+  }
+  throw new Error(`Authorized log stream pagination did not converge within ${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.maxGetLogEventsCallsPerStream} calls: ${stream}`);
+}
+
 async function readPolicyOrNull(callAdmin) {
   try { return policyFromAws(await callAdmin("iamGetRolePolicy", ["iam", "get-role-policy", "--role-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleName, "--policy-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.policyName])); }
   catch (error) { if (isMissingPolicy(error)) return null; throw error; }
@@ -278,10 +292,9 @@ export async function executeBackendLogDiagnostic({ authorization, sourceSha, st
         ? await waitForReaderCapability({ callReader, stream, sleep })
         : await callReader("logsDescribeLogStreams", ["logs", "describe-log-streams", "--log-group-name", authorization.logGroupName, "--log-stream-name-prefix", stream, "--limit", "1", "--no-paginate"]);
       if (!Array.isArray(listed?.logStreams) || listed.logStreams.length !== 1 || listed.logStreams[0]?.logStreamName !== stream) throw new Error(`Authorized log stream response is permanently mismatched: ${stream}`);
-      const page = await callReader("logsGetLogEvents", ["logs", "get-log-events", "--log-group-name", authorization.logGroupName, "--log-stream-name", stream, "--start-from-head", "--limit", String(PRODUCTION_BACKEND_LOG_DIAGNOSTIC.maxEventsPerStream), "--no-paginate"]);
-      if (!Array.isArray(page?.events)) throw new Error(`Authorized log stream response is malformed: ${stream}`);
-      const messages = page.events.map(({ message }) => typeof message === "string" ? message : "").join("\n");
-      captured.push({ stream, eventCount: page.events.length, rawMessagesSha256: sha256(Buffer.from(messages)), excerptRedacted: redactBackendLogDiagnostic(messages) });
+      const events = await readExactLogStream({ authorization, callReader, stream, assertFresh });
+      const messages = events.map(({ message }) => typeof message === "string" ? message : "").join("\n");
+      captured.push({ stream, eventCount: events.length, rawMessagesSha256: sha256(Buffer.from(messages)), excerptRedacted: redactBackendLogDiagnostic(messages) });
     }
     persistState("READ_CAPTURED", counts);
   } catch (error) { originalError = error; }
@@ -306,7 +319,7 @@ export async function executeBackendLogDiagnostic({ authorization, sourceSha, st
   }
   const terminalCounts = { ...counts, s3PutObject: counts.s3PutObject + 1, s3GetObject: counts.s3GetObject + 1 };
   assertCensusWithinCeilings(terminalCounts, authorization.mutationCeilings);
-  if (captured.length !== authorization.logStreams.length || terminalCounts.iamPutRolePolicy !== 1 || terminalCounts.iamDeleteRolePolicy !== 1 || terminalCounts.logsDescribeLogStreams < 8 || terminalCounts.logsGetLogEvents !== 8 || terminalCounts.s3PutObject !== 2 || terminalCounts.s3GetObject !== 2) throw new Error("Backend log diagnostic mutation or read census is invalid.");
+  if (captured.length !== authorization.logStreams.length || terminalCounts.iamPutRolePolicy !== 1 || terminalCounts.iamDeleteRolePolicy !== 1 || terminalCounts.logsDescribeLogStreams < 8 || terminalCounts.logsGetLogEvents < 16 || terminalCounts.s3PutObject !== 2 || terminalCounts.s3GetObject !== 2) throw new Error("Backend log diagnostic mutation or read census is invalid.");
   const body = { schemaVersion: 2, kind: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.evidenceKind, status: "COMPLETE", sourceSha, authorizationSha256: authorization.authorizationSha256, recoveryRunId: authorization.recoveryRunId, recoveryTaskDefinition: authorization.recoveryTaskDefinition, recoveryImageDigest: authorization.recoveryImageDigest, failedRecoveryEvidenceSha256: authorization.failedRecoveryEvidenceSha256, readerRoleArn: authorization.readerRoleArn, logGroupName: authorization.logGroupName, journalReservationKey: authorization.journal.reservationKey, journalTerminalKey: authorization.journal.terminalKey, streams: captured, capabilityRevoked: true, counts: terminalCounts, completedAt: nowIso(new Date()) };
   const evidence = Object.freeze({ ...body, evidenceSha256: canonicalSha256(body) });
   await journal.finalize({ authorization, status: "COMPLETE", capabilityRevoked: true, counts: terminalCounts, evidence });
@@ -319,7 +332,7 @@ export async function executeBackendLogDiagnostic({ authorization, sourceSha, st
 export function assertBackendLogDiagnosticEvidence(value, { authorization } = {}) {
   const { evidenceSha256, ...body } = value || {};
   if (value?.schemaVersion !== 2 || value.kind !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.evidenceKind || value.status !== "COMPLETE" || value.sourceSha !== authorization?.sourceSha || value.authorizationSha256 !== authorization?.authorizationSha256 || value.recoveryRunId !== authorization?.recoveryRunId || value.logGroupName !== authorization?.logGroupName || value.journalReservationKey !== authorization?.journal?.reservationKey || value.journalTerminalKey !== authorization?.journal?.terminalKey || value.capabilityRevoked !== true
-    || canonicalJson(value.streams?.map(({ stream }) => stream)) !== canonicalJson(authorization?.logStreams) || value.counts?.iamPutRolePolicy !== 1 || value.counts?.iamDeleteRolePolicy !== 1 || value.counts?.logsDescribeLogStreams < 8 || value.counts?.logsGetLogEvents !== 8 || value.counts?.s3PutObject !== 2 || value.counts?.s3GetObject !== 2 || !SHA256.test(evidenceSha256 || "") || canonicalSha256(body) !== evidenceSha256) throw new Error("Backend log diagnostic evidence is incomplete or capability revocation is unauthenticated.");
+    || canonicalJson(value.streams?.map(({ stream }) => stream)) !== canonicalJson(authorization?.logStreams) || value.counts?.iamPutRolePolicy !== 1 || value.counts?.iamDeleteRolePolicy !== 1 || value.counts?.logsDescribeLogStreams < 8 || value.counts?.logsGetLogEvents < 16 || value.counts?.s3PutObject !== 2 || value.counts?.s3GetObject !== 2 || !SHA256.test(evidenceSha256 || "") || canonicalSha256(body) !== evidenceSha256) throw new Error("Backend log diagnostic evidence is incomplete or capability revocation is unauthenticated.");
   assertCensusWithinCeilings(value.counts, authorization.mutationCeilings);
   if (value.streams.some(({ eventCount, rawMessagesSha256, excerptRedacted } = {}) => !Number.isSafeInteger(eventCount) || eventCount < 0 || !SHA256.test(rawMessagesSha256 || "") || typeof excerptRedacted !== "string" || redactBackendLogDiagnostic(excerptRedacted) !== excerptRedacted)) throw new Error("Backend log diagnostic evidence contains invalid or unredacted stream evidence.");
   return value;
