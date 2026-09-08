@@ -17,7 +17,7 @@ This capability is intentionally fixed to recovery run `34223529621`, task defin
 5. After authenticated revocation, it conditionally creates one immutable terminal journal record. `COMPLETE` binds the evidence hash and the exact final AWS call census. Any post-reservation failure records `FAILED_OR_INDETERMINATE` when the terminal write is available; neither terminal state permits replay.
 6. If execution is interrupted or revocation cannot be authenticated, do not read again. Revoke the exact inline policy `mscqr-backend-recovery-34223529621-log-read` from `mscqr-production-independent-checker` through a separately reviewed recovery action and authenticate absence.
 
-The policy uses the AWS-supported backend log-stream ARN namespace for `logs:DescribeLogStreams` and exact log-stream ARNs for `logs:GetLogEvents`. It expires at the authorization deadline and grants no Secrets Manager, SSM, ECS, IAM, Logs Insights, or CloudWatch Logs write action. Local state/evidence files are operational outputs only; the S3 reservation is the durable replay boundary.
+The policy uses the exact bare backend log-group ARN for `logs:DescribeLogStreams` and the eight exact log-stream ARNs for `logs:GetLogEvents`, matching AWS's distinct `log-group` and `log-stream` resource types for those actions. It expires at the authorization deadline and grants no Secrets Manager, SSM, ECS, IAM, Logs Insights, or CloudWatch Logs write action. Local state/evidence files are operational outputs only; the S3 reservation is the durable replay boundary.
 
 ## Signed production call contract
 
@@ -28,7 +28,7 @@ The policy uses the AWS-supported backend log-stream ARN namespace for `logs:Des
 | `iam:PutRolePolicy` | 1 | Install the exact temporary log-read policy. |
 | `iam:DeleteRolePolicy` | 1 | Revoke the exact temporary policy. |
 | `logs:DescribeLogStreams` | 13 | Up to six attempts for reader-policy convergence, then one exact lookup for each remaining stream. |
-| `logs:GetLogEvents` | 8 | One non-paginated, bounded request for each authorized stream. |
+| `logs:GetLogEvents` | 32 | Up to four explicitly counted pages for each authorized stream; a repeated forward token terminates that stream. |
 | `s3:GetObject` | 2 | Exact readback of the reservation and terminal journal objects. |
 | `s3:PutObject` | 2 | Conditional creation of the reservation and terminal objects. |
 
