@@ -8,7 +8,7 @@ import path from "node:path";
 import { assertRootDropEvidence, buildRootDropEvidence, buildRootDropPayload, canonicalRootDropPayload, ROOT_DROP_SIGNING_KEY_ARN } from "../aws/production-root-drop-evidence.mjs";
 import { assertAuthenticatedCurrentStageBState, assertPostApplyStageAPlanRecovery, producePostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "../aws/production-stage-a-recovery-evidence.mjs";
 import { assertStageAStateContract, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { bootstrapInitialDualSlotRotation, createInitialDualSlotSecretsManagerClient, generatePendingMaterial, INITIAL_DUAL_SLOT_NAMES, supersedeStalePendingRotation, verifyLiveInitialDualSlotBindingWithRunner } from "../aws/production-initial-dual-slot-bootstrap.mjs";
+import { bootstrapInitialDualSlotRotation, createInitialDualSlotSecretsManagerClient, finalizeStaleRotationSupersessionMaterialJournal, generatePendingMaterial, INITIAL_DUAL_SLOT_NAMES, supersedeStalePendingRotation, verifyLiveInitialDualSlotBindingWithRunner } from "../aws/production-initial-dual-slot-bootstrap.mjs";
 import { buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { buildRebaselinePayloads, PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
@@ -19,6 +19,9 @@ import { productionStageAIngress, productionStageAState, STAGE_A_LINEAGE, STAGE_
 import { prepare, readCurrentState } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
 import { validateRotationTransition } from "../security/check-production-rotation-transition.mjs";
 import { assertProductionStaleSupersessionPredecessor, productionStaleSupersessionPredecessorIdentity } from "../security/production-initial-migration-source-advance.mjs";
+import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
+import { assertApprovedStaleRotationSupersessionAuthorization, assertStaleRotationSupersessionConsumption, createApprovedStaleRotationSupersessionAuthorization, createPendingStaleRotationSupersessionAuthorization, createStaleRotationSupersessionConsumption, createStaleRotationSupersessionPreparation, staleRotationSupersessionSha256 } from "../aws/production-stale-rotation-supersession-contract.mjs";
+import { createStaleRotationSecretsManagerSender, runCli as runStaleSupersessionCli } from "../aws/supersede-production-stale-rotation.mjs";
 
 const sourceSha = "8".repeat(40);
 const staleSourceSha = "e".repeat(40);
@@ -31,7 +34,7 @@ const currentOwnerRotationId = "rotation-current-20260801";
 const productionQrMetadataIdentifier = "c41ca96ab047dd25"; // ggignore: authenticated public-key fingerprint, not secret material
 const currentNames = { jwt: "current-jwt", qrPrivate: "mscqr/prod/qr_sign_private_key", qrPublic: "mscqr/prod/qr_sign_public_key" };
 const staleTaskDefinition = { taskDefinition: { containerDefinitions: [{ name: "backend", environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "2026-04-20" }], secrets: [{ name: "JWT_SECRET", valueFrom: arn(currentNames.jwt) }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: `${arn(currentNames.qrPrivate)}:value::` }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: `${arn(currentNames.qrPublic)}:value::` }] }] } };
-const supersessionArgs = (overrides = {}) => ({ taskDefinition: staleTaskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha, ...overrides });
+const supersessionArgs = (overrides = {}) => ({ taskDefinition: staleTaskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha, mode: "execute", authorizeWritePlan: () => true, ...overrides });
 
 function rotationStore() {
   const pair = generateKeyPairSync("ed25519", { privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } });
@@ -237,6 +240,97 @@ test("replacement credentials use fresh entropy rather than public identifiers",
   assert.notEqual(first.qrPublic, second.qrPublic);
 });
 
+test("stale supersession preparation performs ten selector reads, plans seven writes, and requires exact independent approval", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-supersession-governance-"));
+  const store = rotationStore();
+  const sender = rotationSender(store);
+  const outputFile = path.join(directory, "supersession.json");
+  const preparedResult = await supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs({ mode: "prepare", authorizeWritePlan: undefined }), outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+  assert.equal(sender.reads.length, 10);
+  assert.equal(sender.writes, 0);
+  assert.equal(preparedResult.preparationInput.writePlan.length, 7);
+  assert.deepEqual(preparedResult.preparationInput.writePlan.map(({ slot }) => slot), ["jwtPending", "qrPrivatePending", "qrPublicPending", "jwtPrevious", "qrPublicPrevious", "qrCurrentVersion", "qrPreviousVersion"]);
+  assert.equal(JSON.stringify(preparedResult.preparationInput).includes("PRIVATE KEY"), false);
+  const publication = { runId: "34287838722", artifactSha256: "1".repeat(64), identitySha256: "2".repeat(64), imageDigests: { backend: `sha256:${"3".repeat(64)}`, worker: `sha256:${"4".repeat(64)}`, rlsExecutor: `sha256:${"5".repeat(64)}`, rlsCanary: `sha256:${"6".repeat(64)}` } };
+  const liveBackend = { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:52", imageDigest: `sha256:${"7".repeat(64)}`, identitySha256: "8".repeat(64) };
+  const stageBState = { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 104, stateSha256: "9".repeat(64) };
+  const preparation = createStaleRotationSupersessionPreparation({ discovery: preparedResult.preparationInput, publication, liveBackend, stageBState });
+  const pending = createPendingStaleRotationSupersessionAuthorization(preparation);
+  assert.equal(pending.authorizationStatus, "PENDING");
+  assert.equal(pending.approvedBy, "UNSET");
+  await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec", authorizeWritePlan: undefined }), /authorization is required/);
+  assert.equal(sender.writes, 0);
+  const approval = createProductionEnvironmentApprovalEvidence({
+    repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha,
+    workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-stale-rotation-supersession.yml@refs/heads/main", eventName: "workflow_dispatch", workflowRunId: "123", workflowRunAttempt: "1", executionActor: "release-operator",
+    environmentConfig: { id: 42, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 7, login: "T-ej2003" } }] }] },
+    actualApproval: { state: "approved", environmentId: 42, environmentName: "production", userId: 7, userLogin: "T-ej2003" },
+  });
+  const authorization = createApprovedStaleRotationSupersessionAuthorization({ pendingAuthorization: pending, preparation, protectedEnvironmentApprovalEvidence: approval });
+  assert.equal(JSON.stringify(authorization).includes("PRIVATE KEY"), false);
+  assert.throws(() => assertApprovedStaleRotationSupersessionAuthorization(pending, preparation, { sourceSha, materialJournalFileSha256: preparation.materialJournalFileSha256 }), /schema is invalid|not exactly approved/);
+  const wrongReviewerBody = { ...authorization, approvedBy: "different-reviewer" };
+  delete wrongReviewerBody.authorizationSha256;
+  const wrongReviewer = { ...wrongReviewerBody, authorizationSha256: staleRotationSupersessionSha256(wrongReviewerBody) };
+  assert.throws(() => assertApprovedStaleRotationSupersessionAuthorization(wrongReviewer, preparation, { sourceSha, materialJournalFileSha256: preparation.materialJournalFileSha256 }), /not exactly approved/);
+  assert.throws(() => assertApprovedStaleRotationSupersessionAuthorization(authorization, preparation, { sourceSha, materialJournalFileSha256: "0".repeat(64) }), /material journal differs/);
+  const alteredPreparation = structuredClone(preparation);
+  alteredPreparation.writePlan[0].payloadSha256 = "0".repeat(64);
+  assert.throws(() => assertApprovedStaleRotationSupersessionAuthorization(authorization, alteredPreparation, { sourceSha, materialJournalFileSha256: preparation.materialJournalFileSha256 }), /hash or write plan/);
+  const result = await supersedeStalePendingRotation({
+    send: sender.send, ...supersessionArgs(), outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec",
+    authorizeWritePlan: (discovery) => {
+      const current = createStaleRotationSupersessionPreparation({ discovery, publication, liveBackend, stageBState, preparedAt: preparation.preparedAt });
+      assert.equal(current.preparationSha256, preparation.preparationSha256);
+      assertApprovedStaleRotationSupersessionAuthorization(authorization, preparation, { sourceSha, materialJournalFileSha256: discovery.materialJournalFileSha256 });
+      return true;
+    },
+  });
+  assert.equal(result.writes, 7);
+  assert.equal(result.preWriteAuthorizationAuthenticated, true);
+  assert.equal(sender.writes, 7);
+  const consumption = createStaleRotationSupersessionConsumption({ authorization, preparation, supersessionEvidenceSha256: result.evidenceSha256, rotationBindingSha256: "b".repeat(64) });
+  assert.equal(assertStaleRotationSupersessionConsumption(consumption, { authorization, preparation }).authorizationConsumed, true);
+  assert.throws(() => assertStaleRotationSupersessionConsumption({ ...consumption, authorizationSha256: "c".repeat(64) }, { authorization, preparation }), /binding/);
+  const resumed = await supersedeStalePendingRotation({
+    send: sender.send, ...supersessionArgs(), outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec",
+    authorizeWritePlan: () => true,
+  });
+  assert.equal(resumed.writes, 0);
+  assert.equal(resumed.idempotentReplay, true);
+  finalizeStaleRotationSupersessionMaterialJournal({ outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+  await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /already durably consumed/);
+  rmSync(directory, { recursive: true, force: true });
+});
+
+test("stale supersession authorization rejects altered plan, journal, reviewer, and caller-selected output path", async () => {
+  await assert.rejects(() => runStaleSupersessionCli(["--mode", "execute", "--output-directory", "/tmp/alternate"]), /Invalid or duplicate argument/);
+  const body = readFileSync("scripts/aws/supersede-production-stale-rotation.mjs", "utf8");
+  assert.match(body, /--mode prepare or --mode execute is required/);
+  assert.doesNotMatch(body, /accepted.*output-directory/);
+  const workflow = readFileSync(".github/workflows/authorize-production-stale-rotation-supersession.yml", "utf8");
+  assert.match(workflow, /environment: production/);
+  assert.match(workflow, /actions: read/);
+  assert.doesNotMatch(workflow, /PutSecretValue|secretsmanager:|aws-actions\/configure-aws-credentials/);
+});
+
+test("stale supersession routes reads and writes through the sanitized runner without exposing payload argv", async () => {
+  const calls = [];
+  const send = createStaleRotationSecretsManagerSender((args, options = {}) => {
+    calls.push({ args, options });
+    return JSON.stringify({ VersionId: "a".repeat(64) });
+  });
+  const { PutSecretValueCommand } = requireBackend("@aws-sdk/client-secrets-manager");
+  await send(new PutSecretValueCommand({ SecretId: arn("mscqr/prod/rotation/jwt_pending"), ClientRequestToken: "a".repeat(64), SecretString: '{"value":"synthetic"}' }));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].args.includes('{"value":"synthetic"}'), false);
+  assert.equal(calls[0].args.includes("file:///dev/stdin"), true);
+  assert.equal(calls[0].options.input, '{"value":"synthetic"}');
+  const source = readFileSync("scripts/aws/supersede-production-stale-rotation.mjs", "utf8");
+  assert.match(source, /createProductionCommandRunner/);
+  assert.doesNotMatch(source, /createInitialDualSlotSecretsManagerClient/);
+});
+
 test("post-apply Stage-A recovery is distinct from and stricter than a historical plan", () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-recovery-"));
   const stateBytes = Buffer.from(JSON.stringify(productionStageAState()));
@@ -269,12 +363,10 @@ test("stale rotation supersession requires exact old topology and writes a new i
   assert.equal(result.writes, 7);
   const persistedEvidenceBytes = readFileSync(path.join(directory, "supersession.json"));
   const persistedEvidence = JSON.parse(persistedEvidenceBytes);
+  finalizeStaleRotationSupersessionMaterialJournal({ outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
   await new Promise((resolve) => setTimeout(resolve, 5));
-  const replay = await supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
-  assert.equal(replay.writes, 0);
-  assert.equal(replay.idempotentReplay, true);
-  assert.deepEqual(replay.evidence, persistedEvidence);
-  assert.equal(replay.evidenceSha256, digest(persistedEvidenceBytes));
+  await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /already durably consumed/);
+  assert.equal(JSON.parse(persistedEvidenceBytes).evidenceIdentitySha256, persistedEvidence.evidenceIdentitySha256);
   const tampered = JSON.parse(readFileSync(path.join(directory, "supersession.json"), "utf8"));
   tampered.rotationId = "rotation-tampered-20260817";
   writeFileSync(path.join(directory, "supersession.json"), `${JSON.stringify(tampered)}\n`, { mode: 0o600 });
@@ -648,6 +740,8 @@ test("stale rotation supersession resumes every sequential write boundary withou
     assert.equal(result.idempotentReplay, failure === 7);
     for (const slot of ["jwtPending", "qrPrivatePending", "qrPublicPending"]) assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES[slot]).value.value, journal.material[slot === "jwtPending" ? "jwt" : slot === "qrPrivatePending" ? "qrPrivate" : "qrPublic"]);
     assert.notEqual(store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.value, "jwt-old-material");
+    assert.notEqual(lstatSync(`${outputFile}.material`, { throwIfNoEntry: false }), undefined);
+    finalizeStaleRotationSupersessionMaterialJournal({ outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" });
     assert.equal(lstatSync(`${outputFile}.material`, { throwIfNoEntry: false }), undefined);
   }
 });
@@ -672,6 +766,8 @@ test("production-shaped stale supersession bootstraps a distinct canonical rotat
       proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === productionOldSource && descendantSha === protectedSource,
       outputFile: path.join(directory, "supersession.json"),
       repositoryRoot: "/private/tmp/mscqr-post330-exec",
+      mode: "execute",
+      authorizeWritePlan: () => true,
     });
     assert.equal(result.writes, 7);
     assert.notEqual(result.rotationId, result.staleRotationId);
@@ -782,7 +878,7 @@ test("production-shaped stale supersession bootstraps a distinct canonical rotat
     alteredState.jwt.oldFingerprint = "0".repeat(16);
     writeFileSync(stateFile, `${JSON.stringify(alteredState, null, 2)}\n`, { mode: 0o600 });
     assert.throws(() => readCurrentState(context), /authenticated stale-supersession predecessor/);
-    await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, taskDefinition: staleTaskDefinition, sourceSha: protectedSource, staleSourceSha: productionOldSource, rotationId: freshRotationId, staleRotationId: productionOldRotationId, proveDescendant: () => true, outputFile: path.join(directory, "replay.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /lineage|invalid|unknown/);
+    await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, taskDefinition: staleTaskDefinition, sourceSha: protectedSource, staleSourceSha: productionOldSource, rotationId: freshRotationId, staleRotationId: productionOldRotationId, proveDescendant: () => true, outputFile: path.join(directory, "replay.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec", mode: "execute", authorizeWritePlan: () => true }), /lineage|invalid|unknown/);
     assert.equal(sender.writes, writesAfterPrepare);
   } finally {
     rmSync(directory, { recursive: true, force: true });

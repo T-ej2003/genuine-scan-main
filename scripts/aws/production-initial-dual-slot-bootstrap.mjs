@@ -1,8 +1,8 @@
 import { createHash, createPublicKey } from "node:crypto";
 import { createRequire } from "node:module";
-import { chmodSync, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
-import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
 import { rotationBindingsToTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
 import {
   assertProductionStaleSupersessionPredecessor,
@@ -51,6 +51,7 @@ const fingerprint = secureFingerprint;
 const canonical = (value) => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
 const canonicalSha256 = (value) => sha256(canonical(value));
 const materialFileFor = (outputFile) => `${path.resolve(outputFile)}.material`;
+export const STALE_ROTATION_SUPERSESSION_WRITE_ORDER = Object.freeze(["jwtPending", "qrPrivatePending", "qrPublicPending", "jwtPrevious", "qrPublicPrevious", "qrCurrentVersion", "qrPreviousVersion"]);
 const required = (value, label) => {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required.`);
   return value.trim();
@@ -88,17 +89,14 @@ function readMaterialJournal(filePath, sourceSha, rotationId) {
   return assertPendingMaterial(journal.material);
 }
 
-function writeMaterialJournal(filePath, sourceSha, rotationId, material) {
+function writeMaterialJournal(filePath, sourceSha, rotationId, material, repositoryRoot) {
   const existing = readMaterialJournal(filePath, sourceSha, rotationId);
   if (existing) return existing;
-  const temporary = `${filePath}.tmp-${process.pid}`;
-  writeFileSync(temporary, `${JSON.stringify({ schemaVersion: 1, sourceSha, rotationId, material })}\n`, { mode: 0o600, flag: "wx" });
-  chmodSync(temporary, 0o600);
-  renameSync(temporary, filePath);
+  writeStageBPrivateFileAtomicExclusive({ filePath, bytes: Buffer.from(`${JSON.stringify({ schemaVersion: 1, sourceSha, rotationId, material })}\n`), repositoryRoot, label: "Replacement material journal" });
   return material;
 }
 
-async function recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile }) {
+async function recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile, repositoryRoot }) {
   const pendingSlots = ["jwtPending", "qrPrivatePending", "qrPublicPending"];
   const existing = {};
   for (const slot of pendingSlots) {
@@ -123,7 +121,7 @@ async function recoverInitialPendingMaterial({ send, resources, sourceSha, rotat
     }
     return assertPendingMaterial(expected);
   }
-  return journal || writeMaterialJournal(materialFile, sourceSha, rotationId, generatePendingMaterial());
+  return journal || writeMaterialJournal(materialFile, sourceSha, rotationId, generatePendingMaterial(), repositoryRoot);
 }
 
 function exactArn(response, expectedName) {
@@ -379,7 +377,7 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
   let secretValueWrites = 0;
   ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(outputFile)), repositoryRoot, create: true, normalize: true, label: "Replacement material journal directory" });
   const materialFile = materialFileFor(outputFile);
-  const material = await recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile });
+  const material = await recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile, repositoryRoot });
   const payloads = pendingPayloads({ rotationId, material });
   for (const payload of Object.values(payloads)) payload.sourceSha = sourceSha;
   if (checkedSupersessionPredecessor) for (const payload of Object.values(payloads)) payload.supersessionPredecessorIdentitySha256 = checkedSupersessionPredecessor.predecessorIdentitySha256;
@@ -482,8 +480,9 @@ function readExistingSupersessionEvidence({ outputFile, repositoryRoot, sourceSh
   return { evidence: checked, sha256: sha256(bytes) };
 }
 
-export async function supersedeStalePendingRotation({ send, taskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile, repositoryRoot = process.cwd(), proveDescendant } = {}) {
+export async function supersedeStalePendingRotation({ send, taskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile, repositoryRoot = process.cwd(), proveDescendant, mode, authorizeWritePlan } = {}) {
   if (typeof send !== "function") throw new Error("Stale rotation supersession Secrets Manager sender is required.");
+  if (!["prepare", "execute"].includes(mode)) throw new Error("Stale rotation supersession requires an explicit prepare or execute mode.");
   if (!SHA40.test(sourceSha || "") || !SHA40.test(staleSourceSha || "") || !ROTATION_ID.test(rotationId || "") || !ROTATION_ID.test(staleRotationId || "")) throw new Error("Stale rotation supersession identity is invalid.");
   if (sourceSha === staleSourceSha || rotationId === staleRotationId) throw new Error("Stale and replacement rotation identities must be distinct.");
   if (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: staleSourceSha, descendantSha: sourceSha }) !== true) throw new Error("Stale rotation source is not an authenticated ancestor of the replacement source.");
@@ -501,7 +500,7 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
     if (response?.VersionId !== currentVersionIds[slot]) throw new Error(`Rotation supersession ${slot} predecessor version is not authenticated.`);
     existing[slot] = parseStoredValue(response, name);
   }
-  const replacementOrder = ["jwtPending", "qrPrivatePending", "qrPublicPending", "jwtPrevious", "qrPublicPrevious", "qrCurrentVersion", "qrPreviousVersion"];
+  const replacementOrder = STALE_ROTATION_SUPERSESSION_WRITE_ORDER;
   const definitions = {
     jwtPrevious: ["jwt_secrets", "empty"], jwtPending: ["jwt_secrets", "pending"], qrPrivatePending: ["qr_signing_keys", "pending-private"],
     qrPublicPrevious: ["qr_signing_keys", "empty"], qrPublicPending: ["qr_signing_keys", "pending-public"], qrCurrentVersion: ["qr_key_versions", "current"], qrPreviousVersion: ["qr_key_versions", "previous-empty"],
@@ -574,13 +573,14 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
   const { baseline, predecessor } = await authenticateSupersessionPredecessor({ send, taskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, supersessionEvidenceIdentitySha256, slotIdentities });
   if (logicalPredecessors.qrCurrentVersion.material.value !== baseline.qrCurrentVersion) throw new Error("Stale QR current key-version marker does not match the authenticated runtime baseline.");
   if (existingEvidence && !allNew) throw new Error("Existing stale rotation supersession evidence conflicts with a non-converged secret topology.");
+  ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(outputFile)), repositoryRoot, create: true, label: "Stale rotation supersession transaction directory" });
   const materialFile = materialFileFor(outputFile);
   const journalMaterial = readMaterialJournal(materialFile, sourceSha, rotationId);
+  if (allNew && existingEvidence && !journalMaterial) throw new Error("Stale rotation supersession authorization is already durably consumed by the completed transition.");
   if (allNew && !existingEvidence && !journalMaterial) throw new Error("All-new stale rotation supersession replay is missing its authenticated replacement material journal.");
-  const generated = allNew ? null : generatePendingMaterial();
   const material = allNew
     ? journalMaterial || { jwt: existing.jwtPending.value, qrPrivate: existing.qrPrivatePending.value, qrPublic: existing.qrPublicPending.value, qrKeyVersion: existing.qrPrivatePending.keyVersion }
-    : journalMaterial || writeMaterialJournal(materialFile, sourceSha, rotationId, generated);
+    : journalMaterial || writeMaterialJournal(materialFile, sourceSha, rotationId, generatePendingMaterial(), repositoryRoot);
   const payloads = pendingPayloads({ rotationId, material });
   for (const payload of Object.values(payloads)) payload.sourceSha = sourceSha;
   let derivedPublic;
@@ -610,6 +610,24 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
     const described = await send(new DescribeSecretCommand({ SecretId: expected.secretArn }));
     if (described?.ARN !== expected.secretArn || described.VersionIdsToStages?.[expected.versionId]?.includes("AWSCURRENT") !== true) throw new Error(`Rotation supersession current ${name} predecessor changed before mutation.`);
   }
+  const writePlan = Object.freeze(replacementOrder.map((slot) => Object.freeze({
+    slot,
+    secretArn: resources[slot],
+    clientRequestToken: transitionVersionId(slot),
+    payloadSha256: canonicalSha256(replacement[slot]),
+  })));
+  if (writePlan.length !== 7 || writePlan.some((entry, index) => entry.slot !== replacementOrder[index] || entry.secretArn !== resources[entry.slot])) throw new Error("Stale rotation supersession write plan is not the exact canonical seven-target plan.");
+  const preparationInput = Object.freeze({
+    sourceSha, staleSourceSha, rotationId, staleRotationId,
+    resources: Object.freeze({ ...resources }),
+    predecessorSlotIdentities: Object.freeze(structuredClone(slotIdentities)),
+    currentPredecessor: predecessor,
+    materialJournalFile: path.resolve(materialFile),
+    materialJournalFileSha256: sha256(readFileSync(materialFile)),
+    writePlan,
+  });
+  if (mode === "prepare") return { valid: true, transition: "SUPERSEDE_STALE_PENDING_PREPARED", writes: 0, preparationInput, predecessor, sourceSha, staleSourceSha, rotationId, staleRotationId, resources };
+  if (typeof authorizeWritePlan !== "function" || await authorizeWritePlan(preparationInput) !== true) throw new Error("Approved stale rotation supersession authorization is required before PutSecretValue.");
   const versionIds = {};
   for (const slot of replacementOrder) {
     if (states[slot] === "NEW_AUTHENTICATED") { versionIds[slot] = currentVersionIds[slot]; continue; }
@@ -643,6 +661,12 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
   const bytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`);
   const persisted = existingEvidence || writeStageBPrivateFileAtomic({ filePath: outputFile, bytes, repositoryRoot, label: "Stale rotation supersession evidence" });
   const returnedEvidence = existingEvidence?.evidence || evidence;
-  if (lstatSync(materialFile, { throwIfNoEntry: false })) unlinkSync(materialFile);
-  return { valid: true, transition: returnedEvidence.transition, idempotentReplay: allNew, writes: existingEvidence ? 0 : Object.keys(versionIds).filter((slot) => states[slot] !== "NEW_AUTHENTICATED").length, evidence: returnedEvidence, predecessor, evidenceFile: existingEvidence ? path.resolve(outputFile) : persisted.path, evidenceSha256: persisted.sha256, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, versionIds };
+  return { valid: true, transition: returnedEvidence.transition, preWriteAuthorizationAuthenticated: true, idempotentReplay: allNew, writes: existingEvidence ? 0 : Object.keys(versionIds).filter((slot) => states[slot] !== "NEW_AUTHENTICATED").length, evidence: returnedEvidence, predecessor, evidenceFile: existingEvidence ? path.resolve(outputFile) : persisted.path, evidenceSha256: persisted.sha256, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, versionIds };
+}
+
+export function finalizeStaleRotationSupersessionMaterialJournal({ outputFile, repositoryRoot = process.cwd() } = {}) {
+  const materialFile = materialFileFor(outputFile);
+  ensureStageBPrivateFile({ filePath: materialFile, repositoryRoot, label: "Replacement material journal" });
+  unlinkSync(materialFile);
+  return true;
 }

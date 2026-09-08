@@ -172,6 +172,105 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "stale-rotation-supersession-material-journal",
+      "kind": "file",
+      "producer": "scripts/aws/production-initial-dual-slot-bootstrap.mjs:supersedeStalePendingRotation --mode prepare",
+      "consumers": [
+        "scripts/aws/supersede-production-stale-rotation.mjs",
+        "scripts/aws/production-initial-dual-slot-bootstrap.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "secretMaterial": true,
+      "atomicGroup": "stale-rotation-supersession-material-journal",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stale-rotation-supersession-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/supersede-production-stale-rotation.mjs:runCli --mode prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-stale-rotation-supersession.yml",
+        "scripts/aws/authorize-production-stale-rotation-supersession.mjs",
+        "scripts/aws/supersede-production-stale-rotation.mjs",
+        "scripts/aws/production-stale-rotation-supersession-contract.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "stale-rotation-supersession-preparation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stale-rotation-supersession-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-stale-rotation-supersession.yml",
+      "consumers": [
+        "scripts/aws/supersede-production-stale-rotation.mjs",
+        "scripts/aws/production-stale-rotation-supersession-contract.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "stale-rotation-supersession-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stale-rotation-supersession-consumption",
+      "kind": "file",
+      "producer": "scripts/aws/supersede-production-stale-rotation.mjs:runCli --mode execute",
+      "consumers": [
+        "scripts/aws/supersede-production-stale-rotation.mjs",
+        "scripts/aws/production-stale-rotation-supersession-contract.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "stale-rotation-supersession-consumption",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stale-rotation-supersession-evidence",
+      "kind": "file",
+      "producer": "scripts/aws/production-initial-dual-slot-bootstrap.mjs:supersedeStalePendingRotation --mode execute",
+      "consumers": [
+        "scripts/aws/production-initial-dual-slot-bootstrap.mjs",
+        "scripts/security/production-initial-migration-source-advance.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "stale-rotation-supersession-evidence",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "dual-slot-rebaseline-abandonment-evidence",
       "kind": "file",
       "producer": "scripts/aws/rebaseline-production-dual-slot.mjs:prepareProductionDualSlotRebaseline",
