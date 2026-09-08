@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import JSZip from "jszip";
 import { assertProductionEnvironmentApprovalFreshness, assertProductionEnvironmentApprovalIdentity, assertProductionEnvironmentActualReviewer, assertProductionEnvironmentReviewer, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
+import { createProductionAwsCommandRunner, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { canonicalJson, canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
@@ -34,6 +35,7 @@ export const PRODUCTION_BACKEND_LOG_DIAGNOSTIC = Object.freeze({
   artifactName: "production-backend-log-diagnostic-authorization",
   accountId: "368992683803",
   region: "eu-west-2",
+  adminPrincipalArn: "arn:aws:iam::368992683803:root",
   logGroupName: "/ecs/mscqr-backend",
   readerRoleName: "mscqr-production-independent-checker",
   readerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
@@ -125,7 +127,7 @@ export function assertBackendLogDiagnosticAuthorization(value, { sourceSha, now 
 const policyFromAws = (value) => value?.PolicyDocument ? (typeof value.PolicyDocument === "string" ? JSON.parse(decodeURIComponent(value.PolicyDocument)) : value.PolicyDocument) : null;
 const isMissingPolicy = (error) => /NoSuchEntity/i.test(`${error?.name || ""} ${error?.message || ""} ${error?.stderr || ""}`);
 const exactReader = (identity) => identity?.Account === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId && new RegExp(`^arn:aws:sts::${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId}:assumed-role/${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleName}/`).test(identity?.Arn || "");
-const exactAdmin = (identity) => identity?.Account === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId && /^(arn:aws:iam::368992683803:root|arn:aws:sts::368992683803:assumed-role\/mscqr-production-bootstrap-mfa\/)/.test(identity?.Arn || "");
+const exactAdmin = (identity) => identity?.Account === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId && identity?.Arn === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.adminPrincipalArn;
 const canonicalJournalBytes = (value) => Buffer.from(`${canonicalJson(value)}\n`);
 const redactBackendLogDiagnostic = (value) => redactStageBRefreshDiagnostic(value, { maxChars: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.maxEvidenceCharsPerStream })
   .replace(/\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s"']+/gi, "[REDACTED_CONNECTION_STRING]")
@@ -332,7 +334,7 @@ export async function createBackendLogDiagnosticAuthorizationFromFiles({ sourceS
   return authorization;
 }
 
-export async function resolveBackendLogDiagnosticAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, run = (command, args, options = {}) => execFileSync(command, args, { encoding: options.encoding === null ? null : "utf8", maxBuffer: 64 * 1024 * 1024 }), now = new Date() } = {}) {
+export async function resolveBackendLogDiagnosticAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, run = createProductionGithubCommandRunner(), now = new Date() } = {}) {
   if (!RUN_ID.test(String(workflowRunId || "")) || !RUN_ID.test(String(workflowRunAttempt || "")) || !SHA40.test(sourceSha || "")) throw new Error("Backend log diagnostic authorization workflow coordinates are invalid.");
   const workflow = JSON.parse(run("gh", ["api", `repos/${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.repository}/actions/runs/${workflowRunId}`]));
   if (String(workflow.id) !== String(workflowRunId) || workflow.repository?.full_name !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.repository || workflow.head_repository?.full_name !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.repository || workflow.path !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.workflowPath || workflow.event !== "workflow_dispatch" || workflow.head_sha !== sourceSha || workflow.status !== "completed" || workflow.conclusion !== "success" || String(workflow.run_attempt) !== String(workflowRunAttempt)) throw new Error("Backend log diagnostic authorization workflow provenance is invalid.");
@@ -348,7 +350,14 @@ export async function resolveBackendLogDiagnosticAuthorizationArtifact({ workflo
   return Object.freeze({ authorization, artifact: matches[0], workflow });
 }
 
-const awsAdapter = (profile) => async (args) => { const output = execFileSync("aws", [...args, "--profile", profile, "--region", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.region, "--output", "json", "--no-cli-pager"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); return output ? JSON.parse(output) : {}; };
+export function createBackendLogDiagnosticAwsRunner({ profile, env = process.env, exec = execFileSync } = {}) {
+  const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, env, region: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.region, exec });
+  return async (args) => {
+    const command = [...args, ...(args.includes("--output") ? [] : ["--output", "json"]), ...(args.includes("--no-cli-pager") ? [] : ["--no-cli-pager"])];
+    const output = run(command).trim();
+    return output ? JSON.parse(output) : {};
+  };
+}
 
 export async function runCli(argv = process.argv.slice(2), deps = {}) {
   const sourceSha = required(argv, "--source-sha");
@@ -357,7 +366,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
   const statePath = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--state")), repositoryRoot: root, label: "Backend log diagnostic state", allowExisting: true });
   const evidencePath = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--evidence")), repositoryRoot: root, label: "Backend log diagnostic evidence", allowExisting: false });
   ensureStageBPrivateDirectory({ directory: path.dirname(statePath), repositoryRoot: root, create: true });
-  return executeBackendLogDiagnostic({ authorization: resolved.authorization, sourceSha, statePath, evidencePath, admin: deps.admin || awsAdapter(required(argv, "--admin-profile")), reader: deps.reader || awsAdapter(required(argv, "--reader-profile")), protectedMain: deps.protectedMain, now: deps.now || new Date(), clock: deps.clock, writeFiles: deps.writeFiles, sleep: deps.sleep });
+  return executeBackendLogDiagnostic({ authorization: resolved.authorization, sourceSha, statePath, evidencePath, admin: deps.admin || createBackendLogDiagnosticAwsRunner({ profile: required(argv, "--admin-profile") }), reader: deps.reader || createBackendLogDiagnosticAwsRunner({ profile: required(argv, "--reader-profile") }), protectedMain: deps.protectedMain, now: deps.now || new Date(), clock: deps.clock, writeFiles: deps.writeFiles, sleep: deps.sleep });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) runCli().then((result) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)).catch((error) => { process.stderr.write(`${JSON.stringify({ error: error.message, counts: error.counts || null })}\n`); process.exitCode = 1; });

@@ -5,12 +5,18 @@ import path from "node:path";
 import test from "node:test";
 import yaml from "js-yaml";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
-import { assertBackendLogDiagnosticAuthorization, assertBackendLogDiagnosticEvidence, assertBackendLogDiagnosticPolicy, backendLogStreams, buildBackendLogDiagnosticPolicy, createBackendLogDiagnosticAuthorization, createBackendLogDiagnosticJournal, executeBackendLogDiagnostic, PRODUCTION_BACKEND_LOG_DIAGNOSTIC, runCli } from "../aws/production-backend-log-diagnostic.mjs";
+import { assertBackendLogDiagnosticAuthorization, assertBackendLogDiagnosticEvidence, assertBackendLogDiagnosticPolicy, backendLogStreams, buildBackendLogDiagnosticPolicy, createBackendLogDiagnosticAuthorization, createBackendLogDiagnosticAwsRunner, createBackendLogDiagnosticJournal, executeBackendLogDiagnostic, PRODUCTION_BACKEND_LOG_DIAGNOSTIC, runCli } from "../aws/production-backend-log-diagnostic.mjs";
+import { productionAwsCredentialSourceContract } from "../aws/production-credential-source-contract.mjs";
 
 const sourceSha = "c426a911cd732cd2f4bc5c01134cb858882a0750";
 const now = new Date("2026-09-08T12:00:00.000Z");
 const credentialedDatabaseUrl = ["postgres", "://", "user", ":", "pass", "@example/db"].join("");
 const awsAccessKeyLike = ["AKIA", "1234567890ABCDEF"].join("");
+const hostileAwsEnvironment = Object.freeze({
+  HOME: "/safe/home", PATH: "/safe/bin", LANG: "en_GB.UTF-8",
+  ...Object.fromEntries(productionAwsCredentialSourceContract.namedProfileStrips.map((name) => [name, `hostile-${name}`])),
+  AWS_ENDPOINT_URL_STS: "https://hostile.invalid/sts", AWS_ENDPOINT_URL_IAM: "https://hostile.invalid/iam", AWS_ENDPOINT_URL_S3: "https://hostile.invalid/s3", AWS_ENDPOINT_URL_LOGS: "https://hostile.invalid/logs",
+});
 
 function approval({ reviewer = "T-ej2003", configured = "T-ej2003" } = {}) {
   return createProductionEnvironmentApprovalEvidence({
@@ -23,11 +29,11 @@ function approval({ reviewer = "T-ej2003", configured = "T-ej2003" } = {}) {
 
 const authorization = (overrides = {}) => createBackendLogDiagnosticAuthorization({ sourceSha, protectedEnvironmentApprovalEvidence: approval(), issuedAt: now.toISOString(), ...overrides });
 const zeroCounts = (value = authorization()) => Object.fromEntries(Object.keys(value.mutationCeilings).map((key) => [key, 0]));
-function awsFixture({ policyReadLag = 0, readerReadLag = 0, deleteReadLag = 0, wrongPolicy = false, readerError = null, revokeError = null, journalWriteErrorAt = null, streamMismatchAt = null } = {}) {
+function awsFixture({ adminArn = "arn:aws:iam::368992683803:root", policyReadLag = 0, readerReadLag = 0, deleteReadLag = 0, wrongPolicy = false, readerError = null, revokeError = null, journalWriteErrorAt = null, streamMismatchAt = null } = {}) {
   let installed = null; let deletedPolicy = null; let deleted = false; let policyReads = 0; let readerReads = 0; let deleteReads = 0; const objects = new Map();
   const calls = { sts: 0, getPolicy: 0, put: 0, del: 0, describe: 0, events: 0, s3Get: 0, s3Put: 0 };
   const admin = async (args) => {
-    if (args[0] === "sts") { calls.sts += 1; return { Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-bootstrap-mfa/session" }; }
+    if (args[0] === "sts") { calls.sts += 1; return { Account: "368992683803", Arn: adminArn }; }
     if (args[1] === "get-role-policy") {
       calls.getPolicy += 1;
       policyReads += 1;
@@ -104,10 +110,39 @@ test("operator CLI consumes the authenticated workflow artifact through the comp
   assertBackendLogDiagnosticEvidence(evidence, { authorization: value }); assert.equal(aws.calls.put, 1); assert.equal(aws.calls.del, 1); assert.equal(aws.calls.s3Put, 2);
 });
 
+test("diagnostic admin and reader runners sanitize the complete hostile AWS environment", async () => {
+  for (const profile of ["default", "mscqr-production-independent-checker"]) {
+    const calls = [];
+    const run = createBackendLogDiagnosticAwsRunner({ profile, env: hostileAwsEnvironment, exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; } });
+    for (const args of [["sts", "get-caller-identity"], ["iam", "get-role-policy"], ["s3api", "get-object"], ["logs", "describe-log-streams"]]) await run(args);
+    assert.equal(calls.length, 4);
+    for (const { file, args, options } of calls) {
+      assert.equal(file, "aws"); assert.equal(options.env.AWS_PROFILE, profile); assert.equal(options.env.AWS_REGION, "eu-west-2"); assert.equal(options.env.AWS_DEFAULT_REGION, "eu-west-2"); assert.equal(options.env.AWS_EC2_METADATA_DISABLED, "true");
+      assert.equal(options.env.HOME, hostileAwsEnvironment.HOME); assert.equal(options.env.PATH, hostileAwsEnvironment.PATH); assert.equal(options.env.LANG, hostileAwsEnvironment.LANG);
+      for (const name of Object.keys(hostileAwsEnvironment).filter((name) => name.startsWith("AWS_") && name !== "AWS_PROFILE")) assert.equal(options.env[name], undefined, name);
+      assert.ok(args.includes("--region")); assert.ok(args.includes("--output")); assert.ok(args.includes("--no-cli-pager"));
+    }
+  }
+  assert.throws(() => createBackendLogDiagnosticAwsRunner({ profile: "", env: hostileAwsEnvironment, exec: () => { throw new Error("must not execute"); } }), /explicit profile/);
+});
+
 test("transaction fails closed for wrong reader and never installs capability", async () => {
   const aws = awsFixture(); aws.reader = async () => ({ Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" });
   await assert.rejects(runDiagnostic({ aws }), /independent checker/);
   assert.equal(aws.calls.put, 0);
+});
+
+test("capability installation requires the exact root administrator and rejects bootstrap profile identity confusion", async () => {
+  assert.equal(PRODUCTION_BACKEND_LOG_DIAGNOSTIC.adminPrincipalArn, "arn:aws:iam::368992683803:root");
+  for (const adminArn of [
+    "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator",
+    "arn:aws:sts::368992683803:assumed-role/mscqr-production-bootstrap-mfa/session",
+    "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/session",
+  ]) {
+    const aws = awsFixture({ adminArn });
+    await assert.rejects(runDiagnostic({ aws }), /governed administrator boundary/);
+    assert.equal(aws.calls.s3Put, 0); assert.equal(aws.calls.put, 0); assert.equal(aws.calls.describe, 0);
+  }
 });
 
 test("source drift and stale authorization fail before reservation or capability installation", async () => {

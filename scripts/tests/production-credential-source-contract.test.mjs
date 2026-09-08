@@ -403,3 +403,11 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
   for (const [file, boundary] of Object.entries(boundaries)) assert.match(fs.readFileSync(file, "utf8"), boundary, file);
   assert.match(fs.readFileSync("scripts/aws/verify-production-dependency-closure.mjs", "utf8"), /requireTokens/);
 });
+
+test("backend log diagnostics use the canonical runner instead of a raw inherited-environment AWS adapter", () => {
+  const source = fs.readFileSync("scripts/aws/production-backend-log-diagnostic.mjs", "utf8");
+  assert.match(source, /createProductionAwsCommandRunner/);
+  assert.match(source, /createProductionGithubCommandRunner/);
+  assert.match(source, /PRODUCTION_AWS_CREDENTIAL_SOURCE\.NAMED_PROFILE/);
+  assert.doesNotMatch(source, /awsAdapter|(?:execFileSync|execFile|spawnSync|spawn)\(["']aws["']/);
+});
