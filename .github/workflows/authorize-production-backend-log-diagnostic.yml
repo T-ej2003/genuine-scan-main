@@ -1,0 +1,75 @@
+name: Authorize scoped production backend log diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected main source SHA, required: true, type: string }
+
+permissions:
+  contents: read
+
+jobs:
+  authorize-backend-log-diagnostic:
+    name: Authorize exact failed recovery log diagnostic
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate protected source
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "T-ej2003/genuine-scan-main"
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          install -d -m 700 "$RUNNER_TEMP/backend-log-diagnostic-authorization"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked authorization dependencies
+        run: npm ci
+      - name: Re-authenticate protected source after dependency installation
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain --untracked-files=no)"
+      - name: Authenticate actual protected environment approval
+        id: environment-approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          node scripts/aws/production-github-environment-approval.mjs \
+            --output "$RUNNER_TEMP/backend-log-diagnostic-authorization/environment-approval.json" \
+            --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
+            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/backend-log-diagnostic-authorization/environment-approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Produce exact diagnostic authorization
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          node scripts/aws/production-backend-log-diagnostic.mjs --authorize \
+            --source-sha "$SOURCE_SHA" \
+            --environment-approval "$RUNNER_TEMP/backend-log-diagnostic-authorization/environment-approval.json" \
+            --environment-approval-sha256 "${{ steps.environment-approval.outputs.sha256 }}" \
+            --output "$RUNNER_TEMP/backend-log-diagnostic-authorization/authorization.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-backend-log-diagnostic-authorization
+          path: ${{ runner.temp }}/backend-log-diagnostic-authorization/authorization.json
+          if-no-files-found: error
+          retention-days: 1

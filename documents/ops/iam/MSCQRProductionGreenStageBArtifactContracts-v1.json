@@ -1407,6 +1407,61 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "backend-log-diagnostic-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-backend-log-diagnostic.yml",
+      "consumers": [
+        "scripts/aws/production-backend-log-diagnostic.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "backend-log-diagnostic-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "backend-log-diagnostic-state",
+      "kind": "file",
+      "producer": "scripts/aws/production-backend-log-diagnostic.mjs",
+      "consumers": [
+        "scripts/aws/production-backend-log-diagnostic.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": true,
+      "hashBound": true,
+      "atomicGroup": "backend-log-diagnostic-state",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "backend-log-diagnostic-evidence",
+      "kind": "file",
+      "producer": "scripts/aws/production-backend-log-diagnostic.mjs",
+      "consumers": [
+        "documents/ops/PRODUCTION_BACKEND_FAILED_RECOVERY_LOG_DIAGNOSTIC.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "backend-log-diagnostic-evidence",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "temporary-stage-a-kms-capability",
       "kind": "file",
       "producer": "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs:createTemporaryKmsCapabilityRunner",

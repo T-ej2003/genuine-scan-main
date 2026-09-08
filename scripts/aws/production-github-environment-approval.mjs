@@ -18,6 +18,7 @@ export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
   dualSlotRebaselineWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-dual-slot-rebaseline.yml@refs/heads/main",
   dualSlotRebaselineRecoveryWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-dual-slot-rebaseline-recovery.yml@refs/heads/main",
   stageBApplyAttemptReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-green-stage-b-apply-attempt-reconciliation.yml@refs/heads/main",
+  backendLogDiagnosticWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-backend-log-diagnostic.yml@refs/heads/main",
   installationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml@refs/heads/main",
   installationBootstrapWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml@refs/heads/main",
   installationBootstrapEnvironment: "production-initial-activation-reconciler-bootstrap",
@@ -35,6 +36,7 @@ const approvedWorkflowRefs = new Set([
   PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineRecoveryWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.stageBApplyAttemptReconciliationWorkflowRef,
+  PRODUCTION_ENVIRONMENT_APPROVAL.backendLogDiagnosticWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapWorkflowRef,
 ]);

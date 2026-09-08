@@ -1,0 +1,213 @@
+#!/usr/bin/env node
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import JSZip from "jszip";
+import { assertProductionEnvironmentApprovalFreshness, assertProductionEnvironmentApprovalIdentity, assertProductionEnvironmentActualReviewer, assertProductionEnvironmentReviewer, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
+import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
+import { canonicalJson, canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { redactStageBRefreshDiagnostic } from "../refresh-production-green-stage-b.mjs";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const SHA40 = /^[a-f0-9]{40}$/;
+const SHA256 = /^[a-f0-9]{64}$/;
+const RUN_ID = /^[1-9][0-9]*$/;
+const TASK_ID = /^[a-f0-9]{32}$/;
+const nowIso = (now) => new Date(now).toISOString();
+const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
+const exactFields = (value, fields, label) => { if (!value || typeof value !== "object" || Array.isArray(value) || canonicalJson(Object.keys(value).sort()) !== canonicalJson([...fields].sort())) throw new Error(`${label} schema is invalid.`); };
+const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+
+export const PRODUCTION_BACKEND_LOG_DIAGNOSTIC = Object.freeze({
+  schemaVersion: 1,
+  kind: "PRODUCTION_BACKEND_FAILED_RECOVERY_LOG_DIAGNOSTIC_AUTHORIZATION",
+  evidenceKind: "PRODUCTION_BACKEND_FAILED_RECOVERY_LOG_DIAGNOSTIC_EVIDENCE",
+  operation: "PRODUCTION_BACKEND_FAILED_RECOVERY_LOG_DIAGNOSTIC",
+  repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository,
+  workflowPath: ".github/workflows/authorize-production-backend-log-diagnostic.yml",
+  workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.backendLogDiagnosticWorkflowRef,
+  artifactName: "production-backend-log-diagnostic-authorization",
+  accountId: "368992683803",
+  region: "eu-west-2",
+  logGroupName: "/ecs/mscqr-backend",
+  readerRoleName: "mscqr-production-independent-checker",
+  readerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+  policyName: "mscqr-backend-recovery-34223529621-log-read",
+  recoveryRunId: "34223529621",
+  recoveryTaskDefinition: "mscqr-backend:51",
+  recoveryImageDigest: "sha256:b55ffef21cd794a1fefb0f0da3b56e70a727d44818a9d0a5f1c26d3e1d2e1b3e",
+  failedRecoveryEvidenceSha256: "5fbcfe4a48280a1f488a5a9ba6fb5cc29a590ae984493ed39a8086988c5f31df",
+  taskIds: Object.freeze(["2cad6eb068d14cea83e22fbd901f9462", "31c3de798ed14c18a19eaf9547d132af", "5728a20ebd584dc6a8f80874e8f22e67", "71d4d17200e04e7ba20cdfc247dc5426", "cda9ce369a59409b84792dbc94eb00b9", "d2770807ae7e4911b1535ef7a11f61c1", "f6e73e5cab1345e5a222fde6f38763a3", "f84f325dd46e41ac923adb12a5c2ecc9"]),
+  maxAuthorizationAgeMs: 30 * 60 * 1000,
+  maxEventsPerStream: 10_000,
+  maxEvidenceCharsPerStream: 4096,
+});
+
+export const backendLogStreams = () => PRODUCTION_BACKEND_LOG_DIAGNOSTIC.taskIds.map((taskId) => `ecs/backend/${taskId}`);
+const logGroupArn = () => `arn:aws:logs:${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.region}:${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId}:log-group:${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.logGroupName}`;
+const logStreamArn = (stream) => `${logGroupArn()}:log-stream:${stream}`;
+
+export function buildBackendLogDiagnosticPolicy({ expiresAt } = {}) {
+  const expiry = new Date(expiresAt);
+  if (!Number.isFinite(expiry.getTime()) || expiry.toISOString() !== expiresAt) throw new Error("Diagnostic capability expiry is invalid.");
+  return Object.freeze({ Version: "2012-10-17", Statement: [
+    { Sid: "DescribeExactBackendLogGroup", Effect: "Allow", Action: "logs:DescribeLogStreams", Resource: logGroupArn(), Condition: { StringEquals: { "aws:RequestedRegion": PRODUCTION_BACKEND_LOG_DIAGNOSTIC.region }, DateLessThan: { "aws:CurrentTime": expiresAt } } },
+    { Sid: "ReadExactFailedBackendStreams", Effect: "Allow", Action: "logs:GetLogEvents", Resource: backendLogStreams().map(logStreamArn), Condition: { StringEquals: { "aws:RequestedRegion": PRODUCTION_BACKEND_LOG_DIAGNOSTIC.region }, DateLessThan: { "aws:CurrentTime": expiresAt } } },
+  ] });
+}
+
+export function assertBackendLogDiagnosticPolicy(policy, { expiresAt } = {}) {
+  const expected = buildBackendLogDiagnosticPolicy({ expiresAt });
+  if (canonicalJson(policy) !== canonicalJson(expected)) throw new Error("Backend log diagnostic IAM policy is not the exact least-privilege policy.");
+  const actions = policy.Statement.flatMap(({ Action }) => [Action].flat());
+  if (canonicalJson(actions.sort()) !== canonicalJson(["logs:DescribeLogStreams", "logs:GetLogEvents"].sort())) throw new Error("Backend log diagnostic IAM actions are invalid.");
+  return policy;
+}
+
+const authorizationFields = new Set(["schemaVersion", "kind", "operation", "sourceSha", "repository", "accountId", "region", "recoveryRunId", "recoveryTaskDefinition", "recoveryImageDigest", "failedRecoveryEvidenceSha256", "logGroupName", "logStreams", "readerRoleArn", "policyName", "policyDocument", "policySha256", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "approvedBy", "approverRole", "issuedAt", "expiresAt", "mutationCeilings", "authorizationSha256"]);
+
+export function createBackendLogDiagnosticAuthorization({ sourceSha, protectedEnvironmentApprovalEvidence, issuedAt = new Date().toISOString() } = {}) {
+  assertProductionEnvironmentApprovalIdentity(protectedEnvironmentApprovalEvidence, { sourceSha, repository: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.repository });
+  if (protectedEnvironmentApprovalEvidence.workflowRef !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.workflowRef || protectedEnvironmentApprovalEvidence.schemaVersion !== 3) throw new Error("Backend log diagnostic requires actual approval from its dedicated protected workflow.");
+  const approvedBy = assertProductionEnvironmentActualReviewer(protectedEnvironmentApprovalEvidence, { sourceSha, repository: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.repository, executionActor: protectedEnvironmentApprovalEvidence.executionActor });
+  if (!protectedEnvironmentApprovalEvidence.configuredReviewers.every(({ type }) => type === "User")) throw new Error("Backend log diagnostic supports configured User reviewers only.");
+  assertProductionEnvironmentReviewer(protectedEnvironmentApprovalEvidence, { approvedBy, executionActor: protectedEnvironmentApprovalEvidence.executionActor });
+  const issued = new Date(issuedAt);
+  if (!Number.isFinite(issued.getTime()) || issued.toISOString() !== issuedAt) throw new Error("Diagnostic authorization issue time is invalid.");
+  const expiresAt = new Date(issued.getTime() + PRODUCTION_BACKEND_LOG_DIAGNOSTIC.maxAuthorizationAgeMs).toISOString();
+  const policyDocument = buildBackendLogDiagnosticPolicy({ expiresAt });
+  const body = {
+    schemaVersion: 1, kind: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.kind, operation: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.operation, sourceSha, repository: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.repository, accountId: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId, region: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.region,
+    recoveryRunId: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.recoveryRunId, recoveryTaskDefinition: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.recoveryTaskDefinition, recoveryImageDigest: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.recoveryImageDigest, failedRecoveryEvidenceSha256: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.failedRecoveryEvidenceSha256,
+    logGroupName: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.logGroupName, logStreams: backendLogStreams(), readerRoleArn: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleArn, policyName: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.policyName, policyDocument, policySha256: canonicalSha256(policyDocument),
+    protectedEnvironmentApprovalEvidence, protectedEnvironmentApprovalEvidenceSha256: protectedEnvironmentApprovalEvidence.evidenceSha256, approvedBy, approverRole: "production-operator", issuedAt, expiresAt,
+    mutationCeilings: { putRolePolicy: 1, deleteRolePolicy: 1, describeLogStreams: 8, getLogEvents: 8, otherAwsWrites: 0, secretReads: 0, ssmReads: 0 },
+  };
+  return Object.freeze({ ...body, authorizationSha256: canonicalSha256(body) });
+}
+
+export function assertBackendLogDiagnosticAuthorization(value, { sourceSha, now = new Date() } = {}) {
+  exactFields(value, authorizationFields, "Backend log diagnostic authorization");
+  const { authorizationSha256, ...body } = value;
+  if (!SHA40.test(sourceSha || "") || value.sourceSha !== sourceSha || value.schemaVersion !== 1 || value.kind !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.kind || value.operation !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.operation
+    || value.repository !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.repository || value.accountId !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId || value.region !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.region
+    || value.recoveryRunId !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.recoveryRunId || value.recoveryTaskDefinition !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.recoveryTaskDefinition || value.recoveryImageDigest !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.recoveryImageDigest || value.failedRecoveryEvidenceSha256 !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.failedRecoveryEvidenceSha256
+    || value.logGroupName !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.logGroupName || canonicalJson(value.logStreams) !== canonicalJson(backendLogStreams()) || value.readerRoleArn !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleArn || value.policyName !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.policyName
+    || value.policySha256 !== canonicalSha256(value.policyDocument) || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence?.evidenceSha256
+    || value.approverRole !== "production-operator" || canonicalJson(value.mutationCeilings) !== canonicalJson({ putRolePolicy: 1, deleteRolePolicy: 1, describeLogStreams: 8, getLogEvents: 8, otherAwsWrites: 0, secretReads: 0, ssmReads: 0 })
+    || !SHA256.test(authorizationSha256 || "") || canonicalSha256(body) !== authorizationSha256) throw new Error("Backend log diagnostic authorization is missing, stale, or tampered.");
+  assertBackendLogDiagnosticPolicy(value.policyDocument, { expiresAt: value.expiresAt });
+  assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: value.repository });
+  if (!value.protectedEnvironmentApprovalEvidence.configuredReviewers.every(({ type }) => type === "User")) throw new Error("Backend log diagnostic supports configured User reviewers only.");
+  if (value.protectedEnvironmentApprovalEvidence.workflowRef !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.workflowRef || value.protectedEnvironmentApprovalEvidence.schemaVersion !== 3
+    || assertProductionEnvironmentActualReviewer(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: value.repository, executionActor: value.protectedEnvironmentApprovalEvidence.executionActor }).toLowerCase() !== value.approvedBy.toLowerCase()) throw new Error("Backend log diagnostic independent reviewer binding is invalid.");
+  assertProductionEnvironmentReviewer(value.protectedEnvironmentApprovalEvidence, { approvedBy: value.approvedBy, executionActor: value.protectedEnvironmentApprovalEvidence.executionActor });
+  assertProductionEnvironmentApprovalFreshness(value.protectedEnvironmentApprovalEvidence, { now });
+  const issued = new Date(value.issuedAt); const expires = new Date(value.expiresAt); const age = now.getTime() - issued.getTime();
+  if (!Number.isFinite(issued.getTime()) || issued.toISOString() !== value.issuedAt || !Number.isFinite(expires.getTime()) || expires.toISOString() !== value.expiresAt || expires.getTime() - issued.getTime() !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.maxAuthorizationAgeMs || age < 0 || now.getTime() >= expires.getTime()) throw new Error("Backend log diagnostic authorization is expired or malformed.");
+  return value;
+}
+
+const policyFromAws = (value) => value?.PolicyDocument ? (typeof value.PolicyDocument === "string" ? JSON.parse(decodeURIComponent(value.PolicyDocument)) : value.PolicyDocument) : null;
+const isMissingPolicy = (error) => /NoSuchEntity/i.test(`${error?.name || ""} ${error?.message || ""} ${error?.stderr || ""}`);
+const exactReader = (identity) => identity?.Account === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId && new RegExp(`^arn:aws:sts::${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId}:assumed-role/${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleName}/`).test(identity?.Arn || "");
+const exactAdmin = (identity) => identity?.Account === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.accountId && /^(arn:aws:iam::368992683803:root|arn:aws:sts::368992683803:assumed-role\/mscqr-production-bootstrap-mfa\/)/.test(identity?.Arn || "");
+
+async function readPolicyOrNull(admin) {
+  try { return policyFromAws(await admin(["iam", "get-role-policy", "--role-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleName, "--policy-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.policyName])); }
+  catch (error) { if (isMissingPolicy(error)) return null; throw error; }
+}
+
+export async function executeBackendLogDiagnostic({ authorization, sourceSha, statePath, evidencePath, admin, reader, protectedMain = readFreshProtectedMainIdentity, now = new Date(), writeFiles = writeStageBPrivateFilesAtomic } = {}) {
+  protectedMain({ cwd: root, expectedSourceSha: sourceSha });
+  assertBackendLogDiagnosticAuthorization(authorization, { sourceSha, now });
+  if (fs.lstatSync(statePath, { throwIfNoEntry: false }) || fs.lstatSync(evidencePath, { throwIfNoEntry: false })) throw new Error("Backend log diagnostic authorization cannot be replayed.");
+  if (!exactAdmin(await admin(["sts", "get-caller-identity"]))) throw new Error("Backend log diagnostic capability installation requires the governed administrator boundary.");
+  if (!exactReader(await reader(["sts", "get-caller-identity"]))) throw new Error("Backend logs must be read only by the production independent checker role.");
+  if (await readPolicyOrNull(admin)) throw new Error("Backend log diagnostic capability is already installed.");
+  const persistState = (state, counts) => writeFiles({ repositoryRoot: root, overwrite: true, files: [{ filePath: statePath, label: "Backend log diagnostic state", bytes: Buffer.from(`${JSON.stringify({ schemaVersion: 1, kind: "PRODUCTION_BACKEND_LOG_DIAGNOSTIC_STATE", state, sourceSha, authorizationSha256: authorization.authorizationSha256, counts, observedAt: nowIso(new Date()) }, null, 2)}\n`) }] });
+  const counts = { putRolePolicy: 0, deleteRolePolicy: 0, describeLogStreams: 0, getLogEvents: 0 };
+  persistState("INSTALLING", counts);
+  let captured = []; let originalError;
+  try {
+    await admin(["iam", "put-role-policy", "--role-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleName, "--policy-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.policyName, "--policy-document", JSON.stringify(authorization.policyDocument)]); counts.putRolePolicy += 1;
+    const installed = await readPolicyOrNull(admin);
+    if (!installed || canonicalJson(installed) !== canonicalJson(authorization.policyDocument)) throw new Error("Installed backend log diagnostic policy readback is not exact.");
+    persistState("CAPABILITY_INSTALLED", counts);
+    for (const stream of authorization.logStreams) {
+      const listed = await reader(["logs", "describe-log-streams", "--log-group-name", authorization.logGroupName, "--log-stream-name-prefix", stream, "--limit", "1", "--no-paginate"]); counts.describeLogStreams += 1;
+      if (!Array.isArray(listed?.logStreams) || listed.logStreams.length !== 1 || listed.logStreams[0]?.logStreamName !== stream) throw new Error(`Exact authorized log stream is unavailable: ${stream}`);
+      const page = await reader(["logs", "get-log-events", "--log-group-name", authorization.logGroupName, "--log-stream-name", stream, "--start-from-head", "--limit", String(PRODUCTION_BACKEND_LOG_DIAGNOSTIC.maxEventsPerStream), "--no-paginate"]); counts.getLogEvents += 1;
+      if (!Array.isArray(page?.events)) throw new Error(`Authorized log stream response is malformed: ${stream}`);
+      const messages = page.events.map(({ message }) => typeof message === "string" ? message : "").join("\n");
+      captured.push({ stream, eventCount: page.events.length, rawMessagesSha256: sha256(Buffer.from(messages)), excerptRedacted: redactStageBRefreshDiagnostic(messages, { maxChars: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.maxEvidenceCharsPerStream }) });
+    }
+    persistState("READ_CAPTURED", counts);
+  } catch (error) { originalError = error; }
+  try {
+    await admin(["iam", "delete-role-policy", "--role-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.readerRoleName, "--policy-name", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.policyName]); counts.deleteRolePolicy += 1;
+    if (await readPolicyOrNull(admin)) throw new Error("Backend log diagnostic capability revocation could not be authenticated.");
+    persistState("REVOKED", counts);
+  } catch (revocationError) {
+    const error = new AggregateError([...(originalError ? [originalError] : []), revocationError], "Backend log diagnostic capability revocation failed.");
+    error.counts = counts; throw error;
+  }
+  if (originalError) { originalError.counts = counts; throw originalError; }
+  if (captured.length !== authorization.logStreams.length || counts.putRolePolicy !== 1 || counts.deleteRolePolicy !== 1 || counts.describeLogStreams !== 8 || counts.getLogEvents !== 8) throw new Error("Backend log diagnostic mutation or read census is invalid.");
+  const body = { schemaVersion: 1, kind: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.evidenceKind, status: "COMPLETE", sourceSha, authorizationSha256: authorization.authorizationSha256, recoveryRunId: authorization.recoveryRunId, recoveryTaskDefinition: authorization.recoveryTaskDefinition, recoveryImageDigest: authorization.recoveryImageDigest, failedRecoveryEvidenceSha256: authorization.failedRecoveryEvidenceSha256, readerRoleArn: authorization.readerRoleArn, logGroupName: authorization.logGroupName, streams: captured, capabilityRevoked: true, counts, completedAt: nowIso(new Date()) };
+  const evidence = Object.freeze({ ...body, evidenceSha256: canonicalSha256(body) });
+  writeFiles({ repositoryRoot: root, files: [{ filePath: evidencePath, label: "Backend log diagnostic evidence", bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`) }] });
+  persistState("COMPLETE", counts);
+  return evidence;
+}
+
+export function assertBackendLogDiagnosticEvidence(value, { authorization } = {}) {
+  const { evidenceSha256, ...body } = value || {};
+  if (value?.schemaVersion !== 1 || value.kind !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.evidenceKind || value.status !== "COMPLETE" || value.sourceSha !== authorization?.sourceSha || value.authorizationSha256 !== authorization?.authorizationSha256 || value.recoveryRunId !== authorization?.recoveryRunId || value.logGroupName !== authorization?.logGroupName || value.capabilityRevoked !== true
+    || canonicalJson(value.streams?.map(({ stream }) => stream)) !== canonicalJson(authorization?.logStreams) || value.counts?.putRolePolicy !== 1 || value.counts?.deleteRolePolicy !== 1 || value.counts?.describeLogStreams !== 8 || value.counts?.getLogEvents !== 8 || !SHA256.test(evidenceSha256 || "") || canonicalSha256(body) !== evidenceSha256) throw new Error("Backend log diagnostic evidence is incomplete or capability revocation is unauthenticated.");
+  if (value.streams.some(({ eventCount, rawMessagesSha256, excerptRedacted } = {}) => !Number.isSafeInteger(eventCount) || eventCount < 0 || !SHA256.test(rawMessagesSha256 || "") || typeof excerptRedacted !== "string" || redactStageBRefreshDiagnostic(excerptRedacted, { maxChars: PRODUCTION_BACKEND_LOG_DIAGNOSTIC.maxEvidenceCharsPerStream }) !== excerptRedacted)) throw new Error("Backend log diagnostic evidence contains invalid or unredacted stream evidence.");
+  return value;
+}
+
+export async function createBackendLogDiagnosticAuthorizationFromFiles({ sourceSha, environmentApprovalPath, environmentApprovalSha256, outputPath, now = new Date() } = {}) {
+  const captured = readStageBPrivateFileBytes({ filePath: environmentApprovalPath, repositoryRoot: root, label: "Backend log diagnostic environment approval" });
+  if (captured.sha256 !== environmentApprovalSha256) throw new Error("Backend log diagnostic environment approval bytes changed.");
+  const approval = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes));
+  const authorization = createBackendLogDiagnosticAuthorization({ sourceSha, protectedEnvironmentApprovalEvidence: approval, issuedAt: nowIso(now) });
+  writeStageBPrivateFilesAtomic({ repositoryRoot: root, files: [{ filePath: outputPath, label: "Backend log diagnostic authorization", bytes: Buffer.from(`${JSON.stringify(authorization, null, 2)}\n`) }] });
+  return authorization;
+}
+
+export async function resolveBackendLogDiagnosticAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, run = (command, args, options = {}) => execFileSync(command, args, { encoding: options.encoding === null ? null : "utf8", maxBuffer: 64 * 1024 * 1024 }), now = new Date() } = {}) {
+  if (!RUN_ID.test(String(workflowRunId || "")) || !RUN_ID.test(String(workflowRunAttempt || "")) || !SHA40.test(sourceSha || "")) throw new Error("Backend log diagnostic authorization workflow coordinates are invalid.");
+  const workflow = JSON.parse(run("gh", ["api", `repos/${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.repository}/actions/runs/${workflowRunId}`]));
+  if (String(workflow.id) !== String(workflowRunId) || workflow.repository?.full_name !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.repository || workflow.head_repository?.full_name !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.repository || workflow.path !== PRODUCTION_BACKEND_LOG_DIAGNOSTIC.workflowPath || workflow.event !== "workflow_dispatch" || workflow.head_sha !== sourceSha || workflow.status !== "completed" || workflow.conclusion !== "success" || String(workflow.run_attempt) !== String(workflowRunAttempt)) throw new Error("Backend log diagnostic authorization workflow provenance is invalid.");
+  const listing = JSON.parse(run("gh", ["api", `repos/${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.repository}/actions/runs/${workflowRunId}/artifacts`, "--paginate", "--slurp"]));
+  const matches = (Array.isArray(listing) ? listing.flatMap((page) => page?.artifacts || []) : []).filter((artifact) => artifact.name === PRODUCTION_BACKEND_LOG_DIAGNOSTIC.artifactName && artifact.expired === false && String(artifact.workflow_run?.id) === String(workflowRunId) && artifact.workflow_run?.head_sha === sourceSha && artifact.workflow_run?.repository_id === workflow.repository.id && /^sha256:[a-f0-9]{64}$/.test(artifact.digest || ""));
+  if (matches.length !== 1) throw new Error("Exactly one backend log diagnostic authorization artifact is required.");
+  const archiveBytes = Buffer.from(run("gh", ["api", `repos/${PRODUCTION_BACKEND_LOG_DIAGNOSTIC.repository}/actions/artifacts/${matches[0].id}/zip`], { encoding: null }));
+  if (`sha256:${sha256(archiveBytes)}` !== matches[0].digest) throw new Error("Backend log diagnostic authorization archive digest is invalid.");
+  const zip = await JSZip.loadAsync(archiveBytes); const entries = Object.values(zip.files).filter((entry) => !entry.dir);
+  if (entries.length !== 1 || path.posix.basename(entries[0].name) !== "authorization.json") throw new Error("Backend log diagnostic authorization archive contents are invalid.");
+  const authorization = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await entries[0].async("uint8array")));
+  assertBackendLogDiagnosticAuthorization(authorization, { sourceSha, now });
+  return Object.freeze({ authorization, artifact: matches[0], workflow });
+}
+
+const awsAdapter = (profile) => async (args) => { const output = execFileSync("aws", [...args, "--profile", profile, "--region", PRODUCTION_BACKEND_LOG_DIAGNOSTIC.region, "--output", "json", "--no-cli-pager"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); return output ? JSON.parse(output) : {}; };
+
+export async function runCli(argv = process.argv.slice(2), deps = {}) {
+  const sourceSha = required(argv, "--source-sha");
+  if (argv.includes("--authorize")) return createBackendLogDiagnosticAuthorizationFromFiles({ sourceSha, environmentApprovalPath: path.resolve(required(argv, "--environment-approval")), environmentApprovalSha256: required(argv, "--environment-approval-sha256"), outputPath: assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--output")), repositoryRoot: root, label: "Backend log diagnostic authorization", allowExisting: false }), now: deps.now || new Date() });
+  const resolved = await (deps.resolveAuthorization || resolveBackendLogDiagnosticAuthorizationArtifact)({ workflowRunId: required(argv, "--authorization-workflow-run-id"), workflowRunAttempt: required(argv, "--authorization-workflow-run-attempt"), sourceSha, now: deps.now || new Date() });
+  const statePath = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--state")), repositoryRoot: root, label: "Backend log diagnostic state", allowExisting: true });
+  const evidencePath = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--evidence")), repositoryRoot: root, label: "Backend log diagnostic evidence", allowExisting: false });
+  ensureStageBPrivateDirectory({ directory: path.dirname(statePath), repositoryRoot: root, create: true });
+  return executeBackendLogDiagnostic({ authorization: resolved.authorization, sourceSha, statePath, evidencePath, admin: deps.admin || awsAdapter(required(argv, "--admin-profile")), reader: deps.reader || awsAdapter(required(argv, "--reader-profile")), protectedMain: deps.protectedMain, now: deps.now || new Date(), writeFiles: deps.writeFiles });
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) runCli().then((result) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)).catch((error) => { process.stderr.write(`${JSON.stringify({ error: error.message, counts: error.counts || null })}\n`); process.exitCode = 1; });
