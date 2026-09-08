@@ -19,9 +19,10 @@ import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contrac
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { buildRootAttestationKeyPolicy, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
+import { loadBackendRecoveryTaskDefinition } from "./fixtures/backend-recovery-task-definition.mjs";
 
 const sourceSha = "b64274e155434ae9390d28762d40a37801be5362";
-const legacy = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
+const legacy = loadBackendRecoveryTaskDefinition();
 const bindings = Object.fromEntries(["PRIVATE_KEY_CURRENT", "PUBLIC_KEY_CURRENT", "ACTIVE_KEY_VERSION", "PUBLIC_KEYS_JSON"].map((suffix) => [`ARTIFACT_SIGN_${suffix}`, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/${suffix.toLowerCase().replaceAll("_", "-")}-AbCd12`]));
 const image = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: sourceSha });
 const hashFile = (file) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
@@ -52,7 +53,7 @@ test("real file boundaries support inventory, CAS convergence, post-convergence 
     if (operation === "ecr get-repository-policy") throw noRepositoryPolicy();
     if (operation === "secretsmanager describe-secret") return { ARN: valueAfter("--secret-id"), KmsKeyId: null, VersionIdsToStages: { [`fixture_version_${"0".repeat(16)}`]: ["AWSCURRENT"] } };
     if (operation === "secretsmanager list-secret-version-ids") return { Versions: [{ VersionId: `fixture_version_${"0".repeat(16)}`, VersionStages: ["AWSCURRENT"] }] };
-    if (operation === "secretsmanager get-secret-value") return { ARN: valueAfter("--secret-id"), VersionId: valueAfter("--version-id"), SecretString: JSON.stringify({ DATABASE_URL: "fixture-present", REDIS_URL: "fixture-present" }) };
+    if (operation === "secretsmanager get-secret-value") return { ARN: valueAfter("--secret-id"), VersionId: valueAfter("--version-id"), SecretString: JSON.stringify({ DATABASE_URL: "fixture-present", REDIS_URL: "fixture-present", value: "fixture-present" }) };
     if (operation === "secretsmanager get-resource-policy") return { ARN: valueAfter("--secret-id"), ResourcePolicy: null };
     if (operation === "logs describe-log-groups") { const logGroupName = valueAfter("--log-group-name-prefix"); return { logGroups: [{ logGroupName, logGroupArn: `arn:aws:logs:eu-west-2:368992683803:log-group:${logGroupName}`, creationTime: 1, storedBytes: 0 }] }; }
     if (operation === "kms sign") return { Signature: "AQ==" };

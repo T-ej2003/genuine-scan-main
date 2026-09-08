@@ -5,6 +5,7 @@ import { ARTIFACT_SIGNING_BINDINGS } from "./production-artifact-signing-domain.
 import { loadArtifactSigningBootstrapContract } from "./production-artifact-signing-bootstrap.mjs";
 import { ROLLBACK_VIABILITY, assertFreshRollbackEquivalence, assertRollbackSupersessionProof } from "./production-ecs-rollback-viability.mjs";
 import { assertFreshRuntimeConsumabilityVerification } from "./production-ecs-runtime-consumability.mjs";
+import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
 
 export const BACKEND_HEALTH_RECOVERY = Object.freeze({
   kind: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME",
@@ -60,6 +61,11 @@ const SERVICE_DEPLOYMENT_ID = /^ecs-svc\/[1-9][0-9]*$/;
 const IMAGE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@(sha256:[a-f0-9]{64})$/;
 const IDENTITY_ENV = new Set(["GIT_SHA", "RELEASE_GIT_SHA"]);
 const SIGNING_BINDINGS = new Set(ARTIFACT_SIGNING_BINDINGS);
+const RECOVERY_QR_SECRET_RESOURCES = Object.freeze({
+  QR_SIGN_PRIVATE_KEY: /^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr\/prod\/qr_sign_private_key-[A-Za-z0-9]{6}$/,
+  QR_SIGN_PUBLIC_KEY: /^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr\/prod\/qr_sign_public_key-[A-Za-z0-9]{6}$/,
+});
+const RECOVERY_ALLOWED_DELTA_PROFILE = "IMAGE_SOURCE_IDENTITY_EXACT_ARTIFACT_SIGNING_AND_QR_VALUE_SELECTORS";
 const ARTIFACT_SIGNING_SECRET_NAMES = loadArtifactSigningBootstrapContract().names;
 const ARTIFACT_SIGNING_SECRET_ARNS = Object.fromEntries(ARTIFACT_SIGNING_BINDINGS.map((name) => [name, new RegExp(`^arn:aws:secretsmanager:${BACKEND_HEALTH_RECOVERY.region}:${BACKEND_HEALTH_RECOVERY.account}:secret:${ARTIFACT_SIGNING_SECRET_NAMES[name].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-[A-Za-z0-9]{6}$`)]));
 const AUTHORIZATION_FIELDS = new Set(["schemaVersion", "kind", "environment", "account", "region", "cluster", "service", "family", "sourceSha", "imageReleaseSha", "currentTaskDefinitionArn", "recoveryImageDigest", "imageAuthorizationSha256", "environmentApprovalSha256", "artifactSigningBindingSha256", "runtimeConsumabilitySha256", "failedRecoveryEvidenceSha256", "failedRecoveryEvidenceReferenceSha256", "rollbackProof", "reasonCode", "allowedDeltaProfile", "approval", "authorizationSha256"]);
@@ -165,7 +171,7 @@ export function createLegacyBackendRecoveryAuthorization({ sourceSha, currentTas
     failedRecoveryEvidenceReferenceSha256,
     rollbackProof: rollbackProof ? structuredClone(rollbackProof) : null,
     reasonCode: "CURRENT_IMAGE_DIGEST_MISSING",
-    allowedDeltaProfile: "IMAGE_SOURCE_IDENTITY_AND_EXACT_ARTIFACT_SIGNING_BINDINGS",
+    allowedDeltaProfile: RECOVERY_ALLOWED_DELTA_PROFILE,
     approval: structuredClone(approval),
   };
   return Object.freeze({ ...body, authorizationSha256: canonicalSha256(body) });
@@ -491,6 +497,19 @@ function artifactSigningBindingSourceState(payload, checkedBindings) {
   return "COMPLETE_CANONICAL";
 }
 
+function normalizeRecoveryQrSecretBindings(secrets) {
+  for (const name of Object.keys(RECOVERY_QR_SECRET_RESOURCES)) {
+    if (secrets.filter((entry) => entry?.name === name).length !== 1) throw new Error(`Legacy backend must contain exactly one ${name} secret binding.`);
+  }
+  return secrets.map((entry) => {
+    const expectedResource = RECOVERY_QR_SECRET_RESOURCES[entry?.name];
+    if (!expectedResource) return entry;
+    const selector = parseEcsSecretsManagerReference(entry.valueFrom);
+    if (!expectedResource.test(selector.resource) || selector.versionStage || selector.versionId || ![null, "value"].includes(selector.jsonKey)) throw new Error(`Legacy backend ${entry.name} must reference its exact JSON value secret.`);
+    return { ...entry, valueFrom: `${selector.resource}:value::` };
+  });
+}
+
 function buildLegacyImageIdentityOnlyCandidate({ currentTaskDefinition, recoveryImageDigest, imageReleaseSha } = {}) {
   if (!SHA.test(imageReleaseSha || "") || !SHA256.test(recoveryImageDigest || "")) throw new Error("Recovery image release SHA or image digest is invalid.");
   const current = definition(currentTaskDefinition);
@@ -511,7 +530,8 @@ export function buildLegacyBackendRecoveryCandidate({ currentTaskDefinition, rec
   const container = backendContainer(payload);
   const sourceState = artifactSigningBindingSourceState(payload, checkedBindings);
   const legacySecrets = Array.isArray(container.secrets) ? container.secrets : [];
-  if (sourceState === "ABSENT") container.secrets = [...legacySecrets, ...ARTIFACT_SIGNING_BINDINGS.map((name) => ({ name, valueFrom: checkedBindings[name] }))];
+  const normalizedSecrets = normalizeRecoveryQrSecretBindings(legacySecrets);
+  container.secrets = sourceState === "ABSENT" ? [...normalizedSecrets, ...ARTIFACT_SIGNING_BINDINGS.map((name) => ({ name, valueFrom: checkedBindings[name] }))] : normalizedSecrets;
   return payload;
 }
 
@@ -535,7 +555,7 @@ export function assertLegacyBackendRecoveryAuthorization(authorization, {
     || authorization?.service !== BACKEND_HEALTH_RECOVERY.service || authorization?.family !== BACKEND_HEALTH_RECOVERY.family
     || authorization?.currentTaskDefinitionArn !== currentTaskDefinitionArn || !TASK_ARN.test(currentTaskDefinitionArn || "")
     || authorization?.recoveryImageDigest !== recoveryImageDigest || !SHA256.test(recoveryImageDigest || "")
-    || authorization?.reasonCode !== "CURRENT_IMAGE_DIGEST_MISSING" || authorization?.allowedDeltaProfile !== "IMAGE_SOURCE_IDENTITY_AND_EXACT_ARTIFACT_SIGNING_BINDINGS"
+    || authorization?.reasonCode !== "CURRENT_IMAGE_DIGEST_MISSING" || authorization?.allowedDeltaProfile !== RECOVERY_ALLOWED_DELTA_PROFILE
     || authorization?.sourceSha !== sourceSha || !SHA.test(sourceSha || "")
     || authorization?.imageReleaseSha !== imageAuthorization?.imageReleaseSha || !SHA.test(authorization?.imageReleaseSha || "")
     || !HEX256.test(authorization?.imageAuthorizationSha256 || "") || authorization.imageAuthorizationSha256 !== imageAuthorization?.evidenceSha256

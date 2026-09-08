@@ -13,6 +13,7 @@ import { buildLegacyBackendRecoveryCandidate } from "../aws/production-backend-h
 import { imageAuthorizationSha256 } from "../aws/production-image-authorization.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
+import { loadBackendRecoveryTaskDefinition } from "./fixtures/backend-recovery-task-definition.mjs";
 
 const reused = makeCanonicalImageAuthorization({ sourceSha: "96a4be6f0edcd626285c6a1bd8062a4008175d25", imageReleaseSha: "594bab55f23ff8b2438c12b85b149ba0aebeed1e" });
 const fresh = makeCanonicalImageAuthorization({ sourceSha: "94da9651eb9427603be87abe89f89111412755c9", imageReleaseSha: "94da9651eb9427603be87abe89f89111412755c9", impactImageReleaseSha: "29bf92a14d5e832575009bd76b16886feff62cbd" });
@@ -120,7 +121,7 @@ test("stalled rollback dispatch binds the exact deployment, current revision, an
 });
 
 test("reused image keeps its authenticated release identity in the recovery task definition", () => {
-  const current = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
+  const current = loadBackendRecoveryTaskDefinition();
   const candidate = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, recoveryImageDigest: reused.authorization.backendDigest, imageReleaseSha: reused.authorization.imageReleaseSha, artifactSigningBindings });
   const environment = new Map(candidate.containerDefinitions.find(({ name }) => name === "backend").environment.map(({ name, value }) => [name, value]));
   assert.equal(environment.get("GIT_SHA"), reused.authorization.imageReleaseSha);

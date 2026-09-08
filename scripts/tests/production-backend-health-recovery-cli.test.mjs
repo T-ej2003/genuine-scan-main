@@ -7,6 +7,7 @@ import test from "node:test";
 import { runBackendHealthRecoveryCli, verifyInterruptedProductionBackendHealth, verifyProductionBackendHealth } from "../aws/recover-production-backend-health.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
+import { loadBackendRecoveryTaskDefinition } from "./fixtures/backend-recovery-task-definition.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 
 const sourceSha = "565f78be803558feb40a543ead464c5410738960";
@@ -23,7 +24,7 @@ const artifactSigningBindings = Object.freeze({
 });
 const artifactSigningBindingSha256 = "7".repeat(64);
 const runtimeConsumabilitySha256 = "8".repeat(64);
-const currentTaskDefinition = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url), "utf8"));
+const currentTaskDefinition = loadBackendRecoveryTaskDefinition();
 
 function privateFixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backend-health-recovery-"));
@@ -156,7 +157,7 @@ test("execute authenticates semantic authorization before any AWS call", async (
     failedRecoveryEvidenceSha256: null,
     failedRecoveryEvidenceReferenceSha256: null,
     rollbackProof: null,
-    allowedDeltaProfile: "IMAGE_SOURCE_IDENTITY_AND_EXACT_ARTIFACT_SIGNING_BINDINGS",
+    allowedDeltaProfile: "IMAGE_SOURCE_IDENTITY_EXACT_ARTIFACT_SIGNING_AND_QR_VALUE_SELECTORS",
     approval: { ticket: "INC-1", approvedBy: "security", approverRole: "Security Lead", reason: "backend recovery", verificationRef: "https://example.invalid/1", sourceSha, currentTaskDefinitionArn: currentArn, recoveryImageDigest: digest, runtimeConsumabilitySha256 },
   };
   authorization.authorizationSha256 = canonicalSha256(authorization);

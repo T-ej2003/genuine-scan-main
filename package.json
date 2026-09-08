@@ -220,7 +220,7 @@
     "verify:ci:docker": "npm run verify:ci:docker:frontend && npm run verify:ci:docker:backend",
     "verify:ci:docker:frontend": "docker compose -f .github/ci/docker-compose.frontend-build.yml build frontend",
     "verify:ci:docker:backend": "docker buildx build --platform linux/amd64 --load --file backend/Dockerfile --build-arg GIT_SHA=ci-${GITHUB_SHA:-local} --tag mscqr-backend-ci:${GITHUB_SHA:-local} .",
-    "verify:ci:backend": "npm --prefix backend run build && npm --prefix backend run test:trust-critical:compiled && npm --prefix backend test",
+    "verify:ci:backend": "npm --prefix backend run build && node --test scripts/tests/production-backend-qr-signing-startup.test.mjs && npm --prefix backend run test:trust-critical:compiled && npm --prefix backend test",
     "verify:ci:release-candidate": "npm run verify:rc-local && npm run test:staging-smoke-config && npm --prefix backend run prisma:generate",
     "verify:ci:release-candidate:source": "npm run verify:rc-local:source && npm run test:staging-smoke-config && npm --prefix backend run prisma:generate",
     "verify:rc-local": "npm run verify:guardrails && npm run typecheck && npm run build && npm run test:trust-critical",

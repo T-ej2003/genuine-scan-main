@@ -13,6 +13,7 @@ import {
 import { canonicalSha256, taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
+import { backendRecoverySecretArn, loadBackendRecoveryTaskDefinition } from "./fixtures/backend-recovery-task-definition.mjs";
 import { classifyRollbackViability } from "../aws/production-ecs-rollback-viability.mjs";
 
 const sourceSha = "565f78be803558feb40a543ead464c5410738960";
@@ -24,7 +25,7 @@ const environmentApproval = createProductionEnvironmentApprovalEvidence({
   workflowRef: githubContext.workflowRef, eventName: githubContext.eventName, workflowRunAttempt: githubContext.workflowRunAttempt, executionActor: "release-operator", observedAt: now.toISOString(),
   environmentConfig: { id: 14514600120, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 1, login: "security-reviewer" } }] }] },
 });
-const current = JSON.parse(fs.readFileSync(new URL("./fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
+const current = loadBackendRecoveryTaskDefinition();
 const artifactSigningBindings = Object.freeze({
   ARTIFACT_SIGN_PRIVATE_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-AbCd12",
   ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-key-current-AbCd12",
@@ -33,6 +34,7 @@ const artifactSigningBindings = Object.freeze({
 });
 const artifactSigningBindingSha256 = "7".repeat(64);
 const runtimeConsumabilitySha256 = "8".repeat(64);
+const qrSelector = (name) => `${current.taskDefinition.containerDefinitions[0].secrets.find((entry) => entry.name === name).valueFrom}:value::`;
 const imageFixture = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: sourceSha, imageDigests: {
   backend: digest,
   worker: "sha256:949a4f25d9cc5d67358722c7af75e91bd9a944e75496c76fa36b4677fd152cfe",
@@ -109,18 +111,57 @@ const mutate = (path, value) => {
   return input;
 };
 
-test("real legacy :47 fixture permits only image and source identity replacement", () => {
+test("real legacy :47 fixture permits only image, source identity, QR value selectors, and artifact bindings", () => {
   const result = assertLegacyBackendRecoveryEligibility(base());
   assert.equal(result.currentTaskDefinitionArn, current.taskDefinition.taskDefinitionArn);
   assert.equal(result.recoveryImageDigest, digest);
   const backend = candidate.containerDefinitions.find(({ name }) => name === "backend");
   assert.equal(backend.image.endsWith(`@${digest}`), true);
-  assert.deepEqual(backend.secrets.slice(0, -4), current.taskDefinition.containerDefinitions[0].secrets);
+  assert.deepEqual(backend.secrets.slice(0, -4), current.taskDefinition.containerDefinitions[0].secrets.map((entry) => ["QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"].includes(entry.name) ? { ...entry, valueFrom: `${entry.valueFrom}:value::` } : entry));
   assert.equal(backend.environment.length, 44);
   assert.equal(backend.secrets.length, 18);
   assert.deepEqual(Object.fromEntries(backend.secrets.slice(-4).map(({ name, valueFrom }) => [name, valueFrom])), artifactSigningBindings);
   assert.equal(candidate.taskRoleArn, current.taskDefinition.taskRoleArn);
   assert.equal(candidate.executionRoleArn, current.taskDefinition.executionRoleArn);
+});
+
+test("recovery candidate binds both exact QR secrets to only their JSON value field", () => {
+  const backend = candidate.containerDefinitions.find(({ name }) => name === "backend");
+  assert.equal(backend.secrets.find(({ name }) => name === "QR_SIGN_PRIVATE_KEY").valueFrom, qrSelector("QR_SIGN_PRIVATE_KEY"));
+  assert.equal(backend.secrets.find(({ name }) => name === "QR_SIGN_PUBLIC_KEY").valueFrom, qrSelector("QR_SIGN_PUBLIC_KEY"));
+
+  for (const name of ["QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"]) {
+    const bareCandidate = structuredClone(candidate);
+    bareCandidate.containerDefinitions[0].secrets.find((entry) => entry.name === name).valueFrom = qrSelector(name).slice(0, -8);
+    assert.throws(() => assertLegacyBackendRecoveryCandidate({ currentTaskDefinition: current, candidate: bareCandidate, recoveryImageDigest: digest, imageReleaseSha: sourceSha, artifactSigningBindings }), /outside the exact/);
+  }
+
+  const rejectSource = (mutate) => {
+    const source = structuredClone(current);
+    mutate(source.taskDefinition.containerDefinitions[0].secrets);
+    assert.throws(() => buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: source, recoveryImageDigest: digest, imageReleaseSha: sourceSha, artifactSigningBindings }), /Secrets Manager reference|exact JSON value secret|exactly one/);
+  };
+  rejectSource((secrets) => { secrets.find(({ name }) => name === "QR_SIGN_PRIVATE_KEY").valueFrom = backendRecoverySecretArn("unrelated"); });
+  rejectSource((secrets) => { const privateRef = secrets.find(({ name }) => name === "QR_SIGN_PRIVATE_KEY"); const publicRef = secrets.find(({ name }) => name === "QR_SIGN_PUBLIC_KEY"); [privateRef.valueFrom, publicRef.valueFrom] = [publicRef.valueFrom, privateRef.valueFrom]; });
+  rejectSource((secrets) => { secrets.find(({ name }) => name === "QR_SIGN_PRIVATE_KEY").valueFrom += ":wrong::"; });
+  rejectSource((secrets) => { secrets.find(({ name }) => name === "QR_SIGN_PUBLIC_KEY").valueFrom += ":value:AWSCURRENT:"; });
+  rejectSource((secrets) => { secrets.find(({ name }) => name === "QR_SIGN_PRIVATE_KEY").valueFrom = "not-an-arn"; });
+});
+
+test("QR selector repair preserves every unrelated task-definition field", () => {
+  const source = current.taskDefinition;
+  for (const [key, value] of Object.entries(candidate)) {
+    if (!new Set(["containerDefinitions", "tags"]).has(key)) assert.deepEqual(value, source[key], key);
+  }
+  assert.deepEqual(candidate.tags || [], current.tags || []);
+  const sourceBackend = source.containerDefinitions.find(({ name }) => name === "backend");
+  const candidateBackend = candidate.containerDefinitions.find(({ name }) => name === "backend");
+  for (const [key, value] of Object.entries(candidateBackend)) {
+    if (!new Set(["image", "environment", "secrets"]).has(key)) assert.deepEqual(value, sourceBackend[key], key);
+  }
+  assert.deepEqual(candidate.containerDefinitions.slice(1), source.containerDefinitions.slice(1));
+  assert.deepEqual(candidateBackend.environment, sourceBackend.environment.map((entry) => ["GIT_SHA", "RELEASE_GIT_SHA"].includes(entry.name) ? { ...entry, value: sourceSha } : entry));
+  assert.deepEqual(candidateBackend.secrets.filter(({ name }) => !name.startsWith("ARTIFACT_SIGN_")), sourceBackend.secrets.map((entry) => ["QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"].includes(entry.name) ? { ...entry, valueFrom: `${entry.valueFrom}:value::` } : entry));
 });
 
 test("legacy source receives exactly four authenticated secret bindings and rejects every binding expansion", () => {
@@ -160,7 +201,7 @@ test("canonical artifact-signing bindings are preserved once and every other sou
   complete.taskDefinition.revision = 50;
   complete.taskDefinition.containerDefinitions[0].secrets.push(...canonicalEntries);
   const rendered = buildLegacyBackendRecoveryCandidate({ currentTaskDefinition: complete, recoveryImageDigest: digest, imageReleaseSha: sourceSha, artifactSigningBindings });
-  assert.deepEqual(rendered.containerDefinitions[0].secrets, complete.taskDefinition.containerDefinitions[0].secrets);
+  assert.deepEqual(rendered.containerDefinitions[0].secrets, complete.taskDefinition.containerDefinitions[0].secrets.map((entry) => ["QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY"].includes(entry.name) ? { ...entry, valueFrom: `${entry.valueFrom}:value::` } : entry));
   assert.equal(rendered.containerDefinitions[0].secrets.filter(({ name }) => name.startsWith("ARTIFACT_SIGN_")).length, 4);
 
   const reject = (mutate) => {
@@ -182,20 +223,18 @@ test("canonical artifact-signing bindings are preserved once and every other sou
   reject(({ containerDefinitions: [backend] }) => { backend.secrets.push({ name: "ARTIFACT_SIGN_LEGACY_KEY", valueFrom: canonicalEntries[0].valueFrom }); });
 });
 
-test("optional legacy secrets normalize without changing existing entries", () => {
+test("recovery refuses a legacy task without both startup-critical QR bindings", () => {
   for (const secrets of [undefined, []]) {
     const source = structuredClone(current);
     source.taskDefinition.containerDefinitions[0].secrets = secrets;
     if (secrets === undefined) delete source.taskDefinition.containerDefinitions[0].secrets;
-    const rendered = buildLegacyBackendRecoveryCandidate({
+    assert.throws(() => buildLegacyBackendRecoveryCandidate({
       currentTaskDefinition: source,
       recoveryImageDigest: digest,
       imageReleaseSha: sourceSha,
       artifactSigningBindings,
-    });
-    assert.deepEqual(rendered.containerDefinitions[0].secrets, Object.entries(artifactSigningBindings).map(([name, valueFrom]) => ({ name, valueFrom })));
+    }), /exactly one QR_SIGN_PRIVATE_KEY/);
   }
-  assert.deepEqual(candidate.containerDefinitions[0].secrets.slice(0, -4), current.taskDefinition.containerDefinitions[0].secrets);
 });
 
 test("production failure fixture lacks startup prerequisites while corrected candidate supplies every required binding", () => {
