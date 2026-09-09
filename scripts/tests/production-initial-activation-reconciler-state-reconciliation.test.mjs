@@ -138,3 +138,21 @@ test("post-refresh verification rejects a dirty normal plan and unchanged backen
   const dirty = refreshPlan(); dirty.resource_changes = [{ address: "aws_iam_role.reconciler", change: { actions: ["update"] } }];
   assert.throws(() => executeReconcilerStateReconciliation({ ...common, readPostSnapshot: () => ({ bytes: after, object: { versionId: "successor-version", etag: "successor-etag" } }), renderNormalPlan: () => dirty }), /envelope|exact policy update/); assert.equal(applies, 2);
 });
+
+test("state-reconciliation runbook documents the current prepare-authorize-execute contract", () => {
+  const runbook = fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationReconcilerStateReconciliation-v1.md", "utf8");
+  const preparationScript = "production:initial-activation-reconciler:state-reconcile";
+  assert.equal(JSON.parse(fs.readFileSync("package.json", "utf8")).scripts[preparationScript], "node scripts/aws/reconcile-production-initial-activation-reconciler-state.mjs");
+  const requiredInputs = (workflow) => [...fs.readFileSync(workflow, "utf8").matchAll(/^\s{6}(\w+): \{ description: .*required: true,/gm)].map((match) => match[1]);
+  const authorizationWorkflow = ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation.yml";
+  const executionWorkflow = ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation.yml";
+  assert.match(runbook, new RegExp(`${preparationScript} -- --mode prepare`));
+  assert.match(runbook, /--terraform-data-dir/); assert.match(runbook, /--saved-plan-out/); assert.match(runbook, /--preparation-out/);
+  for (const [workflow, command] of [[authorizationWorkflow, "authorize-production-initial-activation-reconciler-state-reconciliation.yml"], [executionWorkflow, "execute-production-initial-activation-reconciler-state-reconciliation.yml"]]) {
+    assert.ok(runbook.includes(command));
+    for (const input of requiredInputs(workflow)) assert.match(runbook, new RegExp(`-f ${input}=`));
+  }
+  assert.match(runbook, /authorization_run_id/); assert.match(runbook, /authorization_run_attempt/);
+  assert.match(runbook, new RegExp(`${CONTRACT.maxAgeMs / 1000} seconds`));
+  assert.match(runbook, /saved_plan_base64/); assert.match(runbook, /terraform refresh|terraform state push|normal `terraform apply`/);
+});
