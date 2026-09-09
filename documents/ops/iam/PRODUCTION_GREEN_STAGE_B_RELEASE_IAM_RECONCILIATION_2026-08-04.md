@@ -27,7 +27,12 @@ repositories: `mscqr-backend` (backend, RLS executor, and RLS canary) and
 `mscqr-worker` (worker). The release-deployer therefore has only
 `ecr:DescribeImages` on those exact repositories in `eu-west-2`; the worker
 grant is a separate statement so it does not inherit backend recovery's
-`ecr:DescribeRepositories` capability.
+`ecr:DescribeRepositories` capability. The release preflight consumes the
+already-authenticated four-image authorization, requests every publication
+image with `--image-ids imageDigest=<authenticated digest>`, and accepts only
+one response whose account, repository, and digest exactly match that binding.
+Repository-level success or the existence of a different image is not digest
+evidence.
 
 `mscqr-web` is a production repository, but it is outside this direct ECR
 verification topology. Normal cutover authenticates the preserved frontend

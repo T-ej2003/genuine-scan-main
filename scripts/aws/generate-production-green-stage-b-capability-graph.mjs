@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RELEASE_READ_PROBES } from "./production-green-stage-b-identity-capabilities.mjs";
+import { RELEASE_DIGEST_VERIFICATION_BINDINGS, RELEASE_READ_PROBES } from "./production-green-stage-b-identity-capabilities.mjs";
 import { PRODUCTION_ACTIVATION_LIFECYCLE, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { RELEASE_POLICY_SOURCES, canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS } from "./stage-b-evidence-freshness.mjs";
@@ -646,6 +646,11 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
     if (!capability || capability.phase !== "stage-a-production-artifacts-state-reconciliation" || capability.identity !== "RELEASE_DEPLOYER" || capability.executor !== "terraform" || capability.action !== action || JSON.stringify(capability.resources) !== JSON.stringify(resources) || capability.mutation !== mutation || capability.policy?.sourceFile !== stageAReleaseS3ContractPath || capability.policy?.sid !== sid) throw new Error("Stage-A reconciliation Terraform backend capability boundary is not exact.");
   }
   const graphActions = new Set(graph.capabilities.map(({ action }) => action));
+  for (const { service, repository } of RELEASE_DIGEST_VERIFICATION_BINDINGS) {
+    const probe = RELEASE_READ_PROBES.find(({ id }) => id === `stage-b-publication-${service}-image`);
+    const expectedArgs = ["ecr", "describe-images", "--repository-name", repository, "--image-ids", `imageDigest={authenticated:${service}}`];
+    if (probe?.action !== "ecr:DescribeImages" || JSON.stringify(probe.args) !== JSON.stringify(expectedArgs)) throw new Error(`Release publication digest probe is not exact for ${service}.`);
+  }
   for (const probe of RELEASE_READ_PROBES) if (!graphActions.has(probe.action)) throw new Error(`Release probe is absent from capability graph: ${probe.id}.`);
   assertStageBAwsCallCoverage(graph, graph.sourceScan);
   return { phases: graph.phases.length, capabilities: graph.capabilities.length, uniqueActions: graphActions.size, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 };

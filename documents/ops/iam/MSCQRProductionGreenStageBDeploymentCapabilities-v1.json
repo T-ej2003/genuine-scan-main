@@ -382,7 +382,10 @@
       "probe": "structural",
       "probeIds": [
         "backend-health-recovery-images",
-        "stage-b-publication-mscqr-worker-images"
+        "stage-b-publication-backend-image",
+        "stage-b-publication-rls-canary-image",
+        "stage-b-publication-rls-executor-image",
+        "stage-b-publication-worker-image"
       ],
       "policy": {
         "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs",
@@ -2889,7 +2892,10 @@
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct",
       "probeIds": [
-        "backend-health-recovery-images"
+        "backend-health-recovery-images",
+        "stage-b-publication-backend-image",
+        "stage-b-publication-rls-canary-image",
+        "stage-b-publication-rls-executor-image"
       ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
@@ -7632,7 +7638,7 @@
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct",
       "probeIds": [
-        "stage-b-publication-mscqr-worker-images"
+        "stage-b-publication-worker-image"
       ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
@@ -12715,7 +12721,19 @@
       "action": "ecr:DescribeRepositories"
     },
     {
-      "id": "stage-b-publication-mscqr-worker-images",
+      "id": "stage-b-publication-backend-image",
+      "action": "ecr:DescribeImages"
+    },
+    {
+      "id": "stage-b-publication-rls-canary-image",
+      "action": "ecr:DescribeImages"
+    },
+    {
+      "id": "stage-b-publication-rls-executor-image",
+      "action": "ecr:DescribeImages"
+    },
+    {
+      "id": "stage-b-publication-worker-image",
       "action": "ecr:DescribeImages"
     },
     {

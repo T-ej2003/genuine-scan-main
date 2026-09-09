@@ -96,6 +96,10 @@ test("release-deployer digest reads cover the complete Stage B publication topol
     assert.equal(allows({ action: "ecr:DescribeImages", resource: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, context }), true, repository);
     assert(RELEASE_READ_PROBES.some(({ action, args }) => action === "ecr:DescribeImages" && args.includes(repository)), repository);
   }
+  for (const { service, repository } of new Map(Object.values(STAGE_B_PLAN_IMAGE_BINDINGS).map((binding) => [binding.service, binding])).values()) {
+    assert.deepEqual(RELEASE_READ_PROBES.find(({ id }) => id === `stage-b-publication-${service}-image`)?.args,
+      ["ecr", "describe-images", "--repository-name", repository, "--image-ids", `imageDigest={authenticated:${service}}`]);
+  }
   for (const repository of ["mscqr-web", "mscqr-frontend", "unrelated"]) {
     assert.equal(allows({ action: "ecr:DescribeImages", resource: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, context }), false, repository);
   }

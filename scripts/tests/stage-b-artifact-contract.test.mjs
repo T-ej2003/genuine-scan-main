@@ -252,13 +252,20 @@ test("real release-read and backend producers normalize generated permissions", 
     if (probe.id === "stage-a-state" || probe.id === "stage-b-state") { fs.writeFileSync(args.at(-1), probe.id === "stage-a-state" ? stageAStateBytes : stateBytes); return ""; }
     if (probe.id === "audit-services" || probe.id === "audit-tasks" || probe.id === "refresh-broker-policy") return "{}";
     if (probe.id.includes("inline-policies")) return JSON.stringify({ PolicyNames: [] });
+    if (probe.action === "ecr:DescribeImages" && args.includes("--image-ids")) {
+      const repositoryName = args[args.indexOf("--repository-name") + 1]; const imageDigest = args.at(-1).slice("imageDigest=".length);
+      return JSON.stringify({ imageDetails: [{ registryId: "368992683803", repositoryName, imageDigest }] });
+    }
     if (probe.action === "ecr:GetRepositoryPolicy") {
       const repositoryName = args[args.indexOf("--repository-name") + 1];
       return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role" }, Action: ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"], Resource: `arn:aws:ecr:eu-west-2:368992683803:repository/${repositoryName}` }] }) });
     }
     return "{}";
   };
-  const result = runReleaseReadPreflight({ outputDirectory: directory, run });
+  const publicationImages = [
+    ["backend", "mscqr-backend", "b"], ["worker", "mscqr-worker", "a"], ["rls-executor", "mscqr-backend", "e"], ["rls-canary", "mscqr-backend", "c"],
+  ].map(([service, repository, marker]) => ({ service, repository, digest: `sha256:${marker.repeat(64)}` }));
+  const result = runReleaseReadPreflight({ authenticatedImageAuthorization: { images: publicationImages, imageEvidence: { images: publicationImages } }, outputDirectory: directory, run });
   assert.equal(result.status, "valid"); assert.equal(mode(directory), STAGE_B_PRIVATE_DIRECTORY_MODE);
   assert.equal(mode(path.join(directory, "stage-a-state.json")), STAGE_B_PRIVATE_FILE_MODE);
   assert.equal(mode(path.join(directory, "stage-a-state-identity.json")), STAGE_B_PRIVATE_FILE_MODE);

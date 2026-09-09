@@ -26,6 +26,8 @@ const canaryRoles = [
 ];
 const logGroups = ["backend", "canary", "worker", "read-only-canary"].map((name) => `arn:aws:logs:${STAGE_B.region}:${STAGE_B.account}:log-group:/ecs/mscqr-production/rls-green-${name}`);
 export const RELEASE_DIGEST_VERIFICATION_REPOSITORIES = Object.freeze([...new Set(Object.values(STAGE_B_PLAN_IMAGE_BINDINGS).map(({ repository }) => repository))].sort());
+export const RELEASE_DIGEST_VERIFICATION_BINDINGS = Object.freeze([...new Map(Object.values(STAGE_B_PLAN_IMAGE_BINDINGS).map((binding) => [binding.service, binding])).values()]
+  .sort((left, right) => left.service.localeCompare(right.service)));
 
 export const RELEASE_READ_PROBES = Object.freeze([
   ["caller", "sts:GetCallerIdentity", ["sts", "get-caller-identity"]],
@@ -43,7 +45,7 @@ export const RELEASE_READ_PROBES = Object.freeze([
   ["recovery-backend-revisions", "ecs:ListTaskDefinitions", ["ecs", "list-task-definitions", "--family-prefix", "mscqr-production-rls-green-backend-candidate", "--status", "ACTIVE", "--sort", "DESC"]],
   ["backend-health-recovery-images", "ecr:DescribeImages", ["ecr", "describe-images", "--repository-name", "mscqr-backend", "--max-results", "1"]],
   ["backend-health-recovery-repository", "ecr:DescribeRepositories", ["ecr", "describe-repositories", "--repository-names", "mscqr-backend"]],
-  ...RELEASE_DIGEST_VERIFICATION_REPOSITORIES.filter((name) => name !== "mscqr-backend").map((name) => [`stage-b-publication-${name}-images`, "ecr:DescribeImages", ["ecr", "describe-images", "--repository-name", name, "--max-results", "1"]]),
+  ...RELEASE_DIGEST_VERIFICATION_BINDINGS.map(({ service, repository }) => [`stage-b-publication-${service}-image`, "ecr:DescribeImages", ["ecr", "describe-images", "--repository-name", repository, "--image-ids", `imageDigest={authenticated:${service}}`]]),
   ...["mscqr-backend", "mscqr-web", "mscqr-worker"].map((name) => [`runtime-${name}-repository-policy`, "ecr:GetRepositoryPolicy", ["ecr", "get-repository-policy", "--repository-name", name]]),
   ["backend-health-recovery-service-deployments", "ecs:ListServiceDeployments", ["ecs", "list-service-deployments", "--cluster", STAGE_B.clusterArn, "--service", "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"]],
   ["audit-broker", "lambda:GetFunctionConfiguration", ["lambda", "get-function-configuration", "--function-name", STAGE_B.brokerFunctionArn]],
@@ -79,14 +81,38 @@ function safeError(error) {
   return /AccessDenied|Unauthorized/i.test(value) ? "AccessDenied" : "ReadProbeFailed";
 }
 
+function authenticatedPublicationImages(imageAuthorization) {
+  const expected = new Map(RELEASE_DIGEST_VERIFICATION_BINDINGS.map(({ service, repository }) => [service, repository]));
+  const authorized = new Map((imageAuthorization?.images || []).map((image) => [image.service, image.digest]));
+  const evidence = imageAuthorization?.imageEvidence?.images;
+  if (!Array.isArray(evidence) || evidence.length !== expected.size || authorized.size !== expected.size) throw new Error("Release preflight requires the authenticated four-image publication.");
+  const images = new Map();
+  for (const image of evidence) {
+    const repository = expected.get(image.service);
+    if (!repository || image.repository !== repository || !/^sha256:[a-f0-9]{64}$/.test(image.digest || "") || authorized.get(image.service) !== image.digest || images.has(image.service)) throw new Error(`Release preflight authenticated publication binding is invalid for ${image.service || "unknown"}.`);
+    images.set(image.service, image);
+  }
+  if (images.size !== expected.size) throw new Error("Release preflight authenticated publication is incomplete.");
+  return images;
+}
+
+function assertExactPublishedImage(response, { service, repository, digest }) {
+  let parsed;
+  try { parsed = typeof response === "string" ? JSON.parse(response) : response; } catch { throw new Error(`Stage B publication ECR response is malformed for ${service}.`); }
+  const details = parsed?.imageDetails;
+  if (!Array.isArray(details) || details.length !== 1 || details[0]?.registryId !== STAGE_B.account || details[0]?.repositoryName !== repository || details[0]?.imageDigest !== digest) throw new Error(`Stage B publication ECR response does not contain the exact authenticated ${service} digest.`);
+}
+
 export function runReleaseReadPreflight({
   region = STAGE_B.region,
   outputDirectory,
   run,
+  authenticatedImageAuthorization,
 } = {}) {
   if (typeof run !== "function") throw new Error("Stage B release preflight requires an explicit credential-bound AWS command runner.");
   if (region !== STAGE_B.region) throw new Error("Stage B release preflight region is wrong.");
   if (!path.isAbsolute(outputDirectory || "")) throw new Error("Stage B release preflight requires an absolute private output directory.");
+  const publicationImages = authenticatedPublicationImages(authenticatedImageAuthorization);
   readIdentityCapabilityMatrix();
   ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot: root, create: true, normalize: true });
   const stageAStateIdentityOutputPath = path.join(outputDirectory, "stage-a-state-identity.json");
@@ -96,12 +122,20 @@ export function runReleaseReadPreflight({
   for (const probe of RELEASE_READ_PROBES) {
     total += 1;
     const outputPath = path.join(outputDirectory, `${probe.id}.json`);
-    const args = probe.args.map((value) => value === "{output}" ? outputPath : value);
+    const args = probe.args.map((value) => {
+      if (value === "{output}") return outputPath;
+      const service = /^imageDigest=\{authenticated:(.+)\}$/.exec(value)?.[1];
+      return service ? `imageDigest=${publicationImages.get(service)?.digest || ""}` : value;
+    });
     try {
       const response = run(args, probe);
       if (probe.action === "ecr:GetRepositoryPolicy") {
         const repositoryName = args[args.indexOf("--repository-name") + 1];
         assertEcrRepositoryPolicyResponse(response, { repositoryName, registryId: STAGE_B.account });
+      }
+      if (probe.id.startsWith("stage-b-publication-") && probe.action === "ecr:DescribeImages") {
+        const service = probe.id.slice("stage-b-publication-".length, -"-image".length);
+        assertExactPublishedImage(response, publicationImages.get(service));
       }
       if (probe.id === "stage-a-state" || probe.id === "stage-b-state") {
         ensureStageBPrivateFile({ filePath: outputPath, repositoryRoot: root, normalize: true, label: `${probe.id} backup` });
