@@ -103,6 +103,7 @@
     "stage-b:authorize-dual-slot-rebaseline": "node scripts/aws/authorize-production-dual-slot-rebaseline.mjs",
     "stage-b:bootstrap-artifact-signing": "node scripts/aws/bootstrap-production-artifact-signing.mjs",
     "stage-b:supersede-stale-rotation": "node scripts/aws/supersede-production-stale-rotation.mjs",
+    "stage-b:authorize-stale-rotation-supersession": "node scripts/aws/authorize-production-stale-rotation-supersession.mjs",
     "stage-b:produce-root-drop-evidence": "node scripts/aws/produce-production-root-drop-evidence.mjs",
     "production:release-oidc-trust": "node scripts/aws/converge-production-release-oidc-trust.mjs",
     "production:verify-initial-activation-reconciler": "node scripts/aws/verify-production-initial-activation-policy-reconciler.mjs",

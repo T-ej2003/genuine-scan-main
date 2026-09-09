@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { constants, createHash, generateKeyPairSync, sign, verify } from "node:crypto";
-import { lstatSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import JSZip from "jszip";
 import { assertRootDropEvidence, buildRootDropEvidence, buildRootDropPayload, canonicalRootDropPayload, ROOT_DROP_SIGNING_KEY_ARN } from "../aws/production-root-drop-evidence.mjs";
 import { assertAuthenticatedCurrentStageBState, assertPostApplyStageAPlanRecovery, producePostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "../aws/production-stage-a-recovery-evidence.mjs";
 import { assertStageAStateContract, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { bootstrapInitialDualSlotRotation, createInitialDualSlotSecretsManagerClient, generatePendingMaterial, INITIAL_DUAL_SLOT_NAMES, supersedeStalePendingRotation, verifyLiveInitialDualSlotBindingWithRunner } from "../aws/production-initial-dual-slot-bootstrap.mjs";
+import { bootstrapInitialDualSlotRotation, createInitialDualSlotSecretsManagerClient, finalizeStaleRotationSupersessionMaterialJournal, generatePendingMaterial, INITIAL_DUAL_SLOT_NAMES, supersedeStalePendingRotation, verifyLiveInitialDualSlotBindingWithRunner } from "../aws/production-initial-dual-slot-bootstrap.mjs";
 import { buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { buildRebaselinePayloads, PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
@@ -19,6 +20,11 @@ import { productionStageAIngress, productionStageAState, STAGE_A_LINEAGE, STAGE_
 import { prepare, readCurrentState } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
 import { validateRotationTransition } from "../security/check-production-rotation-transition.mjs";
 import { assertProductionStaleSupersessionPredecessor, productionStaleSupersessionPredecessorIdentity } from "../security/production-initial-migration-source-advance.mjs";
+import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
+import { assertApprovedStaleRotationSupersessionAuthorization, assertStaleRotationSupersessionConsumption, createApprovedStaleRotationSupersessionAuthorization, createPendingStaleRotationSupersessionAuthorization, createStaleRotationSupersessionConsumption, createStaleRotationSupersessionExecutionStart, createStaleRotationSupersessionPreparation, resolveStaleRotationSupersessionAuthorizationArtifact, resolveStaleRotationSupersessionPublication, staleRotationSupersessionSha256 } from "../aws/production-stale-rotation-supersession-contract.mjs";
+import { createStaleRotationSecretsManagerSender, runCli as runStaleSupersessionCli } from "../aws/supersede-production-stale-rotation.mjs";
+import { runCli as runStaleSupersessionAuthorizationCli } from "../aws/authorize-production-stale-rotation-supersession.mjs";
+import { buildStageBImagePublicationIdentity, publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
 
 const sourceSha = "8".repeat(40);
 const staleSourceSha = "e".repeat(40);
@@ -31,7 +37,30 @@ const currentOwnerRotationId = "rotation-current-20260801";
 const productionQrMetadataIdentifier = "c41ca96ab047dd25"; // ggignore: authenticated public-key fingerprint, not secret material
 const currentNames = { jwt: "current-jwt", qrPrivate: "mscqr/prod/qr_sign_private_key", qrPublic: "mscqr/prod/qr_sign_public_key" };
 const staleTaskDefinition = { taskDefinition: { containerDefinitions: [{ name: "backend", environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "2026-04-20" }], secrets: [{ name: "JWT_SECRET", valueFrom: arn(currentNames.jwt) }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: `${arn(currentNames.qrPrivate)}:value::` }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: `${arn(currentNames.qrPublic)}:value::` }] }] } };
-const supersessionArgs = (overrides = {}) => ({ taskDefinition: staleTaskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha, ...overrides });
+const supersessionArgs = (overrides = {}) => ({ taskDefinition: staleTaskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha, mode: "execute", authorizeWritePlan: () => true, ...overrides });
+const authorizationProvenance = (authorization, overrides = {}) => {
+  const body = { schemaVersion: 1, kind: "PRODUCTION_STALE_PENDING_ROTATION_SUPERSESSION_AUTHORIZATION_PROVENANCE", repository: "T-ej2003/genuine-scan-main", workflowPath: ".github/workflows/authorize-production-stale-rotation-supersession.yml", workflowRunId: "123", workflowRunAttempt: "1", event: "workflow_dispatch", headSha: sourceSha, status: "completed", conclusion: "success", artifactId: 456, artifactName: "production-stale-rotation-supersession-authorization", artifactDigest: `sha256:${"a".repeat(64)}`, authorizationFileSha256: "b".repeat(64), authorizationSha256: authorization.authorizationSha256, approvedBy: authorization.approvedBy, ...overrides };
+  return { ...body, provenanceSha256: staleRotationSupersessionSha256(body) };
+};
+const supersessionApproval = (overrides = {}) => createProductionEnvironmentApprovalEvidence({
+  repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha,
+  workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-stale-rotation-supersession.yml@refs/heads/main", eventName: "workflow_dispatch", workflowRunId: "123", workflowRunAttempt: "1", executionActor: "release-operator",
+  environmentConfig: { id: 42, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 7, login: "T-ej2003" } }] }] },
+  actualApproval: { state: "approved", environmentId: 42, environmentName: "production", userId: 7, userLogin: "T-ej2003" },
+  ...overrides,
+});
+const publicationFixture = () => {
+  const imageDigests = { backend: `sha256:${"3".repeat(64)}`, worker: `sha256:${"4".repeat(64)}`, rlsExecutor: `sha256:${"5".repeat(64)}`, rlsCanary: `sha256:${"6".repeat(64)}` };
+  const records = [
+    ["backend", "mscqr-backend", sourceSha, imageDigests.backend],
+    ["worker", "mscqr-worker", sourceSha, imageDigests.worker],
+    ["rls-executor", "mscqr-backend", `${sourceSha}-rls-executor`, imageDigests.rlsExecutor],
+    ["rls-canary", "mscqr-backend", `${sourceSha}-rls-canary`, imageDigests.rlsCanary],
+  ].map(([service, repository, tag, image_digest]) => ({ service, repository, image_tag: tag, image_digest, image_uri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}:${tag}`, image_ref: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}@${image_digest}` }));
+  const artifactBytes = Buffer.from(`${records.map(JSON.stringify).join("\n")}\n`);
+  const identity = buildStageBImagePublicationIdentity({ observed: { workflowRunId: "34287838722", workflowDatabaseId: "900", workflowFile: ".github/workflows/production-green-stage-b-images.yml", workflowName: "Production Green Stage B Images", event: "workflow_dispatch", workflowDefinitionSha: sourceSha, imageReleaseSha: sourceSha, headBranch: "main", conclusion: "success", artifactId: "457", artifactName: "production-green-stage-b-images", artifactExpired: false, artifactArchiveFilename: null }, artifactBytes, expectedPublicationSourceSha: sourceSha, expectedReleaseSha: sourceSha, observedAt: "2026-09-09T00:00:00.000Z" });
+  return { artifactBytes, publication: { runId: "34287838722", artifactSha256: digest(artifactBytes), identitySha256: publicationIdentitySha256(identity), identity, imageDigests } };
+};
 
 function rotationStore() {
   const pair = generateKeyPairSync("ed25519", { privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } });
@@ -159,6 +188,91 @@ function convergedStageBState() {
   return { version: 4, serial: 98, lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", outputs: {}, resources: [{ mode: "managed", type: "aws_ecs_service", name: "backend", instances: [{ schema_version: 0, attributes: { id: "mscqr-backend-servi-euw2" } }] }] };
 }
 
+async function staleSupersessionCliFixture(homeDirectory) {
+  const store = rotationStore();
+  const sender = rotationSender(store);
+  const directory = path.join(homeDirectory, ".mscqr", "production-cutover", "stale-rotation-supersession", sourceSha, staleRotationId);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const evidenceFile = path.join(directory, "supersession.json");
+  const prepared = await supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs({ mode: "prepare", authorizeWritePlan: undefined }), outputFile: evidenceFile, repositoryRoot: process.cwd() });
+  const publication = publicationFixture().publication;
+  const liveBackendCore = { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:52", imageDigest: `sha256:${"7".repeat(64)}` };
+  const liveBackend = { ...liveBackendCore, identitySha256: staleRotationSupersessionSha256(liveBackendCore) };
+  const stageBState = { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 104, stateSha256: "9".repeat(64) };
+  const preparation = createStaleRotationSupersessionPreparation({ discovery: prepared.preparationInput, publication, liveBackend, stageBState });
+  const preparationBytes = Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`);
+  writeFileSync(path.join(directory, "preparation.json"), preparationBytes, { mode: 0o600 });
+  const authorization = createApprovedStaleRotationSupersessionAuthorization({ pendingAuthorization: createPendingStaleRotationSupersessionAuthorization(preparation), preparation, protectedEnvironmentApprovalEvidence: supersessionApproval() });
+  const provenance = authorizationProvenance(authorization);
+  const client = { assertCredentialIdentity: async () => true, send: sender.send };
+  let currentLiveBackend = liveBackend;
+  const run = (args) => {
+    if (args[0] === "ecs" && args[1] === "describe-services") return JSON.stringify({ services: [{ taskDefinition: currentLiveBackend.taskDefinitionArn }] });
+    if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: { ...staleTaskDefinition.taskDefinition, containerDefinitions: staleTaskDefinition.taskDefinition.containerDefinitions.map((container) => ({ ...container, image: container.name === "backend" ? `repository@${currentLiveBackend.imageDigest}` : container.image })) } });
+    throw new Error(`unexpected CLI call ${args.join(" ")}`);
+  };
+  const argv = ["--mode", "execute", "--source-sha", sourceSha, "--stale-source-sha", staleSourceSha, "--stale-rotation-id", staleRotationId, "--preparation-sha256", digest(preparationBytes), "--authorization-workflow-run-id", "123", "--authorization-workflow-run-attempt", "1"];
+  const deps = { homeDirectory, readProtectedMain: () => true, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha, run, client, readStageBState: () => stageBState, resolveAuthorization: async () => ({ authorization, provenance }) };
+  return { argv, authorization, client, deps, directory, evidenceFile, preparation, provenance, sender, store, setLiveBackend: (value) => { currentLiveBackend = value; } };
+}
+
+function staleSupersessionPreparationInputs(directory) {
+  const publication = publicationFixture().publication;
+  const liveBackendCore = { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:52", imageDigest: `sha256:${"7".repeat(64)}` };
+  const liveBackend = { ...liveBackendCore, identitySha256: staleRotationSupersessionSha256(liveBackendCore) };
+  const stageBState = { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 104, stateSha256: "9".repeat(64) };
+  const files = Object.fromEntries(Object.entries({ publication, liveBackend, stageBState }).map(([name, value]) => {
+    const file = path.join(directory, `${name}.json`);
+    writeFileSync(file, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+    return [name, file];
+  }));
+  return { publication, liveBackend, stageBState, files };
+}
+
+function staleSupersessionPrepareCliFixture(homeDirectory) {
+  const store = rotationStore();
+  const sender = rotationSender(store);
+  const inputs = staleSupersessionPreparationInputs(homeDirectory);
+  const client = { assertCredentialIdentity: async () => true, send: sender.send };
+  const run = (args) => {
+    if (args[0] === "ecs" && args[1] === "describe-services") return JSON.stringify({ services: [{ taskDefinition: inputs.liveBackend.taskDefinitionArn }] });
+    if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: { ...staleTaskDefinition.taskDefinition, containerDefinitions: staleTaskDefinition.taskDefinition.containerDefinitions.map((container) => ({ ...container, image: container.name === "backend" ? `repository@${inputs.liveBackend.imageDigest}` : container.image })) } });
+    throw new Error(`unexpected CLI call ${args.join(" ")}`);
+  };
+  const argv = ["--mode", "prepare", "--source-sha", sourceSha, "--stale-source-sha", staleSourceSha, "--stale-rotation-id", staleRotationId, "--publication", inputs.files.publication, "--live-backend", inputs.files.liveBackend, "--stage-b-state", inputs.files.stageBState];
+  const deps = { homeDirectory, readProtectedMain: () => true, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha, resolvePublication: async ({ publication }) => ({ publication }), readStageBState: () => JSON.parse(readFileSync(inputs.files.stageBState)), run, client };
+  return { argv, deps, sender, store, inputs, directory: path.join(homeDirectory, ".mscqr", "production-cutover", "stale-rotation-supersession", sourceSha, staleRotationId) };
+}
+
+async function githubAuthorizationFixture(authorization, overrides = {}) {
+  const zip = new JSZip();
+  zip.file("authorization.json", `${JSON.stringify(overrides.authorization || authorization, null, 2)}\n`);
+  const archive = await zip.generateAsync({ type: "nodebuffer", platform: "UNIX" });
+  const published = publicationFixture();
+  const publicationZip = new JSZip();
+  publicationZip.file("stage-b-images.jsonl", published.artifactBytes);
+  const publicationArchive = await publicationZip.generateAsync({ type: "nodebuffer", platform: "UNIX" });
+  const workflow = { id: 123, repository: { id: 1, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { full_name: "T-ej2003/genuine-scan-main" }, path: ".github/workflows/authorize-production-stale-rotation-supersession.yml", event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1, actor: { login: "release-operator" }, ...overrides.workflow };
+  const artifact = { id: 456, name: "production-stale-rotation-supersession-authorization", expired: false, workflow_run: { id: 123, head_sha: sourceSha, repository_id: 1 }, digest: `sha256:${digest(archive)}`, ...overrides.artifact };
+  const publicationWorkflow = { id: 34287838722, workflow_id: 900, repository: { id: 1, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { full_name: "T-ej2003/genuine-scan-main" }, path: ".github/workflows/production-green-stage-b-images.yml", name: "Production Green Stage B Images", event: "workflow_dispatch", head_sha: sourceSha, head_branch: "main", status: "completed", conclusion: "success", run_attempt: 1 };
+  const publicationArtifact = { id: 457, name: "production-green-stage-b-images", expired: false, workflow_run: { id: 34287838722, head_sha: sourceSha, repository_id: 1 }, digest: `sha256:${digest(publicationArchive)}` };
+  const environment = { id: 42, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 7, login: "T-ej2003" } }] }], ...overrides.environment };
+  const approvals = overrides.approvals || [{ state: "approved", environments: [{ id: 42, name: "production" }], user: { id: 7, login: "T-ej2003" } }];
+  const run = (_command, args, options = {}) => {
+    const endpoint = args[1];
+    if (endpoint.endsWith("/actions/runs/34287838722")) return JSON.stringify(overrides.publicationWorkflow || publicationWorkflow);
+    if (endpoint.endsWith("/actions/runs/34287838722/artifacts")) return JSON.stringify([{ artifacts: [overrides.publicationArtifact || publicationArtifact] }]);
+    if (endpoint.endsWith("/actions/artifacts/457/zip")) return options.encoding === null ? (overrides.publicationArchive || publicationArchive) : (overrides.publicationArchive || publicationArchive).toString();
+    if (endpoint.endsWith("/actions/runs/123")) return JSON.stringify(workflow);
+    if (endpoint.endsWith("/actions/runs/123/artifacts")) return JSON.stringify([{ artifacts: [artifact] }]);
+    if (endpoint.endsWith("/actions/artifacts/456/zip")) return options.encoding === null ? (overrides.archive || archive) : (overrides.archive || archive).toString();
+    if (endpoint.endsWith("/environments/production")) return JSON.stringify(environment);
+    if (endpoint.endsWith("/actions/runs/123/approvals")) return JSON.stringify(approvals);
+    throw new Error(`unexpected GitHub endpoint ${endpoint}`);
+  };
+  return { archive, artifact, publicationArtifact, publicationArchive, publicationWorkflow, run, workflow };
+}
+
 test("historical Stage-B provenance remains distinct from authenticated current Stage-B state", () => {
   const current = { ...convergedStageBState(), serial: 100, outputs: { bound_images: { value: { backend: "sha256:fixture" }, type: ["object", { backend: "string" }] } } };
   const prepared = JSON.parse(JSON.stringify(current));
@@ -237,6 +351,702 @@ test("replacement credentials use fresh entropy rather than public identifiers",
   assert.notEqual(first.qrPublic, second.qrPublic);
 });
 
+test("stale supersession preparation performs ten selector reads, plans seven writes, and requires exact independent approval", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-supersession-governance-"));
+  const store = rotationStore();
+  const sender = rotationSender(store);
+  const outputFile = path.join(directory, "supersession.json");
+  const preparedResult = await supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs({ mode: "prepare", authorizeWritePlan: undefined }), outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+  assert.equal(sender.reads.length, 10);
+  assert.equal(sender.writes, 0);
+  assert.equal(preparedResult.preparationInput.writePlan.length, 7);
+  assert.deepEqual(preparedResult.preparationInput.writePlan.map(({ slot }) => slot), ["jwtPending", "qrPrivatePending", "qrPublicPending", "jwtPrevious", "qrPublicPrevious", "qrCurrentVersion", "qrPreviousVersion"]);
+  assert.equal(JSON.stringify(preparedResult.preparationInput).includes("PRIVATE KEY"), false);
+  const publication = publicationFixture().publication;
+  const liveBackendCore = { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:52", imageDigest: `sha256:${"7".repeat(64)}` };
+  const liveBackend = { ...liveBackendCore, identitySha256: staleRotationSupersessionSha256(liveBackendCore) };
+  const stageBState = { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 104, stateSha256: "9".repeat(64) };
+  const preparation = createStaleRotationSupersessionPreparation({ discovery: preparedResult.preparationInput, publication, liveBackend, stageBState });
+  const pending = createPendingStaleRotationSupersessionAuthorization(preparation);
+  assert.equal(pending.authorizationStatus, "PENDING");
+  assert.equal(pending.approvedBy, "UNSET");
+  await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec", authorizeWritePlan: undefined }), /authorization is required/);
+  assert.equal(sender.writes, 0);
+  const approval = supersessionApproval();
+  const authorization = createApprovedStaleRotationSupersessionAuthorization({ pendingAuthorization: pending, preparation, protectedEnvironmentApprovalEvidence: approval });
+  assert.equal(JSON.stringify(authorization).includes("PRIVATE KEY"), false);
+  assert.throws(() => assertApprovedStaleRotationSupersessionAuthorization(pending, preparation, { sourceSha, materialJournalFileSha256: preparation.materialJournalFileSha256 }), /schema is invalid|not exactly approved/);
+  const wrongReviewerBody = { ...authorization, approvedBy: "different-reviewer" };
+  delete wrongReviewerBody.authorizationSha256;
+  const wrongReviewer = { ...wrongReviewerBody, authorizationSha256: staleRotationSupersessionSha256(wrongReviewerBody) };
+  assert.throws(() => assertApprovedStaleRotationSupersessionAuthorization(wrongReviewer, preparation, { sourceSha, materialJournalFileSha256: preparation.materialJournalFileSha256 }), /not exactly approved/);
+  assert.throws(() => assertApprovedStaleRotationSupersessionAuthorization(authorization, preparation, { sourceSha, materialJournalFileSha256: "0".repeat(64) }), /material journal differs/);
+  const alteredPreparation = structuredClone(preparation);
+  alteredPreparation.writePlan[0].payloadSha256 = "0".repeat(64);
+  assert.throws(() => assertApprovedStaleRotationSupersessionAuthorization(authorization, alteredPreparation, { sourceSha, materialJournalFileSha256: preparation.materialJournalFileSha256 }), /hash or write plan/);
+  const result = await supersedeStalePendingRotation({
+    send: sender.send, ...supersessionArgs(), outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec",
+    authorizeWritePlan: (discovery) => {
+      const current = createStaleRotationSupersessionPreparation({ discovery, publication, liveBackend, stageBState, preparedAt: preparation.preparedAt });
+      assert.equal(current.preparationSha256, preparation.preparationSha256);
+      assertApprovedStaleRotationSupersessionAuthorization(authorization, preparation, { sourceSha, materialJournalFileSha256: discovery.materialJournalFileSha256 });
+      return true;
+    },
+  });
+  assert.equal(result.writes, 7);
+  assert.equal(result.preWriteAuthorizationAuthenticated, true);
+  assert.equal(sender.writes, 7);
+  const provenance = authorizationProvenance(authorization);
+  const consumption = createStaleRotationSupersessionConsumption({ authorization, authorizationProvenance: provenance, preparation, supersessionEvidenceSha256: result.evidenceSha256, rotationBindingSha256: "b".repeat(64) });
+  assert.equal(assertStaleRotationSupersessionConsumption(consumption, { authorization, authorizationProvenance: provenance, preparation }).authorizationConsumed, true);
+  assert.throws(() => assertStaleRotationSupersessionConsumption({ ...consumption, authorizationSha256: "c".repeat(64) }, { authorization, authorizationProvenance: provenance, preparation }), /binding/);
+  const resumed = await supersedeStalePendingRotation({
+    send: sender.send, ...supersessionArgs(), outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec",
+    authorizeWritePlan: () => true,
+  });
+  assert.equal(resumed.writes, 0);
+  assert.equal(resumed.idempotentReplay, true);
+  finalizeStaleRotationSupersessionMaterialJournal({ outputFile, expectedFileSha256: digest(readFileSync(`${outputFile}.material`)), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
+  await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile, repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /already durably consumed/);
+  rmSync(directory, { recursive: true, force: true });
+});
+
+test("stale supersession authorization rejects altered plan, journal, reviewer, and caller-selected output path", async () => {
+  await assert.rejects(() => runStaleSupersessionCli(["--mode", "execute", "--output-directory", "/tmp/alternate"]), /Invalid or duplicate argument/);
+  await assert.rejects(() => runStaleSupersessionCli(["--mode", "execute", "--authorization", "/tmp/fabricated.json"]), /Invalid or duplicate argument/);
+  const body = readFileSync("scripts/aws/supersede-production-stale-rotation.mjs", "utf8");
+  assert.match(body, /--mode prepare or --mode execute is required/);
+  assert.match(body, /os\.userInfo\(\)\.homedir/);
+  assert.doesNotMatch(body, /os\.homedir\(\)/);
+  assert.doesNotMatch(body, /accepted.*output-directory/);
+  const workflow = readFileSync(".github/workflows/authorize-production-stale-rotation-supersession.yml", "utf8");
+  assert.match(workflow, /environment: production/);
+  assert.match(workflow, /actions: read/);
+  assert.doesNotMatch(workflow, /PutSecretValue|secretsmanager:|aws-actions\/configure-aws-credentials/);
+});
+
+test("stale supersession execution trusts only the authenticated GitHub run and artifact", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-auth-provenance-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    const github = await githubAuthorizationFixture(fixture.authorization);
+    const resolved = await resolveStaleRotationSupersessionAuthorizationArtifact({ workflowRunId: "123", workflowRunAttempt: "1", sourceSha, preparation: fixture.preparation, run: github.run });
+    assert.equal(resolved.authorization.authorizationSha256, fixture.authorization.authorizationSha256);
+    assert.equal(resolved.provenance.artifactId, 456);
+    assert.equal(resolved.provenance.approvedBy, "T-ej2003");
+
+    const cases = [
+      { workflow: { path: ".github/workflows/other.yml" } },
+      { workflow: { repository: { id: 1, full_name: "attacker/repository" } } },
+      { workflow: { head_sha: staleSourceSha } },
+      { workflow: { run_attempt: 2 } },
+      { workflow: { conclusion: "failure" } },
+      { artifact: { name: "other-artifact" } },
+      { archive: Buffer.from("changed artifact") },
+      { approvals: [{ state: "approved", environments: [{ id: 42, name: "production" }], user: { id: 8, login: "other-reviewer" } }] },
+    ];
+    for (const changed of cases) {
+      const candidate = await githubAuthorizationFixture(fixture.authorization, changed);
+      await assert.rejects(() => resolveStaleRotationSupersessionAuthorizationArtifact({ workflowRunId: "123", workflowRunAttempt: "1", sourceSha, preparation: fixture.preparation, run: candidate.run }), /provenance|artifact|approval|digest|exact|authentic/i);
+    }
+    const rerun = await githubAuthorizationFixture(fixture.authorization, { workflow: { run_attempt: 2 } });
+    await assert.rejects(() => resolveStaleRotationSupersessionAuthorizationArtifact({ workflowRunId: "123", workflowRunAttempt: "2", sourceSha, preparation: fixture.preparation, run: rerun.run }), /coordinates|provenance/i);
+    const altered = { ...fixture.authorization, authorizationSha256: "0".repeat(64) };
+    const changedBody = await githubAuthorizationFixture(fixture.authorization, { authorization: altered });
+    await assert.rejects(() => resolveStaleRotationSupersessionAuthorizationArtifact({ workflowRunId: "123", workflowRunAttempt: "1", sourceSha, preparation: fixture.preparation, run: changedBody.run }), /hash|authorization/i);
+    await assert.rejects(() => resolveStaleRotationSupersessionAuthorizationArtifact({ workflowRunId: "999", workflowRunAttempt: "1", sourceSha, preparation: fixture.preparation, run: github.run }), /malformed|unavailable|provenance/i);
+    assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("stale supersession independently authenticates the source-bound four-image publication", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-publication-provenance-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    const github = await githubAuthorizationFixture(fixture.authorization);
+    const resolved = await resolveStaleRotationSupersessionPublication({ publication: fixture.preparation.publication, sourceSha, run: github.run });
+    assert.equal(resolved.workflowRunId, fixture.preparation.publication.runId);
+    assert.deepEqual(resolved.imageDigests, fixture.preparation.publication.imageDigests);
+    for (const changed of [
+      { publicationWorkflow: { ...github.publicationWorkflow, path: ".github/workflows/other.yml" } },
+      { publicationWorkflow: { id: 34287838722, workflow_id: 900, repository: { id: 1, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { full_name: "T-ej2003/genuine-scan-main" }, path: ".github/workflows/production-green-stage-b-images.yml", name: "Production Green Stage B Images", event: "workflow_dispatch", head_sha: staleSourceSha, head_branch: "main", status: "completed", conclusion: "success", run_attempt: 1 } },
+      { publicationArchive: Buffer.from("changed publication") },
+    ]) {
+      const candidate = await githubAuthorizationFixture(fixture.authorization, changed);
+      await assert.rejects(() => resolveStaleRotationSupersessionPublication({ publication: fixture.preparation.publication, sourceSha, run: candidate.run }), /provenance|archive|artifact|malformed|authentic/i);
+    }
+    const alteredIdentity = structuredClone(fixture.preparation.publication);
+    alteredIdentity.identity.workflowDatabaseId = "901";
+    alteredIdentity.identitySha256 = publicationIdentitySha256(alteredIdentity.identity);
+    await assert.rejects(() => resolveStaleRotationSupersessionPublication({ publication: alteredIdentity, sourceSha, run: github.run }), /publication identity does not match/i);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("authorization generation fails closed unless publication provenance is independently authenticated", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-authorization-publication-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    const preparationFile = path.join(fixture.directory, "preparation.json");
+    const approvalFile = path.join(fixture.directory, "approval.json");
+    const approvalBytes = Buffer.from(`${JSON.stringify(fixture.authorization.protectedEnvironmentApprovalEvidence, null, 2)}\n`);
+    writeFileSync(approvalFile, approvalBytes, { mode: 0o600 });
+    const argv = ["--authorize", "--preparation", preparationFile, "--preparation-file-sha256", digest(readFileSync(preparationFile)), "--environment-approval", approvalFile, "--environment-approval-sha256", digest(approvalBytes), "--output", path.join(fixture.directory, "authorization-output.json")];
+    let checks = 0;
+    await runStaleSupersessionAuthorizationCli(argv, { resolvePublication: async () => { checks += 1; return true; } });
+    assert.equal(checks, 1);
+    await assert.rejects(() => runStaleSupersessionAuthorizationCli([...argv.slice(0, -1), path.join(fixture.directory, "rejected-authorization.json")], { resolvePublication: async () => { throw new Error("publication provenance rejected"); } }), /publication provenance rejected/);
+    assert.equal(lstatSync(path.join(fixture.directory, "rejected-authorization.json"), { throwIfNoEntry: false }), undefined);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("stale supersession rejects dirty executed source before credentials or AWS reads", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-dirty-source-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    let credentialFactories = 0;
+    let credentialAssertions = 0;
+    let awsCalls = 0;
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, {
+      ...fixture.deps,
+      client: { assertCredentialIdentity: async () => { credentialAssertions += 1; }, send: fixture.client.send },
+      createProductionCommandRunner: () => { credentialFactories += 1; throw new Error("credential factory reached"); },
+      readProtectedMain: () => { throw new Error("Stage B tooling checkout contains an untracked file."); },
+      run: (...args) => { awsCalls += 1; return fixture.deps.run(...args); },
+    }), /untracked file/);
+    assert.equal(credentialFactories, 0);
+    assert.equal(credentialAssertions, 0);
+    assert.equal(awsCalls, 0);
+    assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("stale supersession rejects path-shaped rotation identities before credentials or filesystem state", async () => {
+  let credentialFactories = 0;
+  await assert.rejects(() => runStaleSupersessionCli(["--mode", "execute", "--source-sha", sourceSha, "--stale-source-sha", staleSourceSha, "--stale-rotation-id", "../../substitution", "--preparation-sha256", "a".repeat(64), "--authorization-workflow-run-id", "123", "--authorization-workflow-run-attempt", "1"], {
+    readProtectedMain: () => true,
+    createProductionCommandRunner: () => { credentialFactories += 1; throw new Error("credential factory reached"); },
+  }), /source\/rotation identity is invalid/);
+  assert.equal(credentialFactories, 0);
+});
+
+test("stale supersession requires an exact current Stage-B state before every write plan", async () => {
+  for (const [label, current] of [
+    ["lineage", { lineage: "5e438e59-8b8b-194d-030c-5ede0c26344a", serial: 104, stateSha256: "9".repeat(64) }],
+    ["serial", { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 105, stateSha256: "9".repeat(64) }],
+    ["sha", { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 104, stateSha256: "a".repeat(64) }],
+  ]) {
+    const home = mkdtempSync(path.join(os.tmpdir(), `mscqr-stale-stage-b-${label}-`));
+    try {
+      const fixture = await staleSupersessionCliFixture(home);
+      await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, readStageBState: () => current }), /Stage-B state changed/);
+      assert.equal(fixture.sender.writes, 0);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  }
+});
+
+test("Stage-B drift or unreadability after an authenticated prefix cannot write a suffix", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-stage-b-prefix-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    let writes = 0;
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, {
+      ...fixture.deps,
+      client: { assertCredentialIdentity: fixture.client.assertCredentialIdentity, send: async (command) => {
+        const response = await fixture.sender.send(command);
+        if (command.constructor.name === "PutSecretValueCommand" && ++writes === 1) throw new Error("injected prefix failure");
+        return response;
+      } },
+    }), /injected prefix failure/);
+    assert.equal(fixture.sender.writes, 1);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, readStageBState: () => { throw new Error("state backend unavailable"); } }), /state backend unavailable/);
+    assert.equal(fixture.sender.writes, 1);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, readStageBState: () => ({ ...fixture.preparation.stageBState, serial: 105 }) }), /Stage-B state changed/);
+    assert.equal(fixture.sender.writes, 1);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("stale supersession reauthenticates Stage-B immediately before every new write", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-stage-b-per-write-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    let stageReads = 0;
+    let successfulWrites = 0;
+    const client = { assertCredentialIdentity: fixture.client.assertCredentialIdentity, send: async (command) => {
+      const response = await fixture.sender.send(command);
+      if (command.constructor.name === "PutSecretValueCommand") successfulWrites += 1;
+      return response;
+    } };
+    const result = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, client, readStageBState: () => { stageReads += 1; return fixture.preparation.stageBState; } });
+    assert.equal(result.writes, 7);
+    assert.equal(successfulWrites, 7);
+    assert.equal(stageReads, 7);
+
+    for (const driftAfter of [1, 3, 6]) {
+      const isolated = await staleSupersessionCliFixture(mkdtempSync(path.join(os.tmpdir(), `mscqr-stale-stage-b-drift-${driftAfter}-`)));
+      let writes = 0;
+      await assert.rejects(() => runStaleSupersessionCli(isolated.argv, {
+        ...isolated.deps,
+        client: { assertCredentialIdentity: isolated.client.assertCredentialIdentity, send: async (command) => {
+          const response = await isolated.sender.send(command);
+          if (command.constructor.name === "PutSecretValueCommand") writes += 1;
+          return response;
+        } },
+        readStageBState: () => writes >= driftAfter ? { ...isolated.preparation.stageBState, serial: isolated.preparation.stageBState.serial + 1 } : isolated.preparation.stageBState,
+      }), /Stage-B state changed/);
+      assert.equal(writes, driftAfter);
+      assert.equal(isolated.sender.writes, driftAfter);
+    }
+    const unreadableHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-stage-b-read-failure-"));
+    const unreadable = await staleSupersessionCliFixture(unreadableHome);
+    let writesBeforeReadFailure = 0;
+    await assert.rejects(() => runStaleSupersessionCli(unreadable.argv, {
+      ...unreadable.deps,
+      client: { assertCredentialIdentity: unreadable.client.assertCredentialIdentity, send: async (command) => {
+        const response = await unreadable.sender.send(command);
+        if (command.constructor.name === "PutSecretValueCommand") writesBeforeReadFailure += 1;
+        return response;
+      } },
+      readStageBState: () => { if (writesBeforeReadFailure === 3) throw new Error("injected Stage-B read failure"); return unreadable.preparation.stageBState; },
+    }), /injected Stage-B read failure/);
+    assert.equal(writesBeforeReadFailure, 3);
+    rmSync(unreadableHome, { recursive: true, force: true });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("stale supersession reauthenticates secret topology immediately before every new write", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-secret-topology-per-write-"));
+  try {
+    const store = rotationStore();
+    let writes = 0;
+    const sender = rotationSender(store, { onDescribe: ({ response, key }) => {
+      if (writes === 1 && key === INITIAL_DUAL_SLOT_NAMES.jwtPending) return { ...response, VersionIdsToStages: { "unexpected-version": ["AWSCURRENT"] } };
+      return response;
+    } });
+    const send = async (command) => {
+      const response = await sender.send(command);
+      if (command.constructor.name === "PutSecretValueCommand") writes += 1;
+      return response;
+    };
+    await assert.rejects(() => supersedeStalePendingRotation({ send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: process.cwd() }), /topology changed before write 2/);
+    assert.equal(writes, 1);
+    assert.equal(sender.writes, 1);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("governed supersession bootstrap cannot create an eighth secret value", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-strict-bootstrap-"));
+  try {
+    const store = rotationStore();
+    const sender = rotationSender(store);
+    const prepared = await supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs({ mode: "prepare", authorizeWritePlan: undefined }), outputFile: path.join(directory, "supersession.json"), repositoryRoot: process.cwd() });
+    const result = await supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: process.cwd() });
+    const failClosed = async (command) => {
+      if (command.constructor.name === "GetSecretValueCommand" && command.input.SecretId === arn(INITIAL_DUAL_SLOT_NAMES.jwtPending) && !command.input.VersionId) {
+        const error = new Error("not found"); error.name = "ResourceNotFoundException"; throw error;
+      }
+      return sender.send(command);
+    };
+    await assert.rejects(() => bootstrapInitialDualSlotRotation({ send: failClosed, taskDefinition: staleTaskDefinition, sourceSha, rotationId, supersessionEvidence: result.evidence, supersessionPredecessor: result.predecessor, outputFile: path.join(directory, "bindings.json"), repositoryRoot: process.cwd(), requireExisting: true, requiredWritePlan: prepared.preparationInput.writePlan }), /requires every prepared pending value/);
+    assert.equal(sender.writes, 7);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("governed supersession cannot certify a payload substituted after write seven", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-post-write-substitution-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    let pendingReads = 0;
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, {
+      ...fixture.deps,
+      client: { assertCredentialIdentity: fixture.client.assertCredentialIdentity, send: async (command) => {
+        if (command.constructor.name === "GetSecretValueCommand" && command.input.SecretId === arn(INITIAL_DUAL_SLOT_NAMES.jwtPending) && ++pendingReads === 3) {
+          const record = fixture.store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending);
+          record.value = { ...record.value, value: "substituted-post-write-material", materialFingerprint: digest("substituted-post-write-material").slice(0, 16) };
+        }
+        return fixture.sender.send(command);
+      } },
+    }), /differs from the authenticated supersession write plan/);
+    assert.equal(fixture.sender.writes, 7);
+    assert.equal(lstatSync(path.join(fixture.directory, "consumption.json"), { throwIfNoEntry: false }), undefined);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("stale supersession re-fetches live ECS after authorization resolution", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-live-ecs-auth-window-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    fixture.deps.resolveAuthorization = async () => {
+      fixture.setLiveBackend({ ...fixture.preparation.liveBackend, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:53", imageDigest: `sha256:${"a".repeat(64)}` });
+      return { authorization: fixture.authorization, provenance: fixture.provenance };
+    };
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, fixture.deps), /Live backend changed after/);
+    assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("stale supersession reauthenticates live ECS before every new write", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-live-ecs-per-write-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    let writes = 0;
+    const client = { assertCredentialIdentity: fixture.client.assertCredentialIdentity, send: async (command) => {
+      const response = await fixture.sender.send(command);
+      if (command.constructor.name === "PutSecretValueCommand" && ++writes === 1) fixture.setLiveBackend({ ...fixture.preparation.liveBackend, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:53" });
+      return response;
+    } };
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, client }), /Live backend changed at/);
+    assert.equal(writes, 1);
+    assert.equal(fixture.sender.writes, 1);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("authenticated GitHub provenance is required on the real seven-write CLI boundary", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-authenticated-execute-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    const github = await githubAuthorizationFixture(fixture.authorization);
+    let executionStarts = 0;
+    const deps = { ...fixture.deps, githubRun: github.run, afterExecutionStart: () => { executionStarts += 1; } };
+    delete deps.resolveAuthorization;
+    const result = await runStaleSupersessionCli(fixture.argv, deps);
+    assert.equal(result.writes, 7);
+    assert.equal(fixture.sender.writes, 7);
+    assert.equal(executionStarts, 1);
+    assert.match(result.authorizationProvenanceSha256, /^[a-f0-9]{64}$/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("a resolver cannot return self-reported approval without authenticated provenance", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-missing-provenance-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, resolveAuthorization: async () => ({ authorization: fixture.authorization }) }), /provenance/i);
+    assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("terminal receipt makes material-journal cleanup resumable without replaying writes", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-terminal-cleanup-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, afterConsumptionPersist: () => { throw new Error("injected crash after receipt"); } }), /injected crash after receipt/);
+    const receipt = path.join(fixture.directory, "consumption.json");
+    const journal = `${fixture.evidenceFile}.material`;
+    assert.ok(lstatSync(receipt));
+    assert.ok(lstatSync(journal));
+    assert.equal(fixture.sender.writes, 7);
+    const recovered = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date(new Date(fixture.preparation.expiresAt).getTime() + 1000) });
+    assert.equal(recovered.terminalCleanupRecovered, true);
+    assert.equal(recovered.writes, 0);
+    assert.equal(fixture.sender.writes, 7);
+    assert.equal(lstatSync(journal, { throwIfNoEntry: false }), undefined);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, fixture.deps), /already durably consumed/);
+    assert.equal(fixture.sender.writes, 7);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("all seven authenticated writes resume through terminal receipt without regenerating material", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-post-seven-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, afterBootstrap: () => { throw new Error("injected crash after write seven"); } }), /injected crash after write seven/);
+    assert.equal(fixture.sender.writes, 7);
+    assert.equal(lstatSync(path.join(fixture.directory, "consumption.json"), { throwIfNoEntry: false }), undefined);
+    assert.ok(lstatSync(`${fixture.evidenceFile}.material`));
+    const completed = await runStaleSupersessionCli(fixture.argv, fixture.deps);
+    assert.equal(completed.writes, 0);
+    assert.equal(completed.authorizationConsumed, true);
+    assert.equal(fixture.sender.writes, 7);
+    assert.equal(lstatSync(`${fixture.evidenceFile}.material`, { throwIfNoEntry: false }), undefined);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("an all-new topology without the authorization-bound start record cannot terminalize", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-all-new-no-start-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    const direct = await supersedeStalePendingRotation({ send: fixture.sender.send, ...supersessionArgs({ rotationId: fixture.preparation.replacementRotationId }), outputFile: fixture.evidenceFile, repositoryRoot: process.cwd() });
+    assert.equal(direct.writes, 7);
+    assert.equal(lstatSync(path.join(fixture.directory, "execution-start.json"), { throwIfNoEntry: false }), undefined);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, fixture.deps), /missing its authenticated execution start/);
+    assert.equal(fixture.sender.writes, 7);
+    assert.equal(lstatSync(path.join(fixture.directory, "consumption.json"), { throwIfNoEntry: false }), undefined);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("terminal cleanup rejects forged receipts and substituted journals without deleting them", async () => {
+  for (const attack of ["forged-receipt", "wrong-journal"]) {
+    const home = mkdtempSync(path.join(os.tmpdir(), `mscqr-stale-${attack}-`));
+    try {
+      const fixture = await staleSupersessionCliFixture(home);
+      await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, afterConsumptionPersist: () => { throw new Error("injected crash after receipt"); } }), /injected/);
+      const receiptPath = path.join(fixture.directory, "consumption.json");
+      const journalPath = `${fixture.evidenceFile}.material`;
+      if (attack === "forged-receipt") {
+        const receipt = JSON.parse(readFileSync(receiptPath));
+        receipt.supersessionEvidenceSha256 = "c".repeat(64);
+        receipt.terminalExecutionIdentitySha256 = staleRotationSupersessionSha256({ authorizationProvenanceSha256: fixture.provenance.provenanceSha256, preparationSha256: fixture.preparation.preparationSha256, materialJournalIdentity: fixture.preparation.materialJournalIdentity, materialJournalFileSha256: fixture.preparation.materialJournalFileSha256, writePlanSha256: fixture.preparation.writePlanSha256, supersessionEvidenceSha256: receipt.supersessionEvidenceSha256, rotationBindingSha256: receipt.rotationBindingSha256 });
+        delete receipt.consumptionSha256;
+        receipt.consumptionSha256 = staleRotationSupersessionSha256(receipt);
+        writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
+      } else {
+        writeFileSync(journalPath, Buffer.concat([readFileSync(journalPath), Buffer.from(" ")]), { mode: 0o600 });
+      }
+      await assert.rejects(() => runStaleSupersessionCli(fixture.argv, fixture.deps), /receipt|journal|evidence|transaction/i);
+      assert.ok(lstatSync(journalPath));
+      assert.equal(fixture.sender.writes, 7);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  }
+});
+
+test("journal cleanup failure is safely retried after terminal consumption", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-cleanup-retry-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, finalizeJournal: () => { throw new Error("injected cleanup failure"); } }), /injected cleanup failure/);
+    assert.equal(fixture.sender.writes, 7);
+    assert.ok(lstatSync(`${fixture.evidenceFile}.material`));
+    const recovered = await runStaleSupersessionCli(fixture.argv, fixture.deps);
+    assert.equal(recovered.terminalCleanupRecovered, true);
+    assert.equal(fixture.sender.writes, 7);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("an authenticated in-time start permits only its exact post-TTL prefix continuation", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-post-ttl-prefix-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    const fresh = new Date(new Date(fixture.authorization.approvedAt).getTime() + 1000);
+    const expired = new Date(new Date(fixture.preparation.expiresAt).getTime() + 1000);
+    let prefixWrites = 0;
+    const prefixClient = { assertCredentialIdentity: fixture.client.assertCredentialIdentity, send: async (command) => {
+      const response = await fixture.sender.send(command);
+      if (command.constructor.name === "PutSecretValueCommand" && ++prefixWrites === 3) throw new Error("injected crash after prefix");
+      return response;
+    } };
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, client: prefixClient, now: fresh }), /injected crash after prefix/);
+    assert.equal(prefixWrites, 3);
+    assert.ok(lstatSync(path.join(fixture.directory, "execution-start.json")));
+    const resumed = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: expired });
+    assert.equal(resumed.writes, 4);
+    assert.equal(fixture.sender.writes, 7);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("a fresh zero-prefix execution-start retry resumes the exact transaction, but never after expiry", async () => {
+  for (const expired of [false, true]) {
+    const home = mkdtempSync(path.join(os.tmpdir(), `mscqr-stale-zero-prefix-${expired ? "expired" : "fresh"}-`));
+    try {
+      const fixture = await staleSupersessionCliFixture(home);
+      const fresh = new Date(new Date(fixture.authorization.approvedAt).getTime() + 1000);
+      await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: fresh, afterExecutionStart: () => { throw new Error("injected crash before write one"); } }), /injected crash before write one/);
+      assert.ok(lstatSync(path.join(fixture.directory, "execution-start.json")));
+      assert.equal(fixture.sender.writes, 0);
+      const retryNow = expired ? new Date(new Date(fixture.preparation.expiresAt).getTime() + 1000) : fresh;
+      if (expired) {
+        await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: retryNow }), /expired|prefix/i);
+        assert.equal(fixture.sender.writes, 0);
+      } else {
+        const resumed = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: retryNow });
+        assert.equal(resumed.writes, 7);
+        assert.equal(fixture.sender.writes, 7);
+      }
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  }
+});
+
+test("expired stale supersession cannot begin, cannot fake a prefix, and can terminalize an authenticated all-new transition", async () => {
+  const zeroHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-expired-zero-"));
+  const terminalHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-expired-terminal-"));
+  try {
+    const zero = await staleSupersessionCliFixture(zeroHome);
+    const expired = new Date(new Date(zero.preparation.expiresAt).getTime() + 1000);
+    await assert.rejects(() => runStaleSupersessionCli(zero.argv, { ...zero.deps, now: expired }), /expired/);
+    assert.equal(zero.sender.writes, 0);
+
+    const forgedPrefix = await staleSupersessionCliFixture(mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-expired-forged-prefix-")));
+    const fresh = new Date(new Date(forgedPrefix.authorization.approvedAt).getTime() + 1000);
+    let writes = 0;
+    await assert.rejects(() => runStaleSupersessionCli(forgedPrefix.argv, { ...forgedPrefix.deps, now: fresh, client: { assertCredentialIdentity: forgedPrefix.client.assertCredentialIdentity, send: async (command) => {
+      const response = await forgedPrefix.sender.send(command);
+      if (command.constructor.name === "PutSecretValueCommand" && ++writes === 2) throw new Error("injected prefix");
+      return response;
+    } } }), /injected prefix/);
+    rmSync(path.join(forgedPrefix.directory, "execution-start.json"));
+    await assert.rejects(() => runStaleSupersessionCli(forgedPrefix.argv, { ...forgedPrefix.deps, now: new Date(new Date(forgedPrefix.preparation.expiresAt).getTime() + 1000) }), /missing its authenticated execution start/);
+    assert.equal(forgedPrefix.sender.writes, 2);
+    rmSync(path.dirname(forgedPrefix.directory), { recursive: true, force: true });
+
+    const terminal = await staleSupersessionCliFixture(terminalHome);
+    const terminalFresh = new Date(new Date(terminal.authorization.approvedAt).getTime() + 1000);
+    await assert.rejects(() => runStaleSupersessionCli(terminal.argv, { ...terminal.deps, now: terminalFresh, afterBootstrap: () => { throw new Error("injected post-seven crash"); } }), /injected post-seven crash/);
+    const complete = await runStaleSupersessionCli(terminal.argv, { ...terminal.deps, now: new Date(new Date(terminal.preparation.expiresAt).getTime() + 1000) });
+    assert.equal(complete.writes, 0);
+    assert.equal(terminal.sender.writes, 7);
+  } finally { rmSync(zeroHome, { recursive: true, force: true }); rmSync(terminalHome, { recursive: true, force: true }); }
+});
+
+test("replacement-ID reservation survives preparation crashes without regenerating material", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-preparation-resume-"));
+  try {
+    const fixture = staleSupersessionPrepareCliFixture(home);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date("2026-09-09T00:00:00.000Z"), afterPrepareDiscovery: () => { throw new Error("injected crash after journal"); } }), /injected crash after journal/);
+    const reservation = JSON.parse(readFileSync(path.join(fixture.directory, "replacement-id-reservation.json")));
+    const journal = path.join(fixture.directory, "supersession.json.material");
+    const materialSha = digest(readFileSync(journal));
+    const retry = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date("2026-09-09T00:01:00.000Z") });
+    assert.equal(retry.rotationId, reservation.replacementRotationId);
+    assert.equal(digest(readFileSync(journal)), materialSha);
+    assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("prepare reuses fresh preparation bytes and refreshes an expired zero-write preparation without regenerating material", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-preparation-refresh-"));
+  try {
+    const fixture = staleSupersessionPrepareCliFixture(home);
+    const preparedAt = new Date("2026-09-09T00:00:00.000Z");
+    const first = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: preparedAt });
+    const preparationFile = path.join(fixture.directory, "preparation.json");
+    const originalBytes = readFileSync(preparationFile);
+    const originalPreparation = JSON.parse(originalBytes);
+    const oldAuthorization = createApprovedStaleRotationSupersessionAuthorization({ pendingAuthorization: createPendingStaleRotationSupersessionAuthorization(originalPreparation), preparation: originalPreparation, protectedEnvironmentApprovalEvidence: supersessionApproval({ observedAt: preparedAt.toISOString() }) });
+    const reservation = JSON.parse(readFileSync(path.join(fixture.directory, "replacement-id-reservation.json")));
+    const journal = path.join(fixture.directory, "supersession.json.material");
+    const materialSha = digest(readFileSync(journal));
+    const reused = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date(preparedAt.getTime() + 1000) });
+    assert.equal(reused.preparationReused, true);
+    assert.equal(reused.preparationSha256, first.preparationSha256);
+    assert.deepEqual(readFileSync(preparationFile), originalBytes);
+    assert.equal(digest(readFileSync(journal)), materialSha);
+
+    const refreshed = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date(preparedAt.getTime() + 30 * 60 * 1000 + 1000) });
+    assert.equal(refreshed.preparationRefreshed, true);
+    assert.equal(refreshed.rotationId, reservation.replacementRotationId);
+    assert.notEqual(refreshed.preparationSha256, first.preparationSha256);
+    assert.equal(digest(readFileSync(journal)), materialSha);
+    assert.ok(lstatSync(`${preparationFile}.${digest(originalBytes)}.expired.json`));
+    const refreshedPreparation = JSON.parse(readFileSync(preparationFile));
+    assert.throws(() => assertApprovedStaleRotationSupersessionAuthorization(oldAuthorization, refreshedPreparation, { sourceSha, materialJournalFileSha256: refreshedPreparation.materialJournalFileSha256, now: new Date("2026-09-09T00:31:00.000Z") }), /hash or write plan|different prepared transaction/i);
+    assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("expired zero-write preparation refresh adopts an authenticated current Stage-B topology", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-preparation-topology-refresh-"));
+  try {
+    const fixture = staleSupersessionPrepareCliFixture(home);
+    const preparedAt = new Date("2026-09-09T00:00:00.000Z");
+    const first = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: preparedAt });
+    const nextState = { ...fixture.inputs.stageBState, serial: fixture.inputs.stageBState.serial + 1, stateSha256: "a".repeat(64) };
+    writeFileSync(fixture.inputs.files.stageBState, `${JSON.stringify(nextState)}\n`, { mode: 0o600 });
+    const refreshed = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date("2026-09-09T00:31:00.000Z") });
+    assert.equal(refreshed.preparationRefreshed, true);
+    assert.notEqual(refreshed.preparationSha256, first.preparationSha256);
+    assert.equal(JSON.parse(readFileSync(path.join(fixture.directory, "preparation.json"))).stageBState.serial, nextState.serial);
+    assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("expired zero-write preparation refresh adopts an authenticated current live backend", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-preparation-live-refresh-"));
+  try {
+    const fixture = staleSupersessionPrepareCliFixture(home);
+    await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date("2026-09-09T00:00:00.000Z") });
+    const nextBackend = { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:53", imageDigest: `sha256:${"a".repeat(64)}` };
+    Object.assign(fixture.inputs.liveBackend, nextBackend, { identitySha256: staleRotationSupersessionSha256(nextBackend) });
+    writeFileSync(fixture.inputs.files.liveBackend, `${JSON.stringify(fixture.inputs.liveBackend)}\n`, { mode: 0o600 });
+    const refreshed = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date("2026-09-09T00:31:00.000Z") });
+    assert.equal(refreshed.preparationRefreshed, true);
+    assert.equal(JSON.parse(readFileSync(path.join(fixture.directory, "preparation.json"))).liveBackend.taskDefinitionArn, fixture.inputs.liveBackend.taskDefinitionArn);
+    assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("expired preparation refresh rejects transaction-fixed predecessor or publication changes", async () => {
+  for (const changed of ["predecessor", "publication"]) {
+    const home = mkdtempSync(path.join(os.tmpdir(), `mscqr-stale-refresh-fixed-${changed}-`));
+    try {
+      const fixture = staleSupersessionPrepareCliFixture(home);
+      const preparedAt = new Date("2026-09-09T00:00:00.000Z");
+      await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: preparedAt });
+      if (changed === "predecessor") {
+        const record = fixture.store.get(currentNames.jwt);
+        record.value.value = "different-current-material";
+        record.value.materialFingerprint = digest(record.value.value).slice(0, 16);
+        record.versionId = "different-current-version";
+      } else {
+        writeFileSync(fixture.inputs.files.publication, `${JSON.stringify({ ...fixture.inputs.publication, identitySha256: "a".repeat(64) })}\n`, { mode: 0o600 });
+      }
+      await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date("2026-09-09T00:31:00.000Z") }), /non-refreshable|another transaction/i);
+      assert.equal(fixture.sender.writes, 0);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  }
+});
+
+test("expired zero-write preparation archives its old start and requires a new authorization epoch", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-preparation-abandon-"));
+  try {
+    const fixture = staleSupersessionPrepareCliFixture(home);
+    const preparedAt = new Date("2026-09-09T00:00:00.000Z");
+    const first = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: preparedAt });
+    const preparation = JSON.parse(readFileSync(path.join(fixture.directory, "preparation.json")));
+    const authorization = createApprovedStaleRotationSupersessionAuthorization({ pendingAuthorization: createPendingStaleRotationSupersessionAuthorization(preparation), preparation, protectedEnvironmentApprovalEvidence: supersessionApproval({ observedAt: preparedAt.toISOString() }) });
+    const provenance = authorizationProvenance(authorization);
+    const start = createStaleRotationSupersessionExecutionStart({ authorization, authorizationProvenance: provenance, preparation, startedAt: new Date(preparedAt.getTime() + 1000).toISOString() });
+    writeFileSync(path.join(fixture.directory, "execution-start.json"), `${JSON.stringify(start, null, 2)}\n`, { mode: 0o600 });
+    const refreshed = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date(preparedAt.getTime() + 30 * 60 * 1000 + 1000) });
+    assert.equal(refreshed.preparationRefreshed, true);
+    assert.notEqual(refreshed.preparationSha256, first.preparationSha256);
+    assert.equal(lstatSync(path.join(fixture.directory, "execution-start.json"), { throwIfNoEntry: false }), undefined);
+    assert.ok(lstatSync(path.join(fixture.directory, `execution-start.json.${digest(Buffer.from(`${JSON.stringify(start, null, 2)}\n`))}.abandoned.json`)));
+    assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("prepare never overwrites a corrupt artifact or refreshes after an authenticated write prefix", async () => {
+  const corruptHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-preparation-corrupt-"));
+  const prefixHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-preparation-prefix-"));
+  try {
+    const corrupt = staleSupersessionPrepareCliFixture(corruptHome);
+    const preparedAt = new Date("2026-09-09T00:00:00.000Z");
+    await runStaleSupersessionCli(corrupt.argv, { ...corrupt.deps, now: preparedAt });
+    const corruptPreparation = path.join(corrupt.directory, "preparation.json");
+    writeFileSync(corruptPreparation, "{}\n", { mode: 0o600 });
+    await assert.rejects(() => runStaleSupersessionCli(corrupt.argv, { ...corrupt.deps, now: new Date(preparedAt.getTime() + 1000) }), /schema|identity/i);
+    assert.equal(readFileSync(corruptPreparation, "utf8"), "{}\n");
+
+    const prefix = staleSupersessionPrepareCliFixture(prefixHome);
+    const first = await runStaleSupersessionCli(prefix.argv, { ...prefix.deps, now: preparedAt });
+    let writes = 0;
+    const prefixSender = { send: async (command) => {
+      const response = await prefix.sender.send(command);
+      if (command.constructor.name === "PutSecretValueCommand" && ++writes === 1) throw new Error("injected prefix write");
+      return response;
+    } };
+    await assert.rejects(() => supersedeStalePendingRotation({ send: prefixSender.send, ...supersessionArgs({ mode: "execute", rotationId: first.rotationId, authorizeWritePlan: () => true }), outputFile: path.join(prefix.directory, "supersession.json"), repositoryRoot: process.cwd() }), /injected prefix write/);
+    await assert.rejects(() => runStaleSupersessionCli(prefix.argv, { ...prefix.deps, now: new Date(preparedAt.getTime() + 30 * 60 * 1000 + 1000) }), /cannot refresh after mutation/i);
+    assert.equal(prefix.sender.writes, 1);
+  } finally { rmSync(corruptHome, { recursive: true, force: true }); rmSync(prefixHome, { recursive: true, force: true }); }
+});
+
+test("stale supersession routes reads and writes through the sanitized runner without exposing payload argv", async () => {
+  const calls = [];
+  const send = createStaleRotationSecretsManagerSender((args, options = {}) => {
+    calls.push({ args, options });
+    return JSON.stringify({ VersionId: "a".repeat(64) });
+  });
+  const { PutSecretValueCommand } = requireBackend("@aws-sdk/client-secrets-manager");
+  await send(new PutSecretValueCommand({ SecretId: arn("mscqr/prod/rotation/jwt_pending"), ClientRequestToken: "a".repeat(64), SecretString: '{"value":"synthetic"}' }));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].args.includes('{"value":"synthetic"}'), false);
+  assert.equal(calls[0].args.includes("file:///dev/stdin"), true);
+  assert.equal(calls[0].options.input, '{"value":"synthetic"}');
+  const source = readFileSync("scripts/aws/supersede-production-stale-rotation.mjs", "utf8");
+  assert.match(source, /createProductionCommandRunner/);
+  assert.doesNotMatch(source, /createInitialDualSlotSecretsManagerClient/);
+});
+
 test("post-apply Stage-A recovery is distinct from and stricter than a historical plan", () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-recovery-"));
   const stateBytes = Buffer.from(JSON.stringify(productionStageAState()));
@@ -269,12 +1079,10 @@ test("stale rotation supersession requires exact old topology and writes a new i
   assert.equal(result.writes, 7);
   const persistedEvidenceBytes = readFileSync(path.join(directory, "supersession.json"));
   const persistedEvidence = JSON.parse(persistedEvidenceBytes);
+  finalizeStaleRotationSupersessionMaterialJournal({ outputFile: path.join(directory, "supersession.json"), expectedFileSha256: digest(readFileSync(path.join(directory, "supersession.json.material"))), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
   await new Promise((resolve) => setTimeout(resolve, 5));
-  const replay = await supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
-  assert.equal(replay.writes, 0);
-  assert.equal(replay.idempotentReplay, true);
-  assert.deepEqual(replay.evidence, persistedEvidence);
-  assert.equal(replay.evidenceSha256, digest(persistedEvidenceBytes));
+  await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs(), outputFile: path.join(directory, "supersession.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /already durably consumed/);
+  assert.equal(JSON.parse(persistedEvidenceBytes).evidenceIdentitySha256, persistedEvidence.evidenceIdentitySha256);
   const tampered = JSON.parse(readFileSync(path.join(directory, "supersession.json"), "utf8"));
   tampered.rotationId = "rotation-tampered-20260817";
   writeFileSync(path.join(directory, "supersession.json"), `${JSON.stringify(tampered)}\n`, { mode: 0o600 });
@@ -648,6 +1456,8 @@ test("stale rotation supersession resumes every sequential write boundary withou
     assert.equal(result.idempotentReplay, failure === 7);
     for (const slot of ["jwtPending", "qrPrivatePending", "qrPublicPending"]) assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES[slot]).value.value, journal.material[slot === "jwtPending" ? "jwt" : slot === "qrPrivatePending" ? "qrPrivate" : "qrPublic"]);
     assert.notEqual(store.get(INITIAL_DUAL_SLOT_NAMES.jwtPending).value.value, "jwt-old-material");
+    assert.notEqual(lstatSync(`${outputFile}.material`, { throwIfNoEntry: false }), undefined);
+    finalizeStaleRotationSupersessionMaterialJournal({ outputFile, expectedFileSha256: digest(readFileSync(`${outputFile}.material`)), repositoryRoot: "/private/tmp/mscqr-post330-exec" });
     assert.equal(lstatSync(`${outputFile}.material`, { throwIfNoEntry: false }), undefined);
   }
 });
@@ -672,6 +1482,8 @@ test("production-shaped stale supersession bootstraps a distinct canonical rotat
       proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === productionOldSource && descendantSha === protectedSource,
       outputFile: path.join(directory, "supersession.json"),
       repositoryRoot: "/private/tmp/mscqr-post330-exec",
+      mode: "execute",
+      authorizeWritePlan: () => true,
     });
     assert.equal(result.writes, 7);
     assert.notEqual(result.rotationId, result.staleRotationId);
@@ -782,7 +1594,7 @@ test("production-shaped stale supersession bootstraps a distinct canonical rotat
     alteredState.jwt.oldFingerprint = "0".repeat(16);
     writeFileSync(stateFile, `${JSON.stringify(alteredState, null, 2)}\n`, { mode: 0o600 });
     assert.throws(() => readCurrentState(context), /authenticated stale-supersession predecessor/);
-    await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, taskDefinition: staleTaskDefinition, sourceSha: protectedSource, staleSourceSha: productionOldSource, rotationId: freshRotationId, staleRotationId: productionOldRotationId, proveDescendant: () => true, outputFile: path.join(directory, "replay.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec" }), /lineage|invalid|unknown/);
+    await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, taskDefinition: staleTaskDefinition, sourceSha: protectedSource, staleSourceSha: productionOldSource, rotationId: freshRotationId, staleRotationId: productionOldRotationId, proveDescendant: () => true, outputFile: path.join(directory, "replay.json"), repositoryRoot: "/private/tmp/mscqr-post330-exec", mode: "execute", authorizeWritePlan: () => true }), /lineage|invalid|unknown/);
     assert.equal(sender.writes, writesAfterPrepare);
   } finally {
     rmSync(directory, { recursive: true, force: true });

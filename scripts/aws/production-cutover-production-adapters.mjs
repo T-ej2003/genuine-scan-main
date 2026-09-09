@@ -75,13 +75,13 @@ const credentialEnvironment = ({ credentialSource, profile, env = process.env, i
 
 export function createProductionCommandRunner({ credentialSource, profile, region = REGION, env: parentEnvironment = process.env, exec = execFileSync } = {}) {
   const environment = credentialEnvironment({ credentialSource, profile, env: parentEnvironment, injected: credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST && exec !== execFileSync });
-  return (args, { encoding = "utf8", maxBuffer } = {}) => {
+  return (args, { encoding = "utf8", maxBuffer, input } = {}) => {
     if (!Array.isArray(args) || args.length === 0) throw new Error("Production command arguments are required.");
     const command = args[0] === "aws" ? args.slice(1) : [...args];
     const isAwsService = AWS_SERVICE_COMMANDS.has(command[0]);
     const normalized = isAwsService && !command.includes("--region") ? [...command, "--region", region] : command;
     const executable = isAwsService ? "aws" : normalized[0];
-    return exec(executable, normalized.slice(isAwsService ? 0 : 1), { cwd: process.cwd(), env: environment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });
+    return exec(executable, normalized.slice(isAwsService ? 0 : 1), { cwd: process.cwd(), env: environment, encoding, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"], ...(input === undefined ? {} : { input }), ...(maxBuffer === undefined ? {} : { maxBuffer }) });
   };
 }
 

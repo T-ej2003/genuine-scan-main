@@ -16,6 +16,7 @@ import {
   stageBTerraformBackendIdentity,
   stageBAttemptStepS3ObjectKey,
   ensureStageBTerraformBackendMetadataPrivate,
+  readStageBTerraformStateIdentity,
 } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { generateStageBTerraformBackendConfig } from "../aws/generate-production-green-stage-b-backend-config.mjs";
 import { validateManifest } from "../aws/validate-production-green-stage-b-permissions.mjs";
@@ -63,6 +64,21 @@ test("the direct production-state config uses the default CLI workspace", () => 
   assert.match(STAGE_B_TERRAFORM_BACKEND_CONFIG.key, /^env:\/production\//);
   assert.throws(() => assertStageBTerraformBackendConfig({ ...STAGE_B_TERRAFORM_BACKEND_CONFIG, key: "other.tfstate" }), /backend key/);
   assert.throws(() => assertStageBTerraformBackendConfig({ ...STAGE_B_TERRAFORM_BACKEND_CONFIG, profile: "other" }), /unreviewed key/);
+});
+
+test("the canonical Stage-B state identity reader is read-only and hashes exact backend bytes", () => {
+  const state = { version: 4, lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 104, outputs: {}, resources: [] };
+  let calls = 0;
+  const identity = readStageBTerraformStateIdentity((args) => {
+    calls += 1;
+    assert.deepEqual(args.slice(0, 8), ["s3api", "get-object", "--bucket", STAGE_B_TERRAFORM_BACKEND.bucketName, "--key", STAGE_B_TERRAFORM_BACKEND.stateKey, "--expected-bucket-owner", "368992683803"]);
+    fs.writeFileSync(args.at(-1), JSON.stringify(state));
+  });
+  assert.equal(calls, 1);
+  assert.equal(identity.lineage, state.lineage);
+  assert.equal(identity.serial, state.serial);
+  assert.match(identity.stateSha256, /^[a-f0-9]{64}$/);
+  assert.throws(() => readStageBTerraformStateIdentity(() => { throw new Error("state backend unavailable"); }), /state backend unavailable/);
 });
 
 test("Terraform v1.15.7 initialized metadata accepts only the canonical normalized S3 shape", () => {
