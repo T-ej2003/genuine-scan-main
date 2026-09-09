@@ -21,7 +21,7 @@ import { prepare, readCurrentState } from "../../backend/scripts/security/rotate
 import { validateRotationTransition } from "../security/check-production-rotation-transition.mjs";
 import { assertProductionStaleSupersessionPredecessor, productionStaleSupersessionPredecessorIdentity } from "../security/production-initial-migration-source-advance.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
-import { assertApprovedStaleRotationSupersessionAuthorization, assertStaleRotationSupersessionConsumption, createApprovedStaleRotationSupersessionAuthorization, createPendingStaleRotationSupersessionAuthorization, createStaleRotationSupersessionConsumption, createStaleRotationSupersessionPreparation, resolveStaleRotationSupersessionAuthorizationArtifact, staleRotationSupersessionSha256 } from "../aws/production-stale-rotation-supersession-contract.mjs";
+import { assertApprovedStaleRotationSupersessionAuthorization, assertStaleRotationSupersessionConsumption, createApprovedStaleRotationSupersessionAuthorization, createPendingStaleRotationSupersessionAuthorization, createStaleRotationSupersessionConsumption, createStaleRotationSupersessionExecutionStart, createStaleRotationSupersessionPreparation, resolveStaleRotationSupersessionAuthorizationArtifact, staleRotationSupersessionSha256 } from "../aws/production-stale-rotation-supersession-contract.mjs";
 import { createStaleRotationSecretsManagerSender, runCli as runStaleSupersessionCli } from "../aws/supersede-production-stale-rotation.mjs";
 
 const sourceSha = "8".repeat(40);
@@ -546,6 +546,28 @@ test("an authenticated in-time start permits only its exact post-TTL prefix cont
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+test("a fresh zero-prefix execution-start retry resumes the exact transaction, but never after expiry", async () => {
+  for (const expired of [false, true]) {
+    const home = mkdtempSync(path.join(os.tmpdir(), `mscqr-stale-zero-prefix-${expired ? "expired" : "fresh"}-`));
+    try {
+      const fixture = await staleSupersessionCliFixture(home);
+      const fresh = new Date(new Date(fixture.authorization.approvedAt).getTime() + 1000);
+      await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: fresh, afterExecutionStart: () => { throw new Error("injected crash before write one"); } }), /injected crash before write one/);
+      assert.ok(lstatSync(path.join(fixture.directory, "execution-start.json")));
+      assert.equal(fixture.sender.writes, 0);
+      const retryNow = expired ? new Date(new Date(fixture.preparation.expiresAt).getTime() + 1000) : fresh;
+      if (expired) {
+        await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: retryNow }), /expired|prefix/i);
+        assert.equal(fixture.sender.writes, 0);
+      } else {
+        const resumed = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: retryNow });
+        assert.equal(resumed.writes, 7);
+        assert.equal(fixture.sender.writes, 7);
+      }
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  }
+});
+
 test("expired stale supersession cannot begin, cannot fake a prefix, and can terminalize an authenticated all-new transition", async () => {
   const zeroHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-expired-zero-"));
   const terminalHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-expired-terminal-"));
@@ -590,6 +612,83 @@ test("replacement-ID reservation survives preparation crashes without regenerati
     assert.equal(digest(readFileSync(journal)), materialSha);
     assert.equal(fixture.sender.writes, 0);
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("prepare reuses fresh preparation bytes and refreshes an expired zero-write preparation without regenerating material", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-preparation-refresh-"));
+  try {
+    const fixture = staleSupersessionPrepareCliFixture(home);
+    const preparedAt = new Date("2026-09-09T00:00:00.000Z");
+    const first = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: preparedAt });
+    const preparationFile = path.join(fixture.directory, "preparation.json");
+    const originalBytes = readFileSync(preparationFile);
+    const originalPreparation = JSON.parse(originalBytes);
+    const oldAuthorization = createApprovedStaleRotationSupersessionAuthorization({ pendingAuthorization: createPendingStaleRotationSupersessionAuthorization(originalPreparation), preparation: originalPreparation, protectedEnvironmentApprovalEvidence: supersessionApproval({ observedAt: preparedAt.toISOString() }) });
+    const reservation = JSON.parse(readFileSync(path.join(fixture.directory, "replacement-id-reservation.json")));
+    const journal = path.join(fixture.directory, "supersession.json.material");
+    const materialSha = digest(readFileSync(journal));
+    const reused = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date(preparedAt.getTime() + 1000) });
+    assert.equal(reused.preparationReused, true);
+    assert.equal(reused.preparationSha256, first.preparationSha256);
+    assert.deepEqual(readFileSync(preparationFile), originalBytes);
+    assert.equal(digest(readFileSync(journal)), materialSha);
+
+    const refreshed = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date(preparedAt.getTime() + 30 * 60 * 1000 + 1000) });
+    assert.equal(refreshed.preparationRefreshed, true);
+    assert.equal(refreshed.rotationId, reservation.replacementRotationId);
+    assert.notEqual(refreshed.preparationSha256, first.preparationSha256);
+    assert.equal(digest(readFileSync(journal)), materialSha);
+    assert.ok(lstatSync(`${preparationFile}.${digest(originalBytes)}.expired.json`));
+    const refreshedPreparation = JSON.parse(readFileSync(preparationFile));
+    assert.throws(() => assertApprovedStaleRotationSupersessionAuthorization(oldAuthorization, refreshedPreparation, { sourceSha, materialJournalFileSha256: refreshedPreparation.materialJournalFileSha256 }), /hash or write plan|different prepared transaction/i);
+    assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("expired zero-write preparation archives its old start and requires a new authorization epoch", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-preparation-abandon-"));
+  try {
+    const fixture = staleSupersessionPrepareCliFixture(home);
+    const preparedAt = new Date("2026-09-09T00:00:00.000Z");
+    const first = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: preparedAt });
+    const preparation = JSON.parse(readFileSync(path.join(fixture.directory, "preparation.json")));
+    const authorization = createApprovedStaleRotationSupersessionAuthorization({ pendingAuthorization: createPendingStaleRotationSupersessionAuthorization(preparation), preparation, protectedEnvironmentApprovalEvidence: supersessionApproval({ observedAt: preparedAt.toISOString() }) });
+    const provenance = authorizationProvenance(authorization);
+    const start = createStaleRotationSupersessionExecutionStart({ authorization, authorizationProvenance: provenance, preparation, startedAt: new Date(preparedAt.getTime() + 1000).toISOString() });
+    writeFileSync(path.join(fixture.directory, "execution-start.json"), `${JSON.stringify(start, null, 2)}\n`, { mode: 0o600 });
+    const refreshed = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date(preparedAt.getTime() + 30 * 60 * 1000 + 1000) });
+    assert.equal(refreshed.preparationRefreshed, true);
+    assert.notEqual(refreshed.preparationSha256, first.preparationSha256);
+    assert.equal(lstatSync(path.join(fixture.directory, "execution-start.json"), { throwIfNoEntry: false }), undefined);
+    assert.ok(lstatSync(path.join(fixture.directory, `execution-start.json.${digest(Buffer.from(`${JSON.stringify(start, null, 2)}\n`))}.abandoned.json`)));
+    assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("prepare never overwrites a corrupt artifact or refreshes after an authenticated write prefix", async () => {
+  const corruptHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-preparation-corrupt-"));
+  const prefixHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-preparation-prefix-"));
+  try {
+    const corrupt = staleSupersessionPrepareCliFixture(corruptHome);
+    const preparedAt = new Date("2026-09-09T00:00:00.000Z");
+    await runStaleSupersessionCli(corrupt.argv, { ...corrupt.deps, now: preparedAt });
+    const corruptPreparation = path.join(corrupt.directory, "preparation.json");
+    writeFileSync(corruptPreparation, "{}\n", { mode: 0o600 });
+    await assert.rejects(() => runStaleSupersessionCli(corrupt.argv, { ...corrupt.deps, now: new Date(preparedAt.getTime() + 1000) }), /schema|identity/i);
+    assert.equal(readFileSync(corruptPreparation, "utf8"), "{}\n");
+
+    const prefix = staleSupersessionPrepareCliFixture(prefixHome);
+    const first = await runStaleSupersessionCli(prefix.argv, { ...prefix.deps, now: preparedAt });
+    let writes = 0;
+    const prefixSender = { send: async (command) => {
+      const response = await prefix.sender.send(command);
+      if (command.constructor.name === "PutSecretValueCommand" && ++writes === 1) throw new Error("injected prefix write");
+      return response;
+    } };
+    await assert.rejects(() => supersedeStalePendingRotation({ send: prefixSender.send, ...supersessionArgs({ mode: "execute", rotationId: first.rotationId, authorizeWritePlan: () => true }), outputFile: path.join(prefix.directory, "supersession.json"), repositoryRoot: process.cwd() }), /injected prefix write/);
+    await assert.rejects(() => runStaleSupersessionCli(prefix.argv, { ...prefix.deps, now: new Date(preparedAt.getTime() + 30 * 60 * 1000 + 1000) }), /cannot refresh after mutation/i);
+    assert.equal(prefix.sender.writes, 1);
+  } finally { rmSync(corruptHome, { recursive: true, force: true }); rmSync(prefixHome, { recursive: true, force: true }); }
 });
 
 test("stale supersession routes reads and writes through the sanitized runner without exposing payload argv", async () => {

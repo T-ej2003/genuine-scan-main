@@ -254,11 +254,21 @@ export function createStaleRotationSupersessionExecutionStart({ authorization, a
 }
 
 export function assertStaleRotationSupersessionExecutionStart(value, { authorization, authorizationProvenance, preparation } = {}) {
-  exactKeys(value, ["schemaVersion", "kind", "sourceSha", "staleSourceSha", "staleRotationId", "replacementRotationId", "preparationSha256", "authorizationSha256", "authorizationProvenanceSha256", "materialJournalIdentity", "materialJournalFileSha256", "writePlanSha256", "publicationIdentitySha256", "liveBackendIdentitySha256", "stageBState", "startedAt", "executionStartSha256"], "Supersession execution start");
+  assertStaleRotationSupersessionExecutionStartForPreparation(value, { preparation });
   assertStaleRotationSupersessionAuthorizationProvenance(authorizationProvenance, { authorization, sourceSha: preparation?.sourceSha });
-  const { executionStartSha256, ...body } = value;
-  if (value.schemaVersion !== 1 || value.kind !== STALE_ROTATION_SUPERSESSION_EXECUTION_START_KIND || !SHA256.test(executionStartSha256 || "") || staleRotationSupersessionSha256(body) !== executionStartSha256 || canonical(body) !== canonical(transactionStartBody({ authorization, authorizationProvenance, preparation, startedAt: value.startedAt }))) fail("Supersession execution start is not bound to the authenticated transaction.");
+  if (canonical(value) !== canonical({ ...transactionStartBody({ authorization, authorizationProvenance, preparation, startedAt: value.startedAt }), executionStartSha256: value.executionStartSha256 })) fail("Supersession execution start is not bound to the authenticated transaction.");
   assertApprovedStaleRotationSupersessionAuthorization(authorization, preparation, { sourceSha: preparation?.sourceSha, materialJournalFileSha256: preparation?.materialJournalFileSha256, now: value.startedAt, validationMode: "start" });
+  return value;
+}
+
+// This structural check is intentionally weaker than execution authentication:
+// prepare uses it only to retire an expired zero-write start record. It never
+// grants write authority; execute still authenticates GitHub provenance above.
+export function assertStaleRotationSupersessionExecutionStartForPreparation(value, { preparation } = {}) {
+  exactKeys(value, ["schemaVersion", "kind", "sourceSha", "staleSourceSha", "staleRotationId", "replacementRotationId", "preparationSha256", "authorizationSha256", "authorizationProvenanceSha256", "materialJournalIdentity", "materialJournalFileSha256", "writePlanSha256", "publicationIdentitySha256", "liveBackendIdentitySha256", "stageBState", "startedAt", "executionStartSha256"], "Supersession execution start");
+  const { executionStartSha256, ...body } = value;
+  if (value.schemaVersion !== 1 || value.kind !== STALE_ROTATION_SUPERSESSION_EXECUTION_START_KIND || !SHA256.test(executionStartSha256 || "") || !SHA256.test(value.authorizationSha256 || "") || !SHA256.test(value.authorizationProvenanceSha256 || "") || staleRotationSupersessionSha256(body) !== executionStartSha256 || value.sourceSha !== preparation?.sourceSha || value.staleSourceSha !== preparation?.staleSourceSha || value.staleRotationId !== preparation?.staleRotationId || value.replacementRotationId !== preparation?.replacementRotationId || value.preparationSha256 !== preparation?.preparationSha256 || value.materialJournalIdentity !== preparation?.materialJournalIdentity || value.materialJournalFileSha256 !== preparation?.materialJournalFileSha256 || value.writePlanSha256 !== preparation?.writePlanSha256 || value.publicationIdentitySha256 !== preparation?.publication?.identitySha256 || value.liveBackendIdentitySha256 !== preparation?.liveBackend?.identitySha256 || canonical(value.stageBState) !== canonical(preparation?.stageBState)) fail("Supersession execution start is not bound to the prepared transaction.");
+  date(value.startedAt, "Supersession execution startedAt");
   return value;
 }
 

@@ -626,7 +626,7 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
     materialJournalFileSha256: sha256(readFileSync(materialFile)),
     writePlan,
   });
-  if (mode === "prepare") return { valid: true, transition: "SUPERSEDE_STALE_PENDING_PREPARED", writes: 0, preparationInput, predecessor, sourceSha, staleSourceSha, rotationId, staleRotationId, resources };
+  if (mode === "prepare") return { valid: true, transition: "SUPERSEDE_STALE_PENDING_PREPARED", writes: 0, completedWriteCount: newSlots.length, preparationInput, predecessor, sourceSha, staleSourceSha, rotationId, staleRotationId, resources };
   if (typeof authorizeWritePlan !== "function" || await authorizeWritePlan(preparationInput, { completedWriteCount: newSlots.length }) !== true) throw new Error("Approved stale rotation supersession authorization is required before PutSecretValue.");
   const versionIds = {};
   for (const slot of replacementOrder) {
