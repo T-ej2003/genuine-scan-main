@@ -196,7 +196,7 @@ async function staleSupersessionCliFixture(homeDirectory) {
     throw new Error(`unexpected CLI call ${args.join(" ")}`);
   };
   const argv = ["--mode", "execute", "--source-sha", sourceSha, "--stale-source-sha", staleSourceSha, "--stale-rotation-id", staleRotationId, "--preparation-sha256", digest(preparationBytes), "--authorization-workflow-run-id", "123", "--authorization-workflow-run-attempt", "1"];
-  const deps = { homeDirectory, readProtectedMain: () => true, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha, run, client, resolveAuthorization: async () => ({ authorization, provenance }) };
+  const deps = { homeDirectory, readProtectedMain: () => true, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha, run, client, readStageBState: () => stageBState, resolveAuthorization: async () => ({ authorization, provenance }) };
   return { argv, authorization, client, deps, directory, evidenceFile, preparation, provenance, sender, store };
 }
 
@@ -425,6 +425,63 @@ test("stale supersession execution trusts only the authenticated GitHub run and 
     await assert.rejects(() => resolveStaleRotationSupersessionAuthorizationArtifact({ workflowRunId: "123", workflowRunAttempt: "1", sourceSha, preparation: fixture.preparation, run: changedBody.run }), /hash|authorization/i);
     await assert.rejects(() => resolveStaleRotationSupersessionAuthorizationArtifact({ workflowRunId: "999", workflowRunAttempt: "1", sourceSha, preparation: fixture.preparation, run: github.run }), /malformed|unavailable|provenance/i);
     assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("stale supersession rejects dirty executed source before credentials or AWS reads", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-dirty-source-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    let credentialFactories = 0;
+    let credentialAssertions = 0;
+    let awsCalls = 0;
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, {
+      ...fixture.deps,
+      client: { assertCredentialIdentity: async () => { credentialAssertions += 1; }, send: fixture.client.send },
+      createProductionCommandRunner: () => { credentialFactories += 1; throw new Error("credential factory reached"); },
+      readProtectedMain: () => { throw new Error("Stage B tooling checkout contains an untracked file."); },
+      run: (...args) => { awsCalls += 1; return fixture.deps.run(...args); },
+    }), /untracked file/);
+    assert.equal(credentialFactories, 0);
+    assert.equal(credentialAssertions, 0);
+    assert.equal(awsCalls, 0);
+    assert.equal(fixture.sender.writes, 0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("stale supersession requires an exact current Stage-B state before every write plan", async () => {
+  for (const [label, current] of [
+    ["lineage", { lineage: "5e438e59-8b8b-194d-030c-5ede0c26344a", serial: 104, stateSha256: "9".repeat(64) }],
+    ["serial", { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 105, stateSha256: "9".repeat(64) }],
+    ["sha", { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 104, stateSha256: "a".repeat(64) }],
+  ]) {
+    const home = mkdtempSync(path.join(os.tmpdir(), `mscqr-stale-stage-b-${label}-`));
+    try {
+      const fixture = await staleSupersessionCliFixture(home);
+      await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, readStageBState: () => current }), /Stage-B state changed/);
+      assert.equal(fixture.sender.writes, 0);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  }
+});
+
+test("Stage-B drift or unreadability after an authenticated prefix cannot write a suffix", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-stage-b-prefix-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    let writes = 0;
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, {
+      ...fixture.deps,
+      client: { assertCredentialIdentity: fixture.client.assertCredentialIdentity, send: async (command) => {
+        const response = await fixture.sender.send(command);
+        if (command.constructor.name === "PutSecretValueCommand" && ++writes === 1) throw new Error("injected prefix failure");
+        return response;
+      } },
+    }), /injected prefix failure/);
+    assert.equal(fixture.sender.writes, 1);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, readStageBState: () => { throw new Error("state backend unavailable"); } }), /state backend unavailable/);
+    assert.equal(fixture.sender.writes, 1);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, readStageBState: () => ({ ...fixture.preparation.stageBState, serial: 105 }) }), /Stage-B state changed/);
+    assert.equal(fixture.sender.writes, 1);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

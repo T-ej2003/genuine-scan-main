@@ -4,11 +4,12 @@ import { linkSync, lstatSync, mkdirSync, unlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
+import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { supersedeStalePendingRotation, bootstrapInitialDualSlotRotation, finalizeStaleRotationSupersessionMaterialJournal } from "./production-initial-dual-slot-bootstrap.mjs";
 import { readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
 import { assertApprovedStaleRotationSupersessionAuthorization, assertStaleRotationSupersessionAuthorizationProvenance, assertStaleRotationSupersessionConsumption, assertStaleRotationSupersessionExecutionStart, assertStaleRotationSupersessionExecutionStartForPreparation, assertStaleRotationSupersessionPreparation, assertStaleRotationSupersessionReplacementReservation, createStaleRotationSupersessionConsumption, createStaleRotationSupersessionExecutionStart, createStaleRotationSupersessionPreparation, createStaleRotationSupersessionReplacementReservation, deriveStaleRotationReplacementId, resolveStaleRotationSupersessionAuthorizationArtifact, staleRotationSupersessionSha256 } from "./production-stale-rotation-supersession-contract.mjs";
+import { readStageBTerraformStateIdentity } from "./stage-b-terraform-backend-contract.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const accepted = new Set(["mode", "stale-source-sha", "stale-rotation-id", "source-sha", "publication", "live-backend", "stage-b-state", "authorization-workflow-run-id", "authorization-workflow-run-attempt", "preparation-sha256"]);
@@ -63,9 +64,13 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
   const values = parse(argv);
   const gitRun = deps.gitRun || ((args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   const sourceSha = required(values, "source-sha");
-  (deps.readProtectedMain || readFreshProtectedMainIdentity)({ run: gitRun, cwd: ROOT, expectedSourceSha: sourceSha });
+  // Authenticate the exact bytes being executed before any credential source
+  // can be constructed or resolved.  The canonical helper rejects staged,
+  // unstaged, and untracked repository substitutions.
+  (deps.readProtectedMain || readStageBProtectedMainCheckout)({ run: gitRun, cwd: ROOT, expectedSourceSha: sourceSha, requireCanonicalRepository: true });
   const proveDescendant = deps.proveDescendant || (({ ancestorSha, descendantSha }) => { try { gitRun(["cat-file", "-e", `${ancestorSha}^{commit}`]); gitRun(["merge-base", "--is-ancestor", ancestorSha, descendantSha]); return true; } catch { return false; } });
-  const run = deps.run || createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+  const createRunner = deps.createProductionCommandRunner || createProductionCommandRunner;
+  const run = deps.run || createRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
   const client = deps.client;
   const send = client ? (command) => client.send(command) : createStaleRotationSecretsManagerSender(run);
   if (client) await client.assertCredentialIdentity();
@@ -147,12 +152,15 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     }
     throw new Error("Stale rotation supersession authorization is already durably consumed.");
   }
+  const readCurrentStageBState = deps.readStageBState || (() => readStageBTerraformStateIdentity(run));
   const result = await supersedeStalePendingRotation({
     send, taskDefinition, sourceSha, staleSourceSha, rotationId: preparation.replacementRotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "execute",
-    authorizeWritePlan: (discovery, { completedWriteCount } = {}) => {
+    authorizeWritePlan: async (discovery, { completedWriteCount } = {}) => {
       const recomputed = createStaleRotationSupersessionPreparation({ discovery, publication: preparation.publication, liveBackend: preparation.liveBackend, stageBState: preparation.stageBState, preparedAt: preparation.preparedAt });
       if (recomputed.preparationSha256 !== preparation.preparationSha256 || staleRotationSupersessionSha256(discovery.writePlan) !== preparation.writePlanSha256) throw new Error("Final supersession topology differs from the approved preparation.");
       assertApprovedStaleRotationSupersessionAuthorization(authorization, preparation, { sourceSha, materialJournalFileSha256: discovery.materialJournalFileSha256, now: executionNow, validationMode });
+      const currentStageBState = await readCurrentStageBState({ sourceSha, preparation });
+      if (currentStageBState?.lineage !== preparation.stageBState.lineage || currentStageBState?.serial !== preparation.stageBState.serial || currentStageBState?.stateSha256 !== preparation.stageBState.stateSha256) throw new Error("Stage-B state changed after stale rotation supersession preparation.");
       if (!Number.isSafeInteger(completedWriteCount) || completedWriteCount < 0 || completedWriteCount > 7) throw new Error("Stale rotation supersession completed-write count is invalid.");
       if (!executionStart && completedWriteCount !== 0) throw new Error("expired stale rotation supersession prefix is missing its authenticated execution start.");
       if (validationMode === "continuation" && (!executionStart || completedWriteCount < 1)) throw new Error("expired stale rotation supersession has no authenticated write prefix to continue.");
