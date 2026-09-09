@@ -9,6 +9,10 @@ document is accepted from an operator argument.
 
 ## Operator sequence
 
+Prerequisite: complete and verify the separately authorized current Stage-A
+production-artifacts bucket-policy transition before preparing this operation;
+this workflow does not authorize or install that durability boundary.
+
 1. Run `npm run production:provider-readonly-reconciliation -- --mode prepare`
    from protected main with the governed root read profile and a private
    preparation output. Preparation reads IAM only. It authenticates the exact
@@ -29,7 +33,8 @@ document is accepted from an operator argument.
 
 Execution repeats protected-source and live-IAM CAS checks, conditionally
 reserves the authorization in the production artifact bucket, records the
-write attempt, and issues at most one `CreatePolicyVersion` with
+write attempt, reauthenticates source, live IAM, and fresh authorization at
+that final mutation boundary, and issues at most one `CreatePolicyVersion` with
 `SetAsDefault=true`. The request uses `AWS_MAX_ATTEMPTS=1`. A lost response is
 resolved only by bounded readback: the exact desired document must be the new
 default and the version inventory must be the exact predecessor plus one.
@@ -54,6 +59,17 @@ when the deterministic operation ID and every authenticated pre-state binding
 remain exact. The reservation bytes and journal namespace are preserved. An
 expired authorization never regains write authority, and any existing
 write-attempt routes exclusively to ambiguous/post-write recovery.
+
+The Stage-A production-artifacts bucket policy protects the complete
+`production-provider-readonly-policy-reconciliation/` prefix with the same
+write-once and deletion-denial model as the established durable journals:
+only the exact reconciler role may read or conditionally create AES256 objects,
+all non-conditional or other-principal writes are denied, and both current and
+version-specific deletion are denied. Recovery also authenticates bucket
+versioning and rejects any enabled lifecycle expiration or current-version
+transition overlapping the prefix. Object Lock is not used; immutable unique
+keys, explicit delete denial, versioning, and the lifecycle gate form the
+reviewed durability boundary.
 
 The transaction states are `PREPARED`, `AUTHORIZED`, `RESERVED_NO_WRITE`,
 `WRITE_ATTEMPT_RECORDED`, `EXPECTED_POST_STATE_PRESENT`, `COMPLETED`, and

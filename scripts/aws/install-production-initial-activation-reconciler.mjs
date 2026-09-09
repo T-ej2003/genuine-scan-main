@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { INSTALLATION, assertFreshInstallationAuthorization, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { INSTALLATION, assertFreshInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { discoverInstallationPredecessor, assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
 import { assertProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
 import { verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
@@ -52,14 +52,28 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
     // before returning a success status. Recover only by read-only verifier;
     // never retry the saved plan blindly.
     let recoveredState;
-    try { verifyInstalled(); recoveredState = assertInstallationStateResources(readState?.()); } catch { throw error; }
+    try {
+      verifyInstalled();
+      const recoveredStateBytes = readState?.();
+      recoveredState = livePredecessor === "EXACT_UPDATE"
+        ? assertInstallationAuthorizedPostState(recoveredStateBytes, { predecessorState: beforeState, planSemantics: semantics })
+        : assertInstallationStateResources(recoveredStateBytes);
+    } catch (recoveryError) {
+      if (livePredecessor === "EXACT_UPDATE") {
+        recoveryError.recoveryClassification ||= "UNEXPECTED_TERRAFORM_STATE_DRIFT";
+        throw recoveryError;
+      }
+      throw error;
+    }
     const recovered = { kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_RESULT", schemaVersion: 1, operation: INSTALLATION.operation, sourceSha, authorizationArtifactSha256: authorization.authorizationArtifactSha256, status: "COMPLETE", applyCount: 1, targetPolicyCreatePolicyVersionCount: 0, verifier: "PASS", state: recoveredState, completedAt: new Date().toISOString(), recoveredFromAmbiguousApply: true };
     writeStageBPrivateFilesAtomic({ repositoryRoot: root, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(recovered, null, 2)}\n`), label: "Installation result" }] });
     return Object.freeze(recovered);
   }
   verifyInstalled();
   const stateAfterBytes = readState?.();
-  const stateAfter = assertInstallationStateResources(stateAfterBytes);
+  const stateAfter = livePredecessor === "EXACT_UPDATE"
+    ? assertInstallationAuthorizedPostState(stateAfterBytes, { predecessorState: beforeState, planSemantics: semantics })
+    : assertInstallationStateResources(stateAfterBytes);
   const result = { kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_RESULT", schemaVersion: 1, operation: INSTALLATION.operation, sourceSha, authorizationArtifactSha256: authorization.authorizationArtifactSha256, status: "COMPLETE", applyCount: 1, targetPolicyCreatePolicyVersionCount: 0, verifier: "PASS", state: stateAfter, completedAt: new Date().toISOString() };
   writeStageBPrivateFilesAtomic({ repositoryRoot: root, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(result, null, 2)}\n`), label: "Installation result" }] });
   return Object.freeze(result);

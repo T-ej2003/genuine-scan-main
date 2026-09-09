@@ -6,6 +6,7 @@ import {
   buildStageAProductionArtifactsBucketPolicy,
   buildStageAProductionArtifactsBucketPolicyPredecessor,
   buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation,
+  buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection,
   buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation,
   canonicalizeStageAProductionArtifactsPolicy,
   resolveStageAProductionArtifactsBucketPolicyTransition,
@@ -55,6 +56,22 @@ test("reviewed reverse transition removes exactly the six obsolete reservation s
     predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor),
     desiredPolicySha256: stageAProductionArtifactsPolicySha256({ ...target, Statement: target.Statement.slice(1) }),
   }), /not exact or reviewed/);
+});
+
+test("current transition adds only the six immutable ProviderReadOnly journal protections", () => {
+  const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const desired = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
+  const transition = resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
+  const predecessorSids = new Set(predecessor.Statement.map(({ Sid }) => Sid));
+  assert.deepEqual(desired.Statement.filter(({ Sid }) => !predecessorSids.has(Sid)).map(({ Sid }) => Sid), [
+    "AllowInitialActivationReconcilerReadProviderReadonlyReconciliation",
+    "DenyOtherPrincipalsProviderReadonlyReconciliationReads",
+    "AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate",
+    "DenyNonConditionalProviderReadonlyReconciliationWrites",
+    "DenyOtherPrincipalsProviderReadonlyReconciliationWrites",
+    "DenyProviderReadonlyReconciliationDeletion",
+  ]);
+  assert.deepEqual(transition, { predecessor, desired });
 });
 
 test("IAM grammar singleton forms are normalized only at their grammar positions", () => {

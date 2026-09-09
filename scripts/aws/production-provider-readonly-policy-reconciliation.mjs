@@ -33,14 +33,14 @@ export const PROVIDER_READONLY_RECONCILIATION = Object.freeze({
   releaseRoleName: "mscqr-production-release-deployer",
   releaseRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
   executorRoleName: "mscqr-production-initial-activation-policy-reconciler",
-  executorRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
+  executorRoleArn: PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconcilerRoleArn,
   workflowPath: ".github/workflows/authorize-production-provider-readonly-policy-reconciliation.yml",
   workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-provider-readonly-policy-reconciliation.yml@refs/heads/main",
   executionWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/execute-production-provider-readonly-policy-reconciliation.yml@refs/heads/main",
   artifactName: "production-provider-readonly-policy-reconciliation-authorization",
   authorizationFilename: "authorization.json",
   journalBucket: PRODUCTION_ACTIVATION_LIFECYCLE.bucket,
-  journalPrefix: "production-provider-readonly-policy-reconciliation/",
+  journalPrefix: PRODUCTION_ACTIVATION_LIFECYCLE.providerReadonlyPolicyReconciliationPrefix,
   maxAgeMs: 30 * 60 * 1000,
   maxPolicyVersionsBeforeCreate: 4,
   retentionRule: "NONE_FAIL_CLOSED",
@@ -268,11 +268,13 @@ export async function executeProviderReadonlyReconciliation({ sourceSha, prepara
   const before = authenticateProviderReadonlyLiveState(await readLiveState(), { desired, allowPostState: false });
   if (!stateMatchesPreparation(before, preparation)) throw new Error("ProviderReadOnly final live CAS changed after authorization.");
   reauthenticateSource();
+  assertProviderReadonlyAuthorization(authorization, preparation, { sourceSha, now: clock() });
+  if (!await journal.create(authorization, "write-attempt.json", attemptExpected)) throw new Error("ProviderReadOnly write-attempt reservation raced another executor.");
+  reauthenticateSource();
   const latest = authenticateProviderReadonlyLiveState(await readLiveState(), { desired, allowPostState: false });
   if (!stateMatchesPreparation(latest, preparation)) throw new Error("ProviderReadOnly final live CAS changed at the write boundary.");
   reauthenticateSource();
   assertProviderReadonlyAuthorization(authorization, preparation, { sourceSha, now: clock() });
-  if (!await journal.create(authorization, "write-attempt.json", attemptExpected)) throw new Error("ProviderReadOnly write-attempt reservation raced another executor.");
   let response;
   try { response = await createPolicyVersion({ PolicyArn: PROVIDER_READONLY_RECONCILIATION.policyArn, PolicyDocument: desired.document, SetAsDefault: true }); }
   catch (error) {

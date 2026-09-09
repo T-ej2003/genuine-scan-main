@@ -23,6 +23,9 @@ locals {
   initial_activation_policy_reconciliation_reservation_object_arns = [
     "${var.receipt_bucket_arn}/production-initial-activation-lifecycle-policy-reconciliation/reservations/*"
   ]
+  provider_readonly_policy_reconciliation_object_arns = [
+    "${var.receipt_bucket_arn}/production-provider-readonly-policy-reconciliation/*"
+  ]
 }
 
 resource "aws_s3_bucket_policy" "production_artifacts" {
@@ -49,6 +52,12 @@ resource "aws_s3_bucket_policy" "production_artifacts" {
     { Sid = "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.initial_activation_policy_reconciliation_reservation_object_arns, Condition = { StringNotEquals = { "s3:if-none-match" = "*" } } },
     { Sid = "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.initial_activation_policy_reconciliation_reservation_object_arns, Condition = { StringNotEquals = { "aws:PrincipalArn" = "arn:aws:iam::368992683803:root" } } },
     { Sid = "DenyInitialActivationPolicyReconciliationReservationDeletion", Effect = "Deny", Principal = "*", Action = ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource = local.initial_activation_policy_reconciliation_reservation_object_arns },
+    { Sid = "AllowInitialActivationReconcilerReadProviderReadonlyReconciliation", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler" }, Action = "s3:GetObject", Resource = local.provider_readonly_policy_reconciliation_object_arns },
+    { Sid = "DenyOtherPrincipalsProviderReadonlyReconciliationReads", Effect = "Deny", Principal = "*", Action = "s3:GetObject", Resource = local.provider_readonly_policy_reconciliation_object_arns, Condition = { StringNotEquals = { "aws:PrincipalArn" = "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler" } } },
+    { Sid = "AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler" }, Action = "s3:PutObject", Resource = local.provider_readonly_policy_reconciliation_object_arns, Condition = { StringEquals = { "s3:if-none-match" = "*", "s3:x-amz-server-side-encryption" = "AES256" } } },
+    { Sid = "DenyNonConditionalProviderReadonlyReconciliationWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.provider_readonly_policy_reconciliation_object_arns, Condition = { StringNotEquals = { "s3:if-none-match" = "*" } } },
+    { Sid = "DenyOtherPrincipalsProviderReadonlyReconciliationWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.provider_readonly_policy_reconciliation_object_arns, Condition = { StringNotEquals = { "aws:PrincipalArn" = "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler" } } },
+    { Sid = "DenyProviderReadonlyReconciliationDeletion", Effect = "Deny", Principal = "*", Action = ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource = local.provider_readonly_policy_reconciliation_object_arns },
     { Sid = "DenyProductionArtifactsBucketPolicyMutation", Effect = "Deny", Principal = "*", Action = ["s3:PutBucketPolicy", "s3:DeleteBucketPolicy"], Resource = var.receipt_bucket_arn },
   ] })
 }

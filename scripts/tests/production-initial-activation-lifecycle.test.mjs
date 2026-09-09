@@ -197,6 +197,9 @@ test("source policy and bucket policy enforce only exact conditional lifecycle o
   assert.match(terraform, /StringEquals\s*=\s*\{\s*"s3:if-none-match"\s*=\s*"\*"\s*\}/);
   assert.match(terraform, /StringNotEquals\s*=\s*\{\s*"s3:if-none-match"\s*=\s*"\*"\s*\}/);
   assert.match(terraform, /DenyActivationLifecycleDeletion[\s\S]*s3:DeleteObjectVersion/);
+  assert.match(bucketPolicy, /AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate[\s\S]*s3:if-none-match[\s\S]*s3:x-amz-server-side-encryption[\s\S]*AES256/);
+  assert.match(bucketPolicy, /DenyOtherPrincipalsProviderReadonlyReconciliationWrites[\s\S]*aws:PrincipalArn[\s\S]*mscqr-production-initial-activation-policy-reconciler/);
+  assert.match(bucketPolicy, /DenyProviderReadonlyReconciliationDeletion[\s\S]*s3:DeleteObject[\s\S]*s3:DeleteObjectVersion/);
   assert.deepEqual([...bucketPolicy.matchAll(/Sid = "([^"]+)"/g)].map(([, sid]) => sid), [
     "AllowReleaseDeployerReadActivationLifecycle",
     "AllowReleaseDeployerConditionalActivationLifecycleCreate",
@@ -219,6 +222,12 @@ test("source policy and bucket policy enforce only exact conditional lifecycle o
     "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
     "DenyInitialActivationPolicyReconciliationReservationDeletion",
+    "AllowInitialActivationReconcilerReadProviderReadonlyReconciliation",
+    "DenyOtherPrincipalsProviderReadonlyReconciliationReads",
+    "AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate",
+    "DenyNonConditionalProviderReadonlyReconciliationWrites",
+    "DenyOtherPrincipalsProviderReadonlyReconciliationWrites",
+    "DenyProviderReadonlyReconciliationDeletion",
     "DenyProductionArtifactsBucketPolicyMutation",
   ]);
   const evidence = policy.Statement.filter(({ Sid }) => ["ReadExactRebaselineEvidence", "CreateExactRebaselineEvidenceConditionally", "DenyNonConditionalRebaselineEvidenceWrites", "DenyRebaselineEvidenceDeletion"].includes(Sid));

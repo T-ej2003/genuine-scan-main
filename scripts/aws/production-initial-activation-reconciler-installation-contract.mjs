@@ -236,6 +236,34 @@ export function assertInstallationStateResources(rawBytes, { requiredAddresses =
   return identity;
 }
 
+export function assertInstallationAuthorizedPostState(rawBytes, { predecessorState, planSemantics } = {}) {
+  const identity = assertInstallationStateResources(rawBytes);
+  if (!predecessorState?.stateExists || identity.lineage !== predecessorState.lineage || identity.serial <= predecessorState.serial || identity.stateSha256 === predecessorState.stateSha256) {
+    const error = new Error("Installation live IAM is desired but Terraform state remains the authenticated predecessor.");
+    error.recoveryClassification = "LIVE_DESIRED_TERRAFORM_STATE_STALE";
+    throw error;
+  }
+  const policyChange = planSemantics?.resourceChanges?.find(({ address }) => address === "aws_iam_policy.reconciler");
+  if (canonicalJson(policyChange?.actions) !== canonicalJson(["update"])) throw new Error("Installation authorized post-state requires the exact policy update semantics.");
+  const state = JSON.parse(Buffer.from(rawBytes).toString("utf8"));
+  const managedAddresses = state.resources.filter(({ mode }) => mode === "managed").map(({ module, type, name }) => `${module ? `${module}.` : ""}${type}.${name}`).sort();
+  if (canonicalJson(managedAddresses) !== canonicalJson([...INSTALLATION.expectedAddresses].sort())) throw new Error("Installation Terraform post-state resource topology is not exact.");
+  for (const change of planSemantics.resourceChanges) {
+    const resource = state.resources.find((candidate) => candidate?.mode === "managed" && !candidate.module && `${candidate.type}.${candidate.name}` === change.address);
+    const attributes = resource?.instances?.length === 1 ? resource.instances[0]?.attributes : undefined;
+    if (!attributes) throw new Error(`Installation Terraform post-state ${change.address} identity is not exact.`);
+    if (change.address === "aws_iam_policy.reconciler" && (attributes.arn !== INSTALLATION.policyArn || attributes.id !== INSTALLATION.policyArn)) throw new Error("Installation Terraform post-state policy identity is not exact.");
+    for (const [field, expected] of Object.entries(change.after)) {
+      const actual = attributes[field];
+      const equal = field === "policy"
+        ? canonicalJson(policyValue(actual, "Installation Terraform post-state permissions policy")) === canonicalJson(policyValue(expected, "Installation authorized permissions policy"))
+        : canonicalJson(actual) === canonicalJson(expected);
+      if (!equal) throw new Error(`Installation Terraform post-state ${change.address}.${field} does not match the authorized desired state.`);
+    }
+  }
+  return identity;
+}
+
 export function createInstallationPreparation({ sourceSha, state, livePredecessor, livePredecessorAddresses, planJson, planBytes, preparedAt = new Date().toISOString() } = {}) {
   if (!SHA40.test(sourceSha || "")) throw new Error("Installation source SHA is invalid.");
   if (!state || typeof state.stateExists !== "boolean") throw new Error("Installation predecessor state identity is required.");

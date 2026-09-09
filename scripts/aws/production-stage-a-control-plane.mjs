@@ -120,6 +120,23 @@ export function buildStageAProductionArtifactsBucketPolicy() {
     ],
   };
 }
+export function buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection() {
+  const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const journal = [PRODUCTION_ACTIVATION_LIFECYCLE.providerReadonlyPolicyReconciliationArn];
+  return {
+    ...predecessor,
+    Statement: [
+      ...predecessor.Statement,
+      { Sid: "AllowInitialActivationReconcilerReadProviderReadonlyReconciliation", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconcilerRoleArn }, Action: "s3:GetObject", Resource: journal },
+      { Sid: "DenyOtherPrincipalsProviderReadonlyReconciliationReads", Effect: "Deny", Principal: "*", Action: "s3:GetObject", Resource: journal, Condition: { StringNotEquals: { "aws:PrincipalArn": PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconcilerRoleArn } } },
+      { Sid: "AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconcilerRoleArn }, Action: "s3:PutObject", Resource: journal, Condition: { StringEquals: { "s3:if-none-match": "*", "s3:x-amz-server-side-encryption": "AES256" } } },
+      { Sid: "DenyNonConditionalProviderReadonlyReconciliationWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: journal, Condition: { StringNotEquals: { "s3:if-none-match": "*" } } },
+      { Sid: "DenyOtherPrincipalsProviderReadonlyReconciliationWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: journal, Condition: { StringNotEquals: { "aws:PrincipalArn": PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconcilerRoleArn } } },
+      { Sid: "DenyProviderReadonlyReconciliationDeletion", Effect: "Deny", Principal: "*", Action: ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource: journal },
+    ],
+  };
+}
+
 export function buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation() {
   const current = buildStageAProductionArtifactsBucketPolicy();
   const reservations = [PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn];
@@ -148,10 +165,12 @@ export function stageAProductionArtifactsInitialActivationReservationRetirementT
 }
 
 export function resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256, desiredPolicySha256 } = {}) {
+  const preProviderReadonly = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
   const transitions = [
     [buildStageAProductionArtifactsBucketPolicyPredecessor(), buildStageAProductionArtifactsBucketPolicy()],
     [buildStageAProductionArtifactsBucketPolicy(), buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()],
-    [buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation(), buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation()],
+    [preProviderReadonly, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection()],
+    [preProviderReadonly, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation()],
   ];
   const transition = transitions.find(([predecessor, desired]) => stageAProductionArtifactsPolicySha256(predecessor) === predecessorPolicySha256 && stageAProductionArtifactsPolicySha256(desired) === desiredPolicySha256);
   if (!transition) throw new Error("Stage A production-artifacts bucket-policy transition is not exact or reviewed.");
@@ -159,8 +178,8 @@ export function resolveStageAProductionArtifactsBucketPolicyTransition({ predece
 }
 
 export function currentStageAProductionArtifactsBucketPolicyTransition() {
-  const predecessor = buildStageAProductionArtifactsBucketPolicy();
-  const desired = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const desired = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
   return Object.freeze({ predecessor, desired, predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
 }
 const STAGE_A_CHECKER_PUBLICATION_PREDECESSOR = Object.freeze({
@@ -588,14 +607,14 @@ function assertStageAProductionArtifactsBucketPolicyChange(entry) {
   const change = entry.change;
   if (!exactActions(change?.actions, ["create"]) && !exactActions(change?.actions, ["update"]) && !exactActions(change?.actions, ["no-op"])) throw new Error("Stage A production-artifacts bucket policy must be an exact create, reviewed update, or converged no-op.");
   if (change.replace_paths?.length || change.after?.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket) throw new Error("Stage A production-artifacts bucket-policy identity is wrong.");
-  const expected = stageAProductionArtifactsPolicyCanonicalJson(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation());
+  const expected = stageAProductionArtifactsPolicyCanonicalJson(buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection());
   if (stageAProductionArtifactsPolicyCanonicalJson(decodePolicyDocument(change.after?.policy, "Stage A production-artifacts bucket policy")) !== expected) throw new Error("Stage A production-artifacts bucket-policy semantics are not exact.");
   if (exactActions(change.actions, ["create"])) {
     if (change.before !== null) throw new Error("Stage A production-artifacts bucket policy does not have the authenticated absent predecessor.");
   } else if (exactActions(change.actions, ["update"])) {
     if (change.before?.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket) throw new Error("Stage A production-artifacts bucket policy update predecessor identity is not exact.");
     const predecessor = stageAProductionArtifactsPolicyCanonicalJson(decodePolicyDocument(change.before.policy, "Stage A production-artifacts bucket policy predecessor"));
-    if (![buildStageAProductionArtifactsBucketPolicyPredecessor(), buildStageAProductionArtifactsBucketPolicy()].some((policy) => predecessor === stageAProductionArtifactsPolicyCanonicalJson(policy))) throw new Error("Stage A production-artifacts bucket policy update predecessor is not an exact reviewed policy.");
+    if (![buildStageAProductionArtifactsBucketPolicyPredecessor(), buildStageAProductionArtifactsBucketPolicy(), buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()].some((policy) => predecessor === stageAProductionArtifactsPolicyCanonicalJson(policy))) throw new Error("Stage A production-artifacts bucket policy update predecessor is not an exact reviewed policy.");
   } else if (stageAProductionArtifactsPolicyCanonicalJson(decodePolicyDocument(change.before?.policy, "Stage A converged production-artifacts bucket policy")) !== expected
     || change.before?.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket) throw new Error("Stage A converged production-artifacts bucket-policy predecessor is not exact.");
   const recoveryRequired = exactActions(change.actions, ["update"]);

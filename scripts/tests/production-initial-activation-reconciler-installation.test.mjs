@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
-import { INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+import { INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { INITIAL_ACTIVATION_RECONCILER } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
@@ -43,6 +43,7 @@ const preparation = createInstallationPreparation({ sourceSha, state: stateIdent
 const authorization = createInstallationAuthorization({ preparation, preparationArtifactSha256: preparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
 const completePlan = fixture("complete");
 const updatePlan = fixture("update");
+const updatePostState = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 2, lineage: "first-install-lineage", outputs: {}, resources: updatePlan.resource_changes.map((entry) => ({ mode: entry.mode, type: entry.type, name: entry.name, provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: entry.change.after, sensitive_attributes: [] }] })) });
 const completePlanBytes = Buffer.from("exact-saved-noop-plan");
 const completePreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(installedState)), livePredecessor: "EXACT_COMPLETE", livePredecessorAddresses: allAddresses, planJson: completePlan, planBytes: completePlanBytes, preparedAt: now.toISOString() });
 const completeAuthorization = createInstallationAuthorization({ preparation: completePreparation, preparationArtifactSha256: completePreparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
@@ -586,10 +587,40 @@ test("executor-policy upgrade applies only the authenticated saved update plan",
   const authorized = createInstallationAuthorization({ preparation: prepared, preparationArtifactSha256: prepared.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-exact-update-"));
   let applies = 0;
-  const result = executeInstallation({ sourceSha, preparation: prepared, authorization: authorized, planBytes, planJson: updatePlan, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: "EXACT_UPDATE", livePredecessorAddresses: allAddresses, applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(installedState), resultPath: path.join(directory, "result.json"), now });
+  let reads = 0;
+  const result = executeInstallation({ sourceSha, preparation: prepared, authorization: authorized, planBytes, planJson: updatePlan, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: "EXACT_UPDATE", livePredecessorAddresses: allAddresses, applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(reads++ === 0 ? installedState : updatePostState), resultPath: path.join(directory, "result.json"), now });
   assert.equal(applies, 1);
   assert.equal(result.applyCount, 1);
   fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("EXACT_UPDATE ambiguous recovery requires the authorized post-state semantics", () => {
+  const prepared = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(installedState)), livePredecessor: "EXACT_UPDATE", livePredecessorAddresses: allAddresses, planJson: updatePlan, planBytes, preparedAt: now.toISOString() });
+  const authorized = createInstallationAuthorization({ preparation: prepared, preparationArtifactSha256: prepared.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+  const run = (postState, suffix) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `mscqr-install-update-recovery-${suffix}-`));
+    let reads = 0; let applies = 0;
+    try {
+      return executeInstallation({ sourceSha, preparation: prepared, authorization: authorized, planBytes, planJson: updatePlan, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: "EXACT_UPDATE", livePredecessorAddresses: allAddresses, applySavedPlan: () => { applies += 1; throw new Error("response lost"); }, verifyInstalled: () => true, readState: () => Buffer.from(reads++ === 0 ? installedState : postState), resultPath: path.join(directory, "result.json"), now });
+    } finally {
+      assert.equal(applies, 1);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  };
+  assert.equal(run(updatePostState, "desired").recoveredFromAmbiguousApply, true);
+  assert.throws(() => run(installedState, "predecessor"), (error) => error.recoveryClassification === "LIVE_DESIRED_TERRAFORM_STATE_STALE");
+  const addressOnly = JSON.stringify({ ...JSON.parse(installedState), serial: 2 });
+  assert.throws(() => run(addressOnly, "address-only"), /post-state aws_iam_policy\.reconciler identity/);
+  const unrelated = JSON.parse(updatePostState);
+  unrelated.resources.find(({ type }) => type === "aws_iam_policy").instances[0].attributes.policy = JSON.stringify({ Version: "2012-10-17", Statement: [] });
+  assert.throws(() => run(JSON.stringify(unrelated), "unrelated"), /post-state aws_iam_policy\.reconciler\.policy/);
+  const unrelatedRole = JSON.parse(updatePostState);
+  unrelatedRole.resources.find(({ type }) => type === "aws_iam_role").instances[0].attributes.description = "unrelated";
+  assert.throws(() => run(JSON.stringify(unrelatedRole), "unrelated-role"), /aws_iam_role\.reconciler\.description/);
+  const unrelatedResource = JSON.parse(updatePostState);
+  unrelatedResource.resources.push({ mode: "managed", type: "aws_iam_user", name: "unrelated", provider: "provider[\"registry.terraform.io/hashicorp/aws\"]", instances: [{ schema_version: 0, attributes: { name: "unrelated" } }] });
+  assert.throws(() => run(JSON.stringify(unrelatedResource), "unrelated-resource"), /resource topology is not exact/);
+  assert.doesNotThrow(() => assertInstallationAuthorizedPostState(Buffer.from(updatePostState), { predecessorState: prepared.predecessorState, planSemantics: prepared.planSemantics }));
 });
 
 test("one-time root bootstrap is exact, resumable, and ambiguity never advances", () => {

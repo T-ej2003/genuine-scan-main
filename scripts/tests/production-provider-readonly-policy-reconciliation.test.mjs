@@ -116,9 +116,10 @@ test("final CAS drift produces zero writes", async () => {
     state({ document: { Version: "2012-10-17", Statement: [] } }),
     state({ attachedRoles: [CONTRACT.releaseRoleName, "unexpected"] }),
   ]) {
-    const prep = preparation(); const auth = authorization(prep); const store = memoryJournal(); let writes = 0;
-    await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: store.journal, reauthenticateSource: () => true, now: () => now, readLiveState: async () => changed, createPolicyVersion: async () => { writes += 1; } }));
+    const prep = preparation(); const auth = authorization(prep); const store = memoryJournal(); let writes = 0; let reads = 0;
+    await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: store.journal, reauthenticateSource: () => true, now: () => now, readLiveState: async () => reads++ === 0 ? state() : changed, createPolicyVersion: async () => { writes += 1; } }), /write boundary|invalid|drift/);
     assert.equal(writes, 0);
+    assert.equal([...store.values.keys()].filter((key) => key.endsWith("write-attempt.json")).length, 1);
   }
 });
 
