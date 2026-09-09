@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
+import { ensureStageBPrivateFile, readStageBPrivateFileBytes } from "../aws/stage-b-artifact-contract.mjs";
 import { assertExactReconcilerRefreshOnlyPlan, assertExactStateSuccessor, assertReconcilerStateReconciliationAuthorization, createReconcilerStateReconciliationAuthorization, createReconcilerStateReconciliationPreparation, executeReconcilerStateReconciliation, RECONCILER_STATE_RECONCILIATION as CONTRACT } from "../aws/production-initial-activation-reconciler-state-reconciliation.mjs";
 import { assertInstallationPlan } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 
@@ -23,6 +26,34 @@ const object = { versionId: "exact-version", etag: "exact-etag" };
 const approval = () => createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 8, name: "production-initial-activation-reconciler-bootstrap", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production-initial-activation-reconciler-bootstrap", sourceSha, workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation.yml@refs/heads/main", eventName: "workflow_dispatch", workflowRunId: "100", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 8, environmentName: "production-initial-activation-reconciler-bootstrap", userId: 3, userLogin: "reviewer" } });
 const prepared = () => createReconcilerStateReconciliationPreparation({ sourceSha, stateBytes: before, stateObject: object, attachmentTopology: topology, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), preparedAt: now.toISOString() });
 const normalPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-update.json", "utf8"));
+
+test("Terraform-generated backend metadata and saved plans are normalized before private reads", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-state-reconciliation-modes-"));
+  fs.chmodSync(directory, 0o700);
+  try {
+    const metadata = path.join(directory, "terraform.tfstate"); const plan = path.join(directory, "refresh.tfplan"); const postPlan = path.join(directory, "post-refresh.tfplan");
+    fs.writeFileSync(metadata, "metadata", { mode: 0o644 }); fs.writeFileSync(plan, "plan", { mode: 0o644 }); fs.writeFileSync(postPlan, "post-plan", { mode: 0o644 });
+    for (const [filePath, label] of [[metadata, "State reconciliation backend metadata"], [plan, "State reconciliation saved plan"], [postPlan, "State reconciliation post-refresh Terraform plan"]]) {
+      assert.throws(() => readStageBPrivateFileBytes({ filePath, repositoryRoot: process.cwd(), label }), /0600/);
+      ensureStageBPrivateFile({ filePath, repositoryRoot: process.cwd(), normalize: true, label });
+      assert.equal(fs.statSync(filePath).mode & 0o777, 0o600);
+      assert.ok(readStageBPrivateFileBytes({ filePath, repositoryRoot: process.cwd(), label }).bytes.length);
+    }
+    ensureStageBPrivateFile({ filePath: plan, repositoryRoot: process.cwd(), normalize: true, label: "State reconciliation saved plan" });
+    assert.equal(fs.statSync(plan).mode & 0o777, 0o600);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("private-file normalization failures fail closed", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-state-reconciliation-normalize-fail-"));
+  fs.chmodSync(directory, 0o700);
+  try {
+    const filePath = path.join(directory, "refresh.tfplan"); fs.writeFileSync(filePath, "plan", { mode: 0o644 });
+    const fsOps = { lstatSync: fs.lstatSync, realpathSync: fs.realpathSync, readFileSync: fs.readFileSync, chmodSync: () => { throw new Error("chmod denied"); } };
+    assert.throws(() => ensureStageBPrivateFile({ filePath, repositoryRoot: process.cwd(), normalize: true, label: "State reconciliation saved plan", fsOps }), /chmod denied/);
+    assert.throws(() => readStageBPrivateFileBytes({ filePath, repositoryRoot: process.cwd(), label: "State reconciliation saved plan" }), /0600/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
 
 test("accepts only the authenticated two-field refresh-only drift", () => {
   assert.deepEqual(assertExactReconcilerRefreshOnlyPlan(refreshPlan()).resourceDrift, CONTRACT.drift);
