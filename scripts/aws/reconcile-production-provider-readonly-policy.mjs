@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { authenticateProviderReadonlyLiveState, createProviderReadonlyJournal, createProviderReadonlyPreparation, executeProviderReadonlyReconciliation, PROVIDER_READONLY_RECONCILIATION, readProviderReadonlyDesiredPolicy, resolveProviderReadonlyAuthorizationArtifact } from "./production-provider-readonly-policy-reconciliation.mjs";
+import { authenticateProviderReadonlyLiveState, createProviderReadonlyJournal, createProviderReadonlyPreparation, executeProviderReadonlyReconciliation, providerReadonlyProductionSleep, PROVIDER_READONLY_RECONCILIATION, readProviderReadonlyDesiredPolicy, resolveProviderReadonlyAuthorizationArtifact } from "./production-provider-readonly-policy-reconciliation.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 
@@ -103,7 +103,7 @@ export async function runProviderReadonlyReconciliation(argv = process.argv.slic
     const current = (deps.readProtectedCheckout || readStageBProtectedMainCheckout)({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true });
     if (current.toolingSha !== sourceSha) throw new Error("ProviderReadOnly source changed after authorization.");
   };
-  const result = await (deps.execute || executeProviderReadonlyReconciliation)({ sourceSha, preparation, ...resolved, reauthenticateSource, readLiveState: async () => readProviderReadonlyLiveState(run), createPolicyVersion: async ({ PolicyArn, PolicyDocument, SetAsDefault }) => json(run, ["iam", "create-policy-version", "--policy-arn", PolicyArn, "--policy-document", JSON.stringify(PolicyDocument), ...(SetAsDefault ? ["--set-as-default"] : [])]), journal, now: deps.clock || (() => new Date()) });
+  const result = await (deps.execute || executeProviderReadonlyReconciliation)({ sourceSha, preparation, ...resolved, reauthenticateSource, readLiveState: async () => readProviderReadonlyLiveState(run), createPolicyVersion: async ({ PolicyArn, PolicyDocument, SetAsDefault }) => json(run, ["iam", "create-policy-version", "--policy-arn", PolicyArn, "--policy-document", JSON.stringify(PolicyDocument), ...(SetAsDefault ? ["--set-as-default"] : [])]), journal, now: deps.clock || (() => new Date()), sleep: providerReadonlyProductionSleep });
   if (option(argv, "--result-out")) {
     const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--result-out")), repositoryRoot: root, label: "ProviderReadOnly result", allowExisting: false });
     ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "ProviderReadOnly result directory" });

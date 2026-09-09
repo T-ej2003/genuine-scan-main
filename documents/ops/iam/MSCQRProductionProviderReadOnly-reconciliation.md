@@ -34,6 +34,9 @@ write attempt, and issues at most one `CreatePolicyVersion` with
 resolved only by bounded readback: the exact desired document must be the new
 default and the version inventory must be the exact predecessor plus one.
 Otherwise the outcome remains ambiguous and no retry is permitted.
+The bounded read-after-write observations use real awaited 100--1000 ms
+production delays; tests replace only the timer adapter, never the production
+default. Convergence polling performs no additional IAM write.
 
 The S3 journal is keyed by the deterministic operation ID, so repeated
 preparation or authorization artifacts for the same authenticated pre-state
@@ -45,6 +48,18 @@ occurs after the IAM write but before terminal persistence, a retry recognizes
 the exact post-state and writes only the terminal record. If the durable write
 attempt exists while IAM remains in the predecessor state, the transaction is
 ambiguous and requires governed investigation; it never repeats the IAM write.
+An immutable reservation with no write-attempt may be adopted by a newly
+prepared artifact and a new independently authenticated authorization only
+when the deterministic operation ID and every authenticated pre-state binding
+remain exact. The reservation bytes and journal namespace are preserved. An
+expired authorization never regains write authority, and any existing
+write-attempt routes exclusively to ambiguous/post-write recovery.
+
+The transaction states are `PREPARED`, `AUTHORIZED`, `RESERVED_NO_WRITE`,
+`WRITE_ATTEMPT_RECORDED`, `EXPECTED_POST_STATE_PRESENT`, `COMPLETED`, and
+`CONSUMED`. Only a fresh authorized `PREPARED`/`RESERVED_NO_WRITE` transaction
+can create the single policy version. Later states can authenticate or persist
+completion evidence but can never issue another mutation.
 
 ## Version retention and mutation ceiling
 
@@ -63,3 +78,8 @@ bootstrap contract can update only its exact inline permissions predecessor;
 the installation plan can then update only the reconciler managed policy from
 its exact predecessor and fails closed at five versions. Merging this source
 does not modify production IAM.
+
+Before proposing or executing the contract, run
+`npm run stage-b:deployment-closure:pull-request`. This aggregate check includes
+`rls:full-verify`, so changes to authoritative deployment inputs cannot leave
+the generated Full-RLS package stale while narrower IAM tests remain green.

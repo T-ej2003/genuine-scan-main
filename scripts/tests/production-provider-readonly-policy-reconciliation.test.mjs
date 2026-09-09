@@ -8,7 +8,7 @@ import yaml from "js-yaml";
 import JSZip from "jszip";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
-import { PROVIDER_READONLY_RECONCILIATION as CONTRACT, assertProviderReadonlyAuthorization, authenticateProviderReadonlyLiveState, createProviderReadonlyAuthorization, createProviderReadonlyJournal, createProviderReadonlyPreparation, executeProviderReadonlyReconciliation, providerReadonlyOperationId, readProviderReadonlyDesiredPolicy, resolveProviderReadonlyAuthorizationArtifact } from "../aws/production-provider-readonly-policy-reconciliation.mjs";
+import { PROVIDER_READONLY_RECONCILIATION as CONTRACT, assertProviderReadonlyAuthorization, authenticateProviderReadonlyLiveState, createProviderReadonlyAuthorization, createProviderReadonlyJournal, createProviderReadonlyPreparation, executeProviderReadonlyReconciliation, providerReadonlyOperationId, providerReadonlyProductionSleep, readProviderReadonlyDesiredPolicy, resolveProviderReadonlyAuthorizationArtifact } from "../aws/production-provider-readonly-policy-reconciliation.mjs";
 import { readProviderReadonlyLiveState, runProviderReadonlyReconciliation } from "../aws/reconcile-production-provider-readonly-policy.mjs";
 
 const sourceSha = "a".repeat(40);
@@ -32,6 +32,7 @@ const memoryJournal = () => {
 };
 const postState = (change = {}) => state({ defaultVersionId: "v4", document: desired.document, versions: [...state().versions.map((version) => ({ ...version, isDefault: false })), { versionId: "v4", isDefault: true }], ...change });
 const operationBindings = (prep) => ({ sourceSha: prep.sourceSha, currentDefaultVersionId: prep.currentDefaultVersionId, currentDefaultDocumentSha256: prep.currentDefaultDocumentSha256, desiredDocumentSha256: prep.desiredDocumentSha256, versionInventorySha256: prep.versionInventorySha256, attachmentTopologySha256: prep.attachmentTopologySha256 });
+const journalIdentity = (kind, prep, auth, prov, createdAt = prep.createdAt) => ({ schemaVersion: 1, kind, operationId: prep.operationId, sourceSha: prep.sourceSha, account: prep.account, targetPolicyArn: prep.targetPolicyArn, sourcePolicySha256: prep.sourcePolicySha256, preparationSha256: prep.preparationSha256, authorizationSha256: auth.authorizationSha256, authorizationProvenanceSha256: prov.provenanceSha256, currentDefaultVersionId: prep.currentDefaultVersionId, currentDefaultDocumentSha256: prep.currentDefaultDocumentSha256, desiredDocumentSha256: prep.desiredDocumentSha256, semanticDeltaSha256: prep.semanticDeltaSha256, versionInventorySha256: prep.versionInventorySha256, attachmentTopologySha256: prep.attachmentTopologySha256, expectedWritePlanSha256: prep.expectedWritePlanSha256, createdAt });
 const workflowEnvironment = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_WORKFLOW_REF: CONTRACT.executionWorkflowRef, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ATTEMPT: "1", AWS_ACCESS_KEY_ID: "fixture", AWS_SECRET_ACCESS_KEY: "fixture", AWS_SESSION_TOKEN: "fixture" };
 
 async function githubAuthorization(auth, change = {}) {
@@ -132,7 +133,7 @@ test("ambiguous successful write is recovered without a second IAM write", async
 
 test("pre-state after a durable write attempt is ambiguous and never retried", async () => {
   const prep = preparation(); const auth = authorization(prep); const prov = provenance(auth); const store = memoryJournal();
-  const reservation = { schemaVersion: 1, kind: "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_RESERVATION", operationId: prep.operationId, sourceSha, targetPolicyArn: prep.targetPolicyArn, preparationSha256: prep.preparationSha256, authorizationSha256: auth.authorizationSha256, authorizationProvenanceSha256: prov.provenanceSha256, currentDefaultVersionId: prep.currentDefaultVersionId, currentDefaultDocumentSha256: prep.currentDefaultDocumentSha256, desiredDocumentSha256: prep.desiredDocumentSha256, versionInventorySha256: prep.versionInventorySha256, attachmentTopologySha256: prep.attachmentTopologySha256, expectedWritePlanSha256: prep.expectedWritePlanSha256, createdAt: prep.createdAt };
+  const reservation = journalIdentity("PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_RESERVATION", prep, auth, prov);
   await store.journal.create(auth, "reservation.json", reservation);
   await store.journal.create(auth, "write-attempt.json", { ...reservation, kind: "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_WRITE_ATTEMPT" });
   let writes = 0;
@@ -229,26 +230,32 @@ test("expiry, source drift, forged records, and unexpected post-state all fail b
   assert.equal(writes, 0);
   const forged = memoryJournal();
   const key = `${CONTRACT.journalPrefix}${auth.operationId}/reservation.json`; forged.values.set(key, Buffer.from('{"kind":"forged"}\n'));
-  await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: prov, journal: forged.journal, reauthenticateSource: () => true, now: () => now, readLiveState: async () => state(), createPolicyVersion: async () => { writes += 1; } }), /canonical|match/);
+  await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: prov, journal: forged.journal, reauthenticateSource: () => true, now: () => now, readLiveState: async () => state(), createPolicyVersion: async () => { writes += 1; } }), /canonical|schema|match/);
   const altered = memoryJournal();
   await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: prov, journal: altered.journal, reauthenticateSource: () => { throw new Error("stop after reservation"); }, now: () => now, readLiveState: async () => state(), createPolicyVersion: async () => { writes += 1; } }), /stop after reservation/);
-  const record = JSON.parse(altered.values.get(key)); delete record.recordSha256; record.createdAt = new Date(now.getTime() + 1).toISOString(); record.recordSha256 = hash(record); altered.values.set(key, Buffer.from(`${canonicalJson(record)}\n`));
+  const record = JSON.parse(altered.values.get(key)); delete record.recordSha256; record.currentDefaultVersionId = "v2"; record.recordSha256 = hash(record); altered.values.set(key, Buffer.from(`${canonicalJson(record)}\n`));
   await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: prov, journal: altered.journal, reauthenticateSource: () => true, now: () => now, readLiveState: async () => state(), createPolicyVersion: async () => { writes += 1; } }), /does not match/);
   assert.equal(writes, 0);
 });
 
-test("a repeated preparation or authorization cannot open another operation journal namespace", async () => {
-  const prep = preparation(); const repeated = createProviderReadonlyPreparation({ sourceSha, liveState: state(), desired, preparedAt: new Date(now.getTime() + 1).toISOString() });
-  assert.equal(prep.operationId, repeated.operationId); assert.notEqual(prep.preparationSha256, repeated.preparationSha256);
-  const first = authorization(prep); const secondApproval = approval({ workflowRunId: "124", observedAt: new Date(now.getTime() + 1).toISOString() });
-  const second = createProviderReadonlyAuthorization({ preparation: repeated, protectedEnvironmentApprovalEvidence: secondApproval, now: new Date(now.getTime() + 1) });
-  assert.notEqual(first.authorizationSha256, second.authorizationSha256);
-  const store = memoryJournal();
-  const firstIdentity = { schemaVersion: 1, kind: "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_RESERVATION", operationId: prep.operationId, sourceSha, targetPolicyArn: prep.targetPolicyArn, preparationSha256: prep.preparationSha256, authorizationSha256: first.authorizationSha256, authorizationProvenanceSha256: provenance(first).provenanceSha256, currentDefaultVersionId: prep.currentDefaultVersionId, currentDefaultDocumentSha256: prep.currentDefaultDocumentSha256, desiredDocumentSha256: prep.desiredDocumentSha256, versionInventorySha256: prep.versionInventorySha256, attachmentTopologySha256: prep.attachmentTopologySha256, expectedWritePlanSha256: prep.expectedWritePlanSha256, createdAt: prep.createdAt };
-  await store.journal.create(first, "reservation.json", firstIdentity);
-  let writes = 0;
-  await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: repeated, authorization: second, provenance: provenance(second), journal: store.journal, reauthenticateSource: () => true, now: () => new Date(now.getTime() + 1), readLiveState: async () => state(), createPolicyVersion: async () => { writes += 1; } }), /does not match/);
-  assert.equal(writes, 0);
+test("an expired zero-write reservation accepts only a fresh authorization for the same operation", async () => {
+  const firstPreparation = preparation(); const firstAuthorization = authorization(firstPreparation); const firstProvenance = provenance(firstAuthorization); const store = memoryJournal();
+  const reservation = journalIdentity("PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_RESERVATION", firstPreparation, firstAuthorization, firstProvenance);
+  await store.journal.create(firstAuthorization, "reservation.json", reservation);
+  const reservationKey = `${CONTRACT.journalPrefix}${firstPreparation.operationId}/reservation.json`; const originalReservation = Buffer.from(store.values.get(reservationKey));
+  const refreshedAt = new Date(new Date(firstPreparation.expiresAt).getTime() + 1);
+  const refreshedPreparation = createProviderReadonlyPreparation({ sourceSha, liveState: state(), desired, preparedAt: refreshedAt.toISOString() });
+  const refreshedAuthorization = createProviderReadonlyAuthorization({ preparation: refreshedPreparation, protectedEnvironmentApprovalEvidence: approval({ workflowRunId: "124", observedAt: refreshedAt.toISOString() }), now: refreshedAt });
+  assert.equal(firstPreparation.operationId, refreshedPreparation.operationId);
+  assert.notEqual(firstPreparation.preparationSha256, refreshedPreparation.preparationSha256);
+  assert.notEqual(firstAuthorization.authorizationSha256, refreshedAuthorization.authorizationSha256);
+  let live = state(); let writes = 0;
+  await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: firstPreparation, authorization: firstAuthorization, provenance: firstProvenance, journal: store.journal, reauthenticateSource: () => true, now: () => refreshedAt, readLiveState: async () => live, createPolicyVersion: async () => { writes += 1; } }), /stale/);
+  const result = await executeProviderReadonlyReconciliation({ sourceSha, preparation: refreshedPreparation, authorization: refreshedAuthorization, provenance: provenance(refreshedAuthorization), journal: store.journal, reauthenticateSource: () => true, now: () => refreshedAt, sleep: async () => {}, readLiveState: async () => live, createPolicyVersion: async () => { writes += 1; live = postState(); return { PolicyVersion: { VersionId: "v4" } }; } });
+  assert.equal(result.reservationMatch, "REFRESHED_AUTHORIZATION");
+  assert.equal(writes, 1);
+  assert.deepEqual(store.values.get(reservationKey), originalReservation);
+  assert.equal(new Set([...store.values.keys()].map((key) => key.slice(0, key.lastIndexOf("/") + 1))).size, 1);
 });
 
 test("a completed logical operation cannot write again through a repeated preparation", async () => {
@@ -256,7 +263,7 @@ test("a completed logical operation cannot write again through a repeated prepar
   await executeProviderReadonlyReconciliation({ sourceSha, preparation: firstPreparation, authorization: firstAuthorization, provenance: provenance(firstAuthorization), journal: store.journal, reauthenticateSource: () => true, now: () => now, sleep: async () => {}, readLiveState: async () => live, createPolicyVersion: async () => { writes += 1; live = postState(); return { PolicyVersion: { VersionId: "v4" } }; } });
   const repeatedPreparation = createProviderReadonlyPreparation({ sourceSha, liveState: state(), desired, preparedAt: new Date(now.getTime() + 1).toISOString() });
   const repeatedAuthorization = createProviderReadonlyAuthorization({ preparation: repeatedPreparation, protectedEnvironmentApprovalEvidence: approval({ workflowRunId: "124", observedAt: new Date(now.getTime() + 1).toISOString() }), now: new Date(now.getTime() + 1) });
-  await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: repeatedPreparation, authorization: repeatedAuthorization, provenance: provenance(repeatedAuthorization), journal: store.journal, reauthenticateSource: () => true, now: () => new Date(now.getTime() + 1), readLiveState: async () => live, createPolicyVersion: async () => { writes += 1; } }), /does not match/);
+  assert.equal((await executeProviderReadonlyReconciliation({ sourceSha, preparation: repeatedPreparation, authorization: repeatedAuthorization, provenance: provenance(repeatedAuthorization), journal: store.journal, reauthenticateSource: () => true, now: () => new Date(now.getTime() + 1), readLiveState: async () => live, createPolicyVersion: async () => { writes += 1; } })).status, "CONSUMED");
   assert.equal(writes, 1);
 });
 
@@ -275,6 +282,77 @@ test("crashes at reservation, successful write, and terminal persistence resume 
   readsFail = false; terminalRace = true;
   await assert.rejects(() => executeProviderReadonlyReconciliation(args), /terminal consumption raced/); assert.equal(writes, 1);
   assert.equal((await executeProviderReadonlyReconciliation(args)).status, "CONSUMED"); assert.equal(writes, 1);
+});
+
+test("zero-write reservation refresh rejects attempts and every incompatible authenticated binding", async () => {
+  const firstPreparation = preparation(); const firstAuthorization = authorization(firstPreparation); const firstProvenance = provenance(firstAuthorization); const store = memoryJournal();
+  const reservation = journalIdentity("PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_RESERVATION", firstPreparation, firstAuthorization, firstProvenance);
+  await store.journal.create(firstAuthorization, "reservation.json", reservation);
+  await store.journal.create(firstAuthorization, "write-attempt.json", { ...reservation, kind: "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_WRITE_ATTEMPT" });
+  const refreshedAt = new Date(now.getTime() + 1); const refreshedPreparation = createProviderReadonlyPreparation({ sourceSha, liveState: state(), desired, preparedAt: refreshedAt.toISOString() });
+  const refreshedAuthorization = createProviderReadonlyAuthorization({ preparation: refreshedPreparation, protectedEnvironmentApprovalEvidence: approval({ workflowRunId: "124", observedAt: refreshedAt.toISOString() }), now: refreshedAt });
+  let writes = 0;
+  await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: refreshedPreparation, authorization: refreshedAuthorization, provenance: provenance(refreshedAuthorization), journal: store.journal, reauthenticateSource: () => true, now: () => refreshedAt, readLiveState: async () => state(), createPolicyVersion: async () => { writes += 1; } }), /does not match/);
+  assert.equal(writes, 0);
+
+  for (const changed of [
+    state({ defaultVersionId: "v2", versions: [{ versionId: "v2", isDefault: true }] }),
+    state({ versions: [...state().versions, { versionId: "v4", isDefault: false }] }),
+    state({ attachedRoles: [CONTRACT.releaseRoleName, "unexpected"] }),
+  ]) {
+    const zeroWriteStore = memoryJournal(); await zeroWriteStore.journal.create(firstAuthorization, "reservation.json", reservation);
+    await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: refreshedPreparation, authorization: refreshedAuthorization, provenance: provenance(refreshedAuthorization), journal: zeroWriteStore.journal, reauthenticateSource: () => true, now: () => refreshedAt, readLiveState: async () => changed, createPolicyVersion: async () => { writes += 1; } }));
+  }
+  assert.equal(writes, 0);
+});
+
+test("concurrent fresh authorizations share one reservation and permit at most one policy version", async () => {
+  const firstPreparation = preparation(); const firstAuthorization = authorization(firstPreparation); const store = memoryJournal();
+  await store.journal.create(firstAuthorization, "reservation.json", journalIdentity("PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_RESERVATION", firstPreparation, firstAuthorization, provenance(firstAuthorization)));
+  const refreshedAt = new Date(now.getTime() + 1); const refreshedPreparation = createProviderReadonlyPreparation({ sourceSha, liveState: state(), desired, preparedAt: refreshedAt.toISOString() });
+  const makeAuthorization = (runId) => createProviderReadonlyAuthorization({ preparation: refreshedPreparation, protectedEnvironmentApprovalEvidence: approval({ workflowRunId: runId, observedAt: refreshedAt.toISOString() }), now: refreshedAt });
+  const authorizations = [makeAuthorization("124"), makeAuthorization("125")]; let live = state(); let writes = 0;
+  const settled = await Promise.allSettled(authorizations.map((auth) => executeProviderReadonlyReconciliation({ sourceSha, preparation: refreshedPreparation, authorization: auth, provenance: provenance(auth), journal: store.journal, reauthenticateSource: () => true, now: () => refreshedAt, sleep: async () => {}, readLiveState: async () => live, createPolicyVersion: async () => { writes += 1; live = postState(); return { PolicyVersion: { VersionId: "v4" } }; } })));
+  assert.equal(writes, 1);
+  assert.equal(settled.length, 2);
+  assert.equal([...store.values.keys()].filter((key) => key.endsWith("write-attempt.json")).length, 1);
+});
+
+test("bounded convergence awaits exact delays, stops on success, and never retries the write", async () => {
+  const prep = preparation(); const auth = authorization(prep); const store = memoryJournal(); const delays = []; let writes = 0; let reads = 0;
+  const result = await executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: store.journal, reauthenticateSource: () => true, now: () => now, sleep: async (milliseconds) => { delays.push(milliseconds); }, readLiveState: async () => (++reads <= 5 ? state() : postState()), createPolicyVersion: async () => { writes += 1; return { PolicyVersion: { VersionId: "v4" } }; } });
+  assert.equal(result.status, "COMPLETED");
+  assert.deepEqual(delays, [100, 200, 400]);
+  assert.equal(writes, 1);
+  assert.ok([...CONTRACT.ambiguousWriteReadDelaysMs, ...CONTRACT.postWriteReadDelaysMs].every((delay) => Number.isSafeInteger(delay) && delay > 0 && delay <= 1000));
+
+  const ambiguousStore = memoryJournal(); const ambiguousDelays = []; let ambiguousReads = 0; let ambiguousWrites = 0;
+  const recovered = await executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: ambiguousStore.journal, reauthenticateSource: () => true, now: () => now, sleep: async (milliseconds) => { ambiguousDelays.push(milliseconds); }, readLiveState: async () => (++ambiguousReads <= 4 ? state() : postState()), createPolicyVersion: async () => { ambiguousWrites += 1; throw new Error("response lost"); } });
+  assert.equal(recovered.status, "COMPLETED");
+  assert.deepEqual(ambiguousDelays, [100, 300]);
+  assert.equal(ambiguousWrites, 1);
+});
+
+test("convergence exhaustion and timer failure remain ambiguous without another write", async () => {
+  for (const timerFails of [false, true]) {
+    const prep = preparation(); const auth = authorization(prep); const store = memoryJournal(); let writes = 0;
+    const delays = []; const sleep = async (milliseconds) => { delays.push(milliseconds); if (timerFails) throw new Error("timer failed"); };
+    const args = { sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: store.journal, reauthenticateSource: () => true, now: () => now, sleep, readLiveState: async () => state(), createPolicyVersion: async () => { writes += 1; return { PolicyVersion: { VersionId: "v4" } }; } };
+    await assert.rejects(() => executeProviderReadonlyReconciliation(args), (error) => error.mutationOutcome === "WRITE_OUTCOME_AMBIGUOUS");
+    await assert.rejects(() => executeProviderReadonlyReconciliation(args));
+    assert.equal(writes, 1);
+    assert.deepEqual(delays, timerFails ? [100] : [100, 200, 400, 800, 1000]);
+  }
+});
+
+test("production timer is asynchronous and the production CLI passes it explicitly", async () => {
+  let settled = false; const sleeping = providerReadonlyProductionSleep(1).then(() => { settled = true; });
+  await Promise.resolve(); assert.equal(settled, false); await sleeping; assert.equal(settled, true);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-provider-readonly-sleep-")); fs.chmodSync(directory, 0o700);
+  try {
+    const prep = preparation(); const bytes = Buffer.from(`${JSON.stringify(prep, null, 2)}\n`); const prepPath = path.join(directory, "preparation.json"); fs.writeFileSync(prepPath, bytes, { mode: 0o600 });
+    await runProviderReadonlyReconciliation(["--mode", "execute", "--source-sha", sourceSha, "--preparation", prepPath, "--preparation-file-sha256", hash(bytes), "--authorization-workflow-run-id", "123", "--authorization-workflow-run-attempt", "1"], { env: workflowEnvironment, readProtectedCheckout: () => ({ toolingSha: sourceSha }), resolveAuthorization: async () => ({ authorization: authorization(prep), provenance: provenance(authorization(prep)) }), awsRun: () => JSON.stringify({ Arn: `arn:aws:sts::368992683803:assumed-role/${CONTRACT.executorRoleName}/run` }), execute: async ({ sleep }) => { assert.equal(sleep, providerReadonlyProductionSleep); return { status: "TEST", iamWriteCount: 0 }; } });
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("workflow is authorization-only and target contract exposes no arbitrary policy input", () => {

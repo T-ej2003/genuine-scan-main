@@ -44,7 +44,11 @@ export const PROVIDER_READONLY_RECONCILIATION = Object.freeze({
   maxAgeMs: 30 * 60 * 1000,
   maxPolicyVersionsBeforeCreate: 4,
   retentionRule: "NONE_FAIL_CLOSED",
+  ambiguousWriteReadDelaysMs: Object.freeze([100, 300]),
+  postWriteReadDelaysMs: Object.freeze([100, 200, 400, 800, 1000]),
 });
+
+export const providerReadonlyProductionSleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 export function readProviderReadonlyDesiredPolicy({ repositoryRoot = root } = {}) {
   const document = normalizeIamPolicyDocument(fs.readFileSync(path.resolve(repositoryRoot, PROVIDER_READONLY_RECONCILIATION.sourcePath), "utf8"), "ProviderReadOnly source policy");
@@ -193,11 +197,25 @@ export function createProviderReadonlyJournal({ read, create } = {}) {
   return Object.freeze({ read: get, create: put });
 }
 
-const journalIdentity = ({ kind, authorization, provenance, preparation, createdAt, postState }) => ({ schemaVersion: 1, kind, operationId: preparation.operationId, sourceSha: preparation.sourceSha, targetPolicyArn: preparation.targetPolicyArn, preparationSha256: preparation.preparationSha256, authorizationSha256: authorization.authorizationSha256, authorizationProvenanceSha256: provenance.provenanceSha256, currentDefaultVersionId: preparation.currentDefaultVersionId, currentDefaultDocumentSha256: preparation.currentDefaultDocumentSha256, desiredDocumentSha256: preparation.desiredDocumentSha256, versionInventorySha256: preparation.versionInventorySha256, attachmentTopologySha256: preparation.attachmentTopologySha256, expectedWritePlanSha256: preparation.expectedWritePlanSha256, ...(postState ? { createdPolicyVersionId: postState.defaultVersionId, postDefaultDocumentSha256: postState.documentSha256, postVersionInventorySha256: postState.versionInventorySha256, status: "COMPLETED", authorizationConsumed: true } : {}), createdAt });
-const assertJournalRecord = (value, expected, kind) => {
+const JOURNAL_STABLE_FIELDS = ["schemaVersion", "operationId", "sourceSha", "account", "targetPolicyArn", "sourcePolicySha256", "currentDefaultVersionId", "currentDefaultDocumentSha256", "desiredDocumentSha256", "semanticDeltaSha256", "versionInventorySha256", "attachmentTopologySha256", "expectedWritePlanSha256"];
+const JOURNAL_EVIDENCE_FIELDS = ["preparationSha256", "authorizationSha256", "authorizationProvenanceSha256", "createdAt"];
+const JOURNAL_POST_FIELDS = ["createdPolicyVersionId", "postDefaultDocumentSha256", "postVersionInventorySha256", "status", "authorizationConsumed"];
+const journalIdentity = ({ kind, authorization, provenance, preparation, createdAt, postState }) => ({ schemaVersion: 1, kind, operationId: preparation.operationId, sourceSha: preparation.sourceSha, account: preparation.account, targetPolicyArn: preparation.targetPolicyArn, sourcePolicySha256: preparation.sourcePolicySha256, preparationSha256: preparation.preparationSha256, authorizationSha256: authorization.authorizationSha256, authorizationProvenanceSha256: provenance.provenanceSha256, currentDefaultVersionId: preparation.currentDefaultVersionId, currentDefaultDocumentSha256: preparation.currentDefaultDocumentSha256, desiredDocumentSha256: preparation.desiredDocumentSha256, semanticDeltaSha256: preparation.semanticDeltaSha256, versionInventorySha256: preparation.versionInventorySha256, attachmentTopologySha256: preparation.attachmentTopologySha256, expectedWritePlanSha256: preparation.expectedWritePlanSha256, ...(postState ? { createdPolicyVersionId: postState.defaultVersionId, postDefaultDocumentSha256: postState.documentSha256, postVersionInventorySha256: postState.versionInventorySha256, status: "COMPLETED", authorizationConsumed: true } : {}), createdAt });
+const assertJournalRecord = (value, expected, kind, { allowRefreshedEvidence = false } = {}) => {
   const { recordSha256, ...body } = value || {};
-  if (body.kind !== kind || recordSha256 !== sha256(body) || canonicalJson(body) !== canonicalJson(expected)) throw new Error("ProviderReadOnly journal record does not match the authorized transaction.");
-  return value;
+  exactKeys(value, ["kind", ...JOURNAL_STABLE_FIELDS, ...JOURNAL_EVIDENCE_FIELDS, ...(expected.status ? JOURNAL_POST_FIELDS : []), "recordSha256"], "ProviderReadOnly journal record");
+  if (body.kind !== kind || recordSha256 !== sha256(body)) throw new Error("ProviderReadOnly journal record does not match the authorized transaction.");
+  if (canonicalJson(body) === canonicalJson(expected)) return "EXACT_AUTHORIZATION";
+  const stable = (record) => Object.fromEntries([...JOURNAL_STABLE_FIELDS, ...(expected.status ? JOURNAL_POST_FIELDS : [])].map((field) => [field, record[field]]));
+  if (!allowRefreshedEvidence || canonicalJson(stable(body)) !== canonicalJson(stable(expected)) || !SHA256.test(body.preparationSha256 || "") || !SHA256.test(body.authorizationSha256 || "") || !SHA256.test(body.authorizationProvenanceSha256 || "")) throw new Error("ProviderReadOnly journal record does not match the authorized transaction.");
+  iso(body.createdAt, "ProviderReadOnly journal createdAt");
+  return "REFRESHED_AUTHORIZATION";
+};
+
+const waitForConvergence = async (sleep, milliseconds) => {
+  if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0 || milliseconds > 1000) throw new Error("ProviderReadOnly convergence delay is invalid.");
+  try { await sleep(milliseconds); }
+  catch (cause) { const error = cause instanceof Error ? cause : new Error("ProviderReadOnly convergence timer failed.", { cause }); error.mutationOutcome = "WRITE_OUTCOME_AMBIGUOUS"; throw error; }
 };
 
 const stateMatchesPreparation = (state, preparation) => state.status === "AUTHENTICATED_PRE_STATE" && state.defaultVersionId === preparation.currentDefaultVersionId && state.documentSha256 === preparation.currentDefaultDocumentSha256 && state.versionInventorySha256 === preparation.versionInventorySha256 && state.attachmentTopologySha256 === preparation.attachmentTopologySha256;
@@ -208,8 +226,8 @@ const stateMatchesPost = (state, preparation) => {
   return added.length === 1 && added[0].versionId === state.defaultVersionId && added[0].isDefault === true && preparation.versionInventory.every(({ versionId }) => state.versions.some((version) => version.versionId === versionId && version.isDefault === false));
 };
 
-export async function executeProviderReadonlyReconciliation({ sourceSha, preparation, authorization, provenance, readLiveState, createPolicyVersion, journal, reauthenticateSource, now = () => new Date(), sleep = () => {} } = {}) {
-  if (![readLiveState, createPolicyVersion, reauthenticateSource].every((value) => typeof value === "function") || !journal) throw new Error("ProviderReadOnly executor adapters are required.");
+export async function executeProviderReadonlyReconciliation({ sourceSha, preparation, authorization, provenance, readLiveState, createPolicyVersion, journal, reauthenticateSource, now = () => new Date(), sleep = providerReadonlyProductionSleep } = {}) {
+  if (![readLiveState, createPolicyVersion, reauthenticateSource, sleep].every((value) => typeof value === "function") || !journal) throw new Error("ProviderReadOnly executor adapters are required.");
   const clock = typeof now === "function" ? now : () => now;
   assertProviderReadonlyAuthorization(authorization, preparation, { sourceSha, now: clock(), allowExpired: true });
   assertProviderReadonlyAuthorizationProvenance(provenance, { authorization, sourceSha });
@@ -221,11 +239,12 @@ export async function executeProviderReadonlyReconciliation({ sourceSha, prepara
     const current = authenticateProviderReadonlyLiveState(await readLiveState(), { desired });
     if (!stateMatchesPost(current, preparation)) throw new Error("Consumed ProviderReadOnly authorization no longer matches live IAM.");
     const expected = journalIdentity({ kind: "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_TERMINAL", authorization, provenance, preparation, createdAt: terminal.createdAt, postState: current });
-    assertJournalRecord(terminal, expected, expected.kind);
-    return Object.freeze({ status: "CONSUMED", iamWriteCount: 0, postState: current });
+    assertJournalRecord(terminal, expected, expected.kind, { allowRefreshedEvidence: true });
+    return Object.freeze({ status: "CONSUMED", transactionState: "CONSUMED", iamWriteCount: 0, postState: current });
   }
   let reservation = await journal.read(authorization, "reservation.json");
-  if (reservation) assertJournalRecord(reservation, reservationExpected, reservationExpected.kind);
+  let reservationMatch = "EXACT_AUTHORIZATION";
+  if (reservation) reservationMatch = assertJournalRecord(reservation, reservationExpected, reservationExpected.kind, { allowRefreshedEvidence: true });
   else {
     assertProviderReadonlyAuthorization(authorization, preparation, { sourceSha, now: clock() });
     reservation = await journal.create(authorization, "reservation.json", reservationExpected);
@@ -240,8 +259,10 @@ export async function executeProviderReadonlyReconciliation({ sourceSha, prepara
     const terminalBody = journalIdentity({ kind: "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_TERMINAL", authorization, provenance, preparation, createdAt: new Date(clock()).toISOString(), postState: current });
     const completed = await journal.create(authorization, "terminal.json", terminalBody);
     if (!completed) throw new Error("ProviderReadOnly terminal consumption raced another executor.");
-    return Object.freeze({ status: "EXPECTED_POST_STATE_RECOVERED", iamWriteCount: 0, postState: current });
+    return Object.freeze({ status: "EXPECTED_POST_STATE_RECOVERED", transactionState: "COMPLETED", iamWriteCount: 0, postState: current });
   }
+  // A different fresh authorization may adopt only this immutable zero-write
+  // reservation. Any write-attempt remains bound to its original authorization.
   assertProviderReadonlyAuthorization(authorization, preparation, { sourceSha, now: clock() });
   reauthenticateSource();
   const before = authenticateProviderReadonlyLiveState(await readLiveState(), { desired, allowPostState: false });
@@ -257,7 +278,7 @@ export async function executeProviderReadonlyReconciliation({ sourceSha, prepara
   catch (error) {
     for (let index = 0; index < 3; index += 1) {
       try { const observed = authenticateProviderReadonlyLiveState(await readLiveState(), { desired }); if (stateMatchesPost(observed, preparation)) { response = { PolicyVersion: { VersionId: observed.defaultVersionId } }; break; } } catch {}
-      if (index < 2) await sleep([100, 300][index]);
+      if (index < PROVIDER_READONLY_RECONCILIATION.ambiguousWriteReadDelaysMs.length) await waitForConvergence(sleep, PROVIDER_READONLY_RECONCILIATION.ambiguousWriteReadDelaysMs[index]);
     }
     if (!response) { error.mutationOutcome = "WRITE_OUTCOME_AMBIGUOUS"; throw error; }
   }
@@ -267,11 +288,11 @@ export async function executeProviderReadonlyReconciliation({ sourceSha, prepara
     const candidate = authenticateProviderReadonlyLiveState(await readLiveState(), { desired });
     if (stateMatchesPost(candidate, preparation) && candidate.defaultVersionId === response.PolicyVersion.VersionId) { post = candidate; break; }
     if (!stateMatchesPreparation(candidate, preparation)) throw new Error("ProviderReadOnly policy entered an unexpected post-write state.");
-    if (index < 5) await sleep([100, 200, 400, 800, 1000][index]);
+    if (index < PROVIDER_READONLY_RECONCILIATION.postWriteReadDelaysMs.length) await waitForConvergence(sleep, PROVIDER_READONLY_RECONCILIATION.postWriteReadDelaysMs[index]);
   }
   if (!post) throw Object.assign(new Error("ProviderReadOnly policy mutation did not converge to the exact authorized post-state."), { mutationOutcome: "WRITE_OUTCOME_AMBIGUOUS" });
   const terminalBody = journalIdentity({ kind: "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_TERMINAL", authorization, provenance, preparation, createdAt: new Date(clock()).toISOString(), postState: post });
   const completed = await journal.create(authorization, "terminal.json", terminalBody);
   if (!completed) throw new Error("ProviderReadOnly terminal consumption raced another executor.");
-  return Object.freeze({ status: "COMPLETED", iamWriteCount: 1, postState: post, terminal: completed });
+  return Object.freeze({ status: "COMPLETED", transactionState: "COMPLETED", reservationMatch, iamWriteCount: 1, postState: post, terminal: completed });
 }
