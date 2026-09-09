@@ -135,16 +135,25 @@ gh workflow run execute-production-initial-activation-reconciler-state-reconcili
 
 ### 6. Expected completion and restart rules
 
-The result JSON must show `remoteIamMutationCount=0` and
-`refreshOnlyApplyCount=1`. Its authenticated `planSemantics` requires
-`terraformResourceAddCount=0`, `terraformResourceChangeCount=0`, and
-`terraformResourceDestroyCount=0`—the corresponding
-`REMOTE_IAM_MUTATION_COUNT=0`, `TERRAFORM_RESOURCE_ADD_COUNT=0`,
-`TERRAFORM_RESOURCE_CHANGE_COUNT=0`, `TERRAFORM_RESOURCE_DESTROY_COUNT=0`,
-and `TERRAFORM_REFRESH_ONLY_APPLY_COUNT=1` invariants. The backend must become
-the exact authenticated successor, live IAM must remain unchanged, and the
-fresh normal installation plan must report `resource_drift=[]` with only
-`aws_iam_policy.reconciler:update` pending. Stop before that policy update.
+Every successful result has the same authenticated shape: `status`,
+`refreshOnlyApplyCount`, `terraformStateMutationCount`,
+`remoteIamMutationCount`, `planSemantics`, `postState`, and `normalPlan`.
+`planSemantics` is copied from the validated refresh-only plan and must show
+the exact two-field drift, `terraformResourceAddCount=0`,
+`terraformResourceChangeCount=0`, `terraformResourceDestroyCount=0`,
+`exactTwoFieldDrift=true`, and `outputDrift=false`. `normalPlan` is the
+validated read-only installation plan: `resource_drift=[]`, zero creates,
+deletes, and replacements, and exactly one update at
+`aws_iam_policy.reconciler` (all other expected resources are `no-op`).
+
+For `COMPLETE` and `COMPLETED_BY_READBACK`,
+`refreshOnlyApplyCount=1` and `terraformStateMutationCount=1`; the latter
+means the saved apply was proven to have committed the exact successor even
+when its response was lost. For `ALREADY_COMPLETE` and `RECOVERED_COMPLETE`,
+both counts are `0` because no apply or state mutation was performed.
+All statuses require `remoteIamMutationCount=0`, the complete authorized
+successor state, unchanged live IAM, and the validated `normalPlan`. Stop
+before the pending reconciler policy update.
 
 If preparation fails, investigate read-only and prepare fresh. If source,
 predecessor-state CAS, or additional Terraform drift changes, stop. If an
