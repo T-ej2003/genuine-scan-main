@@ -226,6 +226,43 @@ const stateMatchesPost = (state, preparation) => {
   return added.length === 1 && added[0].versionId === state.defaultVersionId && added[0].isDefault === true && preparation.versionInventory.every(({ versionId }) => state.versions.some((version) => version.versionId === versionId && version.isDefault === false));
 };
 
+const isMixedDefaultVersionSnapshot = (value) => {
+  try {
+    return value?.policyArn === PROVIDER_READONLY_RECONCILIATION.policyArn && VERSION.test(value.defaultVersionId || "") && normalizeVersions(value.versions).find(({ isDefault }) => isDefault)?.versionId !== value.defaultVersionId;
+  } catch { return false; }
+};
+
+const isTransientProviderReadonlyRead = (error) => {
+  const retryable = /^(Throttling|ThrottlingException|TooManyRequestsException|RequestLimitExceeded|ServiceUnavailable|ServiceUnavailableException|ServiceFailure|InternalFailure|InternalError)$/;
+  const diagnostic = String(error?.stderr || error?.message || "").match(/(?:^|\n)An error occurred \((\w+)\) when calling the (GetPolicy|GetPolicyVersion|ListPolicyVersions|ListEntitiesForPolicy) operation(?: \(reached max retries: \d+\))?:/);
+  return retryable.test(error?.code || error?.name || "") || Boolean(diagnostic && retryable.test(diagnostic[1]));
+};
+
+// IAM's independently read policy metadata and version inventory may briefly
+// disagree after the sole authorized write. Only that incomplete observation
+// (or a recognized transient read failure) is retried; every coherent incompatible state fails closed.
+const observeProviderReadonlyConvergence = async (readLiveState, desired) => {
+  let value;
+  try { value = await readLiveState(); }
+  catch (error) {
+    if (isTransientProviderReadonlyRead(error)) return { transientError: error };
+    throw error;
+  }
+  try { return { state: authenticateProviderReadonlyLiveState(value, { desired }) }; }
+  catch (error) {
+    if (isMixedDefaultVersionSnapshot(value)) return { transientError: error };
+    throw error;
+  }
+};
+
+const classifyProviderReadonlyConvergence = (observed, preparation, expectedVersionId) => {
+  const candidate = observed.state;
+  if (!candidate) return observed;
+  if (stateMatchesPost(candidate, preparation) && (!expectedVersionId || candidate.defaultVersionId === expectedVersionId)) return { ...observed, postState: candidate };
+  if (!stateMatchesPreparation(candidate, preparation)) throw new Error("ProviderReadOnly policy entered an unexpected post-write state.");
+  return observed;
+};
+
 export async function executeProviderReadonlyReconciliation({ sourceSha, preparation, authorization, provenance, readLiveState, createPolicyVersion, journal, reauthenticateSource, now = () => new Date(), sleep = providerReadonlyProductionSleep } = {}) {
   if (![readLiveState, createPolicyVersion, reauthenticateSource, sleep].every((value) => typeof value === "function") || !journal) throw new Error("ProviderReadOnly executor adapters are required.");
   const clock = typeof now === "function" ? now : () => now;
@@ -279,20 +316,21 @@ export async function executeProviderReadonlyReconciliation({ sourceSha, prepara
   try { response = await createPolicyVersion({ PolicyArn: PROVIDER_READONLY_RECONCILIATION.policyArn, PolicyDocument: desired.document, SetAsDefault: true }); }
   catch (error) {
     for (let index = 0; index < 3; index += 1) {
-      try { const observed = authenticateProviderReadonlyLiveState(await readLiveState(), { desired }); if (stateMatchesPost(observed, preparation)) { response = { PolicyVersion: { VersionId: observed.defaultVersionId } }; break; } } catch {}
+      const observed = classifyProviderReadonlyConvergence(await observeProviderReadonlyConvergence(readLiveState, desired), preparation);
+      if (observed.postState) { response = { PolicyVersion: { VersionId: observed.postState.defaultVersionId } }; break; }
       if (index < PROVIDER_READONLY_RECONCILIATION.ambiguousWriteReadDelaysMs.length) await waitForConvergence(sleep, PROVIDER_READONLY_RECONCILIATION.ambiguousWriteReadDelaysMs[index]);
     }
     if (!response) { error.mutationOutcome = "WRITE_OUTCOME_AMBIGUOUS"; throw error; }
   }
   if (!VERSION.test(response?.PolicyVersion?.VersionId || "")) throw Object.assign(new Error("ProviderReadOnly CreatePolicyVersion response is ambiguous."), { mutationOutcome: "WRITE_OUTCOME_AMBIGUOUS" });
-  let post;
+  let post; let lastTransientReadbackError;
   for (let index = 0; index < 6; index += 1) {
-    const candidate = authenticateProviderReadonlyLiveState(await readLiveState(), { desired });
-    if (stateMatchesPost(candidate, preparation) && candidate.defaultVersionId === response.PolicyVersion.VersionId) { post = candidate; break; }
-    if (!stateMatchesPreparation(candidate, preparation)) throw new Error("ProviderReadOnly policy entered an unexpected post-write state.");
+    const observed = classifyProviderReadonlyConvergence(await observeProviderReadonlyConvergence(readLiveState, desired), preparation, response.PolicyVersion.VersionId);
+    if (observed.postState) { post = observed.postState; break; }
+    lastTransientReadbackError = observed.transientError;
     if (index < PROVIDER_READONLY_RECONCILIATION.postWriteReadDelaysMs.length) await waitForConvergence(sleep, PROVIDER_READONLY_RECONCILIATION.postWriteReadDelaysMs[index]);
   }
-  if (!post) throw Object.assign(new Error("ProviderReadOnly policy mutation did not converge to the exact authorized post-state."), { mutationOutcome: "WRITE_OUTCOME_AMBIGUOUS" });
+  if (!post) throw Object.assign(new Error("ProviderReadOnly policy mutation did not converge to the exact authorized post-state.", { cause: lastTransientReadbackError }), { mutationOutcome: "WRITE_OUTCOME_AMBIGUOUS" });
   const terminalBody = journalIdentity({ kind: "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_TERMINAL", authorization, provenance, preparation, createdAt: new Date(clock()).toISOString(), postState: post });
   const completed = await journal.create(authorization, "terminal.json", terminalBody);
   if (!completed) throw new Error("ProviderReadOnly terminal consumption raced another executor.");

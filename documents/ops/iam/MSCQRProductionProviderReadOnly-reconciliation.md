@@ -39,6 +39,12 @@ that final mutation boundary, and issues at most one `CreatePolicyVersion` with
 resolved only by bounded readback: the exact desired document must be the new
 default and the version inventory must be the exact predecessor plus one.
 Otherwise the outcome remains ambiguous and no retry is permitted.
+An internally inconsistent IAM snapshot (for example, `GetPolicy` observes the
+new default while `ListPolicyVersions` still observes the predecessor default)
+is inconclusive rather than successful: bounded read-only polling waits for a
+coherent snapshot, then still requires the exact post-state.
+Only recognized transient IAM read failures receive the same bounded retry;
+access denial and coherent policy/topology drift fail closed immediately.
 The bounded read-after-write observations use real awaited 100--1000 ms
 production delays; tests replace only the timer adapter, never the production
 default. Convergence polling performs no additional IAM write.

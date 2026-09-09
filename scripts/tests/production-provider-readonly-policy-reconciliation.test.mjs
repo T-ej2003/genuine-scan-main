@@ -31,6 +31,7 @@ const memoryJournal = () => {
   return { values, journal: createProviderReadonlyJournal({ read: async (key) => values.get(key) || null, create: async (key, bytes) => { if (values.has(key)) return false; values.set(key, Buffer.from(bytes)); return true; } }) };
 };
 const postState = (change = {}) => state({ defaultVersionId: "v4", document: desired.document, versions: [...state().versions.map((version) => ({ ...version, isDefault: false })), { versionId: "v4", isDefault: true }], ...change });
+const mixedPostState = () => postState({ versions: state().versions });
 const operationBindings = (prep) => ({ sourceSha: prep.sourceSha, currentDefaultVersionId: prep.currentDefaultVersionId, currentDefaultDocumentSha256: prep.currentDefaultDocumentSha256, desiredDocumentSha256: prep.desiredDocumentSha256, versionInventorySha256: prep.versionInventorySha256, attachmentTopologySha256: prep.attachmentTopologySha256 });
 const journalIdentity = (kind, prep, auth, prov, createdAt = prep.createdAt) => ({ schemaVersion: 1, kind, operationId: prep.operationId, sourceSha: prep.sourceSha, account: prep.account, targetPolicyArn: prep.targetPolicyArn, sourcePolicySha256: prep.sourcePolicySha256, preparationSha256: prep.preparationSha256, authorizationSha256: auth.authorizationSha256, authorizationProvenanceSha256: prov.provenanceSha256, currentDefaultVersionId: prep.currentDefaultVersionId, currentDefaultDocumentSha256: prep.currentDefaultDocumentSha256, desiredDocumentSha256: prep.desiredDocumentSha256, semanticDeltaSha256: prep.semanticDeltaSha256, versionInventorySha256: prep.versionInventorySha256, attachmentTopologySha256: prep.attachmentTopologySha256, expectedWritePlanSha256: prep.expectedWritePlanSha256, createdAt });
 const workflowEnvironment = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_WORKFLOW_REF: CONTRACT.executionWorkflowRef, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ATTEMPT: "1", AWS_ACCESS_KEY_ID: "fixture", AWS_SECRET_ACCESS_KEY: "fixture", AWS_SESSION_TOKEN: "fixture" };
@@ -277,7 +278,7 @@ test("crashes at reservation, successful write, and terminal persistence resume 
     if (record === "terminal.json" && terminalRace) { terminalRace = false; return false; }
     return value;
   } };
-  const args = { sourceSha, preparation: prep, authorization: auth, provenance: prov, journal, reauthenticateSource: () => true, now: () => now, sleep: async () => {}, readLiveState: async () => { if (readsFail) throw new Error("read unavailable"); return live; }, createPolicyVersion: async () => { writes += 1; live = postState(); readsFail = true; throw new Error("response lost"); } };
+  const args = { sourceSha, preparation: prep, authorization: auth, provenance: prov, journal, reauthenticateSource: () => true, now: () => now, sleep: async () => {}, readLiveState: async () => { if (readsFail) throw Object.assign(new Error("read unavailable"), { code: "ServiceUnavailable" }); return live; }, createPolicyVersion: async () => { writes += 1; live = postState(); readsFail = true; throw new Error("response lost"); } };
   await assert.rejects(() => executeProviderReadonlyReconciliation(args), /crash after reservation/); assert.equal(writes, 0);
   await assert.rejects(() => executeProviderReadonlyReconciliation(args), /response lost/); assert.equal(writes, 1);
   readsFail = false; terminalRace = true;
@@ -332,6 +333,52 @@ test("bounded convergence awaits exact delays, stops on success, and never retri
   assert.equal(recovered.status, "COMPLETED");
   assert.deepEqual(ambiguousDelays, [100, 300]);
   assert.equal(ambiguousWrites, 1);
+});
+
+test("mixed IAM propagation snapshots use the shared bounded readback contract without another write", async () => {
+  const prep = preparation(); const auth = authorization(prep);
+  assert.throws(() => authenticateProviderReadonlyLiveState(mixedPostState(), { desired }), /target or attachment topology/);
+
+  const store = memoryJournal(); const delays = []; let writes = 0;
+  const snapshots = [state(), state(), mixedPostState(), mixedPostState(), postState()];
+  const result = await executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: store.journal, reauthenticateSource: () => true, now: () => now, sleep: async (milliseconds) => { delays.push(milliseconds); }, readLiveState: async () => snapshots.shift(), createPolicyVersion: async () => { writes += 1; return { PolicyVersion: { VersionId: "v4" } }; } });
+  assert.equal(result.status, "COMPLETED");
+  assert.deepEqual(delays, [100, 200]);
+  assert.equal(writes, 1);
+
+  const ambiguousStore = memoryJournal(); const ambiguousDelays = []; let ambiguousWrites = 0;
+  const ambiguousSnapshots = [state(), state(), mixedPostState(), postState(), postState()];
+  assert.equal((await executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: ambiguousStore.journal, reauthenticateSource: () => true, now: () => now, sleep: async (milliseconds) => { ambiguousDelays.push(milliseconds); }, readLiveState: async () => ambiguousSnapshots.shift(), createPolicyVersion: async () => { ambiguousWrites += 1; throw new Error("response lost"); } })).status, "COMPLETED");
+  assert.deepEqual(ambiguousDelays, [100]);
+  assert.equal(ambiguousWrites, 1);
+});
+
+test("post-write convergence exhausts mixed snapshots and rejects coherent drift without another write", async () => {
+  const prep = preparation(); const auth = authorization(prep); let writes = 0; const delays = [];
+  const mixedSnapshots = [state(), state(), ...Array.from({ length: 6 }, mixedPostState)];
+  await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: memoryJournal().journal, reauthenticateSource: () => true, now: () => now, sleep: async (milliseconds) => { delays.push(milliseconds); }, readLiveState: async () => mixedSnapshots.shift(), createPolicyVersion: async () => { writes += 1; return { PolicyVersion: { VersionId: "v4" } }; } }), (error) => error.mutationOutcome === "WRITE_OUTCOME_AMBIGUOUS" && /target or attachment topology/.test(error.cause?.message || ""));
+  assert.deepEqual(delays, [100, 200, 400, 800, 1000]);
+  assert.equal(writes, 1);
+
+  for (const changed of [
+    postState({ document: { Version: "2012-10-17", Statement: [] } }),
+    postState({ versions: [...postState().versions, { versionId: "v5", isDefault: false }] }),
+  ]) {
+    let driftWrites = 0; const driftDelays = []; const snapshots = [state(), state(), changed];
+    await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: memoryJournal().journal, reauthenticateSource: () => true, now: () => now, sleep: async (milliseconds) => { driftDelays.push(milliseconds); }, readLiveState: async () => snapshots.shift(), createPolicyVersion: async () => { driftWrites += 1; return { PolicyVersion: { VersionId: "v4" } }; } }));
+    assert.equal(driftWrites, 1);
+    assert.deepEqual(driftDelays, []);
+  }
+
+  let ambiguousDriftWrites = 0; const ambiguousDriftDelays = []; const ambiguousDriftSnapshots = [state(), state(), postState({ versions: [...postState().versions, { versionId: "v5", isDefault: false }] })];
+  await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: memoryJournal().journal, reauthenticateSource: () => true, now: () => now, sleep: async (milliseconds) => { ambiguousDriftDelays.push(milliseconds); }, readLiveState: async () => ambiguousDriftSnapshots.shift(), createPolicyVersion: async () => { ambiguousDriftWrites += 1; throw new Error("response lost"); } }), /unexpected post-write state/);
+  assert.equal(ambiguousDriftWrites, 1);
+  assert.deepEqual(ambiguousDriftDelays, []);
+
+  const denied = Object.assign(new Error("AccessDenied"), { code: "AccessDenied" }); let deniedWrites = 0; const deniedDelays = []; const deniedSnapshots = [state(), state(), denied];
+  await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: memoryJournal().journal, reauthenticateSource: () => true, now: () => now, sleep: async (milliseconds) => { deniedDelays.push(milliseconds); }, readLiveState: async () => { const next = deniedSnapshots.shift(); if (next instanceof Error) throw next; return next; }, createPolicyVersion: async () => { deniedWrites += 1; return { PolicyVersion: { VersionId: "v4" } }; } }), /AccessDenied/);
+  assert.equal(deniedWrites, 1);
+  assert.deepEqual(deniedDelays, []);
 });
 
 test("convergence exhaustion and timer failure remain ambiguous without another write", async () => {
