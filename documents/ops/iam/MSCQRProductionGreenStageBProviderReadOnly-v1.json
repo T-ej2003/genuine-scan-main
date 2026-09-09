@@ -69,6 +69,17 @@
       }
     },
     {
+      "Sid": "ReadExactStageBWorkerPublicationImage",
+      "Effect": "Allow",
+      "Action": "ecr:DescribeImages",
+      "Resource": "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
       "Sid": "ReadExactStageBReplayTable",
       "Effect": "Allow",
       "Action": [

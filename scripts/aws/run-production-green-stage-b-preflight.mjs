@@ -92,7 +92,7 @@ function assertReadinessImageAuthorizationBinding(argv, authorization) {
   if (imageEvidenceSha256(evidence.document) !== authorization.imageEvidenceSha256) throw new Error("Release readiness image evidence does not match the authenticated image authorization.");
   const signature = readPrivateJson(value(argv, "--image-evidence-signature"), "Current image-evidence signature");
   if (canonicalizeJson(signature.document) !== canonicalizeJson(authorization.imageEvidenceSignature)) throw new Error("Release readiness image-evidence signature does not match the authenticated image authorization.");
-  return { imageEvidenceBytes: evidence.bytes, imageEvidenceSignatureBytes: signature.bytes };
+  return { imageEvidenceBytes: evidence.bytes, imageEvidenceSignatureBytes: signature.bytes, imageAuthorization: authorization };
 }
 
 function continueReleaseReadiness(argv, { run = (command, args, options) => execFileSync(command, args, options), imageEvidenceBytes, imageEvidenceSignatureBytes } = {}) {
@@ -235,7 +235,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
     if (canonicalizeJson(adminReport.capabilityGraph) !== canonicalizeJson(capabilityGraph)) throw new Error("Administrator pre-plan capability graph is stale.");
     assertReleasePolicyEvidence(adminReport.policyEvidence);
     const authenticatedPublication = assertReadinessImageAuthorizationBinding(argv, imageAuthorizationFile.authorization);
-    const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)), run: (args) => releaseRun(args) });
+    const report = releasePreflight({ region: REGION, outputDirectory: path.dirname(path.resolve(output)), run: (args) => releaseRun(args), authenticatedImageAuthorization: authenticatedPublication.imageAuthorization });
     report.sourceSha = sourceSha;
     report.requiredReads["kms:Verify"] = "allowed";
     report.administratorReportSha256 = sha256(adminReportBytes);

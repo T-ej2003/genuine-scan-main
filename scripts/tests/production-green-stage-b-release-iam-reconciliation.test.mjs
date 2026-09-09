@@ -3,6 +3,8 @@ import fs from "node:fs";
 import test from "node:test";
 import { buildStageBDeploymentCapabilityGraph } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
+import { STAGE_B_PLAN_IMAGE_BINDINGS } from "../aws/production-green-stage-b-image-evidence.mjs";
+import { RELEASE_DIGEST_VERIFICATION_REPOSITORIES, RELEASE_READ_PROBES } from "../aws/production-green-stage-b-identity-capabilities.mjs";
 import { RELEASE_POLICY_SOURCES, deriveRequiredEvaluations, sourcePolicyEvidence, validateManifest } from "../aws/validate-production-green-stage-b-permissions.mjs";
 
 const read = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
@@ -75,14 +77,54 @@ test("backend recovery ECR reads are exact and add no ECR write authority", () =
     Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
     Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
   });
+  assert.deepEqual(providerRead.Statement.find(({ Sid }) => Sid === "ReadExactStageBWorkerPublicationImage"), {
+    Sid: "ReadExactStageBWorkerPublicationImage",
+    Effect: "Allow",
+    Action: "ecr:DescribeImages",
+    Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker",
+    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
   assert.equal(policies.some(({ document }) => document.Statement.some(({ Effect, Action }) => Effect === "Allow" && list(Action).some((action) => action.startsWith("ecr:") && !["ecr:DescribeImages", "ecr:DescribeRepositories", "ecr:GetRepositoryPolicy"].includes(action)))), false);
+});
+
+test("release-deployer digest reads cover the complete Stage B publication topology only", () => {
+  const requiredRepositories = [...new Set(Object.values(STAGE_B_PLAN_IMAGE_BINDINGS).map(({ repository }) => repository))].sort();
+  assert.deepEqual(RELEASE_DIGEST_VERIFICATION_REPOSITORIES, requiredRepositories);
+  assert.deepEqual([...new Set(manifest.required.filter(({ action }) => action === "ecr:DescribeImages").flatMap(({ resources }) => resources.map((resource) => resource.split("/").at(-1))))].sort(), requiredRepositories);
+  const context = [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }];
+  for (const repository of requiredRepositories) {
+    assert.equal(allows({ action: "ecr:DescribeImages", resource: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, context }), true, repository);
+    assert(RELEASE_READ_PROBES.some(({ action, args }) => action === "ecr:DescribeImages" && args.includes(repository)), repository);
+  }
+  for (const { service, repository } of new Map(Object.values(STAGE_B_PLAN_IMAGE_BINDINGS).map((binding) => [binding.service, binding])).values()) {
+    assert.deepEqual(RELEASE_READ_PROBES.find(({ id }) => id === `stage-b-publication-${service}-image`)?.args,
+      ["ecr", "describe-images", "--repository-name", repository, "--image-ids", `imageDigest={authenticated:${service}}`]);
+  }
+  for (const repository of ["mscqr-web", "mscqr-frontend", "unrelated"]) {
+    assert.equal(allows({ action: "ecr:DescribeImages", resource: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, context }), false, repository);
+  }
+  assert.equal(allows({ action: "ecr:DescribeImages", resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker", context: [{ key: "aws:RequestedRegion", type: "string", values: ["us-east-1"] }] }), false);
+  assert.equal(allows({ action: "ecr:DescribeImages", resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker", context: [] }), false);
+  assert.equal(allows({ action: "ecr:DescribeImages", resource: "arn:aws:ecr:eu-west-2:000000000000:repository/mscqr-worker", context }), false);
+  for (const action of ["ecr:GetAuthorizationToken", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:PutImage", "ecr:BatchDeleteImage"]) {
+    assert.equal(allows({ action, resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker", context }), false, action);
+  }
+  assert.equal(allows({ action: "ecr:DescribeRepositories", resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker", context }), false);
+});
+
+test("frontend digest verification remains ECS metadata-bound, not release-deployer ECR authority", () => {
+  const releaseGate = fs.readFileSync(".github/workflows/release-gate.yml", "utf8");
+  assert.match(releaseGate, /aws ecs describe-task-definition --task-definition "\$frontend_task"/);
+  assert.match(releaseGate, /amazonaws\\\.com\/mscqr-web@sha256:\[a-f0-9\]\{64\}/);
+  assert.doesNotMatch(releaseGate, /aws ecr describe-images[^\n]*mscqr-(?:web|frontend)/);
+  assert.equal(RELEASE_DIGEST_VERIFICATION_REPOSITORIES.includes("mscqr-web"), false);
 });
 
 test("production-shaped required and forbidden resources reconcile to the source policy set", () => {
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 257);
+  assert.equal(evaluations.required.length, 258);
   assert.equal(evaluations.forbidden.length, 38);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
@@ -108,7 +150,7 @@ test("production-shaped required and forbidden resources reconcile to the source
     { action: "ecs:DescribeServiceRevisions", resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2" },
   ]);
   assert(recoveryReads.every(allows));
-  for (const repository of ["mscqr-frontend", "mscqr-worker", "unrelated"]) {
+  for (const repository of ["mscqr-frontend", "mscqr-web", "unrelated"]) {
     assert(recoveryReads.every((evaluation) => !allows({ ...evaluation, resource: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}` })));
   }
   assert(recoveryReads.every((evaluation) => !allows({ ...evaluation, resource: evaluation.resource.replace(":368992683803:", ":000000000000:") })));

@@ -20,6 +20,30 @@ type; the alias name remains an API request field and is enforced by the
 Terraform plan, closure, and apply bindings. No wildcard Lambda resource is
 required.
 
+## Release-deployer ECR digest verification topology
+
+The canonical Stage B publication bindings currently resolve to two ECR
+repositories: `mscqr-backend` (backend, RLS executor, and RLS canary) and
+`mscqr-worker` (worker). The release-deployer therefore has only
+`ecr:DescribeImages` on those exact repositories in `eu-west-2`; the worker
+grant is a separate statement so it does not inherit backend recovery's
+`ecr:DescribeRepositories` capability. The release preflight consumes the
+already-authenticated four-image authorization, requests every publication
+image with `--image-ids imageDigest=<authenticated digest>`, and accepts only
+one response whose account, repository, and digest exactly match that binding.
+Repository-level success or the existence of a different image is not digest
+evidence.
+
+`mscqr-web` is a production repository, but it is outside this direct ECR
+verification topology. Normal cutover authenticates the preserved frontend
+digest from the reviewed `mscqr-frontend:20` ECS task definition, while the
+separate administrator runtime-consumability evidence owns direct ECR image
+verification for all runtime repositories. The release-deployer consequently
+receives no `DescribeImages`, image-pull, or image-publication capability for
+`mscqr-web`. Tests derive the required release-deployer repository set from the
+canonical publication bindings, so adding another publication repository
+without its reviewed metadata-read contract fails closed.
+
 The canonical FinalApplyWrite SHA-256 changes from
 `04ce6d5f63d91ff81faeca0718411fe8554367822777be17fc16739cc1c67bee`
 to
@@ -207,7 +231,7 @@ The allowed inline-policy set is empty.
 The candidate source policy union was evaluated with AWS IAM custom-policy
 simulation against the production-shaped plan:
 
-- required evaluations: 257/257 allowed
+- required evaluations: 258/258 allowed
 - required failures: 0
 - forbidden evaluations: 38/38 denied
 - forbidden allowed: 0

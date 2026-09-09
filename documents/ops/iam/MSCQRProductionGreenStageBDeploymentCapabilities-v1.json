@@ -381,7 +381,11 @@
       "classification": "ADMIN_DIRECT_READ",
       "probe": "structural",
       "probeIds": [
-        "backend-health-recovery-images"
+        "backend-health-recovery-images",
+        "stage-b-publication-backend-image",
+        "stage-b-publication-rls-canary-image",
+        "stage-b-publication-rls-executor-image",
+        "stage-b-publication-worker-image"
       ],
       "policy": {
         "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs",
@@ -2888,14 +2892,17 @@
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct",
       "probeIds": [
-        "backend-health-recovery-images"
+        "backend-health-recovery-images",
+        "stage-b-publication-backend-image",
+        "stage-b-publication-rls-canary-image",
+        "stage-b-publication-rls-executor-image"
       ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
         "sid": "ReadExactLegacyBackendRecoveryRepository",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -2930,7 +2937,7 @@
         "sid": "ReadExactLegacyBackendRecoveryRepository",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -5205,7 +5212,7 @@
         "sid": "ReadExactStageBBrokerAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -5462,7 +5469,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -6161,7 +6168,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -6217,7 +6224,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -6271,7 +6278,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -6325,7 +6332,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -6839,7 +6846,7 @@
         "sid": "ReadExactStageBReplayTable",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -6872,7 +6879,7 @@
         "sid": "ReadExactStageBReplayTable",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -6905,7 +6912,7 @@
         "sid": "ReadExactStageBReplayTable",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -6938,7 +6945,7 @@
         "sid": "ReadExactStageBReplayTable",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -7004,7 +7011,7 @@
         "sid": "ReadExactStageBBrokerFunction",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -7037,7 +7044,7 @@
         "sid": "ReadExactStageBBrokerFunction",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -7074,7 +7081,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -7112,7 +7119,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -7147,7 +7154,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -7184,7 +7191,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e"
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
       },
       "required": true,
       "mutation": false
@@ -7607,6 +7614,41 @@
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "manifest-stage-b-publication-worker-describe-images",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "stage-b-publication-worker-describe-images",
+      "action": "ecr:DescribeImages",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-b-publication-worker-image"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBWorkerPublicationImage",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+      },
+      "required": true,
+      "mutation": false
     },
     {
       "id": "manifest-tag-predeployment-inventory-task-definition",
@@ -12677,6 +12719,22 @@
     {
       "id": "backend-health-recovery-repository",
       "action": "ecr:DescribeRepositories"
+    },
+    {
+      "id": "stage-b-publication-backend-image",
+      "action": "ecr:DescribeImages"
+    },
+    {
+      "id": "stage-b-publication-rls-canary-image",
+      "action": "ecr:DescribeImages"
+    },
+    {
+      "id": "stage-b-publication-rls-executor-image",
+      "action": "ecr:DescribeImages"
+    },
+    {
+      "id": "stage-b-publication-worker-image",
+      "action": "ecr:DescribeImages"
     },
     {
       "id": "runtime-mscqr-backend-repository-policy",

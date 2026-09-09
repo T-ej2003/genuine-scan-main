@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import crypto from "node:crypto";
 import {
+  RELEASE_DIGEST_VERIFICATION_REPOSITORIES,
   RELEASE_READ_PROBES,
   readIdentityCapabilityMatrix,
   runReleaseReadPreflight,
@@ -29,6 +30,7 @@ const shapedPolicyEvidence = () => {
 };
 const temp = () => fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-release-preflight-test-"));
 const imageFixture = makeCanonicalImageAuthorization({ sourceSha: protectedSourceSha, imageReleaseSha: protectedSourceSha });
+const runRelease = (options) => runReleaseReadPreflight({ authenticatedImageAuthorization: imageFixture.authorization, ...options });
 const imageAuthorizationPath = path.join(temp(), "image-authorization.json");
 const imageAuthorizationBytes = Buffer.from(`${JSON.stringify(imageFixture.authorization, null, 2)}\n`);
 fs.writeFileSync(imageAuthorizationPath, imageAuthorizationBytes, { mode: 0o600 });
@@ -65,6 +67,11 @@ const runPreflightCli = (argv, dependencies = {}) => runProductionPreflightCli([
 ], { verifyImageEvidence: imageFixture.verifyImageEvidence, ...dependencies });
 const allowed = (args) => {
   if (args[0] === "sts") return JSON.stringify({ Arn: caller });
+  if (args[0] === "ecr" && args[1] === "describe-images" && args.includes("--image-ids")) {
+    const repositoryName = args[args.indexOf("--repository-name") + 1];
+    const imageDigest = args[args.indexOf("--image-ids") + 1].slice("imageDigest=".length);
+    return JSON.stringify({ imageDetails: [{ registryId: "368992683803", repositoryName, imageDigest }] });
+  }
   if (args[0] === "ecr" && args[1] === "get-repository-policy") {
     const repositoryName = args[args.indexOf("--repository-name") + 1];
     return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role" }, Action: ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"], Resource: `arn:aws:ecr:eu-west-2:368992683803:repository/${repositoryName}` }] }) });
@@ -122,7 +129,7 @@ test("release preflight routes every S3 and Lambda probe through the credential-
       return allowed(normalized);
     },
   });
-  const report = runReleaseReadPreflight({ outputDirectory: temp(), run });
+  const report = runRelease({ outputDirectory: temp(), run });
   const affected = calls.filter(({ args }) => ["s3api", "lambda"].includes(args[0]));
 
   assert.equal(report.status, "valid");
@@ -157,7 +164,7 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 46, capabilities: 384, uniqueActions: 134, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 46, capabilities: 385, uniqueActions: 134, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
@@ -215,6 +222,7 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
       && capability.resources[0] === "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
       && capability.policy.sourceFile === "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json"));
   }
+  assert.deepEqual(first.capabilities.find(({ id }) => id === "manifest-stage-b-publication-worker-describe-images").probeIds, ["stage-b-publication-worker-image"]);
   assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecs:RegisterTaskDefinition"));
   assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecs:UpdateService"));
   assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecr:DescribeImages"));
@@ -277,9 +285,67 @@ test("backend recovery ECR probes are exact read-only repository calls", () => {
   ]);
 });
 
+test("release digest probes derive exact image IDs from the authenticated Stage B publication", () => {
+  const probes = RELEASE_READ_PROBES.filter(({ id }) => id.startsWith("stage-b-publication-"));
+  assert.deepEqual(probes.map(({ id }) => id), ["stage-b-publication-backend-image", "stage-b-publication-rls-canary-image", "stage-b-publication-rls-executor-image", "stage-b-publication-worker-image"]);
+  assert(probes.every(({ action, args }) => action === "ecr:DescribeImages" && args.includes("--image-ids") && !args.includes("--max-results")));
+  assert(probes.some(({ id, args }) => id === "stage-b-publication-worker-image" && args.includes("mscqr-worker") && args.includes("imageDigest={authenticated:worker}")));
+  assert.equal(RELEASE_READ_PROBES.some(({ action, args }) => action === "ecr:DescribeImages" && args.includes("mscqr-web")), false);
+});
+
+test("worker publication ECR denial blocks the release preflight before mutation", () => {
+  const report = runRelease({ outputDirectory: temp(), run: (args, probe) => {
+    if (probe.id === "stage-b-publication-worker-image") throw new Error("AccessDenied");
+    return allowed(args);
+  } });
+  assert.equal(report.status, "blocked");
+  assert.deepEqual(report.failed, [{ id: "stage-b-publication-worker-image", action: "ecr:DescribeImages", classification: "AccessDenied" }]);
+});
+
+test("release preflight proves the exact worker digest from the authenticated publication", () => {
+  const calls = [];
+  const report = runRelease({ outputDirectory: temp(), run: (args, probe) => { calls.push({ args, probe }); return allowed(args); } });
+  const worker = imageFixture.authorization.images.find(({ service }) => service === "worker");
+  const probe = calls.find(({ probe }) => probe.id === "stage-b-publication-worker-image");
+  assert.equal(report.status, "valid");
+  assert.deepEqual(probe.args.slice(0, 6), ["ecr", "describe-images", "--repository-name", "mscqr-worker", "--image-ids", `imageDigest=${worker.digest}`]);
+  assert.equal(probe.args.includes("--max-results"), false);
+});
+
+test("release preflight rejects missing, denied, and mismatched exact publication digests", () => {
+  for (const [label, failure] of [
+    ["ImageNotFound", () => { throw new Error("ImageNotFoundException"); }],
+    ["RepositoryNotFound", () => { throw new Error("RepositoryNotFoundException"); }],
+    ["AccessDenied", () => { throw new Error("AccessDeniedException"); }],
+    ["empty repository", () => JSON.stringify({ imageDetails: [] })],
+    ["other image only", () => JSON.stringify({ imageDetails: [{ registryId: "368992683803", repositoryName: "mscqr-worker", imageDigest: `sha256:${"9".repeat(64)}` }] })],
+    ["wrong repository", ({ digest }) => JSON.stringify({ imageDetails: [{ registryId: "368992683803", repositoryName: "mscqr-backend", imageDigest: digest }] })],
+  ]) {
+    const report = runRelease({ outputDirectory: temp(), run: (args, probe) => {
+      if (probe.id === "stage-b-publication-worker-image") return failure({ digest: args.at(-1).slice("imageDigest=".length) });
+      return allowed(args);
+    } });
+    assert.equal(report.status, "blocked", label);
+    assert.equal(report.failed.some(({ id }) => id === "stage-b-publication-worker-image"), true, label);
+  }
+});
+
+test("release preflight rejects absent, malformed, and substituted publication digests before AWS", () => {
+  for (const authorization of [
+    undefined,
+    { ...imageFixture.authorization, images: imageFixture.authorization.images.filter(({ service }) => service !== "worker") },
+    { ...imageFixture.authorization, imageEvidence: { ...imageFixture.authorization.imageEvidence, images: imageFixture.authorization.imageEvidence.images.map((image) => image.service === "worker" ? { ...image, digest: "malformed" } : image) } },
+    { ...imageFixture.authorization, imageEvidence: { ...imageFixture.authorization.imageEvidence, images: imageFixture.authorization.imageEvidence.images.map((image) => image.service === "worker" ? { ...image, digest: imageFixture.authorization.images.find(({ service }) => service === "backend").digest } : image) } },
+  ]) {
+    let calls = 0;
+    assert.throws(() => runReleaseReadPreflight({ authenticatedImageAuthorization: authorization, outputDirectory: temp(), run: () => { calls += 1; } }), /authenticated four-image publication|publication binding/);
+    assert.equal(calls, 0);
+  }
+});
+
 test("release preflight aggregates independent read denials and never simulates IAM", () => {
   const calls = []; const directory = temp();
-  const report = runReleaseReadPreflight({ outputDirectory: directory, run: (args, probe) => {
+  const report = runRelease({ outputDirectory: directory, run: (args, probe) => {
     calls.push(probe.action);
     if (["ecs:DescribeClusters", "rds:DescribeDBInstances"].includes(probe.action)) throw new Error("AccessDenied");
     return allowed(args);
@@ -292,14 +358,14 @@ test("release preflight aggregates independent read denials and never simulates 
 });
 
 test("backend recovery ECR denial blocks the release preflight before mutation", () => {
-  for (const deniedAction of ["ecr:DescribeImages", "ecr:DescribeRepositories"]) {
-    const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
-      if (probe.action === deniedAction) throw new Error("AccessDenied");
+  for (const [deniedId, deniedAction] of [["backend-health-recovery-images", "ecr:DescribeImages"], ["backend-health-recovery-repository", "ecr:DescribeRepositories"]]) {
+    const report = runRelease({ outputDirectory: temp(), run: (args, probe) => {
+      if (probe.id === deniedId) throw new Error("AccessDenied");
       return allowed(args);
     } });
     assert.equal(report.status, "blocked");
     assert.deepEqual(report.failed.filter(({ action }) => action === deniedAction), [{
-      id: deniedAction === "ecr:DescribeImages" ? "backend-health-recovery-images" : "backend-health-recovery-repository",
+      id: deniedId,
       action: deniedAction,
       classification: "AccessDenied",
     }]);
@@ -307,7 +373,7 @@ test("backend recovery ECR denial blocks the release preflight before mutation",
 });
 
 test("release preflight treats current AWS CLI no-policy errors as authenticated absence", () => {
-  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+  const report = runRelease({ outputDirectory: temp(), run: (args, probe) => {
     if (probe.action === "ecr:GetRepositoryPolicy") {
       const error = new Error("no repository policy");
       const repositoryName = args[args.indexOf("--repository-name") + 1];
@@ -321,7 +387,7 @@ test("release preflight treats current AWS CLI no-policy errors as authenticated
 });
 
 test("release preflight accepts the documented repository-scoped ECR policy without Resource", () => {
-  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+  const report = runRelease({ outputDirectory: temp(), run: (args, probe) => {
     if (probe.action === "ecr:GetRepositoryPolicy") {
       const repositoryName = args[args.indexOf("--repository-name") + 1];
       return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify(ECR_DOCUMENTED_NO_RESOURCE_POLICY) });
@@ -333,7 +399,7 @@ test("release preflight accepts the documented repository-scoped ECR policy with
 });
 
 test("release preflight accepts structurally valid ECR action wildcard policies", () => {
-  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+  const report = runRelease({ outputDirectory: temp(), run: (args, probe) => {
     if (probe.action === "ecr:GetRepositoryPolicy") {
       const repositoryName = args[args.indexOf("--repository-name") + 1];
       const policy = { Version: "2012-10-17", Statement: [
@@ -350,7 +416,7 @@ test("release preflight accepts structurally valid ECR action wildcard policies"
 
 test("release preflight rejects malformed successful ECR policy responses", () => {
   for (const [label, policy] of MALFORMED_ECR_REPOSITORY_POLICIES) {
-    const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+    const report = runRelease({ outputDirectory: temp(), run: (args, probe) => {
       if (probe.action === "ecr:GetRepositoryPolicy") {
         const repositoryName = args[args.indexOf("--repository-name") + 1];
         return JSON.stringify({ registryId: "368992683803", repositoryName, policyText: JSON.stringify(policy) });
@@ -367,7 +433,7 @@ test("active rollback discovery reads the exact deployment details", () => {
   const deploymentArn = "arn:aws:ecs:eu-west-2:368992683803:service-deployment/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/deployment";
   const targetRevisionArn = "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/target";
   const rollbackRevisionArn = "arn:aws:ecs:eu-west-2:368992683803:service-revision/mscqr-prod-euw2-main/mscqr-backend-servi-euw2/rollback";
-  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+  const report = runRelease({ outputDirectory: temp(), run: (args, probe) => {
     calls.push({ args, probe });
     if (probe.id === "backend-health-recovery-service-deployments") return JSON.stringify({ serviceDeployments: [{ serviceDeploymentArn: deploymentArn, status: "ROLLBACK_IN_PROGRESS" }] });
     if (probe.id === "backend-health-recovery-service-deployment-details") return JSON.stringify({ serviceDeployments: [{ serviceDeploymentArn: deploymentArn, targetServiceRevision: { arn: targetRevisionArn }, sourceServiceRevisions: [{ arn: rollbackRevisionArn }], rollback: { serviceRevisionArn: rollbackRevisionArn } }] });
@@ -382,7 +448,7 @@ test("active rollback discovery reads the exact deployment details", () => {
 
 test("complete release preflight is valid and has no skipped probes", () => {
   const directory = temp();
-  const report = runReleaseReadPreflight({ outputDirectory: directory, run: allowed });
+  const report = runRelease({ outputDirectory: directory, run: allowed });
   assert.equal(report.status, "valid");
   assert.deepEqual(report.failed, []);
   assert.deepEqual(report.skipped, []);
@@ -393,7 +459,7 @@ test("complete release preflight is valid and has no skipped probes", () => {
 
 test("release preflight blocks when authenticated Stage-A state cannot produce an identity", () => {
   const directory = temp();
-  const report = runReleaseReadPreflight({ outputDirectory: directory, run: (args, probe) => {
+  const report = runRelease({ outputDirectory: directory, run: (args, probe) => {
     if (probe.id === "stage-a-state") { fs.writeFileSync(args.at(-1), JSON.stringify({ lineage: "wrong", serial: 35 }), { mode: 0o600 }); return ""; }
     return allowed(args);
   } });
@@ -405,19 +471,19 @@ test("release preflight blocks when authenticated Stage-A state cannot produce a
 
 test("wrong caller and region fail closed", () => {
   const directory = temp();
-  const wrongCaller = runReleaseReadPreflight({ outputDirectory: directory, run: (args) => args[0] === "sts" ? JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" }) : allowed(args) });
+  const wrongCaller = runRelease({ outputDirectory: directory, run: (args) => args[0] === "sts" ? JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" }) : allowed(args) });
   assert.equal(wrongCaller.status, "blocked");
   assert.equal(wrongCaller.failed[0].id, "caller");
   assert.equal(wrongCaller.stageAStateIdentityPath, null);
   assert.equal(fs.existsSync(path.join(directory, "stage-a-state-identity.json")), false);
-  assert.throws(() => runReleaseReadPreflight({ outputDirectory: temp(), region: "us-east-1", run: allowed }), /region/);
+  assert.throws(() => runRelease({ outputDirectory: temp(), region: "us-east-1", run: allowed }), /region/);
 });
 
 test("failed preflight removes a stale Stage-A identity instead of preserving it", () => {
   const directory = temp();
   const identityPath = path.join(directory, "stage-a-state-identity.json");
   fs.writeFileSync(identityPath, JSON.stringify({ stateSha256: "f".repeat(64) }), { mode: 0o600 });
-  const report = runReleaseReadPreflight({ outputDirectory: directory, run: (args, probe) => {
+  const report = runRelease({ outputDirectory: directory, run: (args, probe) => {
     if (probe.id === "stage-a-cluster") throw new Error("AccessDenied");
     return allowed(args);
   } });
@@ -454,7 +520,7 @@ test("administrator preflight binds live temporary-KMS absence evidence to prote
     caller: () => caller,
     verify: () => true,
     readProtectedMainCheckout: () => ({ toolingSha: protectedSourceSha, currentHead: protectedSourceSha, originMainHead: protectedSourceSha, porcelainStatus: "" }),
-    releasePreflight: () => { releaseReads += 1; return { schemaVersion: 1, caller, account: "368992683803", region: "eu-west-2", requiredReads: {}, failed: [], skipped: [], status: "valid" }; },
+    releasePreflight: ({ authenticatedImageAuthorization }) => { releaseReads += 1; assert.equal(authenticatedImageAuthorization.authorizationSha256, imageFixture.authorization.authorizationSha256); return { schemaVersion: 1, caller, account: "368992683803", region: "eu-west-2", requiredReads: {}, failed: [], skipped: [], status: "valid" }; },
     continueReadiness: () => ({ backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true }), validateCapabilityGraph: () => admin.capabilityGraph,
   });
   assert.equal(release.status, "ready-for-plan"); assert.equal(releaseReads, 1);

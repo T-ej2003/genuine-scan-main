@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RELEASE_READ_PROBES } from "./production-green-stage-b-identity-capabilities.mjs";
+import { RELEASE_DIGEST_VERIFICATION_BINDINGS, RELEASE_READ_PROBES } from "./production-green-stage-b-identity-capabilities.mjs";
 import { PRODUCTION_ACTIVATION_LIFECYCLE, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { RELEASE_POLICY_SOURCES, canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS } from "./stage-b-evidence-freshness.mjs";
@@ -450,6 +450,12 @@ export function buildStageBDeploymentCapabilityGraph() {
   const manifest = readJson(manifestPath); const policies = sourcePolicies(); const probesByAction = new Map();
   assertProductionReleaseOidcSourceContract(manifest);
   for (const probe of RELEASE_READ_PROBES) probesByAction.set(probe.action, [...(probesByAction.get(probe.action) || []), probe.id]);
+  const probeIdsFor = (entry) => (probesByAction.get(entry.action) || []).filter((id) => {
+    if (entry.action !== "ecr:DescribeImages") return true;
+    const args = RELEASE_READ_PROBES.find((probe) => probe.id === id)?.args || [];
+    const repository = args[args.indexOf("--repository-name") + 1];
+    return entry.resources.some((resource) => resource.endsWith(`:repository/${repository}`));
+  });
   for (const probe of [
     { id: "audit-service-details", action: "ecs:DescribeServices" },
     { id: "audit-task-details", action: "ecs:DescribeTasks" },
@@ -471,7 +477,7 @@ export function buildStageBDeploymentCapabilityGraph() {
     identity: forbidden ? "ADMINISTRATOR" : "RELEASE_DEPLOYER", executor: forbidden ? "iam-simulator" : ["recovery", "recovery-read"].includes(entry.phase) ? "aws-cli" : "terraform-or-aws-cli", sourceFile: manifestPath,
     sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: classification(entry, forbidden),
     probe: forbidden ? "administrator-simulation" : probesByAction.has(entry.action) ? "direct" : entry.phase === "apply" ? "plan-derived-simulation" : "administrator-simulation",
-    probeIds: probesByAction.get(entry.action) || [], policy: authority(entry, forbidden, policies), required: true, mutation: ["apply", "recovery"].includes(entry.phase) || forbidden,
+    probeIds: probeIdsFor(entry), policy: authority(entry, forbidden, policies), required: true, mutation: ["apply", "recovery"].includes(entry.phase) || forbidden,
   })));
   const checkerCapabilities = manifest.checkerRequired.map((entry) => ({
     id: `checker-${entry.id}`, phase: "approval-publication", identity: "INDEPENDENT_CHECKER", executor: "aws-cli", sourceFile: manifestPath,
@@ -640,6 +646,11 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
     if (!capability || capability.phase !== "stage-a-production-artifacts-state-reconciliation" || capability.identity !== "RELEASE_DEPLOYER" || capability.executor !== "terraform" || capability.action !== action || JSON.stringify(capability.resources) !== JSON.stringify(resources) || capability.mutation !== mutation || capability.policy?.sourceFile !== stageAReleaseS3ContractPath || capability.policy?.sid !== sid) throw new Error("Stage-A reconciliation Terraform backend capability boundary is not exact.");
   }
   const graphActions = new Set(graph.capabilities.map(({ action }) => action));
+  for (const { service, repository } of RELEASE_DIGEST_VERIFICATION_BINDINGS) {
+    const probe = RELEASE_READ_PROBES.find(({ id }) => id === `stage-b-publication-${service}-image`);
+    const expectedArgs = ["ecr", "describe-images", "--repository-name", repository, "--image-ids", `imageDigest={authenticated:${service}}`];
+    if (probe?.action !== "ecr:DescribeImages" || JSON.stringify(probe.args) !== JSON.stringify(expectedArgs)) throw new Error(`Release publication digest probe is not exact for ${service}.`);
+  }
   for (const probe of RELEASE_READ_PROBES) if (!graphActions.has(probe.action)) throw new Error(`Release probe is absent from capability graph: ${probe.id}.`);
   assertStageBAwsCallCoverage(graph, graph.sourceScan);
   return { phases: graph.phases.length, capabilities: graph.capabilities.length, uniqueActions: graphActions.size, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 };
