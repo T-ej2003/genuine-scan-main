@@ -647,7 +647,7 @@ test("one-time root bootstrap is exact, resumable, and ambiguity never advances"
   };
   const result = installBootstrapRole({ run, authorization, sourceSha, now });
   assert.deepEqual(result, { status: "COMPLETE", createRoleCount: 1, putRolePolicyCount: 1, recovered: false });
-  assert.deepEqual(installBootstrapRole({ run, authorization, sourceSha, now }), { status: "COMPLETE", createRoleCount: 0, putRolePolicyCount: 0, recovered: false });
+  assert.throws(() => installBootstrapRole({ run, authorization, sourceSha, now }), /predecessor changed/);
   assert.equal(calls.filter((call) => call === "create-role").length, 1);
   assert.equal(calls.filter((call) => call === "put-role-policy").length, 1);
 
@@ -663,14 +663,15 @@ test("one-time root bootstrap is exact, resumable, and ambiguity never advances"
 
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-bootstrap-result-"));
   const resultPath = path.join(directory, "result.json");
+  const completeAuthorization = createBootstrapAuthorization({ sourceSha, preparation: createBootstrapPreparation({ sourceSha, predecessor: discoverBootstrapRole({ run }) }), approval: bootstrapApproval, authorizedAt: now.toISOString() });
   const cliResult = runBootstrapCli(["--execute", "--source-sha", sourceSha, "--authorization-workflow-run-id", "200", "--authorization-workflow-run-attempt", "1", "--admin-profile", "mscqr-production-root", "--result", resultPath], {
     exec: (_command, args) => args[0] === "status" ? "" : sourceSha,
-    resolveAuthorization: () => authorization,
+    resolveAuthorization: () => completeAuthorization,
     run,
     now,
   });
   assert.equal(cliResult.status, "COMPLETE");
-  assert.equal(JSON.parse(fs.readFileSync(resultPath, "utf8")).authorizationSha256, authorization.authorizationSha256);
+  assert.equal(JSON.parse(fs.readFileSync(resultPath, "utf8")).authorizationSha256, completeAuthorization.authorizationSha256);
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
@@ -723,6 +724,40 @@ test("bootstrap accepts only both exact historical predecessors and binds author
     (policy) => { policy.Statement.push({ Sid: "Unexpected", Effect: "Allow", Action: "iam:*", Resource: "*" }); },
     (policy) => { policy.Statement = policy.Statement.filter(({ Sid }) => Sid !== "ReadExactBackendObjects"); },
   ]) { inline = structuredClone(generation1); mutate(inline); assert.throws(() => discoverBootstrapRole({ run }), /not exact/); }
+});
+
+test("bootstrap prepares and replays EXACT_COMPLETE only as the exact zero-write state", () => {
+  const trustPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.trustPath, "utf8"));
+  const desired = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
+  const generation2 = structuredClone(desired); generation2.Statement = generation2.Statement.filter(({ Sid }) => !["ReadExactProductionArtifactsBucketPolicy", "ReadOwnExactBootstrapInlinePolicy"].includes(Sid));
+  let inline = desired; let puts = 0;
+  const run = (args) => {
+    if (args[0] === "sts") return JSON.stringify({ Arn: INSTALLATION_BOOTSTRAP.administratorArn });
+    if (args[1] === "get-role") return JSON.stringify({ Role: { Arn: INSTALLATION_BOOTSTRAP.roleArn, RoleName: INSTALLATION_BOOTSTRAP.roleName, Path: "/", Description: INSTALLATION_BOOTSTRAP.roleDescription, MaxSessionDuration: 3600, AssumeRolePolicyDocument: trustPolicy, Tags: Object.entries(INSTALLATION_BOOTSTRAP.tags).map(([Key, Value]) => ({ Key, Value })) } });
+    if (args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: [] });
+    if (args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: [INSTALLATION_BOOTSTRAP.inlinePolicyName] });
+    if (args[1] === "get-role-policy") return JSON.stringify({ PolicyDocument: inline });
+    if (args[1] === "put-role-policy") { puts += 1; inline = desired; return ""; }
+    throw new Error(`unexpected bootstrap call ${args.join(" ")}`);
+  };
+  const complete = discoverBootstrapRole({ run });
+  assert.equal(complete.classification, "EXACT_COMPLETE");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-bootstrap-complete-preparation-"));
+  const preparationPath = path.join(directory, "preparation.json");
+  const preparedByCli = runBootstrapCli(["--prepare", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--output", preparationPath], { exec: (_command, args) => args[0] === "status" ? "" : sourceSha, run });
+  assert.deepEqual(preparedByCli.predecessorClassification, "EXACT_COMPLETE");
+  assert.equal(JSON.parse(fs.readFileSync(preparationPath, "utf8")).predecessorPolicySha256, complete.predecessorPolicySha256);
+  fs.rmSync(directory, { recursive: true, force: true });
+  const completeAuthorization = createBootstrapAuthorization({ sourceSha, preparation: createBootstrapPreparation({ sourceSha, predecessor: complete }), approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  assert.deepEqual(completeAuthorization.maxAwsMutations, {});
+  assert.deepEqual(installBootstrapRole({ run, authorization: completeAuthorization, sourceSha, now }), { status: "COMPLETE", createRoleCount: 0, putRolePolicyCount: 0, recovered: false });
+  assert.equal(puts, 0);
+  inline = generation2;
+  assert.throws(() => installBootstrapRole({ run, authorization: completeAuthorization, sourceSha, now }), /predecessor changed/);
+  const generation2Authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation("EXACT_PREDECESSOR_GENERATION_2", "da875e515ee4139d05180cf6bebbe51c4b7eb95ae4185e47a4e4c5df6b07a612"), approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  inline = desired;
+  assert.throws(() => installBootstrapRole({ run, authorization: generation2Authorization, sourceSha, now }), /predecessor changed/);
+  assert.equal(puts, 0);
 });
 
 test("root bootstrap accepts only canonical GitHub run, approval, and artifact provenance", () => {
@@ -805,6 +840,15 @@ test("bootstrap authorization creates its decoded preparation privately in the c
   const workflow = fs.readFileSync(".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "utf8");
   assert.match(workflow, /set -euo pipefail\n\s+umask 077\n\s+workdir=.*initial-activation-bootstrap[\s\S]*base64 --decode > "\$workdir\/preparation\.json"/);
   assert.match(workflow, /--preparation "\$RUNNER_TEMP\/initial-activation-bootstrap\/preparation\.json"/);
+});
+
+test("bootstrap runbook documents the required prepare-to-authorize workflow contract", () => {
+  const runbook = fs.readFileSync("documents/ops/iam/MSCQR_PRODUCTION_INITIAL_ACTIVATION_RECONCILER_BOOTSTRAP.md", "utf8");
+  const workflow = fs.readFileSync(".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "utf8");
+  const requiredInputs = [...workflow.matchAll(/^\s{6}(\w+): \{ description: .*required: true,/gm)].map((match) => match[1]);
+  assert.deepEqual(requiredInputs, ["source_sha", "preparation_base64", "preparation_sha256"]);
+  assert.match(runbook, /production:initial-activation-reconciler:bootstrap -- --prepare/);
+  for (const input of requiredInputs) assert.match(runbook, new RegExp(`-f ${input}=`));
 });
 
 test("terraform show failure always removes the unique render copy", () => {

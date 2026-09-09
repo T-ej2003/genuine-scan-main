@@ -23,6 +23,7 @@ const exactFields = (value, names, label) => {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== [...names].sort().join(",")) throw new Error(`${label} fields are not exact.`);
 };
 const bootstrapPermissions = () => readSourceJson(INSTALLATION_BOOTSTRAP.permissionsPath);
+const bootstrapPermissionsSha256 = () => canonicalSha256(bootstrapPermissions());
 const bootstrapPermissionsPredecessors = () => {
   const desired = bootstrapPermissions();
   const exact = (generation, omittedSids, sha256) => {
@@ -66,11 +67,12 @@ const PREPARATION_FIELDS = new Set(["schemaVersion", "kind", "operation", "sourc
 const AUTH_FIELDS = new Set(["schemaVersion", "kind", "operation", "repository", "environment", "sourceSha", "administratorArn", "roleArn", "roleName", "inlinePolicyName", "sourceHashes", "maxAwsMutations", "preparation", "preparationSha256", "approval", "approvalSha256", "authorizedAt", "authorizationSha256"]);
 
 export function createBootstrapPreparation({ sourceSha, predecessor } = {}) {
-  if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !predecessor || !["ABSENT", "EXACT_PARTIAL", "EXACT_PREDECESSOR_GENERATION_1", "EXACT_PREDECESSOR_GENERATION_2"].includes(predecessor.classification)) throw new Error("Bootstrap preparation predecessor is invalid.");
+  if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !predecessor || !["ABSENT", "EXACT_PARTIAL", "EXACT_PREDECESSOR_GENERATION_1", "EXACT_PREDECESSOR_GENERATION_2", "EXACT_COMPLETE"].includes(predecessor.classification)) throw new Error("Bootstrap preparation predecessor is invalid.");
   const policySha256 = predecessor.predecessorPolicySha256 || null;
-  if ((predecessor.classification.startsWith("EXACT_PREDECESSOR_") && !/^[a-f0-9]{64}$/.test(policySha256 || "")) || (!predecessor.classification.startsWith("EXACT_PREDECESSOR_") && policySha256 !== null)) throw new Error("Bootstrap preparation predecessor binding is invalid.");
+  const policyBound = predecessor.classification.startsWith("EXACT_PREDECESSOR_") || predecessor.classification === "EXACT_COMPLETE";
+  if ((policyBound && !/^[a-f0-9]{64}$/.test(policySha256 || "")) || (!policyBound && policySha256 !== null)) throw new Error("Bootstrap preparation predecessor binding is invalid.");
   const expected = predecessor.classification.startsWith("EXACT_PREDECESSOR_") && bootstrapPermissionsPredecessors().find(({ generation }) => predecessor.classification === `EXACT_PREDECESSOR_${generation}`);
-  if (expected && policySha256 !== expected.sha256) throw new Error("Bootstrap preparation predecessor generation is not exact.");
+  if ((expected && policySha256 !== expected.sha256) || (predecessor.classification === "EXACT_COMPLETE" && policySha256 !== bootstrapPermissionsSha256())) throw new Error("Bootstrap preparation predecessor generation is not exact.");
   const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_BOOTSTRAP_PREPARATION", operation: INSTALLATION_BOOTSTRAP.operation, sourceSha, roleArn: INSTALLATION_BOOTSTRAP.roleArn, inlinePolicyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, sourceHashes: bootstrapSourceHashes(), predecessorClassification: predecessor.classification, predecessorPolicySha256: policySha256 };
   return Object.freeze({ ...body, preparationSha256: canonicalSha256(body) });
 }
@@ -84,15 +86,18 @@ export function assertBootstrapPreparation(value, { sourceSha } = {}) {
 export function createBootstrapAuthorization({ sourceSha, approval, preparation, authorizedAt = new Date().toISOString() } = {}) {
   const prepared = assertBootstrapPreparation(preparation, { sourceSha });
   assertProductionEnvironmentApprovalEvidence(approval, { sourceSha, repository: INSTALLATION_BOOTSTRAP.repository, environment: INSTALLATION_BOOTSTRAP.environment, workflowRef: INSTALLATION_BOOTSTRAP.workflowRef, eventName: "workflow_dispatch", workflowRunId: approval?.workflowRunId, workflowRunAttempt: approval?.workflowRunAttempt, executionActor: approval?.executionActor, githubActions: "true", now: new Date(authorizedAt) });
-  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_BOOTSTRAP_AUTHORIZATION", operation: INSTALLATION_BOOTSTRAP.operation, repository: INSTALLATION_BOOTSTRAP.repository, environment: INSTALLATION_BOOTSTRAP.environment, sourceSha, administratorArn: INSTALLATION_BOOTSTRAP.administratorArn, roleArn: INSTALLATION_BOOTSTRAP.roleArn, roleName: INSTALLATION_BOOTSTRAP.roleName, inlinePolicyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, sourceHashes: bootstrapSourceHashes(), maxAwsMutations: INSTALLATION_BOOTSTRAP.maxAwsMutations, preparation: prepared, preparationSha256: prepared.preparationSha256, approval, approvalSha256: approval.evidenceSha256, authorizedAt };
+  const maxAwsMutations = prepared.predecessorClassification === "EXACT_COMPLETE" ? {} : INSTALLATION_BOOTSTRAP.maxAwsMutations;
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_BOOTSTRAP_AUTHORIZATION", operation: INSTALLATION_BOOTSTRAP.operation, repository: INSTALLATION_BOOTSTRAP.repository, environment: INSTALLATION_BOOTSTRAP.environment, sourceSha, administratorArn: INSTALLATION_BOOTSTRAP.administratorArn, roleArn: INSTALLATION_BOOTSTRAP.roleArn, roleName: INSTALLATION_BOOTSTRAP.roleName, inlinePolicyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, sourceHashes: bootstrapSourceHashes(), maxAwsMutations, preparation: prepared, preparationSha256: prepared.preparationSha256, approval, approvalSha256: approval.evidenceSha256, authorizedAt };
   return Object.freeze({ ...body, authorizationSha256: canonicalSha256(body) });
 }
 
 export function assertBootstrapAuthorization(value, { sourceSha, now = new Date() } = {}) {
   exactFields(value, AUTH_FIELDS, "Bootstrap authorization");
   const { authorizationSha256, ...body } = value;
-  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_BOOTSTRAP_AUTHORIZATION" || value.operation !== INSTALLATION_BOOTSTRAP.operation || value.repository !== INSTALLATION_BOOTSTRAP.repository || value.environment !== INSTALLATION_BOOTSTRAP.environment || value.sourceSha !== sourceSha || value.administratorArn !== INSTALLATION_BOOTSTRAP.administratorArn || value.roleArn !== INSTALLATION_BOOTSTRAP.roleArn || value.roleName !== INSTALLATION_BOOTSTRAP.roleName || value.inlinePolicyName !== INSTALLATION_BOOTSTRAP.inlinePolicyName || canonicalJson(value.sourceHashes) !== canonicalJson(bootstrapSourceHashes()) || canonicalJson(value.maxAwsMutations) !== canonicalJson(INSTALLATION_BOOTSTRAP.maxAwsMutations) || value.preparationSha256 !== value.preparation?.preparationSha256 || canonicalSha256(body) !== authorizationSha256) throw new Error("Bootstrap authorization binding is invalid.");
-  assertBootstrapPreparation(value.preparation, { sourceSha });
+  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_BOOTSTRAP_AUTHORIZATION" || value.operation !== INSTALLATION_BOOTSTRAP.operation || value.repository !== INSTALLATION_BOOTSTRAP.repository || value.environment !== INSTALLATION_BOOTSTRAP.environment || value.sourceSha !== sourceSha || value.administratorArn !== INSTALLATION_BOOTSTRAP.administratorArn || value.roleArn !== INSTALLATION_BOOTSTRAP.roleArn || value.roleName !== INSTALLATION_BOOTSTRAP.roleName || value.inlinePolicyName !== INSTALLATION_BOOTSTRAP.inlinePolicyName || canonicalJson(value.sourceHashes) !== canonicalJson(bootstrapSourceHashes()) || value.preparationSha256 !== value.preparation?.preparationSha256 || canonicalSha256(body) !== authorizationSha256) throw new Error("Bootstrap authorization binding is invalid.");
+  const prepared = assertBootstrapPreparation(value.preparation, { sourceSha });
+  const maxAwsMutations = prepared.predecessorClassification === "EXACT_COMPLETE" ? {} : INSTALLATION_BOOTSTRAP.maxAwsMutations;
+  if (canonicalJson(value.maxAwsMutations) !== canonicalJson(maxAwsMutations)) throw new Error("Bootstrap authorization mutation envelope is invalid.");
   assertProductionEnvironmentApprovalIdentity(value.approval, { sourceSha, repository: INSTALLATION_BOOTSTRAP.repository });
   assertProductionEnvironmentApprovalFreshness(value.approval, { now });
   if (value.approval.workflowRef !== INSTALLATION_BOOTSTRAP.workflowRef) throw new Error("Bootstrap authorization workflow binding is invalid.");
@@ -126,7 +131,7 @@ export function discoverBootstrapRole({ run } = {}) {
   if (inline.length === 0) return Object.freeze({ classification: "EXACT_PARTIAL" });
   const document = runJson(run, ["iam", "get-role-policy", "--role-name", INSTALLATION_BOOTSTRAP.roleName, "--policy-name", INSTALLATION_BOOTSTRAP.inlinePolicyName]).PolicyDocument;
   const normalized = normalizeIamPolicyDocument(document, "bootstrap permissions policy");
-  if (canonicalJson(normalized) === canonicalJson(bootstrapPermissions())) return Object.freeze({ classification: "EXACT_COMPLETE" });
+  if (canonicalJson(normalized) === canonicalJson(bootstrapPermissions())) return Object.freeze({ classification: "EXACT_COMPLETE", predecessorPolicySha256: bootstrapPermissionsSha256() });
   const predecessor = bootstrapPermissionsPredecessors().find(({ document }) => canonicalJson(normalized) === canonicalJson(document));
   if (predecessor) return Object.freeze({ classification: `EXACT_PREDECESSOR_${predecessor.generation}`, predecessorPolicySha256: predecessor.sha256 });
   throw new Error("Bootstrap role permissions are not exact.");
@@ -166,7 +171,11 @@ export function installBootstrapRole({ run, authorization, sourceSha, now = new 
   const identity = runJson(run, ["sts", "get-caller-identity"]);
   if (identity?.Arn !== INSTALLATION_BOOTSTRAP.administratorArn) throw new Error("Bootstrap installation requires the exact root administrator.");
   let before = discoverBootstrapRole({ run });
-  if (before.classification === "EXACT_COMPLETE") return Object.freeze({ status: "COMPLETE", createRoleCount: 0, putRolePolicyCount: 0, recovered: false });
+  const preparedPredecessorMatches = () => before.classification === authorization.preparation.predecessorClassification && (before.predecessorPolicySha256 || null) === authorization.preparation.predecessorPolicySha256;
+  if (before.classification === "EXACT_COMPLETE") {
+    if (!preparedPredecessorMatches()) throw new Error("Bootstrap role predecessor changed after authorization.");
+    return Object.freeze({ status: "COMPLETE", createRoleCount: 0, putRolePolicyCount: 0, recovered: false });
+  }
   let createRoleCount = 0;
   let putRolePolicyCount = 0;
   if (before.classification === "ABSENT") {
@@ -182,8 +191,7 @@ export function installBootstrapRole({ run, authorization, sourceSha, now = new 
     before = discoverBootstrapRole({ run });
     if (before.classification !== "EXACT_PARTIAL") throw new Error("Bootstrap role create did not converge to the exact partial state.");
   } else if (before.classification !== "EXACT_PARTIAL" && !before.classification.startsWith("EXACT_PREDECESSOR_")) throw new Error("Bootstrap role predecessor is not eligible for the exact policy update.");
-  const preparedPredecessorMatches = before.classification === authorization.preparation.predecessorClassification && (before.predecessorPolicySha256 || null) === authorization.preparation.predecessorPolicySha256;
-  if (!preparedPredecessorMatches && !(authorization.preparation.predecessorClassification === "ABSENT" && before.classification === "EXACT_PARTIAL")) throw new Error("Bootstrap role predecessor changed after authorization.");
+  if (!preparedPredecessorMatches() && !(authorization.preparation.predecessorClassification === "ABSENT" && before.classification === "EXACT_PARTIAL")) throw new Error("Bootstrap role predecessor changed after authorization.");
   try {
     run(["iam", "put-role-policy", "--role-name", INSTALLATION_BOOTSTRAP.roleName, "--policy-name", INSTALLATION_BOOTSTRAP.inlinePolicyName, "--policy-document", `file://${path.join(root, INSTALLATION_BOOTSTRAP.permissionsPath)}`, "--no-cli-pager"]);
     putRolePolicyCount = 1;
@@ -204,7 +212,7 @@ export function runBootstrapCli(argv = process.argv.slice(2), deps = {}) {
     const run = deps.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(argv, "--admin-profile") });
     if (runJson(run, ["sts", "get-caller-identity"]).Arn !== INSTALLATION_BOOTSTRAP.administratorArn) throw new Error("Bootstrap preparation requires the exact root administrator.");
     const predecessor = discoverBootstrapRole({ run });
-    if (!["ABSENT", "EXACT_PARTIAL", "EXACT_PREDECESSOR_GENERATION_1", "EXACT_PREDECESSOR_GENERATION_2"].includes(predecessor.classification)) throw new Error("Bootstrap preparation predecessor is not eligible.");
+    if (!["ABSENT", "EXACT_PARTIAL", "EXACT_PREDECESSOR_GENERATION_1", "EXACT_PREDECESSOR_GENERATION_2", "EXACT_COMPLETE"].includes(predecessor.classification)) throw new Error("Bootstrap preparation predecessor is not eligible.");
     const preparation = createBootstrapPreparation({ sourceSha, predecessor });
     const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--output")), repositoryRoot: root, label: "Bootstrap preparation", allowExisting: false });
     ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, create: true, label: "Bootstrap preparation directory" });

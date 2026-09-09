@@ -10,10 +10,11 @@ by the bootstrap workflow, so its immutable GitHub OIDC subject cannot be
 minted by unrelated production jobs.
 
 The bootstrap role is not an administrator. Its IAM writes are limited to the
-exact reconciler role, exact reconciler managed policy, and their exact
-attachment. Its S3 access is limited to that root's state and native lockfile.
-It cannot change itself, assume another role, modify Stage A or Stage B, publish
-images, or call `CreatePolicyVersion` on the target lifecycle policy.
+exact reconciler role, exact reconciler managed policy, their exact attachment,
+and the exact target-policy `CreatePolicyVersion` required by the separately
+governed reconciler upgrade. Its S3 access is limited to that root's state and
+native lockfile. It cannot change itself, assume another role, modify Stage A
+or Stage B, or publish images.
 
 The root transition is convergent: `CreateRole` is followed by exact readback;
 an ambiguous create never advances. The only resumable partial state is the
@@ -34,10 +35,46 @@ while production environment approval, protected source binding, the shared
 workflow queue, exact Terraform state locking, and plan validation remain
 mandatory.
 
-After this source is merged, dispatch
-`authorize-production-initial-activation-policy-reconciler-bootstrap.yml` for
-the exact protected-main SHA. The independently authenticated local root
-executor then consumes only that run and attempt:
+## Prepare and authorize
+
+Start from an exact, clean protected-main checkout. Preparation is a local,
+root-authenticated read-only step; authorization is a separate GitHub
+protected-environment approval step. Neither performs an IAM mutation.
+
+```sh
+git fetch origin main
+test -z "$(git status --porcelain=v1 --untracked-files=all)"
+source_sha="$(git rev-parse HEAD)"
+test "$source_sha" = "$(git rev-parse origin/main)"
+workdir="$(mktemp -d /private/tmp/mscqr-bootstrap-preparation.XXXXXX)"
+chmod 700 "$workdir"
+
+npm run production:initial-activation-reconciler:bootstrap -- --prepare \
+  --source-sha "$source_sha" \
+  --admin-profile mscqr-production-root \
+  --output "$workdir/preparation.json"
+
+preparation_sha256="$(node -e 'const fs=require("fs"),crypto=require("crypto"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"))' "$workdir/preparation.json")"
+preparation_base64="$(base64 < "$workdir/preparation.json" | tr -d '\n')"
+
+gh workflow run authorize-production-initial-activation-policy-reconciler-bootstrap.yml \
+  --ref main \
+  -f source_sha="$source_sha" \
+  -f preparation_base64="$preparation_base64" \
+  -f preparation_sha256="$preparation_sha256"
+```
+
+`preparation_sha256` is the SHA-256 digest of the exact original preparation
+bytes. `preparation_base64` encodes those same bytes without changing them;
+the workflow decodes, hashes, and revalidates the bound preparation before it
+creates its authorization artifact. Wait for the required protected-environment
+human approval and successful authorization job. Do not execute the installer
+from this step.
+
+## Execute after authorization
+
+The independently authenticated local root executor consumes only the approved
+run and attempt:
 
 ```text
 npm run production:initial-activation-reconciler:bootstrap -- --execute \
