@@ -21,7 +21,9 @@ semantics. `A_PRIME` is `A` plus one `s3:ListBucket` Allow for the exact
 release-deployer role, exact production-artifacts bucket, and only
 `production-stage-a-production-artifacts-reconciliation/recovery/*`. The
 root-operated, source-bound `A -> A_PRIME` recovery uses the already readable
-root journal; it never needs the permission it installs. `A_PRIME -> B` then
+root journal only to authenticate an absent attempt. State A then requires the
+release-deployer to conditionally create that immutable attempt because its
+explicit write deny excludes every other principal. `A_PRIME -> B` then
 adds the ProviderReadOnly journal protections, including the reconciler's
 equally scoped absence probe. `B -> C` removes only the six obsolete
 InitialActivationLifecycle reservation statements. `C` retains both scoped
@@ -87,10 +89,11 @@ nonconditional writes, writes by every other principal, `DeleteObject`, and
 `DeleteObjectVersion`. No list permission, overwrite, or cross-Stage-B access
 is used.
 
-Before `P2` exists, the already-governed bucket-owner recovery principal writes
-only the signed attempt object with conditional create. After `P2`, the policy
-prevents that principal from writing or deleting journal objects; completion
-and reconciliation records use the release-deployer's narrow journal grant.
+The retained historical `P0` recovery uses the already-governed bucket-owner
+writer. In the current State-A bootstrap, root only reads the absent attempt;
+the release-deployer conditionally creates it. Root never writes a State-A
+reconciliation record. Completion and reconciliation records use the
+release-deployer's narrow journal grant.
 
 ## Immutable records
 

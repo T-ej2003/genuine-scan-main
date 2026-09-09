@@ -442,20 +442,20 @@ test("A-prime to B installs the ProviderReadOnly journal durability boundary onc
   assert.equal(policyWrites, 1);
 });
 
-test("A to A-prime uses the pre-existing root journal, then A-prime to B uses the scoped release journal", async () => {
+test("A to A-prime uses root only to authenticate absence and release to persist its immutable attempt", async () => {
   let livePolicy = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation(); let writes = 0;
-  const attempts = new Map(); const completions = new Map(); const rootReads = []; const releaseReads = [];
+  const attempts = new Map(); const completions = new Map(); const rootReads = []; const releaseReads = []; const events = []; let rootAttemptWrites = 0; let releaseAttemptWrites = 0; let rootCompletionWrites = 0; let releaseCompletionWrites = 0;
   const rootJournal = {
-    readRecoveryAttempt: (sha) => { rootReads.push(sha); return attempts.get(sha) && { bytes: attempts.get(sha) }; },
-    writeRecoveryAttempt: ({ recoveryAuthorizationSha256, bytes }) => { attempts.set(recoveryAuthorizationSha256, bytes); return { key: "root-attempt" }; },
+    readRecoveryAttempt: (sha) => { events.push("root-attempt-read"); rootReads.push(sha); return attempts.get(sha) && { bytes: attempts.get(sha) }; },
+    writeRecoveryAttempt: () => { rootAttemptWrites += 1; throw new Error("State A denies root bootstrap attempt persistence"); },
     readRecoveryCompletion: (sha) => completions.get(sha) && { bytes: completions.get(sha) },
-    writeRecoveryCompletion: ({ recoveryAuthorizationSha256, bytes }) => { completions.set(recoveryAuthorizationSha256, bytes); return { key: "completion" }; },
+    writeRecoveryCompletion: () => { rootCompletionWrites += 1; throw new Error("root must not write Stage-A recovery completion"); },
   };
   const releaseJournal = {
     readRecoveryAttempt: (sha) => { releaseReads.push(sha); return attempts.get(sha) && { bytes: attempts.get(sha) }; },
-    writeRecoveryAttempt: ({ recoveryAuthorizationSha256, bytes }) => { attempts.set(recoveryAuthorizationSha256, bytes); return { key: "release-attempt" }; },
-    readRecoveryCompletion: rootJournal.readRecoveryCompletion,
-    writeRecoveryCompletion: rootJournal.writeRecoveryCompletion,
+    writeRecoveryAttempt: ({ recoveryAuthorizationSha256, bytes }) => { events.push("release-attempt-write"); releaseAttemptWrites += 1; attempts.set(recoveryAuthorizationSha256, bytes); return { key: "release-attempt" }; },
+    readRecoveryCompletion: (sha) => completions.get(sha) && { bytes: completions.get(sha) },
+    writeRecoveryCompletion: ({ recoveryAuthorizationSha256, bytes }) => { releaseCompletionWrites += 1; completions.set(recoveryAuthorizationSha256, bytes); return { key: "release-completion" }; },
   };
   const rootRun = (args) => {
     if (args[1] === "get-caller-identity") return rootIdentity;
@@ -470,7 +470,7 @@ test("A to A-prime uses the pre-existing root journal, then A-prime to B uses th
     const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, workflowRunId), verificationRef: transition === bootstrapTransition ? "bootstrap" : "provider", governedExecutableManifestSha256, transition });
     await runStageAProductionArtifactsRecovery({ ...common, workflowRunId, workflowRunAttempt: "1", resolveAuthorization: () => ({ authorization }) });
   }
-  assert.equal(writes, 2); assert.equal(rootReads.length, 1); assert.equal(releaseReads.length, 1);
+  assert.equal(writes, 2); assert.equal(rootReads.length, 1); assert.equal(releaseReads.length, 1); assert.equal(rootAttemptWrites, 0); assert.equal(releaseAttemptWrites, 2); assert.equal(rootCompletionWrites, 0); assert.equal(releaseCompletionWrites, 2); assert.deepEqual(events.slice(0, 2), ["root-attempt-read", "release-attempt-write"]);
   assert.deepEqual(livePolicy, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection());
 });
 

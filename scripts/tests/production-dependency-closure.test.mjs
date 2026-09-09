@@ -121,7 +121,8 @@ test("Stage A production-artifacts mode closure is tuple-exact and omission-proo
     assert.throws(() => assertStageAProductionArtifactsCapabilityClosure(report.newAwsCalls, changed), /capability tuple is incomplete/);
   }
   const recoverySource = fs.readFileSync("scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "utf8");
-  assert.match(recoverySource, /const attemptJournal = historicalTransition \|\| bootstrapTransition \? rootRecoveryJournal : recoveryJournal/);
+  assert.match(recoverySource, /const attemptReader = historicalTransition \|\| bootstrapTransition \? rootRecoveryJournal : recoveryJournal/);
+  assert.match(recoverySource, /const attemptWriter = bootstrapTransition \? recoveryJournal : attemptReader/);
   assert.match(recoverySource, /const completionJournal = journal/);
   assert.match(recoverySource, /existingCompletionReader = predecessorLive \? rootRecoveryJournal : completionJournal/);
   assert.match(recoverySource, /recoveryJournal: createStageAProductionArtifactsJournal\(\{ run: releaseRun \}\)/);
