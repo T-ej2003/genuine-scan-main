@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "737964e144e989c21046e9b1fea3f75c73aea5b655ffbbc2974fab6c48b659e9",
+  "sourceContractSha256": "9ac266b2c8f383a106ef8e83ee3d14c1701b9c1a6fecc798077f5d475102c307",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -156,7 +156,7 @@
     },
     {
       "path": "infra/aws/terraform/production-green-stage-a/main.tf",
-      "sha256": "30db7e27c6b58a1bba7357a78ea8ebc85733518aa2c132eea2e79843e3d2c2aa"
+      "sha256": "ff4422515f8d8e3950eeb652be648be67c0cf304c28361f7af5d8d28fb9e42e2"
     },
     {
       "path": "infra/aws/terraform/production-green-stage-a/variables.tf",
@@ -204,7 +204,7 @@
     },
     {
       "path": "scripts/aws/production-green-stage-b-contract.mjs",
-      "sha256": "f3c0aa8688af4ccd6268b874f2df0a93ae087117833830baf39fc3d3420e20ec"
+      "sha256": "8733b3fb53502fc390d0a99bd2b4d49bfadad07bab59e3efcffbc70d60954bb8"
     },
     {
       "path": "scripts/aws/create-production-green-stage-b-approval.mjs",
@@ -224,7 +224,7 @@
     },
     {
       "path": "scripts/aws/production-credential-source-contract.mjs",
-      "sha256": "5cbd5c3620f0ee590e4ae33b99fe558564b97fea59658bf01d9d8ebeed939beb"
+      "sha256": "8020e2a47313c33bfa72837874b580e7f4fa0fd01624fab7a232bcbd937c9d56"
     },
     {
       "path": "scripts/aws/production-credential-source.sh",
@@ -336,7 +336,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:737964e144e989c21046e9b1fea3f75c73aea5b655ffbbc2974fab6c48b659e9",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:9ac266b2c8f383a106ef8e83ee3d14c1701b9c1a6fecc798077f5d475102c307",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

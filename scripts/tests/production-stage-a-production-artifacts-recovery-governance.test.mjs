@@ -29,7 +29,7 @@ import {
   stageAProductionArtifactsGovernedExecutableManifest,
   stageAProductionArtifactsGovernedExecutableManifestSha256,
 } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
-import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, createStageAProductionArtifactsReconciliationPrepareEvidence, currentStageAProductionArtifactsBucketPolicyTransition, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
+import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, createStageAProductionArtifactsReconciliationPrepareEvidence, currentStageAProductionArtifactsBucketPolicyTransition, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "../aws/production-stage-a-production-artifacts-journal.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { authorizeStageAProductionArtifactsReconciliation } from "../aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs";
@@ -58,8 +58,9 @@ const rebindApproval = (authorization, protectedEnvironmentApprovalEvidence) => 
 
 test("fresh recovery authorization binds the exact deployed-to-reservation policy transition", () => {
   const authorization = createRecoveryAuthorization({ sourceSha, preState, protectedEnvironmentApprovalEvidence: approval(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF), verificationRef: "reservation-transition", governedExecutableManifestSha256 });
-  assert.equal(authorization.predecessorPolicySha256, stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy()));
-  assert.equal(authorization.desiredPolicySha256, stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()));
+  const transition = currentStageAProductionArtifactsBucketPolicyTransition();
+  assert.equal(authorization.predecessorPolicySha256, transition.predecessorPolicySha256);
+  assert.equal(authorization.desiredPolicySha256, transition.desiredPolicySha256);
   assert.equal(authorization.expectedLivePolicySha256, authorization.predecessorPolicySha256);
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha, preState }));
 });

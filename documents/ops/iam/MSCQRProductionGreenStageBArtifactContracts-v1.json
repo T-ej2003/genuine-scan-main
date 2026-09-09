@@ -1377,6 +1377,65 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "provider-readonly-policy-reconciliation-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-provider-readonly-policy.mjs:runProviderReadonlyReconciliation --mode prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-provider-readonly-policy-reconciliation.yml",
+        "scripts/aws/authorize-production-provider-readonly-policy-reconciliation.mjs",
+        "scripts/aws/reconcile-production-provider-readonly-policy.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "provider-readonly-policy-reconciliation-preparation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "provider-readonly-policy-reconciliation-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-provider-readonly-policy-reconciliation.yml",
+      "consumers": [
+        ".github/workflows/execute-production-provider-readonly-policy-reconciliation.yml",
+        "scripts/aws/reconcile-production-provider-readonly-policy.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "provider-readonly-policy-reconciliation-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "provider-readonly-policy-reconciliation-result",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-provider-readonly-policy.mjs:runProviderReadonlyReconciliation --mode execute",
+      "consumers": [
+        ".github/workflows/execute-production-provider-readonly-policy-reconciliation.yml",
+        "documents/ops/iam/MSCQRProductionProviderReadOnly-reconciliation.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "provider-readonly-policy-reconciliation-result",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "backend-recovery-candidate",
       "kind": "file",
       "producer": "scripts/aws/prepare-production-backend-recovery-candidate.mjs:runCli",

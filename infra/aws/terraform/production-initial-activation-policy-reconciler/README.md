@@ -7,12 +7,19 @@ protected `production` environment. It has no MFA, user, release-deployer,
 Stage-A, Stage-B, image-publisher, self-installation, or policy-management
 capability.
 
-The runtime policy permits only the exact IAM reads required to authenticate the
-reviewed InitialActivationLifecycle target and one
-`iam:CreatePolicyVersion` action on that exact policy ARN. It does not grant
-`SetDefaultPolicyVersion`, version deletion, attachment, trust, role, or policy
-creation actions. PR #448 is migrated to this purpose-bound OIDC execution
-path.
+The runtime policy permits only the exact IAM reads and
+`iam:CreatePolicyVersion` actions required for two allowlisted targets:
+InitialActivationLifecycle and ProviderReadOnly. ProviderReadOnly replay state
+uses conditional writes under one exact artifact-bucket prefix. The role does
+not grant `SetDefaultPolicyVersion`, version deletion, attachment, trust, role,
+or policy creation actions, and neither entrypoint accepts an arbitrary policy
+ARN or document.
+
+An existing installation is upgraded only through the same protected
+bootstrap and saved-plan workflow: the bootstrap inline policy gains
+`iam:CreatePolicyVersion` solely on this reconciler policy, and the plan accepts
+only the exact predecessor-to-source policy update. Five-version state blocks
+before apply because no deletion rule exists.
 
 Installation is performed only by the protected production-environment workflow
 using the exact OIDC bootstrap role documented in

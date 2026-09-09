@@ -15,15 +15,13 @@ binds one root-operated `PutBucketPolicy` from `P0` directly to the final
 policy (`P2`). `P2` contains the existing rebaseline-evidence rules plus the
 isolated journal rules. There is no `P0 -> P1 -> P2` sequence.
 
-The reviewed reservation-retirement transition is the exact reverse from the
-policy containing the six historical `InitialActivationLifecycle` reservation
-statements to canonical `P2` without those statements. It is bound to
-predecessor SHA-256
-`0d5d20a784351f38712513252223fbdfaca52e4301bd00b5d0298882702842be` and
-target SHA-256
-`765e091f99ee56e186741aa2fd849d755dc19f0b668779801855105350db8ff3`.
-The resolver rejects partial removal, additional statement changes, and
-arbitrary bucket-policy replacements.
+The reviewed reservation-retirement transition is exact and composable:
+`A` (reservation-bearing) moves to `B` by adding the six ProviderReadOnly
+journal protections, then `B` moves to `C` by removing only the six obsolete
+`InitialActivationLifecycle` reservation statements. `C` retains every
+ProviderReadOnly protection and is its own exact-complete state. The resolver
+rejects partial removal, protection downgrade, additional statement changes,
+and arbitrary bucket-policy replacements.
 
 The recovery runner requires the exact clean protected checkout, authorization,
 state identity, and predecessor before it creates a root-attested conditional
@@ -53,10 +51,10 @@ On restart, a persisted attempt plus predecessor is not retry authority. Target
 plus authenticated attempt permits completion only; unexpected state fails closed.
 
 The outer lock and existing immutable journal are reused. No new object namespace,
-lock, principal, or authorization format is introduced. This change adds one exact
-reviewed reverse policy transition, from the reservation-bearing Stage-A policy to
-canonical policy without the six reservation statements. That transition remains
-dormant until the #448 reconciler runtime migration is complete. Existing
+lock, principal, or authorization format is introduced. The retirement transition
+begins only from the ProviderReadOnly-protected reservation-bearing policy and
+cannot produce an unprotected successor. It remains dormant until the #448
+reconciler runtime migration is complete. Existing
 refresh-only state reconciliation and normal no-op closure remain unchanged.
 Tests cover failure before/after marker persistence, lost response, failed readback,
 post-write process loss, repeated invocation, and mutation-only CLI retry settings.

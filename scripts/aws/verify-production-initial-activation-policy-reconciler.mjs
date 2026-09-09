@@ -52,10 +52,10 @@ export function assertInitialActivationReconcilerRoleMetadata(role) {
   return role;
 }
 
-export function assertInitialActivationReconcilerPolicyMetadata(policy, document) {
+export function assertInitialActivationReconcilerPolicyMetadata(policy, document, { expectedDocument = readJson(INITIAL_ACTIVATION_RECONCILER.permissionsPath) } = {}) {
   if (policy?.Arn !== INITIAL_ACTIVATION_RECONCILER.policyArn || policy?.PolicyName !== INITIAL_ACTIVATION_RECONCILER.policyName || policy?.Path !== INITIAL_ACTIVATION_RECONCILER.path || policy?.Description !== INITIAL_ACTIVATION_RECONCILER.policyDescription || !/^v[1-9][0-9]*$/.test(policy?.DefaultVersionId || "")) throw new Error("Initial-activation reconciler managed-policy source metadata is not exact.");
   if (policy?.PermissionsBoundaryUsageCount !== 0) throw new Error("Initial-activation reconciler managed-policy permissions-boundary usage is not zero.");
-  exactJson(decodeAwsDocument(document, "reconciler permissions policy"), readJson(INITIAL_ACTIVATION_RECONCILER.permissionsPath), "reconciler permissions policy");
+  exactJson(decodeAwsDocument(document, "reconciler permissions policy"), expectedDocument, "reconciler permissions policy");
   assertTags(policy.Tags, "Initial-activation reconciler managed policy");
   return policy;
 }

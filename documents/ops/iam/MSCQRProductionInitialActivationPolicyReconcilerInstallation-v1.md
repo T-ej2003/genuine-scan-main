@@ -27,6 +27,14 @@ with zero apply. An ambiguous apply is never retried; exact post-state and the
 canonical live verifier must both authenticate before completion evidence is
 written. Unexpected or partial ambiguous outcomes fail closed.
 
+For the reviewed exact policy update, completion additionally requires remote
+Terraform state to advance from the authenticated predecessor and to contain
+the exact role, policy, and attachment attributes from the authorized saved
+plan, including the target ARN and canonical desired policy document. Live IAM convergence with
+the predecessor still in Terraform state is classified as
+`LIVE_DESIRED_TERRAFORM_STATE_STALE`; it is not completion and never triggers a
+second policy mutation.
+
 The workflow bootstrap role has depth one. Its authorized local-root
 installer can create only that exact OIDC role and its fixed inline policy. The
 root transition is convergent and is documented in

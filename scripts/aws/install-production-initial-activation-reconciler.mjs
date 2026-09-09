@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { INSTALLATION, assertFreshInstallationAuthorization, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { INSTALLATION, assertFreshInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { discoverInstallationPredecessor, assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
 import { assertProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
 import { verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
@@ -22,9 +22,10 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   if (executionRoleArn !== INSTALLATION.executionRoleArn) throw new Error("Installation workflow role identity is not exact.");
   const semantics = assertInstallationPlan(planJson);
   if (canonicalJson(semantics) !== canonicalJson(preparation.planSemantics)) throw new Error("Rendered saved-plan semantics differ from the authorized preparation.");
-  if (livePredecessor !== "ABSENT" && livePredecessor !== "EXACT_PARTIAL" && livePredecessor !== "EXACT_COMPLETE") throw new Error("Installation live predecessor is not a supported exact state.");
+  if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor is not a supported exact state.");
   if (livePredecessor === "ABSENT" && semantics.resourceChangeCount !== INSTALLATION.expectedAddresses.length) throw new Error("First-install plan mutation scope is not exact.");
   if (livePredecessor === "EXACT_PARTIAL" && semantics.resourceChangeCount < 1) throw new Error("Partial-install plan mutation scope is not exact.");
+  if (livePredecessor === "EXACT_UPDATE" && (semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_policy.reconciler")) throw new Error("Policy-update installation scope is not exact.");
   if (livePredecessor !== preparation.livePredecessor || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(preparation.livePredecessorAddresses)) throw new Error("Installation live predecessor changed after preparation.");
   const beforeStateBytes = readState?.();
   const beforeState = stateIdentity(beforeStateBytes);
@@ -32,6 +33,7 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   if (livePredecessor === "EXACT_COMPLETE" && (!beforeState.stateExists || semantics.resourceChangeCount !== 0)) throw new Error("Exact-complete replay requires an authenticated state and no-op plan.");
   if (livePredecessor === "EXACT_COMPLETE") assertInstallationStateResources(beforeStateBytes);
   if (livePredecessor === "EXACT_PARTIAL") assertInstallationStateResources(beforeStateBytes, { requiredAddresses: livePredecessorAddresses });
+  if (livePredecessor === "EXACT_UPDATE") assertInstallationStateResources(beforeStateBytes);
   const output = assertStageBArtifactPath({ artifactPath: resultPath, repositoryRoot: root, label: "Installation result", allowExisting: false });
   ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, create: true, label: "Installation result directory" });
   if (livePredecessor === "EXACT_COMPLETE") {
@@ -50,14 +52,28 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
     // before returning a success status. Recover only by read-only verifier;
     // never retry the saved plan blindly.
     let recoveredState;
-    try { verifyInstalled(); recoveredState = assertInstallationStateResources(readState?.()); } catch { throw error; }
+    try {
+      verifyInstalled();
+      const recoveredStateBytes = readState?.();
+      recoveredState = livePredecessor === "EXACT_UPDATE"
+        ? assertInstallationAuthorizedPostState(recoveredStateBytes, { predecessorState: beforeState, planSemantics: semantics })
+        : assertInstallationStateResources(recoveredStateBytes);
+    } catch (recoveryError) {
+      if (livePredecessor === "EXACT_UPDATE") {
+        recoveryError.recoveryClassification ||= "UNEXPECTED_TERRAFORM_STATE_DRIFT";
+        throw recoveryError;
+      }
+      throw error;
+    }
     const recovered = { kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_RESULT", schemaVersion: 1, operation: INSTALLATION.operation, sourceSha, authorizationArtifactSha256: authorization.authorizationArtifactSha256, status: "COMPLETE", applyCount: 1, targetPolicyCreatePolicyVersionCount: 0, verifier: "PASS", state: recoveredState, completedAt: new Date().toISOString(), recoveredFromAmbiguousApply: true };
     writeStageBPrivateFilesAtomic({ repositoryRoot: root, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(recovered, null, 2)}\n`), label: "Installation result" }] });
     return Object.freeze(recovered);
   }
   verifyInstalled();
   const stateAfterBytes = readState?.();
-  const stateAfter = assertInstallationStateResources(stateAfterBytes);
+  const stateAfter = livePredecessor === "EXACT_UPDATE"
+    ? assertInstallationAuthorizedPostState(stateAfterBytes, { predecessorState: beforeState, planSemantics: semantics })
+    : assertInstallationStateResources(stateAfterBytes);
   const result = { kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_RESULT", schemaVersion: 1, operation: INSTALLATION.operation, sourceSha, authorizationArtifactSha256: authorization.authorizationArtifactSha256, status: "COMPLETE", applyCount: 1, targetPolicyCreatePolicyVersionCount: 0, verifier: "PASS", state: stateAfter, completedAt: new Date().toISOString() };
   writeStageBPrivateFilesAtomic({ repositoryRoot: root, files: [{ filePath: output, bytes: Buffer.from(`${JSON.stringify(result, null, 2)}\n`), label: "Installation result" }] });
   return Object.freeze(result);

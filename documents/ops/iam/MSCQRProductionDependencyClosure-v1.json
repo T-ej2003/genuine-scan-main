@@ -1595,6 +1595,253 @@
       "administratorPreflightPresent": true,
       "runtimePreflightPresent": true,
       "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "provider-readonly-reconciliation-identify",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "provider-readonly-reconciliation-identify-prepare",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "iam:GetPolicy",
+      "capabilityId": "provider-readonly-reconciliation-read-policy",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "iam:GetPolicy",
+      "capabilityId": "provider-readonly-reconciliation-read-policy-prepare",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "iam:GetPolicyVersion",
+      "capabilityId": "provider-readonly-reconciliation-read-policy-version",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "iam:GetPolicyVersion",
+      "capabilityId": "provider-readonly-reconciliation-read-policy-version-prepare",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "iam:ListPolicyVersions",
+      "capabilityId": "provider-readonly-reconciliation-list-policy-versions",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "iam:ListPolicyVersions",
+      "capabilityId": "provider-readonly-reconciliation-list-policy-versions-prepare",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "iam:ListEntitiesForPolicy",
+      "capabilityId": "provider-readonly-reconciliation-list-policy-entities",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "iam:ListEntitiesForPolicy",
+      "capabilityId": "provider-readonly-reconciliation-list-policy-entities-prepare",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "s3:GetObject",
+      "capabilityId": "provider-readonly-reconciliation-read-journal",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "s3:PutObject",
+      "capabilityId": "provider-readonly-reconciliation-write-journal",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "iam:CreatePolicyVersion",
+      "capabilityId": "provider-readonly-reconciliation-create-policy-version",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
     }
   ],
   "counters": {
@@ -1653,6 +1900,7 @@
   ],
   "modes": {
     "INITIAL_ACTIVATION_POLICY_RECONCILIATION": "PASS",
+    "PROVIDER_READONLY_POLICY_RECONCILIATION": "PASS",
     "NORMAL": "PASS",
     "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME": "PASS",
     "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY": "PASS",
@@ -1668,6 +1916,7 @@
     "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY": "the governed P0-to-P2 production-artifacts recovery uses its exact root/release journal, policy, lock, and attestation boundaries",
     "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION": "the independently authorized exact refresh-only plan uses its exact release journal, live-policy read, Stage-A state object, and canonical outer lock boundary",
     "INITIAL_ACTIVATION_POLICY_RECONCILIATION": "root performs read-only preparation; the purpose-bound INITIAL_ACTIVATION_RECONCILER GitHub Actions OIDC principal (arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler) publishes only the exact InitialActivationLifecycle managed-policy version after production environment approval",
+    "PROVIDER_READONLY_POLICY_RECONCILIATION": "root performs exact target read-only preparation; independently approved execution uses the allowlisted reconciler and conditional S3 journal to publish at most one exact ProviderReadOnly managed-policy version",
     "ROTATION_OVERLAP": "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
     "ROTATION_CLEANUP": "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
     "ROLLBACK_RECONCILIATION": "rollback viability uses immutable image/resource identity and performs no candidate registration",

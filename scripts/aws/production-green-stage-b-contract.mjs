@@ -61,8 +61,11 @@ export const PRODUCTION_ACTIVATION_LIFECYCLE = Object.freeze({
   stageAProductionArtifactsReconciliationArn: `arn:aws:s3:::${STAGE_B.receiptBucket}/production-stage-a-production-artifacts-reconciliation/*`,
   initialActivationPolicyReconciliationReservationPrefix: "production-initial-activation-lifecycle-policy-reconciliation/reservations/",
   initialActivationPolicyReconciliationReservationArn: `arn:aws:s3:::${STAGE_B.receiptBucket}/production-initial-activation-lifecycle-policy-reconciliation/reservations/*`,
+  providerReadonlyPolicyReconciliationPrefix: "production-provider-readonly-policy-reconciliation/",
+  providerReadonlyPolicyReconciliationArn: `arn:aws:s3:::${STAGE_B.receiptBucket}/production-provider-readonly-policy-reconciliation/*`,
   rootOperatorArn: "arn:aws:iam::368992683803:root",
   releaseRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+  initialActivationPolicyReconcilerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
 });
 
 export function assertStageBRuntimePlatform(value, { format = "either", label = "Stage B runtime platform" } = {}) {

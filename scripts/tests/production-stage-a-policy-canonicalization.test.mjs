@@ -6,6 +6,7 @@ import {
   buildStageAProductionArtifactsBucketPolicy,
   buildStageAProductionArtifactsBucketPolicyPredecessor,
   buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation,
+  buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection,
   buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation,
   canonicalizeStageAProductionArtifactsPolicy,
   resolveStageAProductionArtifactsBucketPolicyTransition,
@@ -28,15 +29,13 @@ test("Stage-A policy canonicalization preserves the historical desired hash and 
   assert.equal(canonicalizeStageAProductionArtifactsPolicy(live).Statement.length, desired.Statement.length);
 });
 
-test("reviewed reverse transition removes exactly the six obsolete reservation statements", () => {
-  const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+test("ProviderReadOnly-protected retirement removes exactly the six obsolete reservation statements", () => {
+  const predecessor = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
   const target = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
   const transition = resolveStageAProductionArtifactsBucketPolicyTransition({
     predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor),
     desiredPolicySha256: stageAProductionArtifactsPolicySha256(target),
   });
-  assert.equal(stageAProductionArtifactsPolicySha256(predecessor), "0d5d20a784351f38712513252223fbdfaca52e4301bd00b5d0298882702842be");
-  assert.equal(stageAProductionArtifactsPolicySha256(target), "765e091f99ee56e186741aa2fd849d755dc19f0b668779801855105350db8ff3");
   const targetSids = new Set(target.Statement.map(({ Sid }) => Sid));
   const removed = predecessor.Statement.filter(({ Sid }) => !targetSids.has(Sid)).map(({ Sid }) => Sid);
   assert.deepEqual(removed, [
@@ -51,10 +50,41 @@ test("reviewed reverse transition removes exactly the six obsolete reservation s
   assert.deepEqual(transition.predecessor, predecessor);
   assert.deepEqual(transition.desired, target);
   for (const statement of target.Statement) assert.deepEqual(statement, predecessor.Statement.find(({ Sid }) => Sid === statement.Sid));
+  for (const sid of ["AllowInitialActivationReconcilerReadProviderReadonlyReconciliation", "DenyOtherPrincipalsProviderReadonlyReconciliationReads", "AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate", "DenyNonConditionalProviderReadonlyReconciliationWrites", "DenyOtherPrincipalsProviderReadonlyReconciliationWrites", "DenyProviderReadonlyReconciliationDeletion"]) assert.ok(targetSids.has(sid));
+  assert.notEqual(stageAProductionArtifactsPolicySha256(target), stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy()));
   assert.throws(() => resolveStageAProductionArtifactsBucketPolicyTransition({
     predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor),
     desiredPolicySha256: stageAProductionArtifactsPolicySha256({ ...target, Statement: target.Statement.slice(1) }),
   }), /not exact or reviewed/);
+});
+
+test("Stage-A reservation and ProviderReadOnly transitions compose only as A to B to C", () => {
+  const A = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const B = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
+  const C = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
+  const transition = (predecessor, desired) => resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
+  assert.deepEqual(transition(A, B), { predecessor: A, desired: B });
+  assert.deepEqual(transition(B, C), { predecessor: B, desired: C });
+  assert.deepEqual(transition(C, C), { predecessor: C, desired: C });
+  assert.throws(() => transition(A, C), /not exact or reviewed/);
+  assert.throws(() => transition(B, buildStageAProductionArtifactsBucketPolicy()), /not exact or reviewed/);
+  assert.throws(() => transition({ ...B, Statement: B.Statement.slice(1) }, C), /not exact or reviewed/);
+});
+
+test("current transition adds only the six immutable ProviderReadOnly journal protections", () => {
+  const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const desired = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
+  const transition = resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
+  const predecessorSids = new Set(predecessor.Statement.map(({ Sid }) => Sid));
+  assert.deepEqual(desired.Statement.filter(({ Sid }) => !predecessorSids.has(Sid)).map(({ Sid }) => Sid), [
+    "AllowInitialActivationReconcilerReadProviderReadonlyReconciliation",
+    "DenyOtherPrincipalsProviderReadonlyReconciliationReads",
+    "AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate",
+    "DenyNonConditionalProviderReadonlyReconciliationWrites",
+    "DenyOtherPrincipalsProviderReadonlyReconciliationWrites",
+    "DenyProviderReadonlyReconciliationDeletion",
+  ]);
+  assert.deepEqual(transition, { predecessor, desired });
 });
 
 test("IAM grammar singleton forms are normalized only at their grammar positions", () => {

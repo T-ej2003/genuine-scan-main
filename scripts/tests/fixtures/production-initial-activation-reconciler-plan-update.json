@@ -9,7 +9,9 @@
         "value": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
       },
       "policy_arn": {
-        "sensitive": false
+        "sensitive": false,
+        "type": "string",
+        "value": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler"
       },
       "policy_name": {
         "sensitive": false,
@@ -17,7 +19,9 @@
         "value": "MSCQRProductionInitialActivationPolicyReconciler"
       },
       "role_arn": {
-        "sensitive": false
+        "sensitive": false,
+        "type": "string",
+        "value": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler"
       },
       "role_name": {
         "sensitive": false,
@@ -40,11 +44,16 @@
           "provider_name": "registry.terraform.io/hashicorp/aws",
           "schema_version": 0,
           "values": {
+            "arn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+            "attachment_count": 1,
             "delay_after_policy_creation_in_ms": null,
             "description": "Exact readback and CreatePolicyVersion capability for InitialActivationLifecycle reconciliation.",
+            "id": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
             "name": "MSCQRProductionInitialActivationPolicyReconciler",
+            "name_prefix": null,
             "path": "/",
             "policy": "{\"Statement\":[{\"Action\":[\"iam:GetPolicy\",\"iam:GetPolicyVersion\",\"iam:ListPolicyVersions\",\"iam:ListEntitiesForPolicy\"],\"Effect\":\"Allow\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\",\"Sid\":\"ReadExactInitialActivationLifecyclePolicy\"},{\"Action\":[\"iam:GetRole\",\"iam:ListAttachedRolePolicies\"],\"Effect\":\"Allow\",\"Resource\":\"arn:aws:iam::368992683803:role/mscqr-production-release-deployer\",\"Sid\":\"ReadExactInitialActivationReleaseRole\"},{\"Action\":\"sts:GetCallerIdentity\",\"Effect\":\"Allow\",\"Resource\":\"*\",\"Sid\":\"IdentifyCurrentSession\"},{\"Action\":\"iam:CreatePolicyVersion\",\"Effect\":\"Allow\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\",\"Sid\":\"CreateExactInitialActivationLifecyclePolicyVersion\"}],\"Version\":\"2012-10-17\"}",
+            "policy_id": "ANPAFIXTURE",
             "tags": {
               "Component": "initial-activation-policy-reconciliation",
               "Environment": "production",
@@ -61,10 +70,6 @@
           "sensitive_values": {
             "tags": {},
             "tags_all": {}
-          },
-          "identity_schema_version": 0,
-          "identity": {
-            "arn": null
           }
         },
         {
@@ -75,11 +80,19 @@
           "provider_name": "registry.terraform.io/hashicorp/aws",
           "schema_version": 0,
           "values": {
+            "arn": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
             "assume_role_policy": "{\"Statement\":[{\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":\"repo:T-ej2003/genuine-scan-main:environment:production\"}},\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com\"},\"Sid\":\"GitHubOidcProductionEnvironmentOnly\"}],\"Version\":\"2012-10-17\"}",
+            "create_date": "2026-09-05T00:00:00Z",
             "description": "GitHub OIDC-only writer for the exact InitialActivationLifecycle policy reconciliation.",
             "force_detach_policies": false,
+            "id": "mscqr-production-initial-activation-policy-reconciler",
+            "inline_policy": [],
+            "managed_policy_arns": [
+              "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler"
+            ],
             "max_session_duration": 3600,
             "name": "mscqr-production-initial-activation-policy-reconciler",
+            "name_prefix": null,
             "path": "/",
             "permissions_boundary": null,
             "tags": {
@@ -93,18 +106,16 @@
               "Environment": "production",
               "ManagedBy": "Terraform",
               "Stack": "production-initial-activation-policy-reconciler"
-            }
+            },
+            "unique_id": "AROAFIXTURE"
           },
           "sensitive_values": {
             "inline_policy": [],
-            "managed_policy_arns": [],
+            "managed_policy_arns": [
+              false
+            ],
             "tags": {},
             "tags_all": {}
-          },
-          "identity_schema_version": 0,
-          "identity": {
-            "account_id": null,
-            "name": null
           }
         },
         {
@@ -115,15 +126,11 @@
           "provider_name": "registry.terraform.io/hashicorp/aws",
           "schema_version": 0,
           "values": {
+            "id": "mscqr-production-initial-activation-policy-reconciler-arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+            "policy_arn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
             "role": "mscqr-production-initial-activation-policy-reconciler"
           },
-          "sensitive_values": {},
-          "identity_schema_version": 0,
-          "identity": {
-            "account_id": null,
-            "policy_arn": null,
-            "role": null
-          }
+          "sensitive_values": {}
         }
       ]
     }
@@ -137,15 +144,19 @@
       "provider_name": "registry.terraform.io/hashicorp/aws",
       "change": {
         "actions": [
-          "create"
+          "update"
         ],
-        "before": null,
-        "after": {
+        "before": {
+          "arn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+          "attachment_count": 1,
           "delay_after_policy_creation_in_ms": null,
           "description": "Exact readback and CreatePolicyVersion capability for InitialActivationLifecycle reconciliation.",
+          "id": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
           "name": "MSCQRProductionInitialActivationPolicyReconciler",
+          "name_prefix": null,
           "path": "/",
-          "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"ReadExactInitialActivationLifecyclePolicy\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetPolicy\",\"iam:GetPolicyVersion\",\"iam:ListPolicyVersions\",\"iam:ListEntitiesForPolicy\"],\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\"},{\"Sid\":\"ReadExactProviderReadOnlyPolicy\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetPolicy\",\"iam:GetPolicyVersion\",\"iam:ListPolicyVersions\",\"iam:ListEntitiesForPolicy\"],\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly\"},{\"Sid\":\"ReadExactInitialActivationReleaseRole\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetRole\",\"iam:ListAttachedRolePolicies\"],\"Resource\":\"arn:aws:iam::368992683803:role/mscqr-production-release-deployer\"},{\"Sid\":\"IdentifyCurrentSession\",\"Effect\":\"Allow\",\"Action\":\"sts:GetCallerIdentity\",\"Resource\":\"*\"},{\"Sid\":\"CreateExactInitialActivationLifecyclePolicyVersion\",\"Effect\":\"Allow\",\"Action\":\"iam:CreatePolicyVersion\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\"},{\"Sid\":\"CreateExactProviderReadOnlyPolicyVersion\",\"Effect\":\"Allow\",\"Action\":\"iam:CreatePolicyVersion\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly\"},{\"Sid\":\"ReadExactProviderReadOnlyReconciliationJournal\",\"Effect\":\"Allow\",\"Action\":\"s3:GetObject\",\"Resource\":\"arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*\"},{\"Sid\":\"PersistExactProviderReadOnlyReconciliationJournal\",\"Effect\":\"Allow\",\"Action\":\"s3:PutObject\",\"Resource\":\"arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*\",\"Condition\":{\"StringEquals\":{\"s3:if-none-match\":\"*\",\"s3:x-amz-server-side-encryption\":\"AES256\"}}}]}",
+          "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"ReadExactInitialActivationLifecyclePolicy\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetPolicy\",\"iam:GetPolicyVersion\",\"iam:ListPolicyVersions\",\"iam:ListEntitiesForPolicy\"],\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\"},{\"Sid\":\"ReadExactInitialActivationReleaseRole\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetRole\",\"iam:ListAttachedRolePolicies\"],\"Resource\":\"arn:aws:iam::368992683803:role/mscqr-production-release-deployer\"},{\"Sid\":\"IdentifyCurrentSession\",\"Effect\":\"Allow\",\"Action\":\"sts:GetCallerIdentity\",\"Resource\":\"*\"},{\"Sid\":\"CreateExactInitialActivationLifecyclePolicyVersion\",\"Effect\":\"Allow\",\"Action\":\"iam:CreatePolicyVersion\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\"}]}",
+          "policy_id": "ANPAFIXTURE",
           "tags": {
             "Component": "initial-activation-policy-reconciliation",
             "Environment": "production",
@@ -159,22 +170,38 @@
             "Stack": "production-initial-activation-policy-reconciler"
           }
         },
-        "after_unknown": {
-          "arn": true,
-          "attachment_count": true,
-          "id": true,
-          "name_prefix": true,
-          "policy_id": true,
+        "after": {
+          "arn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+          "attachment_count": 1,
+          "delay_after_policy_creation_in_ms": null,
+          "description": "Exact readback and CreatePolicyVersion capability for InitialActivationLifecycle reconciliation.",
+          "id": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+          "name": "MSCQRProductionInitialActivationPolicyReconciler",
+          "name_prefix": null,
+          "path": "/",
+          "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"ReadExactInitialActivationLifecyclePolicy\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetPolicy\",\"iam:GetPolicyVersion\",\"iam:ListPolicyVersions\",\"iam:ListEntitiesForPolicy\"],\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\"},{\"Sid\":\"ReadExactProviderReadOnlyPolicy\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetPolicy\",\"iam:GetPolicyVersion\",\"iam:ListPolicyVersions\",\"iam:ListEntitiesForPolicy\"],\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly\"},{\"Sid\":\"ReadExactInitialActivationReleaseRole\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetRole\",\"iam:ListAttachedRolePolicies\"],\"Resource\":\"arn:aws:iam::368992683803:role/mscqr-production-release-deployer\"},{\"Sid\":\"IdentifyCurrentSession\",\"Effect\":\"Allow\",\"Action\":\"sts:GetCallerIdentity\",\"Resource\":\"*\"},{\"Sid\":\"CreateExactInitialActivationLifecyclePolicyVersion\",\"Effect\":\"Allow\",\"Action\":\"iam:CreatePolicyVersion\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\"},{\"Sid\":\"CreateExactProviderReadOnlyPolicyVersion\",\"Effect\":\"Allow\",\"Action\":\"iam:CreatePolicyVersion\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly\"},{\"Sid\":\"ReadExactProviderReadOnlyReconciliationJournal\",\"Effect\":\"Allow\",\"Action\":\"s3:GetObject\",\"Resource\":\"arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*\"},{\"Sid\":\"PersistExactProviderReadOnlyReconciliationJournal\",\"Effect\":\"Allow\",\"Action\":\"s3:PutObject\",\"Resource\":\"arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*\",\"Condition\":{\"StringEquals\":{\"s3:if-none-match\":\"*\",\"s3:x-amz-server-side-encryption\":\"AES256\"}}}]}",
+          "policy_id": "ANPAFIXTURE",
+          "tags": {
+            "Component": "initial-activation-policy-reconciliation",
+            "Environment": "production",
+            "ManagedBy": "Terraform",
+            "Stack": "production-initial-activation-policy-reconciler"
+          },
+          "tags_all": {
+            "Component": "initial-activation-policy-reconciliation",
+            "Environment": "production",
+            "ManagedBy": "Terraform",
+            "Stack": "production-initial-activation-policy-reconciler"
+          }
+        },
+        "after_unknown": {},
+        "before_sensitive": {
           "tags": {},
           "tags_all": {}
         },
-        "before_sensitive": false,
         "after_sensitive": {
           "tags": {},
           "tags_all": {}
-        },
-        "after_identity": {
-          "arn": null
         }
       }
     },
@@ -186,15 +213,22 @@
       "provider_name": "registry.terraform.io/hashicorp/aws",
       "change": {
         "actions": [
-          "create"
+          "no-op"
         ],
-        "before": null,
-        "after": {
+        "before": {
+          "arn": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
           "assume_role_policy": "{\"Statement\":[{\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":\"repo:T-ej2003/genuine-scan-main:environment:production\"}},\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com\"},\"Sid\":\"GitHubOidcProductionEnvironmentOnly\"}],\"Version\":\"2012-10-17\"}",
+          "create_date": "2026-09-05T00:00:00Z",
           "description": "GitHub OIDC-only writer for the exact InitialActivationLifecycle policy reconciliation.",
           "force_detach_policies": false,
+          "id": "mscqr-production-initial-activation-policy-reconciler",
+          "inline_policy": [],
+          "managed_policy_arns": [
+            "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler"
+          ],
           "max_session_duration": 3600,
           "name": "mscqr-production-initial-activation-policy-reconciler",
+          "name_prefix": null,
           "path": "/",
           "permissions_boundary": null,
           "tags": {
@@ -208,29 +242,55 @@
             "Environment": "production",
             "ManagedBy": "Terraform",
             "Stack": "production-initial-activation-policy-reconciler"
-          }
+          },
+          "unique_id": "AROAFIXTURE"
         },
-        "after_unknown": {
-          "arn": true,
-          "create_date": true,
-          "id": true,
-          "inline_policy": true,
-          "managed_policy_arns": true,
-          "name_prefix": true,
-          "tags": {},
-          "tags_all": {},
-          "unique_id": true
-        },
-        "before_sensitive": false,
-        "after_sensitive": {
+        "after": {
+          "arn": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
+          "assume_role_policy": "{\"Statement\":[{\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":\"repo:T-ej2003/genuine-scan-main:environment:production\"}},\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com\"},\"Sid\":\"GitHubOidcProductionEnvironmentOnly\"}],\"Version\":\"2012-10-17\"}",
+          "create_date": "2026-09-05T00:00:00Z",
+          "description": "GitHub OIDC-only writer for the exact InitialActivationLifecycle policy reconciliation.",
+          "force_detach_policies": false,
+          "id": "mscqr-production-initial-activation-policy-reconciler",
           "inline_policy": [],
-          "managed_policy_arns": [],
+          "managed_policy_arns": [
+            "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler"
+          ],
+          "max_session_duration": 3600,
+          "name": "mscqr-production-initial-activation-policy-reconciler",
+          "name_prefix": null,
+          "path": "/",
+          "permissions_boundary": null,
+          "tags": {
+            "Component": "initial-activation-policy-reconciliation",
+            "Environment": "production",
+            "ManagedBy": "Terraform",
+            "Stack": "production-initial-activation-policy-reconciler"
+          },
+          "tags_all": {
+            "Component": "initial-activation-policy-reconciliation",
+            "Environment": "production",
+            "ManagedBy": "Terraform",
+            "Stack": "production-initial-activation-policy-reconciler"
+          },
+          "unique_id": "AROAFIXTURE"
+        },
+        "after_unknown": {},
+        "before_sensitive": {
+          "inline_policy": [],
+          "managed_policy_arns": [
+            false
+          ],
           "tags": {},
           "tags_all": {}
         },
-        "after_identity": {
-          "account_id": null,
-          "name": null
+        "after_sensitive": {
+          "inline_policy": [],
+          "managed_policy_arns": [
+            false
+          ],
+          "tags": {},
+          "tags_all": {}
         }
       }
     },
@@ -242,23 +302,21 @@
       "provider_name": "registry.terraform.io/hashicorp/aws",
       "change": {
         "actions": [
-          "create"
+          "no-op"
         ],
-        "before": null,
-        "after": {
+        "before": {
+          "id": "mscqr-production-initial-activation-policy-reconciler-arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+          "policy_arn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
           "role": "mscqr-production-initial-activation-policy-reconciler"
         },
-        "after_unknown": {
-          "id": true,
-          "policy_arn": true
+        "after": {
+          "id": "mscqr-production-initial-activation-policy-reconciler-arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+          "policy_arn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+          "role": "mscqr-production-initial-activation-policy-reconciler"
         },
-        "before_sensitive": false,
-        "after_sensitive": {},
-        "after_identity": {
-          "account_id": null,
-          "policy_arn": null,
-          "role": null
-        }
+        "after_unknown": {},
+        "before_sensitive": {},
+        "after_sensitive": {}
       }
     }
   ],
@@ -278,7 +336,8 @@
         "create"
       ],
       "before": null,
-      "after_unknown": true,
+      "after": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+      "after_unknown": false,
       "before_sensitive": false,
       "after_sensitive": false
     },
@@ -297,7 +356,8 @@
         "create"
       ],
       "before": null,
-      "after_unknown": true,
+      "after": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
+      "after_unknown": false,
       "before_sensitive": false,
       "after_sensitive": false
     },
@@ -332,9 +392,19 @@
           "value": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825",
           "type": "string"
         },
+        "policy_arn": {
+          "sensitive": false,
+          "value": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+          "type": "string"
+        },
         "policy_name": {
           "sensitive": false,
           "value": "MSCQRProductionInitialActivationPolicyReconciler",
+          "type": "string"
+        },
+        "role_arn": {
+          "sensitive": false,
+          "value": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
           "type": "string"
         },
         "role_name": {
@@ -348,7 +418,110 @@
           "type": "string"
         }
       },
-      "root_module": {}
+      "root_module": {
+        "resources": [
+          {
+            "address": "aws_iam_policy.reconciler",
+            "mode": "managed",
+            "type": "aws_iam_policy",
+            "name": "reconciler",
+            "provider_name": "registry.terraform.io/hashicorp/aws",
+            "schema_version": 0,
+            "values": {
+              "arn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+              "attachment_count": 1,
+              "delay_after_policy_creation_in_ms": null,
+              "description": "Exact readback and CreatePolicyVersion capability for InitialActivationLifecycle reconciliation.",
+              "id": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+              "name": "MSCQRProductionInitialActivationPolicyReconciler",
+              "name_prefix": null,
+              "path": "/",
+              "policy": "{\"Statement\":[{\"Action\":[\"iam:GetPolicy\",\"iam:GetPolicyVersion\",\"iam:ListPolicyVersions\",\"iam:ListEntitiesForPolicy\"],\"Effect\":\"Allow\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\",\"Sid\":\"ReadExactInitialActivationLifecyclePolicy\"},{\"Action\":[\"iam:GetRole\",\"iam:ListAttachedRolePolicies\"],\"Effect\":\"Allow\",\"Resource\":\"arn:aws:iam::368992683803:role/mscqr-production-release-deployer\",\"Sid\":\"ReadExactInitialActivationReleaseRole\"},{\"Action\":\"sts:GetCallerIdentity\",\"Effect\":\"Allow\",\"Resource\":\"*\",\"Sid\":\"IdentifyCurrentSession\"},{\"Action\":\"iam:CreatePolicyVersion\",\"Effect\":\"Allow\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\",\"Sid\":\"CreateExactInitialActivationLifecyclePolicyVersion\"}],\"Version\":\"2012-10-17\"}",
+              "policy_id": "ANPAFIXTURE",
+              "tags": {
+                "Component": "initial-activation-policy-reconciliation",
+                "Environment": "production",
+                "ManagedBy": "Terraform",
+                "Stack": "production-initial-activation-policy-reconciler"
+              },
+              "tags_all": {
+                "Component": "initial-activation-policy-reconciliation",
+                "Environment": "production",
+                "ManagedBy": "Terraform",
+                "Stack": "production-initial-activation-policy-reconciler"
+              }
+            },
+            "sensitive_values": {
+              "tags": {},
+              "tags_all": {}
+            }
+          },
+          {
+            "address": "aws_iam_role.reconciler",
+            "mode": "managed",
+            "type": "aws_iam_role",
+            "name": "reconciler",
+            "provider_name": "registry.terraform.io/hashicorp/aws",
+            "schema_version": 0,
+            "values": {
+              "arn": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
+              "assume_role_policy": "{\"Statement\":[{\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":\"repo:T-ej2003/genuine-scan-main:environment:production\"}},\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com\"},\"Sid\":\"GitHubOidcProductionEnvironmentOnly\"}],\"Version\":\"2012-10-17\"}",
+              "create_date": "2026-09-05T00:00:00Z",
+              "description": "GitHub OIDC-only writer for the exact InitialActivationLifecycle policy reconciliation.",
+              "force_detach_policies": false,
+              "id": "mscqr-production-initial-activation-policy-reconciler",
+              "inline_policy": [],
+              "managed_policy_arns": [
+                "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler"
+              ],
+              "max_session_duration": 3600,
+              "name": "mscqr-production-initial-activation-policy-reconciler",
+              "name_prefix": null,
+              "path": "/",
+              "permissions_boundary": null,
+              "tags": {
+                "Component": "initial-activation-policy-reconciliation",
+                "Environment": "production",
+                "ManagedBy": "Terraform",
+                "Stack": "production-initial-activation-policy-reconciler"
+              },
+              "tags_all": {
+                "Component": "initial-activation-policy-reconciliation",
+                "Environment": "production",
+                "ManagedBy": "Terraform",
+                "Stack": "production-initial-activation-policy-reconciler"
+              },
+              "unique_id": "AROAFIXTURE"
+            },
+            "sensitive_values": {
+              "inline_policy": [],
+              "managed_policy_arns": [
+                false
+              ],
+              "tags": {},
+              "tags_all": {}
+            }
+          },
+          {
+            "address": "aws_iam_role_policy_attachment.reconciler",
+            "mode": "managed",
+            "type": "aws_iam_role_policy_attachment",
+            "name": "reconciler",
+            "provider_name": "registry.terraform.io/hashicorp/aws",
+            "schema_version": 0,
+            "values": {
+              "id": "mscqr-production-initial-activation-policy-reconciler-arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+              "policy_arn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+              "role": "mscqr-production-initial-activation-policy-reconciler"
+            },
+            "sensitive_values": {},
+            "depends_on": [
+              "aws_iam_policy.reconciler",
+              "aws_iam_role.reconciler"
+            ]
+          }
+        ]
+      }
     }
   },
   "configuration": {
@@ -511,15 +684,15 @@
       ]
     },
     {
-      "resource": "aws_iam_role.reconciler",
-      "attribute": [
-        "arn"
-      ]
-    },
-    {
       "resource": "aws_iam_policy.reconciler",
       "attribute": [
         "name"
+      ]
+    },
+    {
+      "resource": "aws_iam_role.reconciler",
+      "attribute": [
+        "arn"
       ]
     },
     {
@@ -529,7 +702,7 @@
       ]
     }
   ],
-  "timestamp": "2026-09-05T14:51:55Z",
+  "timestamp": "2026-09-05T14:52:47Z",
   "applyable": true,
   "complete": true,
   "errored": false
